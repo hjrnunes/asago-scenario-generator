@@ -126,7 +126,9 @@ def _make_control_structure(
                     ControlAction(
                         ca_id="CA-2-1",
                         description="Action",
-                        target=ElementRef(type=ReferenceType.controlled_process, id="CP-1"),
+                        target=ElementRef(
+                            type=ReferenceType.controlled_process, id="CP-1"
+                        ),
                     ),
                 ],
                 feedback_channels=[
@@ -134,7 +136,9 @@ def _make_control_structure(
                         fb_id="FB-2-1",
                         description="Feedback",
                         updates="PM-2-1",
-                        source=ElementRef(type=ReferenceType.controlled_process, id="CP-1"),
+                        source=ElementRef(
+                            type=ReferenceType.controlled_process, id="CP-1"
+                        ),
                     ),
                 ],
             )
@@ -226,9 +230,7 @@ class TestGenerateBDI:
         client.set_response_for(BDIGenerationResult, llm_result)
 
         with TemporaryDirectory() as tmpdir:
-            result, error = generate_bdi(
-                client, bdi, threat, cs, Path(tmpdir)
-            )
+            result, error = generate_bdi(client, bdi, threat, cs, Path(tmpdir))
             assert error is None
             assert result is not None
             assert client.call_count == 1
@@ -325,9 +327,7 @@ class TestGenerateBDI:
             defender_vulnerabilities={"PM-1-1": "v", "PM-1-2": "v"},
             attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
         )
-        client = _SequenceBDIClient(
-            [LengthFinishReasonError("truncated"), llm_result]
-        )
+        client = _SequenceBDIClient([LengthFinishReasonError("truncated"), llm_result])
 
         with TemporaryDirectory() as tmpdir:
             result, error = generate_bdi(client, bdi, threat, cs, Path(tmpdir))
@@ -369,8 +369,10 @@ class TestAssembleScenarioSpec:
         threat = _make_structural_threat(
             catalog_mappings=[
                 CatalogMapping(
-                    catalog="OWASP_AGENTIC", id="T1",
-                    name="Prompt Injection", confidence="low",
+                    catalog="OWASP_AGENTIC",
+                    id="T1",
+                    name="Prompt Injection",
+                    confidence="low",
                 )
             ]
         )
@@ -406,7 +408,10 @@ class TestAssembleScenarioSpec:
         bdi = populate_defender_bdi(cs, "RESP-1")
         threat = _make_structural_threat()
         llm_result = BDIGenerationResult(
-            defender_vulnerabilities={"PM-1-1": "exploitable via injection", "PM-1-2": "schema bypass"},
+            defender_vulnerabilities={
+                "PM-1-1": "exploitable via injection",
+                "PM-1-2": "schema bypass",
+            },
             attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
         )
         spec = assemble_scenario_spec(bdi, llm_result, threat, cs)
@@ -420,7 +425,11 @@ class TestAssembleScenarioSpec:
         threat = _make_structural_threat()
         # LLM returns vulnerabilities with altered pm_id keys
         llm_result = BDIGenerationResult(
-            defender_vulnerabilities={"PM-99-1": "wrong", "PM-1-1": "correct1", "PM-1-2": "correct2"},
+            defender_vulnerabilities={
+                "PM-99-1": "wrong",
+                "PM-1-1": "correct1",
+                "PM-1-2": "correct2",
+            },
             attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
         )
         spec = assemble_scenario_spec(bdi, llm_result, threat, cs)

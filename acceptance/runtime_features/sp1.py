@@ -5050,20 +5050,6 @@ def _h_sp1_robustness_unknown_shape(
     return True, ""
 
 
-def _h_sp1_robustness_validate(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Validate the normalized payload and retain controlled diagnostics."""
-    try:
-        world.control_structure = ControlStructure.model_validate(
-            world.sp1_repair_normalized.payload
-        )
-        world.validation_error = None
-    except (ValidationError, ValueError, TypeError) as exc:
-        world.validation_error = exc
-    return True, ""
-
-
 def _h_sp1_robustness_update_assert(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -5145,17 +5131,6 @@ def _h_sp1_robustness_no_unhashable(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Assert validation diagnostics do not expose unhashable values."""
-    message = str(getattr(world, "validation_error", ""))
-    return (
-        "unhashable" not in message.lower(),
-        f"Unexpected unhashable-value error: {message}",
-    )
-
-
-def _h_sp1_robustness_not_unhashable(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Assert a validation failure is not an unhashable-value error."""
     message = str(getattr(world, "validation_error", ""))
     return (
         "unhashable" not in message.lower(),
@@ -7197,7 +7172,7 @@ def register(api: object) -> None:
     )
     api.register(
         "the failure is not an unhashable-value error$",
-        _h_sp1_robustness_not_unhashable,
+        _h_sp1_robustness_no_unhashable,
         source_order=15169,
     )
     api.register_first(
