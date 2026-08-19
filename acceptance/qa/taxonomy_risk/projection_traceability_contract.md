@@ -7,25 +7,28 @@ pattern fixtures. Inspect CLI output, endpoint request logs, manifests,
 quarantine evidence, and published scenario YAML; do not import project
 modules.
 
-## QA-TPTC-01: outside observe and prepare reach admission
+## QA-TPTC-01: outside observe, crossing deliver, and operator impact reach admission
 
 1. Select an authoritative canonical chain containing semantic steps
-   `attacker.observe`, `attacker.prepare`, and `operator.impact`. Configure
-   the first two as attacker-executed, outside-boundary `observe` and
-   `prepare` steps, and the third as an operator-executed, inside-boundary
-   `impact` step with an observable effect.
+   `attacker.observe`, `attacker.prepare`, `attacker.deliver`, and
+   `operator.impact`. Configure the first two as attacker-executed,
+   outside-boundary `observe` and `prepare` steps, the third as an
+   attacker-executed crossing-boundary `deliver` step, and the fourth as an
+   operator-executed, inside-boundary `impact` step with an observable effect.
 2. Return an ordered attack tree whose first two leaves are
-   `external_precondition` actions without zones and whose last leaf is an
-   internal `impact` action. Map each leaf to its corresponding semantic step
-   ID and omit model-authored realizations.
+   `external_precondition` actions without zones, whose third leaf is an
+   `initial_ingress` action at the crossing boundary, and whose last leaf is
+   an internal `impact` action. Map each leaf to its corresponding semantic
+   step ID and omit model-authored realizations.
 3. Run `generate` and inspect request counts, the manifest, and admitted
    scenario YAML.
 
 **Expected:** No attack-tree retry is caused by an empty action/executor
-compatibility intersection. All three leaves retain their mappings and gain
+compatibility intersection. All four leaves retain their mappings and gain
 canonical realizations. Tree realization coverage is complete and ordered,
-projection traceability has no violation, the manifest reports one admitted
-candidate, and the command exits `0`.
+the pinned-ingress check passes (the crossing leaf provides
+`initial_ingress`), projection traceability has no violation, the manifest
+reports one admitted candidate, and the command exits `0`.
 
 ## QA-TPTC-02: invalid external metadata is canonicalized
 

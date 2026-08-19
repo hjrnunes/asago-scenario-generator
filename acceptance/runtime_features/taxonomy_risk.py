@@ -1334,6 +1334,10 @@ def register(api: object) -> None:
             _h_contract_chain_leaf_rules,
         ),
         (
+            r"the attacker deliver step is a crossing-boundary initial_ingress leaf",
+            _h_contract_chain_leaf_rules,
+        ),
+        (
             r"the operator step is an inside-boundary impact leaf",
             _h_contract_chain_leaf_rules,
         ),

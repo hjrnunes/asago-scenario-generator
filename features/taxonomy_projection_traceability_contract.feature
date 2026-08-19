@@ -68,10 +68,11 @@ Feature: Taxonomy projection traceability contract
     Then normalization rejects unknown projected step ID "step.unknown"
     And no finalized attack tree is published
 
-  # Taxonomy projection traceability contract 06 admits aligned outside and operator chains
-  Scenario: Taxonomy projection traceability contract 06 admits aligned outside and operator chains
-    Given projection selects the ordered canonical chain "attacker.observe,attacker.prepare,operator.impact"
+  # Taxonomy projection traceability contract 06 admits aligned outside, crossing, and operator chains
+  Scenario: Taxonomy projection traceability contract 06 admits aligned outside, crossing, and operator chains
+    Given projection selects the ordered canonical chain "attacker.observe,attacker.prepare,attacker.deliver,operator.impact"
     And the attacker steps are outside-boundary external_precondition leaves
+    And the attacker deliver step is a crossing-boundary initial_ingress leaf
     And the operator step is an inside-boundary impact leaf
     When the projection is realized as an attack tree and admission is evaluated
     Then every selected step has a compatible mapped leaf
