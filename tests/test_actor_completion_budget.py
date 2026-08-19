@@ -73,6 +73,7 @@ def test_actor_profile_call_does_not_supply_a_fallback_limit(monkeypatch) -> Non
 
 def test_actor_profile_length_failure_gets_one_concise_retry(monkeypatch) -> None:
     """A length failure is retried once with feedback and the same limit."""
+
     class LengthFinishReasonError(Exception):
         pass
 
@@ -103,6 +104,7 @@ def test_actor_profile_length_failure_gets_one_concise_retry(monkeypatch) -> Non
 
 def test_actor_profile_length_retry_is_bounded(monkeypatch) -> None:
     """A second length failure is surfaced without a third completion."""
+
     class LengthFinishReasonError(Exception):
         pass
 

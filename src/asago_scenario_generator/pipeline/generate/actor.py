@@ -1114,20 +1114,17 @@ def _call_actor_profile(
     )
     user_prompt = render_prompt("call0_user.j2", **ctx)
     completion_limit = client.max_completion_tokens
+    completion_request: dict[str, Any] = {
+        "system_prompt": system_prompt,
+        "user_prompt": user_prompt,
+        "response_format": Call0Response,
+        "max_completion_tokens": completion_limit,
+    }
     try:
-        result = client.complete(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_format=Call0Response,
-            max_completion_tokens=completion_limit,
-        )
+        result = client.complete(**completion_request)
     except LengthFinishReasonError:
-        result = client.complete(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt + _ACTOR_LENGTH_RETRY_PROMPT,
-            response_format=Call0Response,
-            max_completion_tokens=completion_limit,
-        )
+        completion_request["user_prompt"] += _ACTOR_LENGTH_RETRY_PROMPT
+        result = client.complete(**completion_request)
 
     resp = result.content
     actor_type = _normalize_actor_type(resp.actor_type)
