@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import ast
+import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -47,14 +49,43 @@ _DYNAMIC_CHECKS = [
 
 
 def _run_suite(*args: str, cwd: Path | None = None, env: dict[str, str] | None = None):
-    return subprocess.run(
-        [sys.executable, str(_SUITE), *args],
-        cwd=str(cwd or _PROJECT_ROOT),
-        env=env or dict(os.environ),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    with tempfile.TemporaryDirectory(prefix="fallback-acceptance-ir-") as directory:
+        feature_ir = Path(directory) / "fixture.json"
+        feature_ir.write_text(
+            json.dumps(
+                {
+                    "name": "Fallback acceptance fixture",
+                    "background": [],
+                    "scenarios": [
+                        {
+                            "name": "deterministic runtime",
+                            "steps": [
+                                {
+                                    "keyword": "Given",
+                                    "text": "the quality script is invoked",
+                                }
+                            ],
+                            "examples": [],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return subprocess.run(
+            [
+                sys.executable,
+                str(_SUITE),
+                *args,
+                "--feature-ir",
+                str(feature_ir),
+            ],
+            cwd=str(cwd or _PROJECT_ROOT),
+            env=env or dict(os.environ),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
 
 
 def _check_names(output: str) -> list[str]:

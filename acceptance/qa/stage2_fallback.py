@@ -321,7 +321,7 @@ def run_static_checks(runner: QARunner) -> None:
 # ---------------------------------------------------------------------------
 
 
-def run_dynamic_checks(runner: QARunner) -> None:
+def run_dynamic_checks(runner: QARunner, feature_ir: Path = FEATURE_IR) -> None:
     """Run dynamic checks through the acceptance runtime and direct invocation."""
 
     # --- Check D1: Acceptance feature IR passes (all scenarios green after fix) ---
@@ -331,18 +331,18 @@ def run_dynamic_checks(runner: QARunner) -> None:
             False,
             f"Missing: {ACCEPTANCE_RUNTIME}",
         )
-    elif not FEATURE_IR.exists():
+    elif not feature_ir.exists():
         runner.check(
             "fallback-fix-dynamic-01: feature IR is available",
             False,
-            f"Missing: {FEATURE_IR}",
+            f"Missing: {feature_ir}",
         )
     else:
         sys.path.insert(0, str(ACCEPTANCE_RUNTIME.parent))
         try:
             from acceptance_runtime import execute_ir
 
-            passed, output = execute_ir(str(FEATURE_IR))
+            passed, output = execute_ir(str(feature_ir))
             # After the fix, all scenarios should pass.
             # Before the fix, 7 instances are red (Sanitize-01 ex2/3,
             # Sanitize-04 ex2/3, Sanitize-06 ex1, Sanitize-11 ex1/2).
@@ -625,6 +625,12 @@ def main() -> int:
     mode.add_argument("--static", action="store_true", help="Run static checks only")
     mode.add_argument("--dynamic", action="store_true", help="Run dynamic checks only")
     mode.add_argument("--all", action="store_true", help="Run all checks")
+    parser.add_argument(
+        "--feature-ir",
+        type=Path,
+        default=FEATURE_IR,
+        help="Acceptance IR to execute; defaults to the generated snapshot",
+    )
     args = parser.parse_args()
 
     if not any([args.static, args.dynamic, args.all]):
@@ -638,7 +644,7 @@ def main() -> int:
 
     if args.dynamic or args.all:
         print("--- Dynamic checks (acceptance runtime + direct invocation) ---")
-        run_dynamic_checks(runner)
+        run_dynamic_checks(runner, args.feature_ir)
 
     return runner.summary()
 

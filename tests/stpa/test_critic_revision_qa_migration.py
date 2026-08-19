@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -225,14 +226,46 @@ _PIPELINE_SKIP_BANNER = (
 
 
 def _run_suite(*args: str, cwd: Path | None = None, env: dict[str, str] | None = None):
-    return subprocess.run(
-        [sys.executable, str(_SUITE), *args],
-        cwd=str(cwd or _PROJECT_ROOT),
-        env=env or dict(os.environ),
-        capture_output=True,
-        text=True,
-        check=False,
+    stems = (
+        "critic-gap-detection",
+        "critic-prompt-context",
+        "revision-gap-dismissal",
+        "revision-all-dismissed-warning",
+        "revision-next-cm-id",
+        "revision-prompt-context",
+        "revision-token-ceiling",
     )
+    with tempfile.TemporaryDirectory(prefix="critic-revision-ir-") as directory:
+        ir_dir = Path(directory)
+        fixture = {
+            "name": "Critic revision acceptance fixture",
+            "background": [],
+            "scenarios": [
+                {
+                    "name": "deterministic runtime",
+                    "steps": [
+                        {
+                            "keyword": "Given",
+                            "text": "the quality script is invoked",
+                        }
+                    ],
+                    "examples": [],
+                }
+            ],
+        }
+        for stem in stems:
+            (ir_dir / f"{stem}.json").write_text(
+                json.dumps(fixture),
+                encoding="utf-8",
+            )
+        return subprocess.run(
+            [sys.executable, str(_SUITE), *args, "--ir-dir", str(ir_dir)],
+            cwd=str(cwd or _PROJECT_ROOT),
+            env=env or dict(os.environ),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
 
 
 def _check_names(output: str) -> list[str]:

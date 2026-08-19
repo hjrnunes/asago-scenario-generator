@@ -6,6 +6,12 @@ source only, without copying `build/`, `.cache/`, `tmp/`, or a local virtual
 environment. Capture commands, stdout, stderr, exit status, and generated file
 inventories.
 
+Run the executable form with:
+
+```bash
+uv run python acceptance/qa/clean_checkout_unit_independence.py
+```
+
 ## QA-CUI-01: complete unit suite from source only
 
 1. Create a fresh tracked-source checkout and run `uv sync --locked`.
@@ -39,3 +45,11 @@ inventories.
 3. Run `git ls-files` for `build/acceptance/`, `acceptance/ir/`, and
    `acceptance/generated/`.
 4. Verify the command reports no generated acceptance artifacts.
+
+## QA-CUI-04: CI prerequisite separation
+
+1. Inspect `.github/workflows/ci.yml`.
+2. Verify the unit job runs the documented unit suite without checking out or
+   invoking the Acceptance Pipeline Specification.
+3. Verify the acceptance job owns the pinned APS checkout and invokes the
+   acceptance command separately.

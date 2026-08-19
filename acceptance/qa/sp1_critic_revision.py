@@ -871,7 +871,7 @@ def _gap(description: str = "Missing input validation"):
     )
 
 
-def run_dynamic_checks(runner: QARunner) -> None:
+def run_dynamic_checks(runner: QARunner, ir_dir: Path = IR_DIR) -> None:
     """Behavioral assertions driven without any LLM endpoint."""
 
     sys.path.insert(0, str(SRC_ROOT))
@@ -1695,7 +1695,7 @@ def run_dynamic_checks(runner: QARunner) -> None:
 
     sys.path.insert(0, str(ACCEPTANCE_RUNTIME.parent))
     for stem in FEATURE_STEMS:
-        ir = IR_DIR / f"{stem}.json"
+        ir = ir_dir / f"{stem}.json"
         if not ir.exists():
             runner.check(
                 f"crf-dynamic-28[{stem}]: acceptance IR has been generated",
@@ -1882,6 +1882,12 @@ def main() -> int:
         default=None,
         help="Completed pipeline run directory, for --pipeline",
     )
+    parser.add_argument(
+        "--ir-dir",
+        type=Path,
+        default=IR_DIR,
+        help="Acceptance IR directory; defaults to the generated snapshot",
+    )
     args = parser.parse_args()
 
     if not any([args.static, args.dynamic, args.pipeline, args.all]):
@@ -1895,7 +1901,7 @@ def main() -> int:
 
     if args.dynamic or args.all:
         print("--- Dynamic checks (direct invocation + acceptance runtime) ---")
-        run_dynamic_checks(runner)
+        run_dynamic_checks(runner, args.ir_dir)
 
     if args.pipeline or args.all:
         print("--- Pipeline-mode checks (live LLM endpoint) ---")
