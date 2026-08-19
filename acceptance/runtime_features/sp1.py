@@ -4700,9 +4700,9 @@ def _h_sp1_repair_source_id(
 def _h_sp1_repair_uninferable_target(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: configure a target whose type cannot be inferred."""
+    """Handle: configure a target whose type and ID cannot be inferred."""
     target = world.sp1_repair_payload["responsibilities"][0]["control_actions"][0]
-    target["target"] = {"type": "process-alpha", "id": "process-alpha"}
+    target["target"] = {"type": "unknown-process", "id": "unknown-process"}
     return True, ""
 
 
@@ -4878,18 +4878,18 @@ def _h_src_map(world: World, text: str, examples: dict) -> tuple[bool, str]:
 def _h_sp1_repair_target_type(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an uninferable target type remains unchanged."""
+    """Handle: an unknown target type remains unchanged."""
     payload = world.sp1_repair_normalized.payload
     target = payload["responsibilities"][0]["control_actions"][0]["target"]
-    if target.get("type") != "process-alpha":
-        return False, f"Expected process-alpha, got {target.get('type')}"
+    if target.get("type") != "unknown-process":
+        return False, f"Expected unknown-process, got {target.get('type')}"
     return True, ""
 
 
 def _h_sp1_repair_validation_error(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: validation reports the uninferable target type."""
+    """Handle: validation reports the unknown target type."""
     error = getattr(world, "validation_error", None)
     if error is None:
         return False, "Expected ControlStructure validation to fail"
@@ -7191,7 +7191,7 @@ def register(api: object) -> None:
         source_order=15104,
     )
     api.register_first(
-        "responsibility 1 control action 1 target has type process-alpha and ID process-alpha$",
+        "responsibility 1 control action 1 target has type unknown-process and ID unknown-process$",
         _h_sp1_repair_uninferable_target,
         source_order=15105,
     )
@@ -7250,7 +7250,7 @@ def register(api: object) -> None:
         source_order=15116,
     )
     api.register_first(
-        "the target type remains process-alpha$",
+        "the target type remains unknown-process$",
         _h_sp1_repair_target_type,
         source_order=15117,
     )
