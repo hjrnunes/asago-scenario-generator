@@ -1,0 +1,36 @@
+{% if projection_context is defined and projection_context %}
+### Projection Alignment Rules (INVARIANT)
+Step IDs are semantic names, not positional labels.  Use the exact `step_id`
+value from the canonical projection; do not use a numeric position as an ID.
+
+#### Compatible leaf kinds
+| canonical field | compatible leaf kinds |
+| --- | --- |
+| action_kind `observe` | `external_precondition`, `ai_system_action`, `integration_interaction` |
+| action_kind `prepare` | `external_precondition`, `initial_ingress` |
+| action_kind `deliver` | `initial_ingress` |
+| action_kind `invoke` | `initial_ingress`, `tool_invocation`, `integration_interaction` |
+| action_kind `transform` | `ai_system_action` |
+| action_kind `persist` | `ai_system_action`, `tool_invocation` |
+| action_kind `impact` | `impact` |
+| executor_role `attacker` | `initial_ingress`, `external_precondition`, `impact`, `tool_invocation` |
+| executor_role `system` | `ai_system_action`, `tool_invocation`, `integration_interaction`, `impact` |
+| executor_role `operator` | `external_precondition`, `integration_interaction`, `impact` |
+
+For every mapped leaf, its kind MUST be in the intersection of the
+action-kind compatibility set and executor-role compatibility set.
+
+#### Boundary, zone, and binding rules
+- An `external_precondition` leaf MUST have no zone.
+- An `external_precondition` leaf may map only an outside-boundary canonical
+  step.  Inside-boundary and crossing-boundary external preconditions MUST
+  remain unmapped with empty `projected_step_ids` and realizations.
+- A mapped leaf MUST use the resource bindings from its canonical step; never
+  substitute a binding from another step.
+- Internal and crossing mapped steps MUST use the canonical compatible zone.
+
+#### Technique identity rules
+- Technique IDs are optional annotations, but when present they MUST use
+  either an ATLAS format (`AML.T####` or `AML.T####.###`) or a LAAF format
+  (`S#`, `M#`, or `L#`).  Do not invent or rewrite valid technique IDs.
+{% endif %}

@@ -44,6 +44,8 @@ from asago_scenario_generator.prompts import render_prompt
 
 logger = logging.getLogger(__name__)
 
+_VALID_TECHNIQUE_ID_RE = re.compile(r"^(?:AML\.T\d{4}(?:\.\d{3})?|[SML]\d+)$")
+
 
 # ---------------------------------------------------------------------------
 # Post-generation threat_id cross-reference validation
@@ -167,11 +169,86 @@ def _resolve_projected_step_ids(
     result["realizations"] = [canonical_by_id[sid] for sid in projected_ids]
 
 
+def _projection_step_context(
+    projection_context: dict[str, Any],
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """Index canonical realizations and boundary positions by step ID."""
+    selected_steps = _selected_projection_steps(projection_context)
+    canonical_by_id = {
+        item["step_id"]: item["realization"]
+        for item in selected_steps
+        if isinstance(item.get("realization"), dict)
+    }
+    boundary_by_id = {
+        item["step_id"]: item.get("boundary_position") for item in selected_steps
+    }
+    return canonical_by_id, boundary_by_id
+
+
+def _selected_projection_steps(
+    projection_context: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Return selected steps with usable string IDs."""
+    return [
+        item
+        for item in projection_context.get("selected_steps", [])
+        if isinstance(item, dict) and isinstance(item.get("step_id"), str)
+    ]
+
+
+def _normalize_external_precondition(
+    node: dict[str, Any],
+    boundary_by_id: dict[str, Any],
+) -> None:
+    """Clear boundary metadata and invalid mappings from an external leaf."""
+    node["zone"] = None
+    technique_id = node.get("technique_id")
+    if technique_id is not None and not _VALID_TECHNIQUE_ID_RE.fullmatch(
+        str(technique_id)
+    ):
+        node["technique_id"] = None
+
+    projected_ids = tuple(node.get("projected_step_ids", ()))
+    if projected_ids and not all(
+        boundary_by_id.get(step_id) == "outside" for step_id in projected_ids
+    ):
+        node["projected_step_ids"] = ()
+        node["realizations"] = ()
+
+
+def _normalize_attack_tree_node(
+    node: Any,
+    canonical_by_id: dict[str, dict[str, Any]],
+    boundary_by_id: dict[str, Any],
+) -> Any:
+    """Normalize one attack-tree node and recursively process its children."""
+    if not isinstance(node, dict):
+        return node
+    result = dict(node)
+    _resolve_projected_step_ids(result, canonical_by_id)
+    action = result.get("action")
+    if isinstance(action, dict) and action.get("kind") == "external_precondition":
+        _normalize_external_precondition(result, boundary_by_id)
+    if isinstance(result.get("children"), list):
+        result["children"] = [
+            _normalize_attack_tree_node(child, canonical_by_id, boundary_by_id)
+            for child in result["children"]
+        ]
+    return result
+
+
 def normalize_attack_tree_transport(
     data: Any,
     projection_context: dict[str, Any] | None,
 ) -> Any:
-    """Normalize relaxed transport fields before strict attack-tree parsing."""
+    """Normalize relaxed transport fields before strict attack-tree parsing.
+
+    Transport annotations are deliberately normalized before Pydantic sees
+    them.  External preconditions are outside the assessed boundary, so their
+    zone is always cleared and only outside-boundary leaves may retain a
+    projected-step mapping.  The projected-step resolver remains the
+    canonical authority for unknown IDs and runs before the boundary rule.
+    """
     if projection_context is None or not isinstance(data, dict):
         return data
     normalized = dict(data)
@@ -181,25 +258,11 @@ def normalize_attack_tree_transport(
         )
         return normalized
 
-    canonical_by_id = {
-        item["step_id"]: item["realization"]
-        for item in projection_context.get("selected_steps", [])
-        if isinstance(item, dict)
-        and isinstance(item.get("step_id"), str)
-        and isinstance(item.get("realization"), dict)
-    }
-
-    def normalize_node(node: Any) -> Any:
-        if not isinstance(node, dict):
-            return node
-        result = dict(node)
-        _resolve_projected_step_ids(result, canonical_by_id)
-        if isinstance(result.get("children"), list):
-            result["children"] = [normalize_node(c) for c in result["children"]]
-        return result
-
+    canonical_by_id, boundary_by_id = _projection_step_context(projection_context)
     if isinstance(normalized.get("root"), dict):
-        normalized["root"] = normalize_node(normalized["root"])
+        normalized["root"] = _normalize_attack_tree_node(
+            normalized["root"], canonical_by_id, boundary_by_id
+        )
     return normalized
 
 
@@ -421,6 +484,11 @@ def _validate_tree_against_projection(
         return
 
     selected_step_ids = set(projection_context.get("selected_step_ids", []))
+    boundary_by_id = {
+        item["step_id"]: item.get("boundary_position")
+        for item in projection_context.get("selected_steps", [])
+        if isinstance(item, dict) and isinstance(item.get("step_id"), str)
+    }
 
     # Realization records are now derived in post-processing by
     # _fill_tree_realizations() — no need to rebuild them here for
@@ -439,21 +507,40 @@ def _validate_tree_against_projection(
             is_external = action_kind == "external_precondition"
 
             if is_external:
-                # External preconditions must remain unmapped — both IDs
-                # and realizations must be empty.
-                if node.projected_step_ids:
-                    raise ValueError(
-                        f"External precondition leaf '{node.id}' has "
-                        f"projected_step_ids {list(node.projected_step_ids)} "
-                        f"— external preconditions must be unmapped"
-                    )
-                if node.realizations:
-                    raise ValueError(
-                        f"External precondition leaf '{node.id}' has "
-                        f"{len(node.realizations)} realization records "
-                        f"— external preconditions must have empty "
-                        f"realizations"
-                    )
+                # Outside-boundary external preconditions are traceable.
+                # Internal/crossing external preconditions remain unmapped.
+                if not node.projected_step_ids:
+                    if node.realizations:
+                        raise ValueError(
+                            f"External precondition leaf '{node.id}' has "
+                            "realizations — external preconditions must have "
+                            "empty projected_step_ids and empty realizations"
+                        )
+                else:
+                    for sid in node.projected_step_ids:
+                        if sid not in selected_step_ids:
+                            raise ValueError(
+                                f"External precondition leaf '{node.id}' "
+                                f"references unprojected step '{sid}'"
+                            )
+                        if boundary_by_id.get(sid) != "outside":
+                            raise ValueError(
+                                f"External precondition leaf '{node.id}' "
+                                f"maps non-outside projected step '{sid}' "
+                                f"— external preconditions must be unmapped"
+                            )
+                    real_ids = [
+                        realization.projected_step_id
+                        for realization in node.realizations
+                    ]
+                    if len(real_ids) != len(node.projected_step_ids) or set(
+                        real_ids
+                    ) != set(node.projected_step_ids):
+                        raise ValueError(
+                            f"External precondition leaf '{node.id}' has "
+                            "incomplete canonical realizations for its "
+                            "outside-boundary projected steps"
+                        )
             else:
                 # Every non-external leaf must have nonempty projected IDs.
                 if not node.projected_step_ids:

@@ -10,11 +10,12 @@ trace back to these exact projected steps.
 - ingress_controllability: {{ projection_context.ingress_controllability }}
 
 ### Selected Projected Steps (ordered — preserve this total order)
-Each `step_id` identifies a canonical attack phase in the projection.
+**Warning:** step IDs are semantic names, not positional labels.  Never
+replace a step ID with its numeric position or infer identity from ordering.
 Use these IDs in `projected_step_ids` on narrative steps and tree leaves
 to indicate which phase each element realizes.
 {% for step in projection_context.selected_steps %}
-{{ loop.index }}. step_id: {{ step.step_id }}
+- step_id: {{ step.step_id }}
    - action_kind: {{ step.action_kind }}
    - executor_role: {{ step.executor_role }}
    - boundary_position: {{ step.boundary_position }}
