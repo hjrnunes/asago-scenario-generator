@@ -546,7 +546,10 @@ class TestSystemModelDependencyDirection:
         """
         source = system_model_files["id_normalization"].read_text(encoding="utf-8")
         wrap_at = source.index("_wrap_bare_string_refs(normalized)")
-        type_at = source.index("_repair_element_ref_types(normalized)")
+        # Use the final occurrence so the assertion targets the pipeline
+        # invocation rather than the helper definition.  The namespace maps
+        # argument is intentionally explicit in the production call.
+        type_at = source.rindex("_repair_element_ref_types(")
         rewrite_at = source.index("_rewrite_references_before_id_replacement(")
         ids_at = source.index("_set_canonical_ids(normalized)")
         desc_at = source.index("_repair_empty_descriptions(normalized)")
