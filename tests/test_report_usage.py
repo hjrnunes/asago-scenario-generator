@@ -182,3 +182,24 @@ def test_complete_pipeline_metrics_do_not_emit_unavailable_warning() -> None:
     assert "17 completion tokens" in html
     assert "410ms total" in html
     assert "unavailable" not in html
+
+
+def test_missing_pipeline_metrics_use_zero_totals() -> None:
+    entry = _pipeline_call()
+    for field in ("prompt_tokens", "completion_tokens", "duration_ms"):
+        entry.pop(field)
+
+    html = build_pipeline_calls_section([entry])
+
+    assert "0 prompt tokens" in html
+    assert "0 completion tokens" in html
+    assert "0ms total" in html
+
+
+def test_successful_pipeline_call_has_no_failure_marker() -> None:
+    entry = _pipeline_call()
+    entry.pop("success")
+
+    html = build_pipeline_calls_section([entry])
+
+    assert "FAILED" not in html
