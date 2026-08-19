@@ -231,8 +231,6 @@ def _parse_attack_tree_yaml(
                 f"even after colon sanitization: {exc}"
             ) from exc
 
-    if isinstance(data, dict) and "root" not in data and "id" in data:
-        pass  # top-level is the tree itself
     if isinstance(data, dict) and "attack_tree" in data:
         data = data["attack_tree"]
 

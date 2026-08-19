@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 
 import yaml
@@ -23,6 +24,7 @@ from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     inject_kc_subcodes_display,
 )
+from asago_scenario_generator.pipeline.candidates import FilterSeedQuarantine
 from asago_scenario_generator.pipeline.threats import ThreatSurface
 
 logger = logging.getLogger(__name__)
@@ -98,7 +100,9 @@ def write_pipeline_call_log(entries: list[dict], run_dir: Path) -> None:
             fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
-def write_filter_quarantine_evidence(quarantines: list, run_dir: Path) -> Path | None:
+def write_filter_quarantine_evidence(
+    quarantines: Sequence[FilterSeedQuarantine], run_dir: Path
+) -> Path | None:
     """Persist seed-local candidate-filter quarantine evidence."""
     if not quarantines:
         return None

@@ -599,29 +599,31 @@ class ProjectionReadinessError(ValueError):
         )
 
 
-def check_projection_readiness(
+_RESOURCE_CATEGORY_BY_KIND = {
+    "entry_point": "entry_points",
+    "tool": "tool_inventory",
+    "integration": "external_integrations",
+    "trust_boundary": "trust_boundaries",
+    "output_surface": "output_surfaces",
+    "agent_internal": "agent_internal",
+}
+
+
+def _required_resource_categories(
     patterns: Sequence[AttackPattern],
-    snapshot: CapabilityFactSnapshot,
-) -> ProjectionReadinessReport:
-    """Check selected patterns against the immutable profile/fact snapshot."""
-    resource_categories_by_kind = {
-        "entry_point": "entry_points",
-        "tool": "tool_inventory",
-        "integration": "external_integrations",
-        "trust_boundary": "trust_boundaries",
-        "output_surface": "output_surfaces",
-        "agent_internal": "agent_internal",
-    }
+) -> tuple[str, ...]:
     required_kinds = {
         slot.kind
         for pattern in patterns
         for slot in pattern.canonical_chain.resource_slots
     }
-    required_categories = tuple(
-        sorted(resource_categories_by_kind[kind] for kind in required_kinds)
-    )
-    profile = snapshot.profile
-    available_by_category = {
+    return tuple(sorted(_RESOURCE_CATEGORY_BY_KIND[kind] for kind in required_kinds))
+
+
+def _available_resource_categories(
+    profile: CapabilityProfile,
+) -> dict[str, bool]:
+    return {
         "entry_points": bool(profile.entry_points),
         "tool_inventory": bool(profile.tool_inventory),
         "external_integrations": bool(profile.external_integrations),
@@ -632,26 +634,37 @@ def check_projection_readiness(
         ),
         "agent_internal": "reasoning" in profile.zones_active,
     }
-    missing_categories = tuple(
-        category
-        for category in required_categories
-        if not available_by_category[category]
-    )
 
-    fact_refs = {
-        _fact_key(reference): reference
-        for pattern in patterns
-        for step in pattern.canonical_chain.steps
-        for condition in (
-            ([step.condition] if step.condition is not None else [])
-            + [precondition.condition for precondition in step.preconditions]
-        )
-        for reference in _condition_facts(condition)
-    }
-    required_facts = tuple(
-        sorted(reference.fact_id for reference in fact_refs.values())
-    )
-    missing_facts = tuple(
+
+def _pattern_conditions(pattern: AttackPattern) -> Iterable[Condition]:
+    for step in pattern.canonical_chain.steps:
+        if step.condition is not None:
+            yield step.condition
+        yield from (precondition.condition for precondition in step.preconditions)
+
+
+def _readiness_fact_references(
+    patterns: Sequence[AttackPattern],
+) -> dict[str, AuthoritativeFactReference]:
+    fact_refs: dict[str, AuthoritativeFactReference] = {}
+    for pattern in patterns:
+        for condition in _pattern_conditions(pattern):
+            for reference in _condition_facts(condition):
+                fact_refs[_fact_key(reference)] = reference
+    return fact_refs
+
+
+def _required_fact_ids(
+    fact_refs: dict[str, AuthoritativeFactReference],
+) -> tuple[str, ...]:
+    return tuple(sorted(reference.fact_id for reference in fact_refs.values()))
+
+
+def _missing_fact_ids(
+    fact_refs: dict[str, AuthoritativeFactReference],
+    snapshot: CapabilityFactSnapshot,
+) -> tuple[str, ...]:
+    return tuple(
         sorted(
             reference.fact_id
             for reference in fact_refs.values()
@@ -661,6 +674,23 @@ def check_projection_readiness(
             )
         )
     )
+
+
+def check_projection_readiness(
+    patterns: Sequence[AttackPattern],
+    snapshot: CapabilityFactSnapshot,
+) -> ProjectionReadinessReport:
+    """Check selected patterns against the immutable profile/fact snapshot."""
+    required_categories = _required_resource_categories(patterns)
+    available_by_category = _available_resource_categories(snapshot.profile)
+    missing_categories = tuple(
+        category
+        for category in required_categories
+        if not available_by_category[category]
+    )
+    fact_refs = _readiness_fact_references(patterns)
+    required_facts = _required_fact_ids(fact_refs)
+    missing_facts = _missing_fact_ids(fact_refs, snapshot)
     return ProjectionReadinessReport(
         ready=not missing_categories and not missing_facts,
         required_resource_categories=required_categories,

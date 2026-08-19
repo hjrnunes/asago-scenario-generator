@@ -631,6 +631,15 @@ class FilteredSeed(ScenarioSeed):
     )
 
 
+_FilterResult = tuple[list[FilteredSeed], list[dict], list[FilterVerdict]]
+_QuarantineFilterResult = tuple[
+    list[FilteredSeed],
+    list[dict],
+    list[FilterVerdict],
+    list[FilterSeedQuarantine],
+]
+
+
 # ---------------------------------------------------------------------------
 # Candidate expansion: cross-product seeds x entry_points x techniques
 # ---------------------------------------------------------------------------
@@ -1263,12 +1272,7 @@ def filter_candidates(
     profile: CapabilityProfile,
     *,
     quarantine_on_failure: bool = False,
-) -> tuple[
-    list[FilteredSeed],
-    list[dict],
-    list[FilterVerdict],
-    list[FilterSeedQuarantine],
-]:
+) -> _FilterResult | _QuarantineFilterResult:
     """Filter candidates via one LLM call per seed (with retry-on-malformed).
 
     Groups candidates by ``seed_id``, renders a batch prompt for each seed
@@ -1332,12 +1336,11 @@ def filter_candidates(
         int,
         list[dict],
         list[FilterVerdict],
-        FilterSeedQuarantine | None,
     ]:
         """Filter candidates for a single seed.
 
         Returns (accepted, n_accepted, n_rejected, call_log_entries,
-        rejected_verdicts, quarantine).
+        rejected_verdicts).
         Raises FilterProtocolError on irreconcilable response.
         """
         # Reject duplicate candidate IDs in the submitted input — this
@@ -1540,7 +1543,6 @@ def filter_candidates(
                     len(seed_candidates),
                     seed_call_logs,
                     rejected_verdicts,
-                    None,
                 )
 
             seed_results: list[FilteredSeed] = []
@@ -1581,7 +1583,6 @@ def filter_candidates(
                 seed_total - seed_accepted,
                 seed_call_logs,
                 rejected_verdicts,
-                None,
             )
         except Exception as exc:
             raise FilterProtocolError(
@@ -1612,7 +1613,6 @@ def filter_candidates(
                     n_rej,
                     seed_logs,
                     seed_rejected,
-                    _quarantine,
                 ) = future.result()
                 results.extend(seed_results)
                 total_accepted += n_acc
@@ -1629,15 +1629,12 @@ def filter_candidates(
                 # with evidence rather than silently dropping a seed.
                 # Preserve any call logs the exception already carries.
                 logger.exception("Filter infrastructure failure for seed %s", seed_id)
-                if isinstance(exc, FilterProtocolError):
-                    protocol_errors.append(exc)
-                else:
-                    protocol_errors.append(
-                        FilterProtocolError(
-                            f"Filter infrastructure failure for seed {seed_id}: {exc}",
-                            call_log_entries=[],
-                        )
+                protocol_errors.append(
+                    FilterProtocolError(
+                        f"Filter infrastructure failure for seed {seed_id}: {exc}",
+                        call_log_entries=[],
                     )
+                )
 
     if protocol_errors:
         # Collect all call logs (including from successful seeds) so the
