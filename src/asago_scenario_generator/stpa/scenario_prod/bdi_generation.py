@@ -44,6 +44,12 @@ __all__ = [
     "parse_ica_slot_id",
 ]
 
+_LENGTH_RETRY_MAX_COMPLETION_TOKENS = 2048
+_LENGTH_RETRY_PROMPT = (
+    "\n\nThe prior response was truncated. Return only a concise "
+    "schema-matching response with no explanation."
+)
+
 
 class BDIGenerationResult(BaseModel):
     """LLM response model for the combined BDI generation call."""
@@ -202,9 +208,37 @@ def generate_bdi(
         temperature=temperature,
     )
 
+    if _is_length_finish_reason_error(error):
+        retry_result, _retry_llm_result, retry_error = safe_llm_call(
+            llm_client=llm_client,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt + _LENGTH_RETRY_PROMPT,
+            response_format=BDIGenerationResult,
+            run_dir=run_dir,
+            stage=stage,
+            step=step,
+            temperature=temperature,
+            max_completion_tokens=_LENGTH_RETRY_MAX_COMPLETION_TOKENS,
+        )
+        if retry_error is None:
+            return retry_result, None
+        return (
+            None,
+            "BDI generation retry exhausted after "
+            f"LengthFinishReasonError: {retry_error}",
+        )
+
     if error is not None:
         return None, error
     return result, None
+
+
+def _is_length_finish_reason_error(error: str | None) -> bool:
+    """Return whether a safe-call error came from completion length exhaustion."""
+    if error is None:
+        return False
+    error_type, _, _message = error.partition(":")
+    return error_type == "LengthFinishReasonError"
 
 
 def build_bdi_prompts(

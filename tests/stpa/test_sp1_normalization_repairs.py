@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import warnings
 
 import pytest
 
@@ -202,6 +203,92 @@ def test_normalization_preserves_null_element_refs() -> None:
     result = normalize_control_structure_payload(payload)
 
     assert result.payload["responsibilities"][0]["control_actions"][0]["target"] is None
+    ControlStructure.model_validate(result.payload)
+
+
+def test_normalization_converts_object_shaped_feedback_update_to_scalar() -> None:
+    payload = _payload_with_references()
+    payload["responsibilities"][0]["feedback_channels"][0]["updates"] = {
+        "type": "process_model_part",
+        "id": "state-alpha",
+    }
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = normalize_control_structure_payload(
+            construct_model_unvalidated(payload, ControlStructure)
+        )
+
+    assert not caught
+    feedback = result.payload["responsibilities"][0]["feedback_channels"][0]
+    assert feedback["updates"] == "PM-1-1"
+    ControlStructure.model_validate(result.payload)
+
+
+def test_normalization_leaves_ambiguous_object_feedback_update_for_validation() -> None:
+    payload = _payload_with_references()
+    payload["responsibilities"][0]["process_model_parts"].append(
+        {"pm_id": "state-alpha", "description": "Second state"}
+    )
+    payload["responsibilities"][0]["feedback_channels"][0]["updates"] = {
+        "type": "process_model_part",
+        "id": "state-alpha",
+    }
+
+    result = normalize_control_structure_payload(
+        construct_model_unvalidated(payload, ControlStructure)
+    )
+
+    feedback = result.payload["responsibilities"][0]["feedback_channels"][0]
+    assert feedback["updates"] == {
+        "type": "process_model_part",
+        "id": "state-alpha",
+    }
+    with pytest.raises(ValueError) as exc_info:
+        ControlStructure.model_validate(result.payload)
+    assert "updates" in str(exc_info.value).lower()
+    assert "unhashable" not in str(exc_info.value).lower()
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"type": "process_model_part", "id": "PM-UNKNOWN"},
+        {"type": "control_action", "id": "CA-9-1"},
+    ],
+)
+def test_normalization_leaves_unknown_feedback_update_shapes_for_validation(
+    updates: dict[str, str],
+) -> None:
+    payload = _payload_with_references()
+    payload["responsibilities"][0]["feedback_channels"][0]["updates"] = updates
+
+    result = normalize_control_structure_payload(
+        construct_model_unvalidated(payload, ControlStructure)
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        ControlStructure.model_validate(result.payload)
+    assert "updates" in str(exc_info.value).lower()
+    assert "unhashable" not in str(exc_info.value).lower()
+
+
+def test_namespace_resolves_id_shaped_element_ref_type() -> None:
+    payload = _payload_with_references()
+    payload["controlled_processes"][1]["cp_id"] = "process-alpha"
+    payload["responsibilities"][0]["control_actions"][0]["target"] = {
+        "type": "process-alpha",
+        "id": "process-alpha",
+    }
+    payload["responsibilities"][0]["feedback_channels"][0]["source"] = {
+        "type": "process-alpha",
+        "id": "process-alpha",
+    }
+
+    result = normalize_control_structure_payload(payload)
+
+    target = result.payload["responsibilities"][0]["control_actions"][0]["target"]
+    assert target == {"type": "controlled_process", "id": "CP-2"}
     ControlStructure.model_validate(result.payload)
 
 

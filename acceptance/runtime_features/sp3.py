@@ -37,6 +37,10 @@ from runtime_shared import (
     re,
     tempfile,
 )
+from asago_scenario_generator.stpa.infra.llm import LLMResult
+from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+    BDIGenerationResult,
+)
 
 
 def _h_sp3_bdi_module_importable(
@@ -5131,6 +5135,299 @@ def _h_072o_check_copied_terminology(
     return True, ""
 
 
+def _h_sp3_robustness_stage5_threat(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Provide the single deterministic threat used by retry scenarios."""
+    world.enriched_threat_set = _make_sp3_ets(
+        threats=[_make_sp3_threat(slot_id="RESP-1:CA-1-1:NOT_PROVIDED")]
+    )
+    return True, ""
+
+
+def _h_sp3_robustness_control_structure(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Provide the valid control structure used by retry scenarios."""
+    world.control_structure = _make_sp3_cs()
+    return True, ""
+
+
+def _h_sp3_robustness_stage6_responses(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Mark deterministic Stage 6 responses as available."""
+    world.sp3_stage6_responses_available = True
+    return True, ""
+
+
+def _sp3_robustness_valid_bdi() -> object:
+    """Build the valid structured BDI response used by retry scenarios."""
+    return BDIGenerationResult(
+        defender_vulnerabilities={"PM-1-1": "vulnerability"},
+        attacker_bdi=AttackerBDI(
+            beliefs=["attacker belief"],
+            desires=["induce ICA"],
+            intentions=["poison PM-1-1 via FB-1-1"],
+        ),
+    )
+
+
+def _h_sp3_robustness_first_bdi(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Configure a successful first Stage 5 completion."""
+    world.sp3_stage5_outcomes = [_sp3_robustness_valid_bdi()]
+    return True, ""
+
+
+def _h_sp3_robustness_length_failure(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Configure a first completion-length failure."""
+    length_error = type("LengthFinishReasonError", (Exception,), {})
+    world.sp3_stage5_outcomes = [length_error("completion exhausted")]
+    return True, ""
+
+
+def _h_sp3_robustness_second_bdi(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Append the successful result expected from a corrective retry."""
+    outcomes = getattr(world, "sp3_stage5_outcomes", [])
+    outcomes.append(_sp3_robustness_valid_bdi())
+    world.sp3_stage5_outcomes = outcomes
+    return True, ""
+
+
+def _h_sp3_robustness_second_length_failure(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Append a second completion-length failure for retry exhaustion."""
+    length_error = type("LengthFinishReasonError", (Exception,), {})
+    outcomes = getattr(world, "sp3_stage5_outcomes", [])
+    outcomes.append(length_error("completion exhausted again"))
+    world.sp3_stage5_outcomes = outcomes
+    return True, ""
+
+
+def _h_sp3_robustness_other_failure(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Configure one non-length Stage 5 failure without retry."""
+    match = re.search(
+        r"raises (\w+) with message (.+)$",
+        text,
+        re.IGNORECASE,
+    )
+    if match is None:
+        return False, f"Could not parse failure step: {text}"
+    error_type, message = match.groups()
+    error_classes = {
+        "RuntimeError": RuntimeError,
+        "ConnectionError": ConnectionError,
+    }
+    error_class = error_classes.get(error_type)
+    if error_class is None and error_type == "ValidationError":
+        error_class = type("ValidationError", (Exception,), {})
+    if error_class is None:
+        return False, f"Unsupported test error type: {error_type}"
+    world.sp3_stage5_outcomes = [error_class(message)]
+    return True, ""
+
+
+def _h_sp3_robustness_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Execute the deterministic SP3 retry scenario."""
+    from tests.stpa.sp1_helpers import MockCall, MockLLMClient
+
+    class _Stage5SequenceClient(MockLLMClient):
+        def __init__(self, outcomes: list[object]) -> None:
+            super().__init__()
+            self.outcomes = list(outcomes)
+
+        def complete(
+            self,
+            system_prompt: str,
+            user_prompt: str,
+            response_format: type | None = None,
+            max_completion_tokens: int | None = None,
+            temperature: float | None = None,
+        ) -> LLMResult:
+            if response_format is not BDIGenerationResult or not self.outcomes:
+                return super().complete(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    response_format=response_format,
+                    max_completion_tokens=max_completion_tokens,
+                    temperature=temperature,
+                )
+            self.calls.append(
+                MockCall(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    response_format=response_format,
+                    temperature=temperature,
+                    max_completion_tokens=max_completion_tokens,
+                )
+            )
+            outcome = self.outcomes.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return LLMResult(
+                content=outcome,
+                prompt_tokens=100,
+                completion_tokens=50,
+                duration_ms=1,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+            )
+
+    base_client = _setup_sp3_mock_client(1)
+    client = _Stage5SequenceClient(
+        getattr(world, "sp3_stage5_outcomes", [_sp3_robustness_valid_bdi()])
+    )
+    client._response_queue = base_client._response_queue
+    client._response_map = base_client._response_map
+    world.sp3_llm_client = client
+    world.sp3_run_dir = Path(tempfile.mkdtemp(prefix="sp3_retry_"))
+    if world.control_structure is None:
+        world.control_structure = _make_sp3_cs()
+    if world.enriched_threat_set is None:
+        world.enriched_threat_set = _make_sp3_ets()
+    if world.loss_analysis is None:
+        world.loss_analysis = _make_sp3_loss_analysis()
+
+    from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
+
+    world.sp3_retry_result = run_sp3(
+        llm_client=client,
+        enriched_threat_set=world.enriched_threat_set,
+        control_structure=world.control_structure,
+        loss_analysis=world.loss_analysis,
+        run_dir=world.sp3_run_dir,
+    )
+    return True, ""
+
+
+def _sp3_robustness_bdi_calls(world: World) -> list[object]:
+    """Return only the Stage 5 structured completion calls."""
+    return [
+        call
+        for call in getattr(world.sp3_llm_client, "calls", [])
+        if call.response_format is BDIGenerationResult
+    ]
+
+
+def _h_sp3_robustness_attempt_count(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Assert the exact Stage 5 completion attempt count."""
+    match = re.search(r"exactly (\d+) BDI completion attempts?", text)
+    expected = int(match.group(1)) if match else 0
+    actual = len(_sp3_robustness_bdi_calls(world))
+    return actual == expected, f"Expected {expected} Stage 5 attempts, got {actual}"
+
+
+def _h_sp3_robustness_first_success(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Assert first-attempt success did not use corrective retry."""
+    calls = _sp3_robustness_bdi_calls(world)
+    if len(calls) != 1:
+        return False, f"Expected one first attempt, got {len(calls)}"
+    return (
+        "prior response was truncated" not in calls[0].user_prompt,
+        "First attempt unexpectedly used corrective prompt",
+    )
+
+
+def _h_sp3_robustness_retry_request(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Assert the retry retained the structured schema and token ceiling."""
+    calls = _sp3_robustness_bdi_calls(world)
+    if len(calls) < 2:
+        return False, "No corrective Stage 5 attempt was recorded"
+    retry = calls[1]
+    if retry.response_format is not BDIGenerationResult:
+        return False, "Retry did not request BDIGenerationResult"
+    if retry.max_completion_tokens is None or retry.max_completion_tokens > 2048:
+        return False, f"Retry token ceiling was {retry.max_completion_tokens}"
+    return True, ""
+
+
+def _h_sp3_robustness_retry_prompt(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Assert the corrective retry prompt is concise and explicit."""
+    calls = _sp3_robustness_bdi_calls(world)
+    if len(calls) < 2:
+        return False, "No corrective Stage 5 attempt was recorded"
+    prompt = calls[1].user_prompt.lower()
+    required = ("prior response was truncated", "concise schema-matching response")
+    return all(fragment in prompt for fragment in required), (
+        "Corrective prompt did not request a concise schema-matching response"
+    )
+
+
+def _h_sp3_robustness_specs(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Assert the expected ScenarioSpec count."""
+    match = re.search(r"one ScenarioSpec|no ScenarioSpec", text)
+    expected = 1 if match and match.group(0).startswith("one") else 0
+    actual = len(world.sp3_retry_result.scenario_specs)
+    return actual == expected, f"Expected {expected} ScenarioSpecs, got {actual}"
+
+
+def _h_sp3_robustness_no_generation_error(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Assert Stage 5 BDI generation completed without an error."""
+    errors = world.sp3_retry_result.stage_errors
+    return not any("Stage 5 BDI generation failed" in error for error in errors), (
+        f"Unexpected Stage 5 errors: {errors}"
+    )
+
+
+def _h_sp3_robustness_exhausted_error(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Assert retry exhaustion remains visible in Stage 5 diagnostics."""
+    errors = world.sp3_retry_result.stage_errors
+    joined = "\n".join(errors)
+    return (
+        "retry exhausted" in joined.lower() and "LengthFinishReasonError" in joined,
+        f"Retry exhaustion was not reported: {errors}",
+    )
+
+
+def _h_sp3_robustness_error_type(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Assert a non-length failure type remains visible without retry."""
+    match = re.search(r"mention (\w+)$", text)
+    expected = match.group(1) if match else ""
+    errors = "\n".join(world.sp3_retry_result.stage_errors)
+    return expected in errors, f"Expected {expected} in Stage 5 errors: {errors}"
+
+
+def _h_sp3_robustness_failed_calls(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Assert both failed attempts were written to calls.jsonl."""
+    import json
+
+    entries = [
+        json.loads(line)
+        for line in (world.sp3_run_dir / "calls.jsonl").read_text().splitlines()
+    ]
+    failed = [entry for entry in entries if entry.get("stage") == "stage_5"]
+    return len(failed) == 2 and all(not entry.get("success") for entry in failed), (
+        f"Expected two failed Stage 5 entries, got {failed}"
+    )
+
+
 def _h_072o_check_fails_stpa_sec(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -6728,6 +7025,106 @@ def register(api: object) -> None:
         "the check fails because STPA-Sec jargon is present",
         _h_072o_check_fails_stpa_sec,
         source_order=20231,
+    )
+    api.register(
+        "one valid structural threat for ICA slot RESP-1:CA-1-1:NOT_PROVIDED$",
+        _h_sp3_robustness_stage5_threat,
+        source_order=20232,
+    )
+    api.register(
+        "a valid control structure containing RESP-1 and CA-1-1$",
+        _h_sp3_robustness_control_structure,
+        source_order=20233,
+    )
+    api.register(
+        "valid Stage 6 responses are available for every Stage 5 result$",
+        _h_sp3_robustness_stage6_responses,
+        source_order=20234,
+    )
+    api.register(
+        "the first BDI completion returns a valid structured BDI result$",
+        _h_sp3_robustness_first_bdi,
+        source_order=20235,
+    )
+    api.register(
+        "the first BDI completion raises LengthFinishReasonError$",
+        _h_sp3_robustness_length_failure,
+        source_order=20236,
+    )
+    api.register(
+        "the first BDI completion raises \\w+ with message .*$",
+        _h_sp3_robustness_other_failure,
+        source_order=20237,
+    )
+    api.register(
+        "the second BDI completion returns a valid structured BDI result$",
+        _h_sp3_robustness_second_bdi,
+        source_order=20238,
+    )
+    api.register(
+        "the second BDI completion raises LengthFinishReasonError$",
+        _h_sp3_robustness_second_length_failure,
+        source_order=20239,
+    )
+    api.register_first(
+        "the SP3 run is executed$",
+        _h_sp3_robustness_run,
+        source_order=20240,
+    )
+    api.register(
+        "Stage 5 makes exactly \\d+ BDI completion attempts?$",
+        _h_sp3_robustness_attempt_count,
+        source_order=20241,
+    )
+    api.register(
+        "Stage 5 uses the first BDI result without a corrective prompt$",
+        _h_sp3_robustness_first_success,
+        source_order=20242,
+    )
+    api.register(
+        "the second attempt requests the existing structured BDI schema$",
+        _h_sp3_robustness_retry_request,
+        source_order=20243,
+    )
+    api.register(
+        "the second attempt has max_completion_tokens no greater than 2048$",
+        _h_sp3_robustness_retry_request,
+        source_order=20244,
+    )
+    api.register(
+        "the second attempt prompt says the prior response was truncated$",
+        _h_sp3_robustness_retry_prompt,
+        source_order=20245,
+    )
+    api.register(
+        "the second attempt prompt requests only a concise schema-matching response$",
+        _h_sp3_robustness_retry_prompt,
+        source_order=20246,
+    )
+    api.register(
+        "(?:one|no) ScenarioSpec is produced(?: from the second BDI result| for the structural threat)?$",
+        _h_sp3_robustness_specs,
+        source_order=20247,
+    )
+    api.register(
+        "no Stage 5 BDI generation error is reported$",
+        _h_sp3_robustness_no_generation_error,
+        source_order=20248,
+    )
+    api.register(
+        "the Stage 5 errors report an exhausted BDI generation retry$",
+        _h_sp3_robustness_exhausted_error,
+        source_order=20249,
+    )
+    api.register(
+        "the Stage 5 errors mention \\w+$",
+        _h_sp3_robustness_error_type,
+        source_order=20250,
+    )
+    api.register(
+        "calls.jsonl records both failed Stage 5 attempts$",
+        _h_sp3_robustness_failed_calls,
+        source_order=20251,
     )
     api.set_feature(None)
 

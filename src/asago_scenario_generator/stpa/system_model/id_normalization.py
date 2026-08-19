@@ -103,7 +103,7 @@ class ControlStructureNormalization:
 def _payload_dict(payload: Mapping[str, Any] | BaseModel) -> dict[str, Any]:
     """Return a deep-copied dictionary for a decoded payload."""
     if isinstance(payload, BaseModel):
-        value = payload.model_dump(mode="python", exclude_none=False)
+        value = _raw_model_value(payload)
     elif isinstance(payload, Mapping):
         value = payload
     else:
@@ -112,6 +112,29 @@ def _payload_dict(payload: Mapping[str, Any] | BaseModel) -> dict[str, Any]:
             f"got {type(payload).__name__}."
         )
     return copy.deepcopy(dict(value))
+
+
+def _raw_model_value(value: Any) -> Any:
+    """Read a decoded model graph without invoking Pydantic serialization.
+
+    Tolerant decoding deliberately constructs model graphs with
+    ``model_construct``. Calling ``model_dump`` on such a graph can emit
+    serializer warnings for malformed shapes that this normalizer repairs.
+    """
+    if isinstance(value, BaseModel):
+        return {
+            field_name: _raw_model_value(field_value)
+            for field_name, field_value in value.__dict__.items()
+        }
+    if isinstance(value, Mapping):
+        return {
+            key: _raw_model_value(field_value) for key, field_value in value.items()
+        }
+    if isinstance(value, list):
+        return [_raw_model_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_raw_model_value(item) for item in value)
+    return copy.deepcopy(value)
 
 
 def _empty_namespace_entries() -> NamespaceEntries:
@@ -389,18 +412,41 @@ def _wrap_ref(child: dict[str, Any], ref_key: str) -> None:
     child[ref_key] = {"id": reference}
 
 
-def _fix_type(reference: dict[str, Any]) -> None:
-    """Infer a missing ElementRef type from its source ID."""
+def _source_namespace(
+    source_id: Any,
+    namespace_maps: dict[str, dict[str, str]],
+) -> str | None:
+    """Resolve a source ID to one of the namespaces valid for ElementRef."""
+    if not isinstance(source_id, str):
+        return None
+    matches = [
+        namespace
+        for namespace in _TYPED_REFERENCE_NAMESPACES.values()
+        if source_id in namespace_maps[namespace]
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _fix_type(
+    reference: dict[str, Any],
+    namespace_maps: dict[str, dict[str, str]],
+) -> None:
+    """Infer a missing ElementRef type from its source ID or namespace."""
     reference_type = _reference_type_value(reference.get("type"))
     if reference_type in _TYPED_REFERENCE_NAMESPACES:
         return
     inferred_type = _prefix_type(reference.get("id"))
+    if inferred_type is None:
+        inferred_type = _source_namespace(reference.get("type"), namespace_maps)
     if inferred_type is not None:
         reference["type"] = inferred_type
 
 
-def _repair_element_ref_types(payload: dict[str, Any]) -> None:
-    """Infer missing ElementRef types from their source ID prefixes."""
+def _repair_element_ref_types(
+    payload: dict[str, Any],
+    namespace_maps: dict[str, dict[str, str]],
+) -> None:
+    """Infer missing ElementRef types from source IDs and namespace maps."""
     responsibilities = payload.get("responsibilities", [])
     if not isinstance(responsibilities, list):
         return
@@ -408,7 +454,7 @@ def _repair_element_ref_types(payload: dict[str, Any]) -> None:
         if not isinstance(responsibility, dict):
             continue
         for reference in _ref_items(responsibility):
-            _fix_type(reference)
+            _fix_type(reference, namespace_maps)
 
 
 def _wrap_bare_string_refs(payload: dict[str, Any]) -> None:
@@ -448,6 +494,14 @@ def _rewrite_local_pm_reference(
     old_id = feedback_channel.get("updates")
     if isinstance(old_id, str) and old_id in local_pm_map:
         feedback_channel["updates"] = local_pm_map[old_id]
+        return
+    if not isinstance(old_id, dict):
+        return
+    if _reference_type_value(old_id.get("type")) != "process_model_part":
+        return
+    source_id = old_id.get("id")
+    if isinstance(source_id, str) and source_id in local_pm_map:
+        feedback_channel["updates"] = local_pm_map[source_id]
 
 
 def _rewrite_responsibility_references(
@@ -566,7 +620,7 @@ def normalize_control_structure_payload(
     # 4. Replace published IDs with structural IDs.
     # 5. Fill empty descriptions from the now-canonical IDs and refs.
     _wrap_bare_string_refs(normalized)
-    _repair_element_ref_types(normalized)
+    _repair_element_ref_types(normalized, namespace_maps)
     _rewrite_references_before_id_replacement(
         normalized,
         namespace_maps,

@@ -20,6 +20,7 @@ from asago_scenario_generator.stpa.models.enriched_threat_set import (
     StructuralThreat,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
+from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.models.scenario_spec import (
     AttackerBDI,
 )
@@ -31,7 +32,48 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     parse_ica_slot_id,
     populate_defender_bdi,
 )
-from tests.stpa.sp1_helpers import MockLLMClient, read_calls_jsonl
+from tests.stpa.sp1_helpers import MockCall, MockLLMClient, read_calls_jsonl
+
+
+class LengthFinishReasonError(Exception):
+    """Test stand-in for the OpenAI SDK completion-length exception."""
+
+
+class _SequenceBDIClient(MockLLMClient):
+    """Mock client with per-call outcomes for retry behavior."""
+
+    def __init__(self, outcomes: list[object]) -> None:
+        super().__init__()
+        self._outcomes = list(outcomes)
+
+    def complete(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        response_format: type | None = None,
+        max_completion_tokens: int | None = None,
+        temperature: float | None = None,
+    ) -> LLMResult:
+        self.calls.append(
+            MockCall(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                response_format=response_format,
+                temperature=temperature,
+                max_completion_tokens=max_completion_tokens,
+            )
+        )
+        outcome = self._outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return LLMResult(
+            content=outcome,
+            prompt_tokens=100,
+            completion_tokens=50,
+            duration_ms=1,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+        )
 
 
 def _make_control_structure(
@@ -274,6 +316,47 @@ class TestGenerateBDI:
             assert "vulnerability" in sys_prompt.lower()
             assert "attacker" in sys_prompt.lower()
             assert "PM" in sys_prompt or "FB" in sys_prompt or "CA" in sys_prompt
+
+    def test_length_failure_gets_one_concise_structured_retry(self):
+        cs = _make_control_structure()
+        bdi = populate_defender_bdi(cs, "RESP-1")
+        threat = _make_structural_threat()
+        llm_result = BDIGenerationResult(
+            defender_vulnerabilities={"PM-1-1": "v", "PM-1-2": "v"},
+            attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
+        )
+        client = _SequenceBDIClient(
+            [LengthFinishReasonError("truncated"), llm_result]
+        )
+
+        with TemporaryDirectory() as tmpdir:
+            result, error = generate_bdi(client, bdi, threat, cs, Path(tmpdir))
+
+        assert error is None
+        assert result == llm_result
+        assert len(client.calls) == 2
+        retry = client.calls[1]
+        assert retry.response_format is BDIGenerationResult
+        assert retry.max_completion_tokens <= 2048
+        assert "prior response was truncated" in retry.user_prompt
+        assert "concise schema-matching response" in retry.user_prompt
+
+    def test_exhausted_length_retry_is_reported(self):
+        cs = _make_control_structure()
+        bdi = populate_defender_bdi(cs, "RESP-1")
+        threat = _make_structural_threat()
+        client = _SequenceBDIClient(
+            [LengthFinishReasonError("first"), LengthFinishReasonError("second")]
+        )
+
+        with TemporaryDirectory() as tmpdir:
+            result, error = generate_bdi(client, bdi, threat, cs, Path(tmpdir))
+
+        assert result is None
+        assert len(client.calls) == 2
+        assert error is not None
+        assert "retry exhausted" in error.lower()
+        assert "LengthFinishReasonError" in error
 
 
 class TestAssembleScenarioSpec:
