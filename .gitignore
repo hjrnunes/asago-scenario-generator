@@ -65,3 +65,7 @@ opencode.json
 .cache/
 data/reference-gym/
 tests/test_reference_gym_contract.py
+.swarmforge-droid/
+build/acceptance/ir/
+build/acceptance/dry/
+build/acceptance/generated/

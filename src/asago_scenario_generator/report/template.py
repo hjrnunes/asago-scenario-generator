@@ -6570,6 +6570,17 @@ def _build_pipeline_call_item(
     return usage, item_html
 
 
+def _usage_totals(
+    normalized_usage: list[dict[str, int | float | None]],
+) -> tuple[int | float, int | float, int | float]:
+    """Sum available metrics while treating unavailable telemetry as zero."""
+    return (
+        sum((usage["prompt_tokens"] or 0) for usage in normalized_usage),
+        sum((usage["completion_tokens"] or 0) for usage in normalized_usage),
+        sum((usage["duration_ms"] or 0) for usage in normalized_usage),
+    )
+
+
 def build_pipeline_calls_section(call_logs: list[dict[str, Any]]) -> str:
     """Build an expandable section showing non-scenario LLM calls.
 
@@ -6598,11 +6609,7 @@ def build_pipeline_calls_section(call_logs: list[dict[str, Any]]) -> str:
         call_items.append(item_html)
 
     # Compute aggregate stats.
-    total_prompt = sum((usage["prompt_tokens"] or 0) for usage in normalized_usage)
-    total_completion = sum(
-        (usage["completion_tokens"] or 0) for usage in normalized_usage
-    )
-    total_duration = sum((usage["duration_ms"] or 0) for usage in normalized_usage)
+    total_prompt, total_completion, total_duration = _usage_totals(normalized_usage)
     call_items_html = "".join(call_items)
 
     return f"""

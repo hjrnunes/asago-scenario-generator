@@ -14,6 +14,15 @@ Do not import project modules or call a project API. Keep the suite offline.
 Use disposable copies of authoritative run fixtures whose manifest inventory
 and hashes match their call logs.
 
+The executable counterpart is:
+
+```bash
+uv run python acceptance/qa/run_report_nullable_usage_metrics.py
+```
+
+Pass `--keep-fixtures` when retaining generated reports for manual browser
+inspection.
+
 ## Fixture records
 
 Provide one completed taxonomy-and-risk run fixture with:
