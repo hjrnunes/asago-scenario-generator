@@ -11,6 +11,7 @@ import json
 import logging
 import math
 import re
+from numbers import Real
 from pathlib import Path
 from typing import Any
 
@@ -296,6 +297,82 @@ def _esc(text: str | None) -> str:
     if text is None:
         return ""
     return html.escape(str(text))
+
+
+_USAGE_METRIC_FIELDS: tuple[str, ...] = (
+    "prompt_tokens",
+    "completion_tokens",
+    "duration_ms",
+)
+
+
+def _usage_metrics(
+    entry: dict[str, Any],
+    *,
+    call_label: str,
+) -> dict[str, int | float | None]:
+    """Validate and normalize usage metrics from one call-log entry.
+
+    Missing fields retain the historical zero default.  Explicit ``None``
+    means that telemetry was unavailable and is kept as ``None`` for display,
+    while totals treat it as zero.  Values of any other nonnumeric type are
+    rejected before report rendering can attempt arithmetic on them.
+    """
+    metrics: dict[str, int | float | None] = {}
+    for field in _USAGE_METRIC_FIELDS:
+        value = entry.get(field, 0)
+        if value is None:
+            metrics[field] = None
+            continue
+        if isinstance(value, bool) or not isinstance(value, Real):
+            raise ValueError(
+                f"Invalid usage metric {field}={value!r} for call "
+                f"{call_label!r}; expected a finite number or null."
+            )
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError(
+                f"Invalid usage metric {field}={value!r} for call "
+                f"{call_label!r}; expected a finite number or null."
+            )
+        metrics[field] = value
+    return metrics
+
+
+def _usage_call_label(entry: dict[str, Any], index: int) -> str:
+    """Return a stable, user-facing label for a call-log entry."""
+    return str(entry.get("call") or entry.get("step") or f"call {index}")
+
+
+def _usage_warning_html(
+    call_label: str,
+    metrics: dict[str, int | float | None],
+) -> str:
+    """Render a warning for the unavailable fields in one call."""
+    unavailable = [field for field in _USAGE_METRIC_FIELDS if metrics[field] is None]
+    if not unavailable:
+        return ""
+    fields = ", ".join(unavailable)
+    return (
+        '<div class="warning-banner" role="status">'
+        '<span class="warning-banner-icon">!</span>'
+        f"<span>Warning: call <strong>{_esc(call_label)}</strong> has "
+        f"unavailable usage metrics: {_esc(fields)}.</span>"
+        "</div>"
+    )
+
+
+def _usage_summary(metrics: dict[str, int | float | None]) -> str:
+    """Format usage metrics, preserving the established numeric layout."""
+    if all(metrics[field] is not None for field in _USAGE_METRIC_FIELDS):
+        return (
+            f"{metrics['prompt_tokens']} prompt / "
+            f"{metrics['completion_tokens']} completion tokens, "
+            f"{metrics['duration_ms']}ms"
+        )
+    return ", ".join(
+        f"{field}={'unavailable' if metrics[field] is None else metrics[field]}"
+        for field in _USAGE_METRIC_FIELDS
+    )
 
 
 def _normalize_zone(zone: int | str) -> str:
@@ -4649,13 +4726,24 @@ def build_scenarios_section(
     all_durations: list[float] = []
     all_prompt_tokens: list[float] = []
     all_completion_tokens: list[float] = []
-    for _entries in _call_logs.values():
-        for _e in _entries:
-            all_durations.append(float(_e.get("duration_ms", 0)))
-            all_prompt_tokens.append(float(_e.get("prompt_tokens", 0)))
-            all_completion_tokens.append(float(_e.get("completion_tokens", 0)))
+    for _sid, _entries in _call_logs.items():
+        for _idx, _e in enumerate(_entries):
+            _metrics = _usage_metrics(
+                _e,
+                call_label=_usage_call_label(_e, _idx),
+            )
+            if _metrics["duration_ms"] is not None:
+                all_durations.append(float(_metrics["duration_ms"]))
+            if _metrics["prompt_tokens"] is not None:
+                all_prompt_tokens.append(float(_metrics["prompt_tokens"]))
+            if _metrics["completion_tokens"] is not None:
+                all_completion_tokens.append(float(_metrics["completion_tokens"]))
 
-    if len(all_durations) >= 3:
+    if (
+        len(all_durations) >= 3
+        and len(all_prompt_tokens) >= 3
+        and len(all_completion_tokens) >= 3
+    ):
 
         def _mean_std(vals: list[float]) -> tuple[float, float]:
             n = len(vals)
@@ -5934,9 +6022,11 @@ def _build_scenario_card(
         for idx, entry in enumerate(_logs):
             call_name = entry.get("call", "")
             display_name = _CALL_DISPLAY_NAMES.get(call_name, call_name)
-            ptokens = entry.get("prompt_tokens", 0)
-            ctokens = entry.get("completion_tokens", 0)
-            dur = entry.get("duration_ms", 0)
+            call_label = _usage_call_label(entry, idx)
+            usage = _usage_metrics(entry, call_label=call_label)
+            ptokens = usage["prompt_tokens"]
+            ctokens = usage["completion_tokens"]
+            dur = usage["duration_ms"]
             sys_prompt = _esc(entry.get("system_prompt", ""))
             usr_prompt = _esc(entry.get("user_prompt", ""))
             response_raw = entry.get("response", "")
@@ -5953,18 +6043,21 @@ def _build_scenario_card(
             if call_stats is not None:
                 _threshold = 2.0
                 if (
-                    call_stats["dur_std"] > 0
+                    dur is not None
+                    and call_stats["dur_std"] > 0
                     and dur
                     > call_stats["dur_mean"] + _threshold * call_stats["dur_std"]
                 ):
                     anomaly_badges += '<span class="call-anomaly-badge">⚠ slow</span>'
                     is_anomaly = True
                 if (
-                    call_stats["pt_std"] > 0
+                    ptokens is not None
+                    and call_stats["pt_std"] > 0
                     and ptokens
                     > call_stats["pt_mean"] + _threshold * call_stats["pt_std"]
                 ) or (
-                    call_stats["ct_std"] > 0
+                    ctokens is not None
+                    and call_stats["ct_std"] > 0
                     and ctokens
                     > call_stats["ct_mean"] + _threshold * call_stats["ct_std"]
                 ):
@@ -5974,9 +6067,16 @@ def _build_scenario_card(
                     is_anomaly = True
 
             detail_cls = "expandable call-anomaly" if is_anomaly else "expandable"
+            success = entry.get("success", True)
+            failure_suffix = ""
+            if not success:
+                error = _esc(str(entry.get("error", "")))
+                failure_suffix = f" FAILED{f': {error}' if error else ''}"
+            warning_html = _usage_warning_html(call_label, usage)
             call_items += f"""
+            {warning_html}
             <details class="{detail_cls}">
-              <summary>Call {idx}: {_esc(display_name)} ({ptokens} prompt / {ctokens} completion tokens, {dur}ms){anomaly_badges}</summary>
+              <summary>Call {idx}: {_esc(display_name)} ({_esc(_usage_summary(usage))}){failure_suffix}{anomaly_badges}</summary>
               <div style="padding:8px 0;">
                 <h4 style="margin:8px 0 4px;font-size:12px;color:var(--text-muted);">System Prompt</h4>
                 <pre class="call-log-pre">{sys_prompt}</pre>
@@ -6436,12 +6536,13 @@ def build_pipeline_calls_section(call_logs: list[dict[str, Any]]) -> str:
     }
 
     call_items = ""
+    normalized_usage: list[dict[str, int | float | None]] = []
     for idx, entry in enumerate(call_logs):
         call_name = entry.get("call", "")
         display_name = _CALL_DISPLAY_NAMES.get(call_name, call_name)
-        ptokens = entry.get("prompt_tokens", 0)
-        ctokens = entry.get("completion_tokens", 0)
-        dur = entry.get("duration_ms", 0)
+        call_label = _usage_call_label(entry, idx)
+        usage = _usage_metrics(entry, call_label=call_label)
+        normalized_usage.append(usage)
         sys_prompt = _esc(entry.get("system_prompt", ""))
         usr_prompt = _esc(entry.get("user_prompt", ""))
         response_raw = entry.get("response", "")
@@ -6455,9 +6556,16 @@ def build_pipeline_calls_section(call_logs: list[dict[str, Any]]) -> str:
         if seed_id:
             seed_label = f" (seed: {_esc(seed_id)})"
 
+        success = entry.get("success", True)
+        failure_suffix = ""
+        if not success:
+            error = _esc(str(entry.get("error", "")))
+            failure_suffix = f" FAILED{f': {error}' if error else ''}"
+        warning_html = _usage_warning_html(call_label, usage)
         call_items += f"""
+        {warning_html}
         <details class="expandable">
-          <summary>Call {idx}: {_esc(display_name)}{seed_label} ({ptokens} prompt / {ctokens} completion tokens, {dur}ms)</summary>
+          <summary>Call {idx}: {_esc(display_name)}{seed_label} ({_esc(_usage_summary(usage))}){failure_suffix}</summary>
           <div style="padding:8px 0;">
             <h4 style="margin:8px 0 4px;font-size:12px;color:var(--text-muted);">System Prompt</h4>
             <pre class="call-log-pre">{sys_prompt}</pre>
@@ -6469,9 +6577,11 @@ def build_pipeline_calls_section(call_logs: list[dict[str, Any]]) -> str:
         </details>"""
 
     # Compute aggregate stats.
-    total_prompt = sum(e.get("prompt_tokens", 0) for e in call_logs)
-    total_completion = sum(e.get("completion_tokens", 0) for e in call_logs)
-    total_duration = sum(e.get("duration_ms", 0) for e in call_logs)
+    total_prompt = sum((usage["prompt_tokens"] or 0) for usage in normalized_usage)
+    total_completion = sum(
+        (usage["completion_tokens"] or 0) for usage in normalized_usage
+    )
+    total_duration = sum((usage["duration_ms"] or 0) for usage in normalized_usage)
 
     return f"""
     <section id="sec-pipeline-calls" class="section">
