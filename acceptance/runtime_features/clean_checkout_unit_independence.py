@@ -25,11 +25,14 @@ def _generated_paths(root: Path) -> tuple[Path, ...]:
     return tuple(root / path for path in _GENERATED_PATHS)
 
 
+def _missing_generated_paths(root: Path) -> list[str]:
+    return [str(path) for path in _generated_paths(root) if path.exists()]
+
+
 def _h_clean_checkout(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Verify a source-only checkout starts without generated output."""
     with TemporaryDirectory(prefix="clean-checkout-") as directory:
-        root = Path(directory)
-        missing = [str(path) for path in _generated_paths(root) if path.exists()]
+        missing = _missing_generated_paths(Path(directory))
     return not missing, f"generated paths unexpectedly exist: {missing}"
 
 
@@ -66,8 +69,7 @@ def _h_unit_artifacts_absent(
 ) -> tuple[bool, str]:
     """Check a fresh source-only fixture rather than the generated checkout."""
     with TemporaryDirectory(prefix="unit-suite-output-") as directory:
-        root = Path(directory)
-        missing = [str(path) for path in _generated_paths(root) if path.exists()]
+        missing = _missing_generated_paths(Path(directory))
     return not missing, f"unit suite created generated paths: {missing}"
 
 
@@ -109,8 +111,7 @@ def _h_repository_output_absent(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     with TemporaryDirectory(prefix="repository-output-") as directory:
-        root = Path(directory)
-        missing = [str(path) for path in _generated_paths(root) if path.exists()]
+        missing = _missing_generated_paths(Path(directory))
     return not missing, f"repository generated paths exist: {missing}"
 
 
