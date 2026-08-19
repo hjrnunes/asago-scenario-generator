@@ -21,4 +21,5 @@ __all__ = (
     "acceptance_framework_refactor",
     "clean_checkout_unit_independence",
     "acceptance_pipeline_preservation",
+    "nullable_usage",
 )

@@ -116,6 +116,11 @@ class World:
         self.report_tmpdir: Path | None = None
         self.report_html_path: Path | None = None
         self.report_html_content: str | None = None
+        # Nullable usage report test state
+        self.nullable_pipeline_calls: list[dict[str, Any]] = []
+        self.nullable_scenario_calls: dict[str, list[dict[str, Any]]] = {}
+        self.nullable_scenarios: list[dict[str, Any]] = []
+        self.nullable_report_error: str | None = None
         # Envelope enrichment test state
         self.envelope: Any = None
         self.capability_profile: Any = None

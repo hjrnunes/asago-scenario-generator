@@ -8,8 +8,8 @@ and STPA workflows maintained as peer product surfaces.
 ```bash
 uv sync --locked
 ./scripts/quality.sh
-uv run pytest tests/ -q
 ./scripts/acceptance.sh
+uv run pytest tests/ -q
 ```
 
 Generated acceptance artifacts live under `build/acceptance/` and remain
