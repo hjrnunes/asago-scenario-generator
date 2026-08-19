@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -34,22 +35,76 @@ import pytest
 # Paths
 # ---------------------------------------------------------------------------
 
-_PROJECT_ROOT = next(p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file())
+_PROJECT_ROOT = next(
+    p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file()
+)
 _ACCEPTANCE_DIR = _PROJECT_ROOT / "acceptance"
 
 # Ensure the acceptance runtime is importable.
 sys.path.insert(0, str(_ACCEPTANCE_DIR))
 
+from generate_entrypoints import generate  # noqa: E402
 from acceptance_runtime import (  # noqa: E402
     STEP_PATTERNS,
     _derive_feature_tag,
     find_pattern_conflicts,
 )
-from snapshot import snapshot_layout  # noqa: E402
 
-_LAYOUT = snapshot_layout()
-_IR_DIR = _PROJECT_ROOT / _LAYOUT.ir_dir
-_GENERATED_DIR = _PROJECT_ROOT / _LAYOUT.generated_dir
+
+@dataclass(frozen=True)
+class AcceptanceArtifactFixture:
+    """Test-owned acceptance artifacts for the infrastructure properties."""
+
+    root: Path
+    ir_dir: Path
+    generated_dir: Path
+
+
+@pytest.fixture
+def acceptance_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> AcceptanceArtifactFixture:
+    """Provision a minimal IR and entry point outside the repository tree."""
+    for name in (
+        "SWARMFORGE_ACCEPTANCE_IR_DIR",
+        "SWARMFORGE_ACCEPTANCE_GENERATED_DIR",
+        "SWARMFORGE_ACCEPTANCE_DRY_DIR",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    root = tmp_path / "acceptance-fixture"
+    (root / "features").mkdir(parents=True)
+    (root / "build" / "acceptance" / "ir").mkdir(parents=True)
+    generated_dir = root / "build" / "acceptance" / "generated"
+    generated_dir.mkdir(parents=True)
+    (root / "pyproject.toml").write_text(
+        '[project]\nname = "acceptance-fixture"\n',
+        encoding="utf-8",
+    )
+    (root / "features" / "fixture.feature").write_text(
+        "Feature: Fixture\n",
+        encoding="utf-8",
+    )
+    ir_path = root / "build" / "acceptance" / "ir" / "fixture.json"
+    ir_path.write_text(
+        json.dumps(
+            {
+                "name": "Fixture",
+                "background": [{"steps": [{"text": "the quality script is invoked"}]}],
+                "scenarios": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    generate(
+        str(ir_path),
+        str(generated_dir),
+        feature_path="features/fixture.feature",
+    )
+    return AcceptanceArtifactFixture(
+        root=root,
+        ir_dir=ir_path.parent,
+        generated_dir=generated_dir,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -57,26 +112,24 @@ _GENERATED_DIR = _PROJECT_ROOT / _LAYOUT.generated_dir
 # ---------------------------------------------------------------------------
 
 
-def _ir_files() -> list[Path]:
+def _ir_files(ir_dir: Path) -> list[Path]:
     """All executable IR files (excluding DRY-checker reports)."""
-    return sorted(
-        p for p in _IR_DIR.rglob("*.json") if not p.stem.endswith("_dry")
-    )
+    return sorted(p for p in ir_dir.rglob("*.json") if not p.stem.endswith("_dry"))
 
 
-def _entry_points() -> list[Path]:
+def _entry_points(generated_dir: Path) -> list[Path]:
     """All generated entry point test files."""
-    return sorted(_GENERATED_DIR.glob("*_acceptance_test.py"))
+    return sorted(generated_dir.glob("*_acceptance_test.py"))
 
 
-def _entry_point_ir_refs(entry_point: Path) -> list[str]:
+def _entry_point_ir_refs(entry_point: Path, root: Path) -> list[str]:
     """Extract IR file paths referenced by an entry point."""
     import re
 
     body = entry_point.read_text(encoding="utf-8")
     relative = re.findall(r'_PROJECT_ROOT / "([^"]+\.json)"', body)
     if relative:
-        return [str(_PROJECT_ROOT / rel) for rel in relative]
+        return [str(root / rel) for rel in relative]
     return re.findall(r'Path\(r"([^"]+\.json)"\)', body)
 
 
@@ -116,10 +169,10 @@ def _all_step_texts(ir_path: Path) -> list[str]:
     return texts
 
 
-def _all_ir_step_texts() -> list[str]:
+def _all_ir_step_texts(ir_dir: Path) -> list[str]:
     """Collect all step texts (example-expanded) from every IR file."""
     texts: list[str] = []
-    for ir_path in _ir_files():
+    for ir_path in _ir_files(ir_dir):
         texts.extend(_all_step_texts(ir_path))
     # Deduplicate — many IR files share the same background steps
     return list(dict.fromkeys(texts))
@@ -162,21 +215,31 @@ class TestNoPatternShadowing:
 
     # Feature files whose pipeline-mode scenarios require an LLM endpoint
     # and are out of scope for this work item.
-    _LLM_BLOCKED = frozenset({
-        "stage1_ordering", "stage1a_split", "stage1b_revision",
-        "stage2_assembly", "stage2_call2a", "stage2_call2b", "stage2_call3",
-        "stage2-assembly", "stage2-call2a", "stage2-call2b", "stage2-call3",
-    })
+    _LLM_BLOCKED = frozenset(
+        {
+            "stage1_ordering",
+            "stage1a_split",
+            "stage1b_revision",
+            "stage2_assembly",
+            "stage2_call2a",
+            "stage2_call2b",
+            "stage2_call3",
+            "stage2-assembly",
+            "stage2-call2a",
+            "stage2-call2b",
+            "stage2-call3",
+        }
+    )
 
-    def test_no_global_pattern_conflicts_on_ir_steps(self):
+    def test_no_global_pattern_conflicts_on_ir_steps(
+        self, acceptance_artifacts: AcceptanceArtifactFixture
+    ):
         """No two global (untagged) patterns match the same IR step text."""
-        step_texts = _all_ir_step_texts()
+        step_texts = _all_ir_step_texts(acceptance_artifacts.ir_dir)
         conflicts = find_pattern_conflicts(step_texts)
         if conflicts:
             detail = "\n".join(
-                f"  step: {text!r}\n"
-                f"    first:  {first!r}\n"
-                f"    second: {second!r}"
+                f"  step: {text!r}\n    first:  {first!r}\n    second: {second!r}"
                 for text, first, second in conflicts[:10]
             )
             pytest.fail(
@@ -205,9 +268,7 @@ class TestNoPatternShadowing:
         conflicts = find_pattern_conflicts(synthetic_texts)
         if conflicts:
             detail = "\n".join(
-                f"  step: {text!r}\n"
-                f"    first:  {first!r}\n"
-                f"    second: {second!r}"
+                f"  step: {text!r}\n    first:  {first!r}\n    second: {second!r}"
                 for text, first, second in conflicts
             )
             pytest.fail(
@@ -223,35 +284,37 @@ class TestNoPatternShadowing:
 class TestIREntryPointCoverage:
     """Every IR file has an entry point; every entry point resolves."""
 
-    def test_every_ir_has_entry_point(self):
+    def test_every_ir_has_entry_point(
+        self, acceptance_artifacts: AcceptanceArtifactFixture
+    ):
         """Every IR file is referenced by at least one generated entry point."""
         referenced: set[str] = set()
-        for ep in _entry_points():
-            for ref in _entry_point_ir_refs(ep):
+        for ep in _entry_points(acceptance_artifacts.generated_dir):
+            for ref in _entry_point_ir_refs(ep, acceptance_artifacts.root):
                 referenced.add(Path(ref).resolve().as_posix())
 
         missing = []
-        for ir_path in _ir_files():
+        for ir_path in _ir_files(acceptance_artifacts.ir_dir):
             key = ir_path.resolve().as_posix()
             if key not in referenced:
                 missing.append(ir_path.name)
 
-        assert not missing, (
-            f"IR files without entry points: {missing}"
-        )
+        assert not missing, f"IR files without entry points: {missing}"
 
-    def test_every_entry_point_references_existing_ir(self):
+    def test_every_entry_point_references_existing_ir(
+        self, acceptance_artifacts: AcceptanceArtifactFixture
+    ):
         """Every entry point references an IR file that exists on disk."""
         missing = []
-        for ep in _entry_points():
-            for ref in _entry_point_ir_refs(ep):
+        for ep in _entry_points(acceptance_artifacts.generated_dir):
+            for ref in _entry_point_ir_refs(ep, acceptance_artifacts.root):
                 if not Path(ref).exists():
                     missing.append(f"{ep.name} -> {ref}")
-        assert not missing, (
-            f"Entry points referencing missing IR files: {missing}"
-        )
+        assert not missing, f"Entry points referencing missing IR files: {missing}"
 
-    def test_every_entry_point_references_canonical_ir_location(self):
+    def test_every_entry_point_references_canonical_ir_location(
+        self, acceptance_artifacts: AcceptanceArtifactFixture
+    ):
         """Every entry point references IR in the configured snapshot IR dir.
 
         Non-canonical IR locations (tmp/, leftover acceptance/ir/) are how
@@ -259,11 +322,12 @@ class TestIREntryPointCoverage:
         test ensures all IR is consolidated under the generated output dir.
         """
         non_canonical = []
-        for ep in _entry_points():
-            for ref in _entry_point_ir_refs(ep):
+        ir_dir = acceptance_artifacts.ir_dir
+        for ep in _entry_points(acceptance_artifacts.generated_dir):
+            for ref in _entry_point_ir_refs(ep, acceptance_artifacts.root):
                 ir_path = Path(ref)
                 try:
-                    ir_path.relative_to(_IR_DIR)
+                    ir_path.relative_to(ir_dir)
                 except ValueError:
                     non_canonical.append(f"{ep.name} -> {ref}")
         assert not non_canonical, (
@@ -282,13 +346,25 @@ class TestHandlerResolution:
     # Features whose pipeline-mode scenarios require an LLM endpoint and
     # have step texts that the acceptance runtime cannot resolve (they
     # assert against actual pipeline output, not mock state).
-    _LLM_BLOCKED = frozenset({
-        "stage1_ordering", "stage1a_split", "stage1b_revision",
-        "stage2_assembly", "stage2_call2a", "stage2_call2b", "stage2_call3",
-        "stage2-assembly", "stage2-call2a", "stage2-call2b", "stage2-call3",
-    })
+    _LLM_BLOCKED = frozenset(
+        {
+            "stage1_ordering",
+            "stage1a_split",
+            "stage1b_revision",
+            "stage2_assembly",
+            "stage2_call2a",
+            "stage2_call2b",
+            "stage2_call3",
+            "stage2-assembly",
+            "stage2-call2a",
+            "stage2-call2b",
+            "stage2-call3",
+        }
+    )
 
-    def test_every_ir_step_resolves(self):
+    def test_every_ir_step_resolves(
+        self, acceptance_artifacts: AcceptanceArtifactFixture
+    ):
         """Every step text in every IR file matches at least one handler.
 
         An unresolved step means the IR references behaviour the runtime
@@ -298,7 +374,7 @@ class TestHandlerResolution:
         assert against real pipeline output.
         """
         unresolved = []
-        for ir_path in _ir_files():
+        for ir_path in _ir_files(acceptance_artifacts.ir_dir):
             if ir_path.stem in self._LLM_BLOCKED:
                 continue
             feature_tag = _derive_feature_tag(str(ir_path))

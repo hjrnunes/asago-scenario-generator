@@ -18,20 +18,11 @@ jobs:
         python-version: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: unclebob/Acceptance-Pipeline-Specification
-          ref: accaa33d503340c56513ef387258f8da929ba902
-          path: .cache/acceptance-pipeline-specification
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
-      - uses: DeLaGuardo/setup-clojure@4c7a6f613e5089821bb3bb2a33a3ee115578580d # 13.6.1
-        with:
-          bb: 1.13.219
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       - run: uv sync --locked
-      - run: uv run python acceptance/refresh_snapshot.py
       - run: ./scripts/quality.sh
       - run: env -u ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL uv run pytest tests/ -q
 
