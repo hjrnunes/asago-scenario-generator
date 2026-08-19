@@ -403,6 +403,10 @@ class CandidateTriple(BaseModel):
         default=None,
         description="Entry point data flow direction: 'input', 'output', or 'bidirectional'.",
     )
+    ingress_zone: str | None = Field(
+        default=None,
+        description="Explicit Schneider ingress zone used by canonical identity.",
+    )
     entry_point_id: str = Field(
         description="Canonical, deterministic entry point identity (ep:v1:<hash>).",
     )
@@ -429,6 +433,7 @@ class CandidateTriple(BaseModel):
             self.entry_point,
             self.direction or "bidirectional",
             self.controllability,
+            self.ingress_zone,
         )
         if self.entry_point_id != expected_ep_id:
             raise ValueError(
@@ -527,10 +532,60 @@ class FilterProtocolError(Exception):
     """
 
     def __init__(
-        self, message: str, call_log_entries: list[dict] | None = None
+        self,
+        message: str,
+        call_log_entries: list[dict] | None = None,
+        reconciliation: FilterReconciliationEvidence | None = None,
     ) -> None:
         super().__init__(message)
         self.call_log_entries: list[dict] = call_log_entries or []
+        self.reconciliation = reconciliation
+
+
+class FilterReconciliationEvidence(BaseModel):
+    """Bounded, seed-local evidence for an irreconcilable filter response."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    seed_id: str
+    expected_ids: tuple[str, ...]
+    received_ids: tuple[str, ...]
+    missing_ids: tuple[str, ...]
+    unknown_ids: tuple[str, ...]
+    attempts: int = Field(ge=1)
+    error: str
+
+
+class FilterSeedQuarantine(BaseModel):
+    """A candidate-filter seed removed without affecting independent seeds."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    seed_id: str
+    reconciliation: FilterReconciliationEvidence
+
+
+def _reconciliation_evidence(
+    seed_id: str,
+    expected_ids: set[str],
+    response: BatchFilterResponse | None,
+    error: str | None,
+) -> FilterReconciliationEvidence:
+    """Capture deterministic set arithmetic from the final filter attempt."""
+    received = (
+        {item.candidate_id for item in response.verdicts}
+        if response is not None
+        else set()
+    )
+    return FilterReconciliationEvidence(
+        seed_id=seed_id,
+        expected_ids=tuple(sorted(expected_ids)),
+        received_ids=tuple(sorted(received)),
+        missing_ids=tuple(sorted(expected_ids - received)),
+        unknown_ids=tuple(sorted(received - expected_ids)),
+        attempts=2,
+        error=error or "filter response could not be reconciled",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -579,6 +634,15 @@ class FilteredSeed(ScenarioSeed):
             "typed evidence alongside the rejected sibling rationales."
         ),
     )
+
+
+_FilterResult = tuple[list[FilteredSeed], list[dict], list[FilterVerdict]]
+_QuarantineFilterResult = tuple[
+    list[FilteredSeed],
+    list[dict],
+    list[FilterVerdict],
+    list[FilterSeedQuarantine],
+]
 
 
 # ---------------------------------------------------------------------------
@@ -721,6 +785,7 @@ def expand_candidates(
                             entry_point=entry_point.name,
                             controllability=entry_point.controllability,
                             direction=entry_point.direction,
+                            ingress_zone=entry_point.ingress_zone,
                             entry_point_id=ep_id,
                             candidate_id=compute_candidate_id(
                                 seed.seed_id,
@@ -1211,7 +1276,9 @@ def filter_candidates(
     client: LLMClient,
     use_case: str,
     profile: CapabilityProfile,
-) -> tuple[list[FilteredSeed], list[dict], list[FilterVerdict]]:
+    *,
+    quarantine_on_failure: bool = False,
+) -> _FilterResult | _QuarantineFilterResult:
     """Filter candidates via one LLM call per seed (with retry-on-malformed).
 
     Groups candidates by ``seed_id``, renders a batch prompt for each seed
@@ -1237,18 +1304,19 @@ def filter_candidates(
         profile: Capability profile of the system under assessment.
 
     Returns:
-        Tuple of (filtered_seeds, call_log_entries, rejected_verdicts).
+        Tuple of (filtered_seeds, call_log_entries, rejected_verdicts,
+        quarantined_seeds).
         ``rejected_verdicts`` carries typed :class:`FilterVerdict` records
         for every LLM-rejected candidate, preserving the rationale and
         filter candidate ID for stage-ledger evidence.
 
     Raises:
         FilterProtocolError: If a seed's response cannot be reconciled
-            after one retry.
+            after one retry and ``quarantine_on_failure`` is false.
     """
     if not candidates:
         logger.info("Filter: no candidates to filter")
-        return [], [], []
+        return ([], [], [], []) if quarantine_on_failure else ([], [], [])
 
     # Build seed lookup for constructing FilteredSeed with full fields
     seed_lookup: dict[str, ScenarioSeed] = {s.seed_id: s for s in seeds}
@@ -1268,7 +1336,13 @@ def filter_candidates(
     def _filter_one_seed(
         seed_id: str,
         seed_candidates: list[CandidateTriple],
-    ) -> tuple[list[FilteredSeed], int, int, list[dict], list[FilterVerdict]]:
+    ) -> tuple[
+        list[FilteredSeed],
+        int,
+        int,
+        list[dict],
+        list[FilterVerdict],
+    ]:
         """Filter candidates for a single seed.
 
         Returns (accepted, n_accepted, n_rejected, call_log_entries,
@@ -1428,6 +1502,12 @@ def filter_candidates(
                 f"Filter protocol failure for seed {seed_id} after retry: "
                 f"{reconciliation_error}",
                 call_log_entries=seed_call_logs,
+                reconciliation=_reconciliation_evidence(
+                    seed_id,
+                    submitted_ids,
+                    batch_response,
+                    reconciliation_error,
+                ),
             )
 
         # Reconciliation passed — resolve metadata from candidate lookup.
@@ -1463,7 +1543,13 @@ def filter_candidates(
                     seed_id,
                     len(accepted_verdicts),
                 )
-                return [], 0, len(seed_candidates), seed_call_logs, rejected_verdicts
+                return (
+                    [],
+                    0,
+                    len(seed_candidates),
+                    seed_call_logs,
+                    rejected_verdicts,
+                )
 
             seed_results: list[FilteredSeed] = []
             for verdict in accepted_verdicts:
@@ -1516,6 +1602,7 @@ def filter_candidates(
     call_log_entries: list[dict] = []
     all_rejected_verdicts: list[FilterVerdict] = []
     protocol_errors: list[FilterProtocolError] = []
+    quarantined_seeds: list[FilterSeedQuarantine] = []
 
     max_workers = min(8, len(groups))
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -1526,7 +1613,13 @@ def filter_candidates(
         for future in as_completed(futures):
             seed_id = futures[future]
             try:
-                seed_results, n_acc, n_rej, seed_logs, seed_rejected = future.result()
+                (
+                    seed_results,
+                    n_acc,
+                    n_rej,
+                    seed_logs,
+                    seed_rejected,
+                ) = future.result()
                 results.extend(seed_results)
                 total_accepted += n_acc
                 total_rejected += n_rej
@@ -1542,15 +1635,12 @@ def filter_candidates(
                 # with evidence rather than silently dropping a seed.
                 # Preserve any call logs the exception already carries.
                 logger.exception("Filter infrastructure failure for seed %s", seed_id)
-                if isinstance(exc, FilterProtocolError):
-                    protocol_errors.append(exc)
-                else:
-                    protocol_errors.append(
-                        FilterProtocolError(
-                            f"Filter infrastructure failure for seed {seed_id}: {exc}",
-                            call_log_entries=[],
-                        )
+                protocol_errors.append(
+                    FilterProtocolError(
+                        f"Filter infrastructure failure for seed {seed_id}: {exc}",
+                        call_log_entries=[],
                     )
+                )
 
     if protocol_errors:
         # Collect all call logs (including from successful seeds) so the
@@ -1558,8 +1648,18 @@ def filter_candidates(
         all_logs = list(call_log_entries)
         for err in protocol_errors:
             all_logs.extend(err.call_log_entries)
-        first_err = protocol_errors[0]
-        raise FilterProtocolError(str(first_err), call_log_entries=all_logs)
+        call_log_entries = all_logs
+        for error in protocol_errors:
+            if error.reconciliation is not None and quarantine_on_failure:
+                quarantined_seeds.append(
+                    FilterSeedQuarantine(
+                        seed_id=error.reconciliation.seed_id,
+                        reconciliation=error.reconciliation,
+                    )
+                )
+        if not quarantine_on_failure:
+            first_err = protocol_errors[0]
+            raise FilterProtocolError(str(first_err), call_log_entries=all_logs)
 
     logger.info(
         "Filter: %d/%d candidates survived (%d rejected)",
@@ -1568,6 +1668,8 @@ def filter_candidates(
         total_rejected,
     )
 
+    if quarantine_on_failure:
+        return results, call_log_entries, all_rejected_verdicts, quarantined_seeds
     return results, call_log_entries, all_rejected_verdicts
 
 

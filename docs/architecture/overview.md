@@ -17,6 +17,18 @@ extraction, and SSSOM mappings. It derives a capability profile and threat
 surface, expands and qualifies candidates, projects canonical chains, creates
 scenario artifacts, and runs deterministic admission and evaluation gates.
 
+The grouped taxonomy path keeps failures local and observable: malformed
+candidate-filter responses are retried within their seed and then quarantined
+with exact reconciliation evidence, while independent seeds continue. Before
+authoritative projection, the immutable profile/fact snapshot is checked for
+required architecture resources and qualification readings; missing evidence
+stops the run with profile or qualification guidance and never launches an
+enrichment workflow. Attack-tree transport may provide projected step IDs,
+but canonical realizations are derived from the projection before strict
+validation. The run manifest records status and admitted, quarantined, and
+failed counts; the CLI returns nonzero for degraded completion or no admitted
+scenarios.
+
 ## STPA workflow
 
 The `stpa-run` workflow performs loss and hazard analysis, constructs the

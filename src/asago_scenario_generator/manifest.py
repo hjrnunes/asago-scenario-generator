@@ -99,6 +99,7 @@ class ArtifactRole(str, Enum):
     COVERAGE_PLAN = "coverage_plan"
     FINALIZATION_INVENTORY = "finalization_inventory"
     QUARANTINE_BUNDLE = "quarantine_bundle"
+    CANDIDATE_FILTER_QUARANTINE = "candidate_filter_quarantine"
 
 
 class AttemptDisposition(str, Enum):
@@ -213,6 +214,12 @@ _ROLE_METADATA: dict[ArtifactRole, dict[str, Any]] = {
         "schema_versions": ["1"],
         "singleton_path": None,
     },
+    ArtifactRole.CANDIDATE_FILTER_QUARANTINE: {
+        "extension": ".json",
+        "media_type": "application/json",
+        "schema_versions": ["1"],
+        "singleton_path": "candidate-filter-quarantine.json",
+    },
 }
 
 # Roles that must appear at most once in the inventory.
@@ -230,6 +237,7 @@ SINGLETON_ROLES: frozenset[ArtifactRole] = frozenset(
         ArtifactRole.PLANNING_CHECKPOINT,
         ArtifactRole.COVERAGE_PLAN,
         ArtifactRole.FINALIZATION_INVENTORY,
+        ArtifactRole.CANDIDATE_FILTER_QUARANTINE,
     }
 )
 
@@ -902,6 +910,7 @@ class ManifestInventoryResolver:
                 ArtifactRole.COVERAGE_PLAN,
                 ArtifactRole.FINALIZATION_INVENTORY,
                 ArtifactRole.QUARANTINE_BUNDLE,
+                ArtifactRole.CANDIDATE_FILTER_QUARANTINE,
             }:
                 raise ManifestIntegrityError(
                     f"Manifest v2 does not support v3-only role {role.value}"

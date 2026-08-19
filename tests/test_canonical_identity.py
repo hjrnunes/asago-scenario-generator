@@ -679,6 +679,49 @@ class TestFilterRetryExhaustion:
         # Two call log entries (one per attempt).
         assert len(exc_info.value.call_log_entries) == 2
 
+    def test_second_failure_quarantines_only_the_seed_when_requested(self):
+        """Runner mode keeps an irreconcilable seed local and preserves evidence."""
+        candidates = self._make_two_candidates()
+        seeds = [_make_seed("AP-T7-01")]
+        profile = _make_profile()
+        unknown = "cand:v2:ffffffffffffffffffffffffffffffff"
+        malformed = BatchFilterResponse(
+            seed_id="AP-T7-01",
+            verdicts=[
+                FilterVerdict(
+                    candidate_id=unknown,
+                    verdict="accept",
+                    rationale="unknown",
+                )
+            ],
+        )
+        client = MagicMock()
+        client.complete.side_effect = [
+            _make_llm_result(malformed),
+            _make_llm_result(malformed),
+        ]
+
+        results, logs, rejected, quarantined = filter_candidates(
+            candidates,
+            seeds,
+            client,
+            "test",
+            profile,
+            quarantine_on_failure=True,
+        )
+
+        assert results == []
+        assert rejected == []
+        assert len(logs) == 2
+        assert len(quarantined) == 1
+        evidence = quarantined[0].reconciliation
+        assert evidence.seed_id == "AP-T7-01"
+        assert evidence.expected_ids == tuple(sorted(c.candidate_id for c in candidates))
+        assert evidence.received_ids == (unknown,)
+        assert evidence.missing_ids == evidence.expected_ids
+        assert evidence.unknown_ids == (unknown,)
+        assert evidence.attempts == 2
+
     def test_duplicate_input_candidate_ids_raise(self):
         """Duplicate candidate IDs in submitted input raise FilterProtocolError."""
         # Create two candidates with the same candidate_id by using same inputs.

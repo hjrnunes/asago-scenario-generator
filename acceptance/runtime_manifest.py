@@ -34,6 +34,7 @@ MODULES = (
     "clean_checkout_unit_independence",
     "acceptance_pipeline_preservation",
     "nullable_usage",
+    "taxonomy_risk",
 )
 
 

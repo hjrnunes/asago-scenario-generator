@@ -144,7 +144,70 @@ def _sanitize_yaml_colons(raw_yaml: str) -> str:
     return "\n".join(sanitized_lines)
 
 
-def _parse_attack_tree_yaml(raw: str, seed: ScenarioSeed) -> AttackTree:
+def _resolve_projected_step_ids(
+    result: dict[str, Any],
+    canonical_by_id: dict[str, dict[str, Any]],
+) -> None:
+    """Validate and replace model-supplied realizations from projected IDs.
+
+    Raises ValueError if any projected step ID is not in the canonical set.
+    """
+    projected_ids = result.get("projected_step_ids", ())
+    if not projected_ids:
+        return
+    missing = set(projected_ids) - set(canonical_by_id)
+    if missing:
+        raise ValueError(
+            "Attack tree references unknown projected step ID(s): "
+            + ", ".join(sorted(missing))
+        )
+    # Model-supplied realization semantics are transport-only. Replace
+    # them before strict validation, including omitted or duplicate
+    # records.
+    result["realizations"] = [canonical_by_id[sid] for sid in projected_ids]
+
+
+def normalize_attack_tree_transport(
+    data: Any,
+    projection_context: dict[str, Any] | None,
+) -> Any:
+    """Normalize relaxed transport fields before strict attack-tree parsing."""
+    if projection_context is None or not isinstance(data, dict):
+        return data
+    normalized = dict(data)
+    if isinstance(normalized.get("attack_tree"), dict):
+        normalized["attack_tree"] = normalize_attack_tree_transport(
+            normalized["attack_tree"], projection_context
+        )
+        return normalized
+
+    canonical_by_id = {
+        item["step_id"]: item["realization"]
+        for item in projection_context.get("selected_steps", [])
+        if isinstance(item, dict)
+        and isinstance(item.get("step_id"), str)
+        and isinstance(item.get("realization"), dict)
+    }
+
+    def normalize_node(node: Any) -> Any:
+        if not isinstance(node, dict):
+            return node
+        result = dict(node)
+        _resolve_projected_step_ids(result, canonical_by_id)
+        if isinstance(result.get("children"), list):
+            result["children"] = [normalize_node(c) for c in result["children"]]
+        return result
+
+    if isinstance(normalized.get("root"), dict):
+        normalized["root"] = normalize_node(normalized["root"])
+    return normalized
+
+
+def _parse_attack_tree_yaml(
+    raw: str,
+    seed: ScenarioSeed,
+    projection_context: dict[str, Any] | None = None,
+) -> AttackTree:
     """Parse YAML text into an AttackTree model.
 
     Strips markdown code fences if present, then validates through Pydantic.
@@ -176,8 +239,6 @@ def _parse_attack_tree_yaml(raw: str, seed: ScenarioSeed) -> AttackTree:
                 f"even after colon sanitization: {exc}"
             ) from exc
 
-    if isinstance(data, dict) and "root" not in data and "id" in data:
-        pass  # top-level is the tree itself
     if isinstance(data, dict) and "attack_tree" in data:
         data = data["attack_tree"]
 
@@ -188,6 +249,7 @@ def _parse_attack_tree_yaml(raw: str, seed: ScenarioSeed) -> AttackTree:
     # repair_attack_tree_dict is retained only for post-pruning repair in
     # validation.py (explicit parsimony boundary).
 
+    data = normalize_attack_tree_transport(data, projection_context)
     return AttackTree.model_validate(data)
 
 
@@ -891,7 +953,7 @@ def _call_attack_tree_once(
             user_prompt=user_prompt,
         ) from exc
     try:
-        tree = _parse_attack_tree_yaml(result.content, seed)
+        tree = _parse_attack_tree_yaml(result.content, seed, projection_context)
         tree = _validate_and_postprocess_tree(
             tree, profile, pinned_entry_point_id, skeleton, seed, projection_context
         )
@@ -969,7 +1031,7 @@ def _call_attack_tree(
     # First attempt: parse + validate.  Both YAML parse errors and
     # projection/validation failures trigger the single retry.
     try:
-        tree = _parse_attack_tree_yaml(result.content, seed)
+        tree = _parse_attack_tree_yaml(result.content, seed, projection_context)
         tree = _validate_and_postprocess_tree(
             tree, profile, pinned_entry_point_id, skeleton, seed, projection_context
         )
@@ -994,7 +1056,9 @@ def _call_attack_tree(
         )
 
         try:
-            tree = _parse_attack_tree_yaml(retry_result.content, seed)
+            tree = _parse_attack_tree_yaml(
+                retry_result.content, seed, projection_context
+            )
             tree = _validate_and_postprocess_tree(
                 tree,
                 profile,
