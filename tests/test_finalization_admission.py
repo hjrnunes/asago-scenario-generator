@@ -443,3 +443,34 @@ def test_stage_attempt_failure_evidence_is_persisted_on_every_failed_invocation(
     assert all(
         result.violations[0].code == "stage_attempt_failed" for result in failed_results
     )
+
+
+def test_actor_attempt_failure_is_not_retried_by_finalization() -> None:
+    """Call 0 owns its bounded length retry; the lifecycle must not repeat it."""
+    failure = StageAttemptFailure(
+        call_name=CallName.actor_profile,
+        exception=RuntimeError("actor endpoint failed"),
+        phase="invocation",
+        invoked=True,
+        system_prompt="system",
+        user_prompt="user",
+    )
+
+    def stage(candidate, invocation):
+        if invocation.stage is GeneratedStage.actor:
+            raise failure
+        return GeneratedStageResult(invocation.stage.value)
+
+    machine, _, persistence = _machine(
+        callbacks={stage_name: stage for stage_name in GENERATION_ORDER}
+    )
+    machine.run()
+
+    failed_results = [
+        result
+        for invocation, result in persistence.stage_results
+        if invocation.stage is GeneratedStage.actor
+    ]
+    assert len(failed_results) == 1
+    assert failed_results[0].evidence is failure
+    assert failed_results[0].violations[0].retryable is False

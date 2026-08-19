@@ -402,6 +402,11 @@ class TargetFinalizationMachine:
                         owner=stage,
                         code="stage_attempt_failed",
                         detail=f"{exc.exception_type}: {exc.detail}",
+                        # Actor completion failures already apply their one
+                        # allowed length retry inside Call 0. Re-entering the
+                        # actor stage would multiply that bounded retry and
+                        # would also retry unrelated invocation failures.
+                        retryable=stage is not GeneratedStage.actor,
                     ),
                 ),
             )

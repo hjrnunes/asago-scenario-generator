@@ -54,6 +54,7 @@ def test_actor_profile_call_uses_configured_completion_limit(
             use_case="test",
         )
 
+    assert client.complete.call_count == 1
     assert client.complete.call_args.kwargs["max_completion_tokens"] == completion_limit
 
 

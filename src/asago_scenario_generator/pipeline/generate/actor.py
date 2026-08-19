@@ -1067,6 +1067,23 @@ def build_call0_context(
     }
 
 
+def _complete_actor_profile(
+    client: LLMClient, system_prompt: str, user_prompt: str
+) -> LLMResult:
+    """Complete Call 0, retrying one truncated response with concise feedback."""
+    completion_request: dict[str, Any] = {
+        "system_prompt": system_prompt,
+        "user_prompt": user_prompt,
+        "response_format": Call0Response,
+        "max_completion_tokens": client.max_completion_tokens,
+    }
+    try:
+        return client.complete(**completion_request)
+    except LengthFinishReasonError:
+        completion_request["user_prompt"] += _ACTOR_LENGTH_RETRY_PROMPT
+        return client.complete(**completion_request)
+
+
 def _call_actor_profile(
     seed: ScenarioSeed,
     profile: CapabilityProfile,
@@ -1113,18 +1130,7 @@ def _call_actor_profile(
         tool_inventory=ctx["tool_inventory"],
     )
     user_prompt = render_prompt("call0_user.j2", **ctx)
-    completion_limit = client.max_completion_tokens
-    completion_request: dict[str, Any] = {
-        "system_prompt": system_prompt,
-        "user_prompt": user_prompt,
-        "response_format": Call0Response,
-        "max_completion_tokens": completion_limit,
-    }
-    try:
-        result = client.complete(**completion_request)
-    except LengthFinishReasonError:
-        completion_request["user_prompt"] += _ACTOR_LENGTH_RETRY_PROMPT
-        result = client.complete(**completion_request)
+    result = _complete_actor_profile(client, system_prompt, user_prompt)
 
     resp = result.content
     actor_type = _normalize_actor_type(resp.actor_type)
