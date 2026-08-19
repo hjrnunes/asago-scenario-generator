@@ -317,7 +317,8 @@ class AttackTreeNode(BaseModel):
             "a projected step may be realized by multiple leaves (split). "
             "Required (non-empty) on security-bearing leaves in scenarios "
             "with a projection block; the LLM receives the IDs as opaque "
-            "constraints.  Empty on external_precondition leaves."
+            "constraints.  Empty on internal/crossing external_precondition "
+            "leaves; outside-boundary external preconditions may map."
         ),
     )
     realizations: tuple[ProjectedStepRealization, ...] = Field(
@@ -325,9 +326,9 @@ class AttackTreeNode(BaseModel):
         description=(
             "Per-projected-step canonical realization records.  One record "
             "per projected_step_id.  Required (non-empty) when "
-            "projected_step_ids is non-empty; empty on external_precondition "
-            "leaves.  The validator compares each record against the embedded "
-            "canonical step at the tree boundary."
+            "projected_step_ids is non-empty; empty on internal/crossing "
+            "external_precondition leaves.  The validator compares each "
+            "record against the embedded canonical step at the tree boundary."
         ),
     )
 
@@ -373,8 +374,9 @@ class AttackTreeNode(BaseModel):
 
         # --- Realization coverage check (422o.4) ---
         # Enforced unconditionally on ALL LEAF nodes, not just when
-        # projected_step_ids is truthy.  This closes the external_precondition
-        # bypass where empty IDs + arbitrary realizations would pass.
+        # projected_step_ids is truthy.  Outside-boundary external
+        # preconditions may carry a mapped canonical realization; normalized
+        # internal/crossing external leaves carry neither IDs nor realizations.
         if self.gate == GateType.LEAF:
             real_ids_list = [r.projected_step_id for r in self.realizations]
             projected_ids = set(self.projected_step_ids)

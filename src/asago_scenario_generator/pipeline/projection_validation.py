@@ -1305,7 +1305,11 @@ _STEP_TO_LEAF_ACTION_COMPAT: dict[str, set[str]] = {
     "invoke": {"initial_ingress", "tool_invocation", "integration_interaction"},
     "transform": {"ai_system_action"},
     "persist": {"ai_system_action", "tool_invocation"},
-    "observe": {"ai_system_action", "integration_interaction"},
+    "observe": {
+        "ai_system_action",
+        "integration_interaction",
+        "external_precondition",
+    },
     "impact": {"impact"},
 }
 
@@ -1324,7 +1328,7 @@ _EXECUTOR_ROLE_TO_LEAF_COMPAT: dict[str, set[str]] = {
         "integration_interaction",
         "impact",
     },
-    "operator": {"external_precondition", "integration_interaction"},
+    "operator": {"external_precondition", "integration_interaction", "impact"},
 }
 
 # Mapping from canonical action_kind to valid Gherkin keyword for behavior.
@@ -1404,6 +1408,7 @@ def _check_step_semantic_compatibility(
 
     chain = block.projection.source_chain
     step_by_id = {s.step_id: s for s in chain.steps}
+    boundary_by_id = {s.step_id: s.boundary_position for s in chain.steps}
     _leaf_by_id: dict[str, Any] = {}
     if tree is not None:
         _leaf_by_id = {leaf.id: leaf for leaf in _iter_leaves(tree.root)}
@@ -1412,14 +1417,22 @@ def _check_step_semantic_compatibility(
     # --- Tree leaf semantic compatibility ---
     if tree is not None:
         for leaf in _iter_leaves(tree.root):
-            # External preconditions must have both empty IDs and empty
-            # realizations (422o.4 blocker #2 — defense in depth alongside
-            # the model validator).
+            # External preconditions may map only outside-boundary steps.
+            # Internal and crossing external leaves must remain unmapped.
             action = leaf.action
+            external_mapping_is_invalid = False
+            if action is not None and action.kind == "external_precondition":
+                external_mapping_is_invalid = any(
+                    boundary_by_id.get(sid) != "outside"
+                    for sid in leaf.projected_step_ids
+                )
             if (
                 action is not None
                 and action.kind == "external_precondition"
-                and (leaf.projected_step_ids or leaf.realizations)
+                and (
+                    external_mapping_is_invalid
+                    or (leaf.realizations and not leaf.projected_step_ids)
+                )
             ):
                 violations.append(
                     ProjectionTraceabilityViolation(
@@ -1429,8 +1442,8 @@ def _check_step_semantic_compatibility(
                             f"external precondition leaf '{leaf.id}' has "
                             f"{len(leaf.projected_step_ids)} projected_step_ids "
                             f"and {len(leaf.realizations)} realization records "
-                            f"— external preconditions must have empty "
-                            f"projected_step_ids and empty realizations"
+                            f"— only outside-boundary external preconditions "
+                            f"may be mapped"
                         ),
                         element_id=leaf.id,
                         projected_step_id="",
