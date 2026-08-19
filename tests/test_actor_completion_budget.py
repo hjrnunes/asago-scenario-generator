@@ -36,11 +36,14 @@ def _successful_actor_result() -> actor.LLMResult:
     )
 
 
-def test_actor_profile_call_uses_configured_completion_limit(monkeypatch) -> None:
+@pytest.mark.parametrize("completion_limit", [2048, 16384])
+def test_actor_profile_call_uses_configured_completion_limit(
+    monkeypatch, completion_limit
+) -> None:
     """The actor call forwards the configured operator limit unchanged."""
     _stub_actor_context(monkeypatch)
     client = MagicMock()
-    client.max_completion_tokens = 16384
+    client.max_completion_tokens = completion_limit
     client.complete.side_effect = RuntimeError("stop after invocation")
 
     with pytest.raises(RuntimeError, match="stop after invocation"):
@@ -51,7 +54,7 @@ def test_actor_profile_call_uses_configured_completion_limit(monkeypatch) -> Non
             use_case="test",
         )
 
-    assert client.complete.call_args.kwargs["max_completion_tokens"] == 16384
+    assert client.complete.call_args.kwargs["max_completion_tokens"] == completion_limit
 
 
 def test_actor_profile_call_does_not_supply_a_fallback_limit(monkeypatch) -> None:
