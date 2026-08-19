@@ -151,29 +151,29 @@ def _h_numeric_scenario_call(
     return True, ""
 
 
-def _parse_invalid_value(raw: str, field: str) -> Any:
+def _parse_invalid_value(raw: str) -> Any:
     value = raw.strip()
-    if field == "prompt_tokens":
-        return "many"
-    if field == "completion_tokens":
-        return {"count": 4}
-    if field == "duration_ms":
-        return [300]
     try:
         return json.loads(value)
     except json.JSONDecodeError:
         return value.strip('"')
 
 
-def _h_invalid_pipeline_metric(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
+def _invalid_metric_details(text: str, examples: dict) -> tuple[str, str]:
+    """Extract the invalid metric field and value from a Gherkin step."""
     match = re.search(r"whose (\w+) value is (.+)$", text)
     field = examples.get("metric_field") or (match.group(1) if match else "")
     raw_value = examples.get("invalid_value") or (match.group(2) if match else "")
+    return str(field), str(raw_value)
+
+
+def _h_invalid_pipeline_metric(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    field, raw_value = _invalid_metric_details(text, examples)
     if field not in {"prompt_tokens", "completion_tokens", "duration_ms"}:
         return False, f"Could not identify invalid metric field in: {text}"
-    value = _parse_invalid_value(str(raw_value), field)
+    value = _parse_invalid_value(raw_value)
     world.nullable_pipeline_calls = [
         _call(
             "invalid_pipeline_call",
@@ -306,10 +306,8 @@ def _h_numeric_scenario_metrics(
 
 def _h_invalid_diagnostic(world: World, text: str, examples: dict) -> tuple[bool, str]:
     error = world.nullable_report_error or ""
-    match = re.search(r"whose (\w+) value is (.+)$", text)
-    field = examples.get("metric_field") or (match.group(1) if match else "")
-    raw_value = examples.get("invalid_value") or (match.group(2) if match else "")
-    expected_value = _parse_invalid_value(str(raw_value), field)
+    field, raw_value = _invalid_metric_details(text, examples)
+    expected_value = _parse_invalid_value(raw_value)
     value_fragments = {str(expected_value), repr(expected_value)}
     identifies_value = any(fragment in error for fragment in value_fragments)
     return (

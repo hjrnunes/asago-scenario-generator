@@ -94,6 +94,8 @@ def test_nullable_pipeline_metric_preserves_other_totals(
         ("prompt_tokens", "many"),
         ("completion_tokens", {"count": 4}),
         ("duration_ms", [300]),
+        ("prompt_tokens", True),
+        ("duration_ms", float("nan")),
     ],
 )
 def test_invalid_pipeline_metric_has_a_call_specific_diagnostic(
@@ -110,6 +112,22 @@ def test_invalid_pipeline_metric_has_a_call_specific_diagnostic(
     assert repr(value) in message
     assert "failed_profile" in message
     assert "unsupported operand type" not in message
+
+
+def test_fractional_pipeline_metrics_are_preserved() -> None:
+    html = build_pipeline_calls_section(
+        [
+            _pipeline_call(
+                prompt_tokens=31.5,
+                completion_tokens=17.25,
+                duration_ms=410.5,
+            )
+        ]
+    )
+
+    assert "31.5 prompt tokens" in html
+    assert "17.25 completion tokens" in html
+    assert "410.5ms total" in html
 
 
 def test_synthetic_scenario_call_remains_visible_with_unavailable_metrics() -> None:

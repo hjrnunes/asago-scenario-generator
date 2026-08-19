@@ -306,6 +306,17 @@ _USAGE_METRIC_FIELDS: tuple[str, ...] = (
 )
 
 
+def _is_valid_usage_metric(value: Any) -> bool:
+    """Return whether a usage value is a finite real number."""
+    if isinstance(value, bool):
+        return False
+    if not isinstance(value, Real):
+        return False
+    if isinstance(value, float):
+        return math.isfinite(value)
+    return True
+
+
 def _usage_metrics(
     entry: dict[str, Any],
     *,
@@ -324,12 +335,7 @@ def _usage_metrics(
         if value is None:
             metrics[field] = None
             continue
-        if isinstance(value, bool) or not isinstance(value, Real):
-            raise ValueError(
-                f"Invalid usage metric {field}={value!r} for call "
-                f"{call_label!r}; expected a finite number or null."
-            )
-        if isinstance(value, float) and not math.isfinite(value):
+        if not _is_valid_usage_metric(value):
             raise ValueError(
                 f"Invalid usage metric {field}={value!r} for call "
                 f"{call_label!r}; expected a finite number or null."
@@ -373,6 +379,14 @@ def _usage_summary(metrics: dict[str, int | float | None]) -> str:
         f"{field}={'unavailable' if metrics[field] is None else metrics[field]}"
         for field in _USAGE_METRIC_FIELDS
     )
+
+
+def _usage_failure_suffix(entry: dict[str, Any]) -> str:
+    """Format the failure marker for a call-log entry when needed."""
+    if entry.get("success", True):
+        return ""
+    error = _esc(str(entry.get("error", "")))
+    return f" FAILED{f': {error}' if error else ''}"
 
 
 def _normalize_zone(zone: int | str) -> str:
@@ -6067,11 +6081,7 @@ def _build_scenario_card(
                     is_anomaly = True
 
             detail_cls = "expandable call-anomaly" if is_anomaly else "expandable"
-            success = entry.get("success", True)
-            failure_suffix = ""
-            if not success:
-                error = _esc(str(entry.get("error", "")))
-                failure_suffix = f" FAILED{f': {error}' if error else ''}"
+            failure_suffix = _usage_failure_suffix(entry)
             warning_html = _usage_warning_html(call_label, usage)
             call_items += f"""
             {warning_html}
@@ -6519,6 +6529,47 @@ def _build_priority_signals(signals: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _build_pipeline_call_item(
+    entry: dict[str, Any],
+    index: int,
+    display_names: dict[str, str],
+) -> tuple[dict[str, int | float | None], str]:
+    """Build one pipeline call item and return its normalized usage metrics."""
+    call_name = entry.get("call", "")
+    display_name = display_names.get(call_name, call_name)
+    call_label = _usage_call_label(entry, index)
+    usage = _usage_metrics(entry, call_label=call_label)
+    sys_prompt = _esc(entry.get("system_prompt", ""))
+    usr_prompt = _esc(entry.get("user_prompt", ""))
+    response_raw = entry.get("response", "")
+    if isinstance(response_raw, (dict, list)):
+        response_text = _esc(json.dumps(response_raw, indent=2, ensure_ascii=False))
+    else:
+        response_text = _esc(str(response_raw))
+
+    seed_label = ""
+    seed_id = entry.get("seed_id")
+    if seed_id:
+        seed_label = f" (seed: {_esc(seed_id)})"
+
+    failure_suffix = _usage_failure_suffix(entry)
+    warning_html = _usage_warning_html(call_label, usage)
+    item_html = f"""
+        {warning_html}
+        <details class="expandable">
+          <summary>Call {index}: {_esc(display_name)}{seed_label} ({_esc(_usage_summary(usage))}){failure_suffix}</summary>
+          <div style="padding:8px 0;">
+            <h4 style="margin:8px 0 4px;font-size:12px;color:var(--text-muted);">System Prompt</h4>
+            <pre class="call-log-pre">{sys_prompt}</pre>
+            <h4 style="margin:12px 0 4px;font-size:12px;color:var(--text-muted);">User Prompt</h4>
+            <pre class="call-log-pre">{usr_prompt}</pre>
+            <h4 style="margin:12px 0 4px;font-size:12px;color:var(--text-muted);">Response</h4>
+            <pre class="call-log-pre">{response_text}</pre>
+          </div>
+        </details>"""
+    return usage, item_html
+
+
 def build_pipeline_calls_section(call_logs: list[dict[str, Any]]) -> str:
     """Build an expandable section showing non-scenario LLM calls.
 
@@ -6535,46 +6586,16 @@ def build_pipeline_calls_section(call_logs: list[dict[str, Any]]) -> str:
         "candidate_filter": "Candidate Filter",
     }
 
-    call_items = ""
+    call_items: list[str] = []
     normalized_usage: list[dict[str, int | float | None]] = []
     for idx, entry in enumerate(call_logs):
-        call_name = entry.get("call", "")
-        display_name = _CALL_DISPLAY_NAMES.get(call_name, call_name)
-        call_label = _usage_call_label(entry, idx)
-        usage = _usage_metrics(entry, call_label=call_label)
+        usage, item_html = _build_pipeline_call_item(
+            entry,
+            idx,
+            _CALL_DISPLAY_NAMES,
+        )
         normalized_usage.append(usage)
-        sys_prompt = _esc(entry.get("system_prompt", ""))
-        usr_prompt = _esc(entry.get("user_prompt", ""))
-        response_raw = entry.get("response", "")
-        if isinstance(response_raw, (dict, list)):
-            response_text = _esc(json.dumps(response_raw, indent=2, ensure_ascii=False))
-        else:
-            response_text = _esc(str(response_raw))
-
-        seed_label = ""
-        seed_id = entry.get("seed_id")
-        if seed_id:
-            seed_label = f" (seed: {_esc(seed_id)})"
-
-        success = entry.get("success", True)
-        failure_suffix = ""
-        if not success:
-            error = _esc(str(entry.get("error", "")))
-            failure_suffix = f" FAILED{f': {error}' if error else ''}"
-        warning_html = _usage_warning_html(call_label, usage)
-        call_items += f"""
-        {warning_html}
-        <details class="expandable">
-          <summary>Call {idx}: {_esc(display_name)}{seed_label} ({_esc(_usage_summary(usage))}){failure_suffix}</summary>
-          <div style="padding:8px 0;">
-            <h4 style="margin:8px 0 4px;font-size:12px;color:var(--text-muted);">System Prompt</h4>
-            <pre class="call-log-pre">{sys_prompt}</pre>
-            <h4 style="margin:12px 0 4px;font-size:12px;color:var(--text-muted);">User Prompt</h4>
-            <pre class="call-log-pre">{usr_prompt}</pre>
-            <h4 style="margin:12px 0 4px;font-size:12px;color:var(--text-muted);">Response</h4>
-            <pre class="call-log-pre">{response_text}</pre>
-          </div>
-        </details>"""
+        call_items.append(item_html)
 
     # Compute aggregate stats.
     total_prompt = sum((usage["prompt_tokens"] or 0) for usage in normalized_usage)
@@ -6582,6 +6603,7 @@ def build_pipeline_calls_section(call_logs: list[dict[str, Any]]) -> str:
         (usage["completion_tokens"] or 0) for usage in normalized_usage
     )
     total_duration = sum((usage["duration_ms"] or 0) for usage in normalized_usage)
+    call_items_html = "".join(call_items)
 
     return f"""
     <section id="sec-pipeline-calls" class="section">
@@ -6593,7 +6615,7 @@ def build_pipeline_calls_section(call_logs: list[dict[str, Any]]) -> str:
         {total_completion:,} completion tokens &middot;
         {total_duration:,}ms total
       </p>
-      {call_items}
+      {call_items_html}
     </section>
     """
 
