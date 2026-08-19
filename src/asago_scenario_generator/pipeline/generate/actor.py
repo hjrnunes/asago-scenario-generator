@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from openai import LengthFinishReasonError
 from pydantic import BaseModel
 
 from asago_scenario_generator.data.atlas import TECHNIQUE_PROPERTIES
@@ -45,17 +46,10 @@ from asago_scenario_generator.prompts import render_prompt
 
 logger = logging.getLogger(__name__)
 
-_ACTOR_MAX_COMPLETION_TOKENS = 4096
-
-
-def _actor_completion_limit(client: LLMClient) -> int:
-    """Bound actor output without overriding a tighter operator limit."""
-    configured = client.max_completion_tokens
-    return (
-        min(configured, _ACTOR_MAX_COMPLETION_TOKENS)
-        if configured
-        else _ACTOR_MAX_COMPLETION_TOKENS
-    )
+_ACTOR_LENGTH_RETRY_PROMPT = (
+    "\n\nThe prior response was truncated. Return only a concise "
+    "schema-matching response with no explanation."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1113,16 +1107,27 @@ def _call_actor_profile(
         projection_context=projection_context,
     )
 
-    result = client.complete(
-        system_prompt=render_prompt(
-            "call0_system.j2",
-            zones_active=profile.zones_active,
-            tool_inventory=ctx["tool_inventory"],
-        ),
-        user_prompt=render_prompt("call0_user.j2", **ctx),
-        response_format=Call0Response,
-        max_completion_tokens=_actor_completion_limit(client),
+    system_prompt = render_prompt(
+        "call0_system.j2",
+        zones_active=profile.zones_active,
+        tool_inventory=ctx["tool_inventory"],
     )
+    user_prompt = render_prompt("call0_user.j2", **ctx)
+    completion_limit = client.max_completion_tokens
+    try:
+        result = client.complete(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_format=Call0Response,
+            max_completion_tokens=completion_limit,
+        )
+    except LengthFinishReasonError:
+        result = client.complete(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt + _ACTOR_LENGTH_RETRY_PROMPT,
+            response_format=Call0Response,
+            max_completion_tokens=completion_limit,
+        )
 
     resp = result.content
     actor_type = _normalize_actor_type(resp.actor_type)

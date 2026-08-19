@@ -611,6 +611,149 @@ def _h_exit_code(world: World, text: str, examples: dict) -> tuple[bool, str]:
     ), f"exit code was {actual}, expected {match.group(1)}"
 
 
+def _actor_retry_state(world: World) -> dict[str, Any]:
+    """Return state for deterministic actor completion-retry scenarios."""
+    state = getattr(world, "actor_retry_state", None)
+    if state is None:
+        state = {"configured_limit": None, "outcomes": [], "calls": [], "error": None}
+        world.actor_retry_state = state
+    return state
+
+
+def _h_actor_configured_limit(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r"actor profile generation is configured with max_completion_tokens (\d+)",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse actor completion limit: {text}"
+    _actor_retry_state(world)["configured_limit"] = int(match.group(1))
+    return True, ""
+
+
+def _h_actor_first_length_failure(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    _actor_retry_state(world)["outcomes"] = ["length"]
+    return True, ""
+
+
+def _h_actor_second_success(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    _actor_retry_state(world)["outcomes"].append("success")
+    return True, ""
+
+
+def _h_actor_second_length_failure(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    _actor_retry_state(world)["outcomes"].append("length")
+    return True, ""
+
+
+def _h_actor_generate(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Execute actor generation against a deterministic two-outcome client."""
+    from types import SimpleNamespace
+
+    from asago_scenario_generator.pipeline.generate import actor
+
+    state = _actor_retry_state(world)
+    state["calls"] = []
+    outcomes = list(state["outcomes"])
+    length_error = type("LengthFinishReasonError", (Exception,), {})
+
+    class _Client:
+        max_completion_tokens = state["configured_limit"]
+
+        def complete(self, **kwargs):
+            state["calls"].append(kwargs)
+            outcome = outcomes.pop(0)
+            if outcome == "length":
+                raise length_error("completion truncated")
+            return actor.LLMResult(
+                content=actor.Call0Response(
+                    actor_type="adversarial-user",
+                    capability_level="intermediate",
+                    beliefs=["The system accepts user input."],
+                    desires=["Influence the system."],
+                    intentions=["Submit crafted input."],
+                    resources=["A client application."],
+                ),
+                prompt_tokens=1,
+                completion_tokens=1,
+                duration_ms=1,
+            )
+
+    original_error = actor.LengthFinishReasonError
+    original_context = actor.build_call0_context
+    original_render_prompt = actor.render_prompt
+    actor.LengthFinishReasonError = length_error
+    actor.build_call0_context = lambda **_kwargs: {
+        "tool_inventory": [],
+        "minimum_capability_level": None,
+        "diversity_limitation": None,
+    }
+    actor.render_prompt = lambda *_args, **_kwargs: "actor prompt"
+    try:
+        actor._call_actor_profile(
+            seed=SimpleNamespace(min_complexity=None, seed_id="AP-ACTOR-01"),
+            profile=SimpleNamespace(zones_active=[]),
+            client=_Client(),
+            use_case="deterministic actor retry acceptance",
+        )
+    except Exception as exc:
+        state["error"] = exc
+    finally:
+        actor.LengthFinishReasonError = original_error
+        actor.build_call0_context = original_context
+        actor.render_prompt = original_render_prompt
+    return True, ""
+
+
+def _h_actor_attempts(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r"actor profile completion attempts exactly (\d+) times", text)
+    if match is None:
+        return False, f"Could not parse actor attempt assertion: {text}"
+    actual = len(_actor_retry_state(world)["calls"])
+    return (
+        actual == int(match.group(1)),
+        f"expected {match.group(1)} attempts, got {actual}",
+    )
+
+
+def _h_actor_feedback(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    calls = _actor_retry_state(world)["calls"]
+    if len(calls) < 2:
+        return False, "actor retry call was not recorded"
+    retry_prompt = calls[1]["user_prompt"].lower()
+    return (
+        "prior response was truncated" in retry_prompt
+        and "concise schema-matching response" in retry_prompt,
+        "retry prompt did not contain corrective concise feedback",
+    )
+
+
+def _h_actor_limit(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    calls = _actor_retry_state(world)["calls"]
+    expected = _actor_retry_state(world)["configured_limit"]
+    actual = [call["max_completion_tokens"] for call in calls]
+    return (
+        actual == [expected] * len(calls),
+        f"token limits were {actual}, expected {expected}",
+    )
+
+
+def _h_actor_error(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    error = _actor_retry_state(world)["error"]
+    return (
+        type(error).__name__ == "LengthFinishReasonError",
+        f"expected LengthFinishReasonError, got {error!r}",
+    )
+
+
 def register(api: object) -> None:
     """Register taxonomy acceptance handlers with regex-based extraction."""
     api.set_feature(None)
@@ -762,6 +905,36 @@ def register(api: object) -> None:
         (r"the generate command prints its final summary", _h_print_summary),
         (r'summary reports status "([^"]+)" and counts admitted', _h_summary),
         (r"the process exits with code", _h_exit_code),
+        (
+            r"actor profile generation is configured with max_completion_tokens \d+",
+            _h_actor_configured_limit,
+        ),
+        (
+            r"the initial actor profile completion raises LengthFinishReasonError",
+            _h_actor_first_length_failure,
+        ),
+        (
+            r"the single actor retry returns a valid structured profile",
+            _h_actor_second_success,
+        ),
+        (
+            r"the single actor retry raises LengthFinishReasonError",
+            _h_actor_second_length_failure,
+        ),
+        (r"the actor profile retry sequence runs", _h_actor_generate),
+        (r"actor profile completion attempts exactly \d+ times", _h_actor_attempts),
+        (
+            r"the actor retry contains concise corrective feedback",
+            _h_actor_feedback,
+        ),
+        (
+            r"every actor profile completion uses the configured token limit",
+            _h_actor_limit,
+        ),
+        (
+            r"actor generation reports LengthFinishReasonError",
+            _h_actor_error,
+        ),
     )
     for pattern, handler in registrations:
         api.register(pattern, handler)
