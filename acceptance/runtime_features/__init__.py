@@ -19,4 +19,5 @@ __all__ = (
     "acceptance_hygiene",
     "acceptance_live_opt_in",
     "acceptance_framework_refactor",
+    "taxonomy_risk",
 )

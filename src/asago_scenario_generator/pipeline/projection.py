@@ -1,9 +1,10 @@
 """Deterministic authoritative-chain projection and candidate-v2 expansion.
 
-This module is an explicit migration seam.  It does not consume
-``ScenarioSeed`` or the legacy attack-pattern catalogue shape, and it is not
-wired into the current generation runner.  Future generation stages consume
-only :class:`ProjectedCandidate` instances from this boundary.
+This module is an explicit migration seam. It does not consume
+``ScenarioSeed`` or the legacy attack-pattern catalogue shape. The generation
+runner uses its readiness gate before crossing into authoritative projection,
+and generation stages consume only :class:`ProjectedCandidate` instances from
+this boundary.
 """
 
 from __future__ import annotations
@@ -560,6 +561,125 @@ def _condition_facts(condition: Condition) -> tuple[AuthoritativeFactReference, 
         {_fact_key(item): item for item in items}[key]
         for key in sorted({_fact_key(item): item for item in items})
     )
+
+
+class ProjectionReadinessReport(ProjectionModel):
+    """Preflight result for architecture and qualification evidence."""
+
+    ready: bool
+    required_resource_categories: tuple[str, ...] = ()
+    missing_resource_categories: tuple[str, ...] = ()
+    required_facts: tuple[str, ...] = ()
+    missing_facts: tuple[str, ...] = ()
+    pattern_ids: tuple[str, ...] = ()
+
+
+class ProjectionReadinessError(ValueError):
+    """Raised before projection when reviewed architecture evidence is absent."""
+
+    def __init__(self, report: ProjectionReadinessReport) -> None:
+        self.report = report
+        details: list[str] = []
+        if report.missing_resource_categories:
+            details.append(
+                "missing resource categories "
+                + ", ".join(report.missing_resource_categories)
+                + "; supply a reviewed architecture with '--profile'"
+            )
+        if report.missing_facts:
+            details.append(
+                "missing qualification facts "
+                + ", ".join(report.missing_facts)
+                + "; supply authoritative readings with '--qualification-facts'"
+            )
+        super().__init__(
+            "Projection readiness failed before projection: "
+            + "; ".join(details)
+            + ". No architecture enrichment workflow was launched."
+        )
+
+
+def check_projection_readiness(
+    patterns: Sequence[AttackPattern],
+    snapshot: CapabilityFactSnapshot,
+) -> ProjectionReadinessReport:
+    """Check selected patterns against the immutable profile/fact snapshot."""
+    resource_categories_by_kind = {
+        "entry_point": "entry_points",
+        "tool": "tool_inventory",
+        "integration": "external_integrations",
+        "trust_boundary": "trust_boundaries",
+        "output_surface": "output_surfaces",
+        "agent_internal": "agent_internal",
+    }
+    required_kinds = {
+        slot.kind
+        for pattern in patterns
+        for slot in pattern.canonical_chain.resource_slots
+    }
+    required_categories = tuple(
+        sorted(resource_categories_by_kind[kind] for kind in required_kinds)
+    )
+    profile = snapshot.profile
+    available_by_category = {
+        "entry_points": bool(profile.entry_points),
+        "tool_inventory": bool(profile.tool_inventory),
+        "external_integrations": bool(profile.external_integrations),
+        "trust_boundaries": bool(profile.trust_boundaries),
+        "output_surfaces": any(
+            item.direction in ("output", "bidirectional")
+            for item in profile.entry_points
+        ),
+        "agent_internal": "reasoning" in profile.zones_active,
+    }
+    missing_categories = tuple(
+        category
+        for category in required_categories
+        if not available_by_category[category]
+    )
+
+    fact_refs = {
+        _fact_key(reference): reference
+        for pattern in patterns
+        for step in pattern.canonical_chain.steps
+        for condition in (
+            ([step.condition] if step.condition is not None else [])
+            + [precondition.condition for precondition in step.preconditions]
+        )
+        for reference in _condition_facts(condition)
+    }
+    required_facts = tuple(
+        sorted(reference.fact_id for reference in fact_refs.values())
+    )
+    missing_facts = tuple(
+        sorted(
+            reference.fact_id
+            for reference in fact_refs.values()
+            if (
+                (evidence := snapshot.fact(reference)) is None
+                or evidence.status == "unknown"
+            )
+        )
+    )
+    return ProjectionReadinessReport(
+        ready=not missing_categories and not missing_facts,
+        required_resource_categories=required_categories,
+        missing_resource_categories=missing_categories,
+        required_facts=required_facts,
+        missing_facts=missing_facts,
+        pattern_ids=tuple(sorted(pattern.id for pattern in patterns)),
+    )
+
+
+def ensure_projection_readiness(
+    patterns: Sequence[AttackPattern],
+    snapshot: CapabilityFactSnapshot,
+) -> ProjectionReadinessReport:
+    """Raise actionable guidance instead of converting missing evidence to zero candidates."""
+    report = check_projection_readiness(patterns, snapshot)
+    if not report.ready:
+        raise ProjectionReadinessError(report)
+    return report
 
 
 def _evaluate_projection_conditions(

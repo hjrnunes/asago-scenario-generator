@@ -98,6 +98,24 @@ def write_pipeline_call_log(entries: list[dict], run_dir: Path) -> None:
             fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
+def write_filter_quarantine_evidence(quarantines: list, run_dir: Path) -> Path | None:
+    """Persist seed-local candidate-filter quarantine evidence."""
+    if not quarantines:
+        return None
+    path = run_dir / "candidate-filter-quarantine.json"
+    payload = {
+        "schema_version": "1",
+        "seeds": [
+            item.model_dump(mode="json")
+            for item in sorted(quarantines, key=lambda item: item.seed_id)
+        ],
+    }
+    path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return path
+
+
 def get_scenarios_dir(run_dir: Path) -> Path:
     """Return the path to the ``scenarios/`` subdirectory (does not create it).
 

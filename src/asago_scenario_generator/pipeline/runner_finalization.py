@@ -159,6 +159,11 @@ def build_v3_inventory(
     add(ArtifactRole.COVERAGE_PLAN, "coverage-plan.json")
     add(ArtifactRole.FINALIZATION_INVENTORY, "finalization-inventory.json")
     add(ArtifactRole.PIPELINE_CALL_LOG, "calls.jsonl", required=False)
+    add(
+        ArtifactRole.CANDIDATE_FILTER_QUARANTINE,
+        "candidate-filter-quarantine.json",
+        required=False,
+    )
     if include_eval:
         add(ArtifactRole.EVAL_SCORECARD, "eval-scorecard.yaml")
     if include_report:

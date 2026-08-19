@@ -16,6 +16,14 @@ app = typer.Typer(
 _VERSION = "0.1.0"
 
 
+def _default_generate_exit_code(
+    status: str,
+    admitted: int,
+) -> int:
+    """Return the default nonzero outcome for degraded or empty runs."""
+    return 1 if status == "completed_with_errors" or admitted == 0 else 0
+
+
 def _resolve_use_case(value: str) -> str:
     """If value starts with @, read from the referenced file; otherwise return as-is."""
     if value.startswith("@"):
@@ -133,6 +141,7 @@ def generate(
     if qualification_facts is not None:
         _validate_file(qualification_facts, "qualification facts file")
 
+    outcome_exit_code = 1
     try:
         from asago_scenario_generator.pipeline.runner import run_pipeline
 
@@ -156,7 +165,17 @@ def generate(
             structured=structured,
         )
 
-        typer.echo("\nPipeline complete.")
+        status = result.manifest_status.value
+        outcome_exit_code = _default_generate_exit_code(status, result.admitted_count)
+        typer.echo(
+            "\nPipeline complete."
+            if outcome_exit_code == 0
+            else "\nPipeline completed with errors."
+        )
+        typer.echo(f"  Manifest status:      {status}")
+        typer.echo(f"  Candidates admitted:  {result.admitted_count}")
+        typer.echo(f"  Candidates quarantined: {result.quarantined_count}")
+        typer.echo(f"  Candidates failed:     {result.failed_count}")
         typer.echo(
             f"  Scenarios generated: {len(result.scenarios)}/{len(result.seeds)}"
         )
@@ -169,6 +188,8 @@ def generate(
             msg += f"\n  Caused by: {exc.__cause__}"
         typer.echo(msg, err=True)
         raise typer.Exit(code=1)
+    if outcome_exit_code:
+        raise typer.Exit(code=outcome_exit_code)
 
 
 @app.command()

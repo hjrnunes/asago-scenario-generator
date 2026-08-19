@@ -11,9 +11,13 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+import yaml
 
 from asago_scenario_generator.llm.client import LLMResult
-from asago_scenario_generator.models.capability_profile import CapabilityProfile, EntryPoint
+from asago_scenario_generator.models.capability_profile import (
+    CapabilityProfile,
+    EntryPoint,
+)
 from asago_scenario_generator.models.scenario import (
     NarrativeLayer,
     NarrativeStep,
@@ -23,6 +27,7 @@ from asago_scenario_generator.pipeline.generate import (
     _call_attack_tree,
     _call_attack_tree_once,
 )
+from asago_scenario_generator.pipeline.generate.tree import _parse_attack_tree_yaml
 from tests.helpers.realization_helper import make_realizations
 
 # ---------------------------------------------------------------------------
@@ -110,9 +115,100 @@ def _make_llm_result(content: str) -> LLMResult:
     )
 
 
+def _projection_context(*step_ids: str) -> dict:
+    return {
+        "selected_step_ids": list(step_ids),
+        "selected_steps": [
+            {
+                "step_id": step_id,
+                "realization": {
+                    "projected_step_id": step_id,
+                    "action_kind": "prepare",
+                    "executor_role": "attacker",
+                    "boundary_position": "crossing",
+                    "resource_ref_ids": [],
+                    "consumed_ref_ids": [],
+                    "produced_ref_ids": [f"effect.{index}"],
+                    "produced_effect_ids": [f"effect.{index}"],
+                    "outcome_link_pc_ids": [],
+                    "postcondition_ids": [],
+                },
+            }
+            for index, step_id in enumerate(step_ids, start=1)
+        ],
+    }
+
+
+def _transport_tree(step_ids: list[str], realizations: list[dict] | None = None) -> str:
+    payload = {
+        "id": "tree-AP-T2-05",
+        "seed_id": "AP-T2-05",
+        "goal": "Compromise the target system",
+        "root": {
+            "id": "n1",
+            "label": "Root attack node",
+            "gate": "LEAF",
+            "zone": "input",
+            "action": {
+                "kind": "initial_ingress",
+                "entry_point_id": "ep:v1:52306ddb893a33ef2dc0f20c01e815f1",
+            },
+            "projected_step_ids": step_ids,
+        },
+    }
+    if realizations is not None:
+        payload["root"]["realizations"] = realizations
+    return yaml.safe_dump(payload, sort_keys=False)
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
+
+class TestAttackTreeTransportNormalization:
+    def test_omitted_realizations_are_derived_before_strict_validation(self) -> None:
+        seed = _make_seed()
+        context = _projection_context("step.1", "step.2")
+
+        tree = _parse_attack_tree_yaml(
+            _transport_tree(["step.1", "step.2"]),
+            seed,
+            context,
+        )
+
+        assert [item.projected_step_id for item in tree.root.realizations] == [
+            "step.1",
+            "step.2",
+        ]
+        assert tree.root.realizations[0].action_kind == "prepare"
+
+    def test_model_realization_semantics_cannot_override_projection(self) -> None:
+        seed = _make_seed()
+        context = _projection_context("step.1")
+        conflicting = [
+            {
+                **context["selected_steps"][0]["realization"],
+                "action_kind": "impact",
+                "projected_step_id": "step.1",
+            }
+        ]
+
+        tree = _parse_attack_tree_yaml(
+            _transport_tree(["step.1"], conflicting),
+            seed,
+            context,
+        )
+
+        assert tree.root.realizations[0].action_kind == "prepare"
+
+    def test_unknown_projected_step_is_rejected_before_publication(self) -> None:
+        with pytest.raises(ValueError, match="step.unknown"):
+            _parse_attack_tree_yaml(
+                _transport_tree(["step.unknown"]),
+                _make_seed(),
+                _projection_context("step.1"),
+            )
 
 
 class TestAttackTreeRetry:
@@ -384,7 +480,9 @@ class TestSingleChildGateRejection:
 
     def test_single_child_gate_not_mutated(self) -> None:
         """The raw dict is not mutated by repair before validation."""
-        from asago_scenario_generator.pipeline.generate.tree import _parse_attack_tree_yaml
+        from asago_scenario_generator.pipeline.generate.tree import (
+            _parse_attack_tree_yaml,
+        )
 
         # _parse_attack_tree_yaml should raise on single-child gate
         with pytest.raises(Exception, match="single.child|children"):
@@ -412,7 +510,9 @@ class TestCall2ProjectionRetry:
 
     @staticmethod
     def _make_projection_context() -> dict:
-        from asago_scenario_generator.pipeline.generate.assembly import _build_projection_context
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _build_projection_context,
+        )
         from tests.helpers.projection_factory import get_projected_candidate
 
         candidate = get_projected_candidate()
@@ -638,7 +738,9 @@ class TestCall2ExternalPreconditionRetry:
 
     @staticmethod
     def _make_projection_context() -> dict:
-        from asago_scenario_generator.pipeline.generate.assembly import _build_projection_context
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _build_projection_context,
+        )
         from tests.helpers.projection_factory import get_projected_candidate
 
         candidate = get_projected_candidate()

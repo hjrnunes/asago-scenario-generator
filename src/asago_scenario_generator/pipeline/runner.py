@@ -54,11 +54,15 @@ from asago_scenario_generator.models.capability_profile import (
     ZONE_NAMES,
     CapabilityProfile,
 )
-from asago_scenario_generator.models.attack_pattern import EvaluatedFactEvidence
+from asago_scenario_generator.models.attack_pattern import (
+    EvaluatedFactEvidence,
+    validate_attack_pattern,
+)
 from asago_scenario_generator.models.scenario import ScenarioEnvelope
 from asago_scenario_generator.pipeline.candidates import (
     FilteredSeed,
     FilterProtocolError,
+    FilterSeedQuarantine,
     RemovalDecision,
     StageRecord,
     apply_rule_based_filter,
@@ -88,6 +92,7 @@ from asago_scenario_generator.pipeline.coverage_planning import (
 )
 from asago_scenario_generator.pipeline.generate import generate_run_id
 from asago_scenario_generator.pipeline.io import (
+    write_filter_quarantine_evidence,
     write_capability_profile,
     write_eval_scorecard,
     write_pipeline_call_log,
@@ -97,9 +102,11 @@ from asago_scenario_generator.pipeline.io import (
 from asago_scenario_generator.pipeline.profile import infer_capability_profile
 from asago_scenario_generator.pipeline.projection import (
     ProjectedCandidate,
+    ProjectionReadinessError,
     ProjectionBudget,
     canonical_json_bytes,
     capture_capability_snapshot,
+    ensure_projection_readiness,
     project_authoritative_candidates,
 )
 from asago_scenario_generator.pipeline.seeds import ScenarioSeed, expand_seeds
@@ -135,6 +142,10 @@ class PipelineResult(BaseModel):
     generation_notes: list[str]
     run_dir: Path | None = None
     run_id: str | None = None
+    manifest_status: RunStatus = RunStatus.COMPLETED
+    admitted_count: int = 0
+    quarantined_count: int = 0
+    failed_count: int = 0
 
 
 class QualificationFactsV1(BaseModel):
@@ -213,6 +224,7 @@ def _complete_v3_run(
     filtered_seeds: list[FilteredSeed] | None,
     governance_count: int,
     generation_notes: list[str],
+    filter_quarantines: list[FilterSeedQuarantine] | None = None,
 ) -> PipelineResult:
     """Run the single shared v3 coverage, eval, report, and manifest tail."""
     from asago_scenario_generator.pipeline.persistence import (
@@ -318,7 +330,9 @@ def _complete_v3_run(
     else:
         logger.info("[Eval] Skipped (--no-eval) — non-authoritative.")
 
-    had_quarantine = bool(final_inventory_doc.quarantine_inventory)
+    had_quarantine = bool(
+        final_inventory_doc.quarantine_inventory or filter_quarantines
+    )
     terminal_processing_succeeded = all(
         target.target_state.value in {"admitted", "exhausted"}
         for target in finalization.coverage_plan.targets
@@ -461,6 +475,13 @@ def _complete_v3_run(
     else:
         ManifestInventoryResolver(run_dir, final_manifest, check_orphans=True)
     finalize_manifest(run_dir, final_manifest)
+    filter_quarantine_count = len(filter_quarantines or [])
+    admitted_count = len(final_inventory_doc.admitted_inventory)
+    finalization_quarantine_count = len(final_inventory_doc.quarantine_inventory)
+    failed_count = sum(
+        decision.status.value == "generation_or_finalization_failed"
+        for decision in final_inventory_doc.admission_decisions
+    )
     return PipelineResult(
         capability_profile=profile,
         threat_surface=threat_surface,
@@ -471,6 +492,10 @@ def _complete_v3_run(
         generation_notes=generation_notes,
         run_dir=run_dir,
         run_id=run_id,
+        manifest_status=final_status,
+        admitted_count=admitted_count,
+        quarantined_count=finalization_quarantine_count + filter_quarantine_count,
+        failed_count=failed_count,
     )
 
 
@@ -922,6 +947,10 @@ def _build_failed_evidence_inventory(
     _add_if_exists(ArtifactRole.PIPELINE_LOG, "pipeline.log")
     _add_if_exists(ArtifactRole.COVERAGE_PLAN, "coverage-plan.json")
     _add_if_exists(ArtifactRole.FINALIZATION_INVENTORY, "finalization-inventory.json")
+    _add_if_exists(
+        ArtifactRole.CANDIDATE_FILTER_QUARANTINE,
+        "candidate-filter-quarantine.json",
+    )
 
     # V3 terminal files are discovered only through the durable inventory,
     # never by globbing scenario/quarantine directories.
@@ -1314,15 +1343,43 @@ def run_pipeline(
 
         # Phase 2: LLM filter on survivors only.
         try:
-            filtered_seeds, filter_call_logs, filter_rejected_verdicts = (
-                filter_candidates(rule_passed, seeds, client, use_case, profile)
+            filter_result = filter_candidates(
+                rule_passed,
+                seeds,
+                client,
+                use_case,
+                profile,
+                quarantine_on_failure=True,
             )
+            if len(filter_result) == 4:
+                (
+                    filtered_seeds,
+                    filter_call_logs,
+                    filter_rejected_verdicts,
+                    filter_quarantines,
+                ) = filter_result
+            else:
+                # Keep runner compatibility with integrations that provide
+                # the historical three-item filter result.
+                (
+                    filtered_seeds,
+                    filter_call_logs,
+                    filter_rejected_verdicts,
+                ) = filter_result
+                filter_quarantines = []
         except FilterProtocolError as exc:
             # Persist call/protocol evidence before failing the run.
             write_pipeline_call_log(exc.call_log_entries, run_dir)
             raise
         # Log candidate filter LLM calls to top-level calls.jsonl.
         write_pipeline_call_log(filter_call_logs, run_dir)
+        write_filter_quarantine_evidence(filter_quarantines, run_dir)
+        if filter_quarantines:
+            logger.warning(
+                "  Candidate filter quarantined %d seed(s): %s",
+                len(filter_quarantines),
+                ", ".join(item.seed_id for item in filter_quarantines),
+            )
         filter_accepted = len(filtered_seeds)
         logger.info(
             "  %d candidates -> %d rule-rejected, %d LLM-filtered -> %d accepted",
@@ -1345,6 +1402,28 @@ def run_pipeline(
         attack_pattern_records = list(load_attack_patterns().values())
         taxonomy_resolver = load_taxonomy_resolver()
         capability_snapshot = capture_capability_snapshot(profile, qualification_facts)
+        selected_pattern_ids = {item.seed_id for item in filtered_seeds}
+        selected_patterns = [
+            validate_attack_pattern(item, taxonomy_resolver)
+            for item in attack_pattern_records
+            if item.get("id") in selected_pattern_ids
+        ]
+        try:
+            ensure_projection_readiness(selected_patterns, capability_snapshot)
+        except ProjectionReadinessError as exc:
+            # Legacy inferred runs have no authoritative fact source to
+            # validate. Preserve their existing projection behavior while
+            # keeping the gate fail-closed for explicit fact inputs and all
+            # missing architecture resources.
+            if (
+                qualification_facts_path is not None
+                or exc.report.missing_resource_categories
+            ):
+                raise
+            logger.warning(
+                "Projection readiness has unresolved facts without an explicit "
+                "qualification-facts source; deferring to projection conditions."
+            )
 
         # Build coverage universe before projection (cmps.4 blocker 5).
         coverage_universe = build_coverage_universe(profile)
@@ -1719,6 +1798,7 @@ def run_pipeline(
             filtered_seeds=filtered_seeds,
             governance_count=governance_count,
             generation_notes=generation_notes,
+            filter_quarantines=filter_quarantines,
         )
 
     except Exception as exc:
