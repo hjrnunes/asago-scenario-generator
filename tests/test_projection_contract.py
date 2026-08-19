@@ -137,6 +137,53 @@ def test_normalization_unmaps_inside_external_leaf():
     assert leaf["realizations"] == ()
 
 
+def test_normalization_recurses_through_nested_nodes():
+    data = {
+        "root": {
+            "id": "n1",
+            "label": "combined setup",
+            "gate": "AND",
+            "children": [
+                {
+                    "id": "n1.1",
+                    "label": "external setup",
+                    "gate": "LEAF",
+                    "zone": "input",
+                    "action": {"kind": "external_precondition"},
+                },
+                "not-a-node",
+            ],
+        }
+    }
+
+    normalized = normalize_attack_tree_transport(
+        data, _projection_context(("attacker.observe", "outside"))
+    )
+
+    assert normalized["root"]["children"][0]["zone"] is None
+    assert normalized["root"]["children"][1] == "not-a-node"
+
+
+def test_normalization_handles_wrapped_attack_tree():
+    data = {
+        "attack_tree": {
+            "root": {
+                "id": "n1",
+                "label": "external setup",
+                "gate": "LEAF",
+                "zone": "input",
+                "action": {"kind": "external_precondition"},
+            }
+        }
+    }
+
+    normalized = normalize_attack_tree_transport(
+        data, _projection_context(("attacker.observe", "outside"))
+    )
+
+    assert normalized["attack_tree"]["root"]["zone"] is None
+
+
 def test_normalization_rejects_unknown_ids_before_external_unmapping():
     data = {
         "root": {
