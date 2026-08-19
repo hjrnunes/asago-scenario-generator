@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import warnings
 
 import pytest
 
@@ -32,9 +33,7 @@ def _payload_with_references() -> dict:
             {
                 "resp_id": "RESP-9",
                 "description": "",
-                "responsibility_constraints": [
-                    {"rc_id": "RC-9-1", "description": ""}
-                ],
+                "responsibility_constraints": [{"rc_id": "RC-9-1", "description": ""}],
                 "process_model_parts": [
                     {
                         "pm_id": "state-alpha",
@@ -205,6 +204,92 @@ def test_normalization_preserves_null_element_refs() -> None:
     ControlStructure.model_validate(result.payload)
 
 
+def test_normalization_converts_object_shaped_feedback_update_to_scalar() -> None:
+    payload = _payload_with_references()
+    payload["responsibilities"][0]["feedback_channels"][0]["updates"] = {
+        "type": "process_model_part",
+        "id": "state-alpha",
+    }
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = normalize_control_structure_payload(
+            construct_model_unvalidated(payload, ControlStructure)
+        )
+
+    assert not caught
+    feedback = result.payload["responsibilities"][0]["feedback_channels"][0]
+    assert feedback["updates"] == "PM-1-1"
+    ControlStructure.model_validate(result.payload)
+
+
+def test_normalization_leaves_ambiguous_object_feedback_update_for_validation() -> None:
+    payload = _payload_with_references()
+    payload["responsibilities"][0]["process_model_parts"].append(
+        {"pm_id": "state-alpha", "description": "Second state"}
+    )
+    payload["responsibilities"][0]["feedback_channels"][0]["updates"] = {
+        "type": "process_model_part",
+        "id": "state-alpha",
+    }
+
+    result = normalize_control_structure_payload(
+        construct_model_unvalidated(payload, ControlStructure)
+    )
+
+    feedback = result.payload["responsibilities"][0]["feedback_channels"][0]
+    assert feedback["updates"] == {
+        "type": "process_model_part",
+        "id": "state-alpha",
+    }
+    with pytest.raises(ValueError) as exc_info:
+        ControlStructure.model_validate(result.payload)
+    assert "updates" in str(exc_info.value).lower()
+    assert "unhashable" not in str(exc_info.value).lower()
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"type": "process_model_part", "id": "PM-UNKNOWN"},
+        {"type": "control_action", "id": "CA-9-1"},
+    ],
+)
+def test_normalization_leaves_unknown_feedback_update_shapes_for_validation(
+    updates: dict[str, str],
+) -> None:
+    payload = _payload_with_references()
+    payload["responsibilities"][0]["feedback_channels"][0]["updates"] = updates
+
+    result = normalize_control_structure_payload(
+        construct_model_unvalidated(payload, ControlStructure)
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        ControlStructure.model_validate(result.payload)
+    assert "updates" in str(exc_info.value).lower()
+    assert "unhashable" not in str(exc_info.value).lower()
+
+
+def test_namespace_resolves_id_shaped_element_ref_type() -> None:
+    payload = _payload_with_references()
+    payload["controlled_processes"][1]["cp_id"] = "process-alpha"
+    payload["responsibilities"][0]["control_actions"][0]["target"] = {
+        "type": "process-alpha",
+        "id": "process-alpha",
+    }
+    payload["responsibilities"][0]["feedback_channels"][0]["source"] = {
+        "type": "process-alpha",
+        "id": "process-alpha",
+    }
+
+    result = normalize_control_structure_payload(payload)
+
+    target = result.payload["responsibilities"][0]["control_actions"][0]["target"]
+    assert target == {"type": "controlled_process", "id": "CP-2"}
+    ControlStructure.model_validate(result.payload)
+
+
 def test_normalization_repairs_empty_descriptions_from_canonical_context() -> None:
     result = normalize_control_structure_payload(_payload_with_references())
     payload = result.payload
@@ -220,8 +305,7 @@ def test_normalization_repairs_empty_descriptions_from_canonical_context() -> No
         == "Process model part PM-1-1"
     )
     assert (
-        responsibility["control_actions"][0]["description"]
-        == "Control action CA-1-1"
+        responsibility["control_actions"][0]["description"] == "Control action CA-1-1"
     )
     assert (
         responsibility["feedback_channels"][0]["description"]
@@ -230,21 +314,17 @@ def test_normalization_repairs_empty_descriptions_from_canonical_context() -> No
     assert payload["controlled_processes"][1]["description"] == (
         "Controlled process CP-2"
     )
-    assert payload["coordination_links"][0]["description"] == (
-        "Coordination link CL-1"
-    )
-    assert payload["coordination_links"][0]["coordination_mechanism"]["description"] == (
-        "Coordination mechanism CM-1"
-    )
+    assert payload["coordination_links"][0]["description"] == ("Coordination link CL-1")
+    assert payload["coordination_links"][0]["coordination_mechanism"][
+        "description"
+    ] == ("Coordination mechanism CM-1")
     ControlStructure.model_validate(payload)
 
 
 def test_empty_description_repair_preserves_nonempty_none_and_missing_values() -> None:
     payload = _payload_with_references()
     payload["responsibilities"][1]["description"] = None
-    payload["responsibilities"][1]["process_model_parts"] = [
-        {"pm_id": "state-beta"}
-    ]
+    payload["responsibilities"][1]["process_model_parts"] = [{"pm_id": "state-beta"}]
 
     result = normalize_control_structure_payload(payload)
 
@@ -262,18 +342,20 @@ def test_feedback_description_uses_fallbacks_for_missing_context() -> None:
     feedback["source"] = None
     feedback["description"] = ""
     result = normalize_control_structure_payload(payload)
-    assert result.payload["responsibilities"][0]["feedback_channels"][0][
-        "description"
-    ] == "Feedback updating process model part PM-1-1"
+    assert (
+        result.payload["responsibilities"][0]["feedback_channels"][0]["description"]
+        == "Feedback updating process model part PM-1-1"
+    )
 
     no_update_payload = copy.deepcopy(payload)
-    no_update_payload["responsibilities"][0]["feedback_channels"][0][
-        "updates"
-    ] = ""
+    no_update_payload["responsibilities"][0]["feedback_channels"][0]["updates"] = ""
     no_update_result = normalize_control_structure_payload(no_update_payload)
-    assert no_update_result.payload["responsibilities"][0]["feedback_channels"][0][
-        "description"
-    ] == "Feedback channel FB-1-1"
+    assert (
+        no_update_result.payload["responsibilities"][0]["feedback_channels"][0][
+            "description"
+        ]
+        == "Feedback channel FB-1-1"
+    )
 
 
 @pytest.mark.parametrize(
@@ -351,7 +433,9 @@ def test_tolerant_decode_aliases_generic_id_for_required_element_ids(
     assert getattr(decoded, model_id_field) == source_id
 
 
-def test_tolerant_decode_prefers_explicit_model_id_and_does_not_alias_description() -> None:
+def test_tolerant_decode_prefers_explicit_model_id_and_does_not_alias_description() -> (
+    None
+):
     decoded = construct_model_unvalidated(
         {"id": "ignored", "ca_id": "CA-7-2"},
         ControlAction,

@@ -33,9 +33,9 @@ Feature: SP1 ID normalization repairs
   # SP1-ID-NORMALIZATION-REPAIRS-02 leaves an uninferable ElementRef type for validation
   Scenario: SP1-ID-NORMALIZATION-REPAIRS-02 leaves an uninferable ElementRef type for validation
     Given controlled process 1 has source ID process-alpha
-    And responsibility 1 control action 1 target has type process-alpha and ID process-alpha
+    And responsibility 1 control action 1 target has type unknown-process and ID unknown-process
     When the payload is normalized
-    Then the target type remains process-alpha
+    Then the target type remains unknown-process
     When the normalized payload is validated
     Then validation fails with an error identifying target type
 

@@ -4700,9 +4700,9 @@ def _h_sp1_repair_source_id(
 def _h_sp1_repair_uninferable_target(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: configure a target whose type cannot be inferred."""
+    """Handle: configure a target whose type and ID cannot be inferred."""
     target = world.sp1_repair_payload["responsibilities"][0]["control_actions"][0]
-    target["target"] = {"type": "process-alpha", "id": "process-alpha"}
+    target["target"] = {"type": "unknown-process", "id": "unknown-process"}
     return True, ""
 
 
@@ -4878,18 +4878,18 @@ def _h_src_map(world: World, text: str, examples: dict) -> tuple[bool, str]:
 def _h_sp1_repair_target_type(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: an uninferable target type remains unchanged."""
+    """Handle: an unknown target type remains unchanged."""
     payload = world.sp1_repair_normalized.payload
     target = payload["responsibilities"][0]["control_actions"][0]["target"]
-    if target.get("type") != "process-alpha":
-        return False, f"Expected process-alpha, got {target.get('type')}"
+    if target.get("type") != "unknown-process":
+        return False, f"Expected unknown-process, got {target.get('type')}"
     return True, ""
 
 
 def _h_sp1_repair_validation_error(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: validation reports the uninferable target type."""
+    """Handle: validation reports the unknown target type."""
     error = getattr(world, "validation_error", None)
     if error is None:
         return False, "Expected ControlStructure validation to fail"
@@ -4958,8 +4958,184 @@ def _h_sp1_repair_pm_source(
         int(match.group(1)) - 1
     ]
     process_model_part = responsibility["process_model_parts"][int(match.group(2)) - 1]
+    old_id = process_model_part.get("pm_id")
     process_model_part["pm_id"] = match.group(3)
+    if isinstance(old_id, str):
+        _remap_src(world.sp1_repair_payload, old_id, match.group(3))
     return True, ""
+
+
+def _h_sp1_robustness_feedback_update(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Configure an object-shaped FeedbackChannel.updates value."""
+    match = re.match(
+        r"responsibility (\d+) feedback channel (\d+) updates is (.+)$",
+        text,
+        re.IGNORECASE,
+    )
+    if match is None:
+        return False, f"Could not parse feedback update: {text}"
+    try:
+        value = json.loads(match.group(3))
+        feedback = world.sp1_repair_payload["responsibilities"][
+            int(match.group(1)) - 1
+        ]["feedback_channels"][int(match.group(2)) - 1]
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
+        return False, f"Could not configure feedback update: {exc}"
+    feedback["updates"] = value
+    return True, ""
+
+
+def _h_sp1_robustness_ambiguous_pm(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Configure two process-model parts with the same source ID."""
+    world.sp1_repair_payload["responsibilities"][0]["process_model_parts"].append(
+        {"pm_id": "PM-LEGACY", "description": "Second state"}
+    )
+    for process_model_part in world.sp1_repair_payload["responsibilities"][0][
+        "process_model_parts"
+    ]:
+        process_model_part["pm_id"] = "PM-LEGACY"
+    return True, ""
+
+
+def _h_sp1_robustness_normalize(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Normalize tolerant input before any typed serialization."""
+    import warnings
+
+    try:
+        decoded = _sp1_construct_unvalidated(
+            world.sp1_repair_payload,
+            ControlStructure,
+        )
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = _sp1_id_normalizer()(decoded)
+        world.sp1_repair_normalized = result
+        world.sp1_id_normalization = result
+        world.sp1_serializer_warnings = [str(item.message) for item in caught]
+        try:
+            world.control_structure = ControlStructure.model_validate(result.payload)
+            world.validation_error = None
+        except (ValidationError, ValueError, TypeError) as exc:
+            world.validation_error = exc
+    except (ValidationError, ValueError, TypeError) as exc:
+        world.validation_error = exc
+        return False, f"Normalization failed: {exc}"
+    return True, ""
+
+
+def _h_sp1_robustness_unknown_shape(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Configure an unsupported object-shaped reference."""
+    match = re.match(
+        r"(responsibility \d+ (?:process model part|control action|feedback channel) \d+ "
+        r"(?:feedback_source|target|source)) is (.+)$",
+        text,
+        re.IGNORECASE,
+    )
+    if match is None:
+        return False, f"Could not parse unknown reference shape: {text}"
+    try:
+        value = json.loads(match.group(2))
+        owner, field = _ref_slot(world.sp1_repair_payload, match.group(1))
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError) as exc:
+        return False, f"Could not configure unknown reference shape: {exc}"
+    owner[field] = value
+    return True, ""
+
+
+def _h_sp1_robustness_update_assert(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Assert that an object-shaped update became its scalar canonical ID."""
+    match = re.search(r"updates is the scalar ID (\S+)$", text)
+    if match is None:
+        return False, f"Could not parse scalar update assertion: {text}"
+    actual = world.sp1_repair_normalized.payload["responsibilities"][0][
+        "feedback_channels"
+    ][0]["updates"]
+    expected = match.group(1)
+    return (
+        actual == expected,
+        f"Expected scalar update {expected}, got {actual!r}",
+    )
+
+
+def _h_sp1_robustness_ref_assert(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Configure or assert an ElementRef, depending on normalization state."""
+    match = re.match(r"(.+) has type (\S+) and ID (\S+)$", text)
+    if match is None:
+        return False, f"Could not parse ElementRef assertion: {text}"
+    location, expected_type, expected_id = match.groups()
+    if not hasattr(world, "sp1_repair_normalized"):
+        try:
+            owner, field = _ref_slot(world.sp1_repair_payload, location)
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            return False, f"Unknown ElementRef location: {exc}"
+        owner[field] = {"type": expected_type, "id": expected_id}
+        return True, ""
+    try:
+        owner, field = _ref_slot(
+            world.sp1_repair_normalized.payload,
+            location,
+        )
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        return False, f"Unknown ElementRef location: {exc}"
+    actual = owner.get(field)
+    expected = {"type": expected_type, "id": expected_id}
+    return actual == expected, f"Expected {expected}, got {actual!r}"
+
+
+def _h_sp1_robustness_validates(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Assert successful ControlStructure validation."""
+    error = getattr(world, "validation_error", None)
+    return error is None, f"Unexpected validation error: {error}"
+
+
+def _h_sp1_robustness_fails(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Assert controlled validation failure identifies the requested field."""
+    match = re.search(r"identifying (.+)$", text)
+    expected = match.group(1).lower() if match else ""
+    error = getattr(world, "validation_error", None)
+    if error is None:
+        return False, "Expected normalized validation to fail"
+    message = str(error).lower()
+    if expected and not any(part in message for part in expected.split()):
+        return False, f"Expected {expected!r} in validation error: {error}"
+    if "unhashable" in message:
+        return False, f"Validation leaked an unhashable-value error: {error}"
+    return True, ""
+
+
+def _h_sp1_robustness_no_serializer_warning(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Assert tolerant normalization did not invoke serializer warnings."""
+    warnings = getattr(world, "sp1_serializer_warnings", [])
+    return not warnings, f"Unexpected serializer warnings: {warnings}"
+
+
+def _h_sp1_robustness_no_unhashable(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Assert validation diagnostics do not expose unhashable values."""
+    message = str(getattr(world, "validation_error", ""))
+    return (
+        "unhashable" not in message.lower(),
+        f"Unexpected unhashable-value error: {message}",
+    )
 
 
 def _h_sp1_repair_description_assert(
@@ -6919,6 +7095,11 @@ def register(api: object) -> None:
         source_order=15100,
     )
     api.register(
+        "a tolerantly decoded SP1 control-structure response$",
+        _h_sp1_repair_payload,
+        source_order=15155,
+    )
+    api.register(
         "every field not varied by the scenario is valid$",
         _h_sp1_repair_valid_fields,
         source_order=15101,
@@ -6934,6 +7115,72 @@ def register(api: object) -> None:
         source_order=15103,
     )
     api.register(
+        "responsibility 1 process model parts 1 and 2 both have source ID PM-LEGACY$",
+        _h_sp1_robustness_ambiguous_pm,
+        source_order=15157,
+    )
+    api.register_first(
+        "responsibility \\d+ feedback channel \\d+ updates is \\{.*\\}$",
+        _h_sp1_robustness_feedback_update,
+        source_order=15158,
+    )
+    api.register_first(
+        "responsibility \\d+ (?:process model part|control action|feedback channel) \\d+ "
+        "(?:feedback_source|target|source) is \\{.*\\}$",
+        _h_sp1_robustness_unknown_shape,
+        source_order=15168,
+    )
+    api.register(
+        "every control-structure field not varied by the scenario is valid$",
+        _h_sp1_repair_valid_fields,
+        source_order=15159,
+    )
+    api.register(
+        "source IDs are assigned canonical IDs by final list position$",
+        _h_sp1_repair_valid_fields,
+        source_order=15160,
+    )
+    api.register(
+        "the response is normalized before typed serialization and validation$",
+        _h_sp1_robustness_normalize,
+        source_order=15161,
+    )
+    api.register_first(
+        "responsibility \\d+ feedback channel \\d+ updates is the scalar ID \\S+$",
+        _h_sp1_robustness_update_assert,
+        source_order=15167,
+    )
+    api.register_first(
+        "the normalized response validates as a ControlStructure$",
+        _h_sp1_robustness_validates,
+        source_order=15162,
+    )
+    api.register_first(
+        "validation fails with an error identifying .*$",
+        _h_sp1_robustness_fails,
+        source_order=15163,
+    )
+    api.register(
+        "normalization emits no Pydantic serializer warning$",
+        _h_sp1_robustness_no_serializer_warning,
+        source_order=15164,
+    )
+    api.register(
+        "normalization raises no unhashable-value error$",
+        _h_sp1_robustness_no_unhashable,
+        source_order=15165,
+    )
+    api.register(
+        "the failure is not an unhashable-value error$",
+        _h_sp1_robustness_no_unhashable,
+        source_order=15169,
+    )
+    api.register_first(
+        "responsibility \\d+ (?:process model part|control action|feedback channel) \\d+ (?:feedback_source|target|source) has type \\S+ and ID \\S+$",
+        _h_sp1_robustness_ref_assert,
+        source_order=15166,
+    )
+    api.register(
         "responsibility \\d+ (?:process model part|control action|feedback channel) \\d+ has (?:feedback_source|target|source) type \\S+ and ID \\S+$",
         _h_sp1_repair_reference,
         source_order=15104,
@@ -6944,7 +7191,7 @@ def register(api: object) -> None:
         source_order=15104,
     )
     api.register_first(
-        "responsibility 1 control action 1 target has type process-alpha and ID process-alpha$",
+        "responsibility 1 control action 1 target has type unknown-process and ID unknown-process$",
         _h_sp1_repair_uninferable_target,
         source_order=15105,
     )
@@ -7003,7 +7250,7 @@ def register(api: object) -> None:
         source_order=15116,
     )
     api.register_first(
-        "the target type remains process-alpha$",
+        "the target type remains unknown-process$",
         _h_sp1_repair_target_type,
         source_order=15117,
     )

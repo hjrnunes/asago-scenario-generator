@@ -44,6 +44,12 @@ __all__ = [
     "parse_ica_slot_id",
 ]
 
+_LENGTH_RETRY_MAX_COMPLETION_TOKENS = 2048
+_LENGTH_RETRY_PROMPT = (
+    "\n\nThe prior response was truncated. Return only a concise "
+    "schema-matching response with no explanation."
+)
+
 
 class BDIGenerationResult(BaseModel):
     """LLM response model for the combined BDI generation call."""
@@ -202,9 +208,37 @@ def generate_bdi(
         temperature=temperature,
     )
 
+    if _is_length_finish_reason_error(error):
+        retry_result, _retry_llm_result, retry_error = safe_llm_call(
+            llm_client=llm_client,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt + _LENGTH_RETRY_PROMPT,
+            response_format=BDIGenerationResult,
+            run_dir=run_dir,
+            stage=stage,
+            step=step,
+            temperature=temperature,
+            max_completion_tokens=_LENGTH_RETRY_MAX_COMPLETION_TOKENS,
+        )
+        if retry_error is None:
+            return retry_result, None
+        return (
+            None,
+            "BDI generation retry exhausted after "
+            f"LengthFinishReasonError: {retry_error}",
+        )
+
     if error is not None:
         return None, error
     return result, None
+
+
+def _is_length_finish_reason_error(error: str | None) -> bool:
+    """Return whether a safe-call error came from completion length exhaustion."""
+    if error is None:
+        return False
+    error_type, _, _message = error.partition(":")
+    return error_type == "LengthFinishReasonError"
 
 
 def build_bdi_prompts(
@@ -309,5 +343,5 @@ def assemble_scenario_spec(
 
 
 # mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-14T09:06:36Z","module_hash":"cc4bb447febe00dff4cdf4cedca79457b05d4c1f84e7a8a8337f420f15e04cd0","functions":[{"id":"func/generate_scenario_id","name":"generate_scenario_id","line":55,"end_line":64,"hash":"530efa395a985f80bec7697e91e2a58ea143f9407ee1e32542f30b6fc43b8348"},{"id":"func/parse_ica_slot_id","name":"parse_ica_slot_id","line":67,"end_line":87,"hash":"a414c48cebfc7adc3589764e920f3181d7eccc71a3a5f86880cb39b36b221670"},{"id":"func/populate_defender_bdi","name":"populate_defender_bdi","line":90,"end_line":135,"hash":"f1beb2a9519da247cf720b1a6f684bb3d46c2e8d8e3405337b0e9f6cfe66ec4f"},{"id":"func/_find_responsibility","name":"_find_responsibility","line":138,"end_line":148,"hash":"d049061f7dd1686e0e9cb5a856b073db342800b7a83098911ba067f75c94b415"},{"id":"func/generate_bdi","name":"generate_bdi","line":151,"end_line":209,"hash":"fd1c904e43551f573e30292b676737053c3ad315400ec39884447f704a0eb94d"},{"id":"func/build_bdi_prompts","name":"build_bdi_prompts","line":212,"end_line":259,"hash":"5957583f79b2943fb2faf38468e65f7995a606fe427800178dbc406fc04ccab7"},{"id":"func/assemble_scenario_spec","name":"assemble_scenario_spec","line":262,"end_line":308,"hash":"dc3abfa5cb86f9cfe4dab0414493baef561212a0fe62f7766e9291bc4fd916c9"}]}
+# {"version":1,"tested_at":"2026-08-19T13:04:28Z","module_hash":"cf8714929ce4efac88e19b1a7b79b482fbfebb6872f379a591486eee96608134","source_sha256":"d3ffa67ac78d0720163a69aac96ad9be7e4edcd8cfb55acc52edf5b6b34a08f4","functions":[{"id":"func/generate_scenario_id","name":"generate_scenario_id","line":61,"end_line":70,"hash":"530efa395a985f80bec7697e91e2a58ea143f9407ee1e32542f30b6fc43b8348"},{"id":"func/parse_ica_slot_id","name":"parse_ica_slot_id","line":73,"end_line":93,"hash":"a414c48cebfc7adc3589764e920f3181d7eccc71a3a5f86880cb39b36b221670"},{"id":"func/populate_defender_bdi","name":"populate_defender_bdi","line":96,"end_line":141,"hash":"f1beb2a9519da247cf720b1a6f684bb3d46c2e8d8e3405337b0e9f6cfe66ec4f"},{"id":"func/_find_responsibility","name":"_find_responsibility","line":144,"end_line":152,"hash":"d049061f7dd1686e0e9cb5a856b073db342800b7a83098911ba067f75c94b415"},{"id":"func/generate_bdi","name":"generate_bdi","line":155,"end_line":233,"hash":"5ae1d0511d3084a579d3de35b581902b80417d0ab9394f89a465b7c07383f445"},{"id":"func/_is_length_finish_reason_error","name":"_is_length_finish_reason_error","line":236,"end_line":241,"hash":"e2a3a36b18c4db163ef2bcac8c86b2de581cc0381c345e0067418e595a15fa79"},{"id":"func/build_bdi_prompts","name":"build_bdi_prompts","line":244,"end_line":295,"hash":"5957583f79b2943fb2faf38468e65f7995a606fe427800178dbc406fc04ccab7"},{"id":"func/assemble_scenario_spec","name":"assemble_scenario_spec","line":298,"end_line":342,"hash":"dc3abfa5cb86f9cfe4dab0414493baef561212a0fe62f7766e9291bc4fd916c9"}]}
 # mutate4py-manifest-end
