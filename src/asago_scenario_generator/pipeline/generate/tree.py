@@ -144,6 +144,29 @@ def _sanitize_yaml_colons(raw_yaml: str) -> str:
     return "\n".join(sanitized_lines)
 
 
+def _resolve_projected_step_ids(
+    result: dict[str, Any],
+    canonical_by_id: dict[str, dict[str, Any]],
+) -> None:
+    """Validate and replace model-supplied realizations from projected IDs.
+
+    Raises ValueError if any projected step ID is not in the canonical set.
+    """
+    projected_ids = result.get("projected_step_ids", ())
+    if not projected_ids:
+        return
+    missing = set(projected_ids) - set(canonical_by_id)
+    if missing:
+        raise ValueError(
+            "Attack tree references unknown projected step ID(s): "
+            + ", ".join(sorted(missing))
+        )
+    # Model-supplied realization semantics are transport-only. Replace
+    # them before strict validation, including omitted or duplicate
+    # records.
+    result["realizations"] = [canonical_by_id[sid] for sid in projected_ids]
+
+
 def normalize_attack_tree_transport(
     data: Any,
     projection_context: dict[str, Any] | None,
@@ -170,24 +193,9 @@ def normalize_attack_tree_transport(
         if not isinstance(node, dict):
             return node
         result = dict(node)
-        projected_ids = result.get("projected_step_ids", ())
-        if projected_ids:
-            unknown = [
-                step_id for step_id in projected_ids if step_id not in canonical_by_id
-            ]
-            if unknown:
-                raise ValueError(
-                    "Attack tree references unknown projected step ID(s): "
-                    + ", ".join(sorted(set(unknown)))
-                )
-            # Model-supplied realization semantics are transport-only. Replace
-            # them before strict validation, including omitted or duplicate
-            # records.
-            result["realizations"] = [
-                canonical_by_id[step_id] for step_id in projected_ids
-            ]
+        _resolve_projected_step_ids(result, canonical_by_id)
         if isinstance(result.get("children"), list):
-            result["children"] = [normalize_node(child) for child in result["children"]]
+            result["children"] = [normalize_node(c) for c in result["children"]]
         return result
 
     if isinstance(normalized.get("root"), dict):

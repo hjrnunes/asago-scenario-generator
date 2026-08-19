@@ -523,6 +523,31 @@ class TestExpandCandidates:
         assert len(c.atlas_technique_descriptions) >= 1
         assert c.entry_point != ""
 
+    def test_expand_candidates_preserves_explicit_ingress_zone_identity(self):
+        """Explicit ingress zones remain part of candidate entry-point identity."""
+        profile = CapabilityProfile(
+            zones_active=["input", "reasoning"],
+            entry_points=[
+                {
+                    "name": "configuration loader",
+                    "direction": "input",
+                    "controllability": "indirect",
+                    "ingress_zone": "reasoning",
+                }
+            ],
+            confidence=ConfidenceLevel.high,
+            kc_subcodes=["KC1.1"],
+        )
+
+        candidates = _expand_candidates(
+            [_make_seed(atlas_technique_ids=["AML.T0051"])],
+            profile,
+        )
+
+        assert len(candidates) == 1
+        assert candidates[0].ingress_zone == "reasoning"
+        assert candidates[0].entry_point_id == profile.entry_points[0].entry_point_id
+
     def test_expand_candidates_empty_techniques(self):
         """Seed with no technique IDs (ATLAS or LAAF) produces no candidates."""
         seeds = [

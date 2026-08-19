@@ -1,1 +1,1040 @@
-{"$defs":{"AdmissionDecisionRecord":{"additionalProperties":false,"properties":{"event_id":{"pattern":"^[0-9a-f]{64}$","title":"Event Id","type":"string"},"payload_sha256":{"pattern":"^[0-9a-f]{64}$","title":"Payload Sha256","type":"string"},"sequence":{"minimum":0,"title":"Sequence","type":"integer"},"candidate_id":{"minLength":1,"title":"Candidate Id","type":"string"},"status":{"$ref":"#/$defs/CandidateTerminalStatus"},"admitted":{"title":"Admitted","type":"boolean"},"gate_results":{"items":{"$ref":"#/$defs/GateResultRecord"},"title":"Gate Results","type":"array"},"candidate_snapshot_sha256":{"anyOf":[{"pattern":"^[0-9a-f]{64}$","type":"string"},{"type":"null"}],"default":null,"title":"Candidate Snapshot Sha256"},"actor_snapshot_sha256":{"anyOf":[{"pattern":"^[0-9a-f]{64}$","type":"string"},{"type":"null"}],"default":null,"title":"Actor Snapshot Sha256"},"narrative_snapshot_sha256":{"anyOf":[{"pattern":"^[0-9a-f]{64}$","type":"string"},{"type":"null"}],"default":null,"title":"Narrative Snapshot Sha256"},"final_tree_snapshot_sha256":{"anyOf":[{"pattern":"^[0-9a-f]{64}$","type":"string"},{"type":"null"}],"default":null,"title":"Final Tree Snapshot Sha256"},"violations":{"items":{"$ref":"#/$defs/ViolationRecord"},"title":"Violations","type":"array"},"terminal_receipts":{"items":{"$ref":"#/$defs/ArtifactReceipt"},"title":"Terminal Receipts","type":"array"}},"required":["event_id","payload_sha256","sequence","candidate_id","status","admitted","gate_results","violations","terminal_receipts"],"title":"AdmissionDecisionRecord","type":"object"},"AdmissionEvidenceId":{"description":"Closed, durable identifiers for authoritative admission evidence.","enum":["admission_exception","snapshot_integrity","identity","actor_attack_complexity","capability_grounding","tool_integration_grounding","data_access_grounding","catalog_taxonomy_pin_validity","resource_binding_validity","execution_requirement_drift","projection_traceability","structural_validity","identifier_validity","phantom_validity","semantic_validity","behavior_correspondence","narrative_tree_diagnostics","tree_parsimony","or_tree_prohibition"],"title":"AdmissionEvidenceId","type":"string"},"ArtifactReceipt":{"additionalProperties":false,"properties":{"candidate_id":{"minLength":1,"title":"Candidate Id","type":"string"},"role":{"$ref":"#/$defs/ArtifactRole"},"path":{"minLength":1,"title":"Path","type":"string"},"sha256":{"pattern":"^[0-9a-f]{64}$","title":"Sha256","type":"string"},"scenario_id":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Scenario Id"}},"required":["candidate_id","role","path","sha256","scenario_id"],"title":"ArtifactReceipt","type":"object"},"ArtifactRole":{"description":"Typed role for every persisted artifact in a run.\n\nThe manifest container file (``run-manifest.yaml``) is **not** an\nartifact entry \u2014 it is the sole orphan exception.","enum":["use_case","capability_profile","threat_surface","scenario_yaml","scenario_feature","scenario_call_log","pipeline_call_log","coverage_report","eval_scorecard","report","pipeline_log","planning_checkpoint","coverage_plan","finalization_inventory","quarantine_bundle"],"title":"ArtifactRole","type":"string"},"CallMetadataRecord":{"additionalProperties":false,"properties":{"call":{"title":"Call","type":"string"},"prompt_tokens":{"minimum":0,"title":"Prompt Tokens","type":"integer"},"completion_tokens":{"minimum":0,"title":"Completion Tokens","type":"integer"},"duration_ms":{"minimum":0,"title":"Duration Ms","type":"integer"}},"required":["call","prompt_tokens","completion_tokens","duration_ms"],"title":"CallMetadataRecord","type":"object"},"CandidateAttemptRecord":{"additionalProperties":false,"properties":{"event_id":{"pattern":"^[0-9a-f]{64}$","title":"Event Id","type":"string"},"payload_sha256":{"pattern":"^[0-9a-f]{64}$","title":"Payload Sha256","type":"string"},"sequence":{"minimum":0,"title":"Sequence","type":"integer"},"attempt_id":{"minLength":1,"title":"Attempt Id","type":"string"},"candidate_id":{"minLength":1,"title":"Candidate Id","type":"string"},"target_entry_point_id":{"minLength":1,"title":"Target Entry Point Id","type":"string"},"queue_rank":{"minimum":0,"title":"Queue Rank","type":"integer"},"is_primary":{"title":"Is Primary","type":"boolean"},"stage_attempt_ids":{"items":{"type":"string"},"title":"Stage Attempt Ids","type":"array"}},"required":["event_id","payload_sha256","sequence","attempt_id","candidate_id","target_entry_point_id","queue_rank","is_primary","stage_attempt_ids"],"title":"CandidateAttemptRecord","type":"object"},"CandidateTerminalStatus":{"enum":["admitted","rejected","generation_or_finalization_failed"],"title":"CandidateTerminalStatus","type":"string"},"GateResultRecord":{"additionalProperties":false,"properties":{"gate":{"$ref":"#/$defs/AdmissionEvidenceId"},"passed":{"title":"Passed","type":"boolean"},"violations":{"items":{"$ref":"#/$defs/ViolationRecord"},"title":"Violations","type":"array"},"diagnostics":{"items":{"$ref":"#/$defs/ViolationRecord"},"title":"Diagnostics","type":"array"},"applicable":{"title":"Applicable","type":"boolean"}},"required":["gate","passed","violations","diagnostics","applicable"],"title":"GateResultRecord","type":"object"},"GeneratedStage":{"description":"Only stages that own generated artifacts and retry budgets.","enum":["actor","narrative","tree","behavior"],"title":"GeneratedStage","type":"string"},"JsonValue":{},"LLMResultRecord":{"additionalProperties":false,"properties":{"content":{"$ref":"#/$defs/JsonValue"},"prompt_tokens":{"minimum":0,"title":"Prompt Tokens","type":"integer"},"completion_tokens":{"minimum":0,"title":"Completion Tokens","type":"integer"},"duration_ms":{"minimum":0,"title":"Duration Ms","type":"integer"},"system_prompt":{"title":"System Prompt","type":"string"},"user_prompt":{"title":"User Prompt","type":"string"}},"required":["content","prompt_tokens","completion_tokens","duration_ms","system_prompt","user_prompt"],"title":"LLMResultRecord","type":"object"},"LifecycleState":{"enum":["pending","revalidating_candidate","generating_actor","generating_narrative","generating_tree","finalizing_prebehavior","generating_behavior","admitting","admitted","rejected","exhausted"],"title":"LifecycleState","type":"string"},"ParsimonyRepairRecord":{"additionalProperties":false,"properties":{"event_id":{"pattern":"^[0-9a-f]{64}$","title":"Event Id","type":"string"},"payload_sha256":{"pattern":"^[0-9a-f]{64}$","title":"Payload Sha256","type":"string"},"sequence":{"minimum":0,"title":"Sequence","type":"integer"},"candidate_attempt_id":{"minLength":1,"title":"Candidate Attempt Id","type":"string"},"candidate_id":{"minLength":1,"title":"Candidate Id","type":"string"},"target_entry_point_id":{"minLength":1,"title":"Target Entry Point Id","type":"string"},"before_digest":{"pattern":"^[0-9a-f]{64}$","title":"Before Digest","type":"string"},"after_digest":{"pattern":"^[0-9a-f]{64}$","title":"After Digest","type":"string"},"removed_ids":{"items":{"type":"string"},"title":"Removed Ids","type":"array"},"preserved_projected_ids":{"items":{"type":"string"},"title":"Preserved Projected Ids","type":"array"},"accepted":{"title":"Accepted","type":"boolean"},"detail":{"title":"Detail","type":"string"}},"required":["event_id","payload_sha256","sequence","candidate_attempt_id","candidate_id","target_entry_point_id","before_digest","after_digest","removed_ids","preserved_projected_ids","accepted","detail"],"title":"ParsimonyRepairRecord","type":"object"},"PromptRecord":{"additionalProperties":false,"properties":{"system_prompt":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"System Prompt"},"user_prompt":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"User Prompt"}},"required":["system_prompt","user_prompt"],"title":"PromptRecord","type":"object"},"StageAttemptFailureRecord":{"additionalProperties":false,"properties":{"call_name":{"title":"Call Name","type":"string"},"exception_type":{"minLength":1,"title":"Exception Type","type":"string"},"detail":{"title":"Detail","type":"string"},"phase":{"enum":["before_invocation","invocation","post_response"],"title":"Phase","type":"string"},"invoked":{"title":"Invoked","type":"boolean"},"prompt":{"anyOf":[{"$ref":"#/$defs/PromptRecord"},{"type":"null"}]},"result":{"anyOf":[{"$ref":"#/$defs/LLMResultRecord"},{"type":"null"}]},"raw_response":{"anyOf":[{"$ref":"#/$defs/JsonValue"},{"type":"null"}]}},"required":["call_name","exception_type","detail","phase","invoked","prompt","result","raw_response"],"title":"StageAttemptFailureRecord","type":"object"},"StageAttemptRecord":{"additionalProperties":false,"properties":{"event_id":{"pattern":"^[0-9a-f]{64}$","title":"Event Id","type":"string"},"payload_sha256":{"pattern":"^[0-9a-f]{64}$","title":"Payload Sha256","type":"string"},"sequence":{"minimum":0,"title":"Sequence","type":"integer"},"attempt_id":{"minLength":1,"title":"Attempt Id","type":"string"},"candidate_id":{"minLength":1,"title":"Candidate Id","type":"string"},"stage":{"$ref":"#/$defs/GeneratedStage"},"invocation_index":{"minimum":0,"title":"Invocation Index","type":"integer"},"owner_retry_index":{"maximum":2,"minimum":0,"title":"Owner Retry Index","type":"integer"},"prompt":{"anyOf":[{"$ref":"#/$defs/PromptRecord"},{"type":"null"}]},"call":{"anyOf":[{"$ref":"#/$defs/StageCallEvidenceRecord"},{"type":"null"}]},"result":{"anyOf":[{"$ref":"#/$defs/JsonValue"},{"type":"null"}]},"failure":{"anyOf":[{"$ref":"#/$defs/StageAttemptFailureRecord"},{"type":"null"}]},"input":{"$ref":"#/$defs/StageInputRecord"},"input_sha256":{"pattern":"^[0-9a-f]{64}$","title":"Input Sha256","type":"string"},"candidate_snapshot_sha256":{"pattern":"^[0-9a-f]{64}$","title":"Candidate Snapshot Sha256","type":"string"},"final_tree_snapshot_sha256":{"anyOf":[{"pattern":"^[0-9a-f]{64}$","type":"string"},{"type":"null"}],"default":null,"title":"Final Tree Snapshot Sha256"},"output_sha256":{"anyOf":[{"pattern":"^[0-9a-f]{64}$","type":"string"},{"type":"null"}],"default":null,"title":"Output Sha256"},"violations":{"items":{"$ref":"#/$defs/ViolationRecord"},"title":"Violations","type":"array"}},"required":["event_id","payload_sha256","sequence","attempt_id","candidate_id","stage","invocation_index","owner_retry_index","prompt","call","result","failure","input","input_sha256","candidate_snapshot_sha256","violations"],"title":"StageAttemptRecord","type":"object"},"StageCallEvidenceRecord":{"additionalProperties":false,"properties":{"call_name":{"title":"Call Name","type":"string"},"result":{"$ref":"#/$defs/LLMResultRecord"},"metadata":{"$ref":"#/$defs/CallMetadataRecord"}},"required":["call_name","result","metadata"],"title":"StageCallEvidenceRecord","type":"object"},"StageInputRecord":{"additionalProperties":false,"properties":{"candidate":{"$ref":"#/$defs/JsonValue"},"candidate_id":{"minLength":1,"title":"Candidate Id","type":"string"},"stage":{"$ref":"#/$defs/GeneratedStage"},"invocation_index":{"minimum":0,"title":"Invocation Index","type":"integer"},"owner_retry_index":{"maximum":2,"minimum":0,"title":"Owner Retry Index","type":"integer"},"visible_artifacts":{"additionalProperties":{"$ref":"#/$defs/JsonValue"},"title":"Visible Artifacts","type":"object"},"prompt":{"anyOf":[{"$ref":"#/$defs/PromptRecord"},{"type":"null"}]},"final_tree_digest":{"anyOf":[{"pattern":"^[0-9a-f]{64}$","type":"string"},{"type":"null"}],"default":null,"title":"Final Tree Digest"}},"required":["candidate","candidate_id","stage","invocation_index","owner_retry_index","visible_artifacts","prompt"],"title":"StageInputRecord","type":"object"},"TransitionRecord":{"additionalProperties":false,"properties":{"event_id":{"pattern":"^[0-9a-f]{64}$","title":"Event Id","type":"string"},"payload_sha256":{"pattern":"^[0-9a-f]{64}$","title":"Payload Sha256","type":"string"},"sequence":{"minimum":0,"title":"Sequence","type":"integer"},"target_entry_point_id":{"minLength":1,"title":"Target Entry Point Id","type":"string"},"index":{"minimum":0,"title":"Index","type":"integer"},"previous":{"$ref":"#/$defs/LifecycleState"},"current":{"$ref":"#/$defs/LifecycleState"},"candidate_id":{"anyOf":[{"type":"string"},{"type":"null"}],"title":"Candidate Id"},"reason":{"minLength":1,"title":"Reason","type":"string"}},"required":["event_id","payload_sha256","sequence","target_entry_point_id","index","previous","current","candidate_id","reason"],"title":"TransitionRecord","type":"object"},"ViolationRecord":{"additionalProperties":false,"properties":{"code":{"minLength":1,"title":"Code","type":"string"},"detail":{"minLength":1,"title":"Detail","type":"string"},"owner":{"anyOf":[{"$ref":"#/$defs/GeneratedStage"},{"type":"null"}]},"retryable":{"title":"Retryable","type":"boolean"}},"required":["code","detail","owner","retryable"],"title":"ViolationRecord","type":"object"}},"additionalProperties":false,"properties":{"schema_version":{"const":"1","title":"Schema Version","type":"string"},"run_id":{"minLength":1,"title":"Run Id","type":"string"},"coverage_plan_sha256":{"pattern":"^[0-9a-f]{64}$","title":"Coverage Plan Sha256","type":"string"},"candidate_attempts":{"items":{"$ref":"#/$defs/CandidateAttemptRecord"},"title":"Candidate Attempts","type":"array"},"stage_attempts":{"items":{"$ref":"#/$defs/StageAttemptRecord"},"title":"Stage Attempts","type":"array"},"transitions":{"items":{"$ref":"#/$defs/TransitionRecord"},"title":"Transitions","type":"array"},"repairs":{"items":{"$ref":"#/$defs/ParsimonyRepairRecord"},"title":"Repairs","type":"array"},"admission_decisions":{"items":{"$ref":"#/$defs/AdmissionDecisionRecord"},"title":"Admission Decisions","type":"array"},"admitted_inventory":{"items":{"$ref":"#/$defs/ArtifactReceipt"},"title":"Admitted Inventory","type":"array"},"quarantine_inventory":{"items":{"$ref":"#/$defs/ArtifactReceipt"},"title":"Quarantine Inventory","type":"array"}},"required":["schema_version","run_id","coverage_plan_sha256","candidate_attempts","stage_attempts","transitions","repairs","admission_decisions","admitted_inventory","quarantine_inventory"],"title":"FinalizationInventoryV1","type":"object"}
+{
+  "$defs": {
+    "AdmissionDecisionRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "payload_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Payload Sha256",
+          "type": "string"
+        },
+        "sequence": {
+          "minimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "candidate_id": {
+          "minLength": 1,
+          "title": "Candidate Id",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/CandidateTerminalStatus"
+        },
+        "admitted": {
+          "title": "Admitted",
+          "type": "boolean"
+        },
+        "gate_results": {
+          "items": {
+            "$ref": "#/$defs/GateResultRecord"
+          },
+          "title": "Gate Results",
+          "type": "array"
+        },
+        "candidate_snapshot_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Candidate Snapshot Sha256"
+        },
+        "actor_snapshot_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actor Snapshot Sha256"
+        },
+        "narrative_snapshot_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Narrative Snapshot Sha256"
+        },
+        "final_tree_snapshot_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Final Tree Snapshot Sha256"
+        },
+        "violations": {
+          "items": {
+            "$ref": "#/$defs/ViolationRecord"
+          },
+          "title": "Violations",
+          "type": "array"
+        },
+        "terminal_receipts": {
+          "items": {
+            "$ref": "#/$defs/ArtifactReceipt"
+          },
+          "title": "Terminal Receipts",
+          "type": "array"
+        }
+      },
+      "required": [
+        "event_id",
+        "payload_sha256",
+        "sequence",
+        "candidate_id",
+        "status",
+        "admitted",
+        "gate_results",
+        "violations",
+        "terminal_receipts"
+      ],
+      "title": "AdmissionDecisionRecord",
+      "type": "object"
+    },
+    "AdmissionEvidenceId": {
+      "description": "Closed, durable identifiers for authoritative admission evidence.",
+      "enum": [
+        "admission_exception",
+        "snapshot_integrity",
+        "identity",
+        "actor_attack_complexity",
+        "capability_grounding",
+        "tool_integration_grounding",
+        "data_access_grounding",
+        "catalog_taxonomy_pin_validity",
+        "resource_binding_validity",
+        "execution_requirement_drift",
+        "projection_traceability",
+        "structural_validity",
+        "identifier_validity",
+        "phantom_validity",
+        "semantic_validity",
+        "behavior_correspondence",
+        "narrative_tree_diagnostics",
+        "tree_parsimony",
+        "or_tree_prohibition"
+      ],
+      "title": "AdmissionEvidenceId",
+      "type": "string"
+    },
+    "ArtifactReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_id": {
+          "minLength": 1,
+          "title": "Candidate Id",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/ArtifactRole"
+        },
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "scenario_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Scenario Id"
+        }
+      },
+      "required": [
+        "candidate_id",
+        "role",
+        "path",
+        "sha256",
+        "scenario_id"
+      ],
+      "title": "ArtifactReceipt",
+      "type": "object"
+    },
+    "ArtifactRole": {
+      "description": "Typed role for every persisted artifact in a run.\n\nThe manifest container file (``run-manifest.yaml``) is **not** an\nartifact entry \u2014 it is the sole orphan exception.",
+      "enum": [
+        "use_case",
+        "capability_profile",
+        "threat_surface",
+        "scenario_yaml",
+        "scenario_feature",
+        "scenario_call_log",
+        "pipeline_call_log",
+        "coverage_report",
+        "eval_scorecard",
+        "report",
+        "pipeline_log",
+        "planning_checkpoint",
+        "coverage_plan",
+        "finalization_inventory",
+        "quarantine_bundle",
+        "candidate_filter_quarantine"
+      ],
+      "title": "ArtifactRole",
+      "type": "string"
+    },
+    "CallMetadataRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "call": {
+          "title": "Call",
+          "type": "string"
+        },
+        "prompt_tokens": {
+          "minimum": 0,
+          "title": "Prompt Tokens",
+          "type": "integer"
+        },
+        "completion_tokens": {
+          "minimum": 0,
+          "title": "Completion Tokens",
+          "type": "integer"
+        },
+        "duration_ms": {
+          "minimum": 0,
+          "title": "Duration Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "call",
+        "prompt_tokens",
+        "completion_tokens",
+        "duration_ms"
+      ],
+      "title": "CallMetadataRecord",
+      "type": "object"
+    },
+    "CandidateAttemptRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "payload_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Payload Sha256",
+          "type": "string"
+        },
+        "sequence": {
+          "minimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "attempt_id": {
+          "minLength": 1,
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "candidate_id": {
+          "minLength": 1,
+          "title": "Candidate Id",
+          "type": "string"
+        },
+        "target_entry_point_id": {
+          "minLength": 1,
+          "title": "Target Entry Point Id",
+          "type": "string"
+        },
+        "queue_rank": {
+          "minimum": 0,
+          "title": "Queue Rank",
+          "type": "integer"
+        },
+        "is_primary": {
+          "title": "Is Primary",
+          "type": "boolean"
+        },
+        "stage_attempt_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Stage Attempt Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "event_id",
+        "payload_sha256",
+        "sequence",
+        "attempt_id",
+        "candidate_id",
+        "target_entry_point_id",
+        "queue_rank",
+        "is_primary",
+        "stage_attempt_ids"
+      ],
+      "title": "CandidateAttemptRecord",
+      "type": "object"
+    },
+    "CandidateTerminalStatus": {
+      "enum": [
+        "admitted",
+        "rejected",
+        "generation_or_finalization_failed"
+      ],
+      "title": "CandidateTerminalStatus",
+      "type": "string"
+    },
+    "GateResultRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "gate": {
+          "$ref": "#/$defs/AdmissionEvidenceId"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "violations": {
+          "items": {
+            "$ref": "#/$defs/ViolationRecord"
+          },
+          "title": "Violations",
+          "type": "array"
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/$defs/ViolationRecord"
+          },
+          "title": "Diagnostics",
+          "type": "array"
+        },
+        "applicable": {
+          "title": "Applicable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "gate",
+        "passed",
+        "violations",
+        "diagnostics",
+        "applicable"
+      ],
+      "title": "GateResultRecord",
+      "type": "object"
+    },
+    "GeneratedStage": {
+      "description": "Only stages that own generated artifacts and retry budgets.",
+      "enum": [
+        "actor",
+        "narrative",
+        "tree",
+        "behavior"
+      ],
+      "title": "GeneratedStage",
+      "type": "string"
+    },
+    "JsonValue": {},
+    "LLMResultRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "prompt_tokens": {
+          "minimum": 0,
+          "title": "Prompt Tokens",
+          "type": "integer"
+        },
+        "completion_tokens": {
+          "minimum": 0,
+          "title": "Completion Tokens",
+          "type": "integer"
+        },
+        "duration_ms": {
+          "minimum": 0,
+          "title": "Duration Ms",
+          "type": "integer"
+        },
+        "system_prompt": {
+          "title": "System Prompt",
+          "type": "string"
+        },
+        "user_prompt": {
+          "title": "User Prompt",
+          "type": "string"
+        }
+      },
+      "required": [
+        "content",
+        "prompt_tokens",
+        "completion_tokens",
+        "duration_ms",
+        "system_prompt",
+        "user_prompt"
+      ],
+      "title": "LLMResultRecord",
+      "type": "object"
+    },
+    "LifecycleState": {
+      "enum": [
+        "pending",
+        "revalidating_candidate",
+        "generating_actor",
+        "generating_narrative",
+        "generating_tree",
+        "finalizing_prebehavior",
+        "generating_behavior",
+        "admitting",
+        "admitted",
+        "rejected",
+        "exhausted"
+      ],
+      "title": "LifecycleState",
+      "type": "string"
+    },
+    "ParsimonyRepairRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "payload_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Payload Sha256",
+          "type": "string"
+        },
+        "sequence": {
+          "minimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "candidate_attempt_id": {
+          "minLength": 1,
+          "title": "Candidate Attempt Id",
+          "type": "string"
+        },
+        "candidate_id": {
+          "minLength": 1,
+          "title": "Candidate Id",
+          "type": "string"
+        },
+        "target_entry_point_id": {
+          "minLength": 1,
+          "title": "Target Entry Point Id",
+          "type": "string"
+        },
+        "before_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Before Digest",
+          "type": "string"
+        },
+        "after_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "After Digest",
+          "type": "string"
+        },
+        "removed_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Removed Ids",
+          "type": "array"
+        },
+        "preserved_projected_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Preserved Projected Ids",
+          "type": "array"
+        },
+        "accepted": {
+          "title": "Accepted",
+          "type": "boolean"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "payload_sha256",
+        "sequence",
+        "candidate_attempt_id",
+        "candidate_id",
+        "target_entry_point_id",
+        "before_digest",
+        "after_digest",
+        "removed_ids",
+        "preserved_projected_ids",
+        "accepted",
+        "detail"
+      ],
+      "title": "ParsimonyRepairRecord",
+      "type": "object"
+    },
+    "PromptRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "system_prompt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "System Prompt"
+        },
+        "user_prompt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "User Prompt"
+        }
+      },
+      "required": [
+        "system_prompt",
+        "user_prompt"
+      ],
+      "title": "PromptRecord",
+      "type": "object"
+    },
+    "StageAttemptFailureRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "call_name": {
+          "title": "Call Name",
+          "type": "string"
+        },
+        "exception_type": {
+          "minLength": 1,
+          "title": "Exception Type",
+          "type": "string"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        },
+        "phase": {
+          "enum": [
+            "before_invocation",
+            "invocation",
+            "post_response"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "invoked": {
+          "title": "Invoked",
+          "type": "boolean"
+        },
+        "prompt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PromptRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LLMResultRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "raw_response": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JsonValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "call_name",
+        "exception_type",
+        "detail",
+        "phase",
+        "invoked",
+        "prompt",
+        "result",
+        "raw_response"
+      ],
+      "title": "StageAttemptFailureRecord",
+      "type": "object"
+    },
+    "StageAttemptRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "payload_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Payload Sha256",
+          "type": "string"
+        },
+        "sequence": {
+          "minimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "attempt_id": {
+          "minLength": 1,
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "candidate_id": {
+          "minLength": 1,
+          "title": "Candidate Id",
+          "type": "string"
+        },
+        "stage": {
+          "$ref": "#/$defs/GeneratedStage"
+        },
+        "invocation_index": {
+          "minimum": 0,
+          "title": "Invocation Index",
+          "type": "integer"
+        },
+        "owner_retry_index": {
+          "maximum": 2,
+          "minimum": 0,
+          "title": "Owner Retry Index",
+          "type": "integer"
+        },
+        "prompt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PromptRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "call": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageCallEvidenceRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JsonValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageAttemptFailureRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "input": {
+          "$ref": "#/$defs/StageInputRecord"
+        },
+        "input_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Input Sha256",
+          "type": "string"
+        },
+        "candidate_snapshot_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Candidate Snapshot Sha256",
+          "type": "string"
+        },
+        "final_tree_snapshot_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Final Tree Snapshot Sha256"
+        },
+        "output_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Sha256"
+        },
+        "violations": {
+          "items": {
+            "$ref": "#/$defs/ViolationRecord"
+          },
+          "title": "Violations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "event_id",
+        "payload_sha256",
+        "sequence",
+        "attempt_id",
+        "candidate_id",
+        "stage",
+        "invocation_index",
+        "owner_retry_index",
+        "prompt",
+        "call",
+        "result",
+        "failure",
+        "input",
+        "input_sha256",
+        "candidate_snapshot_sha256",
+        "violations"
+      ],
+      "title": "StageAttemptRecord",
+      "type": "object"
+    },
+    "StageCallEvidenceRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "call_name": {
+          "title": "Call Name",
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/LLMResultRecord"
+        },
+        "metadata": {
+          "$ref": "#/$defs/CallMetadataRecord"
+        }
+      },
+      "required": [
+        "call_name",
+        "result",
+        "metadata"
+      ],
+      "title": "StageCallEvidenceRecord",
+      "type": "object"
+    },
+    "StageInputRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "candidate_id": {
+          "minLength": 1,
+          "title": "Candidate Id",
+          "type": "string"
+        },
+        "stage": {
+          "$ref": "#/$defs/GeneratedStage"
+        },
+        "invocation_index": {
+          "minimum": 0,
+          "title": "Invocation Index",
+          "type": "integer"
+        },
+        "owner_retry_index": {
+          "maximum": 2,
+          "minimum": 0,
+          "title": "Owner Retry Index",
+          "type": "integer"
+        },
+        "visible_artifacts": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Visible Artifacts",
+          "type": "object"
+        },
+        "prompt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PromptRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "final_tree_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Final Tree Digest"
+        }
+      },
+      "required": [
+        "candidate",
+        "candidate_id",
+        "stage",
+        "invocation_index",
+        "owner_retry_index",
+        "visible_artifacts",
+        "prompt"
+      ],
+      "title": "StageInputRecord",
+      "type": "object"
+    },
+    "TransitionRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "payload_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Payload Sha256",
+          "type": "string"
+        },
+        "sequence": {
+          "minimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "target_entry_point_id": {
+          "minLength": 1,
+          "title": "Target Entry Point Id",
+          "type": "string"
+        },
+        "index": {
+          "minimum": 0,
+          "title": "Index",
+          "type": "integer"
+        },
+        "previous": {
+          "$ref": "#/$defs/LifecycleState"
+        },
+        "current": {
+          "$ref": "#/$defs/LifecycleState"
+        },
+        "candidate_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Candidate Id"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "payload_sha256",
+        "sequence",
+        "target_entry_point_id",
+        "index",
+        "previous",
+        "current",
+        "candidate_id",
+        "reason"
+      ],
+      "title": "TransitionRecord",
+      "type": "object"
+    },
+    "ViolationRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "minLength": 1,
+          "title": "Code",
+          "type": "string"
+        },
+        "detail": {
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GeneratedStage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "retryable": {
+          "title": "Retryable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "detail",
+        "owner",
+        "retryable"
+      ],
+      "title": "ViolationRecord",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "run_id": {
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "coverage_plan_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Coverage Plan Sha256",
+      "type": "string"
+    },
+    "candidate_attempts": {
+      "items": {
+        "$ref": "#/$defs/CandidateAttemptRecord"
+      },
+      "title": "Candidate Attempts",
+      "type": "array"
+    },
+    "stage_attempts": {
+      "items": {
+        "$ref": "#/$defs/StageAttemptRecord"
+      },
+      "title": "Stage Attempts",
+      "type": "array"
+    },
+    "transitions": {
+      "items": {
+        "$ref": "#/$defs/TransitionRecord"
+      },
+      "title": "Transitions",
+      "type": "array"
+    },
+    "repairs": {
+      "items": {
+        "$ref": "#/$defs/ParsimonyRepairRecord"
+      },
+      "title": "Repairs",
+      "type": "array"
+    },
+    "admission_decisions": {
+      "items": {
+        "$ref": "#/$defs/AdmissionDecisionRecord"
+      },
+      "title": "Admission Decisions",
+      "type": "array"
+    },
+    "admitted_inventory": {
+      "items": {
+        "$ref": "#/$defs/ArtifactReceipt"
+      },
+      "title": "Admitted Inventory",
+      "type": "array"
+    },
+    "quarantine_inventory": {
+      "items": {
+        "$ref": "#/$defs/ArtifactReceipt"
+      },
+      "title": "Quarantine Inventory",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "coverage_plan_sha256",
+    "candidate_attempts",
+    "stage_attempts",
+    "transitions",
+    "repairs",
+    "admission_decisions",
+    "admitted_inventory",
+    "quarantine_inventory"
+  ],
+  "title": "FinalizationInventoryV1",
+  "type": "object"
+}

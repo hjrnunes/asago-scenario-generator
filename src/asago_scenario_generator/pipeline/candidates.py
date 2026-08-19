@@ -403,6 +403,10 @@ class CandidateTriple(BaseModel):
         default=None,
         description="Entry point data flow direction: 'input', 'output', or 'bidirectional'.",
     )
+    ingress_zone: str | None = Field(
+        default=None,
+        description="Explicit Schneider ingress zone used by canonical identity.",
+    )
     entry_point_id: str = Field(
         description="Canonical, deterministic entry point identity (ep:v1:<hash>).",
     )
@@ -429,6 +433,7 @@ class CandidateTriple(BaseModel):
             self.entry_point,
             self.direction or "bidirectional",
             self.controllability,
+            self.ingress_zone,
         )
         if self.entry_point_id != expected_ep_id:
             raise ValueError(
@@ -780,6 +785,7 @@ def expand_candidates(
                             entry_point=entry_point.name,
                             controllability=entry_point.controllability,
                             direction=entry_point.direction,
+                            ingress_zone=entry_point.ingress_zone,
                             entry_point_id=ep_id,
                             candidate_id=compute_candidate_id(
                                 seed.seed_id,
