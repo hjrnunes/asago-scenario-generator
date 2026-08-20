@@ -49,9 +49,11 @@ config/model-profiles.yaml.backup
 .opencode/
 .superpowers/
 .swarmforge/
+.swarmforge-droid/
 .worktrees/
 swarmforge/
 swarm
+close-swarm
 ai/
 opencode.json
 

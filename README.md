@@ -93,8 +93,8 @@ asago-scenario-generator stpa-report --output-dir output/my-system-stpa
 
 ```bash
 ./scripts/quality.sh
-uv run pytest tests/ -q
 ./scripts/acceptance.sh
+uv run pytest tests/ -q
 ```
 
 The unit and default acceptance suites are deterministic and do not require an

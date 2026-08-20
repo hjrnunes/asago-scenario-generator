@@ -26,12 +26,12 @@ processes or a specific harness:
    behavior that satisfies each accepted example.
 3. **Cleaner** — simplify names, boundaries, duplication, and coupling without
    changing accepted behavior.
-4. **Hardener** — exercise error paths, properties, mutation resistance, and
+4. **Architect** — review the slice for contract coherence, module boundaries,
+   dependency direction, and durable documentation.
+5. **Hardener** — exercise error paths, properties, mutation resistance, and
    adversarial inputs; make failures explicit and diagnosable.
-5. **QA** — run independent deterministic and acceptance gates, verify the
+6. **QA** — run independent deterministic and acceptance gates, verify the
    issue contract, and report reproducible evidence.
-6. **Architect** — review the completed slice for contract coherence, module
-   boundaries, and durable documentation before merge.
 
 Scaffolding a new language or acceptance runtime is bootstrap work outside the
 six-pack. Once the project commands exist, every feature follows the six
@@ -61,9 +61,13 @@ The normal merge evidence is:
 
 ```bash
 ./scripts/quality.sh
-uv run pytest tests/ -q
 ./scripts/acceptance.sh
+uv run pytest tests/ -q
 ```
+
+Generate acceptance artifacts before the unit suite in a fresh checkout.
+Several migration-contract tests deliberately execute the generated acceptance
+entrypoints and fail when `build/acceptance/` has not been reconstructed yet.
 
 Changed production code should also be evaluated with the configured coverage,
 CRAP, DRY, source mutation, and Gherkin mutation commands where relevant. The
@@ -86,6 +90,28 @@ immediately; the project never silently downloads a replacement.
 Update a pin in a dedicated pull request that records upstream changes and runs
 the affected quality gate. Harness-specific role prompts, handoff files,
 dashboards, Beads state, and local tool clones are not repository content.
+
+## Local orchestrators
+
+The supported local installations both use the six-pack order above and the
+commands in `config/swarmforge.env`:
+
+- Upstream SwarmForge uses the pinned `six-pack` configuration under ignored
+  `swarmforge/`, runtime under `.swarmforge/`, and role worktrees under
+  `.worktrees/`. It uses Codex for all six roles. Launch it from a feature
+  branch with `./swarm`; stop it with `./close-swarm` or by closing its first
+  terminal window.
+- SwarmForge-Droid uses ignored role prompts and helpers under `.factory/` and
+  an isolated runtime under `.swarmforge-droid/`. Configure the six-pack
+  without the scaffolder, set `SWARMFORGE_BEADS=false`,
+  `SWARMFORGE_COMMIT_BYLINE=false`, and
+  `SWARMFORGE_MANAGE_AGENT_INSTRUCTIONS=false`, then ask Droid to implement an
+  approved issue.
+
+The scaffolder is intentionally absent because the portable acceptance
+pipeline is already committed. Both installations use ordinary project commit
+messages without agent-role bylines. Never run the two orchestrators against
+the same feature branch concurrently.
 
 ## Completion
 
