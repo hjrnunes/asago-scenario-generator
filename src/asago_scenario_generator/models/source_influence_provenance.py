@@ -326,3 +326,8 @@ class SourceInfluenceProvenanceBlock(BaseModel):
     status: Literal["pass", "fail"] = Field(
         description="Persisted qualification status for this block.",
     )
+
+
+# mutate4py-manifest-begin
+# {"version":1,"tested_at":"2026-08-20T11:16:30Z","module_hash":"fd4973d6ba3c6cb42261b8f0c39599140444b008a9f0c3b34d71d9b22ad85e93","functions":[{"id":"func/SourceInfluenceSourceRef._source_id_matches_type","name":"_source_id_matches_type","line":71,"end_line":87,"hash":"dfd00b2cdf38b8828659a010ee350d156cf59fb52cf116017f5b37e485d7b245"},{"id":"func/SourceInfluenceSourceRef.__hash__","name":"__hash__","line":89,"end_line":90,"hash":"8811d518fa96d2634be1b9b22c04b156fb7324efc92bca15e7eead46f5771cf5"},{"id":"func/parse_source_ref","name":"parse_source_ref","line":93,"end_line":109,"hash":"cb61eee4750e1b2c92dca8c822e0ff4e19ece72f158a6bd9f5ea75636ae6f167"},{"id":"func/CoverageFraction._numerator_within_denominator","name":"_numerator_within_denominator","line":230,"end_line":236,"hash":"1fc62a4539751de8f4130ae6dde34e1eabb7456f3d24347e8087bb7b61fddf0d"},{"id":"func/SourceInfluenceQualification._sync_status","name":"_sync_status","line":282,"end_line":293,"hash":"3869022fe206ca5aa3b05ce10d82d27d0efc8ebf3c5b4e6f833cc805006c90f8"}]}
+# mutate4py-manifest-end
