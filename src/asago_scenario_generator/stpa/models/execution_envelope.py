@@ -212,8 +212,7 @@ class TemporalActionVector(BaseModel):
             candidate_uca_type = UCAType(parts[3])
         except ValueError as exc:
             raise ValueError(
-                f"TemporalActionVector candidate_id has unknown UCA type "
-                f"'{parts[3]}'."
+                f"TemporalActionVector candidate_id has unknown UCA type '{parts[3]}'."
             ) from exc
         expected_candidate_id = candidate_id_for(
             parts[1], self.control_action_id, candidate_uca_type
