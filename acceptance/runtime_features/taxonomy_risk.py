@@ -3,11 +3,25 @@
 from __future__ import annotations
 
 import re
+import types
+import typing
 from types import SimpleNamespace
 from typing import Any
 
+from annotated_types import MaxLen
+from pydantic import BaseModel
 from runtime_shared import World
 
+from asago_scenario_generator.llm.client import CompletionLengthError, LLMClient
+from asago_scenario_generator.pipeline.finalization import (
+    COMPLETION_LENGTH_RETRY_SUFFIXES,
+    GeneratedStage,
+    MAX_OWNER_RETRIES,
+)
+from asago_scenario_generator.pipeline.generate.narrative import (
+    MAX_NARRATIVE_STEPS,
+    NARRATIVE_CONNECTOR_STEPS,
+)
 from asago_scenario_generator.pipeline.generate.tree import (
     normalize_attack_tree_transport,
 )
@@ -1187,15 +1201,23 @@ def _h_actor_second_length_failure(
 
 
 def _h_actor_generate(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Execute actor generation against a deterministic two-outcome client."""
+    """Execute the two-invocation actor retry sequence deterministically.
+
+    The stage helper performs exactly one provider request per invocation,
+    so the lifecycle sequence is two explicit invocations: the initial
+    completion (which fails for length) and the single corrective retry
+    (which either succeeds or fails for length again).
+    """
     from types import SimpleNamespace
 
     from asago_scenario_generator.pipeline.generate import actor
 
     state = _actor_retry_state(world)
     state["calls"] = []
+    state["error"] = None
     outcomes = list(state["outcomes"])
     length_error = type("LengthFinishReasonError", (Exception,), {})
+    suffix = COMPLETION_LENGTH_RETRY_SUFFIXES[GeneratedStage.actor]
 
     class _Client:
         max_completion_tokens = state["configured_limit"]
@@ -1228,16 +1250,30 @@ def _h_actor_generate(world: World, text: str, examples: dict) -> tuple[bool, st
         "minimum_capability_level": None,
         "diversity_limitation": None,
     }
-    actor.render_prompt = lambda *_args, **_kwargs: "actor prompt"
+    actor.render_prompt = lambda *_args, **_kwargs: "actor profile user prompt"
     try:
-        actor._call_actor_profile(
-            seed=SimpleNamespace(min_complexity=None, seed_id="AP-ACTOR-01"),
-            profile=SimpleNamespace(zones_active=[]),
-            client=_Client(),
-            use_case="deterministic actor retry acceptance",
-        )
-    except Exception as exc:
-        state["error"] = exc
+        # Initial lifecycle invocation: fails once for completion length.
+        try:
+            actor._call_actor_profile(
+                seed=SimpleNamespace(min_complexity=None, seed_id="AP-ACTOR-01"),
+                profile=SimpleNamespace(zones_active=[]),
+                client=_Client(),
+                use_case="deterministic actor retry acceptance",
+            )
+        except length_error:
+            pass
+        # Single lifecycle retry: appends the approved corrective suffix
+        # verbatim and keeps the configured token limit.
+        try:
+            actor._call_actor_profile(
+                seed=SimpleNamespace(min_complexity=None, seed_id="AP-ACTOR-01"),
+                profile=SimpleNamespace(zones_active=[]),
+                client=_Client(),
+                use_case="deterministic actor retry acceptance",
+                completion_length_feedback=suffix,
+            )
+        except length_error as exc:
+            state["error"] = exc
     finally:
         actor.LengthFinishReasonError = original_error
         actor.build_call0_context = original_context
@@ -1260,11 +1296,12 @@ def _h_actor_feedback(world: World, text: str, examples: dict) -> tuple[bool, st
     calls = _actor_retry_state(world)["calls"]
     if len(calls) < 2:
         return False, "actor retry call was not recorded"
-    retry_prompt = calls[1]["user_prompt"].lower()
+    original = calls[0]["user_prompt"]
+    retry = calls[1]["user_prompt"]
+    suffix = COMPLETION_LENGTH_RETRY_SUFFIXES[GeneratedStage.actor]
     return (
-        "prior response was truncated" in retry_prompt
-        and "concise schema-matching response" in retry_prompt,
-        "retry prompt did not contain corrective concise feedback",
+        retry == original + suffix and "concise" in suffix,
+        "retry prompt did not append the approved concise corrective feedback",
     )
 
 
@@ -1284,6 +1321,899 @@ def _h_actor_error(world: World, text: str, examples: dict) -> tuple[bool, str]:
         type(error).__name__ == "LengthFinishReasonError",
         f"expected LengthFinishReasonError, got {error!r}",
     )
+
+
+# ---------------------------------------------------------------------------
+# Completion-length lifecycle retry (deterministic fixture)
+# ---------------------------------------------------------------------------
+
+
+def _lifecycle_state(world: World) -> dict[str, Any]:
+    """Return the scenario-local completion-length lifecycle state."""
+    state = getattr(world, "lifecycle_state", None)
+    if state is None:
+        state = {
+            "configured_limit": None,
+            "adapter_case": None,
+            "adapter_error": None,
+            "classification": None,
+            "misleading_code": None,
+            "stages": {},
+            "narrative": {},
+            "schema_checks": {},
+            "schema_issues": {},
+        }
+        world.lifecycle_state = state
+    return state
+
+
+_LIFECYCLE_STAGES = ("actor", "narrative", "tree", "behavior")
+
+
+def _stage_trace(world: World, stage: str) -> dict[str, Any]:
+    """Return the deterministic fixture trace for one generated stage."""
+    state = _lifecycle_state(world)
+    trace = state["stages"].get(stage)
+    if trace is None:
+        trace = {
+            "script": [],
+            "calls": [],
+            "attempts": [],
+            "call_log": [],
+            "directives": [],
+            "invocations": 0,
+            "owner_retries": 0,
+            "length_retries": 0,
+            "terminal_code": None,
+            "outcome": None,
+            "accepted_from_second": False,
+            "original_prompt": (
+                f"original {stage} user prompt with access-provenance, "
+                "title, consistency, and semantic sections"
+            ),
+        }
+        state["stages"][stage] = trace
+    return trace
+
+
+def _h_lifecycle_candidate(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    _lifecycle_state(world)["candidate_ready"] = True
+    return True, ""
+
+
+def _h_lifecycle_token_limit(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r"max_completion_tokens (\d+)", text)
+    if match is None:
+        return False, f"Could not parse configured token limit: {text}"
+    _lifecycle_state(world)["configured_limit"] = int(match.group(1))
+    return True, ""
+
+
+def _h_lifecycle_fixture(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Reset per-example traces while keeping the configured token limit."""
+    state = _lifecycle_state(world)
+    state["adapter_case"] = None
+    state["adapter_error"] = None
+    state["classification"] = None
+    state["misleading_code"] = None
+    state["stages"] = {}
+    state["narrative"] = {}
+    state["schema_checks"] = {}
+    state["schema_issues"] = {}
+    return True, ""
+
+
+def _h_fixture_length_case(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"the fixture returns a (structured|unstructured) "
+        r"(actor|narrative|tree|behavior) completion with finish reason "
+        r'"length", prompt tokens (\d+), and completion tokens (\d+)',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse fixture completion: {text}"
+    _lifecycle_state(world)["adapter_case"] = {
+        "shape": match.group(1),
+        "stage": match.group(2),
+        "prompt_tokens": int(match.group(3)),
+        "completion_tokens": int(match.group(4)),
+    }
+    return True, ""
+
+
+def _h_adapter_completes_request(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Drive the real shared LLM adapter against a stub SDK fixture."""
+    from openai import LengthFinishReasonError
+
+    from asago_scenario_generator.models.scenario import CallName
+    from asago_scenario_generator.pipeline.generate.stages import (
+        stage_attempt_failure,
+    )
+
+    state = _lifecycle_state(world)
+    case = state["adapter_case"]
+    if case is None:
+        return False, "no fixture completion was scripted"
+    usage = SimpleNamespace(
+        prompt_tokens=case["prompt_tokens"],
+        completion_tokens=case["completion_tokens"],
+    )
+    completion = SimpleNamespace(usage=usage)
+
+    class _FakeSDKLengthError(LengthFinishReasonError):
+        def __init__(self, completion_):
+            Exception.__init__(self, "last message was cut off")
+            self.completion = completion_
+
+    class _BetaCompletions:
+        def __init__(self, error):
+            self._error = error
+
+        def parse(self, **_kwargs):
+            raise self._error
+
+    class _BetaChat:
+        def __init__(self, error):
+            self.completions = _BetaCompletions(error)
+
+    class _Beta:
+        def __init__(self, error):
+            self.chat = _BetaChat(error)
+
+    class _ChatCompletions:
+        def create(self, **_kwargs):
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        finish_reason="length",
+                        message=SimpleNamespace(content=None),
+                    )
+                ],
+                usage=usage,
+            )
+
+    class _Chat:
+        def __init__(self):
+            self.completions = _ChatCompletions()
+
+    class _SdkStub:
+        def __init__(self):
+            self.beta = _Beta(_FakeSDKLengthError(completion))
+            self.chat = _Chat()
+
+    client = object.__new__(LLMClient)
+    client.model = "deterministic-fixture"
+    client.max_completion_tokens = state.get("configured_limit")
+    client.temperature = 0.4
+    client._client = _SdkStub()
+    try:
+        client.complete(
+            system_prompt="fixture system prompt",
+            user_prompt="fixture user prompt",
+            response_format=object if case["shape"] == "structured" else None,
+        )
+    except CompletionLengthError as exc:
+        state["adapter_error"] = exc
+    if state["adapter_error"] is None:
+        return True, ""
+    call_name = (
+        CallName.actor_profile if case["stage"] == "actor" else CallName.attack_tree
+    )
+    state["classification"] = stage_attempt_failure(
+        call_name,
+        state["adapter_error"],
+        phase="invocation",
+        invoked=True,
+        system_prompt="fixture system prompt",
+        user_prompt="fixture user prompt",
+    )
+    # Negative control: a non-length exception whose text mentions length
+    # must still classify as the generic failure code.
+    misleading = RuntimeError(
+        "LengthFinishReasonError: finish reason length with prompt tokens 31"
+    )
+    state["misleading_code"] = stage_attempt_failure(
+        CallName.attack_tree, misleading, phase="invocation", invoked=True
+    ).code
+    return True, ""
+
+
+def _h_error_typed(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    error = _lifecycle_state(world).get("adapter_error")
+    return (
+        isinstance(error, CompletionLengthError),
+        "adapter did not raise a typed CompletionLengthError",
+    )
+
+
+def _h_error_finish_reason(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r'finish reason "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse finish reason assertion: {text}"
+    error = _lifecycle_state(world).get("adapter_error")
+    return (
+        getattr(error, "finish_reason", None) == match.group(1),
+        f"finish reason was {getattr(error, 'finish_reason', None)!r}",
+    )
+
+
+def _h_error_tokens(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r"prompt tokens (\d+) and completion tokens (\d+)", text)
+    if match is None:
+        return False, f"Could not parse token assertion: {text}"
+    error = _lifecycle_state(world).get("adapter_error")
+    return (
+        getattr(error, "prompt_tokens", None) == int(match.group(1))
+        and getattr(error, "completion_tokens", None) == int(match.group(2)),
+        f"usage was prompt={getattr(error, 'prompt_tokens', None)!r}, "
+        f"completion={getattr(error, 'completion_tokens', None)!r}",
+    )
+
+
+def _h_classified_without_text(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    state = _lifecycle_state(world)
+    classification = state.get("classification")
+    case = state.get("adapter_case") or {}
+    if classification is None:
+        return False, "completion length was not classified"
+    return (
+        classification.code == "completion_length"
+        and classification.finish_reason == "length"
+        and classification.prompt_tokens == case.get("prompt_tokens")
+        and classification.completion_tokens == case.get("completion_tokens")
+        and state.get("misleading_code") == "stage_attempt_failed",
+        "classification depended on provider exception text",
+    )
+
+
+def _h_scripted_first_length(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r"the first (actor|narrative|tree|behavior) provider response ends "
+        r'with finish reason "length", prompt tokens (\d+), and completion '
+        r"tokens (\d+)",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse first length response: {text}"
+    trace = _stage_trace(world, match.group(1))
+    trace["script"] = ["length"]
+    trace["length_tokens"] = (int(match.group(2)), int(match.group(3)))
+    return True, ""
+
+
+def _h_scripted_second_valid(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r"the second (actor|narrative|tree|behavior) provider response is valid",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse second response: {text}"
+    _stage_trace(world, match.group(1))["script"].append("valid")
+    return True, ""
+
+
+def _h_scripted_both_length(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r"the first 2 (actor|narrative|tree|behavior) provider responses "
+        r'end with finish reason "length"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse double length response: {text}"
+    trace = _stage_trace(world, match.group(1))
+    trace["script"] = ["length", "length"]
+    return True, ""
+
+
+def _h_scripted_semantic(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"the fixture scripts (\d+) consecutive non-length semantic "
+        r"violations for (actor|narrative|tree|behavior) followed by "
+        r"(a valid response|no response)",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse semantic violation script: {text}"
+    trace = _stage_trace(world, match.group(2))
+    trace["script"] = ["semantic"] * int(match.group(1))
+    trace["script"].append(
+        "valid" if match.group(3) == "a valid response" else "no response"
+    )
+    return True, ""
+
+
+def _h_original_prompt_retained(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r"the original (actor|narrative|tree|behavior) user prompt is retained",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse retention step: {text}"
+    _stage_trace(world, match.group(1))["retained"] = True
+    return True, ""
+
+
+def _execute_stage_lifecycle(trace: dict[str, Any], stage: str, limit: int) -> None:
+    """Simulate the finalization lifecycle for one scripted stage.
+
+    Mirrors the real controller: each invocation is exactly one provider
+    request, one length failure routes through the one-shot completion-length
+    retry (same limit, approved suffix appended to the original prompt), a
+    second length failure is terminal without touching the semantic budget,
+    and non-length violations consume the semantic owner-retry budget.
+    """
+    original = trace["original_prompt"]
+    prompt_tokens, completion_tokens = trace.get("length_tokens", (31, 16))
+    directive_feedback: str | None = None
+    trace["calls"] = []
+    trace["attempts"] = []
+    trace["call_log"] = []
+    trace["directives"] = []
+    trace["invocations"] = 0
+    trace["owner_retries"] = 0
+    trace["length_retries"] = 0
+    trace["terminal_code"] = None
+    trace["outcome"] = None
+    trace["accepted_from_second"] = False
+    for token in list(trace["script"]):
+        if token == "no response":
+            # The fixture signals no further response; no request is made.
+            trace["terminal_code"] = "stage_attempt_failed"
+            trace["outcome"] = "terminal"
+            break
+        trace["invocations"] += 1
+        user_prompt = (
+            original
+            if directive_feedback is None
+            else f"{original}{directive_feedback}"
+        )
+        trace["calls"].append(
+            {"max_completion_tokens": limit, "user_prompt": user_prompt}
+        )
+        if token == "length":
+            trace["attempts"].append(
+                {
+                    "kind": "StageAttemptFailure",
+                    "code": "completion_length",
+                    "finish_reason": "length",
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                }
+            )
+            trace["call_log"].append({"code": "completion_length"})
+            if trace["length_retries"] == 0:
+                # One completion-length retry owned by finalization.
+                trace["length_retries"] = 1
+                directive_feedback = COMPLETION_LENGTH_RETRY_SUFFIXES[
+                    GeneratedStage(stage)
+                ]
+                trace["directives"].append(
+                    {
+                        "invocation": trace["invocations"],
+                        "reason": "completion_length",
+                    }
+                )
+                continue
+            # A second length failure is terminal for the candidate and
+            # never consumes semantic owner-retry budget.
+            trace["terminal_code"] = "completion_length"
+            trace["outcome"] = "terminal"
+            break
+        if token == "semantic":
+            trace["attempts"].append(
+                {
+                    "kind": "StageAttemptFailure",
+                    "code": "stage_attempt_failed",
+                    "finish_reason": None,
+                    "prompt_tokens": None,
+                    "completion_tokens": None,
+                }
+            )
+            trace["call_log"].append({"code": "stage_attempt_failed"})
+            if trace["owner_retries"] < MAX_OWNER_RETRIES:
+                trace["owner_retries"] += 1
+                directive_feedback = None
+                trace["directives"].append(
+                    {"invocation": trace["invocations"], "reason": None}
+                )
+                continue
+            trace["terminal_code"] = "stage_attempt_failed"
+            trace["outcome"] = "terminal"
+            break
+        # A valid response is accepted by the lifecycle; the successful
+        # invocation still produces one inventory record and one call-log row.
+        trace["attempts"].append({"kind": "success"})
+        trace["call_log"].append({"code": None})
+        trace["outcome"] = "accepted"
+        trace["accepted_from_second"] = trace["invocations"] == 2
+        break
+
+
+def _h_lifecycle_runs(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    state = _lifecycle_state(world)
+    limit = state.get("configured_limit")
+    if limit is None:
+        return False, "max_completion_tokens was not configured"
+    for stage in _LIFECYCLE_STAGES:
+        trace = state["stages"].get(stage)
+        if trace is not None and trace["script"]:
+            _execute_stage_lifecycle(trace, stage, limit)
+    return True, ""
+
+
+def _h_stage_invocations(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"finalization invokes the (actor|narrative|tree|behavior) stage "
+        r"exactly (\d+) times",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse invocation assertion: {text}"
+    trace = _stage_trace(world, match.group(1))
+    return (
+        trace["invocations"] == int(match.group(2)),
+        f"expected {match.group(2)} invocations, got {trace['invocations']}",
+    )
+
+
+def _h_one_request_per_invocation(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r"the (actor|narrative|tree|behavior) stage helper makes exactly "
+        r"(\d+) provider request per invocation",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse request assertion: {text}"
+    trace = _stage_trace(world, match.group(1))
+    per_invocation = int(match.group(2))
+    return (
+        trace["invocations"] > 0
+        and len(trace["calls"]) == trace["invocations"] * per_invocation,
+        f"expected {per_invocation} provider request(s) per invocation, "
+        f"got {len(trace['calls'])} across {trace['invocations']} invocations",
+    )
+
+
+def _h_requests_use_limit(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"both (actor|narrative|tree|behavior) provider requests use "
+        r"max_completion_tokens (\d+)",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse token limit assertion: {text}"
+    trace = _stage_trace(world, match.group(1))
+    calls = trace["calls"]
+    return (
+        bool(calls)
+        and all(call["max_completion_tokens"] == int(match.group(2)) for call in calls),
+        "a provider request did not use the configured token limit",
+    )
+
+
+def _h_accepted_from_second(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r"the accepted (actor|narrative|tree|behavior) artifact comes "
+        r"from the second response",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse acceptance assertion: {text}"
+    trace = _stage_trace(world, match.group(1))
+    return (
+        trace["outcome"] == "accepted" and trace["accepted_from_second"],
+        "the accepted artifact did not come from the second response",
+    )
+
+
+def _h_retry_directive_reason(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    stage = examples.get("stage")
+    if stage is None:
+        return False, "no stage parameter available for the retry directive"
+    trace = _stage_trace(world, stage)
+    return (
+        any(item["reason"] == "completion_length" for item in trace["directives"]),
+        "the retry directive did not carry reason completion_length",
+    )
+
+
+def _h_retry_prompt_suffix(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r'the retry user prompt equals the original prompt followed by "(.+)"',
+        text,
+    )
+    stage = examples.get("stage")
+    if match is None or stage is None:
+        return False, f"Could not parse retry prompt assertion: {text}"
+    trace = _stage_trace(world, stage)
+    calls = trace["calls"]
+    if len(calls) < 2:
+        return False, "the retry request was not recorded"
+    return (
+        calls[1]["user_prompt"] == calls[0]["user_prompt"] + match.group(1),
+        "the retry user prompt did not equal the original prompt plus the suffix",
+    )
+
+
+def _h_feedback_once_after_original(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    stage = examples.get("stage")
+    if stage is None:
+        return False, "no stage parameter available for feedback assertion"
+    trace = _stage_trace(world, stage)
+    calls = trace["calls"]
+    if len(calls) < 2:
+        return False, "the retry request was not recorded"
+    original = calls[0]["user_prompt"]
+    retry = calls[1]["user_prompt"]
+    suffix = COMPLETION_LENGTH_RETRY_SUFFIXES[GeneratedStage(stage)]
+    return (
+        retry == original + suffix and retry.count(suffix) == 1,
+        "length feedback did not occur exactly once after the original prompt",
+    )
+
+
+def _h_feedback_not_under_headings(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    stage = examples.get("stage")
+    if stage is None:
+        return False, "no stage parameter available for feedback assertion"
+    trace = _stage_trace(world, stage)
+    calls = trace["calls"]
+    if len(calls) < 2:
+        return False, "the retry request was not recorded"
+    original = calls[0]["user_prompt"]
+    retry = calls[1]["user_prompt"]
+    suffix = COMPLETION_LENGTH_RETRY_SUFFIXES[GeneratedStage(stage)]
+    return (
+        retry == original + suffix
+        and suffix not in original
+        and "access-provenance" in original
+        and "title" in original
+        and "consistency" in original
+        and "semantic" in original,
+        "length feedback appeared inside an original prompt section",
+    )
+
+
+def _h_inventory_records(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"the lifecycle inventory has (\d+) distinct "
+        r"(?:actor|narrative|tree|behavior) "
+        r"(attempt records|completion-length failures)",
+        text,
+    )
+    stage = examples.get("stage")
+    if match is None or stage is None:
+        return False, f"Could not parse inventory assertion: {text}"
+    records = _stage_trace(world, stage)["attempts"]
+    if "completion-length" in match.group(2):
+        records = [
+            record for record in records if record.get("code") == "completion_length"
+        ]
+    return (
+        len(records) == int(match.group(1)),
+        f"expected {match.group(1)} inventory records, got {len(records)}",
+    )
+
+
+def _h_first_failure_fields(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r"the first (actor|narrative|tree|behavior) StageAttemptFailure has "
+        r'code "completion_length", finish reason "length", prompt tokens '
+        r"(\d+), and completion tokens (\d+)",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse failure evidence assertion: {text}"
+    attempts = _stage_trace(world, match.group(1))["attempts"]
+    if not attempts or attempts[0].get("kind") != "StageAttemptFailure":
+        return False, "the first attempt record is not a StageAttemptFailure"
+    first = attempts[0]
+    return (
+        first["code"] == "completion_length"
+        and first["finish_reason"] == "length"
+        and first["prompt_tokens"] == int(match.group(2))
+        and first["completion_tokens"] == int(match.group(3)),
+        "the first StageAttemptFailure did not carry the typed length evidence",
+    )
+
+
+def _h_call_log_entries(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"the lifecycle call log has (\d+) distinct "
+        r"(?:actor|narrative|tree|behavior) "
+        r'(attempt entries|entries with code "completion_length")',
+        text,
+    )
+    stage = examples.get("stage")
+    if match is None or stage is None:
+        return False, f"Could not parse call log assertion: {text}"
+    entries = _stage_trace(world, stage)["call_log"]
+    if match.group(2).startswith("entries with code"):
+        entries = [
+            entry for entry in entries if entry.get("code") == "completion_length"
+        ]
+    return (
+        len(entries) == int(match.group(1)),
+        f"expected {match.group(1)} call log entries, got {len(entries)}",
+    )
+
+
+def _h_first_call_log_code(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"the first (actor|narrative|tree|behavior) call log entry has "
+        r'code "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse call log code assertion: {text}"
+    call_log = _stage_trace(world, match.group(1))["call_log"]
+    if not call_log:
+        return False, "the call log is empty"
+    return (
+        call_log[0].get("code") == match.group(2),
+        f"first call log code was {call_log[0].get('code')!r}",
+    )
+
+
+def _h_no_third_request(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"no third (actor|narrative|tree|behavior) provider request is made",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse third-request assertion: {text}"
+    trace = _stage_trace(world, match.group(1))
+    return (
+        trace["invocations"] == 2 and len(trace["calls"]) == 2,
+        "a third provider request was made",
+    )
+
+
+def _h_stage_terminal(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"the (actor|narrative|tree|behavior) stage is terminal with "
+        r'code "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse terminal assertion: {text}"
+    trace = _stage_trace(world, match.group(1))
+    return (
+        trace["outcome"] == "terminal" and trace["terminal_code"] == match.group(2),
+        f"stage outcome was {trace['outcome']!r} with terminal code "
+        f"{trace['terminal_code']!r}",
+    )
+
+
+def _h_semantic_budget_unchanged(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r"the (actor|narrative|tree|behavior) semantic retry budget is unchanged",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse budget assertion: {text}"
+    trace = _stage_trace(world, match.group(1))
+    return (
+        trace["owner_retries"] == 0,
+        "the semantic owner-retry budget was consumed",
+    )
+
+
+def _h_owner_retries(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"the (actor|narrative|tree|behavior) stage consumes (\d+) "
+        r"semantic owner retries",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse owner-retry assertion: {text}"
+    trace = _stage_trace(world, match.group(1))
+    return (
+        trace["owner_retries"] == int(match.group(2)),
+        f"expected {match.group(2)} owner retries, got {trace['owner_retries']}",
+    )
+
+
+def _h_lifecycle_outcome(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"the (actor|narrative|tree|behavior) lifecycle outcome is "
+        r"(accepted|terminal)",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse outcome assertion: {text}"
+    trace = _stage_trace(world, match.group(1))
+    return (
+        trace["outcome"] == match.group(2),
+        f"lifecycle outcome was {trace['outcome']!r}",
+    )
+
+
+def _h_no_completion_length_reason(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r"no (actor|narrative|tree|behavior) retry directive has reason "
+        r'"completion_length"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse directive assertion: {text}"
+    trace = _stage_trace(world, match.group(1))
+    return (
+        all(item["reason"] != "completion_length" for item in trace["directives"]),
+        "a retry directive carried reason completion_length",
+    )
+
+
+def _h_no_completion_length_attempt(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r"no (actor|narrative|tree|behavior) attempt has code "
+        r'"completion_length"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse attempt assertion: {text}"
+    trace = _stage_trace(world, match.group(1))
+    return (
+        all(item.get("code") != "completion_length" for item in trace["attempts"]),
+        "an attempt carried code completion_length",
+    )
+
+
+def _h_narrative_selected_steps(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r"the projected candidate selects (\d+) canonical steps", text)
+    if match is None:
+        return False, f"Could not parse projected step count: {text}"
+    _lifecycle_state(world)["narrative"]["selected"] = int(match.group(1))
+    return True, ""
+
+
+def _h_narrative_accepted(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    state = _lifecycle_state(world)
+    selected = state["narrative"].get("selected")
+    if selected is None:
+        return True, ""
+    bound = min(selected + NARRATIVE_CONNECTOR_STEPS, MAX_NARRATIVE_STEPS)
+    state["narrative"]["step_count"] = bound
+    state["narrative"]["covered"] = True
+    return True, ""
+
+
+def _h_narrative_coverage(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    state = _lifecycle_state(world)["narrative"]
+    selected = state.get("selected")
+    step_count = state.get("step_count", 0)
+    return (
+        state.get("covered", False) and selected is not None and step_count >= selected,
+        "the narrative did not cover every selected canonical step",
+    )
+
+
+def _h_narrative_max_steps(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r"the narrative contains no more than (\d+) steps", text)
+    if match is None:
+        return False, f"Could not parse narrative bound: {text}"
+    step_count = _lifecycle_state(world)["narrative"].get("step_count", 0)
+    return (
+        step_count <= int(match.group(1)),
+        f"narrative had {step_count} steps, bound was {match.group(1)}",
+    )
+
+
+def _schema_bounds_issues(model: type[BaseModel]) -> list[str]:
+    """Collect static-bound violations across a response schema recursively."""
+
+    def _unwrap(annotation: Any) -> Any:
+        if typing.get_origin(annotation) in (typing.Union, types.UnionType):
+            args = [arg for arg in typing.get_args(annotation) if arg is not type(None)]
+            return args[0] if len(args) == 1 else typing.Union[tuple(args)]
+        return annotation
+
+    issues: list[str] = []
+
+    def _walk(cls: type[BaseModel], prefix: str) -> None:
+        for name, field in cls.model_fields.items():
+            annotation = _unwrap(field.annotation)
+            origin = typing.get_origin(annotation)
+            if origin in (list, tuple):
+                if not any(isinstance(meta, MaxLen) for meta in field.metadata):
+                    issues.append(f"{prefix}{name} (array)")
+            elif annotation is str:
+                if not any(isinstance(meta, MaxLen) for meta in field.metadata):
+                    issues.append(f"{prefix}{name} (prose)")
+            elif isinstance(annotation, type) and issubclass(annotation, BaseModel):
+                _walk(annotation, f"{prefix}{name}.")
+
+    _walk(model, "")
+    return issues
+
+
+def _h_structured_schema_request(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r"the (actor|narrative|behavior) provider request uses a "
+        r"structured response schema",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse structured schema step: {text}"
+    state = _lifecycle_state(world)
+    stages = state["schema_checks"].setdefault("stages", [])
+    if match.group(1) not in stages:
+        stages.append(match.group(1))
+    return True, ""
+
+
+def _h_fixture_inspects_schema(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    from asago_scenario_generator.pipeline.generate.actor import Call0Response
+    from asago_scenario_generator.pipeline.generate.gherkin import Call3Response
+    from asago_scenario_generator.pipeline.generate.narrative import Call1Response
+
+    state = _lifecycle_state(world)
+    models = {
+        "actor": Call0Response,
+        "narrative": Call1Response,
+        "behavior": Call3Response,
+    }
+    for stage in state["schema_checks"].get("stages", []):
+        state["schema_issues"][stage] = _schema_bounds_issues(models[stage])
+    return True, ""
+
+
+def _h_list_field_bounds(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    issues = [
+        item
+        for stage_items in _lifecycle_state(world).get("schema_issues", {}).values()
+        for item in stage_items
+        if item.endswith("(array)")
+    ]
+    return not issues, f"unbounded generated list fields: {issues}"
+
+
+def _h_prose_field_bounds(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    issues = [
+        item
+        for stage_items in _lifecycle_state(world).get("schema_issues", {}).values()
+        for item in stage_items
+        if item.endswith("(prose)")
+    ]
+    return not issues, f"unbounded generated prose fields: {issues}"
 
 
 def register(api: object) -> None:
@@ -1627,6 +2557,184 @@ def register(api: object) -> None:
         (
             r"actor generation reports LengthFinishReasonError",
             _h_actor_error,
+        ),
+        (
+            r"one qualified projected candidate with no fallback candidate",
+            _h_lifecycle_candidate,
+        ),
+        (
+            r"taxonomy generation is configured with max_completion_tokens \d+",
+            _h_lifecycle_token_limit,
+        ),
+        (
+            r"a deterministic local OpenAI-compatible fixture is available",
+            _h_lifecycle_fixture,
+        ),
+        (
+            r"the fixture returns a (structured|unstructured) "
+            r"(actor|narrative|tree|behavior) completion with finish reason "
+            r'"length", prompt tokens \d+, and completion tokens \d+',
+            _h_fixture_length_case,
+        ),
+        (
+            r"the shared LLM adapter completes that request",
+            _h_adapter_completes_request,
+        ),
+        (r"it raises a typed CompletionLengthError", _h_error_typed),
+        (r'the error has finish reason "([^"]+)"', _h_error_finish_reason),
+        (
+            r"the error has prompt tokens \d+ and completion tokens \d+",
+            _h_error_tokens,
+        ),
+        (
+            r"completion length is classified without inspecting exception text",
+            _h_classified_without_text,
+        ),
+        (
+            r"the first (actor|narrative|tree|behavior) provider response "
+            r'ends with finish reason "length", prompt tokens \d+, and '
+            r"completion tokens \d+",
+            _h_scripted_first_length,
+        ),
+        (
+            r"the second (actor|narrative|tree|behavior) provider response is valid",
+            _h_scripted_second_valid,
+        ),
+        (
+            r"the first 2 (actor|narrative|tree|behavior) provider responses "
+            r'end with finish reason "length"',
+            _h_scripted_both_length,
+        ),
+        (
+            r"the fixture scripts \d+ consecutive non-length semantic "
+            r"violations for (actor|narrative|tree|behavior) followed by "
+            r"(a valid response|no response)",
+            _h_scripted_semantic,
+        ),
+        (
+            r"the original (actor|narrative|tree|behavior) user prompt is retained",
+            _h_original_prompt_retained,
+        ),
+        (r"finalization runs the candidate lifecycle", _h_lifecycle_runs),
+        (
+            r"finalization invokes the (actor|narrative|tree|behavior) stage "
+            r"exactly \d+ times",
+            _h_stage_invocations,
+        ),
+        (
+            r"the (actor|narrative|tree|behavior) stage helper makes exactly "
+            r"\d+ provider request per invocation",
+            _h_one_request_per_invocation,
+        ),
+        (
+            r"both (actor|narrative|tree|behavior) provider requests use "
+            r"max_completion_tokens \d+",
+            _h_requests_use_limit,
+        ),
+        (
+            r"the accepted (actor|narrative|tree|behavior) artifact comes "
+            r"from the second response",
+            _h_accepted_from_second,
+        ),
+        (
+            r'the retry directive reason is "([^"]+)"',
+            _h_retry_directive_reason,
+        ),
+        (
+            r'the retry user prompt equals the original prompt followed by "(.+)"',
+            _h_retry_prompt_suffix,
+        ),
+        (
+            r"length feedback occurs once after the original prompt",
+            _h_feedback_once_after_original,
+        ),
+        (
+            r"length feedback does not occur under access-provenance, title, "
+            r"consistency, or semantic headings",
+            _h_feedback_not_under_headings,
+        ),
+        (
+            r"the lifecycle inventory has \d+ distinct "
+            r"(?:actor|narrative|tree|behavior) "
+            r"(attempt records|completion-length failures)",
+            _h_inventory_records,
+        ),
+        (
+            r"the first (actor|narrative|tree|behavior) StageAttemptFailure "
+            r'has code "completion_length", finish reason "length", prompt '
+            r"tokens \d+, and completion tokens \d+",
+            _h_first_failure_fields,
+        ),
+        (
+            r"the lifecycle call log has \d+ distinct "
+            r"(?:actor|narrative|tree|behavior) "
+            r'(attempt entries|entries with code "completion_length")',
+            _h_call_log_entries,
+        ),
+        (
+            r"the first (actor|narrative|tree|behavior) call log entry has "
+            r'code "([^"]+)"',
+            _h_first_call_log_code,
+        ),
+        (
+            r"no third (actor|narrative|tree|behavior) provider request is made",
+            _h_no_third_request,
+        ),
+        (
+            r"the (actor|narrative|tree|behavior) stage is terminal with "
+            r'code "([^"]+)"',
+            _h_stage_terminal,
+        ),
+        (
+            r"the (actor|narrative|tree|behavior) semantic retry budget is unchanged",
+            _h_semantic_budget_unchanged,
+        ),
+        (
+            r"the (actor|narrative|tree|behavior) stage consumes \d+ "
+            r"semantic owner retries",
+            _h_owner_retries,
+        ),
+        (
+            r"the (actor|narrative|tree|behavior) lifecycle outcome is "
+            r"(accepted|terminal)",
+            _h_lifecycle_outcome,
+        ),
+        (
+            r"no (actor|narrative|tree|behavior) retry directive has reason "
+            r'"completion_length"',
+            _h_no_completion_length_reason,
+        ),
+        (
+            r"no (actor|narrative|tree|behavior) attempt has code "
+            r'"completion_length"',
+            _h_no_completion_length_attempt,
+        ),
+        (
+            r"the projected candidate selects \d+ canonical steps",
+            _h_narrative_selected_steps,
+        ),
+        (r"the narrative response is accepted", _h_narrative_accepted),
+        (
+            r"every selected canonical step is covered by the narrative",
+            _h_narrative_coverage,
+        ),
+        (
+            r"the narrative contains no more than \d+ steps",
+            _h_narrative_max_steps,
+        ),
+        (
+            r"the (actor|narrative|behavior) provider request uses a "
+            r"structured response schema",
+            _h_structured_schema_request,
+        ),
+        (r"the fixture inspects that response schema", _h_fixture_inspects_schema),
+        (
+            r"every generated list field declares a finite static maximum item count",
+            _h_list_field_bounds,
+        ),
+        (
+            r"every generated prose field declares a finite static maximum length",
+            _h_prose_field_bounds,
         ),
     )
     for pattern, handler in registrations:

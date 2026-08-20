@@ -46,6 +46,7 @@ from asago_scenario_generator.pipeline.generate.actor import (
 from asago_scenario_generator.pipeline.generate.constants import compute_leaf_budget
 from asago_scenario_generator.pipeline.generate.narrative import (
     validate_narrative_access_realization,
+    validate_narrative_step_bounds,
 )
 from asago_scenario_generator.pipeline.projection import (
     ProjectedCandidate,
@@ -66,6 +67,8 @@ class GateCode(str, Enum):
     actor_access = "actor_access"
     narrative_access = "narrative_access"
     narrative_realization = "narrative_realization"
+    narrative_step_coverage = "narrative_step_coverage"
+    narrative_step_bound = "narrative_step_bound"
     tree_realization = "tree_realization"
     canonical_identity = "canonical_identity"
     or_tree = "or_tree"
@@ -568,6 +571,13 @@ def run_prebehavior_gates(
                 "narrative has no projected-step realization",
                 GeneratedStage.narrative,
             )
+        )
+    # Call 1 output-shape gates (completion-length mitigation): the narrative
+    # must cover every selected canonical step and stay within
+    # selected_step_count + 2 steps, capped at 16.
+    for code, detail in validate_narrative_step_bounds(narrative, selected_step_ids):
+        violations.append(
+            GateViolation(GateCode(code), detail, GeneratedStage.narrative)
         )
     all_leaves = _leaves(tree.root)
     tree_ids = tuple(sid for leaf in all_leaves for sid in leaf.projected_step_ids)

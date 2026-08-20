@@ -343,6 +343,13 @@ class StageAttemptFailureRecord(StrictModel):
     detail: str
     phase: Literal["before_invocation", "invocation", "post_response"]
     invoked: bool
+    # Stable typed routing evidence: "completion_length" for length
+    # exhaustion (with finish reason and usage) or the generic
+    # "stage_attempt_failed" code.  Never derived from exception text.
+    code: str = Field(min_length=1)
+    finish_reason: str | None = None
+    prompt_tokens: int | None = Field(default=None, ge=0)
+    completion_tokens: int | None = Field(default=None, ge=0)
     prompt: PromptRecord | None
     result: LLMResultRecord | None
     raw_response: JsonValue | None
@@ -2060,6 +2067,10 @@ def _attempt_failure(value: StageAttemptFailure) -> StageAttemptFailureRecord:
         detail=value.detail,
         phase=value.phase,
         invoked=value.invoked,
+        code=value.code,
+        finish_reason=value.finish_reason,
+        prompt_tokens=value.prompt_tokens,
+        completion_tokens=value.completion_tokens,
         prompt=prompt,
         result=_llm_result(value.result) if value.result is not None else None,
         raw_response=(
@@ -2571,12 +2582,16 @@ class FinalizationPersistenceAdapter:
                             "system_prompt": evidence.system_prompt,
                             "user_prompt": evidence.user_prompt,
                             "response": None,
-                            "prompt_tokens": None,
-                            "completion_tokens": None,
+                            "prompt_tokens": evidence.prompt_tokens,
+                            "completion_tokens": evidence.completion_tokens,
                             "duration_ms": None,
                         }
                     )
                 entry["error"] = f"{evidence.exception_type}: {evidence.detail}"
+                # Stable typed routing evidence for every failed attempt row.
+                entry["code"] = evidence.code
+                if evidence.finish_reason is not None:
+                    entry["finish_reason"] = evidence.finish_reason
 
             from asago_scenario_generator.pipeline.io import write_pipeline_call_log
 

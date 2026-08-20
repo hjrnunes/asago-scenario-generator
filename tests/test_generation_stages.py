@@ -125,7 +125,7 @@ def test_finalization_behavior_port_invokes_call3_once_with_final_tree_copy() ->
     ) as call3:
         result = make_assertions_only_behavior_callback(prepared)(candidate, invocation)
 
-    call3.assert_called_once_with(prepared, narrative, final_tree_copy)
+    call3.assert_called_once_with(prepared, narrative, final_tree_copy, None)
     assert result.artifact is behavior
     assert result.evidence is evidence
 

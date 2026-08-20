@@ -1357,8 +1357,9 @@ def test_full_concrete_phase3b_finalization_composition(monkeypatch) -> None:
     call3_trees: list[AttackTree] = []
     prepared = SimpleNamespace(candidate_id=candidate.candidate_id)
 
-    def call3(_prepared, generated_narrative, finalized_tree):
+    def call3(_prepared, generated_narrative, finalized_tree, retry=None):
         assert generated_narrative == narrative
+        assert retry is None
         call3_trees.append(finalized_tree)
         return SimpleNamespace(artifact=behavior, evidence={"call": 3})
 

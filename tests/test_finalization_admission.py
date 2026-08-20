@@ -445,8 +445,12 @@ def test_stage_attempt_failure_evidence_is_persisted_on_every_failed_invocation(
     )
 
 
-def test_actor_attempt_failure_is_not_retried_by_finalization() -> None:
-    """Call 0 owns its bounded length retry; the lifecycle must not repeat it."""
+def test_actor_attempt_failure_consumes_the_semantic_owner_budget() -> None:
+    """Actor stage attempts are exactly one request and retried by the lifecycle.
+
+    The hidden in-helper length retry is gone: every generated stage,
+    including actor, participates in the semantic owner-retry budget.
+    """
     failure = StageAttemptFailure(
         call_name=CallName.actor_profile,
         exception=RuntimeError("actor endpoint failed"),
@@ -464,13 +468,21 @@ def test_actor_attempt_failure_is_not_retried_by_finalization() -> None:
     machine, _, persistence = _machine(
         callbacks={stage_name: stage for stage_name in GENERATION_ORDER}
     )
-    machine.run()
+    result = machine.run()
 
+    assert result.state is LifecycleState.exhausted
     failed_results = [
         result
         for invocation, result in persistence.stage_results
         if invocation.stage is GeneratedStage.actor
     ]
-    assert len(failed_results) == 1
-    assert failed_results[0].evidence is failure
-    assert failed_results[0].violations[0].retryable is False
+    assert len(failed_results) == MAX_OWNER_RETRIES + 1
+    assert all(result.evidence is failure for result in failed_results)
+    assert all(
+        result.violations[0].retryable is True for result in failed_results
+    )
+    assert all(
+        result.violations[0].code == "stage_attempt_failed"
+        for result in failed_results
+    )
+    assert machine.owner_retry_counts == {GeneratedStage.actor: MAX_OWNER_RETRIES}

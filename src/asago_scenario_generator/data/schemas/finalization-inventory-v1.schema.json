@@ -188,7 +188,7 @@
       "type": "object"
     },
     "ArtifactRole": {
-      "description": "Typed role for every persisted artifact in a run.\n\nThe manifest container file (``run-manifest.yaml``) is **not** an\nartifact entry \u2014 it is the sole orphan exception.",
+      "description": "Typed role for every persisted artifact in a run.\n\nThe manifest container file (``run-manifest.yaml``) is **not** an\nartifact entry — it is the sole orphan exception.",
       "enum": [
         "use_case",
         "capability_profile",
@@ -569,6 +569,49 @@
           "title": "Invoked",
           "type": "boolean"
         },
+        "code": {
+          "minLength": 1,
+          "title": "Code",
+          "type": "string"
+        },
+        "finish_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Finish Reason"
+        },
+        "prompt_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prompt Tokens"
+        },
+        "completion_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completion Tokens"
+        },
         "prompt": {
           "anyOf": [
             {
@@ -606,6 +649,7 @@
         "detail",
         "phase",
         "invoked",
+        "code",
         "prompt",
         "result",
         "raw_response"

@@ -56,15 +56,25 @@ MAX_OR_PATHS = 6
 # ---------------------------------------------------------------------------#
 
 
+_CALL3_ASSERTIONS_MAX_ITEMS = 32
+_CALL3_IDS_MAX_ITEMS = 16
+_CALL3_ID_MAX_LENGTH = 200
+_CALL3_TEXT_MAX_LENGTH = 1000
+
+
 class Call3Assertion(BaseModel):
     """A structured behavior assertion from Call 3, keyed by postcondition IDs."""
 
     model_config = ConfigDict(extra="forbid")
 
-    assertion_id: str = Field(min_length=1)
-    source_step_ids: tuple[str, ...] = Field(min_length=1)
-    projected_postcondition_ids: tuple[str, ...] = Field(min_length=1)
-    text: str = Field(min_length=1)
+    assertion_id: str = Field(min_length=1, max_length=_CALL3_ID_MAX_LENGTH)
+    source_step_ids: tuple[str, ...] = Field(
+        min_length=1, max_length=_CALL3_IDS_MAX_ITEMS
+    )
+    projected_postcondition_ids: tuple[str, ...] = Field(
+        min_length=1, max_length=_CALL3_IDS_MAX_ITEMS
+    )
+    text: str = Field(min_length=1, max_length=_CALL3_TEXT_MAX_LENGTH)
 
 
 class Call3Response(BaseModel):
@@ -72,7 +82,9 @@ class Call3Response(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    assertions: list[Call3Assertion] = Field(default_factory=list)
+    assertions: list[Call3Assertion] = Field(
+        default_factory=list, max_length=_CALL3_ASSERTIONS_MAX_ITEMS
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -508,6 +520,7 @@ def _call_behavior_spec(
     use_case: str,
     scenario_tag: str,
     pinned_technique_ids: list[str] | None = None,
+    completion_length_feedback: str | None = None,
     projection_context: dict[str, Any] | None = None,
 ) -> tuple[BehaviorSpec, LLMResult]:
     """Generate a structured behavior spec for a scenario seed (Call 3).
@@ -518,6 +531,9 @@ def _call_behavior_spec(
     from the accepted structure.  The LLM output is never silently
     replaced — if the structured response does not match the projection,
     a ValueError is raised.
+
+    ``completion_length_feedback`` (the finalization-owned length-retry
+    suffix) is appended verbatim to the end of the rendered user prompt.
 
     Returns:
         Tuple of (BehaviorSpec, LLMResult).
@@ -532,9 +548,12 @@ def _call_behavior_spec(
     )
     actions = _derive_behavior_actions(attack_tree, profile, projection_context)
 
+    user_prompt = render_prompt("call3_user.j2", **ctx)
+    if completion_length_feedback:
+        user_prompt = f"{user_prompt}{completion_length_feedback}"
     result = client.complete(
         system_prompt=render_prompt("call3_system.j2"),
-        user_prompt=render_prompt("call3_user.j2", **ctx),
+        user_prompt=user_prompt,
         response_format=Call3Response,
     )
 
