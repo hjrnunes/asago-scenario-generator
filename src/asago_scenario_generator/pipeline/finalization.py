@@ -23,7 +23,10 @@ from asago_scenario_generator.pipeline.coverage_planning import (
     deserialize_qualified_candidate,
     revalidate_qualified_candidate,
 )
-from asago_scenario_generator.pipeline.generate.stages import StageAttemptFailure
+from asago_scenario_generator.pipeline.generate.stages import (
+    RetryDirective,
+    StageAttemptFailure,
+)
 
 MAX_OWNER_RETRIES = 2
 MAX_TARGETED_RETRIES = MAX_OWNER_RETRIES  # Compatibility name.
@@ -435,33 +438,39 @@ class TargetFinalizationMachine:
                 ),
             )
         except Exception as exc:  # noqa: BLE001 - callback failure is lifecycle data
-            call_name = {
-                GeneratedStage.actor: CallName.actor_profile,
-                GeneratedStage.narrative: CallName.narrative,
-                GeneratedStage.tree: CallName.attack_tree,
-                GeneratedStage.behavior: CallName.behavior_spec,
-            }[stage]
-            failure = StageAttemptFailure(
-                call_name=call_name,
-                exception=exc,
-                phase="before_invocation",
-                invoked=False,
-            )
-            result = GeneratedStageResult(
-                artifact=None,
-                evidence=failure,
-                violations=(
-                    LifecycleViolation(
-                        owner=stage,
-                        code="stage_exception",
-                        detail=f"{failure.exception_type}: {failure.detail}",
-                    ),
-                ),
-            )
+            result = self._unexpected_stage_failure(stage, exc)
         self.persistence.record_stage_result(invocation, result)
         if not result.violations:
             self.artifacts.set(stage, result.artifact)
         return result.violations
+
+    def _unexpected_stage_failure(
+        self, stage: GeneratedStage, exc: Exception
+    ) -> GeneratedStageResult:
+        """Convert an unexpected callback exception into lifecycle evidence."""
+        call_name = {
+            GeneratedStage.actor: CallName.actor_profile,
+            GeneratedStage.narrative: CallName.narrative,
+            GeneratedStage.tree: CallName.attack_tree,
+            GeneratedStage.behavior: CallName.behavior_spec,
+        }[stage]
+        failure = StageAttemptFailure(
+            call_name=call_name,
+            exception=exc,
+            phase="before_invocation",
+            invoked=False,
+        )
+        return GeneratedStageResult(
+            artifact=None,
+            evidence=failure,
+            violations=(
+                LifecycleViolation(
+                    owner=stage,
+                    code="stage_exception",
+                    detail=f"{failure.exception_type}: {failure.detail}",
+                ),
+            ),
+        )
 
     def _route_violations(
         self, violations: Sequence[LifecycleViolation]
@@ -470,22 +479,22 @@ class TargetFinalizationMachine:
         owner = earliest_generated_owner(violations)
         if owner is None:
             return None
-        length_violations = [
-            item
+        if any(
+            item.owner is owner
+            and item.code == StageAttemptFailure.COMPLETION_LENGTH_CODE
             for item in violations
-            if item.owner is owner and item.code == "completion_length"
-        ]
-        if length_violations:
-            used = self.length_retry_counts.get(owner, 0)
-            if used >= MAX_COMPLETION_LENGTH_RETRIES:
-                # A second length failure is terminal for this candidate and
-                # never consumes semantic owner-retry budget.
-                return None
-            self.length_retry_counts[owner] = used + 1
-            self.retry_feedback[owner] = COMPLETION_LENGTH_RETRY_SUFFIXES[owner]
-            self.retry_reasons[owner] = "completion_length"
-            self.artifacts.invalidate_from(owner)
-            return owner
+        ):
+            return self._route_completion_length_retry(owner)
+        return self._route_semantic_retry(owner, violations)
+
+    def _route_semantic_retry(
+        self, owner: GeneratedStage, violations: Sequence[LifecycleViolation]
+    ) -> GeneratedStage | None:
+        """Route a non-length violation through the semantic owner-retry budget.
+
+        Returns the owner to re-invoke, or ``None`` when the semantic
+        owner-retry budget is exhausted (terminal for this candidate).
+        """
         self.retry_reasons.pop(owner, None)
         used = self.owner_retry_counts.get(owner, 0)
         if used >= MAX_OWNER_RETRIES:
@@ -499,6 +508,24 @@ class TargetFinalizationMachine:
             )
             or f"Retry {owner.value} to correct validation failure"
         )
+        self.artifacts.invalidate_from(owner)
+        return owner
+
+    def _route_completion_length_retry(
+        self, owner: GeneratedStage
+    ) -> GeneratedStage | None:
+        """Authorize the one completion-length retry for ``owner``.
+
+        Returns the owner to re-invoke, or ``None`` when the one allowed
+        length retry is already spent: a second length failure is terminal
+        for this candidate and never consumes semantic owner-retry budget.
+        """
+        used = self.length_retry_counts.get(owner, 0)
+        if used >= MAX_COMPLETION_LENGTH_RETRIES:
+            return None
+        self.length_retry_counts[owner] = used + 1
+        self.retry_feedback[owner] = COMPLETION_LENGTH_RETRY_SUFFIXES[owner]
+        self.retry_reasons[owner] = StageAttemptFailure.COMPLETION_LENGTH_CODE
         self.artifacts.invalidate_from(owner)
         return owner
 
@@ -861,15 +888,13 @@ def fallback_candidates_for_target(
     return candidates
 
 
-def retry_directive_for(invocation: StageInvocation) -> Any | None:
+def retry_directive_for(invocation: StageInvocation) -> RetryDirective | None:
     """Rebuild the typed retry directive for one explicit re-invocation.
 
     Returns ``None`` for a first attempt; a ``RetryDirective`` carrying the
     feedback and (for completion-length retries) the ``completion_length``
     reason otherwise.
     """
-    from asago_scenario_generator.pipeline.generate.stages import RetryDirective
-
     if not (invocation.owner_retry_index or invocation.retry_reason):
         return None
     return RetryDirective(

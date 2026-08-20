@@ -52,6 +52,7 @@ from asago_scenario_generator.pipeline.finalization_gates import (
 )
 from asago_scenario_generator.pipeline.generate.stages import (
     GenerationRequest,
+    StageAttemptFailure,
     StageCallEvidence,
     assemble_final_envelope,
     generate_actor_stage,
@@ -187,6 +188,32 @@ def build_v3_inventory(
         )
         entries.append(entry)
     return entries
+
+
+def resume_completion_length_counts(
+    candidate_stages: Sequence[Any],
+) -> dict[GeneratedStage, int]:
+    """Derive authorized completion-length retries from durable stage records.
+
+    A durable ``completion_length`` violation on the latest stage record
+    means the one length retry was already authorized: the resumed
+    invocation re-runs with the approved suffix, and a further length
+    failure is terminal.  Any other latest record leaves the count at zero.
+    """
+    latest = candidate_stages[-1] if candidate_stages else None
+    return {
+        stage: 1
+        if (
+            latest is not None
+            and latest.stage is stage
+            and any(
+                violation.code == StageAttemptFailure.COMPLETION_LENGTH_CODE
+                for violation in latest.violations
+            )
+        )
+        else 0
+        for stage in GeneratedStage
+    }
 
 
 def run_target_finalization(
@@ -364,12 +391,11 @@ def run_target_finalization(
                                 record.stage
                             ] = evidence
                     if record.violations:
-                        length_codes = [
-                            item
+                        has_length_violation = any(
+                            item.code == StageAttemptFailure.COMPLETION_LENGTH_CODE
                             for item in record.violations
-                            if item.code == "completion_length"
-                        ]
-                        if length_codes:
+                        )
+                        if has_length_violation:
                             # Completion-length retries re-invoke with the
                             # approved suffix verbatim, never with rendered
                             # exception text or semantic-channel feedback.
@@ -601,25 +627,7 @@ def run_target_finalization(
             }
             if active_attempt is not None
             else {},
-            # A durable completion-length failure means the one length retry
-            # was already authorized: the resumed invocation re-runs with the
-            # approved suffix, and a further length failure is terminal.
-            resume_length_retry_counts={
-                stage: max(
-                    (
-                        1
-                        for item in candidate_stages
-                        if item.stage is stage
-                        and item is candidate_stages[-1]
-                        and any(
-                            violation.code == "completion_length"
-                            for violation in item.violations
-                        )
-                    ),
-                    default=0,
-                )
-                for stage in GeneratedStage
-            }
+            resume_length_retry_counts=resume_completion_length_counts(candidate_stages)
             if active_attempt is not None
             else {},
             resume_retry_feedback=durable_feedback
