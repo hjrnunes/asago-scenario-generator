@@ -50,6 +50,11 @@ from asago_scenario_generator.prompts import render_prompt
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "_enumerate_root_to_leaf_paths",
+    "normalize_attack_tree_transport",
+]
+
 
 # ---------------------------------------------------------------------------
 # Post-generation threat_id cross-reference validation
