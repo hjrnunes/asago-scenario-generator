@@ -94,21 +94,47 @@ class TestCausalFactorModels:
     def test_ex02_factor_source_identifier_is_required(self):
         """EXEC-02: every causal factor needs a non-empty source identifier."""
         with pytest.raises(ValidationError):
-            CausalFactor(kind=CausalFactorKind.sensor_anomaly, source_id="", description="x")
+            CausalFactor(
+                kind=CausalFactorKind.sensor_anomaly, source_id="", description="x"
+            )
 
     def test_predicate_mapping_is_canonical_per_kind(self):
         """Every factor kind maps to exactly one executable predicate."""
-        assert predicate_for(CausalFactorKind.process_model_flaw) is TemporalPredicate.model_flawed
-        assert predicate_for(CausalFactorKind.feedback_delay) is TemporalPredicate.feedback_delayed
-        assert predicate_for(CausalFactorKind.sensor_anomaly) is TemporalPredicate.sensor_anomalous
-        assert predicate_for(CausalFactorKind.actuator_anomaly) is TemporalPredicate.actuator_anomalous
+        assert (
+            predicate_for(CausalFactorKind.process_model_flaw)
+            is TemporalPredicate.model_flawed
+        )
+        assert (
+            predicate_for(CausalFactorKind.feedback_delay)
+            is TemporalPredicate.feedback_delayed
+        )
+        assert (
+            predicate_for(CausalFactorKind.sensor_anomaly)
+            is TemporalPredicate.sensor_anomalous
+        )
+        assert (
+            predicate_for(CausalFactorKind.actuator_anomaly)
+            is TemporalPredicate.actuator_anomalous
+        )
 
     def test_step_kind_mapping_is_canonical_per_kind(self):
         """Every factor kind maps to exactly one scenario step kind."""
-        assert step_kind_for(CausalFactorKind.process_model_flaw) is ScenarioStepKind.process_model_flaw
-        assert step_kind_for(CausalFactorKind.feedback_delay) is ScenarioStepKind.feedback_delay
-        assert step_kind_for(CausalFactorKind.sensor_anomaly) is ScenarioStepKind.sensor_anomaly
-        assert step_kind_for(CausalFactorKind.actuator_anomaly) is ScenarioStepKind.actuator_anomaly
+        assert (
+            step_kind_for(CausalFactorKind.process_model_flaw)
+            is ScenarioStepKind.process_model_flaw
+        )
+        assert (
+            step_kind_for(CausalFactorKind.feedback_delay)
+            is ScenarioStepKind.feedback_delay
+        )
+        assert (
+            step_kind_for(CausalFactorKind.sensor_anomaly)
+            is ScenarioStepKind.sensor_anomaly
+        )
+        assert (
+            step_kind_for(CausalFactorKind.actuator_anomaly)
+            is ScenarioStepKind.actuator_anomaly
+        )
 
 
 class TestTemporalAssertionValidation:
@@ -161,20 +187,34 @@ class TestTemporalActionVectorValidation:
 
     def test_order_index_must_be_dense(self):
         """Order indexes must equal the deterministic list positions."""
-        vector = _vector(
-            [_factor(CausalFactorKind.feedback_delay, "FB-1-1")]
-        )
+        vector = _vector([_factor(CausalFactorKind.feedback_delay, "FB-1-1")])
         broken = vector.model_dump()
         broken["assertions"][0]["order_index"] = 3
         with pytest.raises(ValidationError) as exc_info:
             TemporalActionVector.model_validate(broken)
         assert "is not its deterministic position" in str(exc_info.value)
 
+    def test_sequence_ids_must_be_canonical(self):
+        """Sequence positions cannot be decoupled from their stable IDs."""
+        vector = _vector([_factor(CausalFactorKind.feedback_delay, "FB-1-1")])
+        broken = vector.model_dump()
+        broken["assertions"][0]["assertion_id"] = "TA-9"
+        with pytest.raises(ValidationError) as exc_info:
+            TemporalActionVector.model_validate(broken)
+        assert "canonical identifier 'TA-1'" in str(exc_info.value)
+
+    def test_vector_candidate_id_must_target_vector_action(self):
+        """A vector cannot claim a different control action in its identity."""
+        vector = _vector([_factor(CausalFactorKind.feedback_delay, "FB-1-1")])
+        broken = vector.model_dump()
+        broken["candidate_id"] = "EXEC:RESP-1:CA-9-9:WRONG_TIMING"
+        with pytest.raises(ValidationError) as exc_info:
+            TemporalActionVector.model_validate(broken)
+        assert "canonical" in str(exc_info.value)
+
     def test_steps_must_end_with_unsafe_control_action(self):
         """Non-empty steps end with the UCA step for the targeted action."""
-        vector = _vector(
-            [_factor(CausalFactorKind.sensor_anomaly, "FB-1-1")]
-        )
+        vector = _vector([_factor(CausalFactorKind.sensor_anomaly, "FB-1-1")])
         truncated = vector.model_dump()
         truncated["steps"] = truncated["steps"][:-1]
         with pytest.raises(ValidationError) as exc_info:
@@ -183,9 +223,7 @@ class TestTemporalActionVectorValidation:
 
     def test_uca_step_must_reference_target_action(self):
         """The final UCA step references the vector's control action."""
-        vector = _vector(
-            [_factor(CausalFactorKind.actuator_anomaly, "CA-1-1")]
-        )
+        vector = _vector([_factor(CausalFactorKind.actuator_anomaly, "CA-1-1")])
         broken = vector.model_dump()
         broken["steps"][-1]["source_id"] = "CA-9-9"
         with pytest.raises(ValidationError) as exc_info:
@@ -314,9 +352,7 @@ class TestAssembleCandidateEnvelope:
 
     def test_ex01_envelope_retains_uca_type(self):
         """EXEC-01: the envelope retains the UCA type."""
-        envelope = _envelope(
-            [_factor(CausalFactorKind.process_model_flaw, "PM-1-1")]
-        )
+        envelope = _envelope([_factor(CausalFactorKind.process_model_flaw, "PM-1-1")])
         assert envelope.uca_type == UCAType.wrong_timing
 
     def test_ex01_envelope_maps_causal_factors(self):
@@ -336,9 +372,7 @@ class TestAssembleCandidateEnvelope:
 
     def test_ex02_envelope_has_canonical_candidate_identifier(self):
         """EXEC-02: the envelope has a canonical candidate identifier."""
-        envelope = _envelope(
-            [_factor(CausalFactorKind.process_model_flaw, "PM-1-1")]
-        )
+        envelope = _envelope([_factor(CausalFactorKind.process_model_flaw, "PM-1-1")])
         assert envelope.candidate_id == candidate_id_for(
             CONTROLLER, CONTROL_ACTION, UCA_TYPE
         )
@@ -355,9 +389,7 @@ class TestAssembleCandidateEnvelope:
 
     def test_ex02_envelope_links_uca_to_control_action(self):
         """EXEC-02: the envelope links the UCA to its control action."""
-        envelope = _envelope(
-            [_factor(CausalFactorKind.process_model_flaw, "PM-1-1")]
-        )
+        envelope = _envelope([_factor(CausalFactorKind.process_model_flaw, "PM-1-1")])
         assert envelope.uca_ref == uca_ref_for(CONTROLLER, CONTROL_ACTION, UCA_TYPE)
         assert CONTROL_ACTION in envelope.uca_ref
 
@@ -387,9 +419,7 @@ class TestAssembleCandidateEnvelope:
 
     def test_no_vector_by_default(self):
         """Default assembly leaves the temporal vector absent."""
-        envelope = _envelope(
-            [_factor(CausalFactorKind.process_model_flaw, "PM-1-1")]
-        )
+        envelope = _envelope([_factor(CausalFactorKind.process_model_flaw, "PM-1-1")])
         assert envelope.temporal_vector is None
 
     def test_unknown_controller_raises(self):
@@ -463,7 +493,9 @@ class TestBackwardCompatibility:
             target_control_action="CA-1-1",
             ica_type=UCAType.not_provided,
             defender_bdi=DefenderBDI(
-                beliefs=[DefenderBelief(pm_id="PM-1-1", content="b", vulnerability="v")],
+                beliefs=[
+                    DefenderBelief(pm_id="PM-1-1", content="b", vulnerability="v")
+                ],
                 desires=[DefenderDesire(resp_id="RESP-1", content="d")],
                 intentions=[DefenderIntention(ca_id="CA-1-1", content="i")],
             ),

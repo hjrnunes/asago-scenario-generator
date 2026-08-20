@@ -124,6 +124,7 @@ def _validate_sequence(
     items: Sequence[BaseModel],
     id_field: str,
     label: str,
+    id_prefix: str,
 ) -> None:
     """Validate that one sequence is canonical: unique ids and dense order."""
     seen: set[str] = set()
@@ -139,6 +140,12 @@ def _validate_sequence(
                 f"TemporalActionVector {label} '{identifier}' order_index "
                 f"{item.order_index} is not its deterministic position "
                 f"{index}."
+            )
+        expected_identifier = f"{id_prefix}-{index + 1}"
+        if identifier != expected_identifier:
+            raise ValueError(
+                f"TemporalActionVector {label} id '{identifier}' is not "
+                f"the canonical identifier '{expected_identifier}'."
             )
 
 
@@ -178,8 +185,15 @@ class TemporalActionVector(BaseModel):
 
     @model_validator(mode="after")
     def validate_deterministic_sequences(self) -> TemporalActionVector:
-        _validate_sequence(self.assertions, "assertion_id", "assertion")
-        _validate_sequence(self.steps, "step_id", "scenario step")
+        parts = self.candidate_id.split(":")
+        if len(parts) != 4 or parts[0] != "EXEC" or parts[2] != self.control_action_id:
+            raise ValueError(
+                "TemporalActionVector candidate_id must be the canonical "
+                "EXEC:<controller>:<control_action>:<uca_type> identifier "
+                f"for control action '{self.control_action_id}'."
+            )
+        _validate_sequence(self.assertions, "assertion_id", "assertion", "TA")
+        _validate_sequence(self.steps, "step_id", "scenario step", "S")
         _validate_uca_step_is_last(self.steps, self.control_action_id)
         return self
 

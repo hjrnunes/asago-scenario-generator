@@ -37,6 +37,15 @@ scenario, evaluation, and reporting artifacts. Its stages reuse shared
 capability and infrastructure contracts while retaining STPA-specific models
 and orchestration.
 
+Post-SP3 execution projection exposes a platform-neutral
+`CandidateExecutionEnvelope` for one unsafe control action. Its canonical
+`EXEC:<controller>:<control-action>:<uca-type>` identity and UCA reference
+retain structural traceability; causal factors use PM/FB/CA control-structure
+IDs. An optional `TemporalActionVector` preserves input factor order with
+canonical `TA-*` assertions and `S-*` steps, and empty factors produce no
+temporal behavior. Assembly validates all factor namespaces against the
+control structure before returning the envelope.
+
 ## Acceptance boundary
 
 `features/` contains the behavior contract. `acceptance/refresh_snapshot.py`
