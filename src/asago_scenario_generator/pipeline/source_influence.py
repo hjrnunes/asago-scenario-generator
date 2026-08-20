@@ -247,6 +247,50 @@ def _qualify_artifact_link(
     )
 
 
+def _links_by_id(
+    links: Sequence[SourceInfluenceArtifactLink],
+    kind: SourceInfluenceArtifactKind,
+) -> dict[str, SourceInfluenceArtifactLink]:
+    """Index links by artifact ID, keeping only those matching ``kind``.
+
+    The two persisted link collections are kept hermetic: ``artifact_kind``
+    is part of the serialized contract, so a link placed in the wrong
+    collection must not qualify an artifact by ID alone.
+    """
+    return {link.artifact_id: link for link in links if link.artifact_kind is kind}
+
+
+def _append_unreferenced_artifact_violation(
+    violations: list[SourceInfluenceViolation],
+    unreferenced_count: int,
+    linked_steps: set[str],
+) -> None:
+    """Append a catch-all unreferenced-artifact violation if needed.
+
+    When artifacts are unreferenced but no per-step
+    ``unreferenced_source_influence_artifact`` violation was already
+    emitted, add a single catch-all so the failure is visible.
+    """
+    if not unreferenced_count:
+        return
+    if any(
+        violation.code
+        == SourceInfluenceViolationCode.unreferenced_source_influence_artifact
+        for violation in violations
+    ):
+        return
+    violations.append(
+        SourceInfluenceViolation(
+            code=SourceInfluenceViolationCode.unreferenced_source_influence_artifact,
+            detail=(
+                "one or more generated artifacts have no source-influence "
+                "provenance link"
+            ),
+            projected_step_id=next(iter(linked_steps), None),
+        )
+    )
+
+
 def _qualify_artifact_kind(
     *,
     elements: Sequence[SourceInfluenceArtifactElement],
@@ -307,21 +351,12 @@ def qualify_source_influence_provenance(
     declared = _canonical_declared_sources(declared_sources)
     declared_ids = {(ref.source_type, ref.source_id) for ref in declared}
 
-    # Keep the two persisted link collections hermetic.  ``artifact_kind`` is
-    # part of the serialized contract, so a link placed in the wrong
-    # collection must not qualify an artifact by ID alone.  It is treated as
-    # absent and consequently produces the normal fail-closed
-    # ``unreferenced_source_influence_artifact`` violation.
-    leaf_links_by_id = {
-        link.artifact_id: link
-        for link in leaf_links
-        if link.artifact_kind is SourceInfluenceArtifactKind.projected_leaf
-    }
-    narrative_links_by_id = {
-        link.artifact_id: link
-        for link in narrative_links
-        if link.artifact_kind is SourceInfluenceArtifactKind.narrative_step
-    }
+    leaf_links_by_id = _links_by_id(
+        leaf_links, SourceInfluenceArtifactKind.projected_leaf
+    )
+    narrative_links_by_id = _links_by_id(
+        narrative_links, SourceInfluenceArtifactKind.narrative_step
+    )
 
     violations: list[SourceInfluenceViolation] = []
     referenced_ids: set[tuple[SourceInfluenceSourceType, str]] = set()
@@ -347,21 +382,9 @@ def qualify_source_influence_provenance(
     )
     violations.extend(_orphaned_source_violations(declared, referenced_ids))
     violations.extend(_unreferenced_step_violations(selected_step_ids, linked_steps))
-    if leaf_unreferenced + narrative_unreferenced and not any(
-        violation.code
-        == SourceInfluenceViolationCode.unreferenced_source_influence_artifact
-        for violation in violations
-    ):
-        violations.append(
-            SourceInfluenceViolation(
-                code=SourceInfluenceViolationCode.unreferenced_source_influence_artifact,
-                detail=(
-                    "one or more generated artifacts have no source-influence "
-                    "provenance link"
-                ),
-                projected_step_id=next(iter(linked_steps), None),
-            )
-        )
+    _append_unreferenced_artifact_violation(
+        violations, leaf_unreferenced + narrative_unreferenced, linked_steps
+    )
     unique = _deduplicate_violations(violations)
 
     source_numerator = len(referenced_ids & declared_ids)
@@ -520,5 +543,5 @@ def validate_source_influence_provenance(
 
 
 # mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-20T11:16:38Z","module_hash":"0291486799b560bf3dbf39eedf530c86720199f191f73cd26e2f7f76d5d81b33","functions":[{"id":"func/_canonical_declared_sources","name":"_canonical_declared_sources","line":72,"end_line":88,"hash":"b9a00c7e6bd7beb5c47466e564c652621484fbdcf27abf9b2d1baf2e84a05f12"},{"id":"func/_step_mismatch_violation","name":"_step_mismatch_violation","line":91,"end_line":107,"hash":"910915c0595828b12fa871dd85d6f6935f2169b8397fbd4cf588fb7fddf68b34"},{"id":"func/_unknown_reference_violation","name":"_unknown_reference_violation","line":110,"end_line":126,"hash":"b16aaeafb540dd93c221879953f4817f07a8461f9928f7570f8b4d6384b58e7d"},{"id":"func/_missing_source_type_violations","name":"_missing_source_type_violations","line":129,"end_line":147,"hash":"81125a677959945961e9792a991bda8a5e22047e4020dfbcf0113f2a2a1c984f"},{"id":"func/_orphaned_source_violations","name":"_orphaned_source_violations","line":150,"end_line":169,"hash":"822115276c1c8d9a754b1ea96f27127bd1b271bccea5a51d698ae4b4569c65b2"},{"id":"func/_unreferenced_step_violations","name":"_unreferenced_step_violations","line":172,"end_line":191,"hash":"39957fd6a788d4814a49a086152429efdb3011f7ea6f19d9dd77732cd179137f"},{"id":"func/_deduplicate_violations","name":"_deduplicate_violations","line":194,"end_line":211,"hash":"d373fcc8afc9609c4d0dedac996dd95c7ba747b29128ba829ecd6f34c66996b8"},{"id":"func/_qualify_artifact_link","name":"_qualify_artifact_link","line":214,"end_line":245,"hash":"3b21b0b8d74c6f1c08a3c8d96f64b0fbbe287ff12b2df5e902400bc26283384c"},{"id":"func/_qualify_artifact_kind","name":"_qualify_artifact_kind","line":248,"end_line":277,"hash":"9348e2315184873e2e93c5d9b98aefc9ac6011c3a4a2c753159c744b79e4abaa"},{"id":"func/qualify_source_influence_provenance","name":"qualify_source_influence_provenance","line":280,"end_line":385,"hash":"85f758c8f14d609b83ebbe94f92d042e12ae2378b0d1bc84f6bfbc67e45851cf"},{"id":"func/make_source_influence_provenance_block","name":"make_source_influence_provenance_block","line":388,"end_line":406,"hash":"3986f497ac369623a46d441c412dec1865090e4dd4c3c85f0eb4c4d34a1fe31f"},{"id":"func/_leaf_nodes","name":"_leaf_nodes","line":414,"end_line":421,"hash":"26aedc3ed6f56c264246772ae913e079c8a2fe536567ac43ecb8044e65e2cac4"},{"id":"func/_artifact_elements","name":"_artifact_elements","line":424,"end_line":452,"hash":"eaffc62ec34144115bf56ab34367c817f439547a90bfa29c91973342dd23cd33"},{"id":"func/validate_source_influence_provenance","name":"validate_source_influence_provenance","line":455,"end_line":511,"hash":"9e1559ddc0de4b40a2341b5284c65e9b2499c544e55bbeea3f74dbb144245d95"}]}
+# {"version":1,"tested_at":"2026-08-20T15:30:39Z","module_hash":"54b192d0952e0bad1e831ac7c136a95892334ed2816759cb202377ec8e965824","functions":[{"id":"func/_canonical_declared_sources","name":"_canonical_declared_sources","line":74,"end_line":90,"hash":"b9a00c7e6bd7beb5c47466e564c652621484fbdcf27abf9b2d1baf2e84a05f12"},{"id":"func/_step_mismatch_violation","name":"_step_mismatch_violation","line":93,"end_line":109,"hash":"910915c0595828b12fa871dd85d6f6935f2169b8397fbd4cf588fb7fddf68b34"},{"id":"func/_unknown_reference_violation","name":"_unknown_reference_violation","line":112,"end_line":128,"hash":"b16aaeafb540dd93c221879953f4817f07a8461f9928f7570f8b4d6384b58e7d"},{"id":"func/_missing_source_type_violations","name":"_missing_source_type_violations","line":131,"end_line":149,"hash":"81125a677959945961e9792a991bda8a5e22047e4020dfbcf0113f2a2a1c984f"},{"id":"func/_orphaned_source_violations","name":"_orphaned_source_violations","line":152,"end_line":171,"hash":"822115276c1c8d9a754b1ea96f27127bd1b271bccea5a51d698ae4b4569c65b2"},{"id":"func/_unreferenced_step_violations","name":"_unreferenced_step_violations","line":174,"end_line":193,"hash":"39957fd6a788d4814a49a086152429efdb3011f7ea6f19d9dd77732cd179137f"},{"id":"func/_deduplicate_violations","name":"_deduplicate_violations","line":196,"end_line":213,"hash":"d373fcc8afc9609c4d0dedac996dd95c7ba747b29128ba829ecd6f34c66996b8"},{"id":"func/_qualify_artifact_link","name":"_qualify_artifact_link","line":216,"end_line":247,"hash":"3b21b0b8d74c6f1c08a3c8d96f64b0fbbe287ff12b2df5e902400bc26283384c"},{"id":"func/_links_by_id","name":"_links_by_id","line":250,"end_line":264,"hash":"1f1e2637dad2f9f681cea88ff538b59d9ca863b5cb3f8e4823e35b448091ce9a"},{"id":"func/_append_unreferenced_artifact_violation","name":"_append_unreferenced_artifact_violation","line":267,"end_line":295,"hash":"197a8ff355db80a1b159439a02a806dea31ae6ab88a2e37a30cc6661dd1b8d53"},{"id":"func/_qualify_artifact_kind","name":"_qualify_artifact_kind","line":298,"end_line":327,"hash":"9348e2315184873e2e93c5d9b98aefc9ac6011c3a4a2c753159c744b79e4abaa"},{"id":"func/qualify_source_influence_provenance","name":"qualify_source_influence_provenance","line":330,"end_line":414,"hash":"60e3092a32b28182c5231c6c340aed17488a2e7a1bc72377b2e574531a22ec8d"},{"id":"func/make_source_influence_provenance_block","name":"make_source_influence_provenance_block","line":417,"end_line":435,"hash":"3986f497ac369623a46d441c412dec1865090e4dd4c3c85f0eb4c4d34a1fe31f"},{"id":"func/leaf_nodes","name":"leaf_nodes","line":443,"end_line":456,"hash":"ff4d04745788d2f0e79a904955c9cc6824a4f3c3c6a2d0fedea710de9f5adeeb"},{"id":"func/artifact_elements","name":"artifact_elements","line":459,"end_line":487,"hash":"61795f74129e879047f3a0f1da13e7302844f3e440a6bb70b8f90bacd03eaff5"},{"id":"func/validate_source_influence_provenance","name":"validate_source_influence_provenance","line":490,"end_line":546,"hash":"7dade893faecc6f4d6a682ef083766da60ff13fade4d03175358114da6fb7baf"}]}
 # mutate4py-manifest-end

@@ -240,3 +240,8 @@ def assemble_source_influence_provenance(
         narrative_links=narrative_links,
         qualification=result,
     )
+
+
+# mutate4py-manifest-begin
+# {"version":1,"tested_at":"2026-08-20T15:28:32Z","module_hash":"14f88f4e67230e0dc3def1bc4d79d1e37f8e31f57da05b914fa2629bad830cd8","functions":[{"id":"func/_load_threat_playbooks_cached","name":"_load_threat_playbooks_cached","line":77,"end_line":90,"hash":"e96d4b649c526ff3d157532ad7577cbdbb720fee2cf5f1e578a22e16b895e984"},{"id":"func/_dedupe_source_refs","name":"_dedupe_source_refs","line":93,"end_line":111,"hash":"f982c5716f3ffe85722562e884b5c1829758fcb29c5b4105bcae47d38b3e30b5"},{"id":"func/_threat_source_refs","name":"_threat_source_refs","line":114,"end_line":121,"hash":"012634033713dfd2cddf4b492b3a2be7eafc785bac3d5cbbf956f2c40a3b39e3"},{"id":"func/_mitigation_source_refs","name":"_mitigation_source_refs","line":124,"end_line":138,"hash":"bc9e5427041785a151d315e17b1b4f2ec9dedc2336bf7311a5d3f87da2bcdeb6"},{"id":"func/_constraint_source_refs","name":"_constraint_source_refs","line":141,"end_line":148,"hash":"4ad7a4519ccb7183c2a50dd1ad27203ed36e368dc2673bacd7da4b7fd8e2702c"},{"id":"func/declared_source_records","name":"declared_source_records","line":151,"end_line":171,"hash":"98db596fc30be3efbe8ed7ced48ab3a11b4bdbd3148a30bcd45589f1ad5855eb"},{"id":"func/_links_for_elements","name":"_links_for_elements","line":174,"end_line":188,"hash":"0231ffdf47c4820050d17f3245f28b966a2d08901b1d02b55f2db8965e1362b3"},{"id":"func/assemble_source_influence_provenance","name":"assemble_source_influence_provenance","line":191,"end_line":242,"hash":"4d356db8b0e7c543b18b3738a8a5ede1af75075524b9f0da89677034a7ecc728"}]}
+# mutate4py-manifest-end
