@@ -25,9 +25,11 @@ from asago_scenario_generator.stpa.models.control_structure import (
     Responsibility,
 )
 from asago_scenario_generator.stpa.models.execution_envelope import (
+    CandidateExecutionEnvelope,
     CausalFactor,
     CausalFactorKind,
     ScenarioStepKind,
+    TemporalActionVector,
     TemporalPredicate,
     candidate_id_for,
     step_kind_for,
@@ -104,42 +106,19 @@ def _make_building_blocks_control_structure() -> ControlStructure:
     )
 
 
-def _find_control_action_owner(
+def _find_control_action(
     control_structure: ControlStructure, control_action_id: str
-) -> str | None:
-    """Return the responsibility owning a control action, if any."""
+) -> tuple[str, str] | None:
+    """Return the (owner, description) of a control action, if any."""
     for responsibility in control_structure.responsibilities:
         for control_action in responsibility.control_actions:
             if control_action.ca_id == control_action_id:
-                return responsibility.resp_id
-    return None
-
-
-def _find_control_action_description(
-    control_structure: ControlStructure, control_action_id: str
-) -> str | None:
-    """Return the canonical description of a control action, if any."""
-    for responsibility in control_structure.responsibilities:
-        for control_action in responsibility.control_actions:
-            if control_action.ca_id == control_action_id:
-                return control_action.description
+                return responsibility.resp_id, control_action.description
     return None
 
 
 def _h_models_importable(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Given: the STPA execution projection models are importable."""
-    from asago_scenario_generator.stpa.models.execution_envelope import (
-        CandidateExecutionEnvelope,
-        CausalFactor,
-        TemporalActionVector,
-    )
-    from asago_scenario_generator.stpa.scenario_prod.assembly import (
-        assemble_candidate_envelope,
-    )
-    from asago_scenario_generator.stpa.scenario_prod.narrative import (
-        derive_temporal_action_vector,
-    )
-
     world.stpa_models_importable = all(
         callable(obj) or isinstance(obj, type)
         for obj in (
@@ -195,9 +174,10 @@ def _h_uca_targets(world: World, text: str, examples: dict) -> tuple[bool, str]:
     control_structure = getattr(world, "stpa_control_structure", None)
     if control_structure is None:
         return False, "No control structure is available yet"
-    controller_id = _find_control_action_owner(control_structure, control_action_id)
-    if controller_id is None:
+    owner = _find_control_action(control_structure, control_action_id)
+    if owner is None:
         return False, f"Control action {control_action_id} has no owning responsibility"
+    controller_id = owner[0]
     world.stpa_uca_type = UCAType(uca_value)
     world.stpa_control_action = control_action_id
     world.stpa_controller = controller_id
@@ -575,11 +555,10 @@ def _h_description_retained(
     control_structure = getattr(world, "stpa_control_structure", None)
     if envelope is None or control_structure is None:
         return False, "Envelope or control structure missing"
-    expected = _find_control_action_description(
-        control_structure, envelope.control_action_id
-    )
-    if expected is None:
+    found = _find_control_action(control_structure, envelope.control_action_id)
+    if found is None:
         return False, f"No control action {envelope.control_action_id} in the structure"
+    expected = found[1]
     if envelope.control_action_description != expected:
         return (
             False,
