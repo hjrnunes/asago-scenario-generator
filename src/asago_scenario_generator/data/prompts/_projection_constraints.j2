@@ -9,13 +9,18 @@ trace back to these exact projected steps.
 - entry_point: {{ projection_context.canonical_ingress_name | default(projection_context.canonical_ingress.entry_point_id) }}
 - ingress_controllability: {{ projection_context.ingress_controllability }}
 
-### Selected Projected Steps (ordered — preserve this total order)
+### Selected Projected Step IDs (canonical order — echo these exact values)
 **Warning:** step IDs are semantic names, not positional labels.  Never
 replace a step ID with its numeric position or infer identity from ordering.
-Use these IDs in `projected_step_ids` on narrative steps and tree leaves
-to indicate which phase each element realizes.
+Echo the exact canonical ID values below in `projected_step_ids` on
+narrative steps and tree leaves to indicate which phase each element
+realizes.  The canonical ID list is:
+
+"{{ projection_context.selected_step_ids | join('", "') }}"
+
+### Per-step projection constraints (same canonical order)
 {% for step in projection_context.selected_steps %}
-- step_id: {{ step.step_id }}
+- {{ step.step_id }}
    - action_kind: {{ step.action_kind }}
    - executor_role: {{ step.executor_role }}
    - boundary_position: {{ step.boundary_position }}

@@ -29,6 +29,7 @@ from asago_scenario_generator.pipeline.coverage_planning import (
     QualityGap,
     StageLedger,
 )
+from asago_scenario_generator.pipeline.generate.zones import active_narrative_zones
 from asago_scenario_generator.pipeline.threats import ThreatSurface
 
 logger = logging.getLogger(__name__)
@@ -209,7 +210,10 @@ def analyze_coverage_gaps(
             if matched_ids and len(matched_ids) == 1:
                 used_entry_point_ids.update(matched_ids)
             # Ambiguous or unknown names must NOT inflate coverage.
-        traversed_zones.update(envelope.narrative.zone_sequence)
+        # Literal 'outside' narrative traversal is not internal traversal:
+        # it never credits an active zone, so uncovered active zones are
+        # reported accurately.
+        traversed_zones.update(active_narrative_zones(envelope.narrative.zone_sequence))
         covered_threat_ids.update(envelope.faceting.taxonomy_chain.agentic_threat_ids)
         covered_attack_pattern_ids.add(envelope.faceting.taxonomy_chain.scenario_seed)
 

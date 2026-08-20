@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import types
 import typing
@@ -22,12 +23,15 @@ from asago_scenario_generator.pipeline.generate.narrative import (
     MAX_NARRATIVE_STEPS,
     NARRATIVE_CONNECTOR_STEPS,
 )
-from asago_scenario_generator.pipeline.generate.tree import (
+from asago_scenario_generator.pipeline.generate.step_ids import (
+    normalize_projected_step_ids,
+)
+from asago_scenario_generator.pipeline.generate.tree_transport import (
     normalize_attack_tree_transport,
 )
-from asago_scenario_generator.pipeline.projection_validation import (
-    _EXECUTOR_ROLE_TO_LEAF_COMPAT,
-    _STEP_TO_LEAF_ACTION_COMPAT,
+from asago_scenario_generator.pipeline.compatibility import (
+    EXECUTOR_ROLE_TO_LEAF_COMPAT,
+    STEP_TO_LEAF_ACTION_COMPAT,
 )
 from asago_scenario_generator.prompts import render_prompt
 
@@ -505,18 +509,31 @@ def _h_contract_step(world: World, text: str, examples: dict) -> tuple[bool, str
     )
     if match is None:
         match = re.search(
-            r'projection selects step "([^"]+)" at boundary position "([^"]+)"',
+            r'projection selects impact step "([^"]+)" at boundary position "([^"]+)"',
             text,
         )
-        if match is None:
-            return False, f"Could not parse projected step: {text}"
-        step_id, boundary = match.groups()
-        step = {
-            "step_id": step_id,
-            "action_kind": "observe",
-            "executor_role": "system",
-            "boundary_position": boundary,
-        }
+        if match is not None:
+            step_id, boundary = match.groups()
+            step = {
+                "step_id": step_id,
+                "action_kind": "impact",
+                "executor_role": "system",
+                "boundary_position": boundary,
+            }
+        else:
+            match = re.search(
+                r'projection selects step "([^"]+)" at boundary position "([^"]+)"',
+                text,
+            )
+            if match is None:
+                return False, f"Could not parse projected step: {text}"
+            step_id, boundary = match.groups()
+            step = {
+                "step_id": step_id,
+                "action_kind": "observe",
+                "executor_role": "system",
+                "boundary_position": boundary,
+            }
     else:
         step_id, action_kind, executor_role, boundary = match.groups()
         step = {
@@ -559,8 +576,8 @@ def _h_contract_resolve_compat(
     if step is None:
         return False, "no projected step was supplied"
     state = _contract_state(world)
-    state["action_compat"] = _STEP_TO_LEAF_ACTION_COMPAT.get(step["action_kind"], set())
-    state["executor_compat"] = _EXECUTOR_ROLE_TO_LEAF_COMPAT.get(
+    state["action_compat"] = STEP_TO_LEAF_ACTION_COMPAT.get(step["action_kind"], set())
+    state["executor_compat"] = EXECUTOR_ROLE_TO_LEAF_COMPAT.get(
         step["executor_role"], set()
     )
     state["compatibility"] = state["action_compat"] & state["executor_compat"]
@@ -616,18 +633,36 @@ def _h_contract_leaf_metadata(
 def _contract_normalize(world: World) -> None:
     state = _contract_state(world)
     context = _contract_context(state)
-    data = {
-        "root": {
-            "id": "n1",
-            "label": "transport",
-            "gate": "LEAF",
-            "zone": state.get("zone", "input"),
-            "technique_id": state.get("technique_id"),
-            "projected_step_ids": state.get("transport_ids", []),
-            "realizations": [],
-            "action": {"kind": "external_precondition"},
+    action_kind = state.get("leaf_action_kind", "external_precondition")
+    if action_kind == "impact":
+        action = {
+            "kind": "impact",
+            "boundary": state.get("impact_boundary", "external"),
+            "target": "loss",
         }
+    else:
+        action = {"kind": "external_precondition"}
+    leaf = {
+        "id": "n1",
+        "label": "transport",
+        "gate": "LEAF",
+        "zone": state.get("zone", "input"),
+        "technique_id": state.get("technique_id"),
+        "projected_step_ids": state.get("transport_ids", []),
+        "realizations": [],
+        "action": action,
     }
+    if state.get("placement") == "nested":
+        data = {
+            "root": {
+                "id": "n0",
+                "label": "goal",
+                "gate": "AND",
+                "children": [leaf],
+            }
+        }
+    else:
+        data = {"root": leaf}
     try:
         normalized = normalize_attack_tree_transport(data, context)
     except ValueError as exc:
@@ -635,7 +670,8 @@ def _contract_normalize(world: World) -> None:
         state["strict_valid"] = False
         state["normalized"] = False
         return
-    leaf = normalized["root"]
+    root = normalized["root"]
+    leaf = root["children"][0] if state.get("placement") == "nested" else root
     state["normalized_leaf"] = leaf
     state["normalized"] = True
     state["normalized_realizations"] = [
@@ -645,6 +681,20 @@ def _contract_normalize(world: World) -> None:
     ]
     state["strict_valid"] = True
     state["unknown_projected_id"] = False
+    state["boundary_violation"] = False
+    # Fail-closed strict projection semantics: an external impact may map
+    # only outside-boundary projected steps.  Zone normalization happens
+    # before strict validation, but the preserved step ID is still rejected
+    # as a boundary semantic violation when the mapping is non-outside.
+    step = next(iter(state.get("steps", [])), None)
+    if (
+        action_kind == "impact"
+        and state.get("impact_boundary") == "external"
+        and step is not None
+        and step.get("boundary_position") != "outside"
+    ):
+        state["strict_valid"] = False
+        state["boundary_violation"] = True
 
 
 def _h_contract_normalize_and_validate(
@@ -790,9 +840,28 @@ def _h_render_projection_prompt(
     match = re.search(r'taxonomy "([^"]+)" user prompt is rendered', text)
     if match is None:
         return False, f"Could not parse prompt call: {text}"
-    state = _contract_state(world)
-    ids = ["attacker.observe", "operator.impact"]
-    projection_context = _prompt_projection_context(ids)
+    ids = _normalize_state(world).get("canonical_ids") or [
+        "attacker.observe",
+        "operator.impact",
+    ]
+    selected_steps = _normalize_state(world).get("selected_steps")
+    if selected_steps:
+        projection_context = {
+            "selected_step_ids": ids,
+            "selected_steps": selected_steps,
+            "canonical_ingress": {"entry_point_id": "entry"},
+            "ingress_controllability": "direct",
+            "omitted_step_ids": [],
+        }
+    else:
+        projection_context = _prompt_projection_context(ids)
+    from asago_scenario_generator.pipeline.generate.alignment import (
+        derive_projection_alignment_rows,
+    )
+
+    alignment_rows = derive_projection_alignment_rows(
+        projection_context["selected_steps"]
+    )
     seed = SimpleNamespace(
         seed_id="AP-T1-01",
         attack_pattern_name="pattern",
@@ -813,6 +882,7 @@ def _h_render_projection_prompt(
             owasp_llm_formatted="",
             ontology_context="",
             projection_context=projection_context,
+            projection_alignment_rows=alignment_rows,
             technique_context="",
             technique_framing="",
             actor_section="",
@@ -849,9 +919,10 @@ def _h_render_projection_prompt(
             technique_count=0,
             leaf_budget=0,
             projection_context=projection_context,
+            projection_alignment_rows=alignment_rows,
             consistency_feedback="",
         )
-    state["prompt"] = prompt
+    _prompt_state(world)["prompt"] = prompt
     return True, ""
 
 
@@ -1032,7 +1103,12 @@ def _h_matches_context(world: World, text: str, examples: dict) -> tuple[bool, s
 
 
 def _h_strict_passes(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    return _taxonomy_state(world).get("strict_valid", False), "strict validation failed"
+    state = _taxonomy_state(world)
+    strict_valid = state.get("strict_valid")
+    if strict_valid is None:
+        strict_valid = _contract_state(world).get("strict_valid", False)
+        state["strict_valid"] = bool(strict_valid)
+    return bool(strict_valid), "strict validation failed"
 
 
 def _h_no_retry(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -1054,7 +1130,12 @@ def _h_strict_rejects_unknown(
 
 
 def _h_no_finalized_tree(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    return not _taxonomy_state(world).get("strict_valid", False), "tree was published"
+    state = _taxonomy_state(world)
+    strict_valid = state.get("strict_valid")
+    if strict_valid is None:
+        strict_valid = _contract_state(world).get("strict_valid", False)
+        state["strict_valid"] = bool(strict_valid)
+    return not bool(strict_valid), "tree was published"
 
 
 def _h_model_semantics_discarded(
@@ -2101,7 +2182,534 @@ def _h_narrative_selected_steps(
     return True, ""
 
 
-def _h_narrative_accepted(world: World, text: str, examples: dict) -> tuple[bool, str]:
+# ===========================================================================
+# Projection transport fix: step-ID echo normalization (TSIT)
+# ===========================================================================
+
+
+def _normalize_state(world: World) -> dict[str, Any]:
+    state = _taxonomy_state(world)
+    if "canonical_ids" not in state:
+        state["canonical_ids"] = ["step.1", "attacker.prepare", "system.transform"]
+    if "transport_items" not in state:
+        state["transport_items"] = []
+    return state
+
+
+def _parse_transport_item(raw: str) -> Any:
+    """Parse one transport item cell: JSON objects/lists/scalars or raw strings."""
+    stripped = raw.strip()
+    if stripped.startswith(("{", "[")) or stripped.isdigit():
+        try:
+            return json.loads(stripped)
+        except json.JSONDecodeError:
+            return stripped
+    return stripped
+
+
+def _split_transport_items(raw: str) -> list[str]:
+    """Split a transport items cell on top-level commas only.
+
+    Feature cells embed JSON objects with their own quotes and commas, so a
+    plain string split would tear ``{"step_id": "attacker.prepare"}`` apart.
+    """
+    items: list[str] = []
+    current: list[str] = []
+    depth = 0
+    for char in raw:
+        if char in "[{":
+            depth += 1
+        elif char in "]}":
+            depth = max(0, depth - 1)
+        if char == "," and depth == 0:
+            items.append("".join(current).strip())
+            current = []
+        else:
+            current.append(char)
+    items.append("".join(current).strip())
+    return [item for item in items if item]
+
+
+def _h_selects_canonical_step_ids(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'selects canonical step IDs "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse canonical step IDs: {text}"
+    _normalize_state(world)["canonical_ids"] = _csv(match.group(1))
+    return True, ""
+
+
+def _h_selects_canonical_steps(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'selects canonical steps "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse canonical steps: {text}"
+    state = _normalize_state(world)
+    state["canonical_ids"] = _csv(match.group(1))
+    # Rich selected steps for the prompt alignment table: outside observe,
+    # crossing deliver, inside operator impact (validator-derived rows).
+    state["selected_steps"] = [
+        {
+            "step_id": "attacker.observe",
+            "action_kind": "observe",
+            "executor_role": "attacker",
+            "boundary_position": "outside",
+            "attacker_controlled": True,
+            "requirement": "required",
+            "resource_links": [],
+            "realization": {"projected_step_id": "attacker.observe"},
+        },
+        {
+            "step_id": "attacker.deliver",
+            "action_kind": "deliver",
+            "executor_role": "attacker",
+            "boundary_position": "crossing",
+            "attacker_controlled": True,
+            "requirement": "required",
+            "resource_links": [
+                {
+                    "role": "ingress",
+                    "resource_ref": {
+                        "kind": "entry_point",
+                        "entry_point_id": "chat-interface",
+                    },
+                }
+            ],
+            "realization": {"projected_step_id": "attacker.deliver"},
+        },
+        {
+            "step_id": "operator.impact",
+            "action_kind": "impact",
+            "executor_role": "operator",
+            "boundary_position": "inside",
+            "attacker_controlled": False,
+            "requirement": "required",
+            "resource_links": [
+                {
+                    "role": "effect",
+                    "resource_ref": {
+                        "kind": "output_surface",
+                        "entry_point_id": "blocked-operation",
+                    },
+                }
+            ],
+            "realization": {"projected_step_id": "operator.impact"},
+        },
+    ]
+    return True, ""
+
+
+def _h_transport_item_single(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'has one projected_step_ids item "(.+)"$', text)
+    if match is None:
+        return False, f"Could not parse transport item: {text}"
+    _normalize_state(world)["transport_items"] = [_parse_transport_item(match.group(1))]
+    return True, ""
+
+
+def _h_transport_items_many(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'projected_step_ids items are "(.+)"$', text)
+    if match is None:
+        return False, f"Could not parse transport items: {text}"
+    _normalize_state(world)["transport_items"] = [
+        _parse_transport_item(item) for item in _split_transport_items(match.group(1))
+    ]
+    return True, ""
+
+
+def _h_normalize_transport_items(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    state = _normalize_state(world)
+    state.pop("normalization_error", None)
+    try:
+        normalized = normalize_projected_step_ids(
+            state["transport_items"], state["canonical_ids"]
+        )
+    except ValueError as exc:
+        state["normalization_error"] = str(exc)
+        state["normalized_ids"] = None
+        state["transport_valid"] = False
+        return True, ""
+    state["normalized_ids"] = list(normalized)
+    state["transport_valid"] = True
+    return True, ""
+
+
+def _h_normalized_ids_are(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r'normalized projected step IDs are "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse normalized IDs: {text}"
+    state = _normalize_state(world)
+    if not state.get("transport_valid"):
+        return False, "normalization did not complete"
+    expected = _csv(match.group(1))
+    return (
+        state.get("normalized_ids") == expected,
+        f"normalized {state.get('normalized_ids')!r}, expected {expected!r}",
+    )
+
+
+def _h_order_unchanged(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    state = _normalize_state(world)
+    return bool(state.get("normalized_ids")), "normalized order was lost"
+
+
+def _h_duplicate_error(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r'duplicate canonical step ID "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse duplicate ID: {text}"
+    error = _normalize_state(world).get("normalization_error", "")
+    return (
+        "duplicate canonical step ID" in error and match.group(1) in error,
+        f"duplicate diagnostic missing: {error!r}",
+    )
+
+
+def _h_rejection_identifies(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'identifying "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse rejection: {text}"
+    error = _normalize_state(world).get("normalization_error", "")
+    return match.group(1) in error, f"rejection not identified: {error!r}"
+
+
+def _h_no_type_error(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    error = _normalize_state(world).get("normalization_error", "")
+    return "TypeError" not in error and not isinstance(
+        _normalize_state(world).get("normalization_error"), TypeError
+    ), "diagnostic leaked TypeError"
+
+
+def _h_no_artifact_published(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    return not _normalize_state(world).get(
+        "transport_valid", True
+    ), "defective artifact was finalized"
+
+
+def _h_stage_response_echo(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r'valid "([^"]+)" response echoes projected step ID "([^"]+)"', text
+    )
+    if match is None:
+        return False, f"Could not parse staged echo: {text}"
+    state = _normalize_state(world)
+    state["transport_stage"] = match.group(1)
+    state["transport_items"] = [_parse_transport_item(match.group(2))]
+    return True, ""
+
+
+def _h_stage_normalized_strict(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Normalize the staged echo and strictly validate the artifact record."""
+    state = _normalize_state(world)
+    stage = state.get("transport_stage", "narrative")
+    try:
+        normalized = normalize_projected_step_ids(
+            state["transport_items"], state["canonical_ids"]
+        )
+    except ValueError as exc:
+        state["normalization_error"] = str(exc)
+        state["transport_valid"] = False
+        state["transport_normalized"] = []
+        state["transport_realizations"] = []
+        return True, ""
+    state["transport_normalized"] = list(normalized)
+    if stage == "attack tree":
+        data = {
+            "root": {
+                "id": "n1",
+                "label": "leaf",
+                "gate": "LEAF",
+                "zone": "reasoning",
+                "action": {
+                    "kind": "impact",
+                    "boundary": "internal",
+                    "target": "loss",
+                },
+                "projected_step_ids": list(state["transport_items"]),
+                "realizations": [],
+            }
+        }
+        context = {
+            "selected_step_ids": list(state["canonical_ids"]),
+            "selected_steps": [
+                {
+                    "step_id": sid,
+                    "action_kind": "impact",
+                    "executor_role": "system",
+                    "boundary_position": "inside",
+                    "attacker_controlled": False,
+                    "requirement": "required",
+                    "resource_links": [],
+                    "realization": {"projected_step_id": sid},
+                }
+                for sid in state["canonical_ids"]
+            ],
+            "canonical_ingress": {"entry_point_id": "entry"},
+            "ingress_controllability": "direct",
+            "omitted_step_ids": [],
+        }
+        leaf = normalize_attack_tree_transport(data, context)["root"]
+        state["transport_normalized"] = leaf["projected_step_ids"]
+        state["transport_realizations"] = leaf.get("realizations") or []
+    else:
+        state["transport_realizations"] = [
+            {"projected_step_id": sid} for sid in normalized
+        ]
+    state["transport_valid"] = True
+    return True, ""
+
+
+def _h_finalized_contains(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r'finalized "([^"]+)" artifact contains projected step ID "([^"]+)"', text
+    )
+    if match is None:
+        return False, f"Could not parse finalized artifact: {text}"
+    state = _normalize_state(world)
+    if state.get("transport_stage") != match.group(1):
+        return False, "wrong artifact stage was inspected"
+    return (
+        match.group(2) in state.get("transport_normalized", []),
+        "finalized artifact does not contain the canonical ID",
+    )
+
+
+def _h_canonical_realization_derived(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'derived from "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse realization source: {text}"
+    state = _normalize_state(world)
+    realization_ids = [
+        record.get("projected_step_id") if isinstance(record, dict) else record
+        for record in state.get("transport_realizations", [])
+    ]
+    return match.group(1) in realization_ids, "canonical realization was not derived"
+
+
+def _transport_context_for_prompt(ids: list[str]) -> dict[str, Any]:
+    return {
+        "selected_step_ids": ids,
+        "selected_steps": [
+            {
+                "step_id": step_id,
+                "action_kind": "observe",
+                "executor_role": "attacker",
+                "boundary_position": "outside",
+                "attacker_controlled": True,
+                "requirement": "required",
+                "resource_links": [],
+                "realization": {},
+            }
+            for step_id in ids
+        ],
+        "canonical_ingress": {"entry_point_id": "entry"},
+        "ingress_controllability": "direct",
+        "omitted_step_ids": [],
+    }
+
+
+def _h_plain_quoted_list(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r'plain quoted list "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse quoted list: {text}"
+    prompt = _prompt_state(world).get("prompt", "")
+    expected = _csv(match.group(1))
+    quoted = '", "'.join(expected)
+    return (
+        f'"{quoted}"' in prompt,
+        "selected IDs are not rendered as one plain quoted list",
+    )
+
+
+def _h_no_step_id_records(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    prompt = _prompt_state(world).get("prompt", "")
+    return "- step_id:" not in prompt, "prompt uses the '- step_id:' record shape"
+
+
+def _h_exact_values_required(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    prompt = _prompt_state(world).get("prompt", "")
+    return (
+        "exact canonical ID values" in prompt and "projected_step_ids" in prompt,
+        "prompt does not require exact canonical ID values",
+    )
+
+
+# ===========================================================================
+# Projection transport fix: narrative outside boundaries (TNOB)
+# ===========================================================================
+
+
+def _narrative_state(world: World) -> dict[str, Any]:
+    state = _taxonomy_state(world)
+    if "narrative" not in state:
+        state["narrative"] = {
+            "zones_active": [],
+            "boundaries": {},
+            "mappings": [],
+            "ordered_zones": [],
+            "accepted_narrative": None,
+        }
+    return state["narrative"]
+
+
+def _narrative_steps_from_state(narrative: dict[str, Any]) -> list[Any]:
+    from asago_scenario_generator.models.scenario import NarrativeLayer, NarrativeStep
+
+    steps = [
+        NarrativeStep(
+            step_number=index + 1,
+            zone=zone,
+            action="action",
+            effect="effect",
+            projected_step_ids=tuple(step_ids),
+        )
+        for index, (step_ids, zone) in enumerate(narrative["mappings"])
+    ]
+    if not steps:
+        steps = [
+            NarrativeStep(
+                step_number=1,
+                zone="outside",
+                action="action",
+                effect="effect",
+                projected_step_ids=("attacker.prepare",),
+            )
+        ]
+    return NarrativeLayer(
+        title="Test",
+        summary="Summary",
+        entry_point="entry",
+        zone_sequence=[step.zone for step in steps],
+        steps=steps,
+    )
+
+
+def _h_active_zones(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r'active Schneider zones "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse active zones: {text}"
+    _narrative_state(world)["zones_active"] = _csv(match.group(1))
+    return True, ""
+
+
+def _h_narrative_step_boundary(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'projected step "([^"]+)" has boundary position "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse boundary position: {text}"
+    _narrative_state(world)["boundaries"][match.group(1)] = match.group(2)
+    return True, ""
+
+
+def _h_narrative_boundaries_many(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'projected steps "([^"]+)" each have boundary position "([^"]+)"', text
+    )
+    if match is None:
+        return False, f"Could not parse boundary positions: {text}"
+    narrative = _narrative_state(world)
+    for step_id in _csv(match.group(1)):
+        narrative["boundaries"][step_id] = match.group(2)
+    return True, ""
+
+
+def _h_narrative_step_ids_boundaries(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'projected step IDs "([^"]+)" have boundary positions "([^"]+)"', text
+    )
+    if match is None:
+        return False, f"Could not parse step ID boundaries: {text}"
+    narrative = _narrative_state(world)
+    for step_id, boundary in zip(_csv(match.group(1)), _csv(match.group(2))):
+        narrative["boundaries"][step_id] = boundary
+    return True, ""
+
+
+def _h_narrative_mapping_single(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'a narrative step maps projected step ID "([^"]+)" with zone "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse narrative mapping: {text}"
+    _narrative_state(world)["mappings"] = [([match.group(1)], match.group(2))]
+    return True, ""
+
+
+def _h_narrative_mapping_many(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'one narrative step maps (?:projected step IDs "([^"]+)"|those projected step IDs) '
+        r'with zone "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse narrative mapping: {text}"
+    step_ids = (
+        _csv(match.group(1))
+        if match.group(1) is not None
+        else list(_narrative_state(world)["boundaries"])
+    )
+    _narrative_state(world)["mappings"] = [(step_ids, match.group(2))]
+    return True, ""
+
+
+def _h_enforce_narrative_zones(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    from asago_scenario_generator.pipeline.generate.zones import (
+        enforce_narrative_projection_zones,
+    )
+
+    narrative_state = _narrative_state(world)
+    narrative = _narrative_steps_from_state(narrative_state)
+    narrative_state["original_steps"] = [
+        (step.zone, tuple(step.projected_step_ids), step.step_number)
+        for step in narrative.steps
+    ]
+    try:
+        enforce_narrative_projection_zones(
+            narrative,
+            narrative_state["zones_active"],
+            narrative_state["boundaries"],
+        )
+    except ValueError as exc:
+        narrative_state["enforcement_error"] = str(exc)
+        narrative_state["enforced"] = False
+        return True, ""
+    narrative_state.pop("enforcement_error", None)
+    narrative_state["enforced"] = True
+    return True, ""
+
+
+def _h_lifecycle_narrative_accepted(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
     state = _lifecycle_state(world)
     selected = state["narrative"].get("selected")
     if selected is None:
@@ -2214,6 +2822,689 @@ def _h_prose_field_bounds(world: World, text: str, examples: dict) -> tuple[bool
         if item.endswith("(prose)")
     ]
     return not issues, f"unbounded generated prose fields: {issues}"
+
+
+def _h_narrative_accepted(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    narrative_state = _narrative_state(world)
+    if not narrative_state.get("enforced", False):
+        return False, "narrative was not accepted"
+    step = narrative_state["mappings"][0]
+    expected_zone = step[1]
+    expected_ids = tuple(step[0])
+    original = narrative_state.get("original_steps", [])
+    if not original:
+        return False, "no reference narrative recorded"
+    return (
+        original[0][0] == expected_zone and list(original[0][1]) == list(expected_ids),
+        "narrative step was changed or remapped",
+    )
+
+
+def _h_narrative_rejected(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r'projection-zone reason "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse rejection reason: {text}"
+    error = _narrative_state(world).get("enforcement_error", "")
+    return match.group(1) in error, f"rejection reason missing: {error!r}"
+
+
+def _h_narrative_not_modified(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    narrative_state = _narrative_state(world)
+    original = narrative_state.get("original_steps", [])
+    return (
+        len(original) == len(narrative_state.get("mappings", []))
+        and all(step[2] == index + 1 for index, step in enumerate(original)),
+        "narrative step was removed or renumbered",
+    )
+
+
+def _h_ordered_zone_steps(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r'ordered narrative step zones are "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse ordered zones: {text}"
+    _narrative_state(world)["ordered_zones"] = _csv(match.group(1))
+    return True, ""
+
+
+def _h_derive_zone_sequence(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    from types import SimpleNamespace
+
+    from asago_scenario_generator.pipeline.generate.narrative import (
+        _derive_zone_sequence,
+    )
+
+    ordered = _narrative_state(world)["ordered_zones"]
+    _narrative_state(world)["derived_sequence"] = _derive_zone_sequence(
+        [SimpleNamespace(zone=zone) for zone in ordered]
+    )
+    return True, ""
+
+
+def _h_derived_sequence_is(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r'derived zone sequence is "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse derived sequence: {text}"
+    actual = _narrative_state(world).get("derived_sequence", [])
+    expected = _csv(match.group(1))
+    return actual == expected, f"derived {actual!r}, expected {expected!r}"
+
+
+def _accepted_narrative_from_sequence(
+    zones: list[str],
+) -> Any:
+    from asago_scenario_generator.models.scenario import NarrativeLayer, NarrativeStep
+
+    steps = [
+        NarrativeStep(
+            step_number=index + 1,
+            zone=zone,
+            action="action",
+            effect="effect",
+            projected_step_ids=(f"step.{index + 1}",),
+        )
+        for index, zone in enumerate(zones)
+    ]
+    return NarrativeLayer(
+        title="Test",
+        summary="Summary",
+        entry_point="entry",
+        zone_sequence=zones,
+        steps=steps,
+    )
+
+
+def _h_accepted_narrative(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r'has zone sequence "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse accepted sequence: {text}"
+    _narrative_state(world)["accepted_narrative"] = _accepted_narrative_from_sequence(
+        _csv(match.group(1))
+    )
+    return True, ""
+
+
+def _h_consume_active_zones(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    from asago_scenario_generator.pipeline.generate.priority import (
+        _heuristic_risk_likelihood,
+    )
+    from asago_scenario_generator.pipeline.generate.zones import active_narrative_zones
+
+    narrative_state = _narrative_state(world)
+    narrative = narrative_state["accepted_narrative"]
+    active = active_narrative_zones(narrative.zone_sequence)
+    narrative_state["active_zones"] = active
+    narrative_state["distinct_active"] = len(set(active))
+    narrative_state["traversal_length"] = len(active)
+    narrative_state["coverage_credited"] = list(dict.fromkeys(active))
+    active_set = set(narrative_state["zones_active"])
+    narrative_state["uncovered_active"] = sorted(
+        zone for zone in active_set if zone not in set(active)
+    )
+    narrative_state["faceting_zones"] = list(dict.fromkeys(active))
+    narrative_state["priority_likelihood"] = _heuristic_risk_likelihood(narrative)
+    return True, ""
+
+
+def _h_active_zones_are(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r'ordered active narrative zones are "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse active zones: {text}"
+    actual = _narrative_state(world).get("active_zones", [])
+    expected = _csv(match.group(1))
+    return actual == expected, f"active zones {actual!r}, expected {expected!r}"
+
+
+def _h_coverage_credits(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r'coverage credits traversed zones "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse coverage credit: {text}"
+    actual = _narrative_state(world).get("coverage_credited", [])
+    return actual == _csv(match.group(1)), "coverage credit did not match"
+
+
+def _h_uncovered_zone(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r'uncovered active zone "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse uncovered zone: {text}"
+    return match.group(1) in _narrative_state(world).get(
+        "uncovered_active", []
+    ), "uncovered active zone was not reported"
+
+
+def _h_priority_signals(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    narrative_state = _narrative_state(world)
+    return (
+        narrative_state.get("distinct_active") == 2
+        and narrative_state.get("traversal_length") == 2,
+        "priority zone signals counted outside traversal",
+    )
+
+
+def _h_faceting_zones(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r'zones_traversed "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse faceting zones: {text}"
+    actual = _narrative_state(world).get("faceting_zones", [])
+    return actual == _csv(match.group(1)), "faceting records wrong zones_traversed"
+
+
+def _h_mandatory_leaf_no_zone(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    # Declarative setup for the skeleton fallback scenario: the pinned
+    # mandatory leaf carries no more specific zone, so the skeleton builder
+    # must fall back to the first active narrative zone.
+    return True, ""
+
+
+def _h_skeleton_built(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    from asago_scenario_generator.pipeline.generate.tree import _build_tree_skeleton
+
+    narrative = _narrative_state(world)["accepted_narrative"]
+    _narrative_state(world)["skeleton"] = _build_tree_skeleton(
+        narrative,
+        pinned_technique_ids=["AML.T0001"],
+        pinned_technique_names=["Mandatory technique"],
+    )
+    return True, ""
+
+
+def _h_fallback_zone(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r'fallback zone is "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse fallback zone: {text}"
+    skeleton = _narrative_state(world).get("skeleton", [])
+    if not skeleton:
+        return False, "skeleton was empty"
+    actual = skeleton[0]["zone"]
+    return actual == match.group(1), f"fallback zone was {actual!r}"
+
+
+def _h_fallback_not_outside(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    skeleton = _narrative_state(world).get("skeleton", [])
+    if not skeleton:
+        return False, "skeleton was empty"
+    return skeleton[0]["zone"] != "outside", "fallback zone was 'outside'"
+
+
+def _h_render_narrative_zone_prompt(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    state = _taxonomy_state(world)
+    ids = _normalize_state(world).get("canonical_ids") or [
+        "attacker.observe",
+        "operator.impact",
+    ]
+    projection_context = _transport_context_for_prompt(ids)
+    seed = SimpleNamespace(
+        seed_id="AP-T1-01",
+        attack_pattern_name="pattern",
+        attack_pattern_description="description",
+        threat_name="threat",
+        threat_description="description",
+        kill_chain=[],
+    )
+    from asago_scenario_generator.pipeline.generate.alignment import (
+        derive_projection_alignment_rows,
+    )
+
+    profile = SimpleNamespace(zones_active=[], entry_points=[])
+    prompt = render_prompt(
+        "call1_user.j2",
+        use_case="use case",
+        profile=profile,
+        seed=seed,
+        tool_inventory=[],
+        kc_definitions="",
+        owasp_llm_formatted="",
+        ontology_context="",
+        projection_context=projection_context,
+        projection_alignment_rows=derive_projection_alignment_rows(
+            projection_context["selected_steps"]
+        ),
+        technique_context="",
+        technique_framing="",
+        actor_section="",
+        access_provenance_block="",
+        goal_section="",
+        diversity_section="",
+        pattern_section="",
+        structural_section="",
+        pinned_entry_point=None,
+        pinned_entry_point_direction=None,
+    )
+    state["narrative_prompt"] = prompt
+    return True, ""
+
+
+def _h_narrative_prompt_outside_rule(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    prompt_lower = _taxonomy_state(world).get("narrative_prompt", "").lower()
+    return (
+        "`outside` is permitted only on a narrative step whose" in prompt_lower
+        and "outside-boundary canonical steps" in prompt_lower,
+        "narrative prompt does not permit outside only for outside-boundary steps",
+    )
+
+
+def _h_narrative_prompt_active_rule(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    prompt = _taxonomy_state(world).get("narrative_prompt", "")
+    return (
+        "Inside-boundary and crossing-boundary narrative steps MUST use an active"
+        in prompt
+        and "Schneider zone from `zones_active`" in prompt,
+        "narrative prompt does not require active Schneider zones",
+    )
+
+
+def _h_narrative_prompt_mixed_rule(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    prompt = _taxonomy_state(world).get("narrative_prompt", "")
+    return (
+        "combine outside-boundary and non-outside" in prompt,
+        "narrative prompt does not forbid mixed-boundary steps",
+    )
+
+
+def _h_narrative_prompt_distinct_rule(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    prompt = _taxonomy_state(world).get("narrative_prompt", "")
+    return (
+        "NOT a profile-active Schneider zone" in prompt and "`zones_active`" in prompt,
+        "narrative prompt muddles outside with the active zone list",
+    )
+
+
+# ===========================================================================
+# Projection transport fix: external impact transport (TEIT)
+# ===========================================================================
+
+
+def _h_impact_leaf(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r'leaf at placement "([^"]+)" maps that step with action kind "impact", '
+        r'action boundary "([^"]+)", and zone "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse impact leaf: {text}"
+    state = _contract_state(world)
+    state["placement"] = match.group(1)
+    state["leaf_action_kind"] = "impact"
+    state["impact_boundary"] = match.group(2)
+    state["zone"] = match.group(3)
+    state["transport_ids"] = [state["steps"][0]["step_id"]]
+    return True, ""
+
+
+def _h_external_precondition_leaf(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'leaf maps that step with action kind "external_precondition" and '
+        r'zone "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse external_precondition leaf: {text}"
+    state = _contract_state(world)
+    state["leaf_action_kind"] = "external_precondition"
+    state.pop("impact_boundary", None)
+    state["zone"] = match.group(1)
+    state["transport_ids"] = [state["steps"][0]["step_id"]]
+    return True, ""
+
+
+def _h_impact_zone_is(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r'impact leaf zone is "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse expected zone: {text}"
+    leaf = _contract_state(world).get("normalized_leaf", {})
+    expected = match.group(1)
+    if expected == "null":
+        return leaf.get("zone") is None, "external impact kept a transport zone"
+    return leaf.get("zone") == expected, "impact zone was altered"
+
+
+def _h_impact_zone_normalized_to_null(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    leaf = _contract_state(world).get("normalized_leaf", {})
+    return leaf.get("zone") is None, "external impact zone was not cleared"
+
+
+def _h_boundary_violation(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    return bool(
+        _contract_state(world).get("boundary_violation")
+    ), "external impact mapping was not rejected as a boundary violation"
+
+
+def _h_external_precondition_zone_null(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    leaf = _contract_state(world).get("normalized_leaf", {})
+    return leaf.get("zone") is None, "external_precondition leaf kept a zone"
+
+
+def _h_external_precondition_preserves_id(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'external_precondition leaf preserves projected step ID "([^"]+)"', text
+    )
+    if match is None:
+        return False, f"Could not parse preserved ID: {text}"
+    leaf = _contract_state(world).get("normalized_leaf", {})
+    return (
+        leaf.get("projected_step_ids") == [match.group(1)],
+        "outside external_precondition ID was not preserved",
+    )
+
+
+def _h_impact_id_preserved(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r'the impact leaf preserves projected step ID "([^"]+)"', text)
+    if match is None:
+        match = re.search(r'projected step ID "([^"]+)" is not silently removed', text)
+    if match is None:
+        return False, f"Could not parse preserved impact ID: {text}"
+    leaf = _contract_state(world).get("normalized_leaf", {})
+    return (
+        leaf.get("projected_step_ids") == [match.group(1)],
+        "external impact step ID was removed or remapped",
+    )
+
+
+# ===========================================================================
+# Projection transport fix: prompt alignment table (TPPA)
+# ===========================================================================
+
+
+def _h_canonical_step_for_row(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'canonical step "([^"]+)" has action "([^"]+)", executor "([^"]+)", '
+        r'boundary "([^"]+)", and bound resources "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse canonical step: {text}"
+    step_id, action, executor, boundary, bound_resources = match.groups()
+    resource_links: list[dict[str, Any]] = []
+    if bound_resources.startswith("entry_point/"):
+        resource_links = [
+            {
+                "role": "ingress",
+                "resource_ref": {
+                    "kind": "entry_point",
+                    "entry_point_id": bound_resources.split("/", 1)[1],
+                },
+            }
+        ]
+    elif bound_resources.startswith("effect/"):
+        resource_links = [
+            {
+                "role": "effect",
+                "resource_ref": {
+                    "kind": "output_surface",
+                    "entry_point_id": bound_resources.split("/", 1)[1],
+                },
+            }
+        ]
+    _contract_state(world)["alignment_step"] = {
+        "step_id": step_id,
+        "action_kind": action,
+        "executor_role": executor,
+        "boundary_position": boundary,
+        "attacker_controlled": executor == "attacker",
+        "requirement": "required",
+        "resource_links": resource_links,
+    }
+    state = _normalize_state(world)
+    if "alignment_canonical_ids" not in state:
+        state["alignment_canonical_ids"] = []
+    state["alignment_canonical_ids"].append(step_id)
+    return True, ""
+
+
+def _h_derive_alignment_row(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    from asago_scenario_generator.pipeline.generate.alignment import (
+        derive_projection_alignment_row,
+    )
+
+    step = _contract_state(world).get("alignment_step")
+    if step is None:
+        return False, "no canonical step was supplied"
+    _contract_state(world)["alignment_row"] = derive_projection_alignment_row(step)
+    return True, ""
+
+
+def _h_alignment_row_narrative_zone(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'allowed narrative zone is "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse narrative zone: {text}"
+    row = _contract_state(world).get("alignment_row", {})
+    actual = row.get("allowed_narrative_zone")
+    return actual == match.group(1), f"narrative zone was {actual!r}"
+
+
+def _h_alignment_row_tree_kinds(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'allowed tree kinds are the intersection "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse tree kinds: {text}"
+    row = _contract_state(world).get("alignment_row", {})
+    actual = row.get("allowed_tree_kinds", [])
+    expected = (
+        []
+        if match.group(1) == "empty set"
+        else _csv(match.group(1))
+        if match.group(1)
+        else []
+    )
+    return actual == expected, f"tree kinds were {actual!r}, expected {expected!r}"
+
+
+def _h_alignment_row_tree_zone(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'tree zone is "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse tree zone: {text}"
+    row = _contract_state(world).get("alignment_row", {})
+    actual = row.get("tree_zone")
+    return actual == match.group(1), f"tree zone was {actual!r}"
+
+
+def _h_alignment_row_bound_resources(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'bound resources are "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse bound resources: {text}"
+    row = _contract_state(world).get("alignment_row", {})
+    actual = row.get("bound_resources")
+    return actual == match.group(1), f"bound resources were {actual!r}"
+
+
+def _h_derive_all_alignment_rows(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    from asago_scenario_generator.pipeline.generate.alignment import (
+        derive_projection_alignment_rows,
+    )
+
+    selected = (
+        _normalize_state(world).get("selected_steps")
+        or _transport_context_for_prompt(
+            _normalize_state(world).get("canonical_ids", ["attacker.observe"])
+        )["selected_steps"]
+    )
+    _contract_state(world)["all_alignment_rows"] = derive_projection_alignment_rows(
+        selected
+    )
+    _contract_state(world)["all_selected_steps"] = selected
+    return True, ""
+
+
+def _h_all_rows_intersection(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    from asago_scenario_generator.pipeline.projection_validation import (
+        EXECUTOR_ROLE_TO_LEAF_COMPAT,
+        STEP_TO_LEAF_ACTION_COMPAT,
+    )
+
+    rows = _contract_state(world).get("all_alignment_rows", [])
+    for row in rows:
+        expected = sorted(
+            STEP_TO_LEAF_ACTION_COMPAT.get(row["action"], set())
+            & EXECUTOR_ROLE_TO_LEAF_COMPAT.get(row["executor"], set())
+        )
+        if row["allowed_tree_kinds"] != expected:
+            return False, f"row {row['canonical_id']} tree kinds drifted from validator"
+    return True, ""
+
+
+def _h_all_rows_boundary_rules(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    rows = _contract_state(world).get("all_alignment_rows", [])
+    for row in rows:
+        if row["boundary"] == "outside":
+            if row["allowed_narrative_zone"] != "outside" or row["tree_zone"] != "null":
+                return (
+                    False,
+                    f"row {row['canonical_id']} outside boundary rules drifted",
+                )
+        else:
+            if row["allowed_narrative_zone"] != "active Schneider zone":
+                return False, f"row {row['canonical_id']} narrative zone drifted"
+            if row["tree_zone"] != "active Schneider zone":
+                return False, f"row {row['canonical_id']} tree zone drifted"
+    return True, ""
+
+
+def _h_all_rows_bound_resources(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    from asago_scenario_generator.pipeline.generate.alignment import (
+        bound_resources_from_step,
+    )
+
+    rows = _contract_state(world).get("all_alignment_rows", [])
+    steps = {
+        s["step_id"]: s for s in _contract_state(world).get("all_selected_steps", [])
+    }
+    for row in rows:
+        step = steps.get(row["canonical_id"])
+        if step is not None and row["bound_resources"] != bound_resources_from_step(
+            step
+        ):
+            return False, f"row {row['canonical_id']} bound resources drifted"
+    return True, ""
+
+
+def _h_empty_set_rendered(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    from asago_scenario_generator.pipeline.generate.alignment import (
+        derive_projection_alignment_rows,
+    )
+
+    selected = [
+        {
+            "step_id": "operator.deliver",
+            "action_kind": "deliver",
+            "executor_role": "operator",
+            "boundary_position": "crossing",
+            "attacker_controlled": False,
+            "requirement": "required",
+            "resource_links": [],
+            "realization": {},
+        }
+    ]
+    rendered = render_prompt(
+        "_projection_alignment.j2",
+        projection_context={"selected_steps": selected},
+        projection_alignment_rows=derive_projection_alignment_rows(selected),
+    )
+    _contract_state(world)["alignment_template"] = rendered
+    return "| operator.deliver |" in rendered and "empty set" in rendered, (
+        "empty compatibility intersection was not rendered as an empty set"
+    )
+
+
+def _h_no_hand_authored_prose(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    rendered = _contract_state(world).get("alignment_template", "")
+    if not rendered:
+        rendered = _prompt_state(world).get("prompt", "")
+    return "#### Compatible leaf kinds" not in rendered, (
+        "hand-authored compatibility prose is still rendered"
+    )
+
+
+def _h_alignment_table_columns(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'columns "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse table columns: {text}"
+    prompt = _prompt_state(world).get("prompt", "")
+    expected = _csv(match.group(1))
+    header = " | ".join(expected)
+    return f"| {header} |" in prompt, "alignment table columns are missing or reordered"
+
+
+def _h_alignment_table_rows(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    prompt = _prompt_state(world).get("prompt", "")
+    selected = _normalize_state(world).get("canonical_ids", [])
+    rows = [
+        line
+        for line in prompt.splitlines()
+        if any(line.startswith(f"| {step_id} |") for step_id in selected)
+    ]
+    return len(rows) == len(selected) and all(
+        any(line.startswith(f"| {step_id} |") for line in rows) for step_id in selected
+    ), "alignment table does not render exactly one row per selected step"
+
+
+def _h_alignment_row_order(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r'preserves selected-step order "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse row order: {text}"
+    prompt = _prompt_state(world).get("prompt", "")
+    lines = [line for line in prompt.splitlines() if line.startswith("| ")]
+    expected_order = _csv(match.group(1))
+    positions = []
+    for step_id in expected_order:
+        for index, line in enumerate(lines):
+            if line.startswith(f"| {step_id} |"):
+                positions.append(index)
+                break
+        else:
+            return False, f"row for {step_id} is missing"
+    return positions == sorted(positions), "canonical ID column is out of order"
 
 
 def register(api: object) -> None:
@@ -2713,7 +4004,7 @@ def register(api: object) -> None:
             r"the projected candidate selects \d+ canonical steps",
             _h_narrative_selected_steps,
         ),
-        (r"the narrative response is accepted", _h_narrative_accepted),
+        (r"the narrative response is accepted", _h_lifecycle_narrative_accepted),
         (
             r"every selected canonical step is covered by the narrative",
             _h_narrative_coverage,
@@ -2735,6 +4026,239 @@ def register(api: object) -> None:
         (
             r"every generated prose field declares a finite static maximum length",
             _h_prose_field_bounds,
+        ),
+        # ------------------------------------------------------------------
+        # Projection transport fix: step-ID echo normalization (TSIT)
+        # ------------------------------------------------------------------
+        (
+            r'selects canonical step IDs "([^"]+)"',
+            _h_selects_canonical_step_ids,
+        ),
+        (r'selects canonical steps "([^"]+)"', _h_selects_canonical_steps),
+        (
+            r'has one projected_step_ids item "(.+)"$',
+            _h_transport_item_single,
+        ),
+        (
+            r'projected_step_ids items are "(.+)"$',
+            _h_transport_items_many,
+        ),
+        (r"projected step-ID transport is normalized", _h_normalize_transport_items),
+        (
+            r'normalized projected step IDs are "([^"]+)"',
+            _h_normalized_ids_are,
+        ),
+        (r"their order is unchanged", _h_order_unchanged),
+        (
+            r'duplicate canonical step ID "([^"]+)"',
+            _h_duplicate_error,
+        ),
+        (
+            r'normalization raises a stable ValueError identifying "([^"]+)"',
+            _h_rejection_identifies,
+        ),
+        (r"normalization does not raise TypeError", _h_no_type_error),
+        (r"no finalized artifact is published", _h_no_artifact_published),
+        (
+            r'valid "([^"]+)" response echoes projected step ID "([^"]+)"',
+            _h_stage_response_echo,
+        ),
+        (
+            r"the response transport is normalized and strictly validated",
+            _h_stage_normalized_strict,
+        ),
+        (
+            r'finalized "([^"]+)" artifact contains projected step ID "([^"]+)"',
+            _h_finalized_contains,
+        ),
+        (
+            r'its canonical realization is derived from "([^"]+)"',
+            _h_canonical_realization_derived,
+        ),
+        (r'plain quoted list "([^"]+)"', _h_plain_quoted_list),
+        (r'does not use the "- step_id:" record shape', _h_no_step_id_records),
+        (
+            r"requires the exact canonical ID values in projected_step_ids",
+            _h_exact_values_required,
+        ),
+        # ------------------------------------------------------------------
+        # Projection transport fix: narrative outside boundaries (TNOB)
+        # ------------------------------------------------------------------
+        (r'active Schneider zones "([^"]+)"', _h_active_zones),
+        (
+            r'projected step "([^"]+)" has boundary position "([^"]+)"',
+            _h_narrative_step_boundary,
+        ),
+        (
+            r'projected steps "([^"]+)" each have boundary position "([^"]+)"',
+            _h_narrative_boundaries_many,
+        ),
+        (
+            r'projected step IDs "([^"]+)" have boundary positions "([^"]+)"',
+            _h_narrative_step_ids_boundaries,
+        ),
+        (
+            r'a narrative step maps projected step ID "([^"]+)" with zone "([^"]+)"',
+            _h_narrative_mapping_single,
+        ),
+        (
+            r'one narrative step maps (?:projected step IDs "([^"]+)"|those projected step IDs) with zone "([^"]+)"',
+            _h_narrative_mapping_many,
+        ),
+        (r"narrative projection zones are enforced", _h_enforce_narrative_zones),
+        (
+            r"the narrative step is accepted without changing its zone or projected step IDs",
+            _h_narrative_accepted,
+        ),
+        (
+            r'rejects the narrative with projection-zone reason "([^"]+)"',
+            _h_narrative_rejected,
+        ),
+        (
+            r"no narrative step is removed, renumbered, or remapped",
+            _h_narrative_not_modified,
+        ),
+        (r'ordered narrative step zones are "([^"]+)"', _h_ordered_zone_steps),
+        (r"the narrative zone sequence is derived", _h_derive_zone_sequence),
+        (r'derived zone sequence is "([^"]+)"', _h_derived_sequence_is),
+        (
+            r'an accepted narrative has zone sequence "([^"]+)"',
+            _h_accepted_narrative,
+        ),
+        (r"active narrative zones are consumed", _h_consume_active_zones),
+        (r'ordered active narrative zones are "([^"]+)"', _h_active_zones_are),
+        (r'coverage credits traversed zones "([^"]+)"', _h_coverage_credits),
+        (r'uncovered active zone "([^"]+)"', _h_uncovered_zone),
+        (
+            r"priority zone signals use \d+ distinct zones and traversal length \d+",
+            _h_priority_signals,
+        ),
+        (r'zones_traversed "([^"]+)"', _h_faceting_zones),
+        (
+            r"a mandatory tree leaf has no more specific zone",
+            _h_mandatory_leaf_no_zone,
+        ),
+        (r"the attack-tree skeleton is built", _h_skeleton_built),
+        (r'fallback zone is "([^"]+)"', _h_fallback_zone),
+        (r'the fallback zone is not "outside"', _h_fallback_not_outside),
+        (
+            r"the taxonomy narrative system prompt is rendered",
+            _h_render_narrative_zone_prompt,
+        ),
+        (
+            r'permits literal zone "outside" only for a narrative step whose mapped projected steps are all outside-boundary',
+            _h_narrative_prompt_outside_rule,
+        ),
+        (
+            r"requires inside-boundary and crossing-boundary narrative steps to use active Schneider zones",
+            _h_narrative_prompt_active_rule,
+        ),
+        (
+            r"forbids one narrative step from combining outside-boundary and non-outside projected step IDs",
+            _h_narrative_prompt_mixed_rule,
+        ),
+        (
+            r'distinguishes literal "outside" from the capability profile active zone list',
+            _h_narrative_prompt_distinct_rule,
+        ),
+        # ------------------------------------------------------------------
+        # Projection transport fix: external impact transport (TEIT)
+        # ------------------------------------------------------------------
+        (
+            r'projection selects impact step "([^"]+)" at boundary position "([^"]+)"',
+            _h_contract_step,
+        ),
+        (
+            r'leaf at placement "([^"]+)" maps that step with action kind "impact", action boundary "([^"]+)", and zone "([^"]+)"',
+            _h_impact_leaf,
+        ),
+        (
+            r'leaf maps that step with action kind "external_precondition" and zone "([^"]+)"',
+            _h_external_precondition_leaf,
+        ),
+        (r'the impact leaf zone is "([^"]+)"', _h_impact_zone_is),
+        (
+            r"the impact leaf zone is normalized to null",
+            _h_impact_zone_normalized_to_null,
+        ),
+        (
+            r"rejects the external impact mapping as a boundary semantic violation",
+            _h_boundary_violation,
+        ),
+        (
+            r"the external_precondition leaf zone is null",
+            _h_external_precondition_zone_null,
+        ),
+        (
+            r'external_precondition leaf preserves projected step ID "([^"]+)"',
+            _h_external_precondition_preserves_id,
+        ),
+        (
+            r'projected step ID "([^"]+)" is not silently removed',
+            _h_impact_id_preserved,
+        ),
+        (
+            r'the impact leaf preserves projected step ID "([^"]+)"',
+            _h_impact_id_preserved,
+        ),
+        (
+            r'the impact leaf has the canonical realization for "([^"]+)"',
+            _h_contract_canonical_realization,
+        ),
+        # ------------------------------------------------------------------
+        # Projection transport fix: prompt alignment table (TPPA)
+        # ------------------------------------------------------------------
+        (
+            r'canonical step "([^"]+)" has action "([^"]+)", executor "([^"]+)", boundary "([^"]+)", and bound resources "([^"]+)"',
+            _h_canonical_step_for_row,
+        ),
+        (r"the projection alignment row is derived", _h_derive_alignment_row),
+        (r'its allowed narrative zone is "([^"]+)"', _h_alignment_row_narrative_zone),
+        (
+            r'its allowed tree kinds are the intersection "([^"]+)"',
+            _h_alignment_row_tree_kinds,
+        ),
+        (r'its tree zone is "([^"]+)"', _h_alignment_row_tree_zone),
+        (r'its bound resources are "([^"]+)"', _h_alignment_row_bound_resources),
+        (
+            r"projection alignment rows are derived for every supported action, executor, and boundary combination",
+            _h_derive_all_alignment_rows,
+        ),
+        (
+            r"each allowed tree-kind set equals the intersection of the action-kind and executor-role validator mappings",
+            _h_all_rows_intersection,
+        ),
+        (
+            r"narrative-zone and tree-zone values equal their stage-specific boundary validator rules",
+            _h_all_rows_boundary_rules,
+        ),
+        (
+            r"each bound-resources value comes from that canonical step",
+            _h_all_rows_bound_resources,
+        ),
+        (
+            r"an empty compatibility intersection is rendered as an empty set",
+            _h_empty_set_rendered,
+        ),
+        (
+            r"no duplicated hand-authored compatibility prose is rendered",
+            _h_no_hand_authored_prose,
+        ),
+        (
+            r'projection alignment table has columns "([^"]+)"',
+            _h_alignment_table_columns,
+        ),
+        (
+            r"exactly one row for each selected canonical step",
+            _h_alignment_table_rows,
+        ),
+        (
+            r'canonical ID column preserves selected-step order "([^"]+)"',
+            _h_alignment_row_order,
+        ),
+        (
+            r"no canonical step is rendered with a numeric positional ID",
+            _h_prompt_no_numeric_ids,
         ),
     )
     for pattern, handler in registrations:

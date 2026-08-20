@@ -38,6 +38,17 @@ The following tactical progression is derived from real-world case study evidenc
 
 {% include "_projection_constraints.j2" %}
 {% include "_projection_alignment.j2" %}
+## Narrative Zone Rules (INVARIANT)
+- The literal zone `outside` is permitted only on a narrative step whose
+  mapped `projected_step_ids` are ALL outside-boundary canonical steps.
+  `outside` represents activity outside the assessed AI boundary — it is
+  NOT a profile-active Schneider zone and must never be added to
+  `zones_active`.
+- Inside-boundary and crossing-boundary narrative steps MUST use an active
+  Schneider zone from `zones_active`; never label them `outside`.
+- One narrative step must NOT combine outside-boundary and non-outside
+  projected step IDs.
+
 ## Your Task
 Write a concrete attack narrative for this attack pattern applied to the target system above.
 {% if pinned_entry_point and pinned_entry_point_direction == 'input' %}

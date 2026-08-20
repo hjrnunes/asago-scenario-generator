@@ -52,11 +52,15 @@ from asago_scenario_generator.pipeline.projection import (
     ProjectedCandidate,
     canonical_json_bytes,
 )
-from asago_scenario_generator.pipeline.projection_validation import (
+from asago_scenario_generator.pipeline.projection_realizations import (
     _check_narrative_realizations,
-    _check_or_tree_prohibition,
-    _check_step_semantic_compatibility,
     _check_tree_realizations,
+)
+from asago_scenario_generator.pipeline.projection_semantics import (
+    _check_step_semantic_compatibility,
+)
+from asago_scenario_generator.pipeline.projection_validation import (
+    _check_or_tree_prohibition,
 )
 
 

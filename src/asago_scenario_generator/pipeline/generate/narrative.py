@@ -24,6 +24,9 @@ from asago_scenario_generator.pipeline.generate.constants import _OWASP_LLM_NAME
 from asago_scenario_generator.pipeline.generate.diversity import (
     _format_structural_exclusions,
 )
+from asago_scenario_generator.pipeline.generate.alignment import (
+    derive_projection_alignment_rows_from_context,
+)
 from asago_scenario_generator.pipeline.generate.ontology import (
     _build_ontology_context,
     _build_technique_context_block,
@@ -32,7 +35,14 @@ from asago_scenario_generator.pipeline.generate.ontology import (
     _lookup_entry_point_direction,
     build_kc_definitions_block,
 )
-from asago_scenario_generator.pipeline.generate.zones import _enforce_zones_narrative
+from asago_scenario_generator.pipeline.generate.step_ids import (
+    normalize_projected_step_ids,
+)
+from asago_scenario_generator.pipeline.generate.zones import (
+    _enforce_zones_narrative,
+    enforce_narrative_projection_zones,
+    projected_boundary_by_id,
+)
 from asago_scenario_generator.pipeline.seeds import ScenarioSeed
 from asago_scenario_generator.prompts import render_prompt
 
@@ -630,6 +640,9 @@ def build_call1_context(
         else projection_context
     )
 
+    # Validator-derived compact alignment table (one row per selected step).
+    alignment_rows = derive_projection_alignment_rows_from_context(humanized_projection)
+
     return {
         "use_case": use_case,
         "seed": seed,
@@ -652,6 +665,7 @@ def build_call1_context(
         "access_feedback": access_feedback or "",
         "realization_feedback": realization_feedback or "",
         "projection_context": humanized_projection,
+        "projection_alignment_rows": alignment_rows,
     }
 
 
@@ -763,12 +777,33 @@ def _call_narrative(
         user_prompt=user_prompt,
         response_format=Call1Response,
     )
+    # Post-processing: normalize echoed step-ID transport shapes to the
+    # canonical IDs before deterministic realization derivation.  Unknown,
+    # ambiguous, or duplicate echoes raise a stable ValueError here so no
+    # defective narrative is finalized.
+    if projection_context is not None:
+        canonical_ids = projection_context.get("selected_step_ids", [])
+        for step in result.content.steps:
+            step.projected_step_ids = normalize_projected_step_ids(
+                step.projected_step_ids, canonical_ids
+            )
     # Post-processing: derive realizations deterministically from
     # the projection context, ignoring whatever the LLM returned.
     _fill_call1_realizations(result.content, projection_context)
     narrative = _map_call1_to_narrative(result.content)
     narrative = _sanitize_narrative(narrative)
-    narrative = _enforce_zones_narrative(narrative, profile.zones_active)
+    if projection_context is not None:
+        # Stage-specific boundary validation: literal 'outside' is allowed
+        # only for steps mapping only outside-boundary projected steps;
+        # inside/crossing steps must use active Schneider zones.
+        boundary_by_id = projected_boundary_by_id(
+            projection_context.get("selected_steps", [])
+        )
+        narrative = enforce_narrative_projection_zones(
+            narrative, profile.zones_active, boundary_by_id
+        )
+    else:
+        narrative = _enforce_zones_narrative(narrative, profile.zones_active)
 
     # Phase 3: resolve human-readable names to canonical hex IDs in
     # the narrative's access_realization.

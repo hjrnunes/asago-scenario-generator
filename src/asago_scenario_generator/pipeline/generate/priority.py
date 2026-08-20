@@ -13,6 +13,7 @@ from asago_scenario_generator.models.scenario import (
     StructuralExposureSignal,
     TechniqueMaturity,
 )
+from asago_scenario_generator.pipeline.generate.zones import active_narrative_zones
 from asago_scenario_generator.pipeline.seeds import ScenarioSeed
 
 
@@ -172,9 +173,10 @@ def _heuristic_risk_impact(
         ):
             score += 0.05
 
-    # Signal 3: Zone breadth from narrative (blast radius proxy)
+    # Signal 3: Zone breadth from narrative (blast radius proxy).
+    # Literal 'outside' traversal is not internal traversal.
     if narrative:
-        distinct_zones = len(set(narrative.zone_sequence))
+        distinct_zones = len(set(active_narrative_zones(narrative.zone_sequence)))
         if distinct_zones >= 4:
             score += 0.3  # Wide blast radius
         elif distinct_zones >= 3:
@@ -226,9 +228,10 @@ def _heuristic_attack_complexity(
       exploitation paths)
     """
     if attack_tree is None:
-        # No tree: fall back to narrative zone count if available
+        # No tree: fall back to narrative zone count if available.
+        # Literal 'outside' traversal is not internal traversal.
         if narrative:
-            zones = len(set(narrative.zone_sequence))
+            zones = len(set(active_narrative_zones(narrative.zone_sequence)))
             if zones >= 4:
                 return AttackComplexity.high
             if zones >= 2:
@@ -280,8 +283,11 @@ def _heuristic_attack_complexity(
 
 
 def _heuristic_risk_likelihood(narrative: NarrativeLayer) -> str:
-    """Derive risk likelihood from zone coverage."""
-    zones_traversed = len(set(narrative.zone_sequence))
+    """Derive risk likelihood from active zone coverage.
+
+    Literal 'outside' traversal never counts toward zone coverage.
+    """
+    zones_traversed = len(set(active_narrative_zones(narrative.zone_sequence)))
     if zones_traversed >= 4:
         return "high"
     if zones_traversed >= 2:
@@ -294,9 +300,11 @@ def _continuous_zone_score(narrative: NarrativeLayer) -> float:
 
     Uses both the number of distinct zones and the length of the zone
     sequence to produce a fine-grained value instead of coarse buckets.
+    Literal 'outside' traversal is excluded: it is not internal traversal.
     """
-    distinct = len(set(narrative.zone_sequence))
-    length = len(narrative.zone_sequence)
+    active_sequence = active_narrative_zones(narrative.zone_sequence)
+    distinct = len(set(active_sequence))
+    length = len(active_sequence)
     # distinct zones: 1-5 mapped to 0.2-1.0
     zone_breadth = min(distinct / 5.0, 1.0)
     # sequence length: longer paths get a small bonus (capped at 10 steps)

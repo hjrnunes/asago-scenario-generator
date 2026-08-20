@@ -52,9 +52,10 @@ from asago_scenario_generator.pipeline.generate.priority import (
     _compute_priority,
     _extract_maestro_layers_from_tree,
 )
-from asago_scenario_generator.pipeline.generate.tree import (
+from asago_scenario_generator.pipeline.generate.tree_validation import (
     _check_consistency,
 )
+from asago_scenario_generator.pipeline.generate.zones import active_narrative_zones
 from asago_scenario_generator.pipeline.projection import (
     CapabilityFactSnapshot,
     ProjectedCandidate,
@@ -739,7 +740,9 @@ def _assemble_envelope(
             scenario_seed=seed.seed_id,
         ),
         capability_profile=CapabilityProfileRef(
-            zones_traversed=narrative.zone_sequence,
+            # Literal 'outside' traversal is excluded: the facade records
+            # the active Schneider zones actually traversed.
+            zones_traversed=active_narrative_zones(narrative.zone_sequence),
             architecture_match=ArchitectureMatch.explicit,
             entry_point=narrative.entry_point,
         ),
