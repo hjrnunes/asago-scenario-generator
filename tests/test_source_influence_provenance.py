@@ -55,6 +55,7 @@ from asago_scenario_generator.models.source_influence_provenance import (
     SourceInfluenceArtifactElement,
     SourceInfluenceArtifactKind,
     SourceInfluenceArtifactLink,
+    CoverageFraction,
     SourceInfluenceMetrics,
     SourceInfluenceProvenanceBlock,
     SourceInfluenceQualification,
@@ -693,6 +694,31 @@ class TestQualificationEngine:
         )
         assert result.valid is True
         assert coverage(result.metrics, "projected_leaf_coverage") == (1, 1)
+
+    def test_link_in_wrong_artifact_collection_fails_closed(self) -> None:
+        """Serialized artifact kind cannot bypass collection boundaries."""
+        result = qualify_source_influence_provenance(
+            selected_step_ids=("attacker.deliver",),
+            declared_sources=SHARED,
+            leaf_elements=[leaf("n1.1", "attacker.deliver")],
+            narrative_elements=[story_step("1", "attacker.deliver")],
+            leaf_links=[
+                narrative_link("n1.1", "attacker.deliver", SHARED),
+            ],
+            narrative_links=[
+                narrative_link("1", "attacker.deliver", SHARED),
+            ],
+        )
+        assert result.valid is False
+        assert result.metrics.projected_leaf_coverage == CoverageFraction(
+            numerator=0, denominator=1
+        )
+        assert any(
+            violation.code
+            == SourceInfluenceViolationCode.unreferenced_source_influence_artifact
+            and violation.projected_step_id == "attacker.deliver"
+            for violation in result.violations
+        )
 
 
 # ---------------------------------------------------------------------------#

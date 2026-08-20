@@ -305,8 +305,21 @@ def qualify_source_influence_provenance(
     declared = _canonical_declared_sources(declared_sources)
     declared_ids = {(ref.source_type, ref.source_id) for ref in declared}
 
-    leaf_links_by_id = {link.artifact_id: link for link in leaf_links}
-    narrative_links_by_id = {link.artifact_id: link for link in narrative_links}
+    # Keep the two persisted link collections hermetic.  ``artifact_kind`` is
+    # part of the serialized contract, so a link placed in the wrong
+    # collection must not qualify an artifact by ID alone.  It is treated as
+    # absent and consequently produces the normal fail-closed
+    # ``unreferenced_source_influence_artifact`` violation.
+    leaf_links_by_id = {
+        link.artifact_id: link
+        for link in leaf_links
+        if link.artifact_kind is SourceInfluenceArtifactKind.projected_leaf
+    }
+    narrative_links_by_id = {
+        link.artifact_id: link
+        for link in narrative_links
+        if link.artifact_kind is SourceInfluenceArtifactKind.narrative_step
+    }
 
     violations: list[SourceInfluenceViolation] = []
     referenced_ids: set[tuple[SourceInfluenceSourceType, str]] = set()
@@ -332,6 +345,21 @@ def qualify_source_influence_provenance(
     )
     violations.extend(_orphaned_source_violations(declared, referenced_ids))
     violations.extend(_unreferenced_step_violations(selected_step_ids, linked_steps))
+    if leaf_unreferenced + narrative_unreferenced and not any(
+        violation.code
+        == SourceInfluenceViolationCode.unreferenced_source_influence_artifact
+        for violation in violations
+    ):
+        violations.append(
+            SourceInfluenceViolation(
+                code=SourceInfluenceViolationCode.unreferenced_source_influence_artifact,
+                detail=(
+                    "one or more generated artifacts have no source-influence "
+                    "provenance link"
+                ),
+                projected_step_id=next(iter(linked_steps), None),
+            )
+        )
     unique = _deduplicate_violations(violations)
 
     source_numerator = len(referenced_ids & declared_ids)
