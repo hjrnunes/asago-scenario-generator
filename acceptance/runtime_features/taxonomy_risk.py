@@ -4272,242 +4272,6 @@ def _tsip_generate_state(world: World) -> dict[str, Any]:
     return state
 
 
-def _tsip_builder_seed(seed_id: str, threat_id: str, agentic: list[str]) -> Any:
-    """Build the scripted ScenarioSeed for a deterministic generate run."""
-    from asago_scenario_generator.pipeline.seeds import ScenarioSeed
-    from asago_scenario_generator.models.scenario import RiskCardRef
-
-    return ScenarioSeed(
-        seed_id=seed_id,
-        threat_id=threat_id,
-        threat_name="Scripted threat",
-        threat_description="Scripted threat description",
-        attack_pattern_name="Scripted pattern",
-        attack_pattern_description="Scripted pattern description",
-        risk_card_ref=RiskCardRef(
-            risk_id="risk-tsip",
-            risk_name="Risk TSIP",
-            risk_description="Description",
-            taxonomy="ibm-risk-atlas",
-            confidence=0.9,
-            grounding_confidence="high",
-        ),
-        owasp_llm_ids=["LLM01"],
-        agentic_threat_ids=agentic,
-        atlas_technique_ids=["AML.T0054"],
-    )
-
-
-def _tsip_profile(kc_subcodes: list[str]) -> Any:
-    """Build the scripted KCX capability profile with full resources."""
-    from asago_scenario_generator.models.capability_profile import CapabilityProfile
-
-    return CapabilityProfile(
-        zones_active=["input", "reasoning", "tool_execution"],
-        entry_points=[
-            {"name": "chat", "direction": "input", "controllability": "direct"},
-            {
-                "name": "RAG documents",
-                "direction": "input",
-                "controllability": "indirect",
-            },
-        ],
-        confidence="high",
-        kc_subcodes=kc_subcodes,
-        tool_inventory=[{"name": "writer", "description": "changes state"}],
-        tool_types=[
-            {
-                "name": "writer",
-                "zone": "tool_execution",
-                "can_modify_state": True,
-                "data_sensitivity": "medium",
-                "code_execution": False,
-            }
-        ],
-        external_integrations=[
-            {
-                "name": "CRM",
-                "integration_type": "api",
-                "auth_method": "oauth",
-                "data_sensitivity": "high",
-            }
-        ],
-        trust_boundaries=[
-            {
-                "name": "user-to-agent",
-                "from_zone": "input",
-                "to_zone": "reasoning",
-                "confidence": "explicit",
-            }
-        ],
-    )
-
-
-def _tsip_projected_candidate(profile: Any) -> tuple[Any, Any]:
-    """Project a feasible candidate bound to the scripted snapshot."""
-    from asago_scenario_generator.models.attack_pattern import (
-        AttackPattern,
-        AuthoritativeFactReference,
-        EvaluatedFactEvidence,
-    )
-    from asago_scenario_generator.pipeline.projection import (
-        ProjectionBudget,
-        capture_capability_snapshot,
-        project_authoritative_candidates,
-    )
-    from tests.helpers.projection_factory import (
-        get_test_raw_pattern,
-        get_test_resolver,
-    )
-
-    raw = get_test_raw_pattern()
-    AttackPattern.model_validate(raw)
-    resolver = get_test_resolver()
-    evidence = EvaluatedFactEvidence(
-        fact=AuthoritativeFactReference.model_validate(
-            {
-                "namespace": "profile",
-                "fact_id": "mode",
-                "value_type": "string",
-                "property_path": [],
-            }
-        ),
-        status="present",
-        value="active",
-    )
-    snapshot = capture_capability_snapshot(profile, (evidence,))
-    batch = project_authoritative_candidates(
-        [raw],
-        resolver,
-        snapshot,
-        budget=ProjectionBudget(max_candidates=100),
-    )
-    assert len(batch.candidates) >= 1, "scripted projection emitted no candidates"
-    return batch.candidates[0], snapshot
-
-
-def _tsip_tree(ingress_id: str) -> Any:
-    """Build the three-leaf fixture attack tree for the scripted run."""
-    from asago_scenario_generator.models.attack_tree import (
-        AiSystemAction,
-        AttackTree,
-        AttackTreeNode,
-        GateType,
-        ImpactAction,
-        InitialIngressAction,
-    )
-    from tests.helpers.projection_factory import make_step_realizations
-
-    return AttackTree(
-        id="tree-AP-T1-01",
-        seed_id="AP-T1-01",
-        goal="Achieve attack objective",
-        root=AttackTreeNode(
-            id="n1",
-            label="Attack goal",
-            gate=GateType.AND,
-            children=[
-                AttackTreeNode(
-                    id="n1.1",
-                    label="Initial ingress",
-                    gate=GateType.LEAF,
-                    zone="input",
-                    action=InitialIngressAction(entry_point_id=ingress_id),
-                    projected_step_ids=("step.1",),
-                    realizations=make_step_realizations(("step.1",)),
-                ),
-                AttackTreeNode(
-                    id="n1.2",
-                    label="System action",
-                    gate=GateType.LEAF,
-                    zone="reasoning",
-                    action=AiSystemAction(),
-                    projected_step_ids=("step.2",),
-                    realizations=make_step_realizations(("step.2",)),
-                ),
-                AttackTreeNode(
-                    id="n1.3",
-                    label="Impact",
-                    gate=GateType.LEAF,
-                    zone="reasoning",
-                    action=ImpactAction(boundary="internal", target="data integrity"),
-                    projected_step_ids=("step.3",),
-                    realizations=make_step_realizations(("step.3",)),
-                ),
-            ],
-        ),
-    )
-
-
-def _tsip_narrative(ingress_id: str) -> Any:
-    """Build the three-step fixture narrative for the scripted run."""
-    from asago_scenario_generator.models.scenario import (
-        NarrativeAccessRealization,
-        NarrativeLayer,
-        NarrativeStep,
-    )
-    from tests.helpers.projection_factory import make_step_realizations
-
-    return NarrativeLayer(
-        title="Scripted scenario",
-        summary="Adversarial summary",
-        entry_point="chat",
-        zone_sequence=["input", "reasoning"],
-        steps=[
-            NarrativeStep(
-                step_number=1,
-                zone="input",
-                action="gain access",
-                effect="entry",
-                projected_step_ids=("step.1",),
-                realizations=make_step_realizations(("step.1",)),
-            ),
-            NarrativeStep(
-                step_number=2,
-                zone="reasoning",
-                action="exploit",
-                effect="control",
-                projected_step_ids=("step.2",),
-                realizations=make_step_realizations(("step.2",)),
-            ),
-            NarrativeStep(
-                step_number=3,
-                zone="reasoning",
-                action="impact",
-                effect="damage",
-                projected_step_ids=("step.3",),
-                realizations=make_step_realizations(("step.3",)),
-            ),
-        ],
-        access_realization=NarrativeAccessRealization(
-            initial_entry_point_id=ingress_id,
-            responsible_step_number=1,
-        ),
-    )
-
-
-def _tsip_actor(ingress_id: str) -> Any:
-    """Build the scripted actor profile for the deterministic run."""
-    from asago_scenario_generator.models.scenario import (
-        ActorAccessProvenance,
-        ActorProfile,
-    )
-
-    return ActorProfile(
-        actor_type="cybercriminal",
-        capability_level="intermediate",
-        beliefs=["target has chat interface"],
-        desires=["steal data"],
-        intentions=["prompt injection"],
-        resources=["open-source tools"],
-        access=ActorAccessProvenance(
-            initial_entry_point_id=ingress_id,
-            ingress_mode="direct",
-            access_class="public",
-        ),
-    )
-
-
 def _h_tsip_script_seed(world: World, text: str, examples: dict) -> tuple[bool, str]:
     match = re.search(
         r'deterministic generate scripts seed "([^"]+)" with threat "([^"]+)" '
@@ -4516,7 +4280,9 @@ def _h_tsip_script_seed(world: World, text: str, examples: dict) -> tuple[bool, 
     )
     if match is None:
         return False, f"Could not parse scripted seed: {text}"
-    _tsip_generate_state(world)["seed"] = _tsip_builder_seed(
+    from tests.helpers.source_influence_fixtures import builder_seed
+
+    _tsip_generate_state(world)["seed"] = builder_seed(
         seed_id=match.group(1),
         threat_id=match.group(2),
         agentic=_csv(match.group(3)),
@@ -4533,9 +4299,14 @@ def _h_tsip_script_constraints(
     )
     if match is None:
         return False, f"Could not parse scripted constraints: {text}"
+    from tests.helpers.source_influence_fixtures import (
+        kcx_profile,
+        projected_candidate,
+    )
+
     state = _tsip_generate_state(world)
-    state["profile"] = _tsip_profile(_csv(match.group(1)))
-    state["candidate"], state["snapshot"] = _tsip_projected_candidate(state["profile"])
+    state["profile"] = kcx_profile(kc_subcodes=_csv(match.group(1)))
+    state["candidate"], state["snapshot"] = projected_candidate(state["profile"])
     return True, ""
 
 
@@ -4549,12 +4320,18 @@ def _h_tsip_script_returns(world: World, text: str, examples: dict) -> tuple[boo
     state = _tsip_generate_state(world)
     if state["candidate"] is None:
         return False, "scripted candidate was not projected"
+    from tests.helpers.source_influence_fixtures import (
+        make_actor,
+        make_narrative,
+        make_tree,
+    )
+
     ingress_id = state["candidate"].canonical_ingress.entry_point_id
     state["ingress_id"] = ingress_id
     state["fixtures"] = {
-        "tree": _tsip_tree(ingress_id),
-        "narrative": _tsip_narrative(ingress_id),
-        "actor": _tsip_actor(ingress_id),
+        "tree": make_tree(ingress_id),
+        "narrative": make_narrative(ingress_id),
+        "actor": make_actor(ingress_id),
     }
     return True, ""
 

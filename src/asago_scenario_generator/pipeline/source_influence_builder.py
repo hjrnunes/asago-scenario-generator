@@ -90,23 +90,35 @@ def _load_threat_playbooks_cached(path: str) -> tuple[tuple[str, tuple[str, ...]
     )
 
 
+def _dedupe_source_refs(
+    source_type: SourceInfluenceSourceType,
+    source_ids: Sequence[str],
+) -> tuple[SourceInfluenceSourceRef, ...]:
+    """Deduplicate pre-formatted source IDs into typed source records.
+
+    First occurrence wins so callers can order inputs deliberately
+    (e.g. primary threat first).
+    """
+    refs: list[SourceInfluenceSourceRef] = []
+    seen: set[str] = set()
+    for source_id in source_ids:
+        if source_id in seen:
+            continue
+        seen.add(source_id)
+        refs.append(
+            SourceInfluenceSourceRef(source_type=source_type, source_id=source_id)
+        )
+    return tuple(refs)
+
+
 def _threat_source_refs(
     threat_ids: Sequence[str],
 ) -> tuple[SourceInfluenceSourceRef, ...]:
     """Deduplicate threat IDs (primary first) into typed threat sources."""
-    refs: list[SourceInfluenceSourceRef] = []
-    seen: set[str] = set()
-    for threat_id in threat_ids:
-        if threat_id in seen:
-            continue
-        seen.add(threat_id)
-        refs.append(
-            SourceInfluenceSourceRef(
-                source_type=SourceInfluenceSourceType.threat_source,
-                source_id=f"threat:{threat_id}",
-            )
-        )
-    return tuple(refs)
+    return _dedupe_source_refs(
+        SourceInfluenceSourceType.threat_source,
+        (f"threat:{threat_id}" for threat_id in threat_ids),
+    )
 
 
 def _mitigation_source_refs(
@@ -130,19 +142,10 @@ def _constraint_source_refs(
     kc_subcodes: Sequence[str],
 ) -> tuple[SourceInfluenceSourceRef, ...]:
     """Derive capability-constraint sources from the profile KC sub-codes."""
-    refs: list[SourceInfluenceSourceRef] = []
-    seen: set[str] = set()
-    for kc in kc_subcodes:
-        if kc in seen:
-            continue
-        seen.add(kc)
-        refs.append(
-            SourceInfluenceSourceRef(
-                source_type=SourceInfluenceSourceType.capability_constraint,
-                source_id=f"constraint:{kc}",
-            )
-        )
-    return tuple(refs)
+    return _dedupe_source_refs(
+        SourceInfluenceSourceType.capability_constraint,
+        (f"constraint:{kc}" for kc in kc_subcodes),
+    )
 
 
 def declared_source_records(
