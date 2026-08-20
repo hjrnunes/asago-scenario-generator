@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from asago_scenario_generator.stpa.models.execution_envelope import (
+from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactorKind,
     predicate_for,
     step_kind_for,
