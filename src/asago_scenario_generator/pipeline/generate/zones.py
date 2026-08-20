@@ -19,15 +19,32 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
+from typing import Any
 
 from asago_scenario_generator.models.attack_tree import AttackTree, AttackTreeNode
-from asago_scenario_generator.models.scenario import NarrativeLayer
+from asago_scenario_generator.models.scenario import NarrativeLayer, NarrativeStep
 
 logger = logging.getLogger(__name__)
 
 # Literal narrative zone for activity outside the assessed AI boundary.
 # Deliberately distinct from the profile's active Schneider zone list.
 OUTSIDE_ZONE = "outside"
+
+
+def projected_boundary_by_id(
+    selected_steps: Iterable[dict[str, Any]],
+) -> dict[str, str | None]:
+    """Index projected-step boundary positions by canonical step ID.
+
+    Malformed transport records (non-dict items, non-string step IDs) are
+    ignored so consumers of the resulting map never hit a KeyError from
+    transport junk.
+    """
+    return {
+        item["step_id"]: item.get("boundary_position")
+        for item in selected_steps
+        if isinstance(item, dict) and isinstance(item.get("step_id"), str)
+    }
 
 
 def active_narrative_zones(zone_sequence: Iterable[str]) -> list[str]:
@@ -69,38 +86,7 @@ def enforce_narrative_projection_zones(
     violations: list[str] = []
 
     for step in narrative.steps:
-        mapped_ids = [sid for sid in step.projected_step_ids if sid in boundary_by_id]
-        if not mapped_ids:
-            continue
-        boundaries = {boundary_by_id[sid] for sid in mapped_ids}
-        if len(boundaries) > 1:
-            violations.append(
-                f"projection-zone: narrative step {step.step_number} maps "
-                f"projected steps with mixed boundary positions "
-                f"({sorted(boundaries)})"
-            )
-            continue
-        boundary = next(iter(boundaries))
-        if boundary == OUTSIDE_ZONE:
-            if step.zone != OUTSIDE_ZONE:
-                violations.append(
-                    f"projection-zone: narrative step {step.step_number} maps "
-                    f"only outside-boundary projected steps but has zone "
-                    f"'{step.zone}' (outside step active zone)"
-                )
-        else:
-            if step.zone == OUTSIDE_ZONE:
-                violations.append(
-                    f"projection-zone: narrative step {step.step_number} has "
-                    f"zone 'outside' but maps {boundary}-boundary projected "
-                    f"steps ({boundary} step outside)"
-                )
-            elif step.zone not in active:
-                violations.append(
-                    f"projection-zone: narrative step {step.step_number} has "
-                    f"zone '{step.zone}' which is not an active Schneider "
-                    f"zone (inactive Schneider zone)"
-                )
+        violations.extend(_projection_zone_violations(step, boundary_by_id, active))
 
     if violations:
         raise ValueError(
@@ -108,6 +94,53 @@ def enforce_narrative_projection_zones(
             + "; ".join(violations)
         )
     return narrative
+
+
+def _projection_zone_violations(
+    step: NarrativeStep,
+    boundary_by_id: dict[str, str | None],
+    active: set[str],
+) -> list[str]:
+    """Stage-specific zone violations for one narrative step's mapping."""
+    mapped_ids = [sid for sid in step.projected_step_ids if sid in boundary_by_id]
+    if not mapped_ids:
+        return []
+    boundaries = {boundary_by_id[sid] for sid in mapped_ids}
+    if len(boundaries) > 1:
+        return [
+            f"projection-zone: narrative step {step.step_number} maps "
+            f"projected steps with mixed boundary positions "
+            f"({sorted(boundaries)})"
+        ]
+    violation = _narrative_zone_rule_violation(step, next(iter(boundaries)), active)
+    return [violation] if violation is not None else []
+
+
+def _narrative_zone_rule_violation(
+    step: NarrativeStep, boundary: str, active: set[str]
+) -> str | None:
+    """Stage-specific zone rule violation for one step, or None when compliant."""
+    if boundary == OUTSIDE_ZONE:
+        if step.zone != OUTSIDE_ZONE:
+            return (
+                f"projection-zone: narrative step {step.step_number} maps "
+                f"only outside-boundary projected steps but has zone "
+                f"'{step.zone}' (outside step active zone)"
+            )
+        return None
+    if step.zone == OUTSIDE_ZONE:
+        return (
+            f"projection-zone: narrative step {step.step_number} has "
+            f"zone 'outside' but maps {boundary}-boundary projected "
+            f"steps ({boundary} step outside)"
+        )
+    if step.zone not in active:
+        return (
+            f"projection-zone: narrative step {step.step_number} has "
+            f"zone '{step.zone}' which is not an active Schneider "
+            f"zone (inactive Schneider zone)"
+        )
+    return None
 
 
 def _enforce_zones_narrative(

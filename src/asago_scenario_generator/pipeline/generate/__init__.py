@@ -152,22 +152,30 @@ from asago_scenario_generator.pipeline.generate.tree import (
     _build_tree_skeleton,
     _call_attack_tree,
     _call_attack_tree_once,
-    _check_consistency,
-    _check_non_actionable_leaves,
     _collect_threat_ids_from_tree,
-    _count_leaves,
     _format_skeleton_yaml,
-    normalize_attack_tree_transport,
+    _validate_mandatory_leaves,
+    _warn_dominant_threat_id_crossref,
+    build_call2_context,
+)
+
+# tree_transport
+from asago_scenario_generator.pipeline.generate.tree_transport import (
     _parse_attack_tree_yaml,
     _sanitize_yaml_colons,
+    normalize_attack_tree_transport,
+)
+
+# tree_validation
+from asago_scenario_generator.pipeline.generate.tree_validation import (
+    _check_consistency,
+    _check_non_actionable_leaves,
+    _count_leaves,
     _strip_non_skeleton_techniques,
     _strip_non_skeleton_techniques_node,
-    _validate_mandatory_leaves,
     _validate_technique_zone_compatibility,
     _validate_technique_zone_node,
     _validate_tree_against_projection,
-    _warn_dominant_threat_id_crossref,
-    build_call2_context,
 )
 
 # step_ids
@@ -182,6 +190,7 @@ from asago_scenario_generator.pipeline.generate.zones import (
     _enforce_zones_narrative,
     active_narrative_zones,
     enforce_narrative_projection_zones,
+    projected_boundary_by_id,
     validate_attack_tree_zones,
 )
 
@@ -234,6 +243,7 @@ __all__ = [
     "TreeStageResult",
     "active_narrative_zones",
     "enforce_narrative_projection_zones",
+    "projected_boundary_by_id",
     # actor
     "Call0Response",
     # narrative

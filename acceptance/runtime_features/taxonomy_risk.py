@@ -12,12 +12,12 @@ from runtime_shared import World
 from asago_scenario_generator.pipeline.generate.step_ids import (
     normalize_projected_step_ids,
 )
-from asago_scenario_generator.pipeline.generate.tree import (
+from asago_scenario_generator.pipeline.generate.tree_transport import (
     normalize_attack_tree_transport,
 )
-from asago_scenario_generator.pipeline.projection_validation import (
-    _EXECUTOR_ROLE_TO_LEAF_COMPAT,
-    _STEP_TO_LEAF_ACTION_COMPAT,
+from asago_scenario_generator.pipeline.compatibility import (
+    EXECUTOR_ROLE_TO_LEAF_COMPAT,
+    STEP_TO_LEAF_ACTION_COMPAT,
 )
 from asago_scenario_generator.prompts import render_prompt
 
@@ -562,8 +562,8 @@ def _h_contract_resolve_compat(
     if step is None:
         return False, "no projected step was supplied"
     state = _contract_state(world)
-    state["action_compat"] = _STEP_TO_LEAF_ACTION_COMPAT.get(step["action_kind"], set())
-    state["executor_compat"] = _EXECUTOR_ROLE_TO_LEAF_COMPAT.get(
+    state["action_compat"] = STEP_TO_LEAF_ACTION_COMPAT.get(step["action_kind"], set())
+    state["executor_compat"] = EXECUTOR_ROLE_TO_LEAF_COMPAT.get(
         step["executor_role"], set()
     )
     state["compatibility"] = state["action_compat"] & state["executor_compat"]
@@ -2437,15 +2437,15 @@ def _h_all_rows_intersection(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     from asago_scenario_generator.pipeline.projection_validation import (
-        _EXECUTOR_ROLE_TO_LEAF_COMPAT,
-        _STEP_TO_LEAF_ACTION_COMPAT,
+        EXECUTOR_ROLE_TO_LEAF_COMPAT,
+        STEP_TO_LEAF_ACTION_COMPAT,
     )
 
     rows = _contract_state(world).get("all_alignment_rows", [])
     for row in rows:
         expected = sorted(
-            _STEP_TO_LEAF_ACTION_COMPAT.get(row["action"], set())
-            & _EXECUTOR_ROLE_TO_LEAF_COMPAT.get(row["executor"], set())
+            STEP_TO_LEAF_ACTION_COMPAT.get(row["action"], set())
+            & EXECUTOR_ROLE_TO_LEAF_COMPAT.get(row["executor"], set())
         )
         if row["allowed_tree_kinds"] != expected:
             return False, f"row {row['canonical_id']} tree kinds drifted from validator"

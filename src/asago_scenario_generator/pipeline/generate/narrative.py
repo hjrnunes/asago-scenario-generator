@@ -23,6 +23,9 @@ from asago_scenario_generator.pipeline.generate.constants import _OWASP_LLM_NAME
 from asago_scenario_generator.pipeline.generate.diversity import (
     _format_structural_exclusions,
 )
+from asago_scenario_generator.pipeline.generate.alignment import (
+    derive_projection_alignment_rows_from_context,
+)
 from asago_scenario_generator.pipeline.generate.ontology import (
     _build_ontology_context,
     _build_technique_context_block,
@@ -37,6 +40,7 @@ from asago_scenario_generator.pipeline.generate.step_ids import (
 from asago_scenario_generator.pipeline.generate.zones import (
     _enforce_zones_narrative,
     enforce_narrative_projection_zones,
+    projected_boundary_by_id,
 )
 from asago_scenario_generator.pipeline.seeds import ScenarioSeed
 from asago_scenario_generator.prompts import render_prompt
@@ -570,15 +574,7 @@ def build_call1_context(
     )
 
     # Validator-derived compact alignment table (one row per selected step).
-    from asago_scenario_generator.pipeline.generate.alignment import (
-        derive_projection_alignment_rows,
-    )
-
-    alignment_rows = (
-        derive_projection_alignment_rows(humanized_projection.get("selected_steps", []))
-        if humanized_projection
-        else []
-    )
+    alignment_rows = derive_projection_alignment_rows_from_context(humanized_projection)
 
     return {
         "use_case": use_case,
@@ -725,11 +721,9 @@ def _call_narrative(
         # Stage-specific boundary validation: literal 'outside' is allowed
         # only for steps mapping only outside-boundary projected steps;
         # inside/crossing steps must use active Schneider zones.
-        boundary_by_id = {
-            item["step_id"]: item.get("boundary_position")
-            for item in projection_context.get("selected_steps", [])
-            if isinstance(item, dict) and isinstance(item.get("step_id"), str)
-        }
+        boundary_by_id = projected_boundary_by_id(
+            projection_context.get("selected_steps", [])
+        )
         narrative = enforce_narrative_projection_zones(
             narrative, profile.zones_active, boundary_by_id
         )

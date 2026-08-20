@@ -52,10 +52,10 @@ from asago_scenario_generator.pipeline.generate.priority import (
     _compute_priority,
     _extract_maestro_layers_from_tree,
 )
-from asago_scenario_generator.pipeline.generate.zones import active_narrative_zones
-from asago_scenario_generator.pipeline.generate.tree import (
+from asago_scenario_generator.pipeline.generate.tree_validation import (
     _check_consistency,
 )
+from asago_scenario_generator.pipeline.generate.zones import active_narrative_zones
 from asago_scenario_generator.pipeline.projection import (
     CapabilityFactSnapshot,
     ProjectedCandidate,

@@ -40,6 +40,36 @@ def _allowed_tree_kinds(action_kind: str, executor_role: str) -> list[str]:
     )
 
 
+# Identity keys tried in order when rendering one bound resource.
+_RESOURCE_IDENTITY_KEYS: tuple[str, ...] = (
+    "entry_point_id",
+    "tool_id",
+    "integration_id",
+    "trust_boundary_id",
+)
+
+
+def _resource_identity(ref: dict[str, Any]) -> str | None:
+    """First non-empty identity value of a resource ref, in key order."""
+    for key in _RESOURCE_IDENTITY_KEYS:
+        value = ref.get(key)
+        if value:
+            return value
+    return None
+
+
+def _resource_cell(link: dict[str, Any]) -> str | None:
+    """Render one bound-resource link as a compact cell, or None to skip it."""
+    ref = link.get("resource_ref")
+    if not isinstance(ref, dict):
+        return None
+    label = _RESOURCE_KIND_LABELS.get(ref.get("kind"))
+    if label is None:
+        return None
+    ident = _resource_identity(ref)
+    return f"{label}/{ident}" if ident else label
+
+
 def bound_resources_from_step(step: dict[str, Any]) -> str:
     """Render the resources bound to one canonical step as compact cells.
 
@@ -50,19 +80,9 @@ def bound_resources_from_step(step: dict[str, Any]) -> str:
     for link in step.get("resource_links", []):
         if not isinstance(link, dict):
             continue
-        ref = link.get("resource_ref")
-        if not isinstance(ref, dict):
-            continue
-        label = _RESOURCE_KIND_LABELS.get(ref.get("kind"))
-        if label is None:
-            continue
-        ident = (
-            ref.get("entry_point_id")
-            or ref.get("tool_id")
-            or ref.get("integration_id")
-            or ref.get("trust_boundary_id")
-        )
-        parts.append(f"{label}/{ident}" if ident else label)
+        cell = _resource_cell(link)
+        if cell is not None:
+            parts.append(cell)
     return ", ".join(parts) if parts else "none"
 
 
@@ -99,3 +119,18 @@ def derive_projection_alignment_rows(
 ) -> list[dict[str, Any]]:
     """Derive one alignment row per selected canonical step, in order."""
     return [derive_projection_alignment_row(step) for step in selected_steps]
+
+
+def derive_projection_alignment_rows_from_context(
+    projection_context: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Derive alignment rows from a humanized projection context.
+
+    A ``None`` context (no projection available) yields no rows.  Missing or
+    malformed ``selected_steps`` entries are ignored by the row derivation.
+    """
+    if not projection_context:
+        return []
+    return derive_projection_alignment_rows(
+        projection_context.get("selected_steps", [])
+    )
