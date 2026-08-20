@@ -990,6 +990,7 @@ def _call_attack_tree_once(
     pinned_technique_ids: list[str] | None = None,
     pinned_technique_names: list[str] | None = None,
     consistency_feedback: str | None = None,
+    completion_length_feedback: str | None = None,
     pinned_entry_point_id: str | None = None,
     projection_context: dict[str, Any] | None = None,
 ) -> tuple[AttackTree, LLMResult]:
@@ -997,6 +998,9 @@ def _call_attack_tree_once(
 
     This is the lifecycle primitive: it performs exactly one LLM invocation
     and never retries.  Retry ownership belongs to the caller.
+
+    ``completion_length_feedback`` (the finalization-owned length-retry
+    suffix) is appended verbatim to the end of the rendered user prompt.
     """
     ctx = build_call2_context(
         seed=seed,
@@ -1020,6 +1024,8 @@ def _call_attack_tree_once(
         pinned_entry_point_name=ctx.get("pinned_entry_point_name"),
     )
     user_prompt = render_prompt("call2_user.j2", **ctx)
+    if completion_length_feedback:
+        user_prompt = f"{user_prompt}{completion_length_feedback}"
     try:
         result = client.complete(
             system_prompt=system_prompt,
@@ -1028,12 +1034,12 @@ def _call_attack_tree_once(
         )
     except Exception as exc:
         from asago_scenario_generator.pipeline.generate.stages import (
-            StageAttemptFailure,
+            stage_attempt_failure,
         )
 
-        raise StageAttemptFailure(
-            call_name=CallName.attack_tree,
-            exception=exc,
+        raise stage_attempt_failure(
+            CallName.attack_tree,
+            exc,
             phase="invocation",
             invoked=True,
             system_prompt=system_prompt,

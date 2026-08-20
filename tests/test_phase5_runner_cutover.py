@@ -3,16 +3,77 @@
 from __future__ import annotations
 
 import inspect
+from types import SimpleNamespace
 
-from asago_scenario_generator.pipeline.coverage_planning import CoveragePlan, CoveragePlanEntry
+from asago_scenario_generator.pipeline.coverage_planning import (
+    CoveragePlan,
+    CoveragePlanEntry,
+)
+from asago_scenario_generator.pipeline.finalization import GeneratedStage
+from asago_scenario_generator.pipeline.generate.stages import StageAttemptFailure
 from asago_scenario_generator.pipeline.runner import run_pipeline
-from asago_scenario_generator.pipeline.runner_finalization import strict_v3_coverage_plan
+from asago_scenario_generator.pipeline.runner_finalization import (
+    resume_completion_length_counts,
+    strict_v3_coverage_plan,
+)
 from tests.test_phase4_persistence import (
     ENTRY_POINT_ID,
     FALLBACK_ID,
     PRIMARY_ID,
     _choice,
 )
+
+
+def _stage_record(stage: GeneratedStage, *codes: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        stage=stage,
+        violations=[SimpleNamespace(code=code) for code in codes],
+    )
+
+
+def test_resume_length_counts_authorize_only_a_latest_length_failure() -> None:
+    records = [
+        _stage_record(GeneratedStage.actor),
+        _stage_record(
+            GeneratedStage.actor,
+            StageAttemptFailure.COMPLETION_LENGTH_CODE,
+        ),
+    ]
+
+    counts = resume_completion_length_counts(records)
+
+    assert counts == {
+        GeneratedStage.actor: 1,
+        GeneratedStage.narrative: 0,
+        GeneratedStage.tree: 0,
+        GeneratedStage.behavior: 0,
+    }
+
+
+def test_resume_length_counts_stay_zero_without_a_latest_length_failure() -> None:
+    records = [
+        _stage_record(
+            GeneratedStage.actor,
+            StageAttemptFailure.COMPLETION_LENGTH_CODE,
+        ),
+        _stage_record(GeneratedStage.actor),
+    ]
+
+    assert resume_completion_length_counts(records) == {
+        GeneratedStage.actor: 0,
+        GeneratedStage.narrative: 0,
+        GeneratedStage.tree: 0,
+        GeneratedStage.behavior: 0,
+    }
+
+
+def test_resume_length_counts_are_zero_for_an_empty_trace() -> None:
+    assert resume_completion_length_counts([]) == {
+        GeneratedStage.actor: 0,
+        GeneratedStage.narrative: 0,
+        GeneratedStage.tree: 0,
+        GeneratedStage.behavior: 0,
+    }
 
 
 def test_strict_v3_plan_is_primary_first_and_all_choices_start_available() -> None:

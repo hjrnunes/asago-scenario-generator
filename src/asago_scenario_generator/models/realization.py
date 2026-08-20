@@ -50,12 +50,21 @@ class ProjectedStepRealization(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    # Conservative static maxima so every generated realization field has a
+    # finite schema bound regardless of the transport (LLM response_format
+    # schemas include these nested records verbatim).
+    _ID_MAX_LENGTH = 200
+    _KIND_MAX_LENGTH = 32
+    _REFS_MAX_ITEMS = 16
+
     projected_step_id: str = Field(
         min_length=1,
+        max_length=_ID_MAX_LENGTH,
         description="Canonical projected step ID this record realizes.",
     )
     action_kind: str = Field(
         min_length=1,
+        max_length=_KIND_MAX_LENGTH,
         description=(
             "Canonical action kind from the projected step (prepare, deliver, "
             "invoke, transform, persist, observe, impact)."
@@ -63,28 +72,36 @@ class ProjectedStepRealization(BaseModel):
     )
     executor_role: str = Field(
         min_length=1,
+        max_length=_KIND_MAX_LENGTH,
         description="Canonical executor role from the projected step (attacker, system, operator).",
     )
     boundary_position: str = Field(
         min_length=1,
+        max_length=_KIND_MAX_LENGTH,
         description="Canonical boundary position from the projected step (outside, crossing, inside).",
     )
     resource_ref_ids: tuple[str, ...] = Field(
+        max_length=_REFS_MAX_ITEMS,
         description="Concrete resource reference IDs for this step's resource_links.",
     )
     consumed_ref_ids: tuple[str, ...] = Field(
+        max_length=_REFS_MAX_ITEMS,
         description="Consumed reference IDs (must match step.consumed[*].ref_id).",
     )
     produced_ref_ids: tuple[str, ...] = Field(
+        max_length=_REFS_MAX_ITEMS,
         description="Produced reference IDs (must match step.produced[*].ref_id).",
     )
     produced_effect_ids: tuple[str, ...] = Field(
+        max_length=_REFS_MAX_ITEMS,
         description="Produced effect IDs (subset of produced where kind == 'effect').",
     )
     outcome_link_pc_ids: tuple[str, ...] = Field(
+        max_length=_REFS_MAX_ITEMS,
         description="Observable outcome link postcondition IDs.",
     )
     postcondition_ids: tuple[str, ...] = Field(
+        max_length=_REFS_MAX_ITEMS,
         description="Owned observable postcondition IDs.",
     )
 

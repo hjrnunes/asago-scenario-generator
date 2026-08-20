@@ -193,7 +193,12 @@ class NarrativeAccessRealization(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    # Conservative static maxima: the narrative response schema embeds this
+    # record, and every generated probe field must declare a finite length.
+    _NAME_MAX_LENGTH = 200
+
     initial_entry_point_id: str = Field(
+        max_length=_NAME_MAX_LENGTH,
         description=(
             "Canonical entry-point name of the initial ingress "
             "this narrative realizes.  Must match actor access provenance."
@@ -201,6 +206,7 @@ class NarrativeAccessRealization(BaseModel):
     )
     influence_source: str | None = Field(
         default=None,
+        max_length=_NAME_MAX_LENGTH,
         description=(
             "Canonical entry-point name of the upstream influence source, "
             "if indirect.  Must match actor access provenance."
@@ -208,6 +214,7 @@ class NarrativeAccessRealization(BaseModel):
     )
     trust_boundary_id: str | None = Field(
         default=None,
+        max_length=_NAME_MAX_LENGTH,
         description=(
             "Canonical trust boundary name of the boundary crossed, "
             "if indirect.  Must match actor access provenance."

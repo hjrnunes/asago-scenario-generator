@@ -7,8 +7,64 @@ import os
 import time
 from typing import Any
 
-from openai import OpenAI
+from openai import LengthFinishReasonError, OpenAI
 from pydantic import BaseModel, Field
+
+
+class CompletionLengthError(RuntimeError):
+    """Project-owned typed evidence for a completion-length exhaustion.
+
+    Normalizes the two provider shapes — the structured OpenAI SDK
+    ``LengthFinishReasonError`` and unstructured choices whose
+    ``finish_reason == "length"`` — into one typed value carrying usage
+    and finish reason as fields.  Callers classify on these fields, never
+    by parsing exception text.
+    """
+
+    finish_reason: str = "length"
+    prompt_tokens: int
+    completion_tokens: int
+
+    def __init__(
+        self,
+        *,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        finish_reason: str = "length",
+        message: str | None = None,
+    ) -> None:
+        super().__init__(
+            message or "completion length limit reached; response finished early"
+        )
+        self.finish_reason = finish_reason
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+
+    @classmethod
+    def from_usage(
+        cls,
+        usage: Any,
+        *,
+        finish_reason: str = "length",
+    ) -> CompletionLengthError:
+        """Build typed length-exhaustion evidence from a provider usage record.
+
+        ``usage`` may be ``None`` or carry no token fields; missing counts
+        degrade to zero without parsing exception text.
+        """
+        prompt_tokens, completion_tokens = _usage_counts(usage)
+        return cls(
+            finish_reason=finish_reason,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
+
+
+def _usage_counts(usage: Any) -> tuple[int, int]:
+    """Extract ``(prompt_tokens, completion_tokens)``, tolerating None usage."""
+    if usage is None:
+        return 0, 0
+    return usage.prompt_tokens, usage.completion_tokens
 
 
 class LLMResult(BaseModel):
@@ -117,34 +173,54 @@ class LLMClient:
             extra_kwargs["max_completion_tokens"] = effective_max
 
         t0 = time.perf_counter_ns()
-
-        if response_format is not None:
-            response = self._client.beta.chat.completions.parse(
-                model=self.model,
-                messages=messages,
-                response_format=response_format,
-                **extra_kwargs,
-            )
-            content = response.choices[0].message.parsed
-        else:
-            response = self._client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                **extra_kwargs,
-            )
-            content = response.choices[0].message.content
-
+        response, content = self._complete(messages, response_format, extra_kwargs)
         duration_ms = (time.perf_counter_ns() - t0) // 1_000_000
-        usage = (
-            response.usage
-            or type("U", (), {"prompt_tokens": 0, "completion_tokens": 0})()
-        )
+        prompt_tokens, completion_tokens = _usage_counts(response.usage)
 
         return LLMResult(
             content=content,
-            prompt_tokens=usage.prompt_tokens,
-            completion_tokens=usage.completion_tokens,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
             duration_ms=duration_ms,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
         )
+
+    def _complete(
+        self,
+        messages: list[dict[str, Any]],
+        response_format: type[BaseModel] | None,
+        extra_kwargs: dict[str, Any],
+    ) -> tuple[Any, Any]:
+        """Run exactly one provider request, returning ``(response, content)``.
+
+        Normalizes both provider length shapes — the structured SDK
+        ``LengthFinishReasonError`` and an unstructured choice whose
+        ``finish_reason == "length"`` — into one typed
+        ``CompletionLengthError`` carrying usage evidence.
+        """
+        try:
+            if response_format is not None:
+                response = self._client.beta.chat.completions.parse(
+                    model=self.model,
+                    messages=messages,
+                    response_format=response_format,
+                    **extra_kwargs,
+                )
+                content = response.choices[0].message.parsed
+            else:
+                response = self._client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    **extra_kwargs,
+                )
+                content = response.choices[0].message.content
+        except LengthFinishReasonError as exc:
+            raise CompletionLengthError.from_usage(exc.completion.usage) from exc
+
+        finish_reason = getattr(response.choices[0], "finish_reason", None)
+        if response_format is None and str(finish_reason) == "length":
+            # Unstructured length exhaustion: a completed response whose
+            # choice ended for length is still a length failure.
+            raise CompletionLengthError.from_usage(response.usage)
+        return response, content

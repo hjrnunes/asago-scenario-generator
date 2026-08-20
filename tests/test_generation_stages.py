@@ -8,7 +8,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from asago_scenario_generator.llm.client import LLMResult
-from asago_scenario_generator.models.projection_envelope import ProjectionTraceabilityResult
+from asago_scenario_generator.models.projection_envelope import (
+    ProjectionTraceabilityResult,
+)
 from asago_scenario_generator.models.scenario import CallName
 from asago_scenario_generator.pipeline.finalization import (
     GeneratedArtifacts,
@@ -125,9 +127,99 @@ def test_finalization_behavior_port_invokes_call3_once_with_final_tree_copy() ->
     ) as call3:
         result = make_assertions_only_behavior_callback(prepared)(candidate, invocation)
 
-    call3.assert_called_once_with(prepared, narrative, final_tree_copy)
+    call3.assert_called_once_with(prepared, narrative, final_tree_copy, None)
     assert result.artifact is behavior
     assert result.evidence is evidence
+
+
+def test_behavior_port_forwards_the_retry_directive_to_call3() -> None:
+    prepared = _prepared()
+    candidate = MagicMock(candidate_id=prepared.candidate_id)
+    narrative = object()
+    final_tree_copy = object()
+    behavior = object()
+    evidence = object()
+    invocation = StageInvocation(
+        candidate_id=prepared.candidate_id,
+        stage=GeneratedStage.behavior,
+        invocation_index=1,
+        owner_retry_index=0,
+        artifacts=GeneratedArtifacts(narrative=narrative, tree=final_tree_copy),
+        final_tree_digest="verified-digest",
+        retry_feedback="approved suffix",
+        retry_reason="completion_length",
+    )
+
+    with patch(
+        "asago_scenario_generator.pipeline.generate.stages.generate_behavior_stage",
+        return_value=BehaviorStageResult(behavior, evidence),
+    ) as call3:
+        result = make_assertions_only_behavior_callback(prepared)(candidate, invocation)
+
+    directive = call3.call_args.args[3]
+    assert directive.feedback == "approved suffix"
+    assert directive.reason == "completion_length"
+    assert result.artifact is behavior
+    assert result.evidence is evidence
+
+
+def test_behavior_port_rejects_invalid_invocations() -> None:
+    prepared = _prepared()
+    candidate = MagicMock(candidate_id=prepared.candidate_id)
+    port = make_assertions_only_behavior_callback(prepared)
+
+    with pytest.raises(ValueError, match="requires behavior stage"):
+        port(
+            candidate,
+            StageInvocation(
+                candidate_id=prepared.candidate_id,
+                stage=GeneratedStage.actor,
+                invocation_index=0,
+                owner_retry_index=0,
+                artifacts=GeneratedArtifacts(),
+            ),
+        )
+    with pytest.raises(ValueError, match="differs from prepared projection"):
+        port(
+            MagicMock(candidate_id="other"),
+            StageInvocation(
+                candidate_id="other",
+                stage=GeneratedStage.behavior,
+                invocation_index=0,
+                owner_retry_index=0,
+                artifacts=GeneratedArtifacts(),
+            ),
+        )
+    with pytest.raises(ValueError, match="verified final-tree"):
+        port(
+            candidate,
+            StageInvocation(
+                candidate_id=prepared.candidate_id,
+                stage=GeneratedStage.behavior,
+                invocation_index=0,
+                owner_retry_index=0,
+                artifacts=GeneratedArtifacts(narrative=object()),
+            ),
+        )
+
+
+def test_stage_attempt_failure_normalizes_completion_length_evidence() -> None:
+    from asago_scenario_generator.llm.client import CompletionLengthError
+    from asago_scenario_generator.pipeline.generate.stages import (
+        stage_attempt_failure,
+    )
+
+    failure = stage_attempt_failure(
+        CallName.actor_profile,
+        CompletionLengthError(prompt_tokens=31, completion_tokens=16),
+        phase="invocation",
+        invoked=True,
+    )
+
+    assert failure.code == StageAttemptFailure.COMPLETION_LENGTH_CODE
+    assert failure.finish_reason == "length"
+    assert failure.prompt_tokens == 31
+    assert failure.completion_tokens == 16
 
 
 def test_retry_directive_is_data_not_hidden_control_flow() -> None:
@@ -146,6 +238,45 @@ def test_retry_directive_is_data_not_hidden_control_flow() -> None:
     assert primitive.call_args.kwargs["access_feedback"] == "repair evidence"
     assert primitive.call_args.kwargs["forced_actor_type"] == "external"
     assert result.diversity_limitation == "limited"
+
+
+def test_completion_length_retry_feedback_uses_only_the_length_channel() -> None:
+    prepared = _prepared()
+    actor = cast(Any, object())
+    narrative = cast(Any, object())
+    tree = cast(Any, object())
+    behavior = cast(Any, object())
+    suffix = "approved length-retry suffix"
+    retry = RetryDirective(feedback=suffix, reason="completion_length")
+
+    with (
+        patch(
+            "asago_scenario_generator.pipeline.generate._call_actor_profile",
+            return_value=(actor, _result(), None),
+        ) as call0,
+        patch(
+            "asago_scenario_generator.pipeline.generate._call_narrative",
+            return_value=(narrative, _result()),
+        ) as call1,
+        patch(
+            "asago_scenario_generator.pipeline.generate._call_attack_tree_once",
+            return_value=(tree, _result()),
+        ) as call2,
+        patch(
+            "asago_scenario_generator.pipeline.generate._call_behavior_spec",
+            return_value=(behavior, _result()),
+        ) as call3,
+    ):
+        generate_actor_stage(prepared, retry)
+        generate_narrative_stage(prepared, actor, retry)
+        generate_tree_stage(prepared, actor, narrative, retry)
+        generate_behavior_stage(prepared, narrative, tree, retry)
+
+    for primitive in (call0, call1, call2, call3):
+        assert primitive.call_args.kwargs["completion_length_feedback"] == suffix
+    assert call0.call_args.kwargs["access_feedback"] is None
+    assert call1.call_args.kwargs["realization_feedback"] is None
+    assert call2.call_args.kwargs["consistency_feedback"] is None
 
 
 def test_tree_post_response_rejection_retains_truthful_attempt_evidence() -> None:
@@ -225,7 +356,8 @@ def test_client_exception_is_invoked_without_synthesized_response() -> None:
 
     with (
         patch(
-            "asago_scenario_generator.pipeline.generate._call_behavior_spec", side_effect=invoke
+            "asago_scenario_generator.pipeline.generate._call_behavior_spec",
+            side_effect=invoke,
         ),
         pytest.raises(StageAttemptFailure) as raised,
     ):
@@ -283,12 +415,20 @@ def test_generate_scenario_legacy_adapter_preserves_call_order_output_and_logs()
 
     with (
         patch(
-            "asago_scenario_generator.pipeline.generate._call_actor_profile", side_effect=call0
+            "asago_scenario_generator.pipeline.generate._call_actor_profile",
+            side_effect=call0,
         ),
-        patch("asago_scenario_generator.pipeline.generate._call_narrative", side_effect=call1),
-        patch("asago_scenario_generator.pipeline.generate._call_attack_tree", side_effect=call2),
         patch(
-            "asago_scenario_generator.pipeline.generate._call_behavior_spec", side_effect=call3
+            "asago_scenario_generator.pipeline.generate._call_narrative",
+            side_effect=call1,
+        ),
+        patch(
+            "asago_scenario_generator.pipeline.generate._call_attack_tree",
+            side_effect=call2,
+        ),
+        patch(
+            "asago_scenario_generator.pipeline.generate._call_behavior_spec",
+            side_effect=call3,
         ),
         patch(
             "asago_scenario_generator.pipeline.generate._validate_actor_type",
@@ -306,7 +446,9 @@ def test_generate_scenario_legacy_adapter_preserves_call_order_output_and_logs()
             "asago_scenario_generator.pipeline.generate.assembly._check_consistency",
             return_value=[],
         ),
-        patch("asago_scenario_generator.pipeline.generate._warn_dominant_threat_id_crossref"),
+        patch(
+            "asago_scenario_generator.pipeline.generate._warn_dominant_threat_id_crossref"
+        ),
         patch(
             "asago_scenario_generator.pipeline.generate._assemble_envelope",
             return_value=envelope,

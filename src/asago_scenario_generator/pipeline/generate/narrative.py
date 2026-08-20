@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -43,18 +44,34 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+# Conservative finite static maxima for the structured Call 1 schema, which
+# is sent to the provider via response_format.  The narrative step list is
+# additionally bounded dynamically to selected_step_count + 2 (capped at
+# MAX_NARRATIVE_STEPS) by finalization gates.
+MAX_NARRATIVE_STEPS = 16
+NARRATIVE_CONNECTOR_STEPS = 2
+_CALL1_TITLE_MAX_LENGTH = 200
+_CALL1_PROSE_MAX_LENGTH = 2000
+_CALL1_ENTRY_MAX_LENGTH = 200
+_CALL1_ZONE_MAX_LENGTH = 64
+_CALL1_STEP_IDS_MAX_ITEMS = 16
+_CALL1_STEP_ID_MAX_LENGTH = 200
+_CALL1_REALIZATIONS_MAX_ITEMS = 16
+
+
 class Call1Step(BaseModel):
     step_number: int
-    zone: str
-    action: str
-    effect: str
-    control_point: str | None = None
+    zone: str = Field(max_length=_CALL1_ZONE_MAX_LENGTH)
+    action: str = Field(max_length=_CALL1_PROSE_MAX_LENGTH)
+    effect: str = Field(max_length=_CALL1_PROSE_MAX_LENGTH)
+    control_point: str | None = Field(default=None, max_length=_CALL1_ZONE_MAX_LENGTH)
     # --- Projection traceability fields (422o.4) ---
     # Required on every step; the LLM receives the IDs as opaque
     # constraints and must echo them back.  No defaults -- a missing
     # field is a typed violation, not an acceptable empty value.
     projected_step_ids: tuple[str, ...] = Field(
         min_length=1,
+        max_length=_CALL1_STEP_IDS_MAX_ITEMS,
         description=(
             "Canonical projected step IDs that this narrative step realizes. "
             "Must be echoed from the projection context constraints."
@@ -62,6 +79,7 @@ class Call1Step(BaseModel):
     )
     realizations: tuple[ProjectedStepRealization, ...] = Field(
         default=(),
+        max_length=_CALL1_REALIZATIONS_MAX_ITEMS,
         description=(
             "Per-projected-step canonical realization records.  Ignored "
             "from LLM output — post-processing derives these "
@@ -71,18 +89,26 @@ class Call1Step(BaseModel):
 
 
 class Call1Response(BaseModel):
-    title: str
-    summary: str
-    entry_point: str
+    title: str = Field(max_length=_CALL1_TITLE_MAX_LENGTH)
+    summary: str = Field(max_length=_CALL1_PROSE_MAX_LENGTH)
+    entry_point: str = Field(max_length=_CALL1_ENTRY_MAX_LENGTH)
     zone_sequence: list[str] = Field(
         min_length=1,
+        max_length=MAX_NARRATIVE_STEPS,
         description=(
             "Ordered attack propagation path through zones, including"
             " revisitations. E.g. [input, reasoning, tool_execution,"
             " reasoning] not just [input, reasoning, tool_execution]."
         ),
     )
-    steps: list[Call1Step] = Field(min_length=1)
+    steps: list[Call1Step] = Field(
+        min_length=1,
+        max_length=MAX_NARRATIVE_STEPS,
+        description=(
+            "Narrative steps.  Must cover every selected canonical step and "
+            "stay within selected_step_count + 2 steps (capped at 16)."
+        ),
+    )
     access_realization: NarrativeAccessRealization | None = None
 
 
@@ -174,6 +200,47 @@ def _sanitize_narrative(narrative: NarrativeLayer) -> NarrativeLayer:
 # ---------------------------------------------------------------------------
 # Zone sequence derivation
 # ---------------------------------------------------------------------------
+
+
+def validate_narrative_step_bounds(
+    narrative: NarrativeLayer,
+    selected_step_ids: Sequence[str],
+) -> list[tuple[str, str]]:
+    """Validate the Call 1 output shape against the projection selection.
+
+    Returns ``(code, detail)`` pairs:
+
+    - ``narrative_step_coverage``: every selected canonical step ID must be
+      realized by at least one narrative step.
+    - ``narrative_step_bound``: the narrative contains no more than
+      ``min(MAX_NARRATIVE_STEPS, selected_step_count + NARRATIVE_CONNECTOR_STEPS)``
+      steps — at most two connector steps beyond the selected steps and never
+      more than 16.
+
+    Pure function: finalization gates translate the codes into Lifecycle
+    violations owned by the narrative stage.
+    """
+    violations: list[tuple[str, str]] = []
+    selected = set(selected_step_ids)
+    covered = {sid for step in narrative.steps for sid in step.projected_step_ids}
+    missing = sorted(selected - covered)
+    if missing:
+        violations.append(
+            (
+                "narrative_step_coverage",
+                f"narrative does not realize selected canonical steps: {missing}",
+            )
+        )
+    maximum = min(MAX_NARRATIVE_STEPS, len(selected) + NARRATIVE_CONNECTOR_STEPS)
+    if len(narrative.steps) > maximum:
+        violations.append(
+            (
+                "narrative_step_bound",
+                f"narrative has {len(narrative.steps)} steps; the bound for "
+                f"{len(selected)} selected steps is {maximum}",
+            )
+        )
+    return violations
 
 
 def _derive_zone_sequence(steps: list[Call1Step] | list[NarrativeStep]) -> list[str]:
@@ -647,12 +714,17 @@ def _call_narrative(
     pinned_entry_point_id: str | None = None,
     access_feedback: str | None = None,
     realization_feedback: str | None = None,
+    completion_length_feedback: str | None = None,
     projection_context: dict[str, Any] | None = None,
 ) -> tuple[NarrativeLayer, LLMResult]:
     """Generate an attack narrative for a scenario seed (Call 1).
 
     Delegates context building to :func:`build_call1_context`, then renders
     templates, calls the LLM, and post-processes the narrative.
+
+    ``completion_length_feedback`` (the finalization-owned length-retry
+    suffix) is appended verbatim to the end of the rendered user prompt,
+    after every semantic section.
 
     Returns:
         Tuple of (NarrativeLayer, LLMResult).
@@ -675,6 +747,9 @@ def _call_narrative(
         projection_context=projection_context,
     )
 
+    user_prompt = render_prompt("call1_user.j2", **ctx)
+    if completion_length_feedback:
+        user_prompt = f"{user_prompt}{completion_length_feedback}"
     result = client.complete(
         system_prompt=render_prompt(
             "call1_system.j2",
@@ -685,7 +760,7 @@ def _call_narrative(
             kc_subcodes=profile.kc_subcodes,
             tool_inventory=ctx["tool_inventory"],
         ),
-        user_prompt=render_prompt("call1_user.j2", **ctx),
+        user_prompt=user_prompt,
         response_format=Call1Response,
     )
     # Post-processing: derive realizations deterministically from

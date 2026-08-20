@@ -71,9 +71,16 @@ class PreparedGeneration:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RetryDirective:
-    """Caller-owned feedback for one explicit stage re-invocation."""
+    """Caller-owned feedback for one explicit stage re-invocation.
+
+    ``reason`` distinguishes the completion-length channel from semantic
+    feedback.  A length retry appends ``feedback`` verbatim to the end of
+    the original user prompt; semantic retries route through the existing
+    per-stage feedback channels.
+    """
 
     feedback: str | None = None
+    reason: str | None = None
     forced_actor_type: str | None = None
     prior_titles: tuple[str, ...] | None = None
 
@@ -93,7 +100,15 @@ class StageAttemptFailure(Exception):
     ``phase`` discriminates failures before the client was called, failures
     raised by the client invocation, and failures after an ``LLMResult`` was
     obtained.  Missing result/raw response fields are intentionally ``None``.
+
+    Completion-length failures carry ``code == "completion_length"`` plus the
+    typed finish reason and usage extracted by the shared adapter; all other
+    failures keep the generic ``stage_attempt_failed`` code.  Callers route on
+    ``code``, never on exception text.
     """
+
+    DEFAULT_CODE = "stage_attempt_failed"
+    COMPLETION_LENGTH_CODE = "completion_length"
 
     def __init__(
         self,
@@ -106,6 +121,10 @@ class StageAttemptFailure(Exception):
         user_prompt: str | None = None,
         result: LLMResult | None = None,
         raw_response: Any | None = None,
+        code: str = "stage_attempt_failed",
+        finish_reason: str | None = None,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
     ) -> None:
         super().__init__(str(exception))
         self.call_name = call_name
@@ -117,6 +136,76 @@ class StageAttemptFailure(Exception):
         self.user_prompt = user_prompt
         self.result = result
         self.raw_response = raw_response
+        self.code = code
+        self.finish_reason = finish_reason
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+
+
+def _split_retry(retry: RetryDirective | None) -> tuple[str | None, str | None]:
+    """Split one retry directive into its two mutually exclusive channels.
+
+    Returns ``(semantic_feedback, completion_length_feedback)``: a
+    completion-length retry routes its feedback only through the length
+    channel, every other retry only through the semantic channel, and a
+    first attempt carries no feedback at all.
+    """
+    if retry is None:
+        return None, None
+    if retry.reason == StageAttemptFailure.COMPLETION_LENGTH_CODE:
+        return None, retry.feedback
+    return retry.feedback, None
+
+
+def _optional_list(values: Any) -> list[Any] | None:
+    """Convert a possibly-empty sequence to ``None``, the call contract marker."""
+    return list(values) or None
+
+
+def stage_attempt_failure(
+    call_name: CallName,
+    exception: BaseException,
+    *,
+    phase: Literal["before_invocation", "invocation", "post_response"],
+    invoked: bool,
+    system_prompt: str | None = None,
+    user_prompt: str | None = None,
+    result: LLMResult | None = None,
+    raw_response: Any | None = None,
+) -> StageAttemptFailure:
+    """Build a typed StageAttemptFailure, normalizing length exhaustion.
+
+    Completion-length failures are recognized structurally from the shared
+    adapter's typed error — never from exception text — and carry the code
+    ``completion_length`` plus finish reason and usage fields.
+    """
+    from asago_scenario_generator.llm.client import CompletionLengthError
+
+    if isinstance(exception, CompletionLengthError):
+        return StageAttemptFailure(
+            call_name=call_name,
+            exception=exception,
+            phase=phase,
+            invoked=invoked,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            result=result,
+            raw_response=raw_response,
+            code=StageAttemptFailure.COMPLETION_LENGTH_CODE,
+            finish_reason=exception.finish_reason,
+            prompt_tokens=exception.prompt_tokens,
+            completion_tokens=exception.completion_tokens,
+        )
+    return StageAttemptFailure(
+        call_name=call_name,
+        exception=exception,
+        phase=phase,
+        invoked=invoked,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        result=result,
+        raw_response=raw_response,
+    )
 
 
 class _AttemptRecordingClient:
@@ -155,9 +244,9 @@ class _AttemptRecordingClient:
     def failure(
         self, call_name: CallName, exception: BaseException
     ) -> StageAttemptFailure:
-        return StageAttemptFailure(
-            call_name=call_name,
-            exception=exception,
+        return stage_attempt_failure(
+            call_name,
+            exception,
             phase=(
                 "post_response"
                 if self.result is not None
@@ -261,6 +350,7 @@ def generate_actor_stage(
 
     request = prepared.request
     recorder = _AttemptRecordingClient(request.client)
+    semantic_feedback, length_feedback = _split_retry(retry)
     try:
         actor, result, limitation = generate._call_actor_profile(
             request.seed,
@@ -268,14 +358,15 @@ def generate_actor_stage(
             recorder,
             request.use_case,
             preferred_actor_type=request.preferred_actor_type,
-            excluded_actor_types=list(request.excluded_actor_types) or None,
+            excluded_actor_types=_optional_list(request.excluded_actor_types),
             preferred_capability_level=request.preferred_capability_level,
             attack_goal=request.attack_goal,
-            pinned_technique_ids=list(request.pinned_technique_ids) or None,
+            pinned_technique_ids=_optional_list(request.pinned_technique_ids),
             forced_actor_type=retry.forced_actor_type if retry else None,
             pinned_entry_point=request.pinned_entry_point,
             pinned_entry_point_id=request.pinned_entry_point_id,
-            access_feedback=retry.feedback if retry else None,
+            access_feedback=semantic_feedback,
+            completion_length_feedback=length_feedback,
             projection_context=prepared.projection_context,
         )
     except StageAttemptFailure:
@@ -304,6 +395,7 @@ def generate_narrative_stage(
         else request.prior_titles
     )
     recorder = _AttemptRecordingClient(request.client)
+    semantic_feedback, length_feedback = _split_retry(retry)
     try:
         narrative, result = generate._call_narrative(
             request.seed,
@@ -312,16 +404,17 @@ def generate_narrative_stage(
             request.use_case,
             actor_profile=actor,
             preferred_entry_point=request.preferred_entry_point,
-            excluded_entry_points=list(request.excluded_entry_points) or None,
-            excluded_patterns=list(request.excluded_patterns) or None,
-            excluded_structural_patterns=(
-                list(request.excluded_structural_patterns) or None
+            excluded_entry_points=_optional_list(request.excluded_entry_points),
+            excluded_patterns=_optional_list(request.excluded_patterns),
+            excluded_structural_patterns=_optional_list(
+                request.excluded_structural_patterns
             ),
             pinned_entry_point=request.pinned_entry_point,
-            pinned_technique_ids=list(request.pinned_technique_ids) or None,
-            prior_titles=list(titles) or None,
+            pinned_technique_ids=_optional_list(request.pinned_technique_ids),
+            prior_titles=_optional_list(titles),
             pinned_entry_point_id=request.pinned_entry_point_id,
-            realization_feedback=retry.feedback if retry else None,
+            realization_feedback=semantic_feedback,
+            completion_length_feedback=length_feedback,
             projection_context=prepared.projection_context,
         )
     except StageAttemptFailure:
@@ -344,6 +437,7 @@ def generate_tree_stage(
 
     request = prepared.request
     recorder = _AttemptRecordingClient(request.client)
+    semantic_feedback, length_feedback = _split_retry(retry)
     try:
         tree, result = generate._call_attack_tree_once(
             request.seed,
@@ -352,9 +446,10 @@ def generate_tree_stage(
             request.use_case,
             profile=request.profile,
             actor_profile=actor,
-            pinned_technique_ids=list(request.pinned_technique_ids) or None,
-            pinned_technique_names=list(request.pinned_technique_names) or None,
-            consistency_feedback=retry.feedback if retry else None,
+            pinned_technique_ids=_optional_list(request.pinned_technique_ids),
+            pinned_technique_names=_optional_list(request.pinned_technique_names),
+            consistency_feedback=semantic_feedback,
+            completion_length_feedback=length_feedback,
             pinned_entry_point_id=request.pinned_entry_point_id,
             projection_context=prepared.projection_context,
         )
@@ -373,12 +468,16 @@ def generate_behavior_stage(
     tree: AttackTree,
     retry: RetryDirective | None = None,
 ) -> BehaviorStageResult:
-    """Perform exactly one structured behavior-spec LLM call."""
-    del retry  # Call 3 has no feedback contract yet (phases 3--6).
+    """Perform exactly one structured behavior-spec LLM call.
+
+    Only the completion-length retry channel is supported; semantic
+    feedback for Call 3 is still out of contract (phases 3--6).
+    """
     import asago_scenario_generator.pipeline.generate as generate
 
     request = prepared.request
     recorder = _AttemptRecordingClient(request.client)
+    _, length_feedback = _split_retry(retry)
     try:
         behavior, result = generate._call_behavior_spec(
             request.seed,
@@ -388,7 +487,8 @@ def generate_behavior_stage(
             recorder,
             request.use_case,
             prepared.scenario_id,
-            pinned_technique_ids=list(request.pinned_technique_ids) or None,
+            pinned_technique_ids=_optional_list(request.pinned_technique_ids),
+            completion_length_feedback=length_feedback,
             projection_context=prepared.projection_context,
         )
     except StageAttemptFailure:
@@ -431,7 +531,7 @@ def assemble_final_envelope(
         use_case=request.use_case,
         notes=list(notes),
         actor_profile=actor,
-        pinned_technique_ids=list(request.pinned_technique_ids) or None,
+        pinned_technique_ids=_optional_list(request.pinned_technique_ids),
         pinned_entry_point=request.pinned_entry_point,
         pinned_entry_point_id=request.pinned_entry_point_id,
         run_id=request.run_id,

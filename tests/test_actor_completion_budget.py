@@ -75,61 +75,75 @@ def test_actor_profile_call_does_not_supply_a_fallback_limit(monkeypatch) -> Non
     assert client.complete.call_args.kwargs["max_completion_tokens"] is None
 
 
-def test_actor_profile_length_failure_gets_one_concise_retry(monkeypatch) -> None:
-    """A length failure is retried once with feedback and the same limit."""
+def test_actor_profile_length_failure_is_typed_and_never_retried(monkeypatch) -> None:
+    """One invocation performs exactly one completion; length is typed data.
 
-    class LengthFinishReasonError(Exception):
-        pass
+    The stage helper no longer owns the corrective retry — the shared
+    adapter raises typed CompletionLengthError evidence and the lifecycle
+    decides.  A second completion in the same invocation can never happen.
+    """
+    from asago_scenario_generator.llm.client import CompletionLengthError
 
-    monkeypatch.setattr(actor, "LengthFinishReasonError", LengthFinishReasonError)
     _stub_actor_context(monkeypatch)
     client = MagicMock(max_completion_tokens=16384)
-    client.complete.side_effect = [
-        LengthFinishReasonError("completion truncated"),
-        _successful_actor_result(),
-    ]
-
-    actor._call_actor_profile(
-        seed=MagicMock(min_complexity=None),
-        profile=MagicMock(zones_active=[]),
-        client=client,
-        use_case="test",
+    client.complete.side_effect = CompletionLengthError(
+        prompt_tokens=31, completion_tokens=16
     )
 
-    assert client.complete.call_count == 2
-    first, retry = [call.kwargs for call in client.complete.call_args_list]
-    assert first["max_completion_tokens"] == 16384
-    assert retry["max_completion_tokens"] == 16384
-    assert retry["user_prompt"].endswith(
-        "The prior response was truncated. Return only a concise "
-        "schema-matching response with no explanation."
-    )
-
-
-def test_actor_profile_length_retry_is_bounded(monkeypatch) -> None:
-    """A second length failure is surfaced without a third completion."""
-
-    class LengthFinishReasonError(Exception):
-        pass
-
-    monkeypatch.setattr(actor, "LengthFinishReasonError", LengthFinishReasonError)
-    _stub_actor_context(monkeypatch)
-    client = MagicMock(max_completion_tokens=16384)
-    client.complete.side_effect = [
-        LengthFinishReasonError("first truncation"),
-        LengthFinishReasonError("second truncation"),
-    ]
-
-    with pytest.raises(LengthFinishReasonError, match="second truncation"):
+    with pytest.raises(CompletionLengthError) as excinfo:
         actor._call_actor_profile(
-            seed=MagicMock(),
+            seed=MagicMock(min_complexity=None),
             profile=MagicMock(zones_active=[]),
             client=client,
             use_case="test",
         )
 
-    assert client.complete.call_count == 2
-    assert all(
-        call.kwargs["max_completion_tokens"] == 16384
-        for call in client.complete.call_args_list
+    assert client.complete.call_count == 1
+    request = client.complete.call_args.kwargs
+    assert request["max_completion_tokens"] == 16384
+    assert request["response_format"] is actor.Call0Response
+    assert excinfo.value.prompt_tokens == 31
+    assert excinfo.value.completion_tokens == 16
+    assert excinfo.value.finish_reason == "length"
+
+
+def test_actor_profile_lifecycle_retry_reuses_limit_with_suffix(monkeypatch) -> None:
+    """A lifecycle re-invocation retries once with the same limit and suffix.
+
+    The retry is an explicit second stage invocation (the finalization
+    lifecycle's single completion-length retry), not a hidden helper loop:
+    each invocation still performs exactly one completion.
+    """
+    _stub_actor_context(monkeypatch)
+    client = MagicMock(max_completion_tokens=16384)
+    client.complete.side_effect = [
+        _successful_actor_result(),
+        _successful_actor_result(),
+    ]
+
+    first = actor._call_actor_profile(
+        seed=MagicMock(min_complexity=None),
+        profile=MagicMock(zones_active=[]),
+        client=client,
+        use_case="test",
     )
+    suffix = (
+        "Return only a schema-matching object with bounded lists and "
+        "concise prose."
+    )
+    actor._call_actor_profile(
+        seed=MagicMock(min_complexity=None),
+        profile=MagicMock(zones_active=[]),
+        client=client,
+        use_case="test",
+        completion_length_feedback=suffix,
+    )
+
+    assert client.complete.call_count == 2
+    first_request, retry_request = [
+        call.kwargs for call in client.complete.call_args_list
+    ]
+    assert first_request["user_prompt"] != retry_request["user_prompt"]
+    assert retry_request["user_prompt"] == first_request["user_prompt"] + suffix
+    assert retry_request["max_completion_tokens"] == 16384
+    assert first[1].content is not None

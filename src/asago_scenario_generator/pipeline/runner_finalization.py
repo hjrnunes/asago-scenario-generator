@@ -29,6 +29,7 @@ from asago_scenario_generator.pipeline.coverage_planning import (
     revalidate_qualified_candidate,
 )
 from asago_scenario_generator.pipeline.finalization import (
+    COMPLETION_LENGTH_RETRY_SUFFIXES,
     MAX_OWNER_RETRIES,
     AdmissionDecision,
     CandidateTerminalResult,
@@ -41,6 +42,7 @@ from asago_scenario_generator.pipeline.finalization import (
     LifecycleViolation,
     TargetFinalizationMachine,
     make_assertions_only_behavior_callback,
+    retry_directive_for,
 )
 from asago_scenario_generator.pipeline.finalization_admission import (
     make_postbehavior_admission,
@@ -50,7 +52,7 @@ from asago_scenario_generator.pipeline.finalization_gates import (
 )
 from asago_scenario_generator.pipeline.generate.stages import (
     GenerationRequest,
-    RetryDirective,
+    StageAttemptFailure,
     StageCallEvidence,
     assemble_final_envelope,
     generate_actor_stage,
@@ -188,6 +190,32 @@ def build_v3_inventory(
     return entries
 
 
+def resume_completion_length_counts(
+    candidate_stages: Sequence[Any],
+) -> dict[GeneratedStage, int]:
+    """Derive authorized completion-length retries from durable stage records.
+
+    A durable ``completion_length`` violation on the latest stage record
+    means the one length retry was already authorized: the resumed
+    invocation re-runs with the approved suffix, and a further length
+    failure is terminal.  Any other latest record leaves the count at zero.
+    """
+    latest = candidate_stages[-1] if candidate_stages else None
+    return {
+        stage: 1
+        if (
+            latest is not None
+            and latest.stage is stage
+            and any(
+                violation.code == StageAttemptFailure.COMPLETION_LENGTH_CODE
+                for violation in latest.violations
+            )
+        )
+        else 0
+        for stage in GeneratedStage
+    }
+
+
 def run_target_finalization(
     *,
     run_dir: Any,
@@ -302,6 +330,7 @@ def run_target_finalization(
                 }
                 latest: dict[GeneratedStage, Any] = {}
                 durable_feedback: dict[GeneratedStage, str] = {}
+                durable_reasons: dict[GeneratedStage, str] = {}
                 durable_candidate = ref_by_id[
                     active_attempt.candidate_id
                 ].projected_candidate
@@ -362,14 +391,27 @@ def run_target_finalization(
                                 record.stage
                             ] = evidence
                     if record.violations:
-                        durable_feedback[record.stage] = (
-                            "; ".join(
-                                f"{item.code}: {item.detail}"
-                                for item in record.violations
-                                if item.owner is record.stage
-                            )
-                            or f"Retry {record.stage.value} to correct validation failure"
+                        has_length_violation = any(
+                            item.code == StageAttemptFailure.COMPLETION_LENGTH_CODE
+                            for item in record.violations
                         )
+                        if has_length_violation:
+                            # Completion-length retries re-invoke with the
+                            # approved suffix verbatim, never with rendered
+                            # exception text or semantic-channel feedback.
+                            durable_feedback[record.stage] = (
+                                COMPLETION_LENGTH_RETRY_SUFFIXES[record.stage]
+                            )
+                            durable_reasons[record.stage] = "completion_length"
+                        else:
+                            durable_feedback[record.stage] = (
+                                "; ".join(
+                                    f"{item.code}: {item.detail}"
+                                    for item in record.violations
+                                    if item.owner is record.stage
+                                )
+                                or f"Retry {record.stage.value} to correct validation failure"
+                            )
                 for stage, artifact in latest.items():
                     resume_artifacts.set(stage, artifact)
                 if candidate_stages and candidate_stages[-1].violations:
@@ -429,11 +471,7 @@ def run_target_finalization(
         def generated(stage: GeneratedStage):
             def callback(candidate: Any, invocation: Any) -> GeneratedStageResult:
                 prepared = prepared_by_id[candidate.candidate_id]  # noqa: B023
-                retry = (
-                    RetryDirective(feedback=invocation.retry_feedback)
-                    if invocation.owner_retry_index
-                    else None
-                )
+                retry = retry_directive_for(invocation)
                 if stage is GeneratedStage.actor:
                     result = generate_actor_stage(prepared, retry)
                 elif stage is GeneratedStage.narrative:
@@ -589,7 +627,13 @@ def run_target_finalization(
             }
             if active_attempt is not None
             else {},
+            resume_length_retry_counts=resume_completion_length_counts(candidate_stages)
+            if active_attempt is not None
+            else {},
             resume_retry_feedback=durable_feedback
+            if active_attempt is not None and resume_candidate_id is not None
+            else {},
+            resume_retry_reasons=durable_reasons
             if active_attempt is not None and resume_candidate_id is not None
             else {},
             transition_index_offset=(

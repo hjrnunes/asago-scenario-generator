@@ -23,11 +23,15 @@ from asago_scenario_generator.pipeline.coverage_planning import (
     deserialize_qualified_candidate,
     revalidate_qualified_candidate,
 )
-from asago_scenario_generator.pipeline.generate.stages import StageAttemptFailure
+from asago_scenario_generator.pipeline.generate.stages import (
+    RetryDirective,
+    StageAttemptFailure,
+)
 
 MAX_OWNER_RETRIES = 2
 MAX_TARGETED_RETRIES = MAX_OWNER_RETRIES  # Compatibility name.
 MAX_TARGET_CHOICES = 3
+MAX_COMPLETION_LENGTH_RETRIES = 1
 
 
 class GeneratedStage(str, Enum):
@@ -45,6 +49,22 @@ GENERATION_ORDER: tuple[GeneratedStage, ...] = (
     GeneratedStage.tree,
     GeneratedStage.behavior,
 )
+
+
+# Approved stage-specific completion-length retry suffixes.  The retry
+# user prompt is exactly the original prompt followed by this suffix.
+COMPLETION_LENGTH_RETRY_SUFFIXES: dict[GeneratedStage, str] = {
+    GeneratedStage.actor: (
+        "Return only a schema-matching object with bounded lists and concise prose."
+    ),
+    GeneratedStage.narrative: (
+        "Return only a schema-matching object with bounded lists and concise prose."
+    ),
+    GeneratedStage.tree: "Return only a complete schema-matching YAML document.",
+    GeneratedStage.behavior: (
+        "Return only the complete required Gherkin/assertion payload."
+    ),
+}
 
 
 class LifecycleState(str, Enum):
@@ -197,6 +217,7 @@ class StageInvocation:
     final_tree_digest: str | None = None
     candidate_snapshot: Any | None = None
     retry_feedback: str | None = None
+    retry_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -335,14 +356,18 @@ class TargetFinalizationMachine:
     artifacts: GeneratedArtifacts = field(default_factory=GeneratedArtifacts)
     invocation_counts: dict[GeneratedStage, int] = field(default_factory=dict)
     owner_retry_counts: dict[GeneratedStage, int] = field(default_factory=dict)
+    length_retry_counts: dict[GeneratedStage, int] = field(default_factory=dict)
     retry_feedback: dict[GeneratedStage, str] = field(default_factory=dict)
+    retry_reasons: dict[GeneratedStage, str] = field(default_factory=dict)
     transition_index_offset: int = 0
     resume_candidate_id: str | None = None
     resume_next_stage: GeneratedStage | None = None
     resume_artifacts: GeneratedArtifacts | None = None
     resume_invocation_counts: dict[GeneratedStage, int] = field(default_factory=dict)
     resume_owner_retry_counts: dict[GeneratedStage, int] = field(default_factory=dict)
+    resume_length_retry_counts: dict[GeneratedStage, int] = field(default_factory=dict)
     resume_retry_feedback: dict[GeneratedStage, str] = field(default_factory=dict)
+    resume_retry_reasons: dict[GeneratedStage, str] = field(default_factory=dict)
     transitions: list[LifecycleTransition] = field(default_factory=list)
     violations: list[LifecycleViolation] = field(default_factory=list)
 
@@ -390,54 +415,62 @@ class TargetFinalizationMachine:
             ),
             candidate_snapshot=candidate,
             retry_feedback=self.retry_feedback.get(stage),
+            retry_reason=self.retry_reasons.get(stage),
         )
         try:
             result = self.stage_callbacks[stage](candidate, invocation)
         except StageAttemptFailure as exc:
+            # Every stage helper now performs exactly one provider request
+            # per invocation.  All stage attempt failures are retryable;
+            # finalization routes completion-length failures through their
+            # own one-shot retry channel and everything else through the
+            # semantic owner-retry budget.
             result = GeneratedStageResult(
                 artifact=None,
                 evidence=exc,
                 violations=(
                     LifecycleViolation(
                         owner=stage,
-                        code="stage_attempt_failed",
+                        code=exc.code,
                         detail=f"{exc.exception_type}: {exc.detail}",
-                        # Actor completion failures already apply their one
-                        # allowed length retry inside Call 0. Re-entering the
-                        # actor stage would multiply that bounded retry and
-                        # would also retry unrelated invocation failures.
-                        retryable=stage is not GeneratedStage.actor,
+                        retryable=True,
                     ),
                 ),
             )
         except Exception as exc:  # noqa: BLE001 - callback failure is lifecycle data
-            call_name = {
-                GeneratedStage.actor: CallName.actor_profile,
-                GeneratedStage.narrative: CallName.narrative,
-                GeneratedStage.tree: CallName.attack_tree,
-                GeneratedStage.behavior: CallName.behavior_spec,
-            }[stage]
-            failure = StageAttemptFailure(
-                call_name=call_name,
-                exception=exc,
-                phase="before_invocation",
-                invoked=False,
-            )
-            result = GeneratedStageResult(
-                artifact=None,
-                evidence=failure,
-                violations=(
-                    LifecycleViolation(
-                        owner=stage,
-                        code="stage_exception",
-                        detail=f"{failure.exception_type}: {failure.detail}",
-                    ),
-                ),
-            )
+            result = self._unexpected_stage_failure(stage, exc)
         self.persistence.record_stage_result(invocation, result)
         if not result.violations:
             self.artifacts.set(stage, result.artifact)
         return result.violations
+
+    def _unexpected_stage_failure(
+        self, stage: GeneratedStage, exc: Exception
+    ) -> GeneratedStageResult:
+        """Convert an unexpected callback exception into lifecycle evidence."""
+        call_name = {
+            GeneratedStage.actor: CallName.actor_profile,
+            GeneratedStage.narrative: CallName.narrative,
+            GeneratedStage.tree: CallName.attack_tree,
+            GeneratedStage.behavior: CallName.behavior_spec,
+        }[stage]
+        failure = StageAttemptFailure(
+            call_name=call_name,
+            exception=exc,
+            phase="before_invocation",
+            invoked=False,
+        )
+        return GeneratedStageResult(
+            artifact=None,
+            evidence=failure,
+            violations=(
+                LifecycleViolation(
+                    owner=stage,
+                    code="stage_exception",
+                    detail=f"{failure.exception_type}: {failure.detail}",
+                ),
+            ),
+        )
 
     def _route_violations(
         self, violations: Sequence[LifecycleViolation]
@@ -446,6 +479,23 @@ class TargetFinalizationMachine:
         owner = earliest_generated_owner(violations)
         if owner is None:
             return None
+        if any(
+            item.owner is owner
+            and item.code == StageAttemptFailure.COMPLETION_LENGTH_CODE
+            for item in violations
+        ):
+            return self._route_completion_length_retry(owner)
+        return self._route_semantic_retry(owner, violations)
+
+    def _route_semantic_retry(
+        self, owner: GeneratedStage, violations: Sequence[LifecycleViolation]
+    ) -> GeneratedStage | None:
+        """Route a non-length violation through the semantic owner-retry budget.
+
+        Returns the owner to re-invoke, or ``None`` when the semantic
+        owner-retry budget is exhausted (terminal for this candidate).
+        """
+        self.retry_reasons.pop(owner, None)
         used = self.owner_retry_counts.get(owner, 0)
         if used >= MAX_OWNER_RETRIES:
             return None
@@ -458,6 +508,24 @@ class TargetFinalizationMachine:
             )
             or f"Retry {owner.value} to correct validation failure"
         )
+        self.artifacts.invalidate_from(owner)
+        return owner
+
+    def _route_completion_length_retry(
+        self, owner: GeneratedStage
+    ) -> GeneratedStage | None:
+        """Authorize the one completion-length retry for ``owner``.
+
+        Returns the owner to re-invoke, or ``None`` when the one allowed
+        length retry is already spent: a second length failure is terminal
+        for this candidate and never consumes semantic owner-retry budget.
+        """
+        used = self.length_retry_counts.get(owner, 0)
+        if used >= MAX_COMPLETION_LENGTH_RETRIES:
+            return None
+        self.length_retry_counts[owner] = used + 1
+        self.retry_feedback[owner] = COMPLETION_LENGTH_RETRY_SUFFIXES[owner]
+        self.retry_reasons[owner] = StageAttemptFailure.COMPLETION_LENGTH_CODE
         self.artifacts.invalidate_from(owner)
         return owner
 
@@ -601,14 +669,19 @@ class TargetFinalizationMachine:
             resuming = ref_id == self.resume_candidate_id
             if ref_id in self.attempted_candidate_ids and not resuming:
                 continue
-            # Invocation and owner-retry indexes are candidate-local traces.
+            # Invocation, owner-retry, and length-retry counters are
+            # candidate-local traces.
             self.invocation_counts = (
                 dict(self.resume_invocation_counts) if resuming else {}
             )
             self.owner_retry_counts = (
                 dict(self.resume_owner_retry_counts) if resuming else {}
             )
+            self.length_retry_counts = (
+                dict(self.resume_length_retry_counts) if resuming else {}
+            )
             self.retry_feedback = dict(self.resume_retry_feedback) if resuming else {}
+            self.retry_reasons = dict(self.resume_retry_reasons) if resuming else {}
             if resuming:
                 self.artifacts = self.resume_artifacts or GeneratedArtifacts()
             else:
@@ -670,6 +743,8 @@ class TargetFinalizationMachine:
                     if not resuming:
                         self.artifacts = GeneratedArtifacts()
                         self.owner_retry_counts = {}
+                        self.length_retry_counts = {}
+                        self.retry_reasons = {}
                     try:
                         verified_candidate = _capture_verified_candidate(
                             validation.candidate
@@ -813,6 +888,21 @@ def fallback_candidates_for_target(
     return candidates
 
 
+def retry_directive_for(invocation: StageInvocation) -> RetryDirective | None:
+    """Rebuild the typed retry directive for one explicit re-invocation.
+
+    Returns ``None`` for a first attempt; a ``RetryDirective`` carrying the
+    feedback and (for completion-length retries) the ``completion_length``
+    reason otherwise.
+    """
+    if not (invocation.owner_retry_index or invocation.retry_reason):
+        return None
+    return RetryDirective(
+        feedback=invocation.retry_feedback,
+        reason=invocation.retry_reason,
+    )
+
+
 class AssertionsOnlyBehaviorPort:
     """Unwired adapter from finalization callbacks to one Call 3 attempt."""
 
@@ -838,6 +928,7 @@ class AssertionsOnlyBehaviorPort:
             self.prepared,
             invocation.artifacts.narrative,
             invocation.artifacts.tree,
+            retry_directive_for(invocation),
         )
         return GeneratedStageResult(result.artifact, result.evidence)
 

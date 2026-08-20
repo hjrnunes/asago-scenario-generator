@@ -7,11 +7,14 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from openai import LengthFinishReasonError
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from asago_scenario_generator.data.atlas import TECHNIQUE_PROPERTIES
-from asago_scenario_generator.llm.client import LLMClient, LLMResult
+from asago_scenario_generator.llm.client import (
+    LengthFinishReasonError as LengthFinishReasonError,
+    LLMClient,
+    LLMResult,
+)
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     is_attacker_accessible_ingress,
@@ -46,32 +49,55 @@ from asago_scenario_generator.prompts import render_prompt
 
 logger = logging.getLogger(__name__)
 
-_ACTOR_LENGTH_RETRY_PROMPT = (
-    "\n\nThe prior response was truncated. Return only a concise "
-    "schema-matching response with no explanation."
-)
-
-
 # ---------------------------------------------------------------------------
 # Intermediate model for structured output
 # ---------------------------------------------------------------------------
+
+# Conservative static bounds for every generated Call 0 field.  The schema
+# is sent to the provider (response_format), so finite maxima keep
+# completion-length risk bounded without reducing the operator-configured
+# completion limit.
+_CALL0_LIST_MAX_ITEMS = 8
+_CALL0_ITEM_MAX_LENGTH = 200
+_CALL0_ENUM_MAX_LENGTH = 64
+_CALL0_EVIDENCE_MAX_LENGTH = 300
 
 
 class Call0Response(BaseModel):
     """LLM response model for Call 0: Actor Profile."""
 
-    actor_type: str
-    capability_level: str
-    beliefs: list[str]
-    desires: list[str]
-    intentions: list[str]
-    resources: list[str]
+    actor_type: str = Field(max_length=_CALL0_ENUM_MAX_LENGTH)
+    capability_level: str = Field(max_length=_CALL0_ENUM_MAX_LENGTH)
+    beliefs: list[str] = Field(
+        max_length=_CALL0_LIST_MAX_ITEMS,
+        description="Attacker beliefs; bounded list of concise strings.",
+    )
+    desires: list[str] = Field(
+        max_length=_CALL0_LIST_MAX_ITEMS,
+        description="Attacker desires; bounded list of concise strings.",
+    )
+    intentions: list[str] = Field(
+        max_length=_CALL0_LIST_MAX_ITEMS,
+        description="Attacker intentions; bounded list of concise strings.",
+    )
+    resources: list[str] = Field(
+        max_length=_CALL0_LIST_MAX_ITEMS,
+        description="Attacker resources; bounded list of concise strings.",
+    )
     # cmps.6 access provenance evidence (LLM-generated, validated post-hoc)
-    access_class: str | None = None
-    influence_source: str | None = None
-    influence_mechanism: str | None = None
-    trust_boundary_id: str | None = None
-    material_insider_advantage: str | None = None
+    access_class: str | None = Field(default=None, max_length=_CALL0_ENUM_MAX_LENGTH)
+    influence_source: str | None = Field(
+        default=None, max_length=_CALL0_EVIDENCE_MAX_LENGTH
+    )
+    influence_mechanism: str | None = Field(
+        default=None, max_length=_CALL0_EVIDENCE_MAX_LENGTH
+    )
+    trust_boundary_id: str | None = Field(
+        default=None, max_length=_CALL0_EVIDENCE_MAX_LENGTH
+    )
+    material_insider_advantage: str | None = Field(
+        default=None, max_length=_CALL0_EVIDENCE_MAX_LENGTH
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1070,18 +1096,18 @@ def build_call0_context(
 def _complete_actor_profile(
     client: LLMClient, system_prompt: str, user_prompt: str
 ) -> LLMResult:
-    """Complete Call 0, retrying one truncated response with concise feedback."""
-    completion_request: dict[str, Any] = {
-        "system_prompt": system_prompt,
-        "user_prompt": user_prompt,
-        "response_format": Call0Response,
-        "max_completion_tokens": client.max_completion_tokens,
-    }
-    try:
-        return client.complete(**completion_request)
-    except LengthFinishReasonError:
-        completion_request["user_prompt"] += _ACTOR_LENGTH_RETRY_PROMPT
-        return client.complete(**completion_request)
+    """Complete Call 0 exactly once with the operator-configured limit.
+
+    Length exhaustion is normalized by the shared adapter into typed
+    ``CompletionLengthError`` evidence; this helper never retries.
+    Retry ownership belongs to the finalization lifecycle.
+    """
+    return client.complete(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        response_format=Call0Response,
+        max_completion_tokens=client.max_completion_tokens,
+    )
 
 
 def _call_actor_profile(
@@ -1098,12 +1124,17 @@ def _call_actor_profile(
     pinned_entry_point: str | None = None,
     pinned_entry_point_id: str | None = None,
     access_feedback: str | None = None,
+    completion_length_feedback: str | None = None,
     projection_context: dict[str, Any] | None = None,
 ) -> tuple[ActorProfile, LLMResult, str | None]:
     """Generate a threat actor profile for a scenario seed (Call 0).
 
     Delegates context building to :func:`build_call0_context`, then renders
     templates, calls the LLM, and parses the response.
+
+    ``completion_length_feedback`` (the finalization-owned length-retry
+    suffix) is appended verbatim to the end of the rendered user prompt,
+    after every semantic section.
 
     Returns:
         Tuple of (ActorProfile, LLMResult).
@@ -1130,6 +1161,8 @@ def _call_actor_profile(
         tool_inventory=ctx["tool_inventory"],
     )
     user_prompt = render_prompt("call0_user.j2", **ctx)
+    if completion_length_feedback:
+        user_prompt = f"{user_prompt}{completion_length_feedback}"
     result = _complete_actor_profile(client, system_prompt, user_prompt)
 
     resp = result.content

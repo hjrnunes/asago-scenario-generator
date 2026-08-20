@@ -10,7 +10,9 @@ from asago_scenario_generator.models.scenario import CallName
 from asago_scenario_generator.pipeline.coverage_planning import CoveragePlanEntry
 from asago_scenario_generator.pipeline.generate.stages import StageAttemptFailure
 from asago_scenario_generator.pipeline.finalization import (
+    COMPLETION_LENGTH_RETRY_SUFFIXES,
     GENERATION_ORDER,
+    MAX_COMPLETION_LENGTH_RETRIES,
     MAX_OWNER_RETRIES,
     AdmissionDecision,
     CandidateTerminalStatus,
@@ -20,6 +22,7 @@ from asago_scenario_generator.pipeline.finalization import (
     LifecycleState,
     LifecycleViolation,
     PrebehaviorFinalizationResult,
+    StageInvocation,
     TargetFinalizationMachine,
     earliest_generated_owner,
     ordered_target_choice_refs,
@@ -445,8 +448,12 @@ def test_stage_attempt_failure_evidence_is_persisted_on_every_failed_invocation(
     )
 
 
-def test_actor_attempt_failure_is_not_retried_by_finalization() -> None:
-    """Call 0 owns its bounded length retry; the lifecycle must not repeat it."""
+def test_actor_attempt_failure_consumes_the_semantic_owner_budget() -> None:
+    """Actor stage attempts are exactly one request and retried by the lifecycle.
+
+    The hidden in-helper length retry is gone: every generated stage,
+    including actor, participates in the semantic owner-retry budget.
+    """
     failure = StageAttemptFailure(
         call_name=CallName.actor_profile,
         exception=RuntimeError("actor endpoint failed"),
@@ -464,13 +471,137 @@ def test_actor_attempt_failure_is_not_retried_by_finalization() -> None:
     machine, _, persistence = _machine(
         callbacks={stage_name: stage for stage_name in GENERATION_ORDER}
     )
-    machine.run()
+    result = machine.run()
 
+    assert result.state is LifecycleState.exhausted
     failed_results = [
         result
         for invocation, result in persistence.stage_results
         if invocation.stage is GeneratedStage.actor
     ]
-    assert len(failed_results) == 1
-    assert failed_results[0].evidence is failure
-    assert failed_results[0].violations[0].retryable is False
+    assert len(failed_results) == MAX_OWNER_RETRIES + 1
+    assert all(result.evidence is failure for result in failed_results)
+    assert all(result.violations[0].retryable is True for result in failed_results)
+    assert all(
+        result.violations[0].code == "stage_attempt_failed" for result in failed_results
+    )
+    assert machine.owner_retry_counts == {GeneratedStage.actor: MAX_OWNER_RETRIES}
+
+
+def _completion_length_failure() -> StageAttemptFailure:
+    return StageAttemptFailure(
+        call_name=CallName.actor_profile,
+        exception=RuntimeError("completion truncated"),
+        phase="invocation",
+        invoked=True,
+        code=StageAttemptFailure.COMPLETION_LENGTH_CODE,
+        finish_reason="length",
+        prompt_tokens=30,
+        completion_tokens=15,
+    )
+
+
+def test_second_completion_length_failure_is_terminal_without_semantic_budget() -> None:
+    """One length retry per stage; a second length failure ends the candidate.
+
+    The retried invocation carries the approved suffix and the
+    ``completion_length`` reason, and the semantic owner-retry budget is
+    never consumed.
+    """
+    failure = _completion_length_failure()
+
+    def stage(candidate, invocation):
+        raise failure
+
+    machine, _, persistence = _machine(
+        callbacks={stage_name: stage for stage_name in GENERATION_ORDER}
+    )
+    result = machine.run()
+
+    assert result.state is LifecycleState.exhausted
+    terminal = persistence.candidate_results[0][1]
+    assert terminal.status is CandidateTerminalStatus.generation_or_finalization_failed
+    actor_results = [
+        (invocation, outcome)
+        for invocation, outcome in persistence.stage_results
+        if invocation.stage is GeneratedStage.actor
+    ]
+    assert len(actor_results) == MAX_COMPLETION_LENGTH_RETRIES + 1
+    retry_invocation = actor_results[1][0]
+    assert retry_invocation.retry_reason == "completion_length"
+    assert (
+        retry_invocation.retry_feedback
+        == COMPLETION_LENGTH_RETRY_SUFFIXES[GeneratedStage.actor]
+    )
+    assert machine.length_retry_counts == {GeneratedStage.actor: 1}
+    assert machine.owner_retry_counts == {}
+
+
+def test_completion_length_retry_then_success_admits_without_semantic_budget() -> None:
+    """A successful length retry admits; the length retry is not an owner retry."""
+    failure = _completion_length_failure()
+    attempts = 0
+
+    def stage(candidate, invocation):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise failure
+        return GeneratedStageResult(invocation.stage.value)
+
+    machine, _, persistence = _machine(
+        callbacks={stage_name: stage for stage_name in GENERATION_ORDER}
+    )
+    result = machine.run()
+
+    assert result.state is LifecycleState.admitted
+    actor_invocations = [
+        invocation
+        for invocation, _ in persistence.stage_results
+        if invocation.stage is GeneratedStage.actor
+    ]
+    assert [item.invocation_index for item in actor_invocations] == [0, 1]
+    assert [item.owner_retry_index for item in actor_invocations] == [0, 0]
+    assert actor_invocations[1].retry_reason == "completion_length"
+    assert machine.length_retry_counts == {GeneratedStage.actor: 1}
+    assert machine.owner_retry_counts == {}
+
+
+def test_semantic_failure_after_length_retry_clears_the_length_reason() -> None:
+    """Semantic routing drops a stale length reason before re-invoking."""
+    failure = _completion_length_failure()
+    invocations: list[StageInvocation] = []
+    admission_calls = 0
+
+    def stage(candidate, invocation):
+        invocations.append(invocation)
+        if len(invocations) == 1:
+            raise failure
+        return GeneratedStageResult(invocation.stage.value)
+
+    def admit(candidate, artifacts, snapshot):
+        nonlocal admission_calls
+        admission_calls += 1
+        if admission_calls == 1:
+            return AdmissionDecision(
+                False, (LifecycleViolation("semantic", owner=GeneratedStage.actor),)
+            )
+        return AdmissionDecision(True)
+
+    machine, _, _ = _machine(
+        callbacks={stage_name: stage for stage_name in GENERATION_ORDER},
+        admit=admit,
+    )
+    result = machine.run()
+
+    assert result.state is LifecycleState.admitted
+    actor_invocations = [
+        item for item in invocations if item.stage is GeneratedStage.actor
+    ]
+    assert [item.retry_reason for item in actor_invocations] == [
+        None,
+        "completion_length",
+        None,
+    ]
+    assert machine.length_retry_counts == {GeneratedStage.actor: 1}
+    assert machine.owner_retry_counts == {GeneratedStage.actor: 1}
