@@ -4252,6 +4252,485 @@ def _h_provenance_serialized_status(
     return status == match.group(1), "serialized qualification status did not match"
 
 
+# ---------------------------------------------------------------------------#
+# Generate-path provenance attachment (TSIP scenarios 10-12)
+# ---------------------------------------------------------------------------#
+
+
+def _tsip_generate_state(world: World) -> dict[str, Any]:
+    """Return the scenario-local generate-path provenance state."""
+    state = getattr(world, "tsip_generate_state", None)
+    if state is None:
+        state = {
+            "seed": None,
+            "profile": None,
+            "candidate": None,
+            "snapshot": None,
+            "envelope": None,
+        }
+        world.tsip_generate_state = state
+    return state
+
+
+def _tsip_builder_seed(seed_id: str, threat_id: str, agentic: list[str]) -> Any:
+    """Build the scripted ScenarioSeed for a deterministic generate run."""
+    from asago_scenario_generator.pipeline.seeds import ScenarioSeed
+    from asago_scenario_generator.models.scenario import RiskCardRef
+
+    return ScenarioSeed(
+        seed_id=seed_id,
+        threat_id=threat_id,
+        threat_name="Scripted threat",
+        threat_description="Scripted threat description",
+        attack_pattern_name="Scripted pattern",
+        attack_pattern_description="Scripted pattern description",
+        risk_card_ref=RiskCardRef(
+            risk_id="risk-tsip",
+            risk_name="Risk TSIP",
+            risk_description="Description",
+            taxonomy="ibm-risk-atlas",
+            confidence=0.9,
+            grounding_confidence="high",
+        ),
+        owasp_llm_ids=["LLM01"],
+        agentic_threat_ids=agentic,
+        atlas_technique_ids=["AML.T0054"],
+    )
+
+
+def _tsip_profile(kc_subcodes: list[str]) -> Any:
+    """Build the scripted KCX capability profile with full resources."""
+    from asago_scenario_generator.models.capability_profile import CapabilityProfile
+
+    return CapabilityProfile(
+        zones_active=["input", "reasoning", "tool_execution"],
+        entry_points=[
+            {"name": "chat", "direction": "input", "controllability": "direct"},
+            {
+                "name": "RAG documents",
+                "direction": "input",
+                "controllability": "indirect",
+            },
+        ],
+        confidence="high",
+        kc_subcodes=kc_subcodes,
+        tool_inventory=[{"name": "writer", "description": "changes state"}],
+        tool_types=[
+            {
+                "name": "writer",
+                "zone": "tool_execution",
+                "can_modify_state": True,
+                "data_sensitivity": "medium",
+                "code_execution": False,
+            }
+        ],
+        external_integrations=[
+            {
+                "name": "CRM",
+                "integration_type": "api",
+                "auth_method": "oauth",
+                "data_sensitivity": "high",
+            }
+        ],
+        trust_boundaries=[
+            {
+                "name": "user-to-agent",
+                "from_zone": "input",
+                "to_zone": "reasoning",
+                "confidence": "explicit",
+            }
+        ],
+    )
+
+
+def _tsip_projected_candidate(profile: Any) -> tuple[Any, Any]:
+    """Project a feasible candidate bound to the scripted snapshot."""
+    from asago_scenario_generator.models.attack_pattern import (
+        AttackPattern,
+        AuthoritativeFactReference,
+        EvaluatedFactEvidence,
+    )
+    from asago_scenario_generator.pipeline.projection import (
+        ProjectionBudget,
+        capture_capability_snapshot,
+        project_authoritative_candidates,
+    )
+    from tests.helpers.projection_factory import (
+        get_test_raw_pattern,
+        get_test_resolver,
+    )
+
+    raw = get_test_raw_pattern()
+    AttackPattern.model_validate(raw)
+    resolver = get_test_resolver()
+    evidence = EvaluatedFactEvidence(
+        fact=AuthoritativeFactReference.model_validate(
+            {
+                "namespace": "profile",
+                "fact_id": "mode",
+                "value_type": "string",
+                "property_path": [],
+            }
+        ),
+        status="present",
+        value="active",
+    )
+    snapshot = capture_capability_snapshot(profile, (evidence,))
+    batch = project_authoritative_candidates(
+        [raw],
+        resolver,
+        snapshot,
+        budget=ProjectionBudget(max_candidates=100),
+    )
+    assert len(batch.candidates) >= 1, "scripted projection emitted no candidates"
+    return batch.candidates[0], snapshot
+
+
+def _tsip_tree(ingress_id: str) -> Any:
+    """Build the three-leaf fixture attack tree for the scripted run."""
+    from asago_scenario_generator.models.attack_tree import (
+        AiSystemAction,
+        AttackTree,
+        AttackTreeNode,
+        GateType,
+        ImpactAction,
+        InitialIngressAction,
+    )
+    from tests.helpers.projection_factory import make_step_realizations
+
+    return AttackTree(
+        id="tree-AP-T1-01",
+        seed_id="AP-T1-01",
+        goal="Achieve attack objective",
+        root=AttackTreeNode(
+            id="n1",
+            label="Attack goal",
+            gate=GateType.AND,
+            children=[
+                AttackTreeNode(
+                    id="n1.1",
+                    label="Initial ingress",
+                    gate=GateType.LEAF,
+                    zone="input",
+                    action=InitialIngressAction(entry_point_id=ingress_id),
+                    projected_step_ids=("step.1",),
+                    realizations=make_step_realizations(("step.1",)),
+                ),
+                AttackTreeNode(
+                    id="n1.2",
+                    label="System action",
+                    gate=GateType.LEAF,
+                    zone="reasoning",
+                    action=AiSystemAction(),
+                    projected_step_ids=("step.2",),
+                    realizations=make_step_realizations(("step.2",)),
+                ),
+                AttackTreeNode(
+                    id="n1.3",
+                    label="Impact",
+                    gate=GateType.LEAF,
+                    zone="reasoning",
+                    action=ImpactAction(boundary="internal", target="data integrity"),
+                    projected_step_ids=("step.3",),
+                    realizations=make_step_realizations(("step.3",)),
+                ),
+            ],
+        ),
+    )
+
+
+def _tsip_narrative(ingress_id: str) -> Any:
+    """Build the three-step fixture narrative for the scripted run."""
+    from asago_scenario_generator.models.scenario import (
+        NarrativeAccessRealization,
+        NarrativeLayer,
+        NarrativeStep,
+    )
+    from tests.helpers.projection_factory import make_step_realizations
+
+    return NarrativeLayer(
+        title="Scripted scenario",
+        summary="Adversarial summary",
+        entry_point="chat",
+        zone_sequence=["input", "reasoning"],
+        steps=[
+            NarrativeStep(
+                step_number=1,
+                zone="input",
+                action="gain access",
+                effect="entry",
+                projected_step_ids=("step.1",),
+                realizations=make_step_realizations(("step.1",)),
+            ),
+            NarrativeStep(
+                step_number=2,
+                zone="reasoning",
+                action="exploit",
+                effect="control",
+                projected_step_ids=("step.2",),
+                realizations=make_step_realizations(("step.2",)),
+            ),
+            NarrativeStep(
+                step_number=3,
+                zone="reasoning",
+                action="impact",
+                effect="damage",
+                projected_step_ids=("step.3",),
+                realizations=make_step_realizations(("step.3",)),
+            ),
+        ],
+        access_realization=NarrativeAccessRealization(
+            initial_entry_point_id=ingress_id,
+            responsible_step_number=1,
+        ),
+    )
+
+
+def _tsip_actor(ingress_id: str) -> Any:
+    """Build the scripted actor profile for the deterministic run."""
+    from asago_scenario_generator.models.scenario import (
+        ActorAccessProvenance,
+        ActorProfile,
+    )
+
+    return ActorProfile(
+        actor_type="cybercriminal",
+        capability_level="intermediate",
+        beliefs=["target has chat interface"],
+        desires=["steal data"],
+        intentions=["prompt injection"],
+        resources=["open-source tools"],
+        access=ActorAccessProvenance(
+            initial_entry_point_id=ingress_id,
+            ingress_mode="direct",
+            access_class="public",
+        ),
+    )
+
+
+def _h_tsip_script_seed(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r'deterministic generate scripts seed "([^"]+)" with threat "([^"]+)" '
+        r'and agentic threats "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse scripted seed: {text}"
+    _tsip_generate_state(world)["seed"] = _tsip_builder_seed(
+        seed_id=match.group(1),
+        threat_id=match.group(2),
+        agentic=_csv(match.group(3)),
+    )
+    return True, ""
+
+
+def _h_tsip_script_constraints(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'the scripted capability profile declares capability constraints "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse scripted constraints: {text}"
+    state = _tsip_generate_state(world)
+    state["profile"] = _tsip_profile(_csv(match.group(1)))
+    state["candidate"], state["snapshot"] = _tsip_projected_candidate(state["profile"])
+    return True, ""
+
+
+def _h_tsip_script_returns(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    if not re.search(
+        r"deterministic generate returns a valid narrative, attack tree, and "
+        r"behavior spec",
+        text,
+    ):
+        return False, f"Could not parse scripted responses: {text}"
+    state = _tsip_generate_state(world)
+    if state["candidate"] is None:
+        return False, "scripted candidate was not projected"
+    ingress_id = state["candidate"].canonical_ingress.entry_point_id
+    state["ingress_id"] = ingress_id
+    state["fixtures"] = {
+        "tree": _tsip_tree(ingress_id),
+        "narrative": _tsip_narrative(ingress_id),
+        "actor": _tsip_actor(ingress_id),
+    }
+    return True, ""
+
+
+def _tsip_run_generate(world: World) -> tuple[bool, str]:
+    """Run the real generate path with scripted LLM responses."""
+    from contextlib import ExitStack
+    from unittest import mock
+
+    from asago_scenario_generator.llm.client import LLMResult
+    from asago_scenario_generator.pipeline.generate import generate_scenario
+    from tests.helpers.projection_factory import make_behavior_spec
+
+    state = _tsip_generate_state(world)
+    if state["seed"] is None or state["candidate"] is None:
+        return False, "scripted seed or candidate is missing"
+    fixtures = state.get("fixtures")
+    if fixtures is None:
+        return False, "scripted narrative, tree, and behavior spec are missing"
+    ingress_id = state["ingress_id"]
+
+    def _result():
+        return LLMResult(
+            content="ok", prompt_tokens=1, completion_tokens=1, duration_ms=1
+        )
+
+    with ExitStack() as stack:
+        stack.enter_context(
+            mock.patch(
+                "asago_scenario_generator.pipeline.generate._call_actor_profile",
+                return_value=(fixtures["actor"], _result(), None),
+            )
+        )
+        stack.enter_context(
+            mock.patch(
+                "asago_scenario_generator.pipeline.generate._call_narrative",
+                return_value=(fixtures["narrative"], _result()),
+            )
+        )
+        stack.enter_context(
+            mock.patch(
+                "asago_scenario_generator.pipeline.generate._call_attack_tree",
+                return_value=(fixtures["tree"], _result()),
+            )
+        )
+        stack.enter_context(
+            mock.patch(
+                "asago_scenario_generator.pipeline.generate._call_behavior_spec",
+                return_value=(make_behavior_spec(), _result()),
+            )
+        )
+        stack.enter_context(
+            mock.patch(
+                "asago_scenario_generator.pipeline.generate._validate_actor_type",
+                side_effect=lambda value: value,
+            )
+        )
+        stack.enter_context(
+            mock.patch(
+                "asago_scenario_generator.pipeline.generate.validate_actor_access_provenance",
+                return_value=[],
+            )
+        )
+        stack.enter_context(
+            mock.patch(
+                "asago_scenario_generator.pipeline.generate.narrative.validate_narrative_access_realization",
+                return_value=[],
+            )
+        )
+        stack.enter_context(
+            mock.patch(
+                "asago_scenario_generator.pipeline.generate.assembly._check_consistency",
+                return_value=[],
+            )
+        )
+        stack.enter_context(
+            mock.patch(
+                "asago_scenario_generator.pipeline.generate._warn_dominant_threat_id_crossref"
+            )
+        )
+        envelope, _ = generate_scenario(
+            seed=state["seed"],
+            profile=state["profile"],
+            client=SimpleNamespace(model="deterministic-fixture"),
+            use_case="deterministic generate provenance acceptance",
+            pinned_entry_point_id=ingress_id,
+            run_id="20260101T000000_0123456789abcdef0123456789abcdef",
+            candidate_id="",
+            projected_candidate=state["candidate"],
+            capability_snapshot=state["snapshot"],
+        )
+    state["envelope"] = envelope
+    from asago_scenario_generator.pipeline.source_influence import (
+        validate_source_influence_provenance,
+    )
+
+    provenance = _provenance_state(world)
+    provenance["block"] = envelope.source_influence_provenance
+    provenance["result"] = validate_source_influence_provenance(envelope)
+    provenance["serialized"] = None
+    return True, ""
+
+
+def _h_tsip_generate(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    if not re.search(r"^generate completes and admits the scenario envelope$", text):
+        return False, f"Could not parse generate step: {text}"
+    return _tsip_run_generate(world)
+
+
+def _h_tsip_generate_and_serialize(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    if not re.search(
+        r"^generate completes, admits the envelope, and serializes it$", text
+    ):
+        return False, f"Could not parse generate step: {text}"
+    ok, message = _tsip_run_generate(world)
+    if not ok:
+        return ok, message
+    envelope = _tsip_generate_state(world)["envelope"]
+    _provenance_state(world)["serialized"] = envelope.model_dump(
+        mode="json", exclude_none=True
+    )
+    return True, ""
+
+
+def _h_tsip_declares_source(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r"the admitted envelope declares (?:agentic )?"
+        r'(threat source|mitigation|capability constraint) "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse declared-source assertion: {text}"
+    sip, _ = _provenance_api()
+    type_by_name = {
+        "threat source": sip.SourceInfluenceSourceType.threat_source,
+        "mitigation": sip.SourceInfluenceSourceType.mitigation,
+        "capability constraint": sip.SourceInfluenceSourceType.capability_constraint,
+    }
+    block = _provenance_state(world)["block"]
+    if block is None:
+        return False, "no provenance block was attached by generate"
+    expected_type = type_by_name[match.group(1)]
+    return any(
+        ref.source_type is expected_type and ref.source_id == match.group(2)
+        for ref in block.declared_sources
+    ), f"declared sources lack {match.group(1)} {match.group(2)!r}"
+
+
+def _h_tsip_links_complete(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    if not re.search(r"every projected leaf and narrative step link is complete", text):
+        return False, f"Could not parse link-completeness assertion: {text}"
+    sip, _ = _provenance_api()
+    block = _provenance_state(world)["block"]
+    if block is None:
+        return False, "no provenance block was attached by generate"
+    declared = {(ref.source_type, ref.source_id) for ref in block.declared_sources}
+    referenced: set[tuple[Any, str]] = set()
+    for link in block.leaf_links + block.narrative_links:
+        types = {ref.source_type for ref in link.source_refs}
+        if types != set(sip.SourceInfluenceSourceType):
+            return False, f"link {link.artifact_id!r} omits a source type"
+        for ref in link.source_refs:
+            key = (ref.source_type, ref.source_id)
+            if key not in declared:
+                return False, f"link {link.artifact_id!r} resolves outside the universe"
+            referenced.add(key)
+    if referenced != declared:
+        orphaned = sorted(source_id for _, source_id in declared - referenced)
+        return False, f"declared sources never referenced: {orphaned}"
+    return True, ""
+
+
 def register(api: object) -> None:
     """Register taxonomy acceptance handlers with regex-based extraction."""
     api.set_feature(None)
@@ -5153,6 +5632,38 @@ def register(api: object) -> None:
         (
             r'the serialized qualification status is "([^"]+)"',
             _h_provenance_serialized_status,
+        ),
+        (
+            r'deterministic generate scripts seed "([^"]+)" with threat '
+            r'"([^"]+)" and agentic threats "([^"]+)"',
+            _h_tsip_script_seed,
+        ),
+        (
+            r"the scripted capability profile declares capability "
+            r'constraints "([^"]+)"',
+            _h_tsip_script_constraints,
+        ),
+        (
+            r"deterministic generate returns a valid narrative, attack tree, "
+            r"and behavior spec",
+            _h_tsip_script_returns,
+        ),
+        (
+            r"^generate completes and admits the scenario envelope$",
+            _h_tsip_generate,
+        ),
+        (
+            r"^generate completes, admits the envelope, and serializes it$",
+            _h_tsip_generate_and_serialize,
+        ),
+        (
+            r"^the admitted envelope declares (?:agentic )?"
+            r"(threat source|mitigation|capability constraint) \"([^\"]+)\"$",
+            _h_tsip_declares_source,
+        ),
+        (
+            r"^every projected leaf and narrative step link is complete$",
+            _h_tsip_links_complete,
         ),
     )
     for pattern, handler in registrations:

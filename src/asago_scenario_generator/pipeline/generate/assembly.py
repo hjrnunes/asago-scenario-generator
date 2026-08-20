@@ -60,6 +60,9 @@ from asago_scenario_generator.pipeline.generate.tree_validation import (
     _check_consistency,
 )
 from asago_scenario_generator.pipeline.generate.zones import active_narrative_zones
+from asago_scenario_generator.pipeline.source_influence_builder import (
+    assemble_source_influence_provenance,
+)
 from asago_scenario_generator.pipeline.projection import (
     CapabilityFactSnapshot,
     ProjectedCandidate,
@@ -824,6 +827,23 @@ def _assemble_envelope(
         capability_snapshot,
     )
 
+    # Source-influence provenance (Wave 2 slice 5, QA-TSIP contract):
+    # generate always attaches the typed provenance block.  When the
+    # caller supplies an explicit block it is preserved; otherwise the
+    # block is assembled deterministically from the seed's risk inputs
+    # (threat sources), the committed OWASP playbooks (mitigations), the
+    # capability profile's KC sub-codes (constraints), and the actual
+    # projected leaf/narrative artifacts.  The finalization gate then
+    # re-validates the persisted qualification fail-closed.
+    if source_influence_provenance is None:
+        source_influence_provenance = assemble_source_influence_provenance(
+            seed=seed,
+            capability_snapshot=capability_snapshot,
+            attack_tree=attack_tree,
+            narrative=narrative,
+            selected_step_ids=projected_candidate.projection.selected_step_ids,
+        )
+
     # Use the canonical ingress ID from the projection.
     effective_entry_point_id = projected_candidate.canonical_ingress.entry_point_id
 
@@ -1531,9 +1551,8 @@ def _generate_scenario_compatibility(
         )
 
     # Run source-influence provenance qualification (Wave 2 slice 5).
-    # Fail-closed: when the envelope declares a source-influence provenance
-    # block, its qualification must pass or the scenario is never returned.
-    # Envelopes without a block pass vacuously.
+    # Fail-closed: assembly always attaches the provenance block, and its
+    # qualification must pass or the scenario is never returned.
     from asago_scenario_generator.pipeline.source_influence import (
         validate_source_influence_provenance,
     )
@@ -1671,8 +1690,8 @@ def write_scenario_outputs(
         )
 
     # Source-influence provenance qualification (Wave 2 slice 5, fail-closed):
-    # an envelope that declares a source-influence provenance block must not
-    # be published while its qualification fails.
+    # generation publishes only envelopes whose provenance block qualifies;
+    # a stale, tampered, or incomplete block is never written to disk.
     from asago_scenario_generator.pipeline.source_influence import (
         validate_source_influence_provenance,
     )

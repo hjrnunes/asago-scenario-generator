@@ -35,6 +35,8 @@ from asago_scenario_generator.models.scenario import (
     ActorAccessProvenance,
     ActorProfile,
     ArchitectureMatch,
+    CallMetadata,
+    CallName,
     CapabilityProfileRef,
     FacetingMetadata,
     GenerationMetadata,
@@ -66,15 +68,26 @@ from asago_scenario_generator.models.source_influence_provenance import (
 )
 from asago_scenario_generator.pipeline.generate.assembly import (
     SourceInfluenceProvenanceError,
+    _assemble_envelope,
     write_scenario_outputs,
 )
+from asago_scenario_generator.pipeline.projection import (
+    capture_capability_snapshot,
+)
+from asago_scenario_generator.pipeline.seeds import ScenarioSeed
 from asago_scenario_generator.pipeline.source_influence import (
     EMPTY_METRICS,
     make_source_influence_provenance_block,
     qualify_source_influence_provenance,
     validate_source_influence_provenance,
 )
+from asago_scenario_generator.pipeline.source_influence_builder import (
+    assemble_source_influence_provenance,
+    declared_source_records,
+)
 from tests.helpers.projection_factory import (
+    get_projected_candidate,
+    get_test_snapshot,
     make_behavior_spec,
     make_projection_block,
     make_step_realizations,
@@ -250,6 +263,23 @@ def _make_narrative(ingress_id: str) -> NarrativeLayer:
     )
 
 
+def _make_actor(ingress_id: str) -> ActorProfile:
+    """Build the shared envelope actor fixture for provenance tests."""
+    return ActorProfile(
+        actor_type="cybercriminal",
+        capability_level="intermediate",
+        beliefs=["target has chat interface"],
+        desires=["steal data"],
+        intentions=["prompt injection"],
+        resources=["open-source tools"],
+        access=ActorAccessProvenance(
+            initial_entry_point_id=ingress_id,
+            ingress_mode="direct",
+            access_class="public",
+        ),
+    )
+
+
 def _make_envelope(
     *,
     source_influence_provenance: SourceInfluenceProvenanceBlock | None = None,
@@ -284,19 +314,7 @@ def _make_envelope(
     ingress_id = projection_block.canonical_ingress.entry_point_id
     tree = _make_tree(ingress_id)
     narrative = _make_narrative(ingress_id)
-    actor = ActorProfile(
-        actor_type="cybercriminal",
-        capability_level="intermediate",
-        beliefs=["target has chat interface"],
-        desires=["steal data"],
-        intentions=["prompt injection"],
-        resources=["open-source tools"],
-        access=ActorAccessProvenance(
-            initial_entry_point_id=ingress_id,
-            ingress_mode="direct",
-            access_class="public",
-        ),
-    )
+    actor = _make_actor(ingress_id)
     envelope = ScenarioEnvelope(
         scenario_id="scenario:v2:" + "a" * 64,
         candidate_id=candidate.candidate_id,
@@ -834,14 +852,11 @@ class TestBlockSerialization:
 
 
 class TestEnvelopeValidation:
-    def test_without_block_passes_vacuously(self) -> None:
-        envelope = _make_envelope()
-        assert envelope.source_influence_provenance is None
-        result = validate_source_influence_provenance(envelope)
-        assert result.valid is True
-        assert result.status == "pass"
-        assert result.violations == ()
-
+    # Generate now always attaches a provenance block (see
+    # TestGeneratePathAttachment), so no generated envelope reaches
+    # validation without one.  The validator still treats blockless
+    # envelopes as a vacuous pass so stand-in envelopes used by adapter
+    # tests (which mock the traceability gate) keep qualifying.
     def test_stand_in_envelope_without_typed_block_passes_vacuously(self) -> None:
         """Adapter tests mock the traceability gate; a stand-in envelope
         without a typed block must qualify vacuously rather than crash."""
@@ -940,3 +955,381 @@ class TestFailClosedPublish:
                 for ref in item["source_refs"]:
                     assert "source_type" in ref
                     assert "source_id" in ref
+
+
+# ---------------------------------------------------------------------------#
+# Generate-path provenance assembly
+# ---------------------------------------------------------------------------#
+
+_RUN_ID = "20260101T000000_0123456789abcdef0123456789abcdef"
+
+
+def _builder_seed(
+    threat_id: str = "T12",
+    agentic: tuple[str, ...] = ("T12", "T13"),
+) -> ScenarioSeed:
+    """ScenarioSeed fixture for the generate-path provenance assembler."""
+    return ScenarioSeed(
+        seed_id="AP-T12-01",
+        threat_id=threat_id,
+        threat_name="Unauthorized instructing",
+        threat_description="Test threat description",
+        attack_pattern_name="Pattern",
+        attack_pattern_description="Test pattern description",
+        risk_card_ref=RiskCardRef(
+            risk_id="risk-1",
+            risk_name="Risk 1",
+            risk_description="Description",
+            taxonomy="ibm-risk-atlas",
+            confidence=0.9,
+            grounding_confidence="high",
+        ),
+        owasp_llm_ids=["LLM01"],
+        agentic_threat_ids=list(agentic),
+        atlas_technique_ids=["AML.T0054"],
+    )
+
+
+def _kcx_profile():
+    """Capability profile carrying KCX capability-constraint sub-codes.
+
+    Mirrors the shared projection fixture's resource surface so the KCX
+    profile yields a feasible projected candidate with the same bound
+    resources.
+    """
+    from asago_scenario_generator.models.capability_profile import CapabilityProfile
+
+    return CapabilityProfile(
+        zones_active=["input", "reasoning", "tool_execution"],
+        entry_points=[
+            {"name": "chat", "direction": "input", "controllability": "direct"},
+            {
+                "name": "RAG documents",
+                "direction": "input",
+                "controllability": "indirect",
+            },
+        ],
+        confidence="high",
+        kc_subcodes=["KCX-MAGENT", "KCX-VSTORE"],
+        tool_inventory=[{"name": "writer", "description": "changes state"}],
+        tool_types=[
+            {
+                "name": "writer",
+                "zone": "tool_execution",
+                "can_modify_state": True,
+                "data_sensitivity": "medium",
+                "code_execution": False,
+            }
+        ],
+        external_integrations=[
+            {
+                "name": "CRM",
+                "integration_type": "api",
+                "auth_method": "oauth",
+                "data_sensitivity": "high",
+            }
+        ],
+        trust_boundaries=[
+            {
+                "name": "user-to-agent",
+                "from_zone": "input",
+                "to_zone": "reasoning",
+                "confidence": "explicit",
+            }
+        ],
+    )
+
+
+def _kcx_snapshot():
+    """Content-addressed capability snapshot over the KCX test profile."""
+    return capture_capability_snapshot(_kcx_profile())
+
+
+def _kcx_projected_candidate():
+    """Projected candidate bound to the KCX capability snapshot."""
+    from asago_scenario_generator.models.attack_pattern import (
+        AttackPattern,
+        AuthoritativeFactReference,
+        EvaluatedFactEvidence,
+    )
+    from asago_scenario_generator.pipeline.projection import (
+        ProjectionBudget,
+        project_authoritative_candidates,
+    )
+    from tests.helpers.projection_factory import (
+        get_test_raw_pattern,
+        get_test_resolver,
+    )
+
+    raw = get_test_raw_pattern()
+    pattern = AttackPattern.model_validate(raw)
+    resolver = get_test_resolver()
+    evidence = EvaluatedFactEvidence(
+        fact=AuthoritativeFactReference.model_validate(
+            {
+                "namespace": "profile",
+                "fact_id": "mode",
+                "value_type": "string",
+                "property_path": [],
+            }
+        ),
+        status="present",
+        value="active",
+    )
+    snapshot = capture_capability_snapshot(_kcx_profile(), (evidence,))
+    batch = project_authoritative_candidates(
+        [raw],
+        resolver,
+        snapshot,
+        budget=ProjectionBudget(max_candidates=100),
+    )
+    assert len(batch.candidates) >= 1
+    return batch.candidates[0], snapshot
+
+
+def _assemble_through_generate_path():
+    """Assemble the standard envelope through the real generate assembler."""
+    candidate, snapshot = _kcx_projected_candidate()
+    ingress_id = candidate.canonical_ingress.entry_point_id
+    envelope = _assemble_envelope(
+        seed=_builder_seed(),
+        profile=_kcx_profile(),
+        narrative=_make_narrative(ingress_id),
+        attack_tree=_make_tree(ingress_id),
+        behavior_spec=make_behavior_spec(),
+        call_metadata_list=[],
+        model_name="test-model",
+        use_case="test",
+        notes=[],
+        pinned_entry_point_id=ingress_id,
+        run_id=_RUN_ID,
+        candidate_id="",
+        attempt=1,
+        projected_candidate=candidate,
+        capability_snapshot=snapshot,
+    )
+    return envelope
+
+
+class TestGenerateProvenanceBuilder:
+    """Declared-universe derivation and link construction for generate."""
+
+    def test_declared_sources_derive_from_seed_and_profile(self) -> None:
+        refs = declared_source_records(
+            seed=_builder_seed(),
+            capability_snapshot=_kcx_snapshot(),
+        )
+        assert [(r.source_type, r.source_id) for r in refs] == [
+            (SourceInfluenceSourceType.threat_source, "threat:T12"),
+            (SourceInfluenceSourceType.threat_source, "threat:T13"),
+            (SourceInfluenceSourceType.mitigation, "mitigation:playbook-6"),
+            (
+                SourceInfluenceSourceType.capability_constraint,
+                "constraint:KCX-MAGENT",
+            ),
+            (
+                SourceInfluenceSourceType.capability_constraint,
+                "constraint:KCX-VSTORE",
+            ),
+        ]
+
+    def test_threat_ids_deduplicate_primary_first(self) -> None:
+        refs = declared_source_records(
+            seed=_builder_seed(agentic=("T12", "T1", "T12")),
+            capability_snapshot=_kcx_snapshot(),
+        )
+        threat_ids = [
+            r.source_id
+            for r in refs
+            if r.source_type is SourceInfluenceSourceType.threat_source
+        ]
+        assert threat_ids == ["threat:T12", "threat:T1"]
+        mitigation_ids = [
+            r.source_id
+            for r in refs
+            if r.source_type is SourceInfluenceSourceType.mitigation
+        ]
+        # Playbooks mitigating T12 (playbook-6) and T1 (playbook-2).
+        assert mitigation_ids == ["mitigation:playbook-2", "mitigation:playbook-6"]
+
+    def test_mitigations_are_playbooks_for_declared_threats(self) -> None:
+        refs = declared_source_records(
+            seed=_builder_seed(threat_id="T6", agentic=("T6", "T1")),
+            capability_snapshot=_kcx_snapshot(),
+        )
+        mitigation_ids = [
+            r.source_id
+            for r in refs
+            if r.source_type is SourceInfluenceSourceType.mitigation
+        ]
+        assert mitigation_ids == ["mitigation:playbook-1", "mitigation:playbook-2"]
+
+    def test_links_every_artifact_to_the_full_declared_universe(self) -> None:
+        candidate, snapshot = _kcx_projected_candidate()
+        ingress_id = candidate.canonical_ingress.entry_point_id
+        block = assemble_source_influence_provenance(
+            seed=_builder_seed(),
+            capability_snapshot=snapshot,
+            attack_tree=_make_tree(ingress_id),
+            narrative=_make_narrative(ingress_id),
+            selected_step_ids=candidate.projection.selected_step_ids,
+        )
+        assert block is not None
+        assert block.status == "pass"
+        assert len(block.leaf_links) == 3
+        assert len(block.narrative_links) == 3
+        declared = block.declared_sources
+        for link in block.leaf_links + block.narrative_links:
+            assert link.source_refs == declared
+            assert link.projected_step_id in ("step.1", "step.2", "step.3")
+        assert block.metrics.projected_leaf_coverage == CoverageFraction(
+            numerator=3, denominator=3
+        )
+        assert block.metrics.narrative_step_coverage == CoverageFraction(
+            numerator=3, denominator=3
+        )
+        assert block.metrics.source_reference_coverage == CoverageFraction(
+            numerator=5, denominator=5
+        )
+        assert block.metrics.orphaned_source_count == 0
+        assert block.metrics.unreferenced_artifact_count == 0
+
+    def test_assembly_without_artifacts_returns_none(self) -> None:
+        block = assemble_source_influence_provenance(
+            seed=_builder_seed(),
+            capability_snapshot=_kcx_snapshot(),
+            attack_tree=None,
+            narrative=None,
+            selected_step_ids=("step.1",),
+        )
+        assert block is None
+
+
+class TestGeneratePathAttachment:
+    """Generate automatically attaches a typed provenance block."""
+
+    def test_assemble_envelope_attaches_valid_block(self) -> None:
+        envelope = _assemble_through_generate_path()
+        block = envelope.source_influence_provenance
+        assert isinstance(block, SourceInfluenceProvenanceBlock)
+        assert block.status == "pass"
+        declared_ids = {(r.source_type, r.source_id) for r in block.declared_sources}
+        assert (SourceInfluenceSourceType.threat_source, "threat:T12") in declared_ids
+        assert (SourceInfluenceSourceType.threat_source, "threat:T13") in declared_ids
+        assert (
+            SourceInfluenceSourceType.mitigation,
+            "mitigation:playbook-6",
+        ) in declared_ids
+        # Constraints derive from the capability snapshot's KC sub-codes.
+        assert (
+            SourceInfluenceSourceType.capability_constraint,
+            "constraint:KCX-MAGENT",
+        ) in declared_ids
+        assert (
+            SourceInfluenceSourceType.capability_constraint,
+            "constraint:KCX-VSTORE",
+        ) in declared_ids
+        # The block must re-qualify against the actual envelope artifacts.
+        validated = validate_source_influence_provenance(envelope)
+        assert validated.valid is True
+        assert validated.status == "pass"
+
+    def test_assemble_envelope_respects_explicit_block(self) -> None:
+        explicit = _full_block(_qualify_full())
+        candidate, snapshot = _kcx_projected_candidate()
+        ingress_id = candidate.canonical_ingress.entry_point_id
+        override = _assemble_envelope(
+            seed=_builder_seed(),
+            profile=_kcx_profile(),
+            narrative=_make_narrative(ingress_id),
+            attack_tree=_make_tree(ingress_id),
+            behavior_spec=make_behavior_spec(),
+            call_metadata_list=[],
+            model_name="test-model",
+            use_case="test",
+            notes=[],
+            pinned_entry_point_id=ingress_id,
+            run_id=_RUN_ID,
+            candidate_id="",
+            projected_candidate=candidate,
+            capability_snapshot=snapshot,
+            source_influence_provenance=explicit,
+        )
+        assert override.source_influence_provenance is explicit
+        assert override.source_influence_provenance.declared_sources == (
+            T12,
+            M12,
+            MAG,
+        )
+
+    def test_assemble_final_envelope_attaches_block(self) -> None:
+        from asago_scenario_generator.llm.client import LLMResult
+        from asago_scenario_generator.pipeline.generate.stages import (
+            GenerationRequest,
+            StageCallEvidence,
+            assemble_final_envelope,
+            prepare_generation,
+        )
+
+        candidate, snapshot = _kcx_projected_candidate()
+        ingress_id = candidate.canonical_ingress.entry_point_id
+        request = GenerationRequest(
+            seed=_builder_seed(),
+            profile=_kcx_profile(),
+            client=MagicMock(model="test-model"),
+            use_case="test",
+            pinned_entry_point_id=ingress_id,
+            projected_candidate=candidate,
+            capability_snapshot=snapshot,
+            run_id=_RUN_ID,
+        )
+        prepared = prepare_generation(request)
+        evidence: list[StageCallEvidence] = []
+        for call in (
+            CallName.actor_profile,
+            CallName.narrative,
+            CallName.attack_tree,
+            CallName.behavior_spec,
+        ):
+            result = LLMResult(
+                content="ok", prompt_tokens=1, completion_tokens=1, duration_ms=1
+            )
+            evidence.append(
+                StageCallEvidence(
+                    call_name=call,
+                    result=result,
+                    metadata=CallMetadata(
+                        call=call, prompt_tokens=1, completion_tokens=1, duration_ms=1
+                    ),
+                )
+            )
+        envelope = assemble_final_envelope(
+            prepared,
+            actor=_make_actor(ingress_id),
+            narrative=_make_narrative(ingress_id),
+            tree=_make_tree(ingress_id),
+            behavior=make_behavior_spec(),
+            evidence=tuple(evidence),
+        )
+        block = envelope.source_influence_provenance
+        assert isinstance(block, SourceInfluenceProvenanceBlock)
+        assert block.status == "pass"
+        validated = validate_source_influence_provenance(envelope)
+        assert validated.valid is True
+
+    def test_publish_serializes_generate_attached_block(self, tmp_path) -> None:
+        import yaml
+
+        envelope = _assemble_through_generate_path()
+        envelope_path, _ = write_scenario_outputs(envelope, tmp_path)
+        serialized = yaml.safe_load(envelope_path.read_text(encoding="utf-8"))
+        block_data = serialized["source_influence_provenance"]
+        assert block_data["status"] == "pass"
+        assert len(block_data["declared_sources"]) == 5
+        refs = {
+            ref["source_id"]
+            for group in ("leaf_links", "narrative_links")
+            for item in block_data[group]
+            for ref in item["source_refs"]
+        }
+        assert {"threat:T12", "threat:T13", "mitigation:playbook-6"} <= refs

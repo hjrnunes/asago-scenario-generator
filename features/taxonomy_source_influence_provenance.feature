@@ -137,3 +137,46 @@ Feature: Taxonomy source-influence provenance
     And each provenance reference contains an explicit source type and source ID
     And the serialized envelope contains source-influence qualification metrics
     And the serialized qualification status is "pass"
+
+  # Taxonomy source-influence provenance 10 generate attaches complete provenance
+  Scenario: Taxonomy source-influence provenance 10 generate attaches complete provenance
+    Given taxonomy source-influence qualification uses deterministic offline inputs
+    And deterministic generate scripts seed "AP-T12-01" with threat "T12" and agentic threats "T12,T13"
+    And the scripted capability profile declares capability constraints "KCX-MAGENT,KCX-VSTORE"
+    And deterministic generate returns a valid narrative, attack tree, and behavior spec
+    When generate completes and admits the scenario envelope
+    Then the scenario envelope metadata contains a typed source-influence provenance block
+    And the admitted envelope declares threat source "threat:T12"
+    And the admitted envelope declares agentic threat source "threat:T13"
+    And the admitted envelope declares mitigation "mitigation:playbook-6"
+    And the admitted envelope declares capability constraint "constraint:KCX-MAGENT"
+    And the admitted envelope declares capability constraint "constraint:KCX-VSTORE"
+    And every projected leaf and narrative step link is complete
+    And source-influence qualification status is "pass"
+
+  # Taxonomy source-influence provenance 11 generate persists complete coverage metrics
+  Scenario: Taxonomy source-influence provenance 11 generate persists complete coverage metrics
+    Given taxonomy source-influence qualification uses deterministic offline inputs
+    And deterministic generate scripts seed "AP-T6-01" with threat "T6" and agentic threats "T6,T1"
+    And the scripted capability profile declares capability constraints "KCX-MAGENT,KCX-VSTORE"
+    And deterministic generate returns a valid narrative, attack tree, and behavior spec
+    When generate completes and admits the scenario envelope
+    Then the scenario envelope metadata contains a typed source-influence provenance block
+    And metric "projected_leaf_coverage" has numerator 3 and denominator 3
+    And metric "narrative_step_coverage" has numerator 3 and denominator 3
+    And metric "source_reference_coverage" has numerator 6 and denominator 6
+    And metric "orphaned_source_count" is 0
+    And metric "unreferenced_artifact_count" is 0
+    And source-influence qualification status is "pass"
+
+  # Taxonomy source-influence provenance 12 generate serializes inspectable provenance
+  Scenario: Taxonomy source-influence provenance 12 generate serializes inspectable provenance
+    Given taxonomy source-influence qualification uses deterministic offline inputs
+    And deterministic generate scripts seed "AP-T12-01" with threat "T12" and agentic threats "T12,T13"
+    And the scripted capability profile declares capability constraints "KCX-MAGENT,KCX-VSTORE"
+    And deterministic generate returns a valid narrative, attack tree, and behavior spec
+    When generate completes, admits the envelope, and serializes it
+    Then the serialized envelope contains a source-influence provenance block
+    And each provenance reference contains an explicit source type and source ID
+    And the serialized envelope contains source-influence qualification metrics
+    And the serialized qualification status is "pass"

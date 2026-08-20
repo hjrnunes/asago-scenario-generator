@@ -549,7 +549,8 @@ def assemble_final_envelope(
             seed_id=request.seed.seed_id,
         )
     # Source-influence provenance qualification (Wave 2 slice 5, fail-closed).
-    # Envelopes without a provenance block pass vacuously.
+    # Assembly always attaches the provenance block, and the gate rejects
+    # any envelope whose qualification fails.
     from asago_scenario_generator.pipeline.source_influence import (
         validate_source_influence_provenance,
     )
