@@ -386,6 +386,34 @@ class TestGherkin:
             assert result is not None
             assert client.call_count == 1
 
+    def test_generate_gherkin_llm_error(self):
+        """LLM failure returns (None, None, error_message)."""
+        spec = _make_scenario_spec()
+        la = _make_loss_analysis()
+        client = MockLLMClient()
+        client.set_exception_for(None, RuntimeError("LLM unavailable"))
+
+        with TemporaryDirectory() as tmpdir:
+            result, raw, error = generate_gherkin(client, spec, la, Path(tmpdir))
+            assert result is None
+            assert raw is None
+            assert error is not None
+            assert "LLM unavailable" in error
+
+    def test_generate_gherkin_unparseable_response(self):
+        """Unparseable LLM response returns (None, raw, error_message)."""
+        spec = _make_scenario_spec()
+        la = _make_loss_analysis()
+        client = MockLLMClient()
+        client.set_response_for(None, ": : not gherkin yaml : :")
+
+        with TemporaryDirectory() as tmpdir:
+            result, raw, error = generate_gherkin(client, spec, la, Path(tmpdir))
+            assert result is None
+            assert raw is not None
+            assert error is not None
+            assert "Failed to parse" in error
+
     def test_call_logged_with_stage_6(self):
         spec = _make_scenario_spec()
         la = _make_loss_analysis()

@@ -264,6 +264,39 @@ class TestProj0302MutationRejection:
         assert matching, f"no violation with code {violation_code}"
         assert matching[0].element_id == expected_element
 
+    @pytest.mark.parametrize(
+        "mutation",
+        [
+            "omitting the PM-1-1 assertion",
+            "reordering the PM-1-1 and FB-1-1 assertions",
+            "changing TA-2 source to PM-1-1",
+        ],
+    )
+    def test_factor_mapping_emits_at_most_one_violation(self, mutation):
+        """The factor-mapping check emits at most one violation per sequence.
+
+        The omission path must short-circuit so the displacement check does
+        not also run and invent a second violation for the same sequence.
+        """
+        doc = _envelope_doc()
+        _mutate(doc, mutation)
+        result = _validate_doc(doc)
+        assert result.valid is False
+        factor_mapping_codes = {
+            "omitted_causal_factor",
+            "reordered_causal_factor",
+            "assertion_source_mismatch",
+            "step_source_mismatch",
+        }
+        factor_mapping_violations = [
+            v
+            for v in result.violations
+            if v.code.value in factor_mapping_codes
+        ]
+        assert len(factor_mapping_violations) == 1, (
+            f"factor-mapping check emitted {factor_mapping_violations!r}"
+        )
+
 
 class TestProj0303CandidateIdentityMismatch:
     """STPA-PROJ-03-03: a vector linked to another candidate is rejected."""
@@ -332,6 +365,26 @@ class TestProj0305Determinism:
         payload = json.loads(canonical_violations_json(result))
         assert payload[0]["code"] == "uca_step_mismatch"
         assert payload[0]["element_id"] == "S-3"
+
+    def test_canonical_violations_escape_non_ascii_details(self):
+        """Canonical violation JSON is ASCII-safe for any detail text.
+
+        Byte stability requires non-ASCII detail characters to be escaped
+        so the canonical payload is portable across readers.
+        """
+        result = StpaProjectionTraceabilityResult(
+            violations=[
+                StpaProjectionTraceabilityViolation(
+                    code=StpaProjectionTraceabilityViolationCode.uca_step_mismatch,
+                    detail="final step \u00e9 mismatch",
+                    element_id="S-3",
+                )
+            ]
+        )
+        payload = canonical_violations_json(result)
+        assert "\u00e9" not in payload
+        assert "\\u00e9" in payload
+        assert json.loads(payload)[0]["detail"] == "final step \u00e9 mismatch"
 
 
 class TestCanonicalDocument:
