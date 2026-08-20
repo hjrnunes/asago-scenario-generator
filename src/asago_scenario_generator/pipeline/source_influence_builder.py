@@ -47,8 +47,8 @@ from asago_scenario_generator.models.source_influence_provenance import (
     SourceInfluenceSourceType,
 )
 from asago_scenario_generator.pipeline.source_influence import (
-    _artifact_elements,
-    _leaf_nodes,
+    artifact_elements,
+    leaf_nodes,
     make_source_influence_provenance_block,
     qualify_source_influence_provenance,
 )
@@ -215,8 +215,8 @@ def assemble_source_influence_provenance(
         capability_snapshot=capability_snapshot,
         threats_path=threats_path,
     )
-    leaves = _leaf_nodes(attack_tree.root) if attack_tree is not None else []
-    leaf_elements, narrative_elements = _artifact_elements(leaves, narrative)
+    leaves = leaf_nodes(attack_tree.root) if attack_tree is not None else []
+    leaf_elements, narrative_elements = artifact_elements(leaves, narrative)
     if not leaf_elements and not narrative_elements:
         return None
 

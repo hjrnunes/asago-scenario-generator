@@ -58,6 +58,8 @@ EMPTY_METRICS = SourceInfluenceMetrics(
 
 __all__ = [
     "EMPTY_METRICS",
+    "artifact_elements",
+    "leaf_nodes",
     "make_source_influence_provenance_block",
     "qualify_source_influence_provenance",
     "validate_source_influence_provenance",
@@ -411,17 +413,23 @@ def make_source_influence_provenance_block(
 # ---------------------------------------------------------------------------#
 
 
-def _leaf_nodes(root: AttackTreeNode) -> list[AttackTreeNode]:
-    """Collect all LEAF nodes from a tree, depth-first."""
+def leaf_nodes(root: AttackTreeNode) -> list[AttackTreeNode]:
+    """Collect all LEAF nodes from a tree, depth-first.
+
+    Shared by the generate-path assembler
+    (:mod:`asago_scenario_generator.pipeline.source_influence_builder`)
+    and the envelope validator below so both halves of the provenance
+    contract derive the same canonical leaf view.
+    """
     if root.gate == GateType.LEAF:
         return [root]
     leaves: list[AttackTreeNode] = []
     for child in root.children or ():
-        leaves.extend(_leaf_nodes(child))
+        leaves.extend(leaf_nodes(child))
     return leaves
 
 
-def _artifact_elements(
+def artifact_elements(
     leaves: Sequence[AttackTreeNode],
     narrative: NarrativeLayer | None,
 ) -> tuple[
@@ -483,11 +491,11 @@ def validate_source_influence_provenance(
             metrics=EMPTY_METRICS,
         )
     leaves = (
-        _leaf_nodes(envelope.attack_tree.root)
+        leaf_nodes(envelope.attack_tree.root)
         if envelope.attack_tree is not None
         else []
     )
-    leaf_elements, narrative_elements = _artifact_elements(leaves, envelope.narrative)
+    leaf_elements, narrative_elements = artifact_elements(leaves, envelope.narrative)
     result = qualify_source_influence_provenance(
         selected_step_ids=tuple(envelope.projection.selected_step_ids),
         declared_sources=block.declared_sources,
