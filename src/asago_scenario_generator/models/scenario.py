@@ -29,6 +29,9 @@ from asago_scenario_generator.models.projection_envelope import (
     ProjectionEnvelopeBlock,
 )
 from asago_scenario_generator.models.realization import ProjectedStepRealization
+from asago_scenario_generator.models.source_influence_provenance import (
+    SourceInfluenceProvenanceBlock,
+)
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -1172,6 +1175,20 @@ class ScenarioEnvelope(BaseModel):
     validation_passed: bool | None = Field(
         default=None,
         description="True only if all three validation sub-blocks are valid. None if validation has not run.",
+    )
+
+    # --- Source-Influence Provenance (Wave 2: slice 5) ---
+
+    source_influence_provenance: SourceInfluenceProvenanceBlock | None = Field(
+        default=None,
+        description=(
+            "Typed source-influence provenance block linking projected "
+            "attack-tree leaves and narrative steps to the declared threat "
+            "sources, mitigations, and capability constraints in taxonomy "
+            "scenario envelopes, with deterministic qualification metrics "
+            "and pass/fail status.  Absent until source-influence "
+            "provenance is declared for the scenario."
+        ),
     )
 
     # --- Generation Metadata ---

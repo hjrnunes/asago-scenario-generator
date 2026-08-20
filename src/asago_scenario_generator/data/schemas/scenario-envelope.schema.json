@@ -130,6 +130,17 @@
         }
       ]
     },
+    "source_influence_provenance": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/SourceInfluenceProvenanceBlock"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Typed source-influence provenance block linking projected attack-tree leaves and narrative steps to the declared threat sources, mitigations, and capability constraints in taxonomy scenario envelopes, with deterministic qualification metrics and pass/fail status. Absent until source-influence provenance is declared for the scenario."
+    },
     "generation": {
       "$ref": "#/$defs/GenerationMetadata"
     },
@@ -3535,6 +3546,182 @@
       "title": "MembershipCondition",
       "type": "object"
     },
+    "SourceInfluenceArtifactKind": {
+      "description": "Generated artifact element kind covered by source-influence provenance.",
+      "enum": [
+        "projected_leaf",
+        "narrative_step"
+      ],
+      "title": "SourceInfluenceArtifactKind",
+      "type": "string"
+    },
+    "SourceInfluenceArtifactLink": {
+      "additionalProperties": false,
+      "description": "A provenance link from one artifact element to typed source records.\n\nThe recorded ``projected_step_id`` is the step the link claims the\nartifact realizes; qualification verifies it against the artifact's\nactual realized projected steps.",
+      "properties": {
+        "artifact_kind": {
+          "$ref": "#/$defs/SourceInfluenceArtifactKind",
+          "description": "Generated artifact stage the linked element belongs to."
+        },
+        "artifact_id": {
+          "description": "Generated artifact element identifier this link attaches to (leaf id or narrative step number as a string).",
+          "minLength": 1,
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "projected_step_id": {
+          "description": "Projected step ID this link claims the artifact realizes.  Must match one of the artifact's realized projected steps.",
+          "minLength": 1,
+          "title": "Projected Step Id",
+          "type": "string"
+        },
+        "source_refs": {
+          "default": [],
+          "description": "Typed source records this artifact is linked to.  Must resolve against the declared source universe and include every source type.",
+          "items": {
+            "$ref": "#/$defs/SourceInfluenceSourceRef"
+          },
+          "title": "Source Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "artifact_kind",
+        "artifact_id",
+        "projected_step_id"
+      ],
+      "title": "SourceInfluenceArtifactLink",
+      "type": "object"
+    },
+    "SourceInfluenceMetrics": {
+      "additionalProperties": false,
+      "description": "Deterministic source-influence qualification metrics.",
+      "properties": {
+        "projected_leaf_coverage": {
+          "$ref": "#/$defs/CoverageFraction",
+          "description": "Covered projected leaves over all provenance-carrying leaves."
+        },
+        "narrative_step_coverage": {
+          "$ref": "#/$defs/CoverageFraction",
+          "description": "Covered narrative steps over all narrative steps."
+        },
+        "source_reference_coverage": {
+          "$ref": "#/$defs/CoverageFraction",
+          "description": "Declared source records referenced at least once over all declared records."
+        },
+        "orphaned_source_count": {
+          "default": 0,
+          "description": "Declared source records never referenced by any artifact link.",
+          "minimum": 0,
+          "title": "Orphaned Source Count",
+          "type": "integer"
+        },
+        "unreferenced_artifact_count": {
+          "default": 0,
+          "description": "Artifact elements carrying no provenance link at all.",
+          "minimum": 0,
+          "title": "Unreferenced Artifact Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "projected_leaf_coverage",
+        "narrative_step_coverage",
+        "source_reference_coverage"
+      ],
+      "title": "SourceInfluenceMetrics",
+      "type": "object"
+    },
+    "SourceInfluenceProvenanceBlock": {
+      "additionalProperties": false,
+      "description": "Typed source-influence provenance block persisted on the envelope.\n\nCarries the scenario-level declared source universe (stored once),\nthe per-artifact links for projected leaves and narrative steps, and\nthe deterministic qualification metrics plus status.  Envelope-level\nvalidation recomputes the qualification from the envelope's actual\nartifacts and rejects stale or tampered persisted metadata.",
+      "properties": {
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "declared_sources": {
+          "description": "Scenario-level declared source universe: each typed source record is stored exactly once.",
+          "items": {
+            "$ref": "#/$defs/SourceInfluenceSourceRef"
+          },
+          "title": "Declared Sources",
+          "type": "array"
+        },
+        "leaf_links": {
+          "default": [],
+          "description": "Provenance links for projected attack-tree leaves.",
+          "items": {
+            "$ref": "#/$defs/SourceInfluenceArtifactLink"
+          },
+          "title": "Leaf Links",
+          "type": "array"
+        },
+        "narrative_links": {
+          "default": [],
+          "description": "Provenance links for narrative steps.",
+          "items": {
+            "$ref": "#/$defs/SourceInfluenceArtifactLink"
+          },
+          "title": "Narrative Links",
+          "type": "array"
+        },
+        "metrics": {
+          "$ref": "#/$defs/SourceInfluenceMetrics",
+          "description": "Deterministic qualification metrics for this block."
+        },
+        "status": {
+          "description": "Persisted qualification status for this block.",
+          "enum": [
+            "pass",
+            "fail"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "declared_sources",
+        "metrics",
+        "status"
+      ],
+      "title": "SourceInfluenceProvenanceBlock",
+      "type": "object"
+    },
+    "SourceInfluenceSourceRef": {
+      "additionalProperties": false,
+      "description": "One declared source record in the scenario's provenance universe.",
+      "properties": {
+        "source_type": {
+          "$ref": "#/$defs/SourceInfluenceSourceType",
+          "description": "Typed source category: threat_source, mitigation, or capability_constraint."
+        },
+        "source_id": {
+          "description": "Stable source identifier from the taxonomy scenario envelope vocabulary, e.g. 'threat:T12', 'mitigation:M12', or 'constraint:KCX-MAGENT'.",
+          "minLength": 1,
+          "title": "Source Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_type",
+        "source_id"
+      ],
+      "title": "SourceInfluenceSourceRef",
+      "type": "object"
+    },
+    "SourceInfluenceSourceType": {
+      "description": "Typed source categories referenced by source-influence provenance.",
+      "enum": [
+        "threat_source",
+        "mitigation",
+        "capability_constraint"
+      ],
+      "title": "SourceInfluenceSourceType",
+      "type": "string"
+    },
     "StateChangingToolFixtureRequirement": {
       "additionalProperties": false,
       "properties": {
@@ -4571,6 +4758,26 @@
         "kc_subcodes"
       ],
       "title": "CapabilityProfile",
+      "type": "object"
+    },
+    "CoverageFraction": {
+      "additionalProperties": false,
+      "description": "Deterministic coverage fraction (numerator over denominator).",
+      "properties": {
+        "numerator": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Numerator",
+          "type": "integer"
+        },
+        "denominator": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Denominator",
+          "type": "integer"
+        }
+      },
+      "title": "CoverageFraction",
       "type": "object"
     },
     "DataFlow": {

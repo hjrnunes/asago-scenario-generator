@@ -1,0 +1,395 @@
+"""Deterministic source-influence provenance qualification.
+
+Qualifies the typed source-influence provenance block persisted on a
+scenario envelope (see ``models.source_influence_provenance``): every
+projected attack-tree leaf and narrative step must link to the declared
+threat sources, mitigations, and capability constraints, and the declared
+source universe must be fully referenced.  Qualification is deterministic,
+offline, and fails closed:
+
+- ``missing_source_provenance`` — an artifact link omits a source type;
+- ``unknown_source_reference`` — a link references a source outside the
+  declared universe;
+- ``provenance_projected_step_mismatch`` — a link claims a projected step
+  the artifact does not realize;
+- ``orphaned_source_provenance`` — a declared source is never referenced;
+- ``unreferenced_source_influence_artifact`` — no artifact carrying a
+  projected step has a provenance link.
+
+Coverage metrics (projected-leaf, narrative-step, and source-reference
+fractions plus orphaned/unreferenced counts) are recomputed on every
+qualification so persisted metadata can be verified for staleness.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
+
+from asago_scenario_generator.models.attack_tree import GateType, AttackTreeNode
+from asago_scenario_generator.models.source_influence_provenance import (
+    CoverageFraction,
+    SourceInfluenceArtifactElement,
+    SourceInfluenceArtifactKind,
+    SourceInfluenceArtifactLink,
+    SourceInfluenceMetrics,
+    SourceInfluenceProvenanceBlock,
+    SourceInfluenceQualification,
+    SourceInfluenceSourceRef,
+    SourceInfluenceSourceType,
+    SourceInfluenceViolation,
+    SourceInfluenceViolationCode,
+)
+
+if TYPE_CHECKING:
+    from asago_scenario_generator.models.scenario import ScenarioEnvelope
+
+EMPTY_METRICS = SourceInfluenceMetrics(
+    projected_leaf_coverage=CoverageFraction(numerator=0, denominator=0),
+    narrative_step_coverage=CoverageFraction(numerator=0, denominator=0),
+    source_reference_coverage=CoverageFraction(numerator=0, denominator=0),
+    orphaned_source_count=0,
+    unreferenced_artifact_count=0,
+)
+"""Metrics for the vacuous pass of an envelope without a provenance block."""
+
+__all__ = [
+    "EMPTY_METRICS",
+    "make_source_influence_provenance_block",
+    "qualify_source_influence_provenance",
+    "validate_source_influence_provenance",
+]
+
+
+# ---------------------------------------------------------------------------#
+# Qualification engine
+# ---------------------------------------------------------------------------#
+
+
+def _canonical_declared_sources(
+    declared_sources: Sequence[SourceInfluenceSourceRef],
+) -> tuple[SourceInfluenceSourceRef, ...]:
+    """Deduplicate declared source records by (type, id), preserving order.
+
+    The scenario-level source universe stores each typed record exactly
+    once; duplicate declarations collapse into the first occurrence.
+    """
+    seen: set[tuple[SourceInfluenceSourceType, str]] = set()
+    result: list[SourceInfluenceSourceRef] = []
+    for ref in declared_sources:
+        key = (ref.source_type, ref.source_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(ref)
+    return tuple(result)
+
+
+def qualify_source_influence_provenance(
+    *,
+    selected_step_ids: Sequence[str],
+    declared_sources: Sequence[SourceInfluenceSourceRef],
+    leaf_elements: Sequence[SourceInfluenceArtifactElement],
+    narrative_elements: Sequence[SourceInfluenceArtifactElement],
+    leaf_links: Sequence[SourceInfluenceArtifactLink],
+    narrative_links: Sequence[SourceInfluenceArtifactLink],
+) -> SourceInfluenceQualification:
+    """Qualify artifact provenance links against the declared source universe.
+
+    Args:
+        selected_step_ids: Projected step IDs from the canonical projection.
+        declared_sources: Scenario-level declared source records (deduped).
+        leaf_elements: Projected attack-tree leaf elements that realize steps.
+        narrative_elements: Narrative step elements that realize steps.
+        leaf_links: Provenance links attached to the leaf elements.
+        narrative_links: Provenance links attached to the narrative elements.
+
+    Returns:
+        A deterministic :class:`SourceInfluenceQualification` carrying the
+        typed violations, coverage metrics, and pass/fail status.  Links
+        naming artifact elements that do not exist in the supplied element
+        sets are ignored.
+    """
+    declared = _canonical_declared_sources(declared_sources)
+    declared_ids = {(ref.source_type, ref.source_id) for ref in declared}
+
+    leaf_links_by_id = {link.artifact_id: link for link in leaf_links}
+    narrative_links_by_id = {link.artifact_id: link for link in narrative_links}
+
+    violations: list[SourceInfluenceViolation] = []
+    referenced_ids: set[tuple[SourceInfluenceSourceType, str]] = set()
+    covered_leaf_ids: set[str] = set()
+    covered_narrative_ids: set[str] = set()
+    linked_steps: set[str] = set()
+
+    for elements, links_by_id, kind in (
+        (leaf_elements, leaf_links_by_id, SourceInfluenceArtifactKind.projected_leaf),
+        (
+            narrative_elements,
+            narrative_links_by_id,
+            SourceInfluenceArtifactKind.narrative_step,
+        ),
+    ):
+        covered_ids = (
+            covered_leaf_ids
+            if kind is SourceInfluenceArtifactKind.projected_leaf
+            else covered_narrative_ids
+        )
+        for element in elements:
+            link = links_by_id.get(element.artifact_id)
+            if link is None:
+                continue
+            if link.source_refs:
+                covered_ids.add(element.artifact_id)
+            linked_steps.update(element.projected_step_ids)
+            if link.projected_step_id not in element.projected_step_ids:
+                violations.append(
+                    SourceInfluenceViolation(
+                        code=SourceInfluenceViolationCode.provenance_projected_step_mismatch,
+                        detail=(
+                            f"{kind.value} '{element.artifact_id}' provenance "
+                            f"link claims projected step "
+                            f"'{link.projected_step_id}' but the artifact "
+                            f"realizes {element.projected_step_ids}"
+                        ),
+                        artifact_id=element.artifact_id,
+                        projected_step_id=link.projected_step_id,
+                    )
+                )
+            present_types: set[SourceInfluenceSourceType] = set()
+            for ref in link.source_refs:
+                present_types.add(ref.source_type)
+                key = (ref.source_type, ref.source_id)
+                if key not in declared_ids:
+                    violations.append(
+                        SourceInfluenceViolation(
+                            code=SourceInfluenceViolationCode.unknown_source_reference,
+                            detail=(
+                                f"{kind.value} '{element.artifact_id}' "
+                                f"references source '{ref.source_id}' which "
+                                f"is not declared in the source-influence "
+                                f"provenance universe"
+                            ),
+                            source_type=ref.source_type,
+                            source_id=ref.source_id,
+                            artifact_id=element.artifact_id,
+                        )
+                    )
+                else:
+                    referenced_ids.add(key)
+            for source_type in SourceInfluenceSourceType:
+                if source_type not in present_types:
+                    violations.append(
+                        SourceInfluenceViolation(
+                            code=SourceInfluenceViolationCode.missing_source_provenance,
+                            detail=(
+                                f"{kind.value} '{element.artifact_id}' "
+                                f"provenance omits source type "
+                                f"'{source_type.value}'"
+                            ),
+                            source_type=source_type,
+                            artifact_id=element.artifact_id,
+                        )
+                    )
+
+    for ref in declared:
+        if (ref.source_type, ref.source_id) not in referenced_ids:
+            violations.append(
+                SourceInfluenceViolation(
+                    code=SourceInfluenceViolationCode.orphaned_source_provenance,
+                    detail=(
+                        f"declared source '{ref.source_id}' is not referenced "
+                        f"by any projected leaf or narrative step link"
+                    ),
+                    source_type=ref.source_type,
+                    source_id=ref.source_id,
+                )
+            )
+
+    for step_id in selected_step_ids:
+        if step_id not in linked_steps:
+            violations.append(
+                SourceInfluenceViolation(
+                    code=SourceInfluenceViolationCode.unreferenced_source_influence_artifact,
+                    detail=(
+                        f"no projected leaf or narrative step artifact "
+                        f"realizing projected step '{step_id}' carries "
+                        f"source-influence provenance links"
+                    ),
+                    projected_step_id=step_id,
+                )
+            )
+
+    # Deduplicate by identity-bearing fields while preserving order.
+    seen: set[tuple[str, str, str | None, str | None, str | None]] = set()
+    unique: list[SourceInfluenceViolation] = []
+    for violation in violations:
+        key = (
+            violation.code.value,
+            violation.source_type.value if violation.source_type else "",
+            violation.source_id,
+            violation.artifact_id,
+            violation.projected_step_id,
+        )
+        if key not in seen:
+            seen.add(key)
+            unique.append(violation)
+
+    leaf_numerator = len(covered_leaf_ids)
+    narrative_numerator = len(covered_narrative_ids)
+    source_numerator = len(referenced_ids & declared_ids)
+    metrics = SourceInfluenceMetrics(
+        projected_leaf_coverage=CoverageFraction(
+            numerator=leaf_numerator, denominator=len(leaf_elements)
+        ),
+        narrative_step_coverage=CoverageFraction(
+            numerator=narrative_numerator, denominator=len(narrative_elements)
+        ),
+        source_reference_coverage=CoverageFraction(
+            numerator=source_numerator, denominator=len(declared)
+        ),
+        orphaned_source_count=len(declared) - source_numerator,
+        unreferenced_artifact_count=sum(
+            1
+            for element in leaf_elements
+            if element.artifact_id not in leaf_links_by_id
+        )
+        + sum(
+            1
+            for element in narrative_elements
+            if element.artifact_id not in narrative_links_by_id
+        ),
+    )
+
+    return SourceInfluenceQualification(
+        valid=not unique,
+        status="pass" if not unique else "fail",
+        violations=tuple(unique),
+        metrics=metrics,
+    )
+
+
+def make_source_influence_provenance_block(
+    *,
+    declared_sources: Sequence[SourceInfluenceSourceRef],
+    leaf_links: Sequence[SourceInfluenceArtifactLink],
+    narrative_links: Sequence[SourceInfluenceArtifactLink],
+    qualification: SourceInfluenceQualification,
+) -> SourceInfluenceProvenanceBlock:
+    """Persist a qualification as the envelope's typed provenance block.
+
+    The declared source universe is stored deduplicated exactly once;
+    links and the computed metrics/status are stored as given.
+    """
+    return SourceInfluenceProvenanceBlock(
+        declared_sources=_canonical_declared_sources(declared_sources),
+        leaf_links=tuple(leaf_links),
+        narrative_links=tuple(narrative_links),
+        metrics=qualification.metrics,
+        status=qualification.status,
+    )
+
+
+# ---------------------------------------------------------------------------#
+# Envelope-level fail-closed validation
+# ---------------------------------------------------------------------------#
+
+
+def _leaf_nodes(root: AttackTreeNode) -> list[AttackTreeNode]:
+    """Collect all LEAF nodes from a tree, depth-first."""
+    if root.gate == GateType.LEAF:
+        return [root]
+    leaves: list[AttackTreeNode] = []
+    for child in root.children or ():
+        leaves.extend(_leaf_nodes(child))
+    return leaves
+
+
+def _artifact_elements(
+    leaves: Sequence[AttackTreeNode],
+    narrative: Any,
+) -> tuple[
+    tuple[SourceInfluenceArtifactElement, ...],
+    tuple[SourceInfluenceArtifactElement, ...],
+]:
+    """Derive leaf and narrative artifact elements from the envelope artifacts.
+
+    Only leaves that realize at least one projected step are provenance
+    participants; narrative steps always carry projected step IDs on
+    scenarios with a projection block.
+    """
+    leaf_elements = tuple(
+        SourceInfluenceArtifactElement(
+            artifact_id=leaf.id,
+            projected_step_ids=tuple(leaf.projected_step_ids),
+        )
+        for leaf in leaves
+        if leaf.projected_step_ids
+    )
+    narrative_elements = tuple(
+        SourceInfluenceArtifactElement(
+            artifact_id=str(step.step_number),
+            projected_step_ids=tuple(step.projected_step_ids),
+        )
+        for step in (narrative.steps if narrative is not None else ())
+    )
+    return leaf_elements, narrative_elements
+
+
+def validate_source_influence_provenance(
+    envelope: ScenarioEnvelope,
+) -> SourceInfluenceQualification:
+    """Validate an envelope's persisted source-influence provenance block.
+
+    An envelope without a provenance block passes vacuously (nothing is
+    declared, so nothing can be orphaned or unreferenced).  When a block
+    is present, the qualification is recomputed from the envelope's actual
+    artifacts and compared with the persisted metrics and status: stale
+    or tampered persisted metadata raises ``ValueError`` (fail closed),
+    and violations are returned for the publish gate to reject.
+
+    Only a typed :class:`SourceInfluenceProvenanceBlock` is treated as a
+    persisted block.  Anything else (``None`` or a stand-in such as a
+    ``MagicMock`` on adapter paths that patch the projection-traceability
+    gate to pass) qualifies vacuously, matching the envelope-validator
+    convention of the traceability gate.
+
+    Raises:
+        ValueError: When the persisted metrics/status disagree with the
+            recomputed deterministic qualification.
+    """
+    block: SourceInfluenceProvenanceBlock | None = envelope.source_influence_provenance
+    if not isinstance(block, SourceInfluenceProvenanceBlock):
+        return SourceInfluenceQualification(
+            valid=True,
+            status="pass",
+            violations=(),
+            metrics=EMPTY_METRICS,
+        )
+    leaves = (
+        _leaf_nodes(envelope.attack_tree.root)
+        if envelope.attack_tree is not None
+        else []
+    )
+    leaf_elements, narrative_elements = _artifact_elements(leaves, envelope.narrative)
+    result = qualify_source_influence_provenance(
+        selected_step_ids=tuple(envelope.projection.selected_step_ids),
+        declared_sources=block.declared_sources,
+        leaf_elements=leaf_elements,
+        narrative_elements=narrative_elements,
+        leaf_links=block.leaf_links,
+        narrative_links=block.narrative_links,
+    )
+    if result.metrics != block.metrics:
+        raise ValueError(
+            "persisted source-influence provenance metrics are inconsistent "
+            "with the envelope artifacts; the provenance block was mutated "
+            "after qualification"
+        )
+    if result.status != block.status:
+        raise ValueError(
+            "persisted source-influence qualification status is inconsistent "
+            "with the envelope artifacts; the provenance block was mutated "
+            "after qualification"
+        )
+    return result
