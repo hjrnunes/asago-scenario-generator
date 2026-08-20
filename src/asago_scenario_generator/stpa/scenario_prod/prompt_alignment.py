@@ -52,6 +52,32 @@ __all__ = [
 ]
 
 
+def _append_uca_row(
+    rows: list[dict[str, Any]],
+    steps: list[dict[str, Any]],
+    required_reference: str,
+) -> None:
+    """Append the final unsafe-control-action row when the document ends with it."""
+    if not steps:
+        return
+    last_step = steps[-1]
+    if last_step.get("step_kind") != "UNSAFE_CONTROL_ACTION":
+        return
+    rows.append(
+        {
+            "projection_id": last_step["source_id"],
+            "source_kind": "UNSAFE_CONTROL_ACTION",
+            "source_id": last_step["source_id"],
+            "assertion_id": "-",
+            "assertion_predicate": "-",
+            "step_id": last_step["step_id"],
+            "step_kind": "UNSAFE_CONTROL_ACTION",
+            "order": len(rows) + 1,
+            "required_reference": required_reference,
+        }
+    )
+
+
 def derive_projection_alignment_rows(
     doc: dict[str, Any],
 ) -> list[dict[str, Any]]:
@@ -87,22 +113,7 @@ def derive_projection_alignment_rows(
                 "required_reference": required_reference,
             }
         )
-    steps = doc.get("steps") or []
-    if steps and steps[-1].get("step_kind") == "UNSAFE_CONTROL_ACTION":
-        last_step = steps[-1]
-        rows.append(
-            {
-                "projection_id": last_step["source_id"],
-                "source_kind": "UNSAFE_CONTROL_ACTION",
-                "source_id": last_step["source_id"],
-                "assertion_id": "-",
-                "assertion_predicate": "-",
-                "step_id": last_step["step_id"],
-                "step_kind": "UNSAFE_CONTROL_ACTION",
-                "order": len(rows) + 1,
-                "required_reference": required_reference,
-            }
-        )
+    _append_uca_row(rows, doc.get("steps") or [], required_reference)
     return rows
 
 

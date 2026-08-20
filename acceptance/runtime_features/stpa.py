@@ -1497,7 +1497,6 @@ def _h_derive_alignment_twice(
     world.stpa_alignment_a = render_projection_alignment_table(doc)
     world.stpa_alignment_b = render_projection_alignment_table(doc)
     world.stpa_alignment_rows = derive_projection_alignment_rows(doc)
-    world.stpa_projection_doc = doc
     return True, ""
 
 
@@ -1659,16 +1658,17 @@ def _h_export_schema_version(
 def _h_export_identifies(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Then: both exports identify candidate|UCA reference "<value>"."""
     match = re.match(
-        r'both exports identify (?:candidate|UCA reference) "([^"]+)"$', text
+        r'both exports identify (candidate|UCA reference) "([^"]+)"$', text
     )
     if not match:
         return False, f"Could not parse export identity step: {text}"
     json_doc = json.loads(getattr(world, "stpa_json_export", "{}"))
     yaml_doc = yaml.safe_load(getattr(world, "stpa_yaml_export", "")) or {}
-    key = "candidate_id" if "candidate" in text else "uca_ref"
-    if json_doc.get(key) != match.group(1):
+    key = "candidate_id" if match.group(1) == "candidate" else "uca_ref"
+    expected = match.group(2)
+    if json_doc.get(key) != expected:
         return False, f"JSON export {key} does not match"
-    if yaml_doc.get(key) != match.group(1):
+    if yaml_doc.get(key) != expected:
         return False, f"YAML export {key} does not match"
     return True, ""
 
