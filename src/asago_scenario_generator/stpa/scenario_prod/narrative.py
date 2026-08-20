@@ -223,5 +223,5 @@ def derive_temporal_action_vector(
 
 
 # mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-14T09:07:18Z","module_hash":"c21de3b96d76b9f988e29ec0fc9da6cf06e74066f05aa1e092778025a4849002","functions":[{"id":"func/generate_narrative","name":"generate_narrative","line":24,"end_line":71,"hash":"45b1b3df64e80ba8fb67270e38c724c45d26465aab5ef860721774f9e98b9a65"},{"id":"func/build_narrative_prompts","name":"build_narrative_prompts","line":74,"end_line":110,"hash":"d0b3cea13fae2a4c9ab64cfdf9a4f79c13a5bba14c59fc6669b8eada7c990fef"}]}
+# {"version":1,"tested_at":"2026-08-20T10:32:24Z","module_hash":"88bd5befcb996150f2f9793268149fa13abdc9bf486ce7e83f04fb1ea8514927","functions":[{"id":"func/generate_narrative","name":"generate_narrative","line":44,"end_line":91,"hash":"45b1b3df64e80ba8fb67270e38c724c45d26465aab5ef860721774f9e98b9a65"},{"id":"func/build_narrative_prompts","name":"build_narrative_prompts","line":94,"end_line":130,"hash":"d0b3cea13fae2a4c9ab64cfdf9a4f79c13a5bba14c59fc6669b8eada7c990fef"},{"id":"func/derive_temporal_action_vector","name":"derive_temporal_action_vector","line":150,"end_line":222,"hash":"c9c3815f942598ff9bd6b67ca02a2cbcd446dd9934b5ee68957152a9653b9b63"}]}
 # mutate4py-manifest-end

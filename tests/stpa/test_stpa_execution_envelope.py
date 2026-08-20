@@ -98,6 +98,20 @@ class TestCausalFactorModels:
                 kind=CausalFactorKind.sensor_anomaly, source_id="", description="x"
             )
 
+    @pytest.mark.parametrize(
+        ("kind", "source_id"),
+        [
+            (CausalFactorKind.process_model_flaw, "FB-1-1"),
+            (CausalFactorKind.feedback_delay, "PM-1-1"),
+            (CausalFactorKind.sensor_anomaly, "CA-1-1"),
+            (CausalFactorKind.actuator_anomaly, "FB-1-1"),
+        ],
+    )
+    def test_factor_kind_requires_matching_namespace(self, kind, source_id):
+        """A factor cannot claim an identifier from another STPA namespace."""
+        with pytest.raises(ValidationError, match="namespace"):
+            _factor(kind, source_id)
+
     def test_predicate_mapping_is_canonical_per_kind(self):
         """Every factor kind maps to exactly one executable predicate."""
         assert (
@@ -211,6 +225,38 @@ class TestTemporalActionVectorValidation:
         with pytest.raises(ValidationError) as exc_info:
             TemporalActionVector.model_validate(broken)
         assert "canonical" in str(exc_info.value)
+
+    def test_vector_candidate_id_must_use_known_uca_type(self):
+        """A vector identity cannot contain an unknown UCA type."""
+        vector = _vector([_factor(CausalFactorKind.feedback_delay, "FB-1-1")])
+        broken = vector.model_dump()
+        broken["candidate_id"] = "EXEC:RESP-1:CA-1-1:NOT_A_UCA"
+        with pytest.raises(ValidationError, match="unknown UCA type"):
+            TemporalActionVector.model_validate(broken)
+
+    def test_vector_candidate_id_must_name_controller(self):
+        """A vector identity cannot omit its controller identifier."""
+        vector = _vector([_factor(CausalFactorKind.feedback_delay, "FB-1-1")])
+        broken = vector.model_dump()
+        broken["candidate_id"] = "EXEC::CA-1-1:WRONG_TIMING"
+        with pytest.raises(ValidationError, match="canonical"):
+            TemporalActionVector.model_validate(broken)
+
+    def test_vector_steps_must_be_reordered_by_canonical_sequence(self):
+        """Scenario steps cannot be reordered while retaining their IDs."""
+        vector = _vector(
+            [
+                _factor(CausalFactorKind.process_model_flaw, "PM-1-1"),
+                _factor(CausalFactorKind.feedback_delay, "FB-1-1"),
+            ]
+        )
+        broken = vector.model_dump()
+        broken["steps"][0], broken["steps"][1] = (
+            broken["steps"][1],
+            broken["steps"][0],
+        )
+        with pytest.raises(ValidationError, match="scenario step"):
+            TemporalActionVector.model_validate(broken)
 
     def test_steps_must_end_with_unsafe_control_action(self):
         """Non-empty steps end with the UCA step for the targeted action."""
@@ -462,6 +508,29 @@ class TestAssembleCandidateEnvelope:
         payload = json.loads(envelope.model_dump_json())
         restored = CandidateExecutionEnvelope.model_validate(payload)
         assert restored == envelope
+
+    def test_envelope_rejects_noncanonical_candidate_id(self):
+        """Envelope identity must agree with its structural fields."""
+        payload = _envelope([]).model_dump()
+        payload["candidate_id"] = "EXEC:RESP-1:CA-1-1:NOT_PROVIDED"
+        with pytest.raises(ValidationError, match="canonical candidate"):
+            CandidateExecutionEnvelope.model_validate(payload)
+
+    def test_envelope_rejects_noncanonical_uca_reference(self):
+        """Envelope UCA references cannot point at another UCA."""
+        payload = _envelope([]).model_dump()
+        payload["uca_ref"] = "RESP-1:CA-1-1:NOT_PROVIDED"
+        with pytest.raises(ValidationError, match="canonical UCA reference"):
+            CandidateExecutionEnvelope.model_validate(payload)
+
+    def test_envelope_rejects_vector_for_another_candidate(self):
+        """Envelope and temporal vector must share candidate identity."""
+        payload = _envelope([], derive_temporal_vector=True).model_dump()
+        payload["temporal_vector"]["candidate_id"] = (
+            "EXEC:RESP-2:CA-1-1:WRONG_TIMING"
+        )
+        with pytest.raises(ValidationError, match="temporal vector"):
+            CandidateExecutionEnvelope.model_validate(payload)
 
 
 class TestBackwardCompatibility:
