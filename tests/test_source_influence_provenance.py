@@ -808,6 +808,25 @@ class TestBlockSerialization:
         with pytest.raises(ValueError):
             parse_source_ref("raw-source")
 
+    @pytest.mark.parametrize(
+        ("source_type", "source_id"),
+        [
+            (SourceInfluenceSourceType.threat_source, "mitigation:T12"),
+            (SourceInfluenceSourceType.mitigation, "threat:M12"),
+            (SourceInfluenceSourceType.capability_constraint, "constraint: "),
+            (SourceInfluenceSourceType.threat_source, "threat:T12 "),
+        ],
+    )
+    def test_malformed_typed_source_ids_fail_closed(
+        self, source_type, source_id
+    ) -> None:
+        """A forged or blank prefix cannot masquerade as a typed record."""
+        with pytest.raises(ValidationError):
+            SourceInfluenceSourceRef(
+                source_type=source_type,
+                source_id=source_id,
+            )
+
 
 # ---------------------------------------------------------------------------#
 # Envelope-level validation

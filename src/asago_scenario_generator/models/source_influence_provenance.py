@@ -67,6 +67,25 @@ class SourceInfluenceSourceRef(BaseModel):
         ),
     )
 
+    @model_validator(mode="after")
+    def _source_id_matches_type(self) -> SourceInfluenceSourceRef:
+        """Reject IDs whose serialized prefix contradicts their type."""
+        expected_prefix = {
+            SourceInfluenceSourceType.threat_source: "threat:",
+            SourceInfluenceSourceType.mitigation: "mitigation:",
+            SourceInfluenceSourceType.capability_constraint: "constraint:",
+        }[self.source_type]
+        if not self.source_id.startswith(expected_prefix):
+            raise ValueError(
+                f"source_id {self.source_id!r} must use the "
+                f"{expected_prefix!r} prefix for source_type "
+                f"{self.source_type.value!r}"
+            )
+        identifier = self.source_id[len(expected_prefix) :]
+        if not identifier or identifier != identifier.strip():
+            raise ValueError("source_id must contain a non-blank identifier")
+        return self
+
     def __hash__(self) -> int:
         return hash((self.source_type, self.source_id))
 
