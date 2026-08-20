@@ -514,6 +514,7 @@ def assemble_final_envelope(
     import asago_scenario_generator.pipeline.generate as generate
     from asago_scenario_generator.pipeline.generate.assembly import (
         ProjectionTraceabilityError,
+        SourceInfluenceProvenanceError,
     )
     from asago_scenario_generator.pipeline.projection_validation import (
         validate_projection_traceability,
@@ -544,6 +545,20 @@ def assemble_final_envelope(
     if not result.valid:
         raise ProjectionTraceabilityError(
             result=result,
+            scenario_id=envelope.scenario_id,
+            seed_id=request.seed.seed_id,
+        )
+    # Source-influence provenance qualification (Wave 2 slice 5, fail-closed).
+    # Assembly always attaches the provenance block, and the gate rejects
+    # any envelope whose qualification fails.
+    from asago_scenario_generator.pipeline.source_influence import (
+        validate_source_influence_provenance,
+    )
+
+    provenance_result = validate_source_influence_provenance(envelope)
+    if not provenance_result.valid:
+        raise SourceInfluenceProvenanceError(
+            result=provenance_result,
             scenario_id=envelope.scenario_id,
             seed_id=request.seed.seed_id,
         )

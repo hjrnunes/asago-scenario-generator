@@ -6,6 +6,9 @@ import json
 import re
 import types
 import typing
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from functools import partial
 from types import SimpleNamespace
 from typing import Any
 
@@ -3507,6 +3510,1004 @@ def _h_alignment_row_order(world: World, text: str, examples: dict) -> tuple[boo
     return positions == sorted(positions), "canonical ID column is out of order"
 
 
+# ===========================================================================
+# Wave 2 slice 5: taxonomy source-influence provenance (TSIP)
+# ===========================================================================
+
+
+def _provenance_state(world: World) -> dict[str, Any]:
+    """Return the scenario-local source-influence provenance state."""
+    state = getattr(world, "provenance_state", None)
+    if state is None:
+        state = {
+            "projected_steps": [],
+            "declared_sources": [],
+            "leaf_elements": [],
+            "narrative_elements": [],
+            "leaf_links": [],
+            "narrative_links": [],
+            "result": None,
+            "block": None,
+            "serialized": None,
+        }
+        world.provenance_state = state
+    return state
+
+
+def _provenance_api() -> tuple[Any, Any]:
+    """Import the typed provenance models and engine modules lazily.
+
+    Returns the ``models.source_influence_provenance`` and
+    ``pipeline.source_influence`` modules so handlers can reference
+    ``sip.SourceInfluenceArtifactLink`` / ``si.qualify_source_influence_provenance``
+    without repeated narrow imports.
+    """
+    from asago_scenario_generator.models import source_influence_provenance as sip
+    from asago_scenario_generator.pipeline import source_influence as si
+
+    return sip, si
+
+
+def _provenance_elements(state: dict[str, Any]) -> tuple[list[Any], list[Any]]:
+    """Build leaf and narrative artifact elements from the fixture state."""
+    sip, _ = _provenance_api()
+    leaf_elements = [
+        sip.SourceInfluenceArtifactElement(
+            artifact_id=item["artifact_id"],
+            projected_step_ids=tuple(item["projected_step_ids"]),
+        )
+        for item in state["leaf_elements"]
+    ]
+    narrative_elements = [
+        sip.SourceInfluenceArtifactElement(
+            artifact_id=item["artifact_id"],
+            projected_step_ids=tuple(item["projected_step_ids"]),
+        )
+        for item in state["narrative_elements"]
+    ]
+    return leaf_elements, narrative_elements
+
+
+def _h_provenance_deterministic_offline(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Background: source-influence qualification never touches an LLM."""
+    return True, ""
+
+
+def _h_provenance_fixture_single(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'a source-influence projection fixture with projected step "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse projected step: {text}"
+    _provenance_state(world)["projected_steps"] = [match.group(1)]
+    return True, ""
+
+
+def _h_provenance_fixture_many(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'a source-influence projection fixture with projected steps "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse projected steps: {text}"
+    _provenance_state(world)["projected_steps"] = _csv(match.group(1))
+    return True, ""
+
+
+def _h_provenance_declares(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"the fixture declares threat sources? \"([^\"]+)\", "
+        r"mitigations? \"([^\"]+)\", and capability constraints? \"([^\"]+)\"",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse declared sources: {text}"
+    sip, _ = _provenance_api()
+    declared = _provenance_state(world)["declared_sources"]
+    for group in match.groups():
+        declared.extend(sip.parse_source_ref(item) for item in _csv(group))
+    return True, ""
+
+
+def _h_provenance_declares_unused(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r"the fixture also declares unused (?:threat source|mitigation|"
+        r'capability constraint) "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse unused source: {text}"
+    sip, _ = _provenance_api()
+    _provenance_state(world)["declared_sources"].append(
+        sip.parse_source_ref(match.group(1))
+    )
+    return True, ""
+
+
+def _h_provenance_leaf_realizes_single(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'projected leaf "([^"]+)" realizes projected step "([^"]+)"', text
+    )
+    if match is None:
+        return False, f"Could not parse leaf realization: {text}"
+    _provenance_state(world)["leaf_elements"].append(
+        {"artifact_id": match.group(1), "projected_step_ids": [match.group(2)]}
+    )
+    return True, ""
+
+
+def _h_provenance_leaf_realizes_many(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'projected leaves "([^"]+)" realize projected steps "([^"]+)"', text
+    )
+    if match is None:
+        return False, f"Could not parse leaf realizations: {text}"
+    leaves = _csv(match.group(1))
+    steps = _csv(match.group(2))
+    if len(leaves) != len(steps):
+        return False, "leaf and projected-step lists differ in length"
+    state = _provenance_state(world)
+    state["leaf_elements"].extend(
+        {"artifact_id": leaf, "projected_step_ids": [step]}
+        for leaf, step in zip(leaves, steps)
+    )
+    return True, ""
+
+
+def _h_provenance_narrative_realizes_single(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'narrative step "([^"]+)" realizes projected step "([^"]+)"', text
+    )
+    if match is None:
+        return False, f"Could not parse narrative realization: {text}"
+    _provenance_state(world)["narrative_elements"].append(
+        {"artifact_id": match.group(1), "projected_step_ids": [match.group(2)]}
+    )
+    return True, ""
+
+
+def _h_provenance_narrative_realizes_many(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'narrative steps "([^"]+)" realize projected steps "([^"]+)"', text
+    )
+    if match is None:
+        return False, f"Could not parse narrative realizations: {text}"
+    steps = _csv(match.group(1))
+    projected = _csv(match.group(2))
+    if len(steps) != len(projected):
+        return False, "narrative-step and projected-step lists differ in length"
+    state = _provenance_state(world)
+    state["narrative_elements"].extend(
+        {"artifact_id": step, "projected_step_ids": [proj]}
+        for step, proj in zip(steps, projected)
+    )
+    return True, ""
+
+
+def _make_links(
+    state: dict[str, Any],
+    elements_key: str,
+    kind: Any,
+    *,
+    refs: Sequence[Any] | None = None,
+    refs_for: Any = None,
+    step_id: str | None = None,
+    only_step: str | None = None,
+) -> list[Any]:
+    """Build provenance links for one artifact kind from the fixture elements.
+
+    Builds one link per element (optionally limited to elements realizing
+    ``only_step``).  Each link claims ``step_id`` when given, otherwise the
+    element's first projected step, and references ``refs`` when given,
+    otherwise the refs resolved by ``refs_for(element)``.
+    """
+    sip, _ = _provenance_api()
+    links: list[Any] = []
+    for item in state[elements_key]:
+        if only_step is not None and only_step not in item["projected_step_ids"]:
+            continue
+        source_refs = refs if refs is not None else refs_for(item)
+        links.append(
+            sip.SourceInfluenceArtifactLink(
+                artifact_kind=kind,
+                artifact_id=item["artifact_id"],
+                projected_step_id=(
+                    step_id if step_id is not None else item["projected_step_ids"][0]
+                ),
+                source_refs=tuple(source_refs),
+            )
+        )
+    return links
+
+
+def _attach_links(state: dict[str, Any], refs: Sequence[Any]) -> None:
+    """Attach one link per leaf and narrative element with the given refs."""
+    sip, _ = _provenance_api()
+    state["leaf_links"] = _make_links(
+        state,
+        "leaf_elements",
+        sip.SourceInfluenceArtifactKind.projected_leaf,
+        refs=refs,
+    )
+    state["narrative_links"] = _make_links(
+        state,
+        "narrative_elements",
+        sip.SourceInfluenceArtifactKind.narrative_step,
+        refs=refs,
+    )
+
+
+def _h_provenance_link_all(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"(?:both artifacts link(?: only)? to|every artifact link names) "
+        r"(?:threat source|threat sources) \"([^\"]+)\", "
+        r"(?:mitigation|mitigations) \"([^\"]+)\", and "
+        r"(?:capability constraint|capability constraints) \"([^\"]+)\"",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse artifact link sources: {text}"
+    sip, _ = _provenance_api()
+    refs = [
+        sip.parse_source_ref(item) for group in match.groups() for item in _csv(group)
+    ]
+    _attach_links(_provenance_state(world), refs)
+    return True, ""
+
+
+def _corresponding_refs_for_element(
+    state: dict[str, Any], element: dict[str, Any]
+) -> list[Any]:
+    """Resolve the declared source records corresponding to an element's step."""
+    declared = state["declared_sources"]
+    step_id = element["projected_step_ids"][0]
+    try:
+        index = state["projected_steps"].index(step_id)
+    except ValueError:
+        return list(declared)
+    by_type: dict[str, list[Any]] = {}
+    for ref in declared:
+        by_type.setdefault(ref.source_type.value, []).append(ref)
+    refs = [
+        by_type[source_type][index]
+        for source_type in ("threat_source", "mitigation", "capability_constraint")
+        if index < len(by_type.get(source_type, []))
+    ]
+    return refs
+
+
+def _h_provenance_link_corresponding(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Every artifact link names the sources corresponding to its step."""
+    state = _provenance_state(world)
+    sip, _ = _provenance_api()
+    refs_for = partial(_corresponding_refs_for_element, state)
+    state["leaf_links"] = _make_links(
+        state,
+        "leaf_elements",
+        sip.SourceInfluenceArtifactKind.projected_leaf,
+        refs_for=refs_for,
+    )
+    state["narrative_links"] = _make_links(
+        state,
+        "narrative_elements",
+        sip.SourceInfluenceArtifactKind.narrative_step,
+        refs_for=refs_for,
+    )
+    return True, ""
+
+
+def _h_provenance_omits_source_type(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'the artifact provenance omits source type "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse omitted source type: {text}"
+    source_type = examples.get("source_type") or match.group(1)
+    state = _provenance_state(world)
+    refs = [
+        ref for ref in state["declared_sources"] if ref.source_type.value != source_type
+    ]
+    _attach_links(state, refs)
+    return True, ""
+
+
+def _h_provenance_unknown_source(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'the projected leaf link refers to unknown source "([^"]+)"', text
+    )
+    if match is None:
+        return False, f"Could not parse unknown source: {text}"
+    state = _provenance_state(world)
+    sip, _ = _provenance_api()
+    refs = list(state["declared_sources"]) + [sip.parse_source_ref(match.group(1))]
+    state["leaf_links"] = _make_links(
+        state,
+        "leaf_elements",
+        sip.SourceInfluenceArtifactKind.projected_leaf,
+        refs=refs,
+    )
+    return True, ""
+
+
+def _h_provenance_claims_step(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'the projected leaf provenance link claims projected step "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse claimed step: {text}"
+    state = _provenance_state(world)
+    sip, _ = _provenance_api()
+    state["leaf_links"] = _make_links(
+        state,
+        "leaf_elements",
+        sip.SourceInfluenceArtifactKind.projected_leaf,
+        refs=state["declared_sources"],
+        step_id=match.group(1),
+    )
+    return True, ""
+
+
+def _h_provenance_only_step_linked(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'only the artifacts for projected step "([^"]+)" have provenance links',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse linked step: {text}"
+    state = _provenance_state(world)
+    step_id = match.group(1)
+    sip, _ = _provenance_api()
+    refs_for = partial(_corresponding_refs_for_element, state)
+    state["leaf_links"] = _make_links(
+        state,
+        "leaf_elements",
+        sip.SourceInfluenceArtifactKind.projected_leaf,
+        refs_for=refs_for,
+        only_step=step_id,
+    )
+    state["narrative_links"] = _make_links(
+        state,
+        "narrative_elements",
+        sip.SourceInfluenceArtifactKind.narrative_step,
+        refs_for=refs_for,
+        only_step=step_id,
+    )
+    return True, ""
+
+
+def _run_provenance_qualification(world: World) -> None:
+    """Run the deterministic engine and keep result, block, and serialization."""
+    state = _provenance_state(world)
+    _, si = _provenance_api()
+    leaf_elements, narrative_elements = _provenance_elements(state)
+    result = si.qualify_source_influence_provenance(
+        selected_step_ids=tuple(state["projected_steps"]),
+        declared_sources=state["declared_sources"],
+        leaf_elements=leaf_elements,
+        narrative_elements=narrative_elements,
+        leaf_links=state["leaf_links"],
+        narrative_links=state["narrative_links"],
+    )
+    block = si.make_source_influence_provenance_block(
+        declared_sources=state["declared_sources"],
+        leaf_links=state["leaf_links"],
+        narrative_links=state["narrative_links"],
+        qualification=result,
+    )
+    state["result"] = result
+    state["block"] = block
+    state["serialized"] = None
+
+
+def _serialize_provenance_envelope(world: World) -> dict[str, Any]:
+    """Serialize a minimal envelope carrying the provenance block."""
+    state = _provenance_state(world)
+    from asago_scenario_generator.models.scenario import ScenarioEnvelope
+
+    envelope = ScenarioEnvelope.model_construct(
+        scenario_id="scenario:v2:" + "a" * 64,
+        candidate_id="cand:v2:" + "b" * 32,
+        generated_at=datetime(2026, 8, 20, tzinfo=UTC),
+        generator_version="test",
+        initial_entry_point_id="ep:v1:" + "c" * 32,
+        source_influence_provenance=state["block"],
+    )
+    state["serialized"] = envelope.model_dump(mode="json", exclude_none=True)
+    return state["serialized"]
+
+
+def _h_provenance_qualified_and_serialized(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    _run_provenance_qualification(world)
+    _serialize_provenance_envelope(world)
+    return True, ""
+
+
+def _h_provenance_qualified(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    _run_provenance_qualification(world)
+    return True, ""
+
+
+def _h_provenance_passes(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    result = _provenance_state(world)["result"]
+    if result is None:
+        return False, "source-influence provenance was not qualified"
+    return result.valid and result.status == "pass", "qualification did not pass"
+
+
+def _h_provenance_metadata_block(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    block = _provenance_state(world)["block"]
+    if block is None:
+        return False, "no provenance block was built"
+    return bool(block.declared_sources), "provenance block metadata is incomplete"
+
+
+def _h_provenance_artifact_linked(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'(?:projected leaf|narrative step) "([^"]+)" is linked to '
+        r'(?:threat source|mitigation|capability constraint) "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse artifact link assertion: {text}"
+    sip, _ = _provenance_api()
+    state = _provenance_state(world)
+    artifact_id = match.group(1)
+    expected = sip.parse_source_ref(match.group(2))
+    links = (
+        state["narrative_links"] if "narrative step" in text else state["leaf_links"]
+    )
+    for link in links:
+        if link.artifact_id != artifact_id:
+            continue
+        if any(
+            ref.source_type == expected.source_type
+            and ref.source_id == expected.source_id
+            for ref in link.source_refs
+        ):
+            return True, ""
+    return False, f"artifact '{artifact_id}' is not linked to {expected.source_id}"
+
+
+def _h_provenance_metric_fraction(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'metric "([^"]+)" has numerator (\d+) and denominator (\d+)', text
+    )
+    if match is None:
+        return False, f"Could not parse metric fraction: {text}"
+    result = _provenance_state(world)["result"]
+    if result is None:
+        return False, "source-influence provenance was not qualified"
+    metrics = result.metrics
+    name = match.group(1)
+    expected = (int(match.group(2)), int(match.group(3)))
+    actual = (
+        metrics.projected_leaf_coverage
+        if name == "projected_leaf_coverage"
+        else metrics.narrative_step_coverage
+        if name == "narrative_step_coverage"
+        else metrics.source_reference_coverage
+        if name == "source_reference_coverage"
+        else None
+    )
+    if actual is None:
+        return False, f"unknown metric {name!r}"
+    return (actual.numerator, actual.denominator) == expected, (
+        f"{name} was {actual.numerator}/{actual.denominator}, "
+        f"expected {expected[0]}/{expected[1]}"
+    )
+
+
+def _h_provenance_metric_count(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'metric "([^"]+)" is (\d+)', text)
+    if match is None:
+        return False, f"Could not parse metric count: {text}"
+    result = _provenance_state(world)["result"]
+    if result is None:
+        return False, "source-influence provenance was not qualified"
+    expected = int(match.group(2))
+    name = match.group(1)
+    actual = (
+        result.metrics.orphaned_source_count
+        if name == "orphaned_source_count"
+        else result.metrics.unreferenced_artifact_count
+        if name == "unreferenced_artifact_count"
+        else None
+    )
+    if actual is None:
+        return False, f"unknown metric {name!r}"
+    return actual == expected, f"{name} was {actual}, expected {expected}"
+
+
+def _h_provenance_status(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r'source-influence qualification status is "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse qualification status: {text}"
+    state = _provenance_state(world)
+    result = state["result"]
+    if result is None:
+        return False, "source-influence provenance was not qualified"
+    return (
+        result.status == match.group(1) and state["block"].status == match.group(1),
+        "qualification status did not match",
+    )
+
+
+def _h_provenance_declared_once(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    block = _provenance_state(world)["block"]
+    if block is None:
+        return False, "no provenance block was built"
+    declared = block.declared_sources
+    return len({(r.source_type, r.source_id) for r in declared}) == len(declared), (
+        "a declared source record is stored more than once"
+    )
+
+
+def _h_provenance_links_resolve(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    block = _provenance_state(world)["block"]
+    if block is None:
+        return False, "no provenance block was built"
+    declared = {(r.source_type, r.source_id) for r in block.declared_sources}
+    links = block.narrative_links if "narrative" in text else block.leaf_links
+    for link in links:
+        for ref in link.source_refs:
+            if (ref.source_type, ref.source_id) not in declared:
+                return False, (
+                    f"link '{link.artifact_id}' resolves to undeclared source "
+                    f"'{ref.source_id}'"
+                )
+    return True, ""
+
+
+def _h_provenance_fails_code(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'qualification fails with violation code "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse violation code: {text}"
+    result = _provenance_state(world)["result"]
+    if result is None:
+        return False, "source-influence provenance was not qualified"
+    return (
+        result.valid is False
+        and any(v.code.value == match.group(1) for v in result.violations),
+        "expected violation code was not reported",
+    )
+
+
+def _h_provenance_identifies_source_type(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'the violation identifies source type "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse source type: {text}"
+    result = _provenance_state(world)["result"]
+    if result is None:
+        return False, "source-influence provenance was not qualified"
+    return any(
+        v.source_type is not None and v.source_type.value == match.group(1)
+        for v in result.violations
+    ), "no violation identified the source type"
+
+
+def _h_provenance_identifies_source(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'the violation identifies source "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse source identity: {text}"
+    result = _provenance_state(world)["result"]
+    if result is None:
+        return False, "source-influence provenance was not qualified"
+    return any(
+        v.source_id == match.group(1) for v in result.violations
+    ), "no violation identified the source"
+
+
+def _h_provenance_identifies_artifact(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'the violation identifies artifact "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse artifact identity: {text}"
+    result = _provenance_state(world)["result"]
+    if result is None:
+        return False, "source-influence provenance was not qualified"
+    return any(
+        v.artifact_id == match.group(1) for v in result.violations
+    ), "no violation identified the artifact"
+
+
+def _h_provenance_identifies_step(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'the violation identifies projected step "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse projected step identity: {text}"
+    result = _provenance_state(world)["result"]
+    if result is None:
+        return False, "source-influence provenance was not qualified"
+    return any(
+        v.projected_step_id == match.group(1) for v in result.violations
+    ), "no violation identified the projected step"
+
+
+def _h_provenance_not_published(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Fail-closed: an invalid qualification publishes no admitted envelope."""
+    result = _provenance_state(world)["result"]
+    if result is None:
+        return False, "source-influence provenance was not qualified"
+    if result.valid:
+        return False, "qualification passed; the envelope would be admitted"
+    return (
+        _provenance_state(world)["block"].status == "fail",
+        "a failing provenance block would still be published",
+    )
+
+
+def _h_provenance_serialized_block(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    serialized = _provenance_state(world).get("serialized")
+    if serialized is None:
+        return False, "no serialized envelope was produced"
+    block = serialized.get("source_influence_provenance")
+    if block is None:
+        return False, "serialized envelope lacks the provenance block"
+    return (
+        "declared_sources" in block
+        and "leaf_links" in block
+        and "narrative_links" in block,
+        "serialized provenance block is incomplete",
+    )
+
+
+def _h_provenance_serialized_refs(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    serialized = _provenance_state(world).get("serialized")
+    if serialized is None:
+        return False, "no serialized envelope was produced"
+    block = serialized.get("source_influence_provenance", {})
+    for group in ("leaf_links", "narrative_links"):
+        for item in block.get(group, []):
+            for ref in item.get("source_refs", []):
+                if "source_type" not in ref or "source_id" not in ref:
+                    return False, "a provenance reference lacks type or ID"
+    return True, ""
+
+
+def _h_provenance_serialized_metrics(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    serialized = _provenance_state(world).get("serialized")
+    if serialized is None:
+        return False, "no serialized envelope was produced"
+    metrics = serialized.get("source_influence_provenance", {}).get("metrics")
+    if metrics is None:
+        return False, "serialized envelope lacks qualification metrics"
+    return (
+        "projected_leaf_coverage" in metrics
+        and "narrative_step_coverage" in metrics
+        and "source_reference_coverage" in metrics
+        and "orphaned_source_count" in metrics
+        and "unreferenced_artifact_count" in metrics,
+        "serialized metrics are incomplete",
+    )
+
+
+def _h_provenance_serialized_status(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'the serialized qualification status is "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse serialized status: {text}"
+    serialized = _provenance_state(world).get("serialized")
+    if serialized is None:
+        return False, "no serialized envelope was produced"
+    status = serialized.get("source_influence_provenance", {}).get("status")
+    return status == match.group(1), "serialized qualification status did not match"
+
+
+# ---------------------------------------------------------------------------#
+# Generate-path provenance attachment (TSIP scenarios 10-12)
+# ---------------------------------------------------------------------------#
+
+
+def _tsip_generate_state(world: World) -> dict[str, Any]:
+    """Return the scenario-local generate-path provenance state."""
+    state = getattr(world, "tsip_generate_state", None)
+    if state is None:
+        state = {
+            "seed": None,
+            "profile": None,
+            "candidate": None,
+            "snapshot": None,
+            "envelope": None,
+        }
+        world.tsip_generate_state = state
+    return state
+
+
+def _h_tsip_script_seed(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r'deterministic generate scripts seed "([^"]+)" with threat "([^"]+)" '
+        r'and agentic threats "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse scripted seed: {text}"
+    from tests.helpers.source_influence_fixtures import builder_seed
+
+    _tsip_generate_state(world)["seed"] = builder_seed(
+        seed_id=match.group(1),
+        threat_id=match.group(2),
+        agentic=_csv(match.group(3)),
+    )
+    return True, ""
+
+
+def _h_tsip_script_constraints(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'the scripted capability profile declares capability constraints "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse scripted constraints: {text}"
+    from tests.helpers.source_influence_fixtures import (
+        kcx_profile,
+        projected_candidate,
+    )
+
+    state = _tsip_generate_state(world)
+    state["profile"] = kcx_profile(kc_subcodes=_csv(match.group(1)))
+    state["candidate"], state["snapshot"] = projected_candidate(state["profile"])
+    return True, ""
+
+
+def _h_tsip_script_returns(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    if not re.search(
+        r"deterministic generate returns a valid narrative, attack tree, and "
+        r"behavior spec",
+        text,
+    ):
+        return False, f"Could not parse scripted responses: {text}"
+    state = _tsip_generate_state(world)
+    if state["candidate"] is None:
+        return False, "scripted candidate was not projected"
+    from tests.helpers.source_influence_fixtures import (
+        make_actor,
+        make_narrative,
+        make_tree,
+    )
+
+    ingress_id = state["candidate"].canonical_ingress.entry_point_id
+    state["ingress_id"] = ingress_id
+    state["fixtures"] = {
+        "tree": make_tree(ingress_id),
+        "narrative": make_narrative(ingress_id),
+        "actor": make_actor(ingress_id),
+    }
+    return True, ""
+
+
+def _tsip_run_generate(world: World) -> tuple[bool, str]:
+    """Run the real generate path with scripted LLM responses."""
+    from contextlib import ExitStack
+    from unittest import mock
+
+    from asago_scenario_generator.llm.client import LLMResult
+    from asago_scenario_generator.pipeline.generate import generate_scenario
+    from tests.helpers.projection_factory import make_behavior_spec
+
+    state = _tsip_generate_state(world)
+    if state["seed"] is None or state["candidate"] is None:
+        return False, "scripted seed or candidate is missing"
+    fixtures = state.get("fixtures")
+    if fixtures is None:
+        return False, "scripted narrative, tree, and behavior spec are missing"
+    ingress_id = state["ingress_id"]
+
+    def _result():
+        return LLMResult(
+            content="ok", prompt_tokens=1, completion_tokens=1, duration_ms=1
+        )
+
+    with ExitStack() as stack:
+        stack.enter_context(
+            mock.patch(
+                "asago_scenario_generator.pipeline.generate._call_actor_profile",
+                return_value=(fixtures["actor"], _result(), None),
+            )
+        )
+        stack.enter_context(
+            mock.patch(
+                "asago_scenario_generator.pipeline.generate._call_narrative",
+                return_value=(fixtures["narrative"], _result()),
+            )
+        )
+        stack.enter_context(
+            mock.patch(
+                "asago_scenario_generator.pipeline.generate._call_attack_tree",
+                return_value=(fixtures["tree"], _result()),
+            )
+        )
+        stack.enter_context(
+            mock.patch(
+                "asago_scenario_generator.pipeline.generate._call_behavior_spec",
+                return_value=(make_behavior_spec(), _result()),
+            )
+        )
+        stack.enter_context(
+            mock.patch(
+                "asago_scenario_generator.pipeline.generate._validate_actor_type",
+                side_effect=lambda value: value,
+            )
+        )
+        stack.enter_context(
+            mock.patch(
+                "asago_scenario_generator.pipeline.generate.validate_actor_access_provenance",
+                return_value=[],
+            )
+        )
+        stack.enter_context(
+            mock.patch(
+                "asago_scenario_generator.pipeline.generate.narrative.validate_narrative_access_realization",
+                return_value=[],
+            )
+        )
+        stack.enter_context(
+            mock.patch(
+                "asago_scenario_generator.pipeline.generate.assembly._check_consistency",
+                return_value=[],
+            )
+        )
+        stack.enter_context(
+            mock.patch(
+                "asago_scenario_generator.pipeline.generate._warn_dominant_threat_id_crossref"
+            )
+        )
+        envelope, _ = generate_scenario(
+            seed=state["seed"],
+            profile=state["profile"],
+            client=SimpleNamespace(model="deterministic-fixture"),
+            use_case="deterministic generate provenance acceptance",
+            pinned_entry_point_id=ingress_id,
+            run_id="20260101T000000_0123456789abcdef0123456789abcdef",
+            candidate_id="",
+            projected_candidate=state["candidate"],
+            capability_snapshot=state["snapshot"],
+        )
+    state["envelope"] = envelope
+    from asago_scenario_generator.pipeline.source_influence import (
+        validate_source_influence_provenance,
+    )
+
+    provenance = _provenance_state(world)
+    provenance["block"] = envelope.source_influence_provenance
+    provenance["result"] = validate_source_influence_provenance(envelope)
+    provenance["serialized"] = None
+    return True, ""
+
+
+def _h_tsip_generate(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    if not re.search(r"^generate completes and admits the scenario envelope$", text):
+        return False, f"Could not parse generate step: {text}"
+    return _tsip_run_generate(world)
+
+
+def _h_tsip_generate_and_serialize(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    if not re.search(
+        r"^generate completes, admits the envelope, and serializes it$", text
+    ):
+        return False, f"Could not parse generate step: {text}"
+    ok, message = _tsip_run_generate(world)
+    if not ok:
+        return ok, message
+    envelope = _tsip_generate_state(world)["envelope"]
+    _provenance_state(world)["serialized"] = envelope.model_dump(
+        mode="json", exclude_none=True
+    )
+    return True, ""
+
+
+def _h_tsip_declares_source(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r"the admitted envelope declares (?:agentic )?"
+        r'(threat source|mitigation|capability constraint) "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse declared-source assertion: {text}"
+    sip, _ = _provenance_api()
+    type_by_name = {
+        "threat source": sip.SourceInfluenceSourceType.threat_source,
+        "mitigation": sip.SourceInfluenceSourceType.mitigation,
+        "capability constraint": sip.SourceInfluenceSourceType.capability_constraint,
+    }
+    block = _provenance_state(world)["block"]
+    if block is None:
+        return False, "no provenance block was attached by generate"
+    expected_type = type_by_name[match.group(1)]
+    return any(
+        ref.source_type is expected_type and ref.source_id == match.group(2)
+        for ref in block.declared_sources
+    ), f"declared sources lack {match.group(1)} {match.group(2)!r}"
+
+
+def _h_tsip_links_complete(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    if not re.search(r"every projected leaf and narrative step link is complete", text):
+        return False, f"Could not parse link-completeness assertion: {text}"
+    sip, _ = _provenance_api()
+    block = _provenance_state(world)["block"]
+    if block is None:
+        return False, "no provenance block was attached by generate"
+    declared = {(ref.source_type, ref.source_id) for ref in block.declared_sources}
+    referenced: set[tuple[Any, str]] = set()
+    for link in block.leaf_links + block.narrative_links:
+        types = {ref.source_type for ref in link.source_refs}
+        if types != set(sip.SourceInfluenceSourceType):
+            return False, f"link {link.artifact_id!r} omits a source type"
+        for ref in link.source_refs:
+            key = (ref.source_type, ref.source_id)
+            if key not in declared:
+                return False, f"link {link.artifact_id!r} resolves outside the universe"
+            referenced.add(key)
+    if referenced != declared:
+        orphaned = sorted(source_id for _, source_id in declared - referenced)
+        return False, f"declared sources never referenced: {orphaned}"
+    return True, ""
+
+
 def register(api: object) -> None:
     """Register taxonomy acceptance handlers with regex-based extraction."""
     api.set_feature(None)
@@ -4259,6 +5260,187 @@ def register(api: object) -> None:
         (
             r"no canonical step is rendered with a numeric positional ID",
             _h_prompt_no_numeric_ids,
+        ),
+        # ------------------------------------------------------------------
+        # Wave 2 slice 5: taxonomy source-influence provenance (TSIP)
+        # ------------------------------------------------------------------
+        (
+            r"taxonomy source-influence qualification uses deterministic offline inputs",
+            _h_provenance_deterministic_offline,
+        ),
+        (
+            r'a source-influence projection fixture with projected step "([^"]+)"',
+            _h_provenance_fixture_single,
+        ),
+        (
+            r'a source-influence projection fixture with projected steps "([^"]+)"',
+            _h_provenance_fixture_many,
+        ),
+        (
+            r'the fixture declares threat sources? "([^"]+)", mitigations? "([^"]+)", '
+            r'and capability constraints? "([^"]+)"',
+            _h_provenance_declares,
+        ),
+        (
+            r"the fixture also declares unused (?:threat source|mitigation|"
+            r'capability constraint) "([^"]+)"',
+            _h_provenance_declares_unused,
+        ),
+        (
+            r'projected leaf "([^"]+)" realizes projected step "([^"]+)"',
+            _h_provenance_leaf_realizes_single,
+        ),
+        (
+            r'projected leaves "([^"]+)" realize projected steps "([^"]+)"',
+            _h_provenance_leaf_realizes_many,
+        ),
+        (
+            r'narrative step "([^"]+)" realizes projected step "([^"]+)"',
+            _h_provenance_narrative_realizes_single,
+        ),
+        (
+            r'narrative steps "([^"]+)" realize projected steps "([^"]+)"',
+            _h_provenance_narrative_realizes_many,
+        ),
+        (
+            r"(?:both artifacts link(?: only)? to|every artifact link names) "
+            r'(?:threat source|threat sources) "([^"]+)", '
+            r'(?:mitigation|mitigations) "([^"]+)", and '
+            r'(?:capability constraint|capability constraints) "([^"]+)"',
+            _h_provenance_link_all,
+        ),
+        (
+            r"every artifact link names its corresponding threat source, "
+            r"mitigation, and capability constraint",
+            _h_provenance_link_corresponding,
+        ),
+        (
+            r'the artifact provenance omits source type "([^"]+)"',
+            _h_provenance_omits_source_type,
+        ),
+        (
+            r'the projected leaf link refers to unknown source "([^"]+)"',
+            _h_provenance_unknown_source,
+        ),
+        (
+            r'the projected leaf provenance link claims projected step "([^"]+)"',
+            _h_provenance_claims_step,
+        ),
+        (
+            r'only the artifacts for projected step "([^"]+)" have provenance links',
+            _h_provenance_only_step_linked,
+        ),
+        (
+            r"source-influence provenance is qualified and the scenario "
+            r"envelope is serialized",
+            _h_provenance_qualified_and_serialized,
+        ),
+        (
+            r"^source-influence provenance is qualified$",
+            _h_provenance_qualified,
+        ),
+        (r"^qualification passes$", _h_provenance_passes),
+        (
+            r"the scenario envelope metadata contains a typed source-influence "
+            r"provenance block",
+            _h_provenance_metadata_block,
+        ),
+        (
+            r'(?:projected leaf|narrative step) "([^"]+)" is linked to '
+            r'(?:threat source|mitigation|capability constraint) "([^"]+)"',
+            _h_provenance_artifact_linked,
+        ),
+        (
+            r'metric "([^"]+)" has numerator (\d+) and denominator (\d+)',
+            _h_provenance_metric_fraction,
+        ),
+        (r'metric "([^"]+)" is (\d+)', _h_provenance_metric_count),
+        (
+            r'source-influence qualification status is "([^"]+)"',
+            _h_provenance_status,
+        ),
+        (
+            r"each declared source record is stored once",
+            _h_provenance_declared_once,
+        ),
+        (
+            r"every (?:projected leaf|narrative step) link resolves to the "
+            r"shared typed source records",
+            _h_provenance_links_resolve,
+        ),
+        (
+            r'qualification fails with violation code "([^"]+)"',
+            _h_provenance_fails_code,
+        ),
+        (
+            r'the violation identifies source type "([^"]+)"',
+            _h_provenance_identifies_source_type,
+        ),
+        (
+            r'the violation identifies source "([^"]+)"',
+            _h_provenance_identifies_source,
+        ),
+        (
+            r'the violation identifies artifact "([^"]+)"',
+            _h_provenance_identifies_artifact,
+        ),
+        (
+            r'the violation identifies projected step "([^"]+)"',
+            _h_provenance_identifies_step,
+        ),
+        (
+            r"no admitted scenario envelope is published",
+            _h_provenance_not_published,
+        ),
+        (
+            r"the serialized envelope contains a source-influence provenance block",
+            _h_provenance_serialized_block,
+        ),
+        (
+            r"each provenance reference contains an explicit source type and "
+            r"source ID",
+            _h_provenance_serialized_refs,
+        ),
+        (
+            r"the serialized envelope contains source-influence qualification "
+            r"metrics",
+            _h_provenance_serialized_metrics,
+        ),
+        (
+            r'the serialized qualification status is "([^"]+)"',
+            _h_provenance_serialized_status,
+        ),
+        (
+            r'deterministic generate scripts seed "([^"]+)" with threat '
+            r'"([^"]+)" and agentic threats "([^"]+)"',
+            _h_tsip_script_seed,
+        ),
+        (
+            r"the scripted capability profile declares capability "
+            r'constraints "([^"]+)"',
+            _h_tsip_script_constraints,
+        ),
+        (
+            r"deterministic generate returns a valid narrative, attack tree, "
+            r"and behavior spec",
+            _h_tsip_script_returns,
+        ),
+        (
+            r"^generate completes and admits the scenario envelope$",
+            _h_tsip_generate,
+        ),
+        (
+            r"^generate completes, admits the envelope, and serializes it$",
+            _h_tsip_generate_and_serialize,
+        ),
+        (
+            r"^the admitted envelope declares (?:agentic )?"
+            r"(threat source|mitigation|capability constraint) \"([^\"]+)\"$",
+            _h_tsip_declares_source,
+        ),
+        (
+            r"^every projected leaf and narrative step link is complete$",
+            _h_tsip_links_complete,
         ),
     )
     for pattern, handler in registrations:

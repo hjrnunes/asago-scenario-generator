@@ -25,6 +25,10 @@ from asago_scenario_generator.models.projection_envelope import (
     ProjectionEnvelopeBlock,
     ProjectionTraceabilityResult,
 )
+from asago_scenario_generator.models.source_influence_provenance import (
+    SourceInfluenceProvenanceBlock,
+    SourceInfluenceQualification,
+)
 from asago_scenario_generator.models.scenario import (
     ActorProfile,
     ArchitectureMatch,
@@ -56,6 +60,9 @@ from asago_scenario_generator.pipeline.generate.tree_validation import (
     _check_consistency,
 )
 from asago_scenario_generator.pipeline.generate.zones import active_narrative_zones
+from asago_scenario_generator.pipeline.source_influence_builder import (
+    assemble_source_influence_provenance,
+)
 from asago_scenario_generator.pipeline.projection import (
     CapabilityFactSnapshot,
     ProjectedCandidate,
@@ -134,6 +141,36 @@ class ProjectionTraceabilityError(GenerationError):
         )
         super().__init__(
             f"Projection traceability violations for {scenario_id}: {detail}",
+            call_log_entries=call_log_entries,
+            seed_id=seed_id,
+        )
+        self.result = result
+        self.scenario_id = scenario_id
+
+
+class SourceInfluenceProvenanceError(GenerationError):
+    """Typed fail-closed error for source-influence provenance violations.
+
+    Raised on the production generation path when
+    :func:`validate_source_influence_provenance` finds violations.
+    Carries the typed :class:`SourceInfluenceQualification` for callers
+    to consume (retry/quarantine routing).  Generation does not retry
+    here; the lifecycle owner routes the failure.
+
+    This is a *recoverable* error (subclass of GenerationError): the
+    runner catches it per-scenario and continues to the next candidate.
+    """
+
+    def __init__(
+        self,
+        result: SourceInfluenceQualification,
+        scenario_id: str,
+        call_log_entries: list[dict] | None = None,
+        seed_id: str = "",
+    ) -> None:
+        detail = "; ".join(f"[{v.code.value}] {v.detail}" for v in result.violations)
+        super().__init__(
+            f"Source-influence provenance violations for {scenario_id}: {detail}",
             call_log_entries=call_log_entries,
             seed_id=seed_id,
         )
@@ -692,6 +729,7 @@ def _assemble_envelope(
     attempt: int = 1,
     projected_candidate: ProjectedCandidate,
     capability_snapshot: CapabilityFactSnapshot,
+    source_influence_provenance: SourceInfluenceProvenanceBlock | None = None,
 ) -> ScenarioEnvelope:
     _validate_run_id(run_id)
     # Derive candidate_id from projected candidate if not supplied.
@@ -789,6 +827,23 @@ def _assemble_envelope(
         capability_snapshot,
     )
 
+    # Source-influence provenance (Wave 2 slice 5, QA-TSIP contract):
+    # generate always attaches the typed provenance block.  When the
+    # caller supplies an explicit block it is preserved; otherwise the
+    # block is assembled deterministically from the seed's risk inputs
+    # (threat sources), the committed OWASP playbooks (mitigations), the
+    # capability profile's KC sub-codes (constraints), and the actual
+    # projected leaf/narrative artifacts.  The finalization gate then
+    # re-validates the persisted qualification fail-closed.
+    if source_influence_provenance is None:
+        source_influence_provenance = assemble_source_influence_provenance(
+            seed=seed,
+            capability_snapshot=capability_snapshot,
+            attack_tree=attack_tree,
+            narrative=narrative,
+            selected_step_ids=projected_candidate.projection.selected_step_ids,
+        )
+
     # Use the canonical ingress ID from the projection.
     effective_entry_point_id = projected_candidate.canonical_ingress.entry_point_id
 
@@ -809,6 +864,7 @@ def _assemble_envelope(
         faceting=faceting,
         priority=priority,
         generation=generation,
+        source_influence_provenance=source_influence_provenance,
     )
 
 
@@ -1494,6 +1550,22 @@ def _generate_scenario_compatibility(
             seed_id=seed.seed_id,
         )
 
+    # Run source-influence provenance qualification (Wave 2 slice 5).
+    # Fail-closed: assembly always attaches the provenance block, and its
+    # qualification must pass or the scenario is never returned.
+    from asago_scenario_generator.pipeline.source_influence import (
+        validate_source_influence_provenance,
+    )
+
+    provenance_result = validate_source_influence_provenance(envelope)
+    if not provenance_result.valid:
+        raise SourceInfluenceProvenanceError(
+            result=provenance_result,
+            scenario_id=envelope.scenario_id,
+            call_log_entries=call_log_entries,
+            seed_id=seed.seed_id,
+        )
+
     # Update call log entries with the final scenario_id (replacing partial).
     for entry in call_log_entries:
         entry["scenario_id"] = envelope.scenario_id
@@ -1591,8 +1663,8 @@ def write_scenario_outputs(
     this call on ordinary failure so no partial pair is left behind.
     Pre-existing or orphan state is a fatal integrity error.
 
-    Validates projection traceability before writing so callers cannot
-    bypass generation validation (422o.4).
+    Validates projection traceability and source-influence provenance
+    before writing so callers cannot bypass generation validation.
 
     Returns:
         Tuple of (envelope_path, feature_path_or_none).
@@ -1602,6 +1674,8 @@ def write_scenario_outputs(
             a stem mismatch / orphan feature is detected.
         ProjectionTraceabilityError: If projection traceability
             validation fails.
+        SourceInfluenceProvenanceError: If the envelope's source-influence
+            provenance block fails qualification.
     """
     # Validate projection traceability before writing (422o.4 fail-closed).
     from asago_scenario_generator.pipeline.projection_validation import (
@@ -1612,6 +1686,20 @@ def write_scenario_outputs(
     if not traceability_result.valid:
         raise ProjectionTraceabilityError(
             result=traceability_result,
+            scenario_id=envelope.scenario_id,
+        )
+
+    # Source-influence provenance qualification (Wave 2 slice 5, fail-closed):
+    # generation publishes only envelopes whose provenance block qualifies;
+    # a stale, tampered, or incomplete block is never written to disk.
+    from asago_scenario_generator.pipeline.source_influence import (
+        validate_source_influence_provenance,
+    )
+
+    provenance_result = validate_source_influence_provenance(envelope)
+    if not provenance_result.valid:
+        raise SourceInfluenceProvenanceError(
+            result=provenance_result,
             scenario_id=envelope.scenario_id,
         )
 
