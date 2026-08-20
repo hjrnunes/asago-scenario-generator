@@ -24,7 +24,7 @@ qualification so persisted metadata can be verified for staleness.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from asago_scenario_generator.models.attack_tree import GateType, AttackTreeNode
 from asago_scenario_generator.models.source_influence_provenance import (
@@ -42,7 +42,10 @@ from asago_scenario_generator.models.source_influence_provenance import (
 )
 
 if TYPE_CHECKING:
-    from asago_scenario_generator.models.scenario import ScenarioEnvelope
+    from asago_scenario_generator.models.scenario import (
+        NarrativeLayer,
+        ScenarioEnvelope,
+    )
 
 EMPTY_METRICS = SourceInfluenceMetrics(
     projected_leaf_coverage=CoverageFraction(numerator=0, denominator=0),
@@ -85,6 +88,195 @@ def _canonical_declared_sources(
     return tuple(result)
 
 
+def _step_mismatch_violation(
+    kind: SourceInfluenceArtifactKind,
+    artifact_id: str,
+    claimed_step_id: str,
+    realized_step_ids: tuple[str, ...],
+) -> SourceInfluenceViolation:
+    """Violation for a link claiming a projected step the artifact lacks."""
+    return SourceInfluenceViolation(
+        code=SourceInfluenceViolationCode.provenance_projected_step_mismatch,
+        detail=(
+            f"{kind.value} '{artifact_id}' provenance link claims projected "
+            f"step '{claimed_step_id}' but the artifact realizes "
+            f"{realized_step_ids}"
+        ),
+        artifact_id=artifact_id,
+        projected_step_id=claimed_step_id,
+    )
+
+
+def _unknown_reference_violation(
+    kind: SourceInfluenceArtifactKind,
+    artifact_id: str,
+    ref: SourceInfluenceSourceRef,
+) -> SourceInfluenceViolation:
+    """Violation for a link referencing a source outside the universe."""
+    return SourceInfluenceViolation(
+        code=SourceInfluenceViolationCode.unknown_source_reference,
+        detail=(
+            f"{kind.value} '{artifact_id}' references source '{ref.source_id}' "
+            f"which is not declared in the source-influence provenance "
+            f"universe"
+        ),
+        source_type=ref.source_type,
+        source_id=ref.source_id,
+        artifact_id=artifact_id,
+    )
+
+
+def _missing_source_type_violations(
+    kind: SourceInfluenceArtifactKind,
+    artifact_id: str,
+    present_types: set[SourceInfluenceSourceType],
+) -> list[SourceInfluenceViolation]:
+    """Violations for every source type a link omits."""
+    return [
+        SourceInfluenceViolation(
+            code=SourceInfluenceViolationCode.missing_source_provenance,
+            detail=(
+                f"{kind.value} '{artifact_id}' provenance omits source type "
+                f"'{source_type.value}'"
+            ),
+            source_type=source_type,
+            artifact_id=artifact_id,
+        )
+        for source_type in SourceInfluenceSourceType
+        if source_type not in present_types
+    ]
+
+
+def _orphaned_source_violations(
+    declared: Sequence[SourceInfluenceSourceRef],
+    referenced_ids: set[tuple[SourceInfluenceSourceType, str]],
+) -> list[SourceInfluenceViolation]:
+    """Violations for declared source records never referenced by any link."""
+    violations: list[SourceInfluenceViolation] = []
+    for ref in declared:
+        if (ref.source_type, ref.source_id) not in referenced_ids:
+            violations.append(
+                SourceInfluenceViolation(
+                    code=SourceInfluenceViolationCode.orphaned_source_provenance,
+                    detail=(
+                        f"declared source '{ref.source_id}' is not referenced "
+                        f"by any projected leaf or narrative step link"
+                    ),
+                    source_type=ref.source_type,
+                    source_id=ref.source_id,
+                )
+            )
+    return violations
+
+
+def _unreferenced_step_violations(
+    selected_step_ids: Sequence[str],
+    linked_steps: set[str],
+) -> list[SourceInfluenceViolation]:
+    """Violations for projected steps no linked artifact realizes."""
+    violations: list[SourceInfluenceViolation] = []
+    for step_id in selected_step_ids:
+        if step_id not in linked_steps:
+            violations.append(
+                SourceInfluenceViolation(
+                    code=SourceInfluenceViolationCode.unreferenced_source_influence_artifact,
+                    detail=(
+                        f"no projected leaf or narrative step artifact "
+                        f"realizing projected step '{step_id}' carries "
+                        f"source-influence provenance links"
+                    ),
+                    projected_step_id=step_id,
+                )
+            )
+    return violations
+
+
+def _deduplicate_violations(
+    violations: Sequence[SourceInfluenceViolation],
+) -> list[SourceInfluenceViolation]:
+    """Deduplicate violations by identity-bearing fields, preserving order."""
+    seen: set[tuple[str, str, str | None, str | None, str | None]] = set()
+    unique: list[SourceInfluenceViolation] = []
+    for violation in violations:
+        key = (
+            violation.code.value,
+            violation.source_type.value if violation.source_type else "",
+            violation.source_id,
+            violation.artifact_id,
+            violation.projected_step_id,
+        )
+        if key not in seen:
+            seen.add(key)
+            unique.append(violation)
+    return unique
+
+
+def _qualify_artifact_link(
+    *,
+    element: SourceInfluenceArtifactElement,
+    link: SourceInfluenceArtifactLink,
+    kind: SourceInfluenceArtifactKind,
+    declared_ids: set[tuple[SourceInfluenceSourceType, str]],
+    violations: list[SourceInfluenceViolation],
+    referenced_ids: set[tuple[SourceInfluenceSourceType, str]],
+) -> None:
+    """Qualify one artifact link, appending its typed violations."""
+    if link.projected_step_id not in element.projected_step_ids:
+        violations.append(
+            _step_mismatch_violation(
+                kind,
+                element.artifact_id,
+                link.projected_step_id,
+                element.projected_step_ids,
+            )
+        )
+    present_types: set[SourceInfluenceSourceType] = set()
+    for ref in link.source_refs:
+        present_types.add(ref.source_type)
+        key = (ref.source_type, ref.source_id)
+        if key not in declared_ids:
+            violations.append(
+                _unknown_reference_violation(kind, element.artifact_id, ref)
+            )
+        else:
+            referenced_ids.add(key)
+    violations.extend(
+        _missing_source_type_violations(kind, element.artifact_id, present_types)
+    )
+
+
+def _qualify_artifact_kind(
+    *,
+    elements: Sequence[SourceInfluenceArtifactElement],
+    links_by_id: dict[str, SourceInfluenceArtifactLink],
+    kind: SourceInfluenceArtifactKind,
+    declared_ids: set[tuple[SourceInfluenceSourceType, str]],
+    violations: list[SourceInfluenceViolation],
+    referenced_ids: set[tuple[SourceInfluenceSourceType, str]],
+    linked_steps: set[str],
+) -> tuple[int, int]:
+    """Qualify one artifact kind; return (covered count, unreferenced count)."""
+    covered_count = 0
+    unreferenced_count = 0
+    for element in elements:
+        link = links_by_id.get(element.artifact_id)
+        if link is None:
+            unreferenced_count += 1
+            continue
+        if link.source_refs:
+            covered_count += 1
+        linked_steps.update(element.projected_step_ids)
+        _qualify_artifact_link(
+            element=element,
+            link=link,
+            kind=kind,
+            declared_ids=declared_ids,
+            violations=violations,
+            referenced_ids=referenced_ids,
+        )
+    return covered_count, unreferenced_count
+
+
 def qualify_source_influence_provenance(
     *,
     selected_step_ids: Sequence[str],
@@ -118,147 +310,43 @@ def qualify_source_influence_provenance(
 
     violations: list[SourceInfluenceViolation] = []
     referenced_ids: set[tuple[SourceInfluenceSourceType, str]] = set()
-    covered_leaf_ids: set[str] = set()
-    covered_narrative_ids: set[str] = set()
     linked_steps: set[str] = set()
 
-    for elements, links_by_id, kind in (
-        (leaf_elements, leaf_links_by_id, SourceInfluenceArtifactKind.projected_leaf),
-        (
-            narrative_elements,
-            narrative_links_by_id,
-            SourceInfluenceArtifactKind.narrative_step,
-        ),
-    ):
-        covered_ids = (
-            covered_leaf_ids
-            if kind is SourceInfluenceArtifactKind.projected_leaf
-            else covered_narrative_ids
-        )
-        for element in elements:
-            link = links_by_id.get(element.artifact_id)
-            if link is None:
-                continue
-            if link.source_refs:
-                covered_ids.add(element.artifact_id)
-            linked_steps.update(element.projected_step_ids)
-            if link.projected_step_id not in element.projected_step_ids:
-                violations.append(
-                    SourceInfluenceViolation(
-                        code=SourceInfluenceViolationCode.provenance_projected_step_mismatch,
-                        detail=(
-                            f"{kind.value} '{element.artifact_id}' provenance "
-                            f"link claims projected step "
-                            f"'{link.projected_step_id}' but the artifact "
-                            f"realizes {element.projected_step_ids}"
-                        ),
-                        artifact_id=element.artifact_id,
-                        projected_step_id=link.projected_step_id,
-                    )
-                )
-            present_types: set[SourceInfluenceSourceType] = set()
-            for ref in link.source_refs:
-                present_types.add(ref.source_type)
-                key = (ref.source_type, ref.source_id)
-                if key not in declared_ids:
-                    violations.append(
-                        SourceInfluenceViolation(
-                            code=SourceInfluenceViolationCode.unknown_source_reference,
-                            detail=(
-                                f"{kind.value} '{element.artifact_id}' "
-                                f"references source '{ref.source_id}' which "
-                                f"is not declared in the source-influence "
-                                f"provenance universe"
-                            ),
-                            source_type=ref.source_type,
-                            source_id=ref.source_id,
-                            artifact_id=element.artifact_id,
-                        )
-                    )
-                else:
-                    referenced_ids.add(key)
-            for source_type in SourceInfluenceSourceType:
-                if source_type not in present_types:
-                    violations.append(
-                        SourceInfluenceViolation(
-                            code=SourceInfluenceViolationCode.missing_source_provenance,
-                            detail=(
-                                f"{kind.value} '{element.artifact_id}' "
-                                f"provenance omits source type "
-                                f"'{source_type.value}'"
-                            ),
-                            source_type=source_type,
-                            artifact_id=element.artifact_id,
-                        )
-                    )
+    leaf_covered, leaf_unreferenced = _qualify_artifact_kind(
+        elements=leaf_elements,
+        links_by_id=leaf_links_by_id,
+        kind=SourceInfluenceArtifactKind.projected_leaf,
+        declared_ids=declared_ids,
+        violations=violations,
+        referenced_ids=referenced_ids,
+        linked_steps=linked_steps,
+    )
+    narrative_covered, narrative_unreferenced = _qualify_artifact_kind(
+        elements=narrative_elements,
+        links_by_id=narrative_links_by_id,
+        kind=SourceInfluenceArtifactKind.narrative_step,
+        declared_ids=declared_ids,
+        violations=violations,
+        referenced_ids=referenced_ids,
+        linked_steps=linked_steps,
+    )
+    violations.extend(_orphaned_source_violations(declared, referenced_ids))
+    violations.extend(_unreferenced_step_violations(selected_step_ids, linked_steps))
+    unique = _deduplicate_violations(violations)
 
-    for ref in declared:
-        if (ref.source_type, ref.source_id) not in referenced_ids:
-            violations.append(
-                SourceInfluenceViolation(
-                    code=SourceInfluenceViolationCode.orphaned_source_provenance,
-                    detail=(
-                        f"declared source '{ref.source_id}' is not referenced "
-                        f"by any projected leaf or narrative step link"
-                    ),
-                    source_type=ref.source_type,
-                    source_id=ref.source_id,
-                )
-            )
-
-    for step_id in selected_step_ids:
-        if step_id not in linked_steps:
-            violations.append(
-                SourceInfluenceViolation(
-                    code=SourceInfluenceViolationCode.unreferenced_source_influence_artifact,
-                    detail=(
-                        f"no projected leaf or narrative step artifact "
-                        f"realizing projected step '{step_id}' carries "
-                        f"source-influence provenance links"
-                    ),
-                    projected_step_id=step_id,
-                )
-            )
-
-    # Deduplicate by identity-bearing fields while preserving order.
-    seen: set[tuple[str, str, str | None, str | None, str | None]] = set()
-    unique: list[SourceInfluenceViolation] = []
-    for violation in violations:
-        key = (
-            violation.code.value,
-            violation.source_type.value if violation.source_type else "",
-            violation.source_id,
-            violation.artifact_id,
-            violation.projected_step_id,
-        )
-        if key not in seen:
-            seen.add(key)
-            unique.append(violation)
-
-    leaf_numerator = len(covered_leaf_ids)
-    narrative_numerator = len(covered_narrative_ids)
     source_numerator = len(referenced_ids & declared_ids)
     metrics = SourceInfluenceMetrics(
         projected_leaf_coverage=CoverageFraction(
-            numerator=leaf_numerator, denominator=len(leaf_elements)
+            numerator=leaf_covered, denominator=len(leaf_elements)
         ),
         narrative_step_coverage=CoverageFraction(
-            numerator=narrative_numerator, denominator=len(narrative_elements)
+            numerator=narrative_covered, denominator=len(narrative_elements)
         ),
         source_reference_coverage=CoverageFraction(
             numerator=source_numerator, denominator=len(declared)
         ),
         orphaned_source_count=len(declared) - source_numerator,
-        unreferenced_artifact_count=sum(
-            1
-            for element in leaf_elements
-            if element.artifact_id not in leaf_links_by_id
-        )
-        + sum(
-            1
-            for element in narrative_elements
-            if element.artifact_id not in narrative_links_by_id
-        ),
+        unreferenced_artifact_count=leaf_unreferenced + narrative_unreferenced,
     )
 
     return SourceInfluenceQualification(
@@ -307,7 +395,7 @@ def _leaf_nodes(root: AttackTreeNode) -> list[AttackTreeNode]:
 
 def _artifact_elements(
     leaves: Sequence[AttackTreeNode],
-    narrative: Any,
+    narrative: NarrativeLayer | None,
 ) -> tuple[
     tuple[SourceInfluenceArtifactElement, ...],
     tuple[SourceInfluenceArtifactElement, ...],

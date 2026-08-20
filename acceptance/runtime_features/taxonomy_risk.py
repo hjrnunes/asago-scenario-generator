@@ -6,6 +6,9 @@ import json
 import re
 import types
 import typing
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from functools import partial
 from types import SimpleNamespace
 from typing import Any
 
@@ -3531,41 +3534,32 @@ def _provenance_state(world: World) -> dict[str, Any]:
     return state
 
 
-def _provenance_imports() -> tuple[Any, Any]:
-    """Import the deterministic source-influence provenance engine lazily."""
-    from asago_scenario_generator.models.source_influence_provenance import (
-        SourceInfluenceArtifactElement,
-        SourceInfluenceArtifactLink,
-        SourceInfluenceSourceType,
-        parse_source_ref,
-    )
-    from asago_scenario_generator.pipeline.source_influence import (
-        make_source_influence_provenance_block,
-        qualify_source_influence_provenance,
-    )
+def _provenance_api() -> tuple[Any, Any]:
+    """Import the typed provenance models and engine modules lazily.
 
-    return (
-        SourceInfluenceArtifactElement,
-        SourceInfluenceArtifactLink,
-        SourceInfluenceSourceType,
-        parse_source_ref,
-        qualify_source_influence_provenance,
-        make_source_influence_provenance_block,
-    )
+    Returns the ``models.source_influence_provenance`` and
+    ``pipeline.source_influence`` modules so handlers can reference
+    ``sip.SourceInfluenceArtifactLink`` / ``si.qualify_source_influence_provenance``
+    without repeated narrow imports.
+    """
+    from asago_scenario_generator.models import source_influence_provenance as sip
+    from asago_scenario_generator.pipeline import source_influence as si
+
+    return sip, si
 
 
 def _provenance_elements(state: dict[str, Any]) -> tuple[list[Any], list[Any]]:
     """Build leaf and narrative artifact elements from the fixture state."""
-    element_cls, _, _, _, _, _ = _provenance_imports()
+    sip, _ = _provenance_api()
     leaf_elements = [
-        element_cls(
+        sip.SourceInfluenceArtifactElement(
             artifact_id=item["artifact_id"],
             projected_step_ids=tuple(item["projected_step_ids"]),
         )
         for item in state["leaf_elements"]
     ]
     narrative_elements = [
-        element_cls(
+        sip.SourceInfluenceArtifactElement(
             artifact_id=item["artifact_id"],
             projected_step_ids=tuple(item["projected_step_ids"]),
         )
@@ -3615,13 +3609,10 @@ def _h_provenance_declares(world: World, text: str, examples: dict) -> tuple[boo
     )
     if match is None:
         return False, f"Could not parse declared sources: {text}"
-    from asago_scenario_generator.models.source_influence_provenance import (
-        parse_source_ref,
-    )
-
+    sip, _ = _provenance_api()
     declared = _provenance_state(world)["declared_sources"]
     for group in match.groups():
-        declared.extend(parse_source_ref(item) for item in _csv(group))
+        declared.extend(sip.parse_source_ref(item) for item in _csv(group))
     return True, ""
 
 
@@ -3635,12 +3626,9 @@ def _h_provenance_declares_unused(
     )
     if match is None:
         return False, f"Could not parse unused source: {text}"
-    from asago_scenario_generator.models.source_influence_provenance import (
-        parse_source_ref,
-    )
-
+    sip, _ = _provenance_api()
     _provenance_state(world)["declared_sources"].append(
-        parse_source_ref(match.group(1))
+        sip.parse_source_ref(match.group(1))
     )
     return True, ""
 
@@ -3713,31 +3701,57 @@ def _h_provenance_narrative_realizes_many(
     return True, ""
 
 
-def _attach_links(state: dict[str, Any], refs: list[Any]) -> None:
-    """Attach one link per artifact element with the given source refs."""
-    link_cls = _provenance_imports()[1]
-    from asago_scenario_generator.models.source_influence_provenance import (
-        SourceInfluenceArtifactKind,
-    )
+def _make_links(
+    state: dict[str, Any],
+    elements_key: str,
+    kind: Any,
+    *,
+    refs: Sequence[Any] | None = None,
+    refs_for: Any = None,
+    step_id: str | None = None,
+    only_step: str | None = None,
+) -> list[Any]:
+    """Build provenance links for one artifact kind from the fixture elements.
 
-    state["leaf_links"] = [
-        link_cls(
-            artifact_kind=SourceInfluenceArtifactKind.projected_leaf,
-            artifact_id=item["artifact_id"],
-            projected_step_id=item["projected_step_ids"][0],
-            source_refs=tuple(refs),
+    Builds one link per element (optionally limited to elements realizing
+    ``only_step``).  Each link claims ``step_id`` when given, otherwise the
+    element's first projected step, and references ``refs`` when given,
+    otherwise the refs resolved by ``refs_for(element)``.
+    """
+    sip, _ = _provenance_api()
+    links: list[Any] = []
+    for item in state[elements_key]:
+        if only_step is not None and only_step not in item["projected_step_ids"]:
+            continue
+        source_refs = refs if refs is not None else refs_for(item)
+        links.append(
+            sip.SourceInfluenceArtifactLink(
+                artifact_kind=kind,
+                artifact_id=item["artifact_id"],
+                projected_step_id=(
+                    step_id if step_id is not None else item["projected_step_ids"][0]
+                ),
+                source_refs=tuple(source_refs),
+            )
         )
-        for item in state["leaf_elements"]
-    ]
-    state["narrative_links"] = [
-        link_cls(
-            artifact_kind=SourceInfluenceArtifactKind.narrative_step,
-            artifact_id=item["artifact_id"],
-            projected_step_id=item["projected_step_ids"][0],
-            source_refs=tuple(refs),
-        )
-        for item in state["narrative_elements"]
-    ]
+    return links
+
+
+def _attach_links(state: dict[str, Any], refs: Sequence[Any]) -> None:
+    """Attach one link per leaf and narrative element with the given refs."""
+    sip, _ = _provenance_api()
+    state["leaf_links"] = _make_links(
+        state,
+        "leaf_elements",
+        sip.SourceInfluenceArtifactKind.projected_leaf,
+        refs=refs,
+    )
+    state["narrative_links"] = _make_links(
+        state,
+        "narrative_elements",
+        sip.SourceInfluenceArtifactKind.narrative_step,
+        refs=refs,
+    )
 
 
 def _h_provenance_link_all(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -3750,19 +3764,19 @@ def _h_provenance_link_all(world: World, text: str, examples: dict) -> tuple[boo
     )
     if match is None:
         return False, f"Could not parse artifact link sources: {text}"
-    from asago_scenario_generator.models.source_influence_provenance import (
-        parse_source_ref,
-    )
-
-    refs = [parse_source_ref(item) for group in match.groups() for item in _csv(group)]
+    sip, _ = _provenance_api()
+    refs = [
+        sip.parse_source_ref(item) for group in match.groups() for item in _csv(group)
+    ]
     _attach_links(_provenance_state(world), refs)
     return True, ""
 
 
 def _corresponding_refs_for_element(
-    state: dict[str, Any], element: dict[str, Any], declared: list[Any]
+    state: dict[str, Any], element: dict[str, Any]
 ) -> list[Any]:
-    """Resolve the source records corresponding to an element's projected step."""
+    """Resolve the declared source records corresponding to an element's step."""
+    declared = state["declared_sources"]
     step_id = element["projected_step_ids"][0]
     try:
         index = state["projected_steps"].index(step_id)
@@ -3784,30 +3798,20 @@ def _h_provenance_link_corresponding(
 ) -> tuple[bool, str]:
     """Every artifact link names the sources corresponding to its step."""
     state = _provenance_state(world)
-    declared = state["declared_sources"]
-    link_cls = _provenance_imports()[1]
-    from asago_scenario_generator.models.source_influence_provenance import (
-        SourceInfluenceArtifactKind,
+    sip, _ = _provenance_api()
+    refs_for = partial(_corresponding_refs_for_element, state)
+    state["leaf_links"] = _make_links(
+        state,
+        "leaf_elements",
+        sip.SourceInfluenceArtifactKind.projected_leaf,
+        refs_for=refs_for,
     )
-
-    state["leaf_links"] = [
-        link_cls(
-            artifact_kind=SourceInfluenceArtifactKind.projected_leaf,
-            artifact_id=item["artifact_id"],
-            projected_step_id=item["projected_step_ids"][0],
-            source_refs=tuple(_corresponding_refs_for_element(state, item, declared)),
-        )
-        for item in state["leaf_elements"]
-    ]
-    state["narrative_links"] = [
-        link_cls(
-            artifact_kind=SourceInfluenceArtifactKind.narrative_step,
-            artifact_id=item["artifact_id"],
-            projected_step_id=item["projected_step_ids"][0],
-            source_refs=tuple(_corresponding_refs_for_element(state, item, declared)),
-        )
-        for item in state["narrative_elements"]
-    ]
+    state["narrative_links"] = _make_links(
+        state,
+        "narrative_elements",
+        sip.SourceInfluenceArtifactKind.narrative_step,
+        refs_for=refs_for,
+    )
     return True, ""
 
 
@@ -3834,26 +3838,15 @@ def _h_provenance_unknown_source(
     )
     if match is None:
         return False, f"Could not parse unknown source: {text}"
-    from asago_scenario_generator.models.source_influence_provenance import (
-        parse_source_ref,
-    )
-
     state = _provenance_state(world)
-    refs = list(state["declared_sources"]) + [parse_source_ref(match.group(1))]
-    link_cls = _provenance_imports()[1]
-    from asago_scenario_generator.models.source_influence_provenance import (
-        SourceInfluenceArtifactKind,
+    sip, _ = _provenance_api()
+    refs = list(state["declared_sources"]) + [sip.parse_source_ref(match.group(1))]
+    state["leaf_links"] = _make_links(
+        state,
+        "leaf_elements",
+        sip.SourceInfluenceArtifactKind.projected_leaf,
+        refs=refs,
     )
-
-    state["leaf_links"] = [
-        link_cls(
-            artifact_kind=SourceInfluenceArtifactKind.projected_leaf,
-            artifact_id=item["artifact_id"],
-            projected_step_id=item["projected_step_ids"][0],
-            source_refs=tuple(refs),
-        )
-        for item in state["leaf_elements"]
-    ]
     return True, ""
 
 
@@ -3867,20 +3860,14 @@ def _h_provenance_claims_step(
     if match is None:
         return False, f"Could not parse claimed step: {text}"
     state = _provenance_state(world)
-    link_cls = _provenance_imports()[1]
-    from asago_scenario_generator.models.source_influence_provenance import (
-        SourceInfluenceArtifactKind,
+    sip, _ = _provenance_api()
+    state["leaf_links"] = _make_links(
+        state,
+        "leaf_elements",
+        sip.SourceInfluenceArtifactKind.projected_leaf,
+        refs=state["declared_sources"],
+        step_id=match.group(1),
     )
-
-    state["leaf_links"] = [
-        link_cls(
-            artifact_kind=SourceInfluenceArtifactKind.projected_leaf,
-            artifact_id=item["artifact_id"],
-            projected_step_id=match.group(1),
-            source_refs=tuple(state["declared_sources"]),
-        )
-        for item in state["leaf_elements"]
-    ]
     return True, ""
 
 
@@ -3895,51 +3882,31 @@ def _h_provenance_only_step_linked(
         return False, f"Could not parse linked step: {text}"
     state = _provenance_state(world)
     step_id = match.group(1)
-    link_cls = _provenance_imports()[1]
-    from asago_scenario_generator.models.source_influence_provenance import (
-        SourceInfluenceArtifactKind,
+    sip, _ = _provenance_api()
+    refs_for = partial(_corresponding_refs_for_element, state)
+    state["leaf_links"] = _make_links(
+        state,
+        "leaf_elements",
+        sip.SourceInfluenceArtifactKind.projected_leaf,
+        refs_for=refs_for,
+        only_step=step_id,
     )
-
-    state["leaf_links"] = [
-        link_cls(
-            artifact_kind=SourceInfluenceArtifactKind.projected_leaf,
-            artifact_id=item["artifact_id"],
-            projected_step_id=item["projected_step_ids"][0],
-            source_refs=tuple(
-                _corresponding_refs_for_element(state, item, state["declared_sources"])
-            ),
-        )
-        for item in state["leaf_elements"]
-        if step_id in item["projected_step_ids"]
-    ]
-    state["narrative_links"] = [
-        link_cls(
-            artifact_kind=SourceInfluenceArtifactKind.narrative_step,
-            artifact_id=item["artifact_id"],
-            projected_step_id=item["projected_step_ids"][0],
-            source_refs=tuple(
-                _corresponding_refs_for_element(state, item, state["declared_sources"])
-            ),
-        )
-        for item in state["narrative_elements"]
-        if step_id in item["projected_step_ids"]
-    ]
+    state["narrative_links"] = _make_links(
+        state,
+        "narrative_elements",
+        sip.SourceInfluenceArtifactKind.narrative_step,
+        refs_for=refs_for,
+        only_step=step_id,
+    )
     return True, ""
 
 
 def _run_provenance_qualification(world: World) -> None:
     """Run the deterministic engine and keep result, block, and serialization."""
     state = _provenance_state(world)
-    (
-        _,
-        _,
-        _,
-        _,
-        qualify_source_influence_provenance,
-        make_source_influence_provenance_block,
-    ) = _provenance_imports()
+    _, si = _provenance_api()
     leaf_elements, narrative_elements = _provenance_elements(state)
-    result = qualify_source_influence_provenance(
+    result = si.qualify_source_influence_provenance(
         selected_step_ids=tuple(state["projected_steps"]),
         declared_sources=state["declared_sources"],
         leaf_elements=leaf_elements,
@@ -3947,7 +3914,7 @@ def _run_provenance_qualification(world: World) -> None:
         leaf_links=state["leaf_links"],
         narrative_links=state["narrative_links"],
     )
-    block = make_source_influence_provenance_block(
+    block = si.make_source_influence_provenance_block(
         declared_sources=state["declared_sources"],
         leaf_links=state["leaf_links"],
         narrative_links=state["narrative_links"],
@@ -3966,7 +3933,7 @@ def _serialize_provenance_envelope(world: World) -> dict[str, Any]:
     envelope = ScenarioEnvelope.model_construct(
         scenario_id="scenario:v2:" + "a" * 64,
         candidate_id="cand:v2:" + "b" * 32,
-        generated_at="2026-08-20T00:00:00Z",
+        generated_at=datetime(2026, 8, 20, tzinfo=UTC),
         generator_version="test",
         initial_entry_point_id="ep:v1:" + "c" * 32,
         source_influence_provenance=state["block"],
@@ -4003,12 +3970,7 @@ def _h_provenance_metadata_block(
     block = _provenance_state(world)["block"]
     if block is None:
         return False, "no provenance block was built"
-    return (
-        tuple(block.declared_sources)
-        and tuple(block.leaf_links) is not None
-        and tuple(block.narrative_links) is not None,
-        "provenance block metadata is incomplete",
-    )
+    return bool(block.declared_sources), "provenance block metadata is incomplete"
 
 
 def _h_provenance_artifact_linked(
@@ -4021,13 +3983,10 @@ def _h_provenance_artifact_linked(
     )
     if match is None:
         return False, f"Could not parse artifact link assertion: {text}"
-    from asago_scenario_generator.models.source_influence_provenance import (
-        parse_source_ref,
-    )
-
+    sip, _ = _provenance_api()
     state = _provenance_state(world)
     artifact_id = match.group(1)
-    expected = parse_source_ref(match.group(2))
+    expected = sip.parse_source_ref(match.group(2))
     links = (
         state["narrative_links"] if "narrative step" in text else state["leaf_links"]
     )

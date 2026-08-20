@@ -14,6 +14,7 @@ Covers the deterministic engine contract behind
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -148,9 +149,7 @@ def leaf_link(
 def narrative_link(
     artifact_id: str, step_id: str, refs: tuple[SourceInfluenceSourceRef, ...]
 ) -> SourceInfluenceArtifactLink:
-    return link(
-        SourceInfluenceArtifactKind.narrative_step, artifact_id, step_id, refs
-    )
+    return link(SourceInfluenceArtifactKind.narrative_step, artifact_id, step_id, refs)
 
 
 def coverage(metrics: SourceInfluenceMetrics, name: str) -> tuple[int, int]:
@@ -352,7 +351,9 @@ def _make_envelope(
     return envelope
 
 
-def _shared_links() -> tuple[tuple[SourceInfluenceArtifactLink, ...], tuple[SourceInfluenceArtifactLink, ...]]:
+def _shared_links() -> tuple[
+    tuple[SourceInfluenceArtifactLink, ...], tuple[SourceInfluenceArtifactLink, ...]
+]:
     """Full coverage links for the three-step envelope fixture."""
     leaf_links = tuple(
         leaf_link(f"n1.{i + 1}", f"step.{i + 1}", SHARED) for i in range(3)
@@ -361,6 +362,58 @@ def _shared_links() -> tuple[tuple[SourceInfluenceArtifactLink, ...], tuple[Sour
         narrative_link(str(i + 1), f"step.{i + 1}", SHARED) for i in range(3)
     )
     return leaf_links, narrative_links
+
+
+FULL_STEP_IDS = ("step.1", "step.2", "step.3")
+FULL_LEAF_ELEMENTS = (
+    leaf("n1.1", "step.1"),
+    leaf("n1.2", "step.2"),
+    leaf("n1.3", "step.3"),
+)
+FULL_NARRATIVE_ELEMENTS = (
+    story_step("1", "step.1"),
+    story_step("2", "step.2"),
+    story_step("3", "step.3"),
+)
+
+
+def _qualify_full(
+    *,
+    declared_sources: Sequence[SourceInfluenceSourceRef] = SHARED,
+    leaf_links: Sequence[SourceInfluenceArtifactLink] | None = None,
+    narrative_links: Sequence[SourceInfluenceArtifactLink] | None = None,
+) -> SourceInfluenceQualification:
+    """Qualify the standard three-step envelope fixture with overrides."""
+    default_leaf_links, default_narrative_links = _shared_links()
+    return qualify_source_influence_provenance(
+        selected_step_ids=FULL_STEP_IDS,
+        declared_sources=declared_sources,
+        leaf_elements=FULL_LEAF_ELEMENTS,
+        narrative_elements=FULL_NARRATIVE_ELEMENTS,
+        leaf_links=default_leaf_links if leaf_links is None else leaf_links,
+        narrative_links=(
+            default_narrative_links if narrative_links is None else narrative_links
+        ),
+    )
+
+
+def _full_block(
+    result: SourceInfluenceQualification,
+    *,
+    declared_sources: Sequence[SourceInfluenceSourceRef] = SHARED,
+    leaf_links: Sequence[SourceInfluenceArtifactLink] | None = None,
+    narrative_links: Sequence[SourceInfluenceArtifactLink] | None = None,
+) -> SourceInfluenceProvenanceBlock:
+    """Persist the standard three-step fixture qualification as a block."""
+    default_leaf_links, default_narrative_links = _shared_links()
+    return make_source_influence_provenance_block(
+        declared_sources=declared_sources,
+        leaf_links=default_leaf_links if leaf_links is None else leaf_links,
+        narrative_links=(
+            default_narrative_links if narrative_links is None else narrative_links
+        ),
+        qualification=result,
+    )
 
 
 # ---------------------------------------------------------------------------#
@@ -499,9 +552,7 @@ class TestQualificationEngine:
         assert result.status == "fail"
         codes = [v.code for v in result.violations]
         assert SourceInfluenceViolationCode.missing_source_provenance in codes
-        identified = [
-            v for v in result.violations if v.source_type == missing_type
-        ]
+        identified = [v for v in result.violations if v.source_type == missing_type]
         assert identified, "no violation identified the missing source type"
 
     def test_unknown_source_reference_fails_closed(self) -> None:
@@ -756,37 +807,16 @@ class TestEnvelopeValidation:
         assert result.metrics == EMPTY_METRICS
 
     def test_valid_block_passes_on_full_envelope(self) -> None:
-        leaf_links, narrative_links = _shared_links()
-        result = qualify_source_influence_provenance(
-            selected_step_ids=("step.1", "step.2", "step.3"),
-            declared_sources=SHARED,
-            leaf_elements=[
-                leaf("n1.1", "step.1"),
-                leaf("n1.2", "step.2"),
-                leaf("n1.3", "step.3"),
-            ],
-            narrative_elements=[
-                story_step("1", "step.1"),
-                story_step("2", "step.2"),
-                story_step("3", "step.3"),
-            ],
-            leaf_links=leaf_links,
-            narrative_links=narrative_links,
+        envelope = _make_envelope(
+            source_influence_provenance=_full_block(_qualify_full())
         )
-        block = make_source_influence_provenance_block(
-            declared_sources=SHARED,
-            leaf_links=leaf_links,
-            narrative_links=narrative_links,
-            qualification=result,
-        )
-        envelope = _make_envelope(source_influence_provenance=block)
         validated = validate_source_influence_provenance(envelope)
         assert validated.valid is True
         assert validated.status == "pass"
         assert coverage(validated.metrics, "projected_leaf_coverage") == (3, 3)
 
     def test_invalid_block_returns_invalid_result(self) -> None:
-        leaf_links, narrative_links = _shared_links()
+        _, narrative_links = _shared_links()
         # Narrative link for step 2 omits the mitigation reference.
         partial_narrative = tuple(
             narrative_link("2", "step.2", (T12, MAG))
@@ -794,28 +824,8 @@ class TestEnvelopeValidation:
             else item
             for item in narrative_links
         )
-        result = qualify_source_influence_provenance(
-            selected_step_ids=("step.1", "step.2", "step.3"),
-            declared_sources=SHARED,
-            leaf_elements=[
-                leaf("n1.1", "step.1"),
-                leaf("n1.2", "step.2"),
-                leaf("n1.3", "step.3"),
-            ],
-            narrative_elements=[
-                story_step("1", "step.1"),
-                story_step("2", "step.2"),
-                story_step("3", "step.3"),
-            ],
-            leaf_links=leaf_links,
-            narrative_links=partial_narrative,
-        )
-        block = make_source_influence_provenance_block(
-            declared_sources=SHARED,
-            leaf_links=leaf_links,
-            narrative_links=partial_narrative,
-            qualification=result,
-        )
+        result = _qualify_full(narrative_links=partial_narrative)
+        block = _full_block(result, narrative_links=partial_narrative)
         envelope = _make_envelope(source_influence_provenance=block)
         validated = validate_source_influence_provenance(envelope)
         assert validated.valid is False
@@ -825,35 +835,12 @@ class TestEnvelopeValidation:
         )
 
     def test_stale_persisted_metrics_raise(self) -> None:
-        leaf_links, narrative_links = _shared_links()
-        result = qualify_source_influence_provenance(
-            selected_step_ids=("step.1", "step.2", "step.3"),
-            declared_sources=SHARED,
-            leaf_elements=[
-                leaf("n1.1", "step.1"),
-                leaf("n1.2", "step.2"),
-                leaf("n1.3", "step.3"),
-            ],
-            narrative_elements=[
-                story_step("1", "step.1"),
-                story_step("2", "step.2"),
-                story_step("3", "step.3"),
-            ],
-            leaf_links=leaf_links,
-            narrative_links=narrative_links,
-        )
-        block = make_source_influence_provenance_block(
-            declared_sources=SHARED,
-            leaf_links=leaf_links,
-            narrative_links=narrative_links,
-            qualification=result,
-        )
+        block = _full_block(_qualify_full())
         tampered = block.model_copy(
             update={
                 "metrics": block.metrics.model_copy(
                     update={
-                        "orphaned_source_count": block.metrics.orphaned_source_count
-                        + 1
+                        "orphaned_source_count": block.metrics.orphaned_source_count + 1
                     }
                 )
             }
@@ -863,29 +850,7 @@ class TestEnvelopeValidation:
             validate_source_influence_provenance(envelope)
 
     def test_stale_persisted_status_raises(self) -> None:
-        leaf_links, narrative_links = _shared_links()
-        result = qualify_source_influence_provenance(
-            selected_step_ids=("step.1", "step.2", "step.3"),
-            declared_sources=SHARED,
-            leaf_elements=[
-                leaf("n1.1", "step.1"),
-                leaf("n1.2", "step.2"),
-                leaf("n1.3", "step.3"),
-            ],
-            narrative_elements=[
-                story_step("1", "step.1"),
-                story_step("2", "step.2"),
-                story_step("3", "step.3"),
-            ],
-            leaf_links=leaf_links,
-            narrative_links=narrative_links,
-        )
-        block = make_source_influence_provenance_block(
-            declared_sources=SHARED,
-            leaf_links=leaf_links,
-            narrative_links=narrative_links,
-            qualification=result,
-        )
+        block = _full_block(_qualify_full())
         tampered = block.model_copy(update={"status": "fail"})
         envelope = _make_envelope(source_influence_provenance=tampered)
         with pytest.raises(ValueError, match="status"):
@@ -899,29 +864,8 @@ class TestEnvelopeValidation:
 
 class TestFailClosedPublish:
     def test_publish_rejects_invalid_provenance_without_writing(self, tmp_path) -> None:
-        leaf_links, narrative_links = _shared_links()
-        result = qualify_source_influence_provenance(
-            selected_step_ids=("step.1", "step.2", "step.3"),
-            declared_sources=SHARED + (M99,),
-            leaf_elements=[
-                leaf("n1.1", "step.1"),
-                leaf("n1.2", "step.2"),
-                leaf("n1.3", "step.3"),
-            ],
-            narrative_elements=[
-                story_step("1", "step.1"),
-                story_step("2", "step.2"),
-                story_step("3", "step.3"),
-            ],
-            leaf_links=leaf_links,
-            narrative_links=narrative_links,
-        )
-        block = make_source_influence_provenance_block(
-            declared_sources=SHARED + (M99,),
-            leaf_links=leaf_links,
-            narrative_links=narrative_links,
-            qualification=result,
-        )
+        result = _qualify_full(declared_sources=SHARED + (M99,))
+        block = _full_block(result, declared_sources=SHARED + (M99,))
         envelope = _make_envelope(source_influence_provenance=block)
         with pytest.raises(SourceInfluenceProvenanceError) as excinfo:
             write_scenario_outputs(envelope, tmp_path)
@@ -933,30 +877,9 @@ class TestFailClosedPublish:
     def test_publish_serializes_valid_provenance_block(self, tmp_path) -> None:
         import yaml
 
-        leaf_links, narrative_links = _shared_links()
-        result = qualify_source_influence_provenance(
-            selected_step_ids=("step.1", "step.2", "step.3"),
-            declared_sources=SHARED,
-            leaf_elements=[
-                leaf("n1.1", "step.1"),
-                leaf("n1.2", "step.2"),
-                leaf("n1.3", "step.3"),
-            ],
-            narrative_elements=[
-                story_step("1", "step.1"),
-                story_step("2", "step.2"),
-                story_step("3", "step.3"),
-            ],
-            leaf_links=leaf_links,
-            narrative_links=narrative_links,
+        envelope = _make_envelope(
+            source_influence_provenance=_full_block(_qualify_full())
         )
-        block = make_source_influence_provenance_block(
-            declared_sources=SHARED,
-            leaf_links=leaf_links,
-            narrative_links=narrative_links,
-            qualification=result,
-        )
-        envelope = _make_envelope(source_influence_provenance=block)
         envelope_path, _ = write_scenario_outputs(envelope, tmp_path)
         serialized = yaml.safe_load(envelope_path.read_text(encoding="utf-8"))
         assert "source_influence_provenance" in serialized
