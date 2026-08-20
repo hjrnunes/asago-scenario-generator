@@ -143,6 +143,7 @@ def build_attack_tree_prompts(
     scenario_spec: ScenarioSpec,
     control_structure: ControlStructure,
     loader: TemplateLoader,
+    projection_alignment: str | None = None,
 ) -> tuple[str, str]:
     """Build the system and user prompts for the attack tree call.
 
@@ -150,6 +151,9 @@ def build_attack_tree_prompts(
         scenario_spec: The scenario specification.
         control_structure: The full control structure.
         loader: Template loader.
+        projection_alignment: Optional rendered STPA projection alignment
+            table shared by every Stage 6 prompt.  When ``None`` no table
+            is included (backward compatible default).
 
     Returns:
         A tuple of (system_prompt, user_prompt).
@@ -167,13 +171,17 @@ def build_attack_tree_prompts(
         allow_unicode=True,
     )
 
-    system_prompt = loader.render_prompt("stage6b_tree_system.j2")
+    system_prompt = loader.render_prompt(
+        "stage6b_tree_system.j2",
+        projection_alignment=projection_alignment,
+    )
     user_prompt = loader.render_prompt(
         "stage6b_tree_user.j2",
         scenario_spec_yaml=scenario_spec_yaml,
         control_structure_yaml=control_structure_yaml,
         ica_type=scenario_spec.ica_type.value,
         control_action=scenario_spec.target_control_action,
+        projection_alignment=projection_alignment,
     )
 
     return system_prompt, user_prompt

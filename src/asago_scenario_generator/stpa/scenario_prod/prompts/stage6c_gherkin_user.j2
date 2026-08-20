@@ -18,14 +18,16 @@
 
 ---
 
+{% include "_stage6_projection_alignment.j2" %}
 ## Your Task
 
 Produce a Gherkin behavior specification using the should/but structure defined in the system prompt.
 
-1. The "Given" steps must reference process model states (PM-* IDs or descriptions).
+1. The "Given" steps must reference the process model state IDs (PM-*) from the projection alignment table.
 2. The "should" clause must reflect the security constraint.
-3. The "But" clause must reference the ICA type and control action.
+3. The "But" clause — the actual outcome — must state the exact ICA type and control action from the table's required reference.
 4. Include a loss reference in the consequences using only the following valid Loss IDs: {{ valid_loss_ids }}.
    Use only L-* loss IDs. Do not use H-* hazard IDs.
+5. Reference no structural ID (PM-*, FB-*, CA-*, RESP-*) outside the projection alignment table or the control structure.
 
 Return a YAML object with fields: feature, scenario, given (list), when (list), then_expected (list), then_actual (list).

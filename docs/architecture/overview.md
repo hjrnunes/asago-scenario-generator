@@ -46,6 +46,20 @@ canonical `TA-*` assertions and `S-*` steps, and empty factors produce no
 temporal behavior. Assembly validates all factor namespaces against the
 control structure before returning the envelope.
 
+Stream B makes the projection contract executable. A deterministic
+traceability validator (`stpa.scenario_prod.projection`) checks the canonical
+projection document — schema version, candidate identity, UCA reference,
+factor-to-assertion and factor-to-step mapping, canonical predicates, the
+final unsafe-control-action step, and typed provenance — and returns typed
+violations aligned with the taxonomy `projection_validation` contract.
+Stage 6 narrative, attack-tree, and Gherkin prompts render the same
+validator-derived projection alignment table (`stpa.scenario_prod.prompt_alignment`),
+keyed by semantic structural IDs, when the optional `projection_alignment`
+argument is supplied to their builders. The same canonical document is
+exported as standalone JSON/YAML (`stpa-execution-projection-v1`) with stable
+identifiers and typed provenance, and re-validated on load without project
+objects.
+
 ## Acceptance boundary
 
 `features/` contains the behavior contract. `acceptance/refresh_snapshot.py`

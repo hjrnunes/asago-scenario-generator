@@ -95,6 +95,7 @@ def build_narrative_prompts(
     scenario_spec: ScenarioSpec,
     loader: TemplateLoader,
     capability_profile: CapabilityProfile | None = None,
+    projection_alignment: str | None = None,
 ) -> tuple[str, str]:
     """Build the system and user prompts for the narrative call.
 
@@ -103,6 +104,9 @@ def build_narrative_prompts(
         loader: Template loader.
         capability_profile: Optional capability profile used to ground
             technology-specific feedback mechanisms in the prompt.
+        projection_alignment: Optional rendered STPA projection alignment
+            table shared by every Stage 6 prompt.  When ``None`` no table
+            is included (backward compatible default).
 
     Returns:
         A tuple of (system_prompt, user_prompt).
@@ -118,13 +122,17 @@ def build_narrative_prompts(
     ica_text = f"ICA type: {scenario_spec.ica_type.value} on {scenario_spec.target_control_action}"
     technology_context = context_for(capability_profile)
 
-    system_prompt = loader.render_prompt("stage6a_narrative_system.j2")
+    system_prompt = loader.render_prompt(
+        "stage6a_narrative_system.j2",
+        projection_alignment=projection_alignment,
+    )
     user_prompt = loader.render_prompt(
         "stage6a_narrative_user.j2",
         scenario_spec_yaml=scenario_spec_yaml,
         ica_text=ica_text,
         loss_scenario=loss_scenario,
         technology_context=technology_context,
+        projection_alignment=projection_alignment,
     )
 
     return system_prompt, user_prompt

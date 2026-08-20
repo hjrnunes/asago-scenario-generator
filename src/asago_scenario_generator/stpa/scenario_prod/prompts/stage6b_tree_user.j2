@@ -10,6 +10,7 @@
 
 ---
 
+{% include "_stage6_projection_alignment.j2" %}
 ## Your Task
 
 Produce an attack tree using the STPA two-level causal taxonomy defined in the system prompt.
@@ -19,5 +20,6 @@ Produce an attack tree using the STPA two-level causal taxonomy defined in the s
 3. Ensure the tree uses at least 2 of the 3 branch categories (controller_side, path_side, coordination_gap).
 4. Reference specific PM-*, FB-*, CA-*, RESP-* IDs where applicable.
 5. The root node MUST be exactly: "Induce ICA {{ ica_type }} on {{ control_action }}". Use the exact ICA type enum value — do not substitute or paraphrase.
+6. Temporal-factor leaf references (PM-*, FB-*, CA-*) must preserve the projection order defined in the alignment table: earlier rows before later rows, with the unsafe control action row last.
 
 Return the attack tree as a YAML-serializable dictionary matching the structure defined in the system prompt.

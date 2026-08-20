@@ -40,6 +40,11 @@ from asago_scenario_generator.stpa.models.execution_envelope import (
     step_kind_for,
     uca_ref_for,
 )
+from asago_scenario_generator.stpa.models.execution_projection import (
+    StpaProjectionTraceabilityResult,
+    StpaProjectionTraceabilityViolation,
+    StpaProjectionTraceabilityViolationCode,
+)
 from asago_scenario_generator.stpa.models.ica_enumeration import (
     ICA,
     ICAEnumeration,
@@ -113,6 +118,10 @@ __all__ = [
     "predicate_for",
     "step_kind_for",
     "uca_ref_for",
+    # execution_projection
+    "StpaProjectionTraceabilityResult",
+    "StpaProjectionTraceabilityViolation",
+    "StpaProjectionTraceabilityViolationCode",
     # scenario_spec
     "AttackerBDI",
     "DefenderBDI",

@@ -160,6 +160,7 @@ def build_gherkin_prompts(
     security_constraint: SecurityConstraint | None,
     loss_analysis: LossAnalysis,
     loader: TemplateLoader,
+    projection_alignment: str | None = None,
 ) -> tuple[str, str]:
     """Build the system and user prompts for the Gherkin call.
 
@@ -168,6 +169,9 @@ def build_gherkin_prompts(
         security_constraint: The security constraint for the should clause.
         loss_analysis: The loss analysis for valid Loss/Hazard ID extraction.
         loader: Template loader.
+        projection_alignment: Optional rendered STPA projection alignment
+            table shared by every Stage 6 prompt.  When ``None`` no table
+            is included (backward compatible default).
 
     Returns:
         A tuple of (system_prompt, user_prompt).
@@ -190,7 +194,10 @@ def build_gherkin_prompts(
     valid_loss_ids = _extract_valid_loss_ids(loss_analysis)
     valid_hazard_ids = _extract_valid_hazard_ids(loss_analysis)
 
-    system_prompt = loader.render_prompt("stage6c_gherkin_system.j2")
+    system_prompt = loader.render_prompt(
+        "stage6c_gherkin_system.j2",
+        projection_alignment=projection_alignment,
+    )
     user_prompt = loader.render_prompt(
         "stage6c_gherkin_user.j2",
         scenario_spec_yaml=scenario_spec_yaml,
@@ -200,6 +207,7 @@ def build_gherkin_prompts(
         ica_text=ica_text,
         valid_loss_ids=", ".join(valid_loss_ids),
         valid_hazard_ids=", ".join(valid_hazard_ids),
+        projection_alignment=projection_alignment,
     )
 
     return system_prompt, user_prompt
