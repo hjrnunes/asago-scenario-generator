@@ -4,12 +4,30 @@ Combines the ScenarioSpec, narrative, attack tree, and Gherkin spec
 into a ScenarioEnvelope with faceting metadata.  When a capability
 profile and control structure are provided, the envelope is enriched
 with ``system_context`` and ``consumer_hints`` blocks.
+
+Also assembles post-SP3 platform-neutral candidate execution envelopes
+from structural STPA findings, optionally with their deterministic
+temporal action vector.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
-from asago_scenario_generator.stpa.models.control_structure import ControlStructure
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlAction,
+    ControlStructure,
+    Responsibility,
+)
+from asago_scenario_generator.stpa.models.execution_envelope import (
+    CandidateExecutionEnvelope,
+    CausalFactor,
+    CausalFactorKind,
+    candidate_id_for,
+    uca_ref_for,
+)
+from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.scenario_envelope import (
     ConsumerHints,
     GherkinSpec,
@@ -19,8 +37,9 @@ from asago_scenario_generator.stpa.models.scenario_envelope import (
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 
 from .enrichment import compute_consumer_hints, compute_system_context
+from .narrative import derive_temporal_action_vector
 
-__all__ = ["assemble_envelope"]
+__all__ = ["assemble_envelope", "assemble_candidate_envelope"]
 
 
 def assemble_envelope(
@@ -86,6 +105,136 @@ def assemble_envelope(
         provenance=scenario_spec.threat_source.provenance,
         system_context=system_context,
         consumer_hints=consumer_hints,
+    )
+
+
+_SOURCE_NAMESPACES: dict[CausalFactorKind, str] = {
+    CausalFactorKind.process_model_flaw: "PM",
+    CausalFactorKind.feedback_delay: "FB",
+    CausalFactorKind.sensor_anomaly: "FB",
+    CausalFactorKind.actuator_anomaly: "CA",
+}
+
+
+def _find_responsibility(
+    control_structure: ControlStructure,
+    controller_id: str,
+) -> Responsibility:
+    """Look up a responsibility by identifier, raising ValueError when absent."""
+    for responsibility in control_structure.responsibilities:
+        if responsibility.resp_id == controller_id:
+            return responsibility
+    raise ValueError(f"Control structure has no responsibility '{controller_id}'.")
+
+
+def _find_control_action(
+    responsibility: Responsibility,
+    control_action_id: str,
+) -> ControlAction:
+    """Look up a control action on a responsibility, raising ValueError."""
+    for control_action in responsibility.control_actions:
+        if control_action.ca_id == control_action_id:
+            return control_action
+    raise ValueError(
+        f"Responsibility {responsibility.resp_id} has no control action "
+        f"'{control_action_id}'."
+    )
+
+
+def _collect_source_ids(
+    control_structure: ControlStructure,
+) -> dict[CausalFactorKind, set[str]]:
+    """Collect valid source identifiers per causal factor kind."""
+    pm_ids: set[str] = set()
+    fb_ids: set[str] = set()
+    ca_ids: set[str] = set()
+    for responsibility in control_structure.responsibilities:
+        pm_ids.update(pm.pm_id for pm in responsibility.process_model_parts)
+        fb_ids.update(fb.fb_id for fb in responsibility.feedback_channels)
+        ca_ids.update(ca.ca_id for ca in responsibility.control_actions)
+    return {
+        CausalFactorKind.process_model_flaw: pm_ids,
+        CausalFactorKind.feedback_delay: fb_ids,
+        CausalFactorKind.sensor_anomaly: fb_ids,
+        CausalFactorKind.actuator_anomaly: ca_ids,
+    }
+
+
+def _validate_causal_factor_sources(
+    control_structure: ControlStructure,
+    causal_factors: Sequence[CausalFactor],
+) -> None:
+    """Validate every causal factor source against its structural namespace."""
+    source_ids = _collect_source_ids(control_structure)
+    for factor in causal_factors:
+        valid = source_ids[factor.kind]
+        if factor.source_id not in valid:
+            raise ValueError(
+                f"Causal factor {factor.kind.value} source "
+                f"'{factor.source_id}' is not a known "
+                f"{_SOURCE_NAMESPACES[factor.kind]} identifier in the "
+                f"control structure."
+            )
+
+
+def assemble_candidate_envelope(
+    control_structure: ControlStructure,
+    *,
+    controller_id: str,
+    control_action_id: str,
+    uca_type: UCAType,
+    causal_factors: Sequence[CausalFactor] | None = None,
+    derive_temporal_vector: bool = False,
+) -> CandidateExecutionEnvelope:
+    """Assemble a platform-neutral candidate execution envelope.
+
+    Maps an unsafe control action and its structural causal factors onto
+    a canonical :class:`CandidateExecutionEnvelope`.  The controller and
+    control action are resolved against *control_structure* (raising
+    ``ValueError`` for unknown identifiers), and every causal factor
+    source is validated against the matching PM/FB/CA namespace.
+
+    When *derive_temporal_vector* is true, the deterministic temporal
+    action vector is derived from the causal factors and linked to the
+    envelope's canonical candidate identifier.  When false, the envelope
+    carries no temporal vector (backward compatible default).
+
+    Args:
+        control_structure: The control structure the findings come from.
+        controller_id: The owning responsibility identifier (RESP-N).
+        control_action_id: The targeted control action (CA-X-Y).
+        uca_type: The unsafe control action type.
+        causal_factors: The mapped structural causal factors in
+            causal-factor order.  Defaults to no factors.
+        derive_temporal_vector: Whether to derive and link the temporal
+            action vector (default: ``False``).
+
+    Returns:
+        A :class:`CandidateExecutionEnvelope`.
+    """
+    responsibility = _find_responsibility(control_structure, controller_id)
+    control_action = _find_control_action(responsibility, control_action_id)
+    factors = list(causal_factors or [])
+    _validate_causal_factor_sources(control_structure, factors)
+
+    temporal_vector = None
+    if derive_temporal_vector:
+        temporal_vector = derive_temporal_action_vector(
+            factors,
+            controller_id=controller_id,
+            control_action_id=control_action_id,
+            uca_type=uca_type,
+        )
+
+    return CandidateExecutionEnvelope(
+        candidate_id=candidate_id_for(controller_id, control_action_id, uca_type),
+        controller_id=controller_id,
+        control_action_id=control_action_id,
+        control_action_description=control_action.description,
+        uca_type=uca_type,
+        uca_ref=uca_ref_for(controller_id, control_action_id, uca_type),
+        causal_factors=factors,
+        temporal_vector=temporal_vector,
     )
 
 

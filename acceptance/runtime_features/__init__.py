@@ -23,4 +23,5 @@ __all__ = (
     "acceptance_pipeline_preservation",
     "nullable_usage",
     "taxonomy_risk",
+    "stpa",
 )

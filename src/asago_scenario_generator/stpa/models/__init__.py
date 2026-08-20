@@ -26,6 +26,20 @@ from asago_scenario_generator.stpa.models.enriched_threat_set import (
     EnrichedThreatSet,
     StructuralThreat,
 )
+from asago_scenario_generator.stpa.models.execution_envelope import (
+    CandidateExecutionEnvelope,
+    CausalFactor,
+    CausalFactorKind,
+    ScenarioStep,
+    ScenarioStepKind,
+    TemporalActionVector,
+    TemporalAssertion,
+    TemporalPredicate,
+    candidate_id_for,
+    predicate_for,
+    step_kind_for,
+    uca_ref_for,
+)
 from asago_scenario_generator.stpa.models.ica_enumeration import (
     ICA,
     ICAEnumeration,
@@ -86,6 +100,19 @@ __all__ = [
     "CoverageAnalysis",
     "EnrichedThreatSet",
     "StructuralThreat",
+    # execution_envelope
+    "CandidateExecutionEnvelope",
+    "CausalFactor",
+    "CausalFactorKind",
+    "ScenarioStep",
+    "ScenarioStepKind",
+    "TemporalActionVector",
+    "TemporalAssertion",
+    "TemporalPredicate",
+    "candidate_id_for",
+    "predicate_for",
+    "step_kind_for",
+    "uca_ref_for",
     # scenario_spec
     "AttackerBDI",
     "DefenderBDI",
