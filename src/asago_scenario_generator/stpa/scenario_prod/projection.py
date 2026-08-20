@@ -22,15 +22,20 @@ from typing import Any
 
 import yaml
 
+from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
+from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.execution_envelope import (
     CandidateExecutionEnvelope,
-    CausalFactorKind,
     predicate_for,
 )
 from asago_scenario_generator.stpa.models.execution_projection import (
     StpaProjectionTraceabilityResult,
     StpaProjectionTraceabilityViolation,
     StpaProjectionTraceabilityViolationCode,
+)
+from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
+from asago_scenario_generator.stpa.scenario_prod.assembly import (
+    assemble_candidate_envelope,
 )
 
 SCHEMA_VERSION = "stpa-execution-projection-v1"
@@ -44,6 +49,7 @@ __all__ = [
     "canonical_violations_json",
     "export_projection_json",
     "export_projection_yaml",
+    "project_execution",
     "validate_exported_projection",
     "validate_projection_traceability",
 ]
@@ -71,9 +77,17 @@ def _source_kind_for_step(step_kind: str) -> str:
 def _canonical_factor_entries(
     factors: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Map envelope causal factors to their canonical document entries."""
+    """Map envelope causal factors to their canonical document entries.
+
+    Each entry retains the declared kind, source ID, and evidence
+    description so the standalone document is self-contained.
+    """
     return [
-        {"source_kind": factor["kind"], "source_id": factor["source_id"]}
+        {
+            "source_kind": factor["kind"],
+            "source_id": factor["source_id"],
+            "description": factor["description"],
+        }
         for factor in factors
     ]
 
@@ -81,7 +95,12 @@ def _canonical_factor_entries(
 def _canonical_assertion_entries(
     assertions: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Map envelope temporal assertions to their canonical document entries."""
+    """Map envelope temporal assertions to their canonical document entries.
+
+    Typed temporal constraints (or their absence with ``requires_binding``)
+    are carried per assertion so the standalone document preserves the
+    declared timing contract without free-form prose.
+    """
     return [
         {
             "assertion_id": assertion["assertion_id"],
@@ -90,6 +109,8 @@ def _canonical_assertion_entries(
             "source_id": assertion["source_id"],
             "kind": assertion["kind"],
             "predicate": assertion["predicate"],
+            "constraint": assertion.get("constraint"),
+            "requires_binding": assertion.get("requires_binding", True),
         }
         for assertion in assertions
     ]
@@ -110,7 +131,12 @@ def _canonical_step_entries(steps: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 
 def _projection_document(envelope: CandidateExecutionEnvelope) -> dict[str, Any]:
-    """Normalize one envelope into the canonical standalone projection shape."""
+    """Normalize one envelope into the canonical standalone projection shape.
+
+    The structural candidate identifier is preserved; ICA ID and scenario
+    ID are exported as their own separate fields so changing either never
+    rewrites the structural candidate identity.
+    """
     payload = envelope.model_dump(mode="json")
     vector = _first_non_empty(payload.get("temporal_vector"), {})
     factors = _first_non_empty(payload.get("causal_factors"), [])
@@ -125,10 +151,49 @@ def _projection_document(envelope: CandidateExecutionEnvelope) -> dict[str, Any]
         "control_action_id": payload["control_action_id"],
         "uca_type": payload["uca_type"],
         "uca_ref": payload["uca_ref"],
+        "ica_id": payload.get("ica_id"),
+        "scenario_id": payload.get("scenario_id"),
         "causal_factors": _canonical_factor_entries(factors),
         "assertions": _canonical_assertion_entries(assertions),
         "steps": _canonical_step_entries(steps),
+        "uca_constraint": _first_non_empty(vector.get("uca_constraint"), None),
     }
+
+
+def project_execution(
+    spec: ScenarioSpec,
+    control_structure: ControlStructure,
+) -> CandidateExecutionEnvelope:
+    """Deterministically project a validated ScenarioSpec into an envelope.
+
+    Stage 6 seam: maps exactly the causal factors declared and validated
+    by Stage 5 into the candidate execution envelope and its temporal
+    vector — no causal inference, no timing invention, and no runtime
+    observations.  The structural candidate identifier is preserved while
+    the ICA ID and scenario ID are carried as separate identity fields.
+
+    Args:
+        spec: The Stage 5 :class:`ScenarioSpec` (its causal factors are
+            already evidence-backed and control-structure validated).
+        control_structure: The control structure the findings come from.
+
+    Returns:
+        The deterministic :class:`CandidateExecutionEnvelope`.
+
+    Raises:
+        ValueError: When the spec references unknown structural
+            identifiers (defense in depth; Stage 5 rejects them first).
+    """
+    return assemble_candidate_envelope(
+        control_structure,
+        controller_id=spec.target_controller,
+        control_action_id=spec.target_control_action,
+        uca_type=spec.ica_type,
+        causal_factors=spec.causal_factors,
+        derive_temporal_vector=True,
+        ica_id=spec.threat_source.ica_id,
+        scenario_id=spec.scenario_id,
+    )
 
 
 def canonical_projection_data(
@@ -305,6 +370,39 @@ def _check_factor_mapping(
     )
 
 
+_REQUIRED_VECTOR_KEYS: tuple[
+    tuple[str, StpaProjectionTraceabilityViolationCode], ...
+] = (
+    ("causal_factors", StpaProjectionTraceabilityViolationCode.causal_factors_missing),
+    ("assertions", StpaProjectionTraceabilityViolationCode.assertions_missing),
+    ("steps", StpaProjectionTraceabilityViolationCode.steps_missing),
+)
+
+
+def _check_required_vectors(
+    doc: dict[str, Any],
+    violations: list[StpaProjectionTraceabilityViolation],
+) -> set[str]:
+    """Emit a typed missing-vector violation for every absent vector key.
+
+    Fail-closed contract: a projection missing ``causal_factors``,
+    ``assertions``, or ``steps`` is malformed and must never be treated
+    as a valid empty projection.  Present-but-empty lists remain valid.
+    """
+    missing: set[str] = set()
+    for key, code in _REQUIRED_VECTOR_KEYS:
+        if key not in doc or doc.get(key) is None:
+            violations.append(
+                _violation(
+                    code,
+                    key,
+                    f"canonical projection is missing the required '{key}' list",
+                )
+            )
+            missing.add(key)
+    return missing
+
+
 def _check_schema_version(
     doc: dict[str, Any],
     violations: list[StpaProjectionTraceabilityViolation],
@@ -417,6 +515,37 @@ def _check_uca_final_step(
     )
 
 
+def _check_uca_constraint(
+    steps: list[dict[str, Any]],
+    uca_constraint: Any,
+    control_action_id: str,
+    uca_type: Any,
+    violations: list[StpaProjectionTraceabilityViolation],
+) -> None:
+    """Emit a violation when the final UCA outcome mapping is forged.
+
+    The vector-level ``uca_constraint`` must mirror the final UCA step:
+    whenever a projection has steps, the outcome mapping must name the
+    same control action and UCA type.
+    """
+    if not steps:
+        return
+    expected = {
+        "type": "uca_outcome",
+        "control_action_id": control_action_id,
+        "uca_type": uca_type,
+    }
+    if uca_constraint != expected:
+        violations.append(
+            _violation(
+                StpaProjectionTraceabilityViolationCode.uca_constraint_mismatch,
+                "uca_constraint",
+                f"final UCA outcome constraint '{uca_constraint}' does not "
+                f"match the canonical '{expected}'",
+            )
+        )
+
+
 def _check_typed_provenance(
     assertions: list[dict[str, Any]],
     steps: list[dict[str, Any]],
@@ -456,11 +585,13 @@ def validate_projection_traceability(
     """Validate the STPA execution projection traceability.
 
     Checks, in deterministic order: schema version, canonical candidate
-    identity and UCA reference, causal-factor-to-assertion mapping,
-    canonical assertion predicates, causal-factor-to-step mapping, the
-    final unsafe control action step, and typed provenance.  Each check
-    emits at most one violation naming the earliest affected projection
-    element.
+    identity and UCA reference, required projection vectors (fail-close:
+    absent ``causal_factors``/``assertions``/``steps`` keys are typed
+    violations while present-empty lists are valid), causal-factor-to-
+    assertion mapping, canonical assertion predicates, causal-factor-to-
+    step mapping, the final unsafe control action step, the explicit UCA
+    outcome constraint, and typed provenance.  Each mapping check emits
+    at most one violation naming the earliest affected projection element.
 
     Args:
         envelope_or_doc: A :class:`CandidateExecutionEnvelope`, or the
@@ -472,6 +603,7 @@ def validate_projection_traceability(
     """
     doc = canonical_projection_data(envelope_or_doc)
     violations: list[StpaProjectionTraceabilityViolation] = []
+    missing = _check_required_vectors(doc, violations)
     factors = _first_non_empty(doc.get("causal_factors"), [])
     assertions = _first_non_empty(doc.get("assertions"), [])
     steps = _first_non_empty(doc.get("steps"), [])
@@ -479,28 +611,40 @@ def validate_projection_traceability(
 
     _check_schema_version(doc, violations)
     _check_candidate_identity(doc, violations)
-    _check_factor_mapping(
-        assertions,
-        factor_sources,
-        item_label="assertion",
-        id_field="assertion_id",
-        id_prefix="TA",
-        violations=violations,
-    )
-    _check_assertion_predicates(assertions, violations)
+    if "causal_factors" not in missing and "assertions" not in missing:
+        _check_factor_mapping(
+            assertions,
+            factor_sources,
+            item_label="assertion",
+            id_field="assertion_id",
+            id_prefix="TA",
+            violations=violations,
+        )
+    if "assertions" not in missing:
+        _check_assertion_predicates(assertions, violations)
     factor_steps = [
         step for step in steps if step.get("source_kind") == _CAUSAL_FACTOR_PROVENANCE
     ]
-    _check_factor_mapping(
-        factor_steps,
-        factor_sources,
-        item_label="scenario step",
-        id_field="step_id",
-        id_prefix="S",
-        violations=violations,
-    )
-    _check_uca_final_step(steps, factors, doc.get("control_action_id"), violations)
-    _check_typed_provenance(assertions, steps, violations)
+    if "causal_factors" not in missing and "steps" not in missing:
+        _check_factor_mapping(
+            factor_steps,
+            factor_sources,
+            item_label="scenario step",
+            id_field="step_id",
+            id_prefix="S",
+            violations=violations,
+        )
+    if "steps" not in missing:
+        _check_uca_final_step(steps, factors, doc.get("control_action_id"), violations)
+        _check_uca_constraint(
+            steps,
+            doc.get("uca_constraint"),
+            doc.get("control_action_id"),
+            doc.get("uca_type"),
+            violations,
+        )
+    if "assertions" not in missing and "steps" not in missing:
+        _check_typed_provenance(assertions, steps, violations)
 
     return StpaProjectionTraceabilityResult(valid=not violations, violations=violations)
 

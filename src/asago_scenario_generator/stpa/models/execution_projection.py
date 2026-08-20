@@ -26,6 +26,10 @@ class StpaProjectionTraceabilityViolationCode(str, Enum):
     candidate_identity_mismatch = "candidate_identity_mismatch"
     typed_provenance_mismatch = "typed_provenance_mismatch"
     schema_version_missing = "schema_version_missing"
+    causal_factors_missing = "causal_factors_missing"
+    assertions_missing = "assertions_missing"
+    steps_missing = "steps_missing"
+    uca_constraint_mismatch = "uca_constraint_mismatch"
 
 
 class StpaProjectionTraceabilityViolation(BaseModel):

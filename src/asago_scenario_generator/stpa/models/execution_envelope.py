@@ -10,86 +10,57 @@ All identifiers are stable control-structure identifiers (PM-X-Y,
 FB-X-Y, CA-X-Y); the contract contains no adapter payloads and no
 parsed prose.  Empty causal factors produce an empty temporal vector
 without invented behavior.
+
+Causal-factor kinds and their per-kind behavior (namespace, predicate,
+step kind, step text) live in the neutral ``causal_factor`` registry;
+typed temporal constraints live in ``temporal_constraints``.  Both are
+re-exported from this module for backward compatibility.
 """
 
 from __future__ import annotations
 
-from enum import Enum
-from typing import Literal, Sequence
+from typing import Literal
+from typing import Sequence
 
 from pydantic import BaseModel, Field, model_validator
 
+from asago_scenario_generator.stpa.models.causal_factor import (
+    CausalFactor,
+    CausalFactorKind,
+    ScenarioStepKind,
+    TemporalPredicate,
+    predicate_for,
+    step_kind_for,
+)
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
-
-
-class CausalFactorKind(str, Enum):
-    """Kind of STPA causal factor mapped into an execution envelope."""
-
-    process_model_flaw = "PROCESS_MODEL_FLAW"
-    feedback_delay = "FEEDBACK_DELAY"
-    sensor_anomaly = "SENSOR_ANOMALY"
-    actuator_anomaly = "ACTUATOR_ANOMALY"
-
-
-class CausalFactor(BaseModel):
-    """A structural causal factor explaining an unsafe control action.
-
-    ``source_id`` is a stable control-structure identifier (PM-X-Y for
-    process-model flaws, FB-X-Y for feedback delays and sensor
-    anomalies, CA-X-Y for actuator anomalies).
-    """
-
-    kind: CausalFactorKind
-    source_id: str = Field(min_length=1)
-    description: str = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def validate_source_namespace(self) -> CausalFactor:
-        expected_prefix = {
-            CausalFactorKind.process_model_flaw: "PM-",
-            CausalFactorKind.feedback_delay: "FB-",
-            CausalFactorKind.sensor_anomaly: "FB-",
-            CausalFactorKind.actuator_anomaly: "CA-",
-        }[self.kind]
-        if not self.source_id.startswith(expected_prefix):
-            raise ValueError(
-                f"CausalFactor {self.kind.value} source_id "
-                f"'{self.source_id}' must use the {expected_prefix[:-1]} namespace; "
-                f"it is not a known {expected_prefix[:-1]} identifier."
-            )
-        return self
-
-
-class TemporalPredicate(str, Enum):
-    """Executable predicate encoded by a temporal assertion."""
-
-    model_flawed = "MODEL_FLAWED"
-    feedback_delayed = "FEEDBACK_DELAYED"
-    sensor_anomalous = "SENSOR_ANOMALOUS"
-    actuator_anomalous = "ACTUATOR_ANOMALOUS"
-
-
-_PREDICATE_BY_KIND: dict[CausalFactorKind, TemporalPredicate] = {
-    CausalFactorKind.process_model_flaw: TemporalPredicate.model_flawed,
-    CausalFactorKind.feedback_delay: TemporalPredicate.feedback_delayed,
-    CausalFactorKind.sensor_anomaly: TemporalPredicate.sensor_anomalous,
-    CausalFactorKind.actuator_anomaly: TemporalPredicate.actuator_anomalous,
-}
-
-
-def predicate_for(kind: CausalFactorKind) -> TemporalPredicate:
-    """Return the executable predicate canonically paired with a factor kind."""
-    return _PREDICATE_BY_KIND[kind]
+from asago_scenario_generator.stpa.models.temporal_constraints import (
+    AbsenceConstraint,
+    DelayConstraint,
+    DurationConstraint,
+    OrderingConstraint,
+    TemporalConstraint,
+    UcaOutcomeConstraint,
+    WindowConstraint,
+    is_structural_reference,
+    parse_declared_timing,
+)
 
 
 class TemporalAssertion(BaseModel):
-    """One executable temporal assertion derived from a causal factor."""
+    """One executable temporal assertion derived from a causal factor.
+
+    ``constraint`` is the typed temporal constraint derived only from
+    declared Stage 5 evidence; unknown timing leaves it ``None`` and sets
+    ``requires_binding`` so no guessed timing enters the projection.
+    """
 
     assertion_id: str  # canonical "TA-<n>"
     order_index: int = Field(ge=0)
     kind: CausalFactorKind
     source_id: str = Field(min_length=1)
     predicate: TemporalPredicate
+    constraint: TemporalConstraint | None = None
+    requires_binding: bool = True
 
     @model_validator(mode="after")
     def validate_predicate_consistency(self) -> TemporalAssertion:
@@ -102,28 +73,10 @@ class TemporalAssertion(BaseModel):
             )
         return self
 
-
-class ScenarioStepKind(str, Enum):
-    """Kind of a deterministic scenario step in the temporal vector."""
-
-    process_model_flaw = "PROCESS_MODEL_FLAW"
-    feedback_delay = "FEEDBACK_DELAY"
-    sensor_anomaly = "SENSOR_ANOMALY"
-    actuator_anomaly = "ACTUATOR_ANOMALY"
-    unsafe_control_action = "UNSAFE_CONTROL_ACTION"
-
-
-_STEP_KIND_BY_FACTOR_KIND: dict[CausalFactorKind, ScenarioStepKind] = {
-    CausalFactorKind.process_model_flaw: ScenarioStepKind.process_model_flaw,
-    CausalFactorKind.feedback_delay: ScenarioStepKind.feedback_delay,
-    CausalFactorKind.sensor_anomaly: ScenarioStepKind.sensor_anomaly,
-    CausalFactorKind.actuator_anomaly: ScenarioStepKind.actuator_anomaly,
-}
-
-
-def step_kind_for(kind: CausalFactorKind) -> ScenarioStepKind:
-    """Return the scenario-step kind canonically paired with a factor kind."""
-    return _STEP_KIND_BY_FACTOR_KIND[kind]
+    @model_validator(mode="after")
+    def sync_requires_binding(self) -> TemporalAssertion:
+        self.requires_binding = self.constraint is None
+        return self
 
 
 class ScenarioStep(BaseModel):
@@ -191,13 +144,15 @@ class TemporalActionVector(BaseModel):
 
     Empty causal factors produce an empty vector: no assertions and no
     steps are invented.  With causal factors, the vector ends with the
-    unsafe control action step for the targeted control action.
+    unsafe control action step for the targeted control action and maps
+    that final outcome explicitly through ``uca_constraint``.
     """
 
     candidate_id: str
     control_action_id: str
     assertions: list[TemporalAssertion] = Field(default_factory=list)
     steps: list[ScenarioStep] = Field(default_factory=list)
+    uca_constraint: UcaOutcomeConstraint | None = None
 
     @model_validator(mode="after")
     def validate_deterministic_sequences(self) -> TemporalActionVector:
@@ -252,6 +207,10 @@ class CandidateExecutionEnvelope(BaseModel):
     The envelope carries only canonical structural identifiers and
     deterministic projections; ``platform_neutral`` is structurally
     pinned so adapters can trust the payload contains no vendor shape.
+
+    The structural candidate identity (``candidate_id``) is preserved;
+    the ICA ID and scenario ID are carried as separate optional fields
+    so standalone exports identify them independently.
     """
 
     candidate_id: str
@@ -262,6 +221,8 @@ class CandidateExecutionEnvelope(BaseModel):
     uca_ref: str
     causal_factors: list[CausalFactor] = Field(default_factory=list)
     temporal_vector: TemporalActionVector | None = None
+    ica_id: str | None = None
+    scenario_id: str | None = None
     platform_neutral: Literal[True] = True
 
     @model_validator(mode="after")
@@ -296,15 +257,24 @@ class CandidateExecutionEnvelope(BaseModel):
 
 
 __all__ = [
+    "AbsenceConstraint",
     "CandidateExecutionEnvelope",
     "CausalFactor",
     "CausalFactorKind",
+    "DelayConstraint",
+    "DurationConstraint",
+    "OrderingConstraint",
     "ScenarioStep",
     "ScenarioStepKind",
     "TemporalActionVector",
     "TemporalAssertion",
+    "TemporalConstraint",
     "TemporalPredicate",
+    "UcaOutcomeConstraint",
+    "WindowConstraint",
     "candidate_id_for",
+    "is_structural_reference",
+    "parse_declared_timing",
     "predicate_for",
     "step_kind_for",
     "uca_ref_for",
@@ -312,5 +282,5 @@ __all__ = [
 
 
 # mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-20T10:33:14Z","module_hash":"f6325c495575c75a4b27250459a952ce0d04058170895856ac7327d4155fd72b","functions":[{"id":"func/CausalFactor.validate_source_namespace","name":"validate_source_namespace","line":47,"end_line":60,"hash":"783b5839832fdb6a208b0f65b237de8b01d567823be0f63687afb73e88e71b72"},{"id":"func/predicate_for","name":"predicate_for","line":80,"end_line":82,"hash":"fec70a4f2b011858b357f48027d014bf1fda3b6a79c5a708a9cf5dcd149de345"},{"id":"func/TemporalAssertion.validate_predicate_consistency","name":"validate_predicate_consistency","line":95,"end_line":103,"hash":"8b33c3f26027dab43072b2fcb0cbb96551ec72db21a6fefd1eba04ed2c32bf65"},{"id":"func/step_kind_for","name":"step_kind_for","line":124,"end_line":126,"hash":"4d201c78392b502ab2f624e5831c5894808ab1fb23059ed23ebd6553be34915d"},{"id":"func/_validate_sequence","name":"_validate_sequence","line":139,"end_line":165,"hash":"774a92e224a06eb5ea8a393404d4565c95c40a6e28219a3c021eca6c2f310b98"},{"id":"func/_validate_uca_step_is_last","name":"_validate_uca_step_is_last","line":168,"end_line":186,"hash":"0f6abc85faeaf8eead3964465977cab636ff81b3c039ff4c014a92a62143a531"},{"id":"func/TemporalActionVector.validate_deterministic_sequences","name":"validate_deterministic_sequences","line":203,"end_line":229,"hash":"81f5192adcd8ff29e88d34cd7c665bbc0f4ba232c53e0f3376ebcd243739b2c1"},{"id":"func/candidate_id_for","name":"candidate_id_for","line":232,"end_line":238,"hash":"12635952b58522185d9844a217358e5533cd2ecc320def88c8d90fa8355706fe"},{"id":"func/uca_ref_for","name":"uca_ref_for","line":241,"end_line":247,"hash":"baaaad7e4ffc18436b09afe2d6475872adf188f0690ac05f8d5a1e2f6a80e405"},{"id":"func/CandidateExecutionEnvelope.validate_canonical_references","name":"validate_canonical_references","line":269,"end_line":296,"hash":"9c80a1b145db2dcba35b19c0f62034dd2fe3767236e93e6719bdacdcd9977bca"}]}
+# {"version":1,"tested_at":"2026-08-20T10:33:14Z","module_hash":"f6325c495575c75a4b27250459a952ce0d04058170895856ac7327d4155fd72b","functions":[{"id":"func/TemporalAssertion.validate_predicate_consistency","name":"validate_predicate_consistency","line":95,"end_line":103,"hash":"8b33c3f26027dab43072b2fcb0cbb96551ec72db21a6fefd1eba04ed2c32bf65"},{"id":"func/_validate_sequence","name":"_validate_sequence","line":139,"end_line":165,"hash":"774a92e224a06eb5ea8a393404d4565c95c40a6e28219a3c021eca6c2f310b98"},{"id":"func/_validate_uca_step_is_last","name":"_validate_uca_step_is_last","line":168,"end_line":186,"hash":"0f6abc85faeaf8eead3964465977cab636ff81b3c039ff4c014a92a62143a531"},{"id":"func/TemporalActionVector.validate_deterministic_sequences","name":"validate_deterministic_sequences","line":203,"end_line":229,"hash":"81f5192adcd8ff29e88d34cd7c665bbc0f4ba232c53e0f3376ebcd243739b2c1"},{"id":"func/CandidateExecutionEnvelope.validate_canonical_references","name":"validate_canonical_references","line":269,"end_line":296,"hash":"9c80a1b145db2dcba35b19c0f62034dd2fe3767236e93e6719bdacdcd9977bca"}]}
 # mutate4py-manifest-end

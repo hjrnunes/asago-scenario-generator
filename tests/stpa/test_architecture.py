@@ -49,9 +49,11 @@ _FORBIDDEN_INFRA_PREFIXES = (
 # A module may only import from same-or-lower layers.
 _MODEL_LAYERS: dict[str, int] = {
     "_validation": 0,
+    "causal_factor": 1,
     "loss_analysis": 1,
     "control_structure": 1,
     "enriched_threat_set": 1,
+    "temporal_constraints": 2,
     "ica_enumeration": 2,
     "scenario_spec": 3,
     "scenario_envelope": 4,

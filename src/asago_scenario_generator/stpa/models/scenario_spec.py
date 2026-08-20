@@ -13,6 +13,10 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
 
+from asago_scenario_generator.stpa.models.causal_factor import (
+    CausalFactor,
+    validate_factor_sources,
+)
 from asago_scenario_generator.stpa.models.enriched_threat_set import CatalogMapping
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 
@@ -78,6 +82,11 @@ class ScenarioSpec(BaseModel):
     attacker_bdi: AttackerBDI
     catalog_context: list[CatalogMapping] = Field(default_factory=list)
     loss_scenario: str  # carried from Stage 3
+    # Stage 5 declared, evidence-backed causal factors in declared order.
+    # Only factors the LLM explicitly declared with evidence are stored;
+    # structural presence alone never invents a factor.  Empty is valid
+    # and means "no declared factors".
+    causal_factors: list[CausalFactor] = Field(default_factory=list)
 
     def validate_against(self, control_structure: ControlStructure) -> None:
         """Validate scenario spec references against a ControlStructure.
@@ -89,6 +98,8 @@ class ScenarioSpec(BaseModel):
         - target_controller references a valid RESP.
         - target_control_action references a valid CA belonging to
           target_controller.
+        - Every causal-factor reference resolves to its PM/FB/CA
+          namespace in the control structure.
 
         Args:
             control_structure: The control structure to validate against.
@@ -108,6 +119,7 @@ class ScenarioSpec(BaseModel):
             ca_to_resp,
         )
         _validate_defender_bdi(self.defender_bdi, all_pm_ids, resp_ids, all_ca_ids)
+        validate_factor_sources(control_structure, self.causal_factors)
 
 
 def _build_lookup_maps(

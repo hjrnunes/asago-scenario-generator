@@ -15,6 +15,11 @@ from asago_scenario_generator.stpa.infra.llm import LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
+from asago_scenario_generator.stpa.models.causal_factor import (
+    CausalFactor,
+    CausalFactorKind,
+    validate_factor_sources,
+)
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
     Responsibility,
@@ -36,6 +41,7 @@ from ._constants import PROMPTS_DIR
 
 __all__ = [
     "BDIGenerationResult",
+    "CausalFactorDeclaration",
     "populate_defender_bdi",
     "generate_bdi",
     "build_bdi_prompts",
@@ -51,11 +57,30 @@ _LENGTH_RETRY_PROMPT = (
 )
 
 
+class CausalFactorDeclaration(BaseModel):
+    """One Stage 5 declaration of an evidence-backed causal factor.
+
+    ``kind`` and ``source_id`` name the structural finding, ``evidence``
+    carries the declared evidence description, and ``timing`` carries
+    optional declared timing text (parsed into typed temporal
+    constraints only at projection time; never inferred).
+    """
+
+    kind: CausalFactorKind
+    source_id: str = Field(min_length=1)
+    evidence: str = Field(min_length=1)
+    timing: str | None = None
+
+
 class BDIGenerationResult(BaseModel):
     """LLM response model for the combined BDI generation call."""
 
     defender_vulnerabilities: dict[str, str] = Field(default_factory=dict)
     attacker_bdi: AttackerBDI
+    # Declared, evidence-backed causal factors in declared order.  An
+    # absent or empty list is the explicit empty contract: structural
+    # presence alone must never select a factor.
+    causal_factors: list[CausalFactorDeclaration] = Field(default_factory=list)
 
 
 def generate_scenario_id(index: int = 0) -> str:
@@ -309,6 +334,12 @@ def assemble_scenario_spec(
     LLM — the original deterministic values are used, and vulnerabilities
     are extracted by matching to the original pm_id values.
 
+    Declared causal factors are selected in declared order with their
+    evidence descriptions and optional timing; every factor reference is
+    validated against the control structure (a ``ValueError`` names the
+    invalid causal-factor reference) so unbacked structural presence
+    never invents a factor.
+
     Args:
         defender_bdi: Pre-populated defender BDI (will be mutated in place).
         llm_result: The LLM generation result.
@@ -325,6 +356,21 @@ def assemble_scenario_spec(
     for belief in defender_bdi.beliefs:
         belief.vulnerability = llm_result.defender_vulnerabilities.get(belief.pm_id, "")
 
+    # Select exactly the declared, evidence-backed causal factors.
+    # References must resolve against the control structure; invalid
+    # references stop Stage 5 with a causal-factor reference validation
+    # error before any Stage 6 call can run.
+    causal_factors = [
+        CausalFactor(
+            kind=declaration.kind,
+            source_id=declaration.source_id,
+            description=declaration.evidence,
+            declared_timing=declaration.timing,
+        )
+        for declaration in llm_result.causal_factors
+    ]
+    validate_factor_sources(control_structure, causal_factors)
+
     return ScenarioSpec(
         scenario_id=generate_scenario_id(scenario_index),
         threat_source=ThreatSource(
@@ -339,6 +385,7 @@ def assemble_scenario_spec(
         attacker_bdi=llm_result.attacker_bdi,
         catalog_context=threat.catalog_mappings,
         loss_scenario=threat.loss_scenario,
+        causal_factors=causal_factors,
     )
 
 

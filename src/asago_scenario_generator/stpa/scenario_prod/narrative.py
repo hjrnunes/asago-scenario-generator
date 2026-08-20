@@ -17,9 +17,11 @@ from asago_scenario_generator.stpa.infra.llm import LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call_raw
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
-from asago_scenario_generator.stpa.models.execution_envelope import (
+from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactor,
-    CausalFactorKind,
+    step_text_for,
+)
+from asago_scenario_generator.stpa.models.execution_envelope import (
     ScenarioStep,
     ScenarioStepKind,
     TemporalActionVector,
@@ -29,6 +31,10 @@ from asago_scenario_generator.stpa.models.execution_envelope import (
     step_kind_for,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
+from asago_scenario_generator.stpa.models.temporal_constraints import (
+    UcaOutcomeConstraint,
+    parse_declared_timing,
+)
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 from asago_scenario_generator.stpa.threat_enum.technology_context import context_for
 
@@ -138,23 +144,6 @@ def build_narrative_prompts(
     return system_prompt, user_prompt
 
 
-_STEP_TEXTS: dict[CausalFactorKind, str] = {
-    CausalFactorKind.process_model_flaw: (
-        "Process model part {source} is flawed before control action {action} is issued"
-    ),
-    CausalFactorKind.feedback_delay: (
-        "Feedback channel {source} is delayed before control action {action} is issued"
-    ),
-    CausalFactorKind.sensor_anomaly: (
-        "Sensor reporting through {source} is anomalous before control "
-        "action {action} is issued"
-    ),
-    CausalFactorKind.actuator_anomaly: (
-        "Actuator {source} is anomalous before control action {action} is issued"
-    ),
-}
-
-
 def derive_temporal_action_vector(
     causal_factors: Sequence[CausalFactor],
     *,
@@ -166,12 +155,19 @@ def derive_temporal_action_vector(
 
     Each causal factor maps to one executable temporal assertion and one
     ordered scenario step; a non-empty vector ends with the unsafe
-    control action step for *control_action_id*.  The vector is linked
+    control action step for *control_action_id* and maps that final
+    outcome explicitly through ``uca_constraint``.  The vector is linked
     to the canonical candidate identifier for the given controller,
     control action, and UCA type.
 
-    Empty *causal_factors* produce an empty vector — no assertions and
-    no steps are invented.
+    Assertions carry typed temporal constraints derived only from each
+    factor's declared timing: known timing selects its canonical variant
+    with canonical units, while unknown timing yields ``constraint=None``
+    and ``requires_binding``.  No causal inference and no runtime
+    observations ever enter the vector.
+
+    Empty *causal_factors* produce an empty vector — no assertions, no
+    steps, and no outcome mapping are invented.
 
     Args:
         causal_factors: The mapped structural causal factors, in
@@ -192,6 +188,7 @@ def derive_temporal_action_vector(
             kind=factor.kind,
             source_id=factor.source_id,
             predicate=predicate_for(factor.kind),
+            constraint=parse_declared_timing(factor.declared_timing, factor.source_id),
         )
         for index, factor in enumerate(factors)
     ]
@@ -201,13 +198,14 @@ def derive_temporal_action_vector(
             order_index=index,
             kind=step_kind_for(factor.kind),
             source_id=factor.source_id,
-            text=_STEP_TEXTS[factor.kind].format(
+            text=step_text_for(factor.kind).format(
                 source=factor.source_id,
                 action=control_action_id,
             ),
         )
         for index, factor in enumerate(factors)
     ]
+    uca_constraint: UcaOutcomeConstraint | None = None
     if factors:
         steps.append(
             ScenarioStep(
@@ -221,12 +219,17 @@ def derive_temporal_action_vector(
                 ),
             )
         )
+        uca_constraint = UcaOutcomeConstraint(
+            control_action_id=control_action_id,
+            uca_type=uca_type,
+        )
     candidate_id = candidate_id_for(controller_id, control_action_id, uca_type)
     return TemporalActionVector(
         candidate_id=candidate_id,
         control_action_id=control_action_id,
         assertions=assertions,
         steps=steps,
+        uca_constraint=uca_constraint,
     )
 
 

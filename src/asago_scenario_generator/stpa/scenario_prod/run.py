@@ -54,6 +54,13 @@ from .coverage import compute_coverage_gaps, write_coverage_gaps
 from .eval_metrics import compute_eval_scorecard, write_eval_scorecard
 from .gherkin import build_gherkin_prompts, find_security_constraint, parse_gherkin_spec
 from .narrative import build_narrative_prompts
+from .projection import (
+    canonical_projection_data,
+    export_projection_json,
+    export_projection_yaml,
+    project_execution,
+)
+from .prompt_alignment import render_projection_alignment_table
 from .validators import (
     TraceabilityError,
     ValidationResult,
@@ -151,7 +158,7 @@ def run_sp3(
 
     # --- Stage 6: Concretization (3 LLM calls per scenario, parallelizable) ---
     for spec in scenario_specs:
-        envelope = _run_stage6_for_spec(
+        envelope, projection_doc = _run_stage6_for_spec(
             llm_client,
             spec,
             control_structure,
@@ -165,7 +172,7 @@ def run_sp3(
         )
         if envelope is not None:
             scenario_envelopes.append(envelope)
-            _write_scenario_artifacts(envelope, scenarios_dir)
+            _write_scenario_artifacts(envelope, scenarios_dir, projection_doc)
 
     # --- Stage 7: Validation + eval metrics + coverage gaps ---
     _run_stage7_validations(
@@ -270,9 +277,16 @@ def _run_stage5_for_threat(
         stage_errors.append(f"Stage 5 BDI generation failed: {error}")
         return None
 
-    spec = assemble_scenario_spec(
-        defender_bdi, llm_result, threat, control_structure, scenario_index
-    )
+    try:
+        spec = assemble_scenario_spec(
+            defender_bdi, llm_result, threat, control_structure, scenario_index
+        )
+    except ValueError as e:
+        # Invalid causal-factor references (or any other assembly-level
+        # reference error) stop this scenario before Stage 6: no narrative,
+        # attack-tree, or Gherkin call is made and no artifact is written.
+        stage_errors.append(f"Stage 5: {e}")
+        return None
     _validate_stage5_spec(spec, control_structure, stage_errors)
     return spec
 
@@ -304,13 +318,34 @@ def _run_stage6_for_spec(
     stage_errors: list[str],
     *,
     capability_profile: CapabilityProfile | None = None,
-) -> ScenarioEnvelope | None:
-    """Run Stage 6 concretization for a single scenario spec."""
+) -> tuple[ScenarioEnvelope | None, dict | None]:
+    """Run Stage 6 concretization for a single scenario spec.
+
+    The projection is derived once (deterministically, from the Stage 5
+    declared factors) and its validator-derived alignment table is passed
+    to every Stage 6 prompt, so the narrative, attack-tree, and Gherkin
+    calls all receive the same projection.  The canonical projection
+    document is returned with the envelope for artifact writing.
+
+    Returns:
+        A (envelope, projection_doc) pair; ``None`` envelope means the
+        scenario was rejected (recorded in *stage_errors*) and no
+        artifact is written.
+    """
+    try:
+        projection = project_execution(spec, control_structure)
+    except ValueError as e:
+        stage_errors.append(f"Stage 6 projection failed for {spec.scenario_id}: {e}")
+        return None, None
+    projection_doc = canonical_projection_data(projection)
+    projection_alignment = render_projection_alignment_table(projection_doc)
+
     prompts = _build_stage6_prompts(
         spec,
         control_structure,
         loss_analysis,
         loader,
+        projection_alignment=projection_alignment,
         capability_profile=capability_profile,
     )
 
@@ -338,7 +373,7 @@ def _run_stage6_for_spec(
         stage_errors,
     )
 
-    return assemble_envelope(
+    envelope = assemble_envelope(
         scenario_id=spec.scenario_id,
         scenario_spec=spec,
         narrative=narrative_text,
@@ -348,6 +383,7 @@ def _run_stage6_for_spec(
         capability_profile=capability_profile,
         control_structure=control_structure,
     )
+    return envelope, projection_doc
 
 
 @dataclass
@@ -365,17 +401,28 @@ def _build_stage6_prompts(
     loss_analysis: LossAnalysis,
     loader: TemplateLoader,
     *,
+    projection_alignment: str | None = None,
     capability_profile: CapabilityProfile | None = None,
 ) -> _Stage6Prompts:
-    """Build system/user prompt pairs for all three Stage 6 calls."""
+    """Build system/user prompt pairs for all three Stage 6 calls.
+
+    When a validated ``projection_alignment`` table is supplied, every
+    Stage 6 prompt receives the same table; otherwise the prompts render
+    without one (backward compatible default).
+    """
     nar_prompts = build_narrative_prompts(
         spec,
         loader,
         capability_profile=capability_profile,
+        projection_alignment=projection_alignment,
     )
-    tree_prompts = build_attack_tree_prompts(spec, control_structure, loader)
+    tree_prompts = build_attack_tree_prompts(
+        spec, control_structure, loader, projection_alignment=projection_alignment
+    )
     sc = find_security_constraint(spec, loss_analysis)
-    ghk_prompts = build_gherkin_prompts(spec, sc, loss_analysis, loader)
+    ghk_prompts = build_gherkin_prompts(
+        spec, sc, loss_analysis, loader, projection_alignment=projection_alignment
+    )
 
     return _Stage6Prompts(
         narrative=nar_prompts,
@@ -608,13 +655,31 @@ def _envelope_gherkin_text(envelope: ScenarioEnvelope) -> str:
 def _write_scenario_artifacts(
     envelope: ScenarioEnvelope,
     scenarios_dir: Path,
+    projection_doc: dict | None = None,
 ) -> None:
-    """Write scenario YAML and .feature files."""
+    """Write scenario YAML, .feature, and canonical projection artifacts.
+
+    The canonical projection document (``stpa-execution-projection-v1``)
+    is exported as standalone JSON and YAML under
+    ``scenarios/canonical/`` beside the legacy scenario YAML and Gherkin
+    feature, so legacy ``*.yaml`` readers keep seeing only envelope
+    documents.  When no projection is supplied only the legacy artifacts
+    are written (backward compatible default).
+    """
     write_yaml(envelope, scenarios_dir / f"{envelope.scenario_id}.yaml")
     feature_text = _envelope_gherkin_text(envelope)
     (scenarios_dir / f"{envelope.scenario_id}.feature").write_text(
         feature_text, encoding="utf-8"
     )
+    if projection_doc is not None:
+        canonical_dir = scenarios_dir / "canonical"
+        canonical_dir.mkdir(parents=True, exist_ok=True)
+        (canonical_dir / f"{envelope.scenario_id}.projection.json").write_text(
+            export_projection_json(projection_doc), encoding="utf-8"
+        )
+        (canonical_dir / f"{envelope.scenario_id}.projection.yaml").write_text(
+            export_projection_yaml(projection_doc), encoding="utf-8"
+        )
 
 
 def _write_manifest(

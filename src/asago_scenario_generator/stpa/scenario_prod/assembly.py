@@ -15,6 +15,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
+from asago_scenario_generator.stpa.models.causal_factor import (
+    CausalFactor,
+    validate_factor_sources,
+)
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
     ControlStructure,
@@ -22,8 +26,6 @@ from asago_scenario_generator.stpa.models.control_structure import (
 )
 from asago_scenario_generator.stpa.models.execution_envelope import (
     CandidateExecutionEnvelope,
-    CausalFactor,
-    CausalFactorKind,
     candidate_id_for,
     uca_ref_for,
 )
@@ -108,14 +110,6 @@ def assemble_envelope(
     )
 
 
-_SOURCE_NAMESPACES: dict[CausalFactorKind, str] = {
-    CausalFactorKind.process_model_flaw: "PM",
-    CausalFactorKind.feedback_delay: "FB",
-    CausalFactorKind.sensor_anomaly: "FB",
-    CausalFactorKind.actuator_anomaly: "CA",
-}
-
-
 def _find_responsibility(
     control_structure: ControlStructure,
     controller_id: str,
@@ -141,42 +135,6 @@ def _find_control_action(
     )
 
 
-def _collect_source_ids(
-    control_structure: ControlStructure,
-) -> dict[CausalFactorKind, set[str]]:
-    """Collect valid source identifiers per causal factor kind."""
-    pm_ids: set[str] = set()
-    fb_ids: set[str] = set()
-    ca_ids: set[str] = set()
-    for responsibility in control_structure.responsibilities:
-        pm_ids.update(pm.pm_id for pm in responsibility.process_model_parts)
-        fb_ids.update(fb.fb_id for fb in responsibility.feedback_channels)
-        ca_ids.update(ca.ca_id for ca in responsibility.control_actions)
-    return {
-        CausalFactorKind.process_model_flaw: pm_ids,
-        CausalFactorKind.feedback_delay: fb_ids,
-        CausalFactorKind.sensor_anomaly: fb_ids,
-        CausalFactorKind.actuator_anomaly: ca_ids,
-    }
-
-
-def _validate_causal_factor_sources(
-    control_structure: ControlStructure,
-    causal_factors: Sequence[CausalFactor],
-) -> None:
-    """Validate every causal factor source against its structural namespace."""
-    source_ids = _collect_source_ids(control_structure)
-    for factor in causal_factors:
-        valid = source_ids[factor.kind]
-        if factor.source_id not in valid:
-            raise ValueError(
-                f"Causal factor {factor.kind.value} source "
-                f"'{factor.source_id}' is not a known "
-                f"{_SOURCE_NAMESPACES[factor.kind]} identifier in the "
-                f"control structure."
-            )
-
-
 def assemble_candidate_envelope(
     control_structure: ControlStructure,
     *,
@@ -185,6 +143,8 @@ def assemble_candidate_envelope(
     uca_type: UCAType,
     causal_factors: Sequence[CausalFactor] | None = None,
     derive_temporal_vector: bool = False,
+    ica_id: str | None = None,
+    scenario_id: str | None = None,
 ) -> CandidateExecutionEnvelope:
     """Assemble a platform-neutral candidate execution envelope.
 
@@ -215,7 +175,7 @@ def assemble_candidate_envelope(
     responsibility = _find_responsibility(control_structure, controller_id)
     control_action = _find_control_action(responsibility, control_action_id)
     factors = list(causal_factors or [])
-    _validate_causal_factor_sources(control_structure, factors)
+    validate_factor_sources(control_structure, factors)
 
     temporal_vector = None
     if derive_temporal_vector:
@@ -235,6 +195,8 @@ def assemble_candidate_envelope(
         uca_ref=uca_ref_for(controller_id, control_action_id, uca_type),
         causal_factors=factors,
         temporal_vector=temporal_vector,
+        ica_id=ica_id,
+        scenario_id=scenario_id,
     )
 
 
