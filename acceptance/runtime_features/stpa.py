@@ -140,6 +140,12 @@ _KIND_BY_ID_PREFIX = {
     "CA": CausalFactorKind.actuator_anomaly,
 }
 
+_KIND_BY_HYPHEN_LABEL = {
+    "process-model": CausalFactorKind.process_model_flaw,
+    "feedback-delay": CausalFactorKind.feedback_delay,
+    "actuator-anomaly": CausalFactorKind.actuator_anomaly,
+}
+
 _RE_LABELED_ITEM = re.compile(
     r"^(?:a |an )?(process-model flaw|feedback delay|sensor anomaly|"
     r"actuator anomaly) (?:for|at) ([A-Z0-9-]+)$"
@@ -2617,14 +2623,9 @@ def _h_stage5_one_evidence_factor(
     if not match:
         return False, f"Could not parse Stage 5 evidence step: {text}"
     kind_label, source_id = match.groups()
-    kind_by_label = {
-        "process-model": CausalFactorKind.process_model_flaw,
-        "feedback-delay": CausalFactorKind.feedback_delay,
-        "actuator-anomaly": CausalFactorKind.actuator_anomaly,
-    }
     world.stpa_declarations = [
         CausalFactorDeclaration(
-            kind=kind_by_label[kind_label],
+            kind=_KIND_BY_HYPHEN_LABEL[kind_label],
             source_id=source_id,
             evidence=f"Stage 5 evidence for {kind_label} at {source_id}",
         )
@@ -2682,6 +2683,27 @@ def _h_dir_contains_canonical(
     return True, ""
 
 
+def _read_canonical_artifacts(
+    world: World,
+) -> tuple[dict | None, dict | None] | None:
+    """Parse the canonical projection artifacts of the run dir.
+
+    Returns the (json_doc, yaml_doc) pair read with standard JSON and
+    YAML readers, or ``None`` when no artifact directory is recorded.
+    """
+    artifact_dir = getattr(world, "stpa_artifact_dir", None)
+    if artifact_dir is None:
+        return None
+    canonical_dir = artifact_dir / "canonical"
+    json_doc = json.loads(
+        (canonical_dir / "SCN-001.projection.json").read_text(encoding="utf-8")
+    )
+    yaml_doc = yaml.safe_load(
+        (canonical_dir / "SCN-001.projection.yaml").read_text(encoding="utf-8")
+    )
+    return json_doc, yaml_doc
+
+
 def _h_canonical_schema_version(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -2691,16 +2713,10 @@ def _h_canonical_schema_version(
     )
     if not match:
         return False, f"Could not parse schema version step: {text}"
-    artifact_dir = getattr(world, "stpa_artifact_dir", None)
-    if artifact_dir is None:
+    artifacts = _read_canonical_artifacts(world)
+    if artifacts is None:
         return False, "No scenario artifact directory recorded"
-    canonical_dir = artifact_dir / "canonical"
-    json_doc = json.loads(
-        (canonical_dir / "SCN-001.projection.json").read_text(encoding="utf-8")
-    )
-    yaml_doc = yaml.safe_load(
-        (canonical_dir / "SCN-001.projection.yaml").read_text(encoding="utf-8")
-    )
+    json_doc, yaml_doc = artifacts
     if json_doc.get("schema_version") != match.group(1):
         return False, "Canonical JSON schema version does not match"
     if yaml_doc.get("schema_version") != match.group(1):
@@ -2719,16 +2735,10 @@ def _h_canonical_identifies_ica_scenario(
     )
     if not match:
         return False, f"Could not parse artifact identity step: {text}"
-    artifact_dir = getattr(world, "stpa_artifact_dir", None)
-    if artifact_dir is None:
+    artifacts = _read_canonical_artifacts(world)
+    if artifacts is None:
         return False, "No scenario artifact directory recorded"
-    canonical_dir = artifact_dir / "canonical"
-    json_doc = json.loads(
-        (canonical_dir / "SCN-001.projection.json").read_text(encoding="utf-8")
-    )
-    yaml_doc = yaml.safe_load(
-        (canonical_dir / "SCN-001.projection.yaml").read_text(encoding="utf-8")
-    )
+    json_doc, yaml_doc = artifacts
     ica_id, scenario_id = match.groups()
     for export in (json_doc, yaml_doc):
         if export.get("ica_id") != ica_id:
@@ -2744,16 +2754,10 @@ def _h_canonical_standard_reader(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Then: standard readers parse the artifacts without project imports."""
-    artifact_dir = getattr(world, "stpa_artifact_dir", None)
-    if artifact_dir is None:
+    artifacts = _read_canonical_artifacts(world)
+    if artifacts is None:
         return False, "No scenario artifact directory recorded"
-    canonical_dir = artifact_dir / "canonical"
-    json_doc = json.loads(
-        (canonical_dir / "SCN-001.projection.json").read_text(encoding="utf-8")
-    )
-    yaml_doc = yaml.safe_load(
-        (canonical_dir / "SCN-001.projection.yaml").read_text(encoding="utf-8")
-    )
+    json_doc, yaml_doc = artifacts
     if not _is_plain_data(json_doc) or not _is_plain_data(yaml_doc):
         return False, "Canonical artifacts require project imports to parse"
     return True, ""
@@ -3029,14 +3033,9 @@ def _h_unknown_timing_factor(
     if not match:
         return False, f"Could not parse unknown timing step: {text}"
     kind_label, source_id = match.groups()
-    kind_by_label = {
-        "process-model": CausalFactorKind.process_model_flaw,
-        "feedback-delay": CausalFactorKind.feedback_delay,
-        "actuator-anomaly": CausalFactorKind.actuator_anomaly,
-    }
     world.stpa_causal_factors = [
         CausalFactor(
-            kind=kind_by_label[kind_label],
+            kind=_KIND_BY_HYPHEN_LABEL[kind_label],
             source_id=source_id,
             description=source_id,
             declared_timing=None,

@@ -16,6 +16,7 @@ output; the projection never imports them.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, Field, model_validator
@@ -139,6 +140,71 @@ def _normalize_s(value_text: str, unit: str) -> int | None:
     return None
 
 
+def _parse_ordering(text: str, source_id: str) -> TemporalConstraint | None:
+    """Parse declared "ordering before|after <ref>" timing."""
+    match = re.fullmatch(r"ordering (before|after) (.+)", text)
+    if match and is_structural_reference(match.group(2)):
+        return OrderingConstraint(ordering=match.group(1), reference=match.group(2))
+    return None
+
+
+def _parse_delay(text: str, source_id: str) -> TemporalConstraint | None:
+    """Parse declared "delay <n> <unit>" timing into canonical milliseconds."""
+    match = re.fullmatch(r"delay (\d+) (milliseconds|ms|seconds|s)", text)
+    if not match:
+        return None
+    value_ms = _normalize_ms(match.group(1), match.group(2))
+    if value_ms is None:
+        return None
+    return DelayConstraint(delay_ms=value_ms, reference=source_id)
+
+
+def _parse_duration(text: str, source_id: str) -> TemporalConstraint | None:
+    """Parse declared "duration <n> <unit>" timing into canonical seconds."""
+    match = re.fullmatch(r"duration (\d+) (milliseconds|ms|seconds|s)", text)
+    if not match:
+        return None
+    value_s = _normalize_s(match.group(1), match.group(2))
+    if value_s is None:
+        return None
+    return DurationConstraint(duration_s=value_s, reference=source_id)
+
+
+def _parse_window(text: str, source_id: str) -> TemporalConstraint | None:
+    """Parse declared "window from <a> to <b> <unit>" timing into ms bounds."""
+    match = re.fullmatch(
+        r"window from (\d+) to (\d+) (milliseconds|ms|seconds|s)", text
+    )
+    if not match:
+        return None
+    from_ms = _normalize_ms(match.group(1), match.group(3))
+    to_ms = _normalize_ms(match.group(2), match.group(3))
+    if from_ms is None or to_ms is None:
+        return None
+    return WindowConstraint(
+        window_from_ms=from_ms, window_to_ms=to_ms, reference=source_id
+    )
+
+
+def _parse_absence(text: str, source_id: str) -> TemporalConstraint | None:
+    """Parse declared "absence until <ref>" timing."""
+    match = re.fullmatch(r"absence until (.+)", text)
+    if match and is_structural_reference(match.group(1)):
+        return AbsenceConstraint(reference=match.group(1))
+    return None
+
+
+# Variant parsers in canonical precedence order; each returns ``None`` for
+# any text it does not fully own, so the loop derives at most one constraint.
+_TIMING_PARSERS: tuple[Callable[[str, str], TemporalConstraint | None], ...] = (
+    _parse_ordering,
+    _parse_delay,
+    _parse_duration,
+    _parse_window,
+    _parse_absence,
+)
+
+
 def parse_declared_timing(
     declared_timing: str | None,
     source_id: str,
@@ -158,45 +224,13 @@ def parse_declared_timing(
     Returns:
         The typed constraint variant, or ``None`` when timing is unknown.
     """
-    if not declared_timing:
-        return None
-    text = declared_timing.strip()
+    text = (declared_timing or "").strip()
     if not text:
         return None
-
-    ordering = re.fullmatch(r"ordering (before|after) (.+)", text)
-    if ordering and is_structural_reference(ordering.group(2)):
-        return OrderingConstraint(
-            ordering=ordering.group(1), reference=ordering.group(2)
-        )
-
-    delay = re.fullmatch(r"delay (\d+) (milliseconds|ms|seconds|s)", text)
-    if delay:
-        value_ms = _normalize_ms(delay.group(1), delay.group(2))
-        if value_ms is not None:
-            return DelayConstraint(delay_ms=value_ms, reference=source_id)
-
-    duration = re.fullmatch(r"duration (\d+) (milliseconds|ms|seconds|s)", text)
-    if duration:
-        value_s = _normalize_s(duration.group(1), duration.group(2))
-        if value_s is not None:
-            return DurationConstraint(duration_s=value_s, reference=source_id)
-
-    window = re.fullmatch(
-        r"window from (\d+) to (\d+) (milliseconds|ms|seconds|s)", text
-    )
-    if window:
-        from_ms = _normalize_ms(window.group(1), window.group(3))
-        to_ms = _normalize_ms(window.group(2), window.group(3))
-        if from_ms is not None and to_ms is not None:
-            return WindowConstraint(
-                window_from_ms=from_ms, window_to_ms=to_ms, reference=source_id
-            )
-
-    absence = re.fullmatch(r"absence until (.+)", text)
-    if absence and is_structural_reference(absence.group(1)):
-        return AbsenceConstraint(reference=absence.group(1))
-
+    for parser in _TIMING_PARSERS:
+        constraint = parser(text, source_id)
+        if constraint is not None:
+            return constraint
     return None
 
 

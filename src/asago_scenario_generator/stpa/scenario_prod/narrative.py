@@ -19,6 +19,8 @@ from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactor,
+    predicate_for,
+    step_kind_for,
     step_text_for,
 )
 from asago_scenario_generator.stpa.models.execution_envelope import (
@@ -27,8 +29,6 @@ from asago_scenario_generator.stpa.models.execution_envelope import (
     TemporalActionVector,
     TemporalAssertion,
     candidate_id_for,
-    predicate_for,
-    step_kind_for,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.temporal_constraints import (

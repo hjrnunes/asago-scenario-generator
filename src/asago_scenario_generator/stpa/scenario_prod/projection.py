@@ -22,11 +22,13 @@ from typing import Any
 
 import yaml
 
-from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
+from asago_scenario_generator.stpa.models.causal_factor import (
+    CausalFactorKind,
+    predicate_for,
+)
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.execution_envelope import (
     CandidateExecutionEnvelope,
-    predicate_for,
 )
 from asago_scenario_generator.stpa.models.execution_projection import (
     StpaProjectionTraceabilityResult,
@@ -494,42 +496,33 @@ def _check_final_step_identity(
     )
 
 
-def _check_uca_final_step(
+def _check_uca_step_and_outcome(
     steps: list[dict[str, Any]],
     factors: list[dict[str, Any]],
     control_action_id: str,
-    violations: list[StpaProjectionTraceabilityViolation],
-) -> None:
-    """Check the final scenario step or the missing-UCA contract."""
-    if steps:
-        _check_final_step_identity(steps[-1], control_action_id, violations)
-        return
-    if not factors:
-        return
-    violations.append(
-        _violation(
-            StpaProjectionTraceabilityViolationCode.uca_step_mismatch,
-            "steps",
-            "temporal projection has no final unsafe control action step",
-        )
-    )
-
-
-def _check_uca_constraint(
-    steps: list[dict[str, Any]],
-    uca_constraint: Any,
-    control_action_id: str,
     uca_type: Any,
+    uca_constraint: Any,
     violations: list[StpaProjectionTraceabilityViolation],
 ) -> None:
-    """Emit a violation when the final UCA outcome mapping is forged.
+    """Check the final UCA scenario step and its explicit outcome mapping.
 
-    The vector-level ``uca_constraint`` must mirror the final UCA step:
-    whenever a projection has steps, the outcome mapping must name the
-    same control action and UCA type.
+    Composes the missing-UCA contract with the forged-outcome check: a
+    non-empty factor list without a final unsafe control action step
+    violates fail-closed traceability, and whenever a projection has
+    steps the vector-level ``uca_constraint`` must mirror the final step
+    — naming the same control action and UCA type.
     """
     if not steps:
+        if factors:
+            violations.append(
+                _violation(
+                    StpaProjectionTraceabilityViolationCode.uca_step_mismatch,
+                    "steps",
+                    "temporal projection has no final unsafe control action step",
+                )
+            )
         return
+    _check_final_step_identity(steps[-1], control_action_id, violations)
     expected = {
         "type": "uca_outcome",
         "control_action_id": control_action_id,
@@ -579,6 +572,71 @@ def _check_typed_provenance(
             return
 
 
+def _check_factor_sequences(
+    assertions: list[dict[str, Any]],
+    factor_steps: list[dict[str, Any]],
+    factor_sources: list[str],
+    missing: set[str],
+    violations: list[StpaProjectionTraceabilityViolation],
+) -> None:
+    """Run the causal-factor sequence checks whose required vectors are present.
+
+    Emits, in deterministic order: the causal-factor-to-assertion
+    mapping, the canonical assertion predicates, then the
+    causal-factor-to-step mapping.  A check whose prerequisite
+    ``causal_factors``/``assertions``/``steps`` key is missing is skipped
+    (the absence was already reported by the required-vector check).
+    """
+    if not missing & {"causal_factors", "assertions"}:
+        _check_factor_mapping(
+            assertions,
+            factor_sources,
+            item_label="assertion",
+            id_field="assertion_id",
+            id_prefix="TA",
+            violations=violations,
+        )
+    if "assertions" not in missing:
+        _check_assertion_predicates(assertions, violations)
+    if not missing & {"causal_factors", "steps"}:
+        _check_factor_mapping(
+            factor_steps,
+            factor_sources,
+            item_label="scenario step",
+            id_field="step_id",
+            id_prefix="S",
+            violations=violations,
+        )
+
+
+def _check_final_step_sequence(
+    steps: list[dict[str, Any]],
+    factors: list[dict[str, Any]],
+    assertions: list[dict[str, Any]],
+    control_action_id: str,
+    uca_type: Any,
+    uca_constraint: Any,
+    missing: set[str],
+    violations: list[StpaProjectionTraceabilityViolation],
+) -> None:
+    """Run the final-step and typed-provenance checks with present vectors.
+
+    Emits, in deterministic order: the final unsafe control action step
+    with its explicit UCA outcome constraint, then typed provenance.
+    """
+    if "steps" not in missing:
+        _check_uca_step_and_outcome(
+            steps,
+            factors,
+            control_action_id,
+            uca_type,
+            uca_constraint,
+            violations,
+        )
+    if not missing & {"assertions", "steps"}:
+        _check_typed_provenance(assertions, steps, violations)
+
+
 def validate_projection_traceability(
     envelope_or_doc: CandidateExecutionEnvelope | dict[str, Any],
 ) -> StpaProjectionTraceabilityResult:
@@ -608,43 +666,25 @@ def validate_projection_traceability(
     assertions = _first_non_empty(doc.get("assertions"), [])
     steps = _first_non_empty(doc.get("steps"), [])
     factor_sources = [factor.get("source_id") for factor in factors]
-
-    _check_schema_version(doc, violations)
-    _check_candidate_identity(doc, violations)
-    if "causal_factors" not in missing and "assertions" not in missing:
-        _check_factor_mapping(
-            assertions,
-            factor_sources,
-            item_label="assertion",
-            id_field="assertion_id",
-            id_prefix="TA",
-            violations=violations,
-        )
-    if "assertions" not in missing:
-        _check_assertion_predicates(assertions, violations)
     factor_steps = [
         step for step in steps if step.get("source_kind") == _CAUSAL_FACTOR_PROVENANCE
     ]
-    if "causal_factors" not in missing and "steps" not in missing:
-        _check_factor_mapping(
-            factor_steps,
-            factor_sources,
-            item_label="scenario step",
-            id_field="step_id",
-            id_prefix="S",
-            violations=violations,
-        )
-    if "steps" not in missing:
-        _check_uca_final_step(steps, factors, doc.get("control_action_id"), violations)
-        _check_uca_constraint(
-            steps,
-            doc.get("uca_constraint"),
-            doc.get("control_action_id"),
-            doc.get("uca_type"),
-            violations,
-        )
-    if "assertions" not in missing and "steps" not in missing:
-        _check_typed_provenance(assertions, steps, violations)
+
+    _check_schema_version(doc, violations)
+    _check_candidate_identity(doc, violations)
+    _check_factor_sequences(
+        assertions, factor_steps, factor_sources, missing, violations
+    )
+    _check_final_step_sequence(
+        steps,
+        factors,
+        assertions,
+        doc.get("control_action_id"),
+        doc.get("uca_type"),
+        doc.get("uca_constraint"),
+        missing,
+        violations,
+    )
 
     return StpaProjectionTraceabilityResult(valid=not violations, violations=violations)
 
