@@ -57,9 +57,14 @@ from asago_scenario_generator.models.attack_tree import (
     AttackTree,
     AttackTreeNode,
     GateType,
+    ImpactAction,
     InitialIngressAction,
     IntegrationInteractionAction,
     ToolInvocationAction,
+)
+from asago_scenario_generator.pipeline.compatibility import (
+    EXECUTOR_ROLE_TO_LEAF_COMPAT as _EXECUTOR_ROLE_TO_LEAF_COMPAT,
+    STEP_TO_LEAF_ACTION_COMPAT as _STEP_TO_LEAF_ACTION_COMPAT,
 )
 from asago_scenario_generator.models.projection_envelope import (
     ArtifactRealizationMapping,
@@ -1294,42 +1299,10 @@ def _check_security_actions_mapped(
 # ---------------------------------------------------------------------------#
 # Check 4b: per-step semantic compatibility (contract §4)
 # ---------------------------------------------------------------------------#
-
-# Mapping from canonical chain step action_kind to valid tree leaf action kinds.
-# Canonical action_kinds: prepare, deliver, invoke, transform, persist, observe, impact
-# Tree leaf action kinds: initial_ingress, external_precondition, ai_system_action,
-#   tool_invocation, integration_interaction, impact
-_STEP_TO_LEAF_ACTION_COMPAT: dict[str, set[str]] = {
-    "prepare": {"external_precondition", "initial_ingress"},
-    "deliver": {"initial_ingress"},
-    "invoke": {"initial_ingress", "tool_invocation", "integration_interaction"},
-    "transform": {"ai_system_action"},
-    "persist": {"ai_system_action", "tool_invocation"},
-    "observe": {
-        "ai_system_action",
-        "integration_interaction",
-        "external_precondition",
-    },
-    "impact": {"impact"},
-}
-
-# Mapping from canonical executor_role to compatible leaf action kinds.
-# 422o.4: all executor roles checked, not just attacker.
-_EXECUTOR_ROLE_TO_LEAF_COMPAT: dict[str, set[str]] = {
-    "attacker": {
-        "initial_ingress",
-        "external_precondition",
-        "impact",
-        "tool_invocation",
-    },
-    "system": {
-        "ai_system_action",
-        "tool_invocation",
-        "integration_interaction",
-        "impact",
-    },
-    "operator": {"external_precondition", "integration_interaction", "impact"},
-}
+# The action-kind and executor-role compatibility mappings live in
+# ``pipeline.compatibility`` (single source of truth shared with the prompt
+# alignment table).  They are re-imported above as the ``_``-prefixed names
+# so existing call sites keep working.
 
 # Mapping from canonical action_kind to valid Gherkin keyword for behavior.
 # 422o.4: behavior keyword must match canonical action semantics.
@@ -1382,6 +1355,16 @@ def _compare_realization_to_step(
 # Mapping from canonical boundary_position to valid tree leaf constraints.
 _BOUNDARY_COMPAT: dict[str, set[str | None]] = {
     "outside": {None},  # outside steps → external_precondition (no zone)
+    "crossing": {"input", "reasoning", "tool_execution", "memory", "inter_agent"},
+    "inside": {"input", "reasoning", "tool_execution", "memory", "inter_agent"},
+}
+
+# Mapping from canonical boundary_position to valid NARRATIVE step zones.
+# Stage-specific: a narrative step representing activity outside the assessed
+# boundary uses the literal zone 'outside' (never an active Schneider zone);
+# inside/crossing narrative steps use active Schneider zones.
+_NARRATIVE_BOUNDARY_ZONE_COMPAT: dict[str, set[str]] = {
+    "outside": {"outside"},
     "crossing": {"input", "reasoning", "tool_execution", "memory", "inter_agent"},
     "inside": {"input", "reasoning", "tool_execution", "memory", "inter_agent"},
 }
@@ -1482,7 +1465,33 @@ def _check_step_semantic_compatibility(
 
                 # --- Boundary/zone compatibility ---
                 valid_zones = _BOUNDARY_COMPAT.get(step.boundary_position, set())
-                if leaf.zone not in valid_zones:
+                external_impact = (
+                    isinstance(action, ImpactAction) and action.boundary == "external"
+                )
+                if external_impact:
+                    # External impacts occur outside the assessed boundary,
+                    # so the leaf zone is null by model contract and the
+                    # generic zone check does not apply.  Every mapped
+                    # projected step must itself be outside-boundary; a
+                    # non-outside mapping is a boundary semantic violation
+                    # — the step ID is preserved, never removed or remapped.
+                    if step.boundary_position != "outside":
+                        violations.append(
+                            ProjectionTraceabilityViolation(
+                                code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
+                                stage=ProjectionTraceabilityStage.attack_tree,
+                                detail=(
+                                    f"tree leaf '{leaf.id}' external impact "
+                                    f"maps non-outside projected step "
+                                    f"'{step.step_id}' (boundary_position "
+                                    f"'{step.boundary_position}') — boundary "
+                                    f"semantic violation"
+                                ),
+                                element_id=leaf.id,
+                                projected_step_id=step.step_id,
+                            )
+                        )
+                elif leaf.zone not in valid_zones:
                     violations.append(
                         ProjectionTraceabilityViolation(
                             code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
@@ -1667,8 +1676,12 @@ def _check_step_semantic_compatibility(
             step = step_by_id.get(sid)
             if step is None:
                 continue
-            # Narrative step zone must be compatible with projected step boundary.
-            valid_zones = _BOUNDARY_COMPAT.get(step.boundary_position, set())
+            # Narrative stage boundary rules: outside-boundary steps use the
+            # literal zone 'outside'; inside/crossing steps use an active
+            # Schneider zone (never 'outside').
+            valid_zones = _NARRATIVE_BOUNDARY_ZONE_COMPAT.get(
+                step.boundary_position, set()
+            )
             if n_step.zone not in valid_zones:
                 violations.append(
                     ProjectionTraceabilityViolation(

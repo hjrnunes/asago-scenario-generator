@@ -5,16 +5,109 @@ Action-aware enforcement (cmps.9):
 - Internal action zone requirements remain profile-active.
 - Tool invocation zone must be exactly 'tool_execution'.
 - Invalid zones are rejected (violation list), not silently pruned (cmps.9 review correction 4).
+
+Narrative outside-boundary representation (projection transport):
+- A narrative step may use the literal zone ``outside`` only when every
+  projected step it maps is outside-boundary; ``outside`` represents
+  activity outside the assessed AI boundary and is never an active
+  Schneider zone.
+- Active-zone consumers use :func:`active_narrative_zones` so ``outside``
+  traversal is never credited as internal traversal.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 
 from asago_scenario_generator.models.attack_tree import AttackTree, AttackTreeNode
 from asago_scenario_generator.models.scenario import NarrativeLayer
 
 logger = logging.getLogger(__name__)
+
+# Literal narrative zone for activity outside the assessed AI boundary.
+# Deliberately distinct from the profile's active Schneider zone list.
+OUTSIDE_ZONE = "outside"
+
+
+def active_narrative_zones(zone_sequence: Iterable[str]) -> list[str]:
+    """Project a narrative zone sequence onto active zones, dropping ``outside``.
+
+    ``outside`` represents activity outside the assessed AI boundary, so it
+    is never counted as internal traversal by coverage, priority, faceting,
+    or skeleton fallback consumers.
+    """
+    return [zone for zone in zone_sequence if zone != OUTSIDE_ZONE]
+
+
+def enforce_narrative_projection_zones(
+    narrative: NarrativeLayer,
+    zones_active: list[str] | None,
+    boundary_by_id: dict[str, str | None] | None,
+) -> NarrativeLayer:
+    """Validate narrative step zones against projected-step boundary positions.
+
+    Stage-specific narrative boundary rules (projection transport):
+
+    - One narrative step may combine only projected steps with consistent
+      boundary positions.
+    - A step mapping only outside-boundary projected steps must use the
+      literal zone ``outside``.
+    - Inside/crossing steps must use an active Schneider zone — never
+      ``outside``, never an inactive zone.
+
+    Raises ``ValueError`` with ``projection-zone`` reasons on the first
+    violation set — the narrative is never repaired (no step is removed,
+    renumbered, or remapped).  Returns the narrative unchanged when every
+    step satisfies the rules or when *zones_active*/*boundary_by_id* are
+    ``None`` (no validation possible).
+    """
+    if zones_active is None or boundary_by_id is None:
+        return narrative
+
+    active = set(zones_active)
+    violations: list[str] = []
+
+    for step in narrative.steps:
+        mapped_ids = [sid for sid in step.projected_step_ids if sid in boundary_by_id]
+        if not mapped_ids:
+            continue
+        boundaries = {boundary_by_id[sid] for sid in mapped_ids}
+        if len(boundaries) > 1:
+            violations.append(
+                f"projection-zone: narrative step {step.step_number} maps "
+                f"projected steps with mixed boundary positions "
+                f"({sorted(boundaries)})"
+            )
+            continue
+        boundary = next(iter(boundaries))
+        if boundary == OUTSIDE_ZONE:
+            if step.zone != OUTSIDE_ZONE:
+                violations.append(
+                    f"projection-zone: narrative step {step.step_number} maps "
+                    f"only outside-boundary projected steps but has zone "
+                    f"'{step.zone}' (outside step active zone)"
+                )
+        else:
+            if step.zone == OUTSIDE_ZONE:
+                violations.append(
+                    f"projection-zone: narrative step {step.step_number} has "
+                    f"zone 'outside' but maps {boundary}-boundary projected "
+                    f"steps ({boundary} step outside)"
+                )
+            elif step.zone not in active:
+                violations.append(
+                    f"projection-zone: narrative step {step.step_number} has "
+                    f"zone '{step.zone}' which is not an active Schneider "
+                    f"zone (inactive Schneider zone)"
+                )
+
+    if violations:
+        raise ValueError(
+            "Narrative has projection-zone violations (no semantic repair): "
+            + "; ".join(violations)
+        )
+    return narrative
 
 
 def _enforce_zones_narrative(

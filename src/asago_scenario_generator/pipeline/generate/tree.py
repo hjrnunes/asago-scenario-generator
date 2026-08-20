@@ -35,9 +35,13 @@ from asago_scenario_generator.pipeline.generate.ontology import (
     _lookup_entry_point_controllability,
     _lookup_entry_point_direction,
 )
+from asago_scenario_generator.pipeline.generate.step_ids import (
+    normalize_projected_step_ids,
+)
 from asago_scenario_generator.pipeline.generate.zones import (
     _collect_zones_from_tree,
     _enforce_zones_attack_tree,
+    active_narrative_zones,
 )
 from asago_scenario_generator.pipeline.seeds import ScenarioSeed
 from asago_scenario_generator.prompts import render_prompt
@@ -152,21 +156,23 @@ def _resolve_projected_step_ids(
 ) -> None:
     """Validate and replace model-supplied realizations from projected IDs.
 
-    Raises ValueError if any projected step ID is not in the canonical set.
+    Normalizes accepted transport echo shapes (exact strings, ``step_id``
+    records, ``step.`` prefixes, ``step_id`` objects) to canonical IDs in
+    their original order.  Raises a stable ValueError for unknown,
+    ambiguous, or duplicate canonical identities — never TypeError.
     """
     projected_ids = result.get("projected_step_ids", ())
     if not projected_ids:
         return
-    missing = set(projected_ids) - set(canonical_by_id)
-    if missing:
-        raise ValueError(
-            "Attack tree references unknown projected step ID(s): "
-            + ", ".join(sorted(missing))
-        )
+    normalized = normalize_projected_step_ids(projected_ids, canonical_by_id)
+    if isinstance(projected_ids, list):
+        result["projected_step_ids"] = list(normalized)
+    else:
+        result["projected_step_ids"] = normalized
     # Model-supplied realization semantics are transport-only. Replace
     # them before strict validation, including omitted or duplicate
     # records.
-    result["realizations"] = [canonical_by_id[sid] for sid in projected_ids]
+    result["realizations"] = [canonical_by_id[sid] for sid in normalized]
 
 
 def _projection_step_context(
@@ -229,6 +235,17 @@ def _normalize_attack_tree_node(
     action = result.get("action")
     if isinstance(action, dict) and action.get("kind") == "external_precondition":
         _normalize_external_precondition(result, boundary_by_id)
+    elif (
+        isinstance(action, dict)
+        and action.get("kind") == "impact"
+        and action.get("boundary") == "external"
+    ):
+        # External impacts occur outside the assessed AI boundary, so a
+        # transport zone is noise and is cleared before strict parsing.
+        # The mapped projected step IDs are preserved — strict projection
+        # validation owns the outside-boundary requirement and fails
+        # closed on a non-outside mapping (never silent removal/remap).
+        result["zone"] = None
     if isinstance(result.get("children"), list):
         result["children"] = [
             _normalize_attack_tree_node(child, canonical_by_id, boundary_by_id)
@@ -340,7 +357,10 @@ def _build_tree_skeleton(
     if not pinned_technique_ids:
         return []
 
-    fallback_zone = narrative.zone_sequence[0] if narrative.zone_sequence else "input"
+    # The fallback zone is the first ACTIVE narrative zone — the literal
+    # 'outside' zone never becomes a tree skeleton zone.
+    active_sequence = active_narrative_zones(narrative.zone_sequence)
+    fallback_zone = active_sequence[0] if active_sequence else "input"
 
     leaves: list[dict[str, str]] = []
     for idx, (tid, tname) in enumerate(
@@ -505,6 +525,23 @@ def _validate_tree_against_projection(
         if node.gate == GateType.LEAF:
             action_kind = node.action.kind if node.action else ""
             is_external = action_kind == "external_precondition"
+            is_external_impact = (
+                action_kind == "impact"
+                and getattr(node.action, "boundary", None) == "external"
+            )
+
+            if is_external_impact:
+                # External impacts happen outside the assessed boundary, so
+                # every mapped projected step must itself be outside-boundary.
+                # The step ID is preserved (never removed or remapped) and the
+                # mapping fails closed as a boundary semantic violation.
+                for sid in node.projected_step_ids:
+                    if boundary_by_id.get(sid) != "outside":
+                        raise ValueError(
+                            f"Tree leaf '{node.id}' external impact maps "
+                            f"non-outside projected step '{sid}' — boundary "
+                            f"semantic violation (fail closed, no repair)"
+                        )
 
             if is_external:
                 # Outside-boundary external preconditions are traceable.
@@ -862,6 +899,17 @@ def build_call2_context(
         else projection_context
     )
 
+    # Validator-derived compact alignment table (one row per selected step).
+    from asago_scenario_generator.pipeline.generate.alignment import (
+        derive_projection_alignment_rows,
+    )
+
+    alignment_rows = (
+        derive_projection_alignment_rows(humanized_projection.get("selected_steps", []))
+        if humanized_projection
+        else []
+    )
+
     return {
         "seed": seed,
         "use_case": use_case,
@@ -885,6 +933,7 @@ def build_call2_context(
         # Non-template data for post-generation validation
         "skeleton": skeleton,
         "projection_context": humanized_projection,
+        "projection_alignment_rows": alignment_rows,
     }
 
 

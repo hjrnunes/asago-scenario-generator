@@ -170,11 +170,18 @@ from asago_scenario_generator.pipeline.generate.tree import (
     build_call2_context,
 )
 
+# step_ids
+from asago_scenario_generator.pipeline.generate.step_ids import (
+    normalize_projected_step_ids,
+)
+
 # zones
 from asago_scenario_generator.pipeline.generate.zones import (
     _collect_zones_from_tree,
     _enforce_zones_attack_tree,
     _enforce_zones_narrative,
+    active_narrative_zones,
+    enforce_narrative_projection_zones,
     validate_attack_tree_zones,
 )
 
@@ -225,6 +232,8 @@ __all__ = [
     "StageAttemptFailure",
     "StageCallEvidence",
     "TreeStageResult",
+    "active_narrative_zones",
+    "enforce_narrative_projection_zones",
     # actor
     "Call0Response",
     # narrative
@@ -289,6 +298,7 @@ __all__ = [
     "_normalize_capability_level",
     "_parse_attack_tree_yaml",
     "normalize_attack_tree_transport",
+    "normalize_projected_step_ids",
     "_sanitize_narrative",
     "_sanitize_non_latin",
     "_sanitize_yaml_colons",
