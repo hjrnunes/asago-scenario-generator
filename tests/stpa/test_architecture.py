@@ -904,6 +904,11 @@ _SCENARIO_PROD_LAYERS: dict[str, int] = {
     "attack_tree": 1,
     "gherkin": 1,
     "validators": 1,
+    # Stream B deterministic projection validators/derivers.  They depend
+    # only on stpa.models (execution_envelope/execution_projection), never
+    # on scenario_prod siblings or IO, so they sit at the stage-module layer.
+    "projection": 1,
+    "prompt_alignment": 1,
     "eval_metrics": 2,
     "coverage": 2,
     "run": 3,
@@ -991,6 +996,8 @@ class TestScenarioProdNoImportCycles:
             "asago_scenario_generator.stpa.scenario_prod.attack_tree",
             "asago_scenario_generator.stpa.scenario_prod.gherkin",
             "asago_scenario_generator.stpa.scenario_prod.validators",
+            "asago_scenario_generator.stpa.scenario_prod.projection",
+            "asago_scenario_generator.stpa.scenario_prod.prompt_alignment",
             "asago_scenario_generator.stpa.scenario_prod.eval_metrics",
             "asago_scenario_generator.stpa.scenario_prod.coverage",
             "asago_scenario_generator.stpa.scenario_prod.run",
