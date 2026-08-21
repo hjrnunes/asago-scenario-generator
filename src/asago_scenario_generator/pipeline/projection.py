@@ -43,6 +43,7 @@ from asago_scenario_generator.models.attack_pattern import (
     ResourceBinding,
     ResourceSlot,
     SecurityOutcomeAssertionRequirement,
+    SourceInfluencePath,
     StateChangingToolFixtureRequirement,
     StepOmission,
     TaxonomyResolver,
@@ -397,6 +398,7 @@ class ProjectionIssue(ProjectionModel):
         "incompatible_profile",
         "unsupported_requirement_derivation",
         "inapplicable_projection",
+        "source_influence_relation_infeasible",
     ]
     pattern_id: str
     detail: str
@@ -404,6 +406,15 @@ class ProjectionIssue(ProjectionModel):
     slot_id: str | None = None
     condition_results: tuple[ConditionEvaluationResult, ...] = ()
     precondition_results: tuple[PreconditionEvaluationResult, ...] = ()
+    source_id: str | None = None
+    boundary_id: str | None = None
+    target_ingress_id: str | None = None
+    canonical_ingress_id: str | None = None
+    expected_target_zone: str | None = None
+    actual_boundary_zones: str | None = None
+    expected_source_kind: str | None = None
+    actual_binding_kind: str | None = None
+    guidance: str | None = None
 
 
 class ProjectionLimitation(ProjectionModel):
@@ -530,6 +541,212 @@ class ProjectedCandidate(ProjectionModel):
         if self.complexity_inputs != expected_complexity:
             raise ValueError("complexity inputs do not match projected candidate")
         return self
+
+
+def _resource_id(reference: CanonicalResourceReference) -> str:
+    if isinstance(reference, EntryPointResourceReference):
+        return reference.entry_point_id
+    if isinstance(reference, IntegrationResourceReference):
+        return reference.integration_id
+    if isinstance(reference, TrustBoundaryResourceReference):
+        return reference.trust_boundary_id
+    if isinstance(reference, ToolResourceReference):
+        return reference.tool_id
+    if isinstance(reference, OutputSurfaceResourceReference):
+        return reference.entry_point_id
+    if isinstance(reference, AgentInternalResourceReference):
+        return "agent_internal:reasoning"
+    raise TypeError(f"unsupported canonical resource reference: {reference!r}")
+
+
+_SOURCE_RELATION_GUIDANCE = (
+    "Review the explicit ingress_zone or trust-boundary declaration."
+)
+
+
+def _source_relation_issue(
+    pattern_id: str,
+    detail: str,
+    *,
+    source_id: str | None = None,
+    boundary_id: str | None = None,
+    target_ingress_id: str | None = None,
+    canonical_ingress_id: str | None = None,
+    expected_target_zone: str | None = None,
+    actual_boundary_zones: str | None = None,
+    expected_source_kind: str | None = None,
+    actual_binding_kind: str | None = None,
+) -> ProjectionIssue:
+    """Build the consistent typed failure for an invalid source relation."""
+    return ProjectionIssue(
+        code="source_influence_relation_infeasible",
+        pattern_id=pattern_id,
+        detail=detail,
+        source_id=source_id,
+        boundary_id=boundary_id,
+        target_ingress_id=target_ingress_id,
+        canonical_ingress_id=canonical_ingress_id,
+        expected_target_zone=expected_target_zone,
+        actual_boundary_zones=actual_boundary_zones,
+        expected_source_kind=expected_source_kind,
+        actual_binding_kind=actual_binding_kind,
+        guidance=_SOURCE_RELATION_GUIDANCE,
+    )
+
+
+def _source_influence_relation(
+    pattern_id: str,
+    chain: CanonicalAttackChain,
+    selected: tuple[str, ...],
+    bindings: tuple[ResourceBinding, ...],
+    snapshot: CapabilityFactSnapshot,
+) -> tuple[tuple[SourceInfluencePath, ...], ProjectionIssue | None]:
+    """Resolve exactly one source relation from immutable projection bindings."""
+    bindings_by_slot = {item.slot_id: item.resource_ref for item in bindings}
+    selected_ids = set(selected)
+    links = [
+        link
+        for step in chain.steps
+        if step.step_id in selected_ids
+        for link in step.resource_links
+        if link.role == "source_influence"
+    ]
+    ingress_ref = bindings_by_slot[chain.initial_ingress_slot_id]
+    if not isinstance(ingress_ref, EntryPointResourceReference):
+        return (), _source_relation_issue(
+            pattern_id,
+            "canonical ingress is not an entry-point binding",
+            canonical_ingress_id=_resource_id(ingress_ref),
+        )
+    ingress = snapshot.profile.resolve_entry_point(ingress_ref.entry_point_id)
+    assert ingress is not None
+
+    # Preserve the legacy structural use of source-influence links on a
+    # directly controlled ingress.  Relation preflight applies to indirect
+    # ingress, where source provenance is the activation contract.
+    if ingress.effective_controllability == "direct":
+        return (), None
+    if not links:
+        return (), _source_relation_issue(
+            pattern_id,
+            "indirect canonical ingress has no selected source-influence path",
+            target_ingress_id=ingress_ref.entry_point_id,
+            canonical_ingress_id=ingress_ref.entry_point_id,
+            expected_target_zone=ingress.effective_ingress_zone,
+        )
+    if len(links) != 1:
+        return (), _source_relation_issue(
+            pattern_id,
+            (
+                "candidate requires exactly one selected source-to-boundary-"
+                f"to-ingress path, found {len(links)}"
+            ),
+            target_ingress_id=ingress_ref.entry_point_id,
+            canonical_ingress_id=ingress_ref.entry_point_id,
+            expected_target_zone=ingress.effective_ingress_zone,
+        )
+
+    link = links[0]
+    source_ref = bindings_by_slot.get(link.slot_id)
+    boundary_ref = bindings_by_slot.get(str(link.trust_boundary_slot_id))
+    target_ref = bindings_by_slot.get(str(link.target_ingress_slot_id))
+    source_id = _resource_id(source_ref) if source_ref is not None else None
+    boundary_id = _resource_id(boundary_ref) if boundary_ref is not None else None
+    target_id = _resource_id(target_ref) if target_ref is not None else None
+    expected_kind = link.source_identity_kind
+    if expected_kind is None:
+        source_slot = next(
+            slot for slot in chain.resource_slots if slot.slot_id == link.slot_id
+        )
+        expected_kind = source_slot.kind
+    actual_kind = source_ref.kind if source_ref is not None else None
+    boundary = (
+        snapshot.profile.resolve_trust_boundary(boundary_ref.trust_boundary_id)
+        if isinstance(boundary_ref, TrustBoundaryResourceReference)
+        else None
+    )
+    actual_boundary_zones = (
+        f"{boundary.from_zone}->{boundary.to_zone}" if boundary is not None else None
+    )
+    issue_detail: str | None = None
+    if actual_kind != expected_kind:
+        issue_detail = "source identity kind does not match the concrete binding"
+    elif not isinstance(
+        source_ref, (EntryPointResourceReference, IntegrationResourceReference)
+    ):
+        issue_detail = "source binding is not an entry point or integration"
+    elif isinstance(source_ref, EntryPointResourceReference):
+        source = snapshot.profile.resolve_entry_point(source_ref.entry_point_id)
+        if source is None or not is_attacker_accessible_ingress(
+            source, snapshot.profile.zones_active
+        ):
+            issue_detail = "entry-point source is not attacker-influenceable"
+        elif source_ref.entry_point_id == ingress_ref.entry_point_id:
+            issue_detail = "source entry point must be distinct from target ingress"
+    if boundary is None:
+        issue_detail = "source-influence boundary is absent from reviewed declarations"
+    elif boundary.confidence.value == "hypothesized":
+        issue_detail = "source-influence boundary is not a reviewed declaration"
+    elif (
+        ingress.ingress_zone is not None
+        and boundary.to_zone != ingress.effective_ingress_zone
+    ):
+        issue_detail = "trust-boundary destination zone does not match target ingress"
+    elif target_id != ingress_ref.entry_point_id:
+        issue_detail = "source-influence target is not the canonical ingress binding"
+    if issue_detail is not None:
+        return (), _source_relation_issue(
+            pattern_id,
+            detail=issue_detail,
+            source_id=source_id,
+            boundary_id=boundary_id,
+            target_ingress_id=target_id,
+            canonical_ingress_id=ingress_ref.entry_point_id,
+            expected_target_zone=ingress.effective_ingress_zone,
+            actual_boundary_zones=actual_boundary_zones,
+            expected_source_kind=expected_kind,
+            actual_binding_kind=actual_kind,
+        )
+    assert boundary is not None
+    assert target_id is not None
+    path = SourceInfluencePath(
+        source_identity_kind=expected_kind,
+        source_id=source_id,
+        boundary_id=boundary_id,
+        target_ingress_id=target_id,
+        expected_target_zone=ingress.effective_ingress_zone,
+        boundary_zones=actual_boundary_zones,
+    )
+    return (path,), None
+
+
+def _validate_source_influence_paths(
+    candidate: ProjectedCandidate,
+    snapshot: CapabilityFactSnapshot,
+) -> None:
+    """Re-derive the authoritative relation at the persistence boundary.
+
+    Projection generation and serialized-candidate validation must share the
+    same relation rule.  Digest and candidate-identity checks prove that a
+    payload is self-consistent, but they do not prove that its derived path
+    matches the immutable bindings and profile.
+    """
+    expected_paths, issue = _source_influence_relation(
+        candidate.pattern_id,
+        candidate.projection.source_chain,
+        candidate.projection.selected_step_ids,
+        candidate.projection.bindings,
+        snapshot,
+    )
+    if issue is not None:
+        raise ValueError(
+            f"candidate source-influence relation is infeasible: {issue.detail}"
+        )
+    if candidate.projection.source_influence_paths != expected_paths:
+        raise ValueError(
+            "candidate source-influence paths do not match authoritative "
+            "bindings and profile"
+        )
 
 
 class ProjectionBatch(ProjectionModel):
@@ -829,6 +1046,7 @@ def _references_for_slot(
     initial_ingress: bool,
 ) -> tuple[CanonicalResourceReference, ...]:
     """Resolve one slot using only its typed, adapter-neutral constraints."""
+    allowed_resource_ids = set(slot.allowed_resource_ids)
     references = _references_for_kind(
         slot.kind,
         snapshot,
@@ -839,6 +1057,8 @@ def _references_for_slot(
     )
     compatible: list[CanonicalResourceReference] = []
     for reference in references:
+        if allowed_resource_ids and _resource_id(reference) not in allowed_resource_ids:
+            continue
         if isinstance(reference, IntegrationResourceReference):
             integration = snapshot.profile.resolve_integration(reference.integration_id)
             if integration is None:  # pragma: no cover - built from this snapshot
@@ -1065,11 +1285,8 @@ def _derive_execution_requirements_core(
     ``security_relevant`` flag alone.
     """
     slots_by_id = {slot.slot_id: slot for slot in chain.resource_slots}
-    selected_steps = [
-        step
-        for step in chain.steps
-        if step.step_id in set(projection.selected_step_ids)
-    ]
+    selected_ids = set(projection.selected_step_ids)
+    selected_steps = [step for step in chain.steps if step.step_id in selected_ids]
     requirements: list[ExecutionRequirement] = []
 
     for step in selected_steps:
@@ -1107,7 +1324,7 @@ def _derive_execution_requirements_core(
                     )
                 )
             elif link.role == "source_influence":
-                source_identity_kind = (
+                source_identity_kind = link.source_identity_kind or (
                     "entry_point" if slot.kind == "entry_point" else "integration"
                 )
                 requirements.append(
@@ -1323,6 +1540,7 @@ def validate_projected_candidate(
     if candidate.projection.capability_fact_snapshot_digest != snapshot.snapshot_digest:
         raise ValueError("candidate capability snapshot digest pin does not match")
     validate_projection_snapshot(candidate.projection.model_dump(mode="json"), snapshot)
+    _validate_source_influence_paths(candidate, snapshot)
     for result in candidate.precondition_results:
         for evidence in result.evidence:
             if snapshot.fact(evidence.fact) != evidence:
@@ -1529,6 +1747,11 @@ def _build_candidate_from_combination(
         ResourceBinding(slot_id=slot.slot_id, resource_ref=resource)
         for slot, resource in zip(chain.resource_slots, resources, strict=True)
     )
+    source_influence_paths, relation_issue = _source_influence_relation(
+        pattern_id, chain, selected, bindings, snapshot
+    )
+    if relation_issue is not None:
+        return None, relation_issue
     projection_data = {
         "schema_version": "1",
         "source_chain": chain.model_dump(mode="json"),
@@ -1542,6 +1765,9 @@ def _build_candidate_from_combination(
         "pattern_pin": pattern_pin,
         "capability_fact_snapshot_digest": snapshot.snapshot_digest,
         "projection_digest": "0" * 64,
+        "source_influence_paths": [
+            item.model_dump(mode="json") for item in source_influence_paths
+        ],
     }
     projection_data["projection_digest"] = compute_projection_digest(projection_data)
     projection = validate_projection_snapshot(projection_data, snapshot)
@@ -1763,6 +1989,11 @@ def project_authoritative_candidates(
             )
             continue
 
+        ingress_index = next(
+            index
+            for index, slot in enumerate(chain.resource_slots)
+            if slot.slot_id == chain.initial_ingress_slot_id
+        )
         option_sets: list[tuple[CanonicalResourceReference, ...]] = []
         missing_slots = []
         for slot in chain.resource_slots:
@@ -1775,22 +2006,102 @@ def project_authoritative_candidates(
             if not options:
                 missing_slots.append(slot)
         if missing_slots:
-            issues.extend(
-                ProjectionIssue(
-                    code="missing_compatible_resource",
-                    pattern_id=pattern.id,
-                    slot_id=slot.slot_id,
-                    detail=f"no compatible canonical {slot.kind} resource for slot",
-                )
-                for slot in missing_slots
+            relation_links = [
+                link
+                for step in chain.steps
+                if step.step_id in set(selected)
+                for link in step.resource_links
+                if link.role == "source_influence"
+            ]
+            relation_slot_ids = (
+                {link.slot_id for link in relation_links}
+                | {str(link.trust_boundary_slot_id) for link in relation_links}
+                | {str(link.target_ingress_slot_id) for link in relation_links}
             )
+            relation_has_explicit_ids = any(
+                item.allowed_resource_ids
+                for item in chain.resource_slots
+                if item.slot_id in relation_slot_ids
+            )
+            for slot in missing_slots:
+                if (
+                    slot.slot_id not in relation_slot_ids
+                    or not relation_has_explicit_ids
+                ):
+                    issues.append(
+                        ProjectionIssue(
+                            code="missing_compatible_resource",
+                            pattern_id=pattern.id,
+                            slot_id=slot.slot_id,
+                            detail=f"no compatible canonical {slot.kind} resource for slot",
+                        )
+                    )
+                    continue
+                link = relation_links[0]
+                source_slot = next(
+                    item
+                    for item in chain.resource_slots
+                    if item.slot_id == link.slot_id
+                )
+                ingress_options = option_sets[ingress_index] if option_sets else ()
+                target_id = (
+                    _resource_id(ingress_options[0])
+                    if ingress_options
+                    else next(
+                        iter(
+                            next(
+                                (
+                                    item.allowed_resource_ids
+                                    for item in chain.resource_slots
+                                    if item.slot_id == str(link.target_ingress_slot_id)
+                                ),
+                                (),
+                            )
+                        ),
+                        None,
+                    )
+                )
+                target = (
+                    snapshot.profile.resolve_entry_point(target_id)
+                    if isinstance(target_id, str)
+                    else None
+                )
+                source_ids = source_slot.allowed_resource_ids
+                boundary_slot = next(
+                    item
+                    for item in chain.resource_slots
+                    if item.slot_id == str(link.trust_boundary_slot_id)
+                )
+                boundary_id = next(iter(boundary_slot.allowed_resource_ids), None)
+                source_id = next(iter(source_ids), None)
+                issues.append(
+                    ProjectionIssue(
+                        code="source_influence_relation_infeasible",
+                        pattern_id=pattern.id,
+                        slot_id=slot.slot_id,
+                        detail="source-influence relation resource is not reviewed",
+                        source_id=source_id,
+                        boundary_id=boundary_id,
+                        target_ingress_id=target_id,
+                        canonical_ingress_id=target_id,
+                        expected_target_zone=(
+                            target.effective_ingress_zone
+                            if target is not None
+                            else None
+                        ),
+                        actual_boundary_zones="unreviewed",
+                        expected_source_kind=(
+                            link.source_identity_kind or source_slot.kind
+                        ),
+                        actual_binding_kind=source_slot.kind,
+                        guidance=(
+                            "Review the explicit ingress_zone or trust-boundary "
+                            "declaration."
+                        ),
+                    )
+                )
             continue
 
-        ingress_index = next(
-            index
-            for index, slot in enumerate(chain.resource_slots)
-            if slot.slot_id == chain.initial_ingress_slot_id
-        )
         direct_ingress_options = tuple(
             option
             for option in option_sets[ingress_index]

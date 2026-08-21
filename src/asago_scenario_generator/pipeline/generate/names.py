@@ -43,10 +43,9 @@ def access_provenance_block_with_names(
     if access is None:
         return ""
 
-    id_to_ep = profile.id_to_entry_point_name()
-    id_to_tb = profile.id_to_trust_boundary_name()
-
-    ep_name = id_to_ep.get(access.initial_entry_point_id, access.initial_entry_point_id)
+    ep_name = resource_name_for_kind(
+        "entry_point", access.initial_entry_point_id, profile
+    )
     block = (
         f"{header}"
         f"- initial_entry_point_id: {ep_name}\n"
@@ -54,12 +53,18 @@ def access_provenance_block_with_names(
         f"- access_class: {access.access_class}\n"
     )
     if access.influence_source:
-        source_name = id_to_ep.get(access.influence_source, access.influence_source)
+        source_name = resource_name_for_kind(
+            getattr(access, "influence_source_kind", None) or "entry_point",
+            access.influence_source,
+            profile,
+        )
         block += f"- influence_source: {source_name}\n"
     if access.influence_mechanism:
         block += f"- influence_mechanism: {access.influence_mechanism}\n"
     if access.trust_boundary_id:
-        tb_name = id_to_tb.get(access.trust_boundary_id, access.trust_boundary_id)
+        tb_name = resource_name_for_kind(
+            "trust_boundary", access.trust_boundary_id, profile
+        )
         block += f"- trust_boundary_id: {tb_name}\n"
     if access.material_insider_advantage:
         block += f"- material_insider_advantage: {access.material_insider_advantage}\n"
@@ -118,6 +123,35 @@ def humanize_resource_ref(
     return result
 
 
+def resource_name_for_kind(
+    resource_kind: str | None,
+    resource_id: str,
+    profile: CapabilityProfile,
+) -> str:
+    """Return the profile name for a typed resource ID when it is known.
+
+    Projection prompts keep canonical IDs in authoritative fields, but show
+    profile names beside them for model readability.  Keeping the lookup in
+    one helper prevents each prompt builder from maintaining its own
+    kind-to-inventory mapping.
+    """
+    name_by_kind = {
+        "entry_point": profile.id_to_entry_point_name(),
+        "integration": profile.id_to_integration_name(),
+        "trust_boundary": profile.id_to_trust_boundary_name(),
+        "tool": profile.id_to_tool_name(),
+        "output_surface": profile.id_to_entry_point_name(),
+    }
+    names = name_by_kind.get(resource_kind)
+    if names is None:
+        names = {
+            **profile.integration_name_to_id(),
+            **profile.entry_point_name_to_id(),
+        }
+        names = {value: key for key, value in names.items()}
+    return names.get(resource_id, resource_id)
+
+
 def humanize_projection_context(
     projection_context: dict[str, Any] | None,
     profile: CapabilityProfile,
@@ -159,6 +193,29 @@ def humanize_projection_context(
         h_step["resource_links"] = h_links
         humanized_steps.append(h_step)
     result["selected_steps"] = humanized_steps
+
+    # Keep canonical IDs in the authoritative path record so generated
+    # stages cannot replace them, while supplying names for prompt prose.
+    humanized_paths = []
+    for path in projection_context.get("source_influence_paths", []):
+        h_path = dict(path)
+        h_path["source_name"] = resource_name_for_kind(
+            path.get("source_identity_kind"),
+            path.get("source_id", ""),
+            profile,
+        )
+        h_path["boundary_name"] = resource_name_for_kind(
+            "trust_boundary",
+            path.get("boundary_id", ""),
+            profile,
+        )
+        h_path["target_ingress_name"] = resource_name_for_kind(
+            "entry_point",
+            path.get("target_ingress_id", ""),
+            profile,
+        )
+        humanized_paths.append(h_path)
+    result["source_influence_paths"] = humanized_paths
 
     # Note: resource_slots and bindings were removed from the projection
     # context in Phase 4 — they are no longer rendered in prompts.

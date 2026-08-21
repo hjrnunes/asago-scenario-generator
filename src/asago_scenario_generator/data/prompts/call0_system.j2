@@ -61,7 +61,7 @@ DO NOT default to "intermediate" — actively consider whether a novice could ex
 ### Access Provenance Constraint (cmps.6)
 When a pinned entry point is provided, your actor profile must include structured access provenance evidence:
 - You MUST provide `access_class`: one of `public`, `authenticated`, `privileged`, `supply_chain` — describing the actor's relationship to the system.
-- **indirect** entry points: you MUST provide `influence_source` (the name of the upstream data source/channel entry point), `influence_mechanism` (how influence is exerted), and `trust_boundary_id` (the name of a TrustBoundary declared in the capability profile). Actor eligibility for indirect ingress is determined by typed evidence, not by a categorical actor-type allowlist.
+- **indirect** entry points: you MUST provide `influence_source` (the name of the upstream data source/channel, which may be an entry point or integration), `influence_mechanism` (how influence is exerted), and `trust_boundary_id` (the name of a TrustBoundary declared in the capability profile). The authoritative projection supplies the typed source kind and canonical ID; do not invent or substitute either. Actor eligibility for indirect ingress is determined by typed evidence, not by a categorical actor-type allowlist.
 - **direct** entry points with insider actors (malicious-insider, negligent-insider) using `public` or `authenticated` access: you MUST provide `material_insider_advantage` — a structured advantage beyond public access that justifies why an insider uses this surface.
 - **system** entry points are NOT eligible initial ingress. They may appear downstream only.
 

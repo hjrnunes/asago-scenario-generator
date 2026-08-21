@@ -499,44 +499,86 @@
       }
     },
     "NarrativeAccessRealization": {
-      "type": "object",
       "additionalProperties": false,
+      "description": "Typed narrative access realization reference (cmps.6).\n\nLinks the narrative to the actor's structured access provenance without\nrelying on prose keyword matching.  The fields must exactly agree with\n``ActorAccessProvenance`` — this is a cross-artifact invariant, not a\nkeyword check.",
+      "properties": {
+        "initial_entry_point_id": {
+          "description": "Canonical entry-point name of the initial ingress this narrative realizes.  Must match actor access provenance.",
+          "maxLength": 200,
+          "title": "Initial Entry Point Id",
+          "type": "string"
+        },
+        "influence_source": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical entry-point name of the upstream influence source, if indirect.  Must match actor access provenance.",
+          "title": "Influence Source"
+        },
+        "influence_source_kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "entry_point",
+                "integration"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Typed kind of the canonical upstream influence source.",
+          "title": "Influence Source Kind"
+        },
+        "influence_source_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical upstream influence source ID, if indirect.",
+          "title": "Influence Source Id"
+        },
+        "trust_boundary_id": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical trust boundary name of the boundary crossed, if indirect.  Must match actor access provenance.",
+          "title": "Trust Boundary Id"
+        },
+        "responsible_step_number": {
+          "description": "Step number in the narrative where the actor realizes the initial access described by the provenance block.",
+          "minimum": 1,
+          "title": "Responsible Step Number",
+          "type": "integer"
+        }
+      },
       "required": [
         "initial_entry_point_id",
         "responsible_step_number"
       ],
-      "properties": {
-        "initial_entry_point_id": {
-          "type": "string",
-          "pattern": "^ep:v1:[0-9a-f]{32}$"
-        },
-        "influence_source": {
-          "oneOf": [
-            {
-              "type": "string",
-              "pattern": "^ep:v1:[0-9a-f]{32}$"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "trust_boundary_id": {
-          "oneOf": [
-            {
-              "type": "string",
-              "pattern": "^tb:v1:[0-9a-f]{32}$"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "responsible_step_number": {
-          "type": "integer",
-          "minimum": 1
-        }
-      }
+      "title": "NarrativeAccessRealization",
+      "type": "object"
     },
     "AiSystemAction": {
       "type": "object",
@@ -1793,76 +1835,124 @@
       }
     },
     "ActorAccessProvenance": {
-      "type": "object",
       "additionalProperties": false,
-      "required": [
-        "initial_entry_point_id",
-        "ingress_mode",
-        "access_class"
-      ],
+      "description": "Typed evidence linking an actor to the scenario's canonical initial ingress.\n\nReplaces blanket direct/indirect actor allowlists and keyword insider\nchecks with structured access provenance grounded in the canonical\nentry-point identity (cmps.6).\n\nTwo distinct concepts are modelled:\n\n- ``ingress_mode`` — the channel controllability of the pinned entry\n  point, derived from its canonical ``effective_controllability``.\n  This is **never** LLM-inferred; it is authoritative.\n- ``access_class`` — the actor's relationship to the system\n  (``public``, ``authenticated``, ``privileged``, ``supply_chain``).\n  This is LLM-generated and validated against the ingress mode and\n  actor type.\n\nEvidence fields:\n\n- ``indirect`` ingress requires ``influence_source`` (a canonical\n  ``entry_point_id`` resolvable in the profile), ``influence_mechanism``,\n  and ``trust_boundary_id`` (a canonical ``tb:v1:…`` referencing a\n  ``TrustBoundary`` declared in the profile).  The boundary's\n  ``to_zone`` must match the pinned entry point's\n  ``effective_ingress_zone``, and the influence source must not be\n  the same as the initial ingress (no self-relation unless explicitly\n  modeled).\n- Insider actors using ``direct`` ingress require\n  ``material_insider_advantage`` regardless of ``access_class`` —\n  enum choice is not evidence.",
       "properties": {
         "initial_entry_point_id": {
-          "type": "string",
-          "pattern": "^ep:v1:[0-9a-f]{32}$"
+          "description": "Canonical entry-point ID inherited from the initial ingress.  The scenario must inherit exactly one.",
+          "title": "Initial Entry Point Id",
+          "type": "string"
         },
         "ingress_mode": {
-          "type": "string",
+          "description": "Channel controllability of the pinned entry point, derived from its canonical effective controllability: 'direct' (actor types input directly) or 'indirect' (actor influences an upstream data source).  Never LLM-inferred.",
           "enum": [
             "direct",
             "indirect"
-          ]
+          ],
+          "title": "Ingress Mode",
+          "type": "string"
         },
         "access_class": {
-          "type": "string",
+          "description": "Actor access class describing the actor's relationship to the system: 'public' (no auth), 'authenticated' (registered user), 'privileged' (elevated/internal access), 'supply_chain' (upstream supply-chain position).",
           "enum": [
             "public",
             "authenticated",
             "privileged",
             "supply_chain"
-          ]
+          ],
+          "title": "Access Class",
+          "type": "string"
         },
         "influence_source": {
-          "oneOf": [
+          "anyOf": [
             {
               "type": "string"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null,
+          "description": "Canonical entry-point ID of the upstream data source the actor influences (required for indirect ingress mode). Must resolve in the capability profile.",
+          "title": "Influence Source"
+        },
+        "influence_source_kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "entry_point",
+                "integration"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Typed kind of the canonical upstream influence source.",
+          "title": "Influence Source Kind"
+        },
+        "influence_source_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical upstream influence source ID, if indirect.",
+          "title": "Influence Source Id"
         },
         "influence_mechanism": {
-          "oneOf": [
+          "anyOf": [
             {
               "type": "string"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null,
+          "description": "How the actor exerts influence — e.g. poisoning, injection, staging (required for indirect ingress mode).",
+          "title": "Influence Mechanism"
         },
         "trust_boundary_id": {
-          "oneOf": [
-            {
-              "type": "string",
-              "pattern": "^tb:v1:[0-9a-f]{32}$"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "material_insider_advantage": {
-          "oneOf": [
+          "anyOf": [
             {
               "type": "string"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null,
+          "description": "Canonical trust boundary ID referencing a TrustBoundary declared in the capability profile (required for indirect ingress mode).  The boundary's to_zone must match the pinned entry point's effective_ingress_zone.",
+          "title": "Trust Boundary Id"
+        },
+        "material_insider_advantage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Structured material insider advantage beyond public access (required for insider actors using public/authenticated access with direct ingress).",
+          "title": "Material Insider Advantage"
         }
-      }
+      },
+      "required": [
+        "initial_entry_point_id",
+        "ingress_mode",
+        "access_class"
+      ],
+      "title": "ActorAccessProvenance",
+      "type": "object"
     },
     "ProjectionEnvelopeBlock": {
       "additionalProperties": false,
@@ -2083,7 +2173,7 @@
     },
     "ArtifactRealizationMapping": {
       "additionalProperties": false,
-      "description": "Map one generated artifact element to one or more projected steps.\n\nControlled many-to-many realization (contract \u00a75): one artifact element\nmay realize multiple projected steps (combine), and one projected step\nmay be realized by multiple artifact elements (split).  The total order\nof projected steps must be preserved across element ordering within the\nsame artifact stage.",
+      "description": "Map one generated artifact element to one or more projected steps.\n\nControlled many-to-many realization (contract §5): one artifact element\nmay realize multiple projected steps (combine), and one projected step\nmay be realized by multiple artifact elements (split).  The total order\nof projected steps must be preserved across element ordering within the\nsame artifact stage.",
       "properties": {
         "artifact_stage": {
           "$ref": "#/$defs/ArtifactStage"
@@ -2124,7 +2214,7 @@
     },
     "AssertionRealizationMapping": {
       "additionalProperties": false,
-      "description": "Map a generated behavior assertion to projected observable postconditions.\n\nAssertions map to projected observable postconditions (contract \u00a74), not\nmechanically to setup steps.  Each assertion traces to one or more\npostconditions owned by one or more selected projected steps.",
+      "description": "Map a generated behavior assertion to projected observable postconditions.\n\nAssertions map to projected observable postconditions (contract §4), not\nmechanically to setup steps.  Each assertion traces to one or more\npostconditions owned by one or more selected projected steps.",
       "properties": {
         "element_id": {
           "description": "Generated behavior assertion element identifier.",
@@ -2780,6 +2870,16 @@
             "type": "string"
           },
           "title": "Allowed Trust Boundary To Zones",
+          "type": "array"
+        },
+        "allowed_resource_ids": {
+          "default": [],
+          "items": {
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "type": "string"
+          },
+          "title": "Allowed Resource Ids",
           "type": "array"
         },
         "distinct_from_slot_ids": {
@@ -3448,7 +3548,7 @@
     },
     "StepResourceLink": {
       "additionalProperties": false,
-      "description": "Explicit link from a step to a required resource slot.\n\nThe ``role`` declares how the slot is used by the step, determining the\nexecution-requirement derivation.  No inference from action kind, name,\nor cardinality is performed by the projection \u2014 the link is the sole\nauthority for requirement derivation.\n\nFor ``source_influence`` links the ``slot_id`` is the upstream source\nslot (an entry point or integration the attacker influences outside the\ntrust boundary), ``trust_boundary_slot_id`` is the boundary the source\ncontent crosses, and ``target_ingress_slot_id`` is the canonical ingress\nentry point the influenced content flows into.  The target-ingress edge\nis explicit: the projection never assumes the chain's initial ingress\nimplicitly supplies this relation.",
+      "description": "Explicit link from a step to a required resource slot.\n\nThe ``role`` declares how the slot is used by the step, determining the\nexecution-requirement derivation.  No inference from action kind, name,\nor cardinality is performed by the projection — the link is the sole\nauthority for requirement derivation.\n\nFor ``source_influence`` links the ``slot_id`` is the upstream source\nslot (an entry point or integration the attacker influences outside the\ntrust boundary), ``trust_boundary_slot_id`` is the boundary the source\ncontent crosses, and ``target_ingress_slot_id`` is the canonical ingress\nentry point the influenced content flows into.  The target-ingress edge\nis explicit: the projection never assumes the chain's initial ingress\nimplicitly supplies this relation.",
       "properties": {
         "slot_id": {
           "minLength": 1,
@@ -3492,6 +3592,22 @@
           ],
           "default": null,
           "title": "Target Ingress Slot Id"
+        },
+        "source_identity_kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "entry_point",
+                "integration"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Identity Kind"
         }
       },
       "required": [
@@ -3819,6 +3935,14 @@
           "pattern": "^[0-9a-f]{64}$",
           "title": "Projection Digest",
           "type": "string"
+        },
+        "source_influence_paths": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SourceInfluencePath"
+          },
+          "title": "Source Influence Paths",
+          "type": "array"
         }
       },
       "required": [
@@ -3912,7 +4036,7 @@
     },
     "AgentInternalResourceReference": {
       "additionalProperties": false,
-      "description": "Canonical reference to agent-internal state.\n\nAgent-internal state is data assembled or transformed within the\nagent's own working context \u2014 neither an external entry point, tool,\nintegration, nor trust boundary.  It is the intrinsic singleton working\nstate of the profiled agent, so it requires no adapter inventory identity.\nCandidate-v2 resolves exactly this typed singleton rather than laundering\nit through an unrelated tool or integration binding.",
+      "description": "Canonical reference to agent-internal state.\n\nAgent-internal state is data assembled or transformed within the\nagent's own working context — neither an external entry point, tool,\nintegration, nor trust boundary.  It is the intrinsic singleton working\nstate of the profiled agent, so it requires no adapter inventory identity.\nCandidate-v2 resolves exactly this typed singleton rather than laundering\nit through an unrelated tool or integration binding.",
       "properties": {
         "kind": {
           "const": "agent_internal",
@@ -4301,7 +4425,7 @@
     },
     "OutputSurfaceResourceReference": {
       "additionalProperties": false,
-      "description": "Canonical reference to an output-direction entry point.\n\nAn output surface is the agent's rendered-response surface \u2014 the\nmodel's output that a client renders or fetches.  It is distinct from\nan input entry point (``EntryPointResourceReference``) even though\nboth resolve to an :class:`EntryPoint` in the capability profile:\nonly entry points with ``direction == \"output\"`` qualify as output\nsurfaces.",
+      "description": "Canonical reference to an output-direction entry point.\n\nAn output surface is the agent's rendered-response surface — the\nmodel's output that a client renders or fetches.  It is distinct from\nan input entry point (``EntryPointResourceReference``) even though\nboth resolve to an :class:`EntryPoint` in the capability profile:\nonly entry points with ``direction == \"output\"`` qualify as output\nsurfaces.",
       "properties": {
         "kind": {
           "const": "output_surface",
@@ -4893,7 +5017,7 @@
             }
           ],
           "default": null,
-          "description": "Canonical Schneider zone for initial ingress through this entry point. When None, inferred from direction: input\u2192input, bidirectional\u2192input, output\u2192output. This establishes canonical ingress-zone semantics in typed profile data rather than inferring from labels.",
+          "description": "Canonical Schneider zone for initial ingress through this entry point. When None, inferred from direction: input→input, bidirectional→input, output→output. This establishes canonical ingress-zone semantics in typed profile data rather than inferring from labels.",
           "title": "Ingress Zone"
         }
       },
@@ -4904,7 +5028,7 @@
       "type": "object"
     },
     "ExternalIntegration": {
-      "description": "An external system or service the agent integrates with.\n\nThe ``integration_id`` is a computed canonical identity (deterministic,\nversioned, 128-bit) derived from the canonical name and integration type.\nApplication-assigned \u2014 the LLM never invents IDs.",
+      "description": "An external system or service the agent integrates with.\n\nThe ``integration_id`` is a computed canonical identity (deterministic,\nversioned, 128-bit) derived from the canonical name and integration type.\nApplication-assigned — the LLM never invents IDs.",
       "properties": {
         "name": {
           "description": "Name of the external system (e.g. 'CRM', 'payment gateway')",
@@ -4964,7 +5088,7 @@
       "type": "object"
     },
     "ToolInventoryEntry": {
-      "description": "A tool in the system's tool inventory (Stage 1).\n\nLightweight description of a tool or API the system can invoke,\nextracted during Stage 1 capability profile inference.  Used to\nground downstream scenario generation \u2014 the LLM may only reference\ntools listed here, preventing phantom tool hallucination.\n\nThe ``tool_id`` is a computed canonical identity (deterministic,\nversioned, 128-bit) derived from the canonical tool name.\nApplication-assigned \u2014 the LLM never invents IDs.",
+      "description": "A tool in the system's tool inventory (Stage 1).\n\nLightweight description of a tool or API the system can invoke,\nextracted during Stage 1 capability profile inference.  Used to\nground downstream scenario generation — the LLM may only reference\ntools listed here, preventing phantom tool hallucination.\n\nThe ``tool_id`` is a computed canonical identity (deterministic,\nversioned, 128-bit) derived from the canonical tool name.\nApplication-assigned — the LLM never invents IDs.",
       "properties": {
         "name": {
           "description": "Tool or API name",
@@ -5152,6 +5276,50 @@
         "postcondition_ids"
       ],
       "title": "ProjectedStepRealization",
+      "type": "object"
+    },
+    "SourceInfluencePath": {
+      "additionalProperties": false,
+      "description": "One deterministic source-to-boundary-to-ingress relation.",
+      "properties": {
+        "source_identity_kind": {
+          "enum": [
+            "entry_point",
+            "integration"
+          ],
+          "title": "Source Identity Kind",
+          "type": "string"
+        },
+        "source_id": {
+          "title": "Source Id",
+          "type": "string"
+        },
+        "boundary_id": {
+          "title": "Boundary Id",
+          "type": "string"
+        },
+        "target_ingress_id": {
+          "title": "Target Ingress Id",
+          "type": "string"
+        },
+        "expected_target_zone": {
+          "title": "Expected Target Zone",
+          "type": "string"
+        },
+        "boundary_zones": {
+          "title": "Boundary Zones",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_identity_kind",
+        "source_id",
+        "boundary_id",
+        "target_ingress_id",
+        "expected_target_zone",
+        "boundary_zones"
+      ],
+      "title": "SourceInfluencePath",
       "type": "object"
     }
   }

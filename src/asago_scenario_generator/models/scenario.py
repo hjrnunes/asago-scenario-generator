@@ -215,6 +215,15 @@ class NarrativeAccessRealization(BaseModel):
             "if indirect.  Must match actor access provenance."
         ),
     )
+    influence_source_kind: Literal["entry_point", "integration"] | None = Field(
+        default=None,
+        description="Typed kind of the canonical upstream influence source.",
+    )
+    influence_source_id: str | None = Field(
+        default=None,
+        max_length=_NAME_MAX_LENGTH,
+        description="Canonical upstream influence source ID, if indirect.",
+    )
     trust_boundary_id: str | None = Field(
         default=None,
         max_length=_NAME_MAX_LENGTH,
@@ -344,6 +353,14 @@ class ActorAccessProvenance(BaseModel):
             "the actor influences (required for indirect ingress mode). "
             "Must resolve in the capability profile."
         ),
+    )
+    influence_source_kind: Literal["entry_point", "integration"] | None = Field(
+        default=None,
+        description="Typed kind of the canonical upstream influence source.",
+    )
+    influence_source_id: str | None = Field(
+        default=None,
+        description="Canonical upstream influence source ID, if indirect.",
     )
     influence_mechanism: str | None = Field(
         default=None,

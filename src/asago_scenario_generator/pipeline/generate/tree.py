@@ -37,7 +37,7 @@ from asago_scenario_generator.pipeline.generate.tree_transport import (
     normalize_attack_tree_transport,
 )
 from asago_scenario_generator.pipeline.generate.tree_validation import (
-    _check_tool_execution_leaf_grounding,
+    _check_tool_execution_leaf_grounding,  # noqa: F401
     _enumerate_root_to_leaf_paths,
     _validate_pinned_ingress,
     _validate_tree_against_projection,
@@ -52,7 +52,6 @@ from asago_scenario_generator.prompts import render_prompt
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "_check_tool_execution_leaf_grounding",
     "_enumerate_root_to_leaf_paths",
     "normalize_attack_tree_transport",
 ]
@@ -545,7 +544,6 @@ def _call_attack_tree_once(
     pinned_technique_names: list[str] | None = None,
     consistency_feedback: str | None = None,
     completion_length_feedback: str | None = None,
-    temperature: float | None = None,
     pinned_entry_point_id: str | None = None,
     projection_context: dict[str, Any] | None = None,
 ) -> tuple[AttackTree, LLMResult]:
@@ -586,7 +584,6 @@ def _call_attack_tree_once(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_format=None,
-            temperature=temperature,
         )
     except Exception as exc:
         from asago_scenario_generator.pipeline.generate.stages import (
@@ -600,7 +597,6 @@ def _call_attack_tree_once(
             invoked=True,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            request_controls=getattr(client, "request_controls", None),
         ) from exc
     try:
         tree = _parse_attack_tree_yaml(result.content, seed, projection_context)
@@ -621,7 +617,6 @@ def _call_attack_tree_once(
             user_prompt=user_prompt,
             result=result,
             raw_response=result.content,
-            request_controls=getattr(client, "request_controls", None),
         ) from exc
     return tree, result
 

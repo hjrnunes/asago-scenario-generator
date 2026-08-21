@@ -697,6 +697,12 @@ def _build_projection_context(candidate: ProjectedCandidate) -> dict[str, Any]:
         "omitted_step_ids": [o.step_id for o in candidate.projection.omissions],
         "canonical_ingress": candidate.canonical_ingress.model_dump(mode="json"),
         "ingress_controllability": candidate.ingress_controllability,
+        # This is the sole authoritative source/boundary/target tuple.  It is
+        # projected once and reused by every generated stage.
+        "source_influence_paths": [
+            path.model_dump(mode="json")
+            for path in candidate.projection.source_influence_paths
+        ],
         "pattern_id": chain.pattern_id,
         "chain_id": chain.chain_id,
         "chain_semantic_revision": chain.semantic_revision,
