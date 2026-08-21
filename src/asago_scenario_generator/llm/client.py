@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -170,8 +171,6 @@ def _partial_diagnostics(content: Any | None) -> dict[str, Any]:
         }
     if not isinstance(content, str):
         content = json.dumps(_plain_value(content), ensure_ascii=False, sort_keys=True)
-    import hashlib
-
     return {
         "partial_character_count": len(content),
         "partial_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),

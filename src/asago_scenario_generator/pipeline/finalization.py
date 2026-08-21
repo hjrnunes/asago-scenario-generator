@@ -67,13 +67,15 @@ COMPLETION_LENGTH_RETRY_SUFFIXES: dict[GeneratedStage, str] = {
     ),
 }
 
+_COMPACT_RESPONSE_SCHEMA_RETRY = CausalRetryControl(
+    control_id="candidate-specific-compact-response-schema",
+    field="response_schema",
+    initial_value="standard",
+    retry_value="compact-v1",
+)
+
 COMPLETION_LENGTH_RETRY_CONTROLS: dict[GeneratedStage, CausalRetryControl] = {
-    GeneratedStage.actor: CausalRetryControl(
-        control_id="candidate-specific-compact-response-schema",
-        field="response_schema",
-        initial_value="standard",
-        retry_value="compact-v1",
-    ),
+    GeneratedStage.actor: _COMPACT_RESPONSE_SCHEMA_RETRY,
     GeneratedStage.narrative: CausalRetryControl(
         control_id="stage-specific-completion-cap",
         field="max_completion_tokens",
@@ -86,12 +88,7 @@ COMPLETION_LENGTH_RETRY_CONTROLS: dict[GeneratedStage, CausalRetryControl] = {
         initial_value=0.4,
         retry_value=0.1,
     ),
-    GeneratedStage.behavior: CausalRetryControl(
-        control_id="candidate-specific-compact-response-schema",
-        field="response_schema",
-        initial_value="standard",
-        retry_value="compact-v1",
-    ),
+    GeneratedStage.behavior: _COMPACT_RESPONSE_SCHEMA_RETRY,
 }
 
 

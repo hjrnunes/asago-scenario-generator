@@ -2056,6 +2056,16 @@ def _llm_result(value: Any) -> LLMResultRecord:
     )
 
 
+def _pipeline_log_response(value: Any) -> Any:
+    """Convert one LLM result content to the historical log representation."""
+    content = value.content
+    if content is None:
+        return None
+    if hasattr(content, "model_dump"):
+        return content.model_dump(mode="json")
+    return content if isinstance(content, str) else str(content)
+
+
 def _call_evidence(value: StageCallEvidence) -> StageCallEvidenceRecord:
     return StageCallEvidenceRecord(
         call_name=value.call_name.value,
@@ -2576,15 +2586,7 @@ class FinalizationPersistenceAdapter:
             if isinstance(result.evidence, StageCallEvidence):
                 evidence = result.evidence
                 llm_result = evidence.result
-                raw_content = llm_result.content
-                if raw_content is None:
-                    response = None
-                elif hasattr(raw_content, "model_dump"):
-                    response = raw_content.model_dump(mode="json")
-                elif not isinstance(raw_content, str):
-                    response = str(raw_content)
-                else:
-                    response = raw_content
+                response = _pipeline_log_response(llm_result)
 
                 entry.update(
                     {
@@ -2601,15 +2603,7 @@ class FinalizationPersistenceAdapter:
                 evidence = result.evidence
                 if evidence.result is not None:
                     llm_result = evidence.result
-                    raw_content = llm_result.content
-                    if raw_content is None:
-                        response = None
-                    elif hasattr(raw_content, "model_dump"):
-                        response = raw_content.model_dump(mode="json")
-                    elif not isinstance(raw_content, str):
-                        response = str(raw_content)
-                    else:
-                        response = raw_content
+                    response = _pipeline_log_response(llm_result)
 
                     entry.update(
                         {

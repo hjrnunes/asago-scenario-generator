@@ -193,6 +193,17 @@ def _optional_list(values: Any) -> list[Any] | None:
     return list(values) or None
 
 
+def _retry_control_value(
+    retry: RetryDirective | None,
+    field: str,
+) -> str | int | float | None:
+    """Return the approved retry value when it targets *field*."""
+    control = retry.causal_control if retry is not None else None
+    if control is None or control.field != field:
+        return None
+    return control.retry_value
+
+
 def stage_attempt_failure(
     call_name: CallName,
     exception: BaseException,
@@ -419,11 +430,7 @@ def generate_actor_stage(
     request = prepared.request
     recorder = _AttemptRecordingClient(request.client)
     semantic_feedback, length_feedback = _split_retry(retry)
-    compact_schema = bool(
-        retry
-        and retry.causal_control
-        and retry.causal_control.field == "response_schema"
-    )
+    compact_schema = _retry_control_value(retry, "response_schema") is not None
     try:
         actor, result, limitation = generate._call_actor_profile(
             request.seed,
@@ -470,13 +477,7 @@ def generate_narrative_stage(
     )
     recorder = _AttemptRecordingClient(request.client)
     semantic_feedback, length_feedback = _split_retry(retry)
-    retry_max_tokens = (
-        retry.causal_control.retry_value
-        if retry
-        and retry.causal_control
-        and retry.causal_control.field == "max_completion_tokens"
-        else None
-    )
+    retry_max_tokens = _retry_control_value(retry, "max_completion_tokens")
     try:
         narrative, result = generate._call_narrative(
             request.seed,
@@ -520,13 +521,7 @@ def generate_tree_stage(
     request = prepared.request
     recorder = _AttemptRecordingClient(request.client)
     semantic_feedback, length_feedback = _split_retry(retry)
-    retry_temperature = (
-        retry.causal_control.retry_value
-        if retry
-        and retry.causal_control
-        and retry.causal_control.field == "temperature"
-        else None
-    )
+    retry_temperature = _retry_control_value(retry, "temperature")
     try:
         tree, result = generate._call_attack_tree_once(
             request.seed,
@@ -568,11 +563,7 @@ def generate_behavior_stage(
     request = prepared.request
     recorder = _AttemptRecordingClient(request.client)
     _, length_feedback = _split_retry(retry)
-    compact_schema = bool(
-        retry
-        and retry.causal_control
-        and retry.causal_control.field == "response_schema"
-    )
+    compact_schema = _retry_control_value(retry, "response_schema") is not None
     try:
         behavior, result = generate._call_behavior_spec(
             request.seed,
