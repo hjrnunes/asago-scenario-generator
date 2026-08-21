@@ -24,6 +24,7 @@ from asago_scenario_generator.pipeline.coverage_planning import (
     revalidate_qualified_candidate,
 )
 from asago_scenario_generator.pipeline.generate.stages import (
+    CausalRetryControl,
     RetryDirective,
     StageAttemptFailure,
 )
@@ -63,6 +64,33 @@ COMPLETION_LENGTH_RETRY_SUFFIXES: dict[GeneratedStage, str] = {
     GeneratedStage.tree: "Return only a complete schema-matching YAML document.",
     GeneratedStage.behavior: (
         "Return only the complete required Gherkin/assertion payload."
+    ),
+}
+
+COMPLETION_LENGTH_RETRY_CONTROLS: dict[GeneratedStage, CausalRetryControl] = {
+    GeneratedStage.actor: CausalRetryControl(
+        control_id="candidate-specific-compact-response-schema",
+        field="response_schema",
+        initial_value="standard",
+        retry_value="compact-v1",
+    ),
+    GeneratedStage.narrative: CausalRetryControl(
+        control_id="stage-specific-completion-cap",
+        field="max_completion_tokens",
+        initial_value=16384,
+        retry_value=8192,
+    ),
+    GeneratedStage.tree: CausalRetryControl(
+        control_id="lower-retry-temperature",
+        field="temperature",
+        initial_value=0.4,
+        retry_value=0.1,
+    ),
+    GeneratedStage.behavior: CausalRetryControl(
+        control_id="candidate-specific-compact-response-schema",
+        field="response_schema",
+        initial_value="standard",
+        retry_value="compact-v1",
     ),
 }
 
@@ -218,6 +246,8 @@ class StageInvocation:
     candidate_snapshot: Any | None = None
     retry_feedback: str | None = None
     retry_reason: str | None = None
+    retry_control: CausalRetryControl | None = None
+    total_request_budget: int = MAX_COMPLETION_LENGTH_RETRIES + 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -359,6 +389,9 @@ class TargetFinalizationMachine:
     length_retry_counts: dict[GeneratedStage, int] = field(default_factory=dict)
     retry_feedback: dict[GeneratedStage, str] = field(default_factory=dict)
     retry_reasons: dict[GeneratedStage, str] = field(default_factory=dict)
+    retry_controls: dict[GeneratedStage, CausalRetryControl] = field(
+        default_factory=dict
+    )
     transition_index_offset: int = 0
     resume_candidate_id: str | None = None
     resume_next_stage: GeneratedStage | None = None
@@ -368,6 +401,9 @@ class TargetFinalizationMachine:
     resume_length_retry_counts: dict[GeneratedStage, int] = field(default_factory=dict)
     resume_retry_feedback: dict[GeneratedStage, str] = field(default_factory=dict)
     resume_retry_reasons: dict[GeneratedStage, str] = field(default_factory=dict)
+    resume_retry_controls: dict[GeneratedStage, CausalRetryControl] = field(
+        default_factory=dict
+    )
     transitions: list[LifecycleTransition] = field(default_factory=list)
     violations: list[LifecycleViolation] = field(default_factory=list)
 
@@ -416,6 +452,7 @@ class TargetFinalizationMachine:
             candidate_snapshot=candidate,
             retry_feedback=self.retry_feedback.get(stage),
             retry_reason=self.retry_reasons.get(stage),
+            retry_control=self.retry_controls.get(stage),
         )
         try:
             result = self.stage_callbacks[stage](candidate, invocation)
@@ -496,6 +533,7 @@ class TargetFinalizationMachine:
         owner-retry budget is exhausted (terminal for this candidate).
         """
         self.retry_reasons.pop(owner, None)
+        self.retry_controls.pop(owner, None)
         used = self.owner_retry_counts.get(owner, 0)
         if used >= MAX_OWNER_RETRIES:
             return None
@@ -526,6 +564,7 @@ class TargetFinalizationMachine:
         self.length_retry_counts[owner] = used + 1
         self.retry_feedback[owner] = COMPLETION_LENGTH_RETRY_SUFFIXES[owner]
         self.retry_reasons[owner] = StageAttemptFailure.COMPLETION_LENGTH_CODE
+        self.retry_controls[owner] = COMPLETION_LENGTH_RETRY_CONTROLS[owner]
         self.artifacts.invalidate_from(owner)
         return owner
 
@@ -682,6 +721,7 @@ class TargetFinalizationMachine:
             )
             self.retry_feedback = dict(self.resume_retry_feedback) if resuming else {}
             self.retry_reasons = dict(self.resume_retry_reasons) if resuming else {}
+            self.retry_controls = dict(self.resume_retry_controls) if resuming else {}
             if resuming:
                 self.artifacts = self.resume_artifacts or GeneratedArtifacts()
             else:
@@ -900,6 +940,7 @@ def retry_directive_for(invocation: StageInvocation) -> RetryDirective | None:
     return RetryDirective(
         feedback=invocation.retry_feedback,
         reason=invocation.retry_reason,
+        causal_control=invocation.retry_control,
     )
 
 

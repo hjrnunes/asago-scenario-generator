@@ -83,6 +83,17 @@ class RetryDirective:
     reason: str | None = None
     forced_actor_type: str | None = None
     prior_titles: tuple[str, ...] | None = None
+    causal_control: CausalRetryControl | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CausalRetryControl:
+    """One approved provider-facing causal change for a bounded retry."""
+
+    control_id: str
+    field: str
+    initial_value: str | int | float
+    retry_value: str | int | float
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +136,16 @@ class StageAttemptFailure(Exception):
         finish_reason: str | None = None,
         prompt_tokens: int | None = None,
         completion_tokens: int | None = None,
+        total_tokens: int | None = None,
+        usage_details: dict[str, Any] | None = None,
+        response_id: str | None = None,
+        model: str | None = None,
+        partial_character_count: int | None = None,
+        partial_sha256: str | None = None,
+        partial_preview_prefix: str | None = None,
+        partial_preview_suffix: str | None = None,
+        elapsed_ms: int | None = None,
+        request_controls: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(str(exception))
         self.call_name = call_name
@@ -140,6 +161,16 @@ class StageAttemptFailure(Exception):
         self.finish_reason = finish_reason
         self.prompt_tokens = prompt_tokens
         self.completion_tokens = completion_tokens
+        self.total_tokens = total_tokens
+        self.usage_details = usage_details
+        self.response_id = response_id
+        self.model = model
+        self.partial_character_count = partial_character_count
+        self.partial_sha256 = partial_sha256
+        self.partial_preview_prefix = partial_preview_prefix
+        self.partial_preview_suffix = partial_preview_suffix
+        self.elapsed_ms = elapsed_ms
+        self.request_controls = request_controls or {}
 
 
 def _split_retry(retry: RetryDirective | None) -> tuple[str | None, str | None]:
@@ -172,6 +203,7 @@ def stage_attempt_failure(
     user_prompt: str | None = None,
     result: LLMResult | None = None,
     raw_response: Any | None = None,
+    request_controls: dict[str, Any] | None = None,
 ) -> StageAttemptFailure:
     """Build a typed StageAttemptFailure, normalizing length exhaustion.
 
@@ -195,6 +227,16 @@ def stage_attempt_failure(
             finish_reason=exception.finish_reason,
             prompt_tokens=exception.prompt_tokens,
             completion_tokens=exception.completion_tokens,
+            total_tokens=exception.total_tokens,
+            usage_details=exception.usage_details,
+            response_id=exception.response_id,
+            model=exception.model,
+            partial_character_count=exception.partial_character_count,
+            partial_sha256=exception.partial_sha256,
+            partial_preview_prefix=exception.partial_preview_prefix,
+            partial_preview_suffix=exception.partial_preview_suffix,
+            elapsed_ms=exception.elapsed_ms,
+            request_controls=request_controls,
         )
     return StageAttemptFailure(
         call_name=call_name,
@@ -205,6 +247,7 @@ def stage_attempt_failure(
         user_prompt=user_prompt,
         result=result,
         raw_response=raw_response,
+        request_controls=request_controls,
     )
 
 
@@ -217,6 +260,7 @@ class _AttemptRecordingClient:
         self.system_prompt: str | None = None
         self.user_prompt: str | None = None
         self.result: LLMResult | None = None
+        self.request_controls: dict[str, Any] = {}
         self._unstructured_response = False
 
     def __getattr__(self, name: str) -> Any:
@@ -233,12 +277,35 @@ class _AttemptRecordingClient:
         self.system_prompt = system_prompt
         self.user_prompt = user_prompt
         self._unstructured_response = response_format is None
-        self.result = self._client.complete(
+        max_tokens = kwargs.get("max_completion_tokens")
+        if max_tokens is None:
+            max_tokens = getattr(self._client, "max_completion_tokens", None)
+        request_temperature = kwargs.get("temperature")
+        if request_temperature is None:
+            request_temperature = getattr(self._client, "temperature", None)
+        self.request_controls = {
+            "response_schema": (
+                (
+                    "compact-v1"
+                    if response_format.__name__.startswith("Compact")
+                    else "standard"
+                )
+                if response_format is not None
+                else None
+            ),
+            "max_completion_tokens": max_tokens,
+            "transport_token_cap": getattr(self._client, "max_completion_tokens", None),
+            "temperature": request_temperature,
+        }
+        result = self._client.complete(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_format=response_format,
             **kwargs,
         )
+        if not result.request_controls:
+            result.request_controls = self.request_controls
+        self.result = result
         return self.result
 
     def failure(
@@ -265,6 +332,7 @@ class _AttemptRecordingClient:
                 and isinstance(self.result.content, str)
                 else None
             ),
+            request_controls=self.request_controls,
         )
 
 
@@ -351,6 +419,11 @@ def generate_actor_stage(
     request = prepared.request
     recorder = _AttemptRecordingClient(request.client)
     semantic_feedback, length_feedback = _split_retry(retry)
+    compact_schema = bool(
+        retry
+        and retry.causal_control
+        and retry.causal_control.field == "response_schema"
+    )
     try:
         actor, result, limitation = generate._call_actor_profile(
             request.seed,
@@ -367,6 +440,7 @@ def generate_actor_stage(
             pinned_entry_point_id=request.pinned_entry_point_id,
             access_feedback=semantic_feedback,
             completion_length_feedback=length_feedback,
+            compact_response_schema=compact_schema,
             projection_context=prepared.projection_context,
         )
     except StageAttemptFailure:
@@ -396,6 +470,13 @@ def generate_narrative_stage(
     )
     recorder = _AttemptRecordingClient(request.client)
     semantic_feedback, length_feedback = _split_retry(retry)
+    retry_max_tokens = (
+        retry.causal_control.retry_value
+        if retry
+        and retry.causal_control
+        and retry.causal_control.field == "max_completion_tokens"
+        else None
+    )
     try:
         narrative, result = generate._call_narrative(
             request.seed,
@@ -415,6 +496,7 @@ def generate_narrative_stage(
             pinned_entry_point_id=request.pinned_entry_point_id,
             realization_feedback=semantic_feedback,
             completion_length_feedback=length_feedback,
+            max_completion_tokens=retry_max_tokens,
             projection_context=prepared.projection_context,
         )
     except StageAttemptFailure:
@@ -438,6 +520,13 @@ def generate_tree_stage(
     request = prepared.request
     recorder = _AttemptRecordingClient(request.client)
     semantic_feedback, length_feedback = _split_retry(retry)
+    retry_temperature = (
+        retry.causal_control.retry_value
+        if retry
+        and retry.causal_control
+        and retry.causal_control.field == "temperature"
+        else None
+    )
     try:
         tree, result = generate._call_attack_tree_once(
             request.seed,
@@ -450,6 +539,7 @@ def generate_tree_stage(
             pinned_technique_names=_optional_list(request.pinned_technique_names),
             consistency_feedback=semantic_feedback,
             completion_length_feedback=length_feedback,
+            temperature=retry_temperature,
             pinned_entry_point_id=request.pinned_entry_point_id,
             projection_context=prepared.projection_context,
         )
@@ -478,6 +568,11 @@ def generate_behavior_stage(
     request = prepared.request
     recorder = _AttemptRecordingClient(request.client)
     _, length_feedback = _split_retry(retry)
+    compact_schema = bool(
+        retry
+        and retry.causal_control
+        and retry.causal_control.field == "response_schema"
+    )
     try:
         behavior, result = generate._call_behavior_spec(
             request.seed,
@@ -489,6 +584,7 @@ def generate_behavior_stage(
             prepared.scenario_id,
             pinned_technique_ids=_optional_list(request.pinned_technique_ids),
             completion_length_feedback=length_feedback,
+            compact_response_schema=compact_schema,
             projection_context=prepared.projection_context,
         )
     except StageAttemptFailure:

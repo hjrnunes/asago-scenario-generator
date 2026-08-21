@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
+from collections.abc import Mapping
 from typing import Any
 
 from openai import LengthFinishReasonError, OpenAI
@@ -24,6 +26,15 @@ class CompletionLengthError(RuntimeError):
     finish_reason: str = "length"
     prompt_tokens: int
     completion_tokens: int
+    total_tokens: int
+    usage_details: dict[str, Any]
+    response_id: str | None
+    model: str | None
+    partial_character_count: int
+    partial_sha256: str | None
+    partial_preview_prefix: str | None
+    partial_preview_suffix: str | None
+    elapsed_ms: int | None
 
     def __init__(
         self,
@@ -32,6 +43,15 @@ class CompletionLengthError(RuntimeError):
         completion_tokens: int = 0,
         finish_reason: str = "length",
         message: str | None = None,
+        total_tokens: int | None = None,
+        usage_details: Mapping[str, Any] | None = None,
+        response_id: str | None = None,
+        model: str | None = None,
+        partial_character_count: int = 0,
+        partial_sha256: str | None = None,
+        partial_preview_prefix: str | None = None,
+        partial_preview_suffix: str | None = None,
+        elapsed_ms: int | None = None,
     ) -> None:
         super().__init__(
             message or "completion length limit reached; response finished early"
@@ -39,6 +59,19 @@ class CompletionLengthError(RuntimeError):
         self.finish_reason = finish_reason
         self.prompt_tokens = prompt_tokens
         self.completion_tokens = completion_tokens
+        self.total_tokens = (
+            total_tokens
+            if total_tokens is not None
+            else prompt_tokens + completion_tokens
+        )
+        self.usage_details = dict(usage_details or {})
+        self.response_id = response_id
+        self.model = model
+        self.partial_character_count = partial_character_count
+        self.partial_sha256 = partial_sha256
+        self.partial_preview_prefix = partial_preview_prefix
+        self.partial_preview_suffix = partial_preview_suffix
+        self.elapsed_ms = elapsed_ms
 
     @classmethod
     def from_usage(
@@ -46,6 +79,8 @@ class CompletionLengthError(RuntimeError):
         usage: Any,
         *,
         finish_reason: str = "length",
+        response: Any | None = None,
+        partial_content: Any | None = None,
     ) -> CompletionLengthError:
         """Build typed length-exhaustion evidence from a provider usage record.
 
@@ -53,10 +88,20 @@ class CompletionLengthError(RuntimeError):
         degrade to zero without parsing exception text.
         """
         prompt_tokens, completion_tokens = _usage_counts(usage)
+        usage_details = _usage_details(usage)
+        total_tokens = usage_details.get("total_tokens")
+        if not isinstance(total_tokens, int):
+            total_tokens = prompt_tokens + completion_tokens
+        diagnostics = _partial_diagnostics(partial_content)
         return cls(
             finish_reason=finish_reason,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            usage_details=usage_details,
+            response_id=_response_field(response, "id"),
+            model=_response_field(response, "model"),
+            **diagnostics,
         )
 
 
@@ -64,7 +109,83 @@ def _usage_counts(usage: Any) -> tuple[int, int]:
     """Extract ``(prompt_tokens, completion_tokens)``, tolerating None usage."""
     if usage is None:
         return 0, 0
-    return usage.prompt_tokens, usage.completion_tokens
+    return (
+        int(getattr(usage, "prompt_tokens", 0) or 0),
+        int(getattr(usage, "completion_tokens", 0) or 0),
+    )
+
+
+def _plain_value(value: Any) -> Any:
+    """Convert SDK/Pydantic telemetry objects into JSON-compatible values."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    if isinstance(value, Mapping):
+        return {str(key): _plain_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain_value(item) for item in value]
+    if hasattr(value, "__dict__"):
+        return {
+            str(key): _plain_value(item)
+            for key, item in vars(value).items()
+            if not key.startswith("_")
+        }
+    return str(value)
+
+
+def _usage_details(usage: Any) -> dict[str, Any]:
+    """Preserve all provider usage and nested token-detail fields."""
+    plain = _plain_value(usage)
+    return plain if isinstance(plain, dict) else {}
+
+
+def _response_field(response: Any | None, name: str) -> str | None:
+    value = getattr(response, name, None) if response is not None else None
+    return value if isinstance(value, str) else None
+
+
+_SENSITIVE_VALUE = re.compile(
+    r"(?i)\b(?:secret|password|passwd|token|api[_-]?key|authorization)"
+    r"\s*[:=]\s*[^\s,;]+"
+)
+_PREVIEW_LIMIT = 128
+
+
+def _redacted_preview(content: str, *, suffix: bool) -> str:
+    redacted = _SENSITIVE_VALUE.sub("[REDACTED]", content)
+    if len(redacted) <= _PREVIEW_LIMIT:
+        return redacted
+    return redacted[-_PREVIEW_LIMIT:] if suffix else redacted[:_PREVIEW_LIMIT]
+
+
+def _partial_diagnostics(content: Any | None) -> dict[str, Any]:
+    """Return bounded, redacted evidence without retaining the full response."""
+    if content is None:
+        return {
+            "partial_character_count": 0,
+            "partial_sha256": None,
+            "partial_preview_prefix": None,
+            "partial_preview_suffix": None,
+        }
+    if not isinstance(content, str):
+        content = json.dumps(_plain_value(content), ensure_ascii=False, sort_keys=True)
+    import hashlib
+
+    return {
+        "partial_character_count": len(content),
+        "partial_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        "partial_preview_prefix": _redacted_preview(content, suffix=False),
+        "partial_preview_suffix": _redacted_preview(content, suffix=True),
+    }
+
+
+def _response_schema_label(response_format: type[BaseModel] | None) -> str | None:
+    if response_format is None:
+        return None
+    return (
+        "compact-v1" if response_format.__name__.startswith("Compact") else "standard"
+    )
 
 
 class LLMResult(BaseModel):
@@ -76,6 +197,10 @@ class LLMResult(BaseModel):
     duration_ms: int = Field(description="Wall-clock duration in milliseconds.")
     system_prompt: str = Field(default="", description="System prompt sent to the LLM.")
     user_prompt: str = Field(default="", description="User prompt sent to the LLM.")
+    request_controls: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Provider-facing controls used for this request.",
+    )
 
 
 class LLMClient:
@@ -173,7 +298,11 @@ class LLMClient:
             extra_kwargs["max_completion_tokens"] = effective_max
 
         t0 = time.perf_counter_ns()
-        response, content = self._complete(messages, response_format, extra_kwargs)
+        try:
+            response, content = self._complete(messages, response_format, extra_kwargs)
+        except CompletionLengthError as exc:
+            exc.elapsed_ms = max(0, (time.perf_counter_ns() - t0) // 1_000_000)
+            raise
         duration_ms = (time.perf_counter_ns() - t0) // 1_000_000
         prompt_tokens, completion_tokens = _usage_counts(response.usage)
 
@@ -184,6 +313,12 @@ class LLMClient:
             duration_ms=duration_ms,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            request_controls={
+                "response_schema": (_response_schema_label(response_format)),
+                "max_completion_tokens": effective_max,
+                "transport_token_cap": self.max_completion_tokens,
+                "temperature": effective_temp,
+            },
         )
 
     def _complete(
@@ -216,11 +351,29 @@ class LLMClient:
                 )
                 content = response.choices[0].message.content
         except LengthFinishReasonError as exc:
-            raise CompletionLengthError.from_usage(exc.completion.usage) from exc
+            completion = exc.completion
+            partial_content = _choice_content(completion)
+            raise CompletionLengthError.from_usage(
+                completion.usage,
+                response=completion,
+                partial_content=partial_content,
+            ) from exc
 
         finish_reason = getattr(response.choices[0], "finish_reason", None)
         if response_format is None and str(finish_reason) == "length":
             # Unstructured length exhaustion: a completed response whose
             # choice ended for length is still a length failure.
-            raise CompletionLengthError.from_usage(response.usage)
+            raise CompletionLengthError.from_usage(
+                response.usage,
+                response=response,
+                partial_content=_choice_content(response),
+            )
         return response, content
+
+
+def _choice_content(response: Any) -> Any | None:
+    """Read provider partial content for diagnostics only."""
+    try:
+        return response.choices[0].message.content
+    except (AttributeError, IndexError, KeyError, TypeError):
+        return None

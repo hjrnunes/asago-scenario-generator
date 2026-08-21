@@ -567,6 +567,45 @@ def test_completion_length_retry_then_success_admits_without_semantic_budget() -
     assert machine.owner_retry_counts == {}
 
 
+@pytest.mark.parametrize(
+    ("stage", "field", "initial", "retry"),
+    (
+        (GeneratedStage.actor, "response_schema", "standard", "compact-v1"),
+        (GeneratedStage.narrative, "max_completion_tokens", 16384, 8192),
+        (GeneratedStage.tree, "temperature", 0.4, 0.1),
+        (GeneratedStage.behavior, "response_schema", "standard", "compact-v1"),
+    ),
+)
+def test_completion_length_retry_selects_one_approved_causal_control(
+    stage, field, initial, retry
+) -> None:
+    failure = _completion_length_failure()
+    invocations: list[StageInvocation] = []
+
+    def callback(candidate, invocation):
+        invocations.append(invocation)
+        if invocation.stage is stage and invocation.invocation_index == 0:
+            raise failure
+        return GeneratedStageResult(invocation.stage.value)
+
+    machine, _, _ = _machine(
+        callbacks={stage_name: callback for stage_name in GENERATION_ORDER}
+    )
+    assert machine.run().state is LifecycleState.admitted
+
+    retry_invocation = next(
+        item
+        for item in invocations
+        if item.stage is stage and item.invocation_index == 1
+    )
+    control = retry_invocation.retry_control
+    assert control is not None
+    assert control.field == field
+    assert control.initial_value == initial
+    assert control.retry_value == retry
+    assert retry_invocation.total_request_budget == 2
+
+
 def test_semantic_failure_after_length_retry_clears_the_length_reason() -> None:
     """Semantic routing drops a stale length reason before re-invoking."""
     failure = _completion_length_failure()

@@ -87,6 +87,10 @@ class Call3Response(BaseModel):
     )
 
 
+class CompactCall3Response(Call3Response):
+    """Provider schema name for the one causal compact-response experiment."""
+
+
 # ---------------------------------------------------------------------------
 # Leaf-action step classification (cmps.9)
 # ---------------------------------------------------------------------------
@@ -521,6 +525,7 @@ def _call_behavior_spec(
     scenario_tag: str,
     pinned_technique_ids: list[str] | None = None,
     completion_length_feedback: str | None = None,
+    compact_response_schema: bool = False,
     projection_context: dict[str, Any] | None = None,
 ) -> tuple[BehaviorSpec, LLMResult]:
     """Generate a structured behavior spec for a scenario seed (Call 3).
@@ -554,7 +559,9 @@ def _call_behavior_spec(
     result = client.complete(
         system_prompt=render_prompt("call3_system.j2"),
         user_prompt=user_prompt,
-        response_format=Call3Response,
+        response_format=(
+            CompactCall3Response if compact_response_schema else Call3Response
+        ),
     )
 
     call3_response: Call3Response = result.content

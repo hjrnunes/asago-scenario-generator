@@ -30,6 +30,7 @@ from asago_scenario_generator.pipeline.coverage_planning import (
 )
 from asago_scenario_generator.pipeline.finalization import (
     COMPLETION_LENGTH_RETRY_SUFFIXES,
+    COMPLETION_LENGTH_RETRY_CONTROLS,
     MAX_OWNER_RETRIES,
     AdmissionDecision,
     CandidateTerminalResult,
@@ -331,6 +332,7 @@ def run_target_finalization(
                 latest: dict[GeneratedStage, Any] = {}
                 durable_feedback: dict[GeneratedStage, str] = {}
                 durable_reasons: dict[GeneratedStage, str] = {}
+                durable_controls: dict[GeneratedStage, Any] = {}
                 durable_candidate = ref_by_id[
                     active_attempt.candidate_id
                 ].projected_candidate
@@ -403,6 +405,9 @@ def run_target_finalization(
                                 COMPLETION_LENGTH_RETRY_SUFFIXES[record.stage]
                             )
                             durable_reasons[record.stage] = "completion_length"
+                            durable_controls[record.stage] = (
+                                COMPLETION_LENGTH_RETRY_CONTROLS[record.stage]
+                            )
                         else:
                             durable_feedback[record.stage] = (
                                 "; ".join(
@@ -634,6 +639,9 @@ def run_target_finalization(
             if active_attempt is not None and resume_candidate_id is not None
             else {},
             resume_retry_reasons=durable_reasons
+            if active_attempt is not None and resume_candidate_id is not None
+            else {},
+            resume_retry_controls=durable_controls
             if active_attempt is not None and resume_candidate_id is not None
             else {},
             transition_index_offset=(

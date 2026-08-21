@@ -3368,3 +3368,105 @@ def test_record_stage_result_writes_to_calls_jsonl(tmp_path):
     assert entry_fail["completion_tokens"] is None
     assert entry_fail["duration_ms"] is None
     assert entry_fail["error"] == "ValueError: Something went wrong"
+
+
+def test_record_stage_result_redacts_and_preserves_completion_length_diagnostics(
+    tmp_path,
+):
+    import json
+    from unittest.mock import MagicMock
+
+    from asago_scenario_generator.llm.client import CompletionLengthError
+    from asago_scenario_generator.models.scenario import CallName
+    from asago_scenario_generator.pipeline.finalization import (
+        GeneratedStage,
+        GeneratedStageResult,
+        StageInvocation,
+    )
+    from asago_scenario_generator.pipeline.generate.stages import (
+        stage_attempt_failure,
+    )
+    from asago_scenario_generator.pipeline.persistence import (
+        FinalizationPersistenceAdapter,
+    )
+
+    inventory = MagicMock()
+    inventory.candidate_attempts = []
+    inventory.stage_attempts = []
+    inventory.transitions = []
+    inventory.repairs = []
+    inventory.admission_decisions = []
+    inventory.model_copy.return_value = inventory
+    coverage_plan = MagicMock(targets=[])
+    run_dir = tmp_path / "run_dir"
+    run_dir.mkdir()
+
+    adapter = FinalizationPersistenceAdapter(run_dir, inventory, coverage_plan)
+    adapter._candidate_attempt = MagicMock()
+    adapter._replayed = MagicMock(return_value=False)
+    adapter._commit = MagicMock()
+    adapter._sequence = MagicMock(return_value=1)
+
+    partial = "BEGIN SECRET=fixture-customer@example.invalid END"
+    usage_details = {
+        "prompt_tokens": 31,
+        "completion_tokens": 16,
+        "total_tokens": 47,
+        "prompt_tokens_details": {"cached_tokens": 3},
+        "completion_tokens_details": {"reasoning_tokens": 5},
+    }
+    failure = stage_attempt_failure(
+        CallName.actor_profile,
+        CompletionLengthError(
+            prompt_tokens=31,
+            completion_tokens=16,
+            total_tokens=47,
+            usage_details=usage_details,
+            response_id="fixture-response-001",
+            model="fixture-model-v1",
+            partial_character_count=len(partial),
+            partial_sha256="a" * 64,
+            partial_preview_prefix="BEGIN [REDACTED] END",
+            partial_preview_suffix="BEGIN [REDACTED] END",
+            elapsed_ms=3,
+        ),
+        phase="invocation",
+        invoked=True,
+        system_prompt="system",
+        user_prompt="user",
+        request_controls={
+            "response_schema": "standard",
+            "max_completion_tokens": 16384,
+            "temperature": 0.4,
+        },
+    )
+    invocation = StageInvocation(
+        candidate_id="cand:v2:diagnostics",
+        stage=GeneratedStage.actor,
+        invocation_index=0,
+        owner_retry_index=0,
+        artifacts={},
+        candidate_snapshot={"candidate_id": "cand:v2:diagnostics"},
+        retry_reason="completion_length",
+    )
+
+    adapter.record_stage_result(
+        invocation,
+        GeneratedStageResult(artifact=None, evidence=failure),
+    )
+
+    entry = json.loads((run_dir / "calls.jsonl").read_text().splitlines()[0])
+    assert entry["code"] == "completion_length"
+    assert entry["finish_reason"] == "length"
+    assert entry["prompt_tokens"] == 31
+    assert entry["completion_tokens"] == 16
+    assert entry["total_tokens"] == 47
+    assert entry["usage_details"] == usage_details
+    assert entry["response_id"] == "fixture-response-001"
+    assert entry["model"] == "fixture-model-v1"
+    assert entry["partial_character_count"] == len(partial)
+    assert entry["partial_sha256"] == "a" * 64
+    assert entry["partial_preview_prefix"] == "BEGIN [REDACTED] END"
+    assert entry["partial_preview_suffix"] == "BEGIN [REDACTED] END"
+    assert entry["elapsed_ms"] == 3
+    assert "SECRET=fixture-customer@example.invalid" not in json.dumps(entry)

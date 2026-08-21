@@ -222,6 +222,50 @@ def test_stage_attempt_failure_normalizes_completion_length_evidence() -> None:
     assert failure.completion_tokens == 16
 
 
+def test_stage_attempt_failure_retains_redacted_length_diagnostics() -> None:
+    from asago_scenario_generator.llm.client import CompletionLengthError
+    from asago_scenario_generator.pipeline.generate.stages import (
+        stage_attempt_failure,
+    )
+
+    exception = CompletionLengthError(
+        prompt_tokens=31,
+        completion_tokens=16,
+        total_tokens=47,
+        usage_details={
+            "prompt_tokens": 31,
+            "completion_tokens": 16,
+            "total_tokens": 47,
+            "prompt_tokens_details": {"cached_tokens": 3},
+            "completion_tokens_details": {"reasoning_tokens": 5},
+        },
+        response_id="fixture-response-001",
+        model="fixture-model-v1",
+        partial_character_count=8,
+        partial_sha256="a" * 64,
+        partial_preview_prefix="[REDACTED]",
+        partial_preview_suffix="[REDACTED]",
+        elapsed_ms=4,
+    )
+
+    failure = stage_attempt_failure(
+        CallName.actor_profile,
+        exception,
+        phase="invocation",
+        invoked=True,
+    )
+
+    assert failure.total_tokens == 47
+    assert failure.usage_details["completion_tokens_details"]["reasoning_tokens"] == 5
+    assert failure.response_id == "fixture-response-001"
+    assert failure.model == "fixture-model-v1"
+    assert failure.partial_character_count == 8
+    assert failure.partial_sha256 == "a" * 64
+    assert failure.partial_preview_prefix == "[REDACTED]"
+    assert failure.partial_preview_suffix == "[REDACTED]"
+    assert failure.elapsed_ms == 4
+
+
 def test_retry_directive_is_data_not_hidden_control_flow() -> None:
     prepared = _prepared()
     actor = cast(Any, object())

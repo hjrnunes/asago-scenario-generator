@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -108,6 +109,98 @@ def test_structured_sdk_length_error_is_normalized_typed() -> None:
     assert raised.value.completion_tokens == 22
     client._client.beta.chat.completions.parse.assert_called_once()
     assert client._client.chat.completions.create.call_count == 0
+
+
+def test_structured_length_error_preserves_bounded_diagnostic_evidence() -> None:
+    from hashlib import sha256
+    from openai import LengthFinishReasonError
+
+    client = _client()
+    partial = "BEGIN SECRET=fixture-customer@example.invalid END"
+    usage = SimpleNamespace(
+        prompt_tokens=31,
+        completion_tokens=16,
+        total_tokens=47,
+        prompt_tokens_details=SimpleNamespace(cached_tokens=3),
+        completion_tokens_details=SimpleNamespace(reasoning_tokens=5),
+    )
+    completion = SimpleNamespace(
+        id="fixture-response-001",
+        model="fixture-model-v1",
+        usage=usage,
+        choices=[
+            SimpleNamespace(
+                finish_reason="length",
+                message=SimpleNamespace(content=partial),
+            )
+        ],
+    )
+    client._client.beta.chat.completions.parse.side_effect = (
+        LengthFinishReasonError(completion=completion)
+    )
+
+    with pytest.raises(CompletionLengthError) as raised:
+        client.complete(
+            system_prompt="system",
+            user_prompt="user",
+            response_format=MagicMock,
+        )
+
+    error = raised.value
+    assert error.finish_reason == "length"
+    assert error.prompt_tokens == 31
+    assert error.completion_tokens == 16
+    assert error.total_tokens == 47
+    assert error.usage_details == {
+        "prompt_tokens": 31,
+        "completion_tokens": 16,
+        "total_tokens": 47,
+        "prompt_tokens_details": {"cached_tokens": 3},
+        "completion_tokens_details": {"reasoning_tokens": 5},
+    }
+    assert error.response_id == "fixture-response-001"
+    assert error.model == "fixture-model-v1"
+    assert error.partial_character_count == len(partial)
+    assert error.partial_sha256 == sha256(partial.encode()).hexdigest()
+    assert error.partial_preview_prefix == "BEGIN [REDACTED] END"
+    assert error.partial_preview_suffix == "BEGIN [REDACTED] END"
+    assert error.elapsed_ms is not None and error.elapsed_ms >= 0
+
+
+def test_unstructured_length_error_preserves_partial_diagnostic_evidence() -> None:
+    client = _client()
+    partial = "prefix SECRET=fixture-customer@example.invalid suffix"
+    usage = SimpleNamespace(
+        prompt_tokens=31,
+        completion_tokens=16,
+        total_tokens=47,
+        prompt_tokens_details=SimpleNamespace(cached_tokens=3),
+        completion_tokens_details=SimpleNamespace(reasoning_tokens=5),
+    )
+    response = SimpleNamespace(
+        id="fixture-response-001",
+        model="fixture-model-v1",
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content=partial),
+                finish_reason="length",
+            )
+        ],
+        usage=usage,
+    )
+    client._client.chat.completions.create.return_value = response
+
+    with pytest.raises(CompletionLengthError) as raised:
+        client.complete(system_prompt="system", user_prompt="user")
+
+    error = raised.value
+    assert error.partial_character_count == len(partial)
+    assert error.partial_preview_prefix is not None
+    assert error.partial_preview_suffix is not None
+    assert "SECRET=fixture-customer@example.invalid" not in (
+        error.partial_preview_prefix + error.partial_preview_suffix
+    )
+    assert error.usage_details["prompt_tokens_details"]["cached_tokens"] == 3
 
 
 def test_explicit_completion_limit_is_forwarded_to_the_provider() -> None:

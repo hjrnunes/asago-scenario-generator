@@ -122,6 +122,10 @@ class Call1Response(BaseModel):
     access_realization: NarrativeAccessRealization | None = None
 
 
+class CompactCall1Response(Call1Response):
+    """Provider schema name for the one causal compact-response experiment."""
+
+
 # ---------------------------------------------------------------------------
 # Non-Latin script sanitization
 # ---------------------------------------------------------------------------
@@ -729,6 +733,7 @@ def _call_narrative(
     access_feedback: str | None = None,
     realization_feedback: str | None = None,
     completion_length_feedback: str | None = None,
+    max_completion_tokens: int | None = None,
     projection_context: dict[str, Any] | None = None,
 ) -> tuple[NarrativeLayer, LLMResult]:
     """Generate an attack narrative for a scenario seed (Call 1).
@@ -776,6 +781,7 @@ def _call_narrative(
         ),
         user_prompt=user_prompt,
         response_format=Call1Response,
+        max_completion_tokens=max_completion_tokens,
     )
     # Post-processing: normalize echoed step-ID transport shapes to the
     # canonical IDs before deterministic realization derivation.  Unknown,

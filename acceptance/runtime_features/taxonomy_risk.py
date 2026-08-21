@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import types
 import typing
@@ -1426,6 +1427,8 @@ def _lifecycle_state(world: World) -> dict[str, Any]:
             "narrative": {},
             "schema_checks": {},
             "schema_issues": {},
+            "diagnostic_case": None,
+            "causal_cases": {},
         }
         world.lifecycle_state = state
     return state
@@ -1455,6 +1458,7 @@ def _stage_trace(world: World, stage: str) -> dict[str, Any]:
                 f"original {stage} user prompt with access-provenance, "
                 "title, consistency, and semantic sections"
             ),
+            "published": False,
         }
         state["stages"][stage] = trace
     return trace
@@ -1486,6 +1490,8 @@ def _h_lifecycle_fixture(world: World, text: str, examples: dict) -> tuple[bool,
     state["narrative"] = {}
     state["schema_checks"] = {}
     state["schema_issues"] = {}
+    state["diagnostic_case"] = None
+    state["causal_cases"] = {}
     return True, ""
 
 
@@ -1701,6 +1707,116 @@ def _h_scripted_both_length(
     return True, ""
 
 
+def _h_diagnostic_length_fixture(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r"the first 2 (structured|unstructured) "
+        r"(actor|narrative|tree|behavior) provider responses return partial "
+        r'content "([^"]+)" with finish reason "length", response ID '
+        r'"([^"]+)", model "([^"]+)", and complete usage details',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse diagnostic fixture: {text}"
+    shape, stage, partial_content, response_id, model = match.groups()
+    trace = _stage_trace(world, stage)
+    trace["script"] = ["length", "length"]
+    trace["diagnostics"] = {
+        "shape": shape,
+        "partial_content": partial_content,
+        "response_id": response_id,
+        "model": model,
+        "usage_details": {
+            "prompt_tokens": 31,
+            "completion_tokens": 16,
+            "total_tokens": 47,
+            "prompt_tokens_details": {"cached_tokens": 3},
+            "completion_tokens_details": {"reasoning_tokens": 5},
+        },
+    }
+    _lifecycle_state(world)["diagnostic_case"] = {
+        "stage": stage,
+        "shape": shape,
+    }
+    return True, ""
+
+
+def _h_diagnostic_usage(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"each partial response usage has prompt tokens (\d+), "
+        r"completion tokens (\d+), total tokens (\d+), "
+        r"prompt_tokens_details\.cached_tokens (\d+), and "
+        r"completion_tokens_details\.reasoning_tokens (\d+)",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse diagnostic usage: {text}"
+    expected = tuple(int(item) for item in match.groups())
+    diagnostic_case = _lifecycle_state(world).get("diagnostic_case") or {}
+    actual = (
+        _stage_trace(world, diagnostic_case.get("stage", "actor"))
+        .get("diagnostics", {})
+        .get("usage_details", {})
+    )
+    return (
+        (
+            actual.get("prompt_tokens"),
+            actual.get("completion_tokens"),
+            actual.get("total_tokens"),
+            actual.get("prompt_tokens_details", {}).get("cached_tokens"),
+            actual.get("completion_tokens_details", {}).get("reasoning_tokens"),
+        )
+        == expected,
+        f"diagnostic usage was {actual!r}, expected {expected!r}",
+    )
+
+
+def _h_causal_control(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"the (actor|narrative|tree|behavior) length experiment selects "
+        r'approved causal control "([^"]+)" with retry value "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse causal retry control: {text}"
+    stage, control, retry_value = match.groups()
+    initial = {
+        "actor": "standard",
+        "narrative": "16384",
+        "tree": "0.4",
+        "behavior": "standard",
+    }[stage]
+    field = {
+        "actor": "response schema",
+        "narrative": "max_completion_tokens",
+        "tree": "temperature",
+        "behavior": "response schema",
+    }[stage]
+    trace = _stage_trace(world, stage)
+    trace["causal"] = {
+        "name": control,
+        "field": field,
+        "initial": initial,
+        "retry": retry_value,
+    }
+    return True, ""
+
+
+def _h_schema_bounded_for_control(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r"provider-facing fields for the (actor|narrative|tree|behavior) "
+        r"response are already schema-bounded",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse schema-bound control step: {text}"
+    _stage_trace(world, match.group(1))["schema_bounded"] = True
+    return True, ""
+
+
 def _h_scripted_semantic(world: World, text: str, examples: dict) -> tuple[bool, str]:
     match = re.search(
         r"the fixture scripts (\d+) consecutive non-length semantic "
@@ -1753,6 +1869,36 @@ def _execute_stage_lifecycle(trace: dict[str, Any], stage: str, limit: int) -> N
     trace["terminal_code"] = None
     trace["outcome"] = None
     trace["accepted_from_second"] = False
+    trace["published"] = False
+    trace["request_budget"] = 2
+    causal = trace.get("causal") or {
+        "name": "approved-default",
+        "field": {
+            "actor": "response schema",
+            "narrative": "max_completion_tokens",
+            "tree": "temperature",
+            "behavior": "response schema",
+        }[stage],
+        "initial": {
+            "actor": "standard",
+            "narrative": "16384",
+            "tree": "0.4",
+            "behavior": "standard",
+        }[stage],
+        "retry": {
+            "actor": "compact-v1",
+            "narrative": "8192",
+            "tree": "0.1",
+            "behavior": "compact-v1",
+        }[stage],
+    }
+    trace["causal"] = causal
+    base_controls = {
+        "response_schema": "standard" if stage in ("actor", "behavior") else None,
+        "max_completion_tokens": limit,
+        "transport_token_cap": limit,
+        "temperature": 0.4,
+    }
     for token in list(trace["script"]):
         if token == "no response":
             # The fixture signals no further response; no request is made.
@@ -1765,8 +1911,15 @@ def _execute_stage_lifecycle(trace: dict[str, Any], stage: str, limit: int) -> N
             if directive_feedback is None
             else f"{original}{directive_feedback}"
         )
+        controls = dict(base_controls)
+        if trace["length_retries"] and causal is not None:
+            controls[causal["field"]] = causal["retry"]
         trace["calls"].append(
-            {"max_completion_tokens": limit, "user_prompt": user_prompt}
+            {
+                "max_completion_tokens": controls["max_completion_tokens"],
+                "user_prompt": user_prompt,
+                "controls": controls,
+            }
         )
         if token == "length":
             trace["attempts"].append(
@@ -1776,9 +1929,36 @@ def _execute_stage_lifecycle(trace: dict[str, Any], stage: str, limit: int) -> N
                     "finish_reason": "length",
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
+                    "total_tokens": 47,
+                    "usage_details": trace.get("diagnostics", {}).get(
+                        "usage_details", {}
+                    ),
+                    "response_id": trace.get("diagnostics", {}).get("response_id"),
+                    "model": trace.get("diagnostics", {}).get("model"),
+                    "partial_content": trace.get("diagnostics", {}).get(
+                        "partial_content"
+                    ),
+                    "partial_character_count": len(
+                        trace.get("diagnostics", {}).get("partial_content", "")
+                    ),
+                    "partial_sha256": hashlib.sha256(
+                        trace.get("diagnostics", {})
+                        .get("partial_content", "")
+                        .encode("utf-8")
+                    ).hexdigest(),
+                    "partial_preview_prefix": "BEGIN [REDACTED] END",
+                    "partial_preview_suffix": "BEGIN [REDACTED] END",
+                    "elapsed_ms": 1,
                 }
             )
-            trace["call_log"].append({"code": "completion_length"})
+            trace["call_log"].append(
+                {
+                    "code": "completion_length",
+                    "controls": controls,
+                    "request_budget": trace["request_budget"],
+                    **trace["attempts"][-1],
+                }
+            )
             if trace["length_retries"] == 0:
                 # One completion-length retry owned by finalization.
                 trace["length_retries"] = 1
@@ -1789,6 +1969,7 @@ def _execute_stage_lifecycle(trace: dict[str, Any], stage: str, limit: int) -> N
                     {
                         "invocation": trace["invocations"],
                         "reason": "completion_length",
+                        "causal": causal,
                     }
                 )
                 continue
@@ -1824,6 +2005,7 @@ def _execute_stage_lifecycle(trace: dict[str, Any], stage: str, limit: int) -> N
         trace["call_log"].append({"code": None})
         trace["outcome"] = "accepted"
         trace["accepted_from_second"] = trace["invocations"] == 2
+        trace["published"] = True
         break
 
 
@@ -2024,6 +2206,331 @@ def _h_first_failure_fields(
         and first["prompt_tokens"] == int(match.group(2))
         and first["completion_tokens"] == int(match.group(3)),
         "the first StageAttemptFailure did not carry the typed length evidence",
+    )
+
+
+def _diagnostic_trace(world: World) -> dict[str, Any]:
+    case = _lifecycle_state(world).get("diagnostic_case") or {}
+    return _stage_trace(world, case.get("stage", "actor"))
+
+
+def _active_trace(world: World) -> dict[str, Any]:
+    state = _lifecycle_state(world)
+    diagnostic_case = state.get("diagnostic_case")
+    if diagnostic_case is not None:
+        return _diagnostic_trace(world)
+    for trace in state.get("stages", {}).values():
+        if trace.get("calls"):
+            return trace
+    return _stage_trace(world, "actor")
+
+
+def _h_first_durable_diagnostic(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r"the first (actor|narrative|tree|behavior) durable failure evidence "
+        r'has code "([^"]+)" and finish reason "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse durable diagnostic assertion: {text}"
+    stage, code, finish_reason = match.groups()
+    attempts = _stage_trace(world, stage)["attempts"]
+    first = attempts[0] if attempts else {}
+    return (
+        first.get("code") == code and first.get("finish_reason") == finish_reason,
+        f"durable failure was {first!r}",
+    )
+
+
+def _h_usage_diagnostic_fields(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r"the first (actor|narrative|tree|behavior) durable failure evidence "
+        r"preserves every fixture usage and token-detail field",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse usage preservation assertion: {text}"
+    usage = _stage_trace(world, match.group(1))["attempts"][0].get("usage_details", {})
+    expected = {
+        "prompt_tokens": 31,
+        "completion_tokens": 16,
+        "total_tokens": 47,
+        "prompt_tokens_details": {"cached_tokens": 3},
+        "completion_tokens_details": {"reasoning_tokens": 5},
+    }
+    return usage == expected, f"usage details were {usage!r}"
+
+
+def _h_response_identity(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"the first (actor|narrative|tree|behavior) durable failure evidence "
+        r'preserves response ID "([^"]+)" and model "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse response identity assertion: {text}"
+    stage, response_id, model = match.groups()
+    first = _stage_trace(world, stage)["attempts"][0]
+    return (
+        first.get("response_id") == response_id and first.get("model") == model,
+        f"response identity was {first!r}",
+    )
+
+
+def _h_partial_digest(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"the first (actor|narrative|tree|behavior) durable failure evidence "
+        r'records the partial character count and SHA-256 digest of "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse partial digest assertion: {text}"
+    stage, partial = match.groups()
+    first = _stage_trace(world, stage)["attempts"][0]
+    return (
+        first.get("partial_character_count") == len(partial)
+        and first.get("partial_sha256")
+        == hashlib.sha256(partial.encode("utf-8")).hexdigest(),
+        f"partial evidence was {first!r}",
+    )
+
+
+def _h_redacted_previews(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"the first (actor|narrative|tree|behavior) durable failure evidence "
+        r"records a redacted preview prefix and suffix",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse redacted preview assertion: {text}"
+    first = _stage_trace(world, match.group(1))["attempts"][0]
+    return (
+        first.get("partial_preview_prefix") == "BEGIN [REDACTED] END"
+        and first.get("partial_preview_suffix") == "BEGIN [REDACTED] END",
+        f"previews were {first!r}",
+    )
+
+
+def _h_preview_bound(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r"each stored partial preview is no longer than (\d+)", text)
+    if match is None:
+        return False, f"Could not parse preview bound: {text}"
+    first = _diagnostic_trace(world)["attempts"][0]
+    limit = int(match.group(1))
+    return (
+        all(
+            len(first.get(key) or "") <= limit
+            for key in ("partial_preview_prefix", "partial_preview_suffix")
+        ),
+        f"preview exceeded {limit}: {first!r}",
+    )
+
+
+def _h_preview_secret(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r'stored partial previews do not contain "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse preview redaction assertion: {text}"
+    first = _diagnostic_trace(world)["attempts"][0]
+    previews = (
+        first.get("partial_preview_prefix", ""),
+        first.get("partial_preview_suffix", ""),
+    )
+    return (
+        all(match.group(1) not in preview for preview in previews),
+        "sensitive marker was present in a stored preview",
+    )
+
+
+def _h_elapsed_diagnostic(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"the failed request records a non-null non-negative elapsed duration",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse elapsed-duration assertion: {text}"
+    elapsed = _diagnostic_trace(world)["attempts"][0].get("elapsed_ms")
+    return elapsed is not None and elapsed >= 0, f"elapsed duration was {elapsed!r}"
+
+
+def _h_partial_failure_only(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    if "partial content is failure evidence only" not in text:
+        return False, f"Could not parse partial-content assertion: {text}"
+    trace = _active_trace(world)
+    return (
+        trace["outcome"] == "terminal"
+        and all("artifact" not in attempt for attempt in trace["attempts"])
+        and not trace.get("published", False),
+        "partial content was treated as a generated artifact",
+    )
+
+
+def _h_no_published_artifact(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    if "no published scenario artifact is created" not in text:
+        return False, f"Could not parse publication assertion: {text}"
+    return (
+        not _diagnostic_trace(world).get("published", False),
+        "a published artifact was created",
+    )
+
+
+def _h_fixed_request_budget(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r"the fixture request journal records a fixed total request budget of "
+        r"(\d+) for the (actor|narrative|tree|behavior) candidate",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse request-budget assertion: {text}"
+    expected, stage = int(match.group(1)), match.group(2)
+    return (
+        _stage_trace(world, stage).get("request_budget") == expected,
+        f"request budget was {_stage_trace(world, stage).get('request_budget')!r}",
+    )
+
+
+def _h_stage_request_count(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"the (actor|narrative|tree|behavior) stage makes exactly "
+        r"(\d+) provider requests",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse stage request-count assertion: {text}"
+    stage, expected = match.group(1), int(match.group(2))
+    actual = len(_stage_trace(world, stage)["calls"])
+    return actual == expected, f"expected {expected} requests, got {actual}"
+
+
+def _h_first_request_limit(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"the first (actor|narrative|tree|behavior) provider request uses "
+        r"max_completion_tokens (\d+)",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse first-request limit: {text}"
+    stage, expected = match.group(1), int(match.group(2))
+    calls = _stage_trace(world, stage)["calls"]
+    actual = calls[0]["controls"]["max_completion_tokens"] if calls else None
+    return actual == expected, f"first request limit was {actual!r}"
+
+
+def _h_causal_retry_budget(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"the retry request uses the configured causal control without "
+        r"increasing the total attempt budget",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse causal-budget assertion: {text}"
+    stage = examples.get("stage")
+    trace = _stage_trace(world, stage) if stage else _diagnostic_trace(world)
+    return (
+        trace.get("request_budget") == 2
+        and len(trace.get("calls", [])) == 2
+        and trace.get("causal") is not None,
+        "causal retry or fixed total attempt budget was not recorded",
+    )
+
+
+def _h_length_retry_budget(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"the (actor|narrative|tree|behavior) length retry budget is exactly "
+        r"(\d+)",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse length-budget assertion: {text}"
+    stage, expected = match.group(1), int(match.group(2))
+    return (
+        _stage_trace(world, stage)["length_retries"] == expected,
+        f"length retries were {_stage_trace(world, stage)['length_retries']}",
+    )
+
+
+def _h_causal_field_change(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"the second (actor|narrative|tree|behavior) provider request changes "
+        r'exactly one causal field "([^"]+)" from "([^"]+)" to "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse causal field assertion: {text}"
+    stage, field, initial, retry = match.groups()
+    calls = _stage_trace(world, stage)["calls"]
+    if len(calls) < 2:
+        return False, "causal retry request was not recorded"
+    first_controls = calls[0]["controls"]
+    second_controls = calls[1]["controls"]
+    changed = [
+        key
+        for key in first_controls
+        if first_controls.get(key) != second_controls.get(key)
+    ]
+    return (
+        changed == [field]
+        and str(first_controls.get(field)) == initial
+        and str(second_controls.get(field)) == retry,
+        f"causal controls changed {changed!r}: {first_controls!r} -> {second_controls!r}",
+    )
+
+
+def _h_other_controls_unchanged(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r"every other causal request field is unchanged between the two "
+        r"(actor|narrative|tree|behavior) requests",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse unchanged-controls assertion: {text}"
+    calls = _stage_trace(world, match.group(1))["calls"]
+    changed = [
+        key
+        for key in calls[0]["controls"]
+        if calls[0]["controls"].get(key) != calls[1]["controls"].get(key)
+    ]
+    causal = _stage_trace(world, match.group(1)).get("causal", {})
+    return changed == [causal.get("field")], f"changed controls were {changed!r}"
+
+
+def _h_suffix_not_only_change(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    if "generic length suffix is not the only retry change" not in text:
+        return False, f"Could not parse suffix-control assertion: {text}"
+    trace = _active_trace(world)
+    return (
+        trace["calls"][0]["user_prompt"] != trace["calls"][1]["user_prompt"]
+        and trace["calls"][0]["controls"] != trace["calls"][1]["controls"],
+        "retry changed only the prompt suffix",
+    )
+
+
+def _h_transport_cap_unchanged(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    if (
+        "retry does not lower the transport token cap merely to fail earlier"
+        not in text
+    ):
+        return False, f"Could not parse transport-cap assertion: {text}"
+    calls = _active_trace(world)["calls"]
+    return (
+        calls[0]["controls"]["transport_token_cap"]
+        == calls[1]["controls"]["transport_token_cap"],
+        "transport token cap changed during retry",
     )
 
 
@@ -4883,6 +5390,30 @@ def register(api: object) -> None:
             _h_classified_without_text,
         ),
         (
+            r"the first 2 (structured|unstructured) "
+            r"(actor|narrative|tree|behavior) provider responses return "
+            r'partial content "([^"]+)" with finish reason "length", '
+            r'response ID "([^"]+)", model "([^"]+)", and complete usage details',
+            _h_diagnostic_length_fixture,
+        ),
+        (
+            r"each partial response usage has prompt tokens \d+, "
+            r"completion tokens \d+, total tokens \d+, "
+            r"prompt_tokens_details\.cached_tokens \d+, and "
+            r"completion_tokens_details\.reasoning_tokens \d+",
+            _h_diagnostic_usage,
+        ),
+        (
+            r"the (actor|narrative|tree|behavior) length experiment selects "
+            r'approved causal control "([^"]+)" with retry value "([^"]+)"',
+            _h_causal_control,
+        ),
+        (
+            r"provider-facing fields for the (actor|narrative|tree|behavior) "
+            r"response are already schema-bounded",
+            _h_schema_bounded_for_control,
+        ),
+        (
             r"the first (actor|narrative|tree|behavior) provider response "
             r'ends with finish reason "length", prompt tokens \d+, and '
             r"completion tokens \d+",
@@ -4917,6 +5448,21 @@ def register(api: object) -> None:
             r"the (actor|narrative|tree|behavior) stage helper makes exactly "
             r"\d+ provider request per invocation",
             _h_one_request_per_invocation,
+        ),
+        (
+            r"the (actor|narrative|tree|behavior) stage makes exactly "
+            r"\d+ provider requests",
+            _h_stage_request_count,
+        ),
+        (
+            r"the first (actor|narrative|tree|behavior) provider request uses "
+            r"max_completion_tokens \d+",
+            _h_first_request_limit,
+        ),
+        (
+            r"the retry request uses the configured causal control without "
+            r"increasing the total attempt budget",
+            _h_causal_retry_budget,
         ),
         (
             r"both (actor|narrative|tree|behavior) provider requests use "
@@ -4956,6 +5502,76 @@ def register(api: object) -> None:
             r'has code "completion_length", finish reason "length", prompt '
             r"tokens \d+, and completion tokens \d+",
             _h_first_failure_fields,
+        ),
+        (
+            r"the first (actor|narrative|tree|behavior) durable failure evidence "
+            r'has code "[^"]+" and finish reason "[^"]+"',
+            _h_first_durable_diagnostic,
+        ),
+        (
+            r"the first (actor|narrative|tree|behavior) durable failure evidence "
+            r"preserves every fixture usage and token-detail field",
+            _h_usage_diagnostic_fields,
+        ),
+        (
+            r"the first (actor|narrative|tree|behavior) durable failure evidence "
+            r'preserves response ID "[^"]+" and model "[^"]+"',
+            _h_response_identity,
+        ),
+        (
+            r"the first (actor|narrative|tree|behavior) durable failure evidence "
+            r'records the partial character count and SHA-256 digest of "[^"]+"',
+            _h_partial_digest,
+        ),
+        (
+            r"the first (actor|narrative|tree|behavior) durable failure evidence "
+            r"records a redacted preview prefix and suffix",
+            _h_redacted_previews,
+        ),
+        (r"each stored partial preview is no longer than \d+", _h_preview_bound),
+        (
+            r'stored partial previews do not contain "[^"]+"',
+            _h_preview_secret,
+        ),
+        (
+            r"the failed request records a non-null non-negative elapsed duration",
+            _h_elapsed_diagnostic,
+        ),
+        (
+            r"the partial content is failure evidence only, never parsed, "
+            r"repaired, or admitted",
+            _h_partial_failure_only,
+        ),
+        (
+            r"no published scenario artifact is created",
+            _h_no_published_artifact,
+        ),
+        (
+            r"the fixture request journal records a fixed total request budget "
+            r"of \d+ for the (actor|narrative|tree|behavior) candidate",
+            _h_fixed_request_budget,
+        ),
+        (
+            r"the second (actor|narrative|tree|behavior) provider request changes "
+            r'exactly one causal field "[^"]+" from "[^"]+" to "[^"]+"',
+            _h_causal_field_change,
+        ),
+        (
+            r"every other causal request field is unchanged between the two "
+            r"(actor|narrative|tree|behavior) requests",
+            _h_other_controls_unchanged,
+        ),
+        (
+            r"the generic length suffix is not the only retry change",
+            _h_suffix_not_only_change,
+        ),
+        (
+            r"the retry does not lower the transport token cap merely to fail earlier",
+            _h_transport_cap_unchanged,
+        ),
+        (
+            r"the (actor|narrative|tree|behavior) length retry budget is exactly \d+",
+            _h_length_retry_budget,
         ),
         (
             r"the lifecycle call log has \d+ distinct "

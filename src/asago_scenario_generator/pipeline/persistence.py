@@ -39,6 +39,7 @@ from asago_scenario_generator.pipeline.coverage_planning import (
     deserialize_qualified_candidate,
 )
 from asago_scenario_generator.pipeline.finalization import (
+    MAX_COMPLETION_LENGTH_RETRIES,
     MAX_OWNER_RETRIES,
     CandidateTerminalResult,
     CandidateTerminalStatus,
@@ -60,6 +61,7 @@ from asago_scenario_generator.pipeline.finalization_gates import (
     AdmissionEvidenceId,
 )
 from asago_scenario_generator.pipeline.generate.stages import (
+    CausalRetryControl,
     StageAttemptFailure,
     StageCallEvidence,
 )
@@ -313,6 +315,9 @@ class StageInputRecord(StrictModel):
     visible_artifacts: dict[str, JsonValue]
     prompt: PromptRecord | None
     final_tree_digest: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    retry_reason: str | None = None
+    retry_control: JsonValue | None = None
+    total_request_budget: int = Field(default=MAX_COMPLETION_LENGTH_RETRIES + 1, ge=1)
 
 
 class LLMResultRecord(StrictModel):
@@ -322,6 +327,7 @@ class LLMResultRecord(StrictModel):
     duration_ms: int = Field(ge=0)
     system_prompt: str
     user_prompt: str
+    request_controls: dict[str, JsonValue] = Field(default_factory=dict)
 
 
 class CallMetadataRecord(StrictModel):
@@ -350,6 +356,16 @@ class StageAttemptFailureRecord(StrictModel):
     finish_reason: str | None = None
     prompt_tokens: int | None = Field(default=None, ge=0)
     completion_tokens: int | None = Field(default=None, ge=0)
+    total_tokens: int | None = Field(default=None, ge=0)
+    usage_details: dict[str, JsonValue] = Field(default_factory=dict)
+    response_id: str | None = None
+    model: str | None = None
+    partial_character_count: int | None = Field(default=None, ge=0)
+    partial_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    partial_preview_prefix: str | None = Field(default=None, max_length=128)
+    partial_preview_suffix: str | None = Field(default=None, max_length=128)
+    elapsed_ms: int | None = Field(default=None, ge=0)
+    request_controls: dict[str, JsonValue] = Field(default_factory=dict)
     prompt: PromptRecord | None
     result: LLMResultRecord | None
     raw_response: JsonValue | None
@@ -2036,6 +2052,7 @@ def _llm_result(value: Any) -> LLMResultRecord:
         duration_ms=value.duration_ms,
         system_prompt=value.system_prompt,
         user_prompt=value.user_prompt,
+        request_controls=_json_value(getattr(value, "request_controls", {})),
     )
 
 
@@ -2071,12 +2088,33 @@ def _attempt_failure(value: StageAttemptFailure) -> StageAttemptFailureRecord:
         finish_reason=value.finish_reason,
         prompt_tokens=value.prompt_tokens,
         completion_tokens=value.completion_tokens,
+        total_tokens=value.total_tokens,
+        usage_details=_json_value(value.usage_details or {}),
+        response_id=value.response_id,
+        model=value.model,
+        partial_character_count=value.partial_character_count,
+        partial_sha256=value.partial_sha256,
+        partial_preview_prefix=value.partial_preview_prefix,
+        partial_preview_suffix=value.partial_preview_suffix,
+        elapsed_ms=value.elapsed_ms,
+        request_controls=_json_value(value.request_controls),
         prompt=prompt,
         result=_llm_result(value.result) if value.result is not None else None,
         raw_response=(
             _json_value(value.raw_response) if value.raw_response is not None else None
         ),
     )
+
+
+def _retry_control(value: CausalRetryControl | None) -> JsonValue | None:
+    if value is None:
+        return None
+    return {
+        "control_id": value.control_id,
+        "field": value.field,
+        "initial_value": value.initial_value,
+        "retry_value": value.retry_value,
+    }
 
 
 def _event_key(kind: str, identity: Any) -> str:
@@ -2477,6 +2515,9 @@ class FinalizationPersistenceAdapter:
                 visible_artifacts=visible_artifacts,
                 prompt=prompt,
                 final_tree_digest=invocation.final_tree_digest,
+                retry_reason=invocation.retry_reason,
+                retry_control=_retry_control(invocation.retry_control),
+                total_request_budget=invocation.total_request_budget,
             )
             input_payload = input_record.model_dump(mode="json")
             payload = {
@@ -2527,6 +2568,9 @@ class FinalizationPersistenceAdapter:
                 "candidate_id": invocation.candidate_id,
                 "stage": invocation.stage.value,
                 "attempt_id": attempt_id,
+                "retry_reason": invocation.retry_reason,
+                "retry_control": _retry_control(invocation.retry_control),
+                "total_request_budget": invocation.total_request_budget,
             }
 
             if isinstance(result.evidence, StageCallEvidence):
@@ -2550,6 +2594,7 @@ class FinalizationPersistenceAdapter:
                         "prompt_tokens": llm_result.prompt_tokens,
                         "completion_tokens": llm_result.completion_tokens,
                         "duration_ms": llm_result.duration_ms,
+                        "request_controls": llm_result.request_controls,
                     }
                 )
             elif isinstance(result.evidence, StageAttemptFailure):
@@ -2574,6 +2619,9 @@ class FinalizationPersistenceAdapter:
                             "prompt_tokens": llm_result.prompt_tokens,
                             "completion_tokens": llm_result.completion_tokens,
                             "duration_ms": llm_result.duration_ms,
+                            "request_controls": (
+                                evidence.request_controls or llm_result.request_controls
+                            ),
                         }
                     )
                 else:
@@ -2584,7 +2632,8 @@ class FinalizationPersistenceAdapter:
                             "response": None,
                             "prompt_tokens": evidence.prompt_tokens,
                             "completion_tokens": evidence.completion_tokens,
-                            "duration_ms": None,
+                            "duration_ms": evidence.elapsed_ms,
+                            "request_controls": evidence.request_controls,
                         }
                     )
                 entry["error"] = f"{evidence.exception_type}: {evidence.detail}"
@@ -2592,6 +2641,19 @@ class FinalizationPersistenceAdapter:
                 entry["code"] = evidence.code
                 if evidence.finish_reason is not None:
                     entry["finish_reason"] = evidence.finish_reason
+                entry.update(
+                    {
+                        "total_tokens": evidence.total_tokens,
+                        "usage_details": evidence.usage_details,
+                        "response_id": evidence.response_id,
+                        "model": evidence.model,
+                        "partial_character_count": evidence.partial_character_count,
+                        "partial_sha256": evidence.partial_sha256,
+                        "partial_preview_prefix": evidence.partial_preview_prefix,
+                        "partial_preview_suffix": evidence.partial_preview_suffix,
+                        "elapsed_ms": evidence.elapsed_ms,
+                    }
+                )
 
             from asago_scenario_generator.pipeline.io import write_pipeline_call_log
 
