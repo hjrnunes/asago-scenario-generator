@@ -99,6 +99,10 @@ def test_call0_item_boundaries_are_enforced(field: str) -> None:
         "intentions": ["short"],
         "resources": ["short"],
     }
+    data[field] = [""]
+    with pytest.raises(ValidationError):
+        Call0Response.model_validate(data)
+
     data[field] = ["x" * 200]
     Call0Response.model_validate(data)
 

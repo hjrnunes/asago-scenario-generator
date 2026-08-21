@@ -232,6 +232,46 @@ class TestValidateActorAccessProvenance:
             v.rule for v in validate_actor_access_provenance(actor, profile)
         ]
 
+    def test_missing_initial_ingress_zone_does_not_invent_zone_mismatch(self):
+        target = _make_entry_point(
+            "output feed",
+            direction="output",
+            controllability="indirect",
+        )
+        source = EntryPoint(
+            name="memory feed",
+            direction="input",
+            controllability="indirect",
+            ingress_zone="memory",
+        )
+        boundary = TrustBoundary(
+            name="memory-to-input",
+            from_zone="memory",
+            to_zone="input",
+            confidence=BoundaryConfidence.explicit,
+        )
+        profile = _make_profile(
+            entry_points=[target, source],
+            zones_active=["memory", "input"],
+            trust_boundaries=[boundary],
+        )
+        actor = _make_actor_with_access(
+            entry_point_id=target.entry_point_id,
+            ingress_mode="indirect",
+            access_class="supply_chain",
+            influence_source=source.entry_point_id,
+            influence_mechanism="document poisoning",
+            trust_boundary_id=boundary.trust_boundary_id,
+        )
+
+        rules = {
+            violation.rule
+            for violation in validate_actor_access_provenance(actor, profile)
+        }
+
+        assert "ineligible_ingress_entry_point" in rules
+        assert "trust_boundary_target_zone_mismatch" not in rules
+
     @pytest.mark.parametrize(
         ("ingress_mode", "access_class"),
         [("direct", "supply_chain"), ("indirect", "public")],
@@ -296,6 +336,29 @@ class TestBuildActorAccessProvenance:
         )
         assert access.ingress_mode == controllability
         assert access.access_class == access_class
+
+    def test_profile_resolves_human_names_to_canonical_ids(self):
+        profile, target_id, source_id, boundary_id = _make_indirect_profile()
+        target, source = profile.entry_points
+        boundary = profile.trust_boundaries[0]
+        resp = _make_call0_response(
+            access_class="supply_chain",
+            influence_source=source.name,
+            influence_mechanism="document poisoning",
+            trust_boundary_id=boundary.name,
+        )
+
+        access = build_actor_access_provenance(
+            target_id,
+            "indirect",
+            "supply-chain-actor",
+            resp,
+            profile=profile,
+        )
+
+        assert access.initial_entry_point_id == target.entry_point_id == target_id
+        assert access.influence_source == source.entry_point_id == source_id
+        assert access.trust_boundary_id == boundary.trust_boundary_id == boundary_id
 
     @pytest.mark.parametrize("controllability", ["system", None])
     def test_ineligible_controllability_does_not_default_to_direct(

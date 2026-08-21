@@ -468,6 +468,120 @@ class TestBuildCall0Context:
         if ctx["diversity_section"]:
             assert "novice" not in ctx["diversity_section"]
 
+    def test_missing_preferred_capability_does_not_create_guidance(self):
+        """A computed floor alone must not create a diversity hint."""
+        ctx = build_call0_context(
+            seed=_make_seed(technique_ids=["AML.T0010"]),
+            profile=_make_profile(),
+            use_case="test",
+            preferred_capability_level=None,
+        )
+
+        assert ctx["minimum_capability_level"] == "advanced"
+        assert ctx["diversity_section"] == ""
+
+    def test_preferred_capability_at_floor_is_not_overridden(self, caplog):
+        """An equal preference should not produce an override diagnostic."""
+        profile = _make_profile(
+            entry_points=[
+                EntryPoint(
+                    name="internal API",
+                    direction="input",
+                    controllability="indirect",
+                )
+            ]
+        )
+        with caplog.at_level("DEBUG"):
+            ctx = build_call0_context(
+                seed=_make_seed(threat_id="T3"),
+                profile=profile,
+                use_case="test",
+                preferred_capability_level="intermediate",
+                pinned_entry_point="internal API",
+            )
+
+        assert ctx["minimum_capability_level"] == "intermediate"
+        assert "Preferred capability level: intermediate" in ctx["diversity_section"]
+        assert "Capability floor override" not in caplog.text
+
+    def test_indirect_entry_point_adds_access_provenance_guidance(self):
+        """Indirect ingress includes upstream source evidence guidance."""
+        target = EntryPoint(
+            name="document feed",
+            direction="input",
+            controllability="indirect",
+        )
+        source = EntryPoint(
+            name="partner upload",
+            direction="input",
+            controllability="direct",
+        )
+        profile = _make_profile(entry_points=[target, source])
+
+        ctx = build_call0_context(
+            seed=_make_seed(),
+            profile=profile,
+            use_case="test",
+            pinned_entry_point=target.name,
+            pinned_entry_point_id=target.entry_point_id,
+        )
+
+        assert (
+            "Access Provenance Constraint (MANDATORY)"
+            in ctx["access_provenance_section"]
+        )
+        assert source.name in ctx["access_provenance_section"]
+
+    def test_direct_entry_point_uses_normal_interface_guidance(self):
+        """Direct non-insider ingress describes normal interface access."""
+        profile = _make_profile()
+        target = profile.entry_points[0]
+
+        ctx = build_call0_context(
+            seed=_make_seed(),
+            profile=profile,
+            use_case="test",
+            pinned_entry_point=target.name,
+            pinned_entry_point_id=target.entry_point_id,
+        )
+
+        assert "normal user interface" in ctx["access_provenance_section"]
+
+    def test_direct_insider_entry_point_requires_material_advantage(self):
+        """Direct insider ingress requires an explicit material advantage."""
+        profile = _make_profile()
+        target = profile.entry_points[0]
+
+        ctx = build_call0_context(
+            seed=_make_seed(),
+            profile=profile,
+            use_case="test",
+            forced_actor_type="malicious-insider",
+            pinned_entry_point=target.name,
+            pinned_entry_point_id=target.entry_point_id,
+        )
+
+        assert "material_insider_advantage" in ctx["access_provenance_section"]
+
+    def test_system_entry_point_has_no_access_provenance_guidance(self):
+        """System-controlled entry points are not actor ingress surfaces."""
+        target = EntryPoint(
+            name="internal event bus",
+            direction="input",
+            controllability="system",
+        )
+        profile = _make_profile(entry_points=[target])
+
+        ctx = build_call0_context(
+            seed=_make_seed(),
+            profile=profile,
+            use_case="test",
+            pinned_entry_point=target.name,
+            pinned_entry_point_id=target.entry_point_id,
+        )
+
+        assert ctx["access_provenance_section"] == ""
+
 
 # ---------------------------------------------------------------------------
 # Tests: build_call1_context
