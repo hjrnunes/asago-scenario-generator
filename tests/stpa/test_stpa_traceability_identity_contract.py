@@ -166,10 +166,18 @@ class TestTypedValidationRejectsForgedLinks:
                 ),
                 "candidate_identity_mismatch",
             ),
+            (
+                lambda doc: doc.__setitem__(
+                    "uca_ref", "RESP-9:CA-1-1:WRONG_TIMING"
+                ),
+                "candidate_identity_mismatch",
+            ),
             ("assertion_source", "assertion_source_mismatch"),
             ("step_source", "uca_step_mismatch"),
-            ("provenance", "typed_provenance_mismatch"),
+            ("assertion_provenance", "typed_provenance_mismatch"),
+            ("step_provenance", "typed_provenance_mismatch"),
             ("schema", "schema_version_missing"),
+            ("empty_steps_with_factors", "uca_step_mismatch"),
         ],
     )
     def test_mutated_doc_rejected_with_typed_code(
@@ -183,10 +191,14 @@ class TestTypedValidationRejectsForgedLinks:
             doc["assertions"][1]["source_id"] = "PM-9-9"
         elif mutation == "step_source":
             doc["steps"][-1]["source_id"] = "CA-9-9"
-        elif mutation == "provenance":
+        elif mutation == "assertion_provenance":
             doc["assertions"][0]["source_kind"] = "unsafe_control_action"
+        elif mutation == "step_provenance":
+            doc["steps"][0]["source_kind"] = "unsafe_control_action"
         elif mutation == "schema":
             del doc["schema_version"]
+        elif mutation == "empty_steps_with_factors":
+            doc["steps"] = []
         result = validate_projection_traceability(doc)
         assert result.valid is False
         codes = {v.code.value for v in result.violations}
@@ -204,6 +216,48 @@ class TestTypedValidationRejectsForgedLinks:
         ]
         assert matching
         assert matching[0].element_id == "TA-2"
+
+    def test_forged_uca_ref_identifies_the_ref(self):
+        """A forged UCA reference names the forged ref value as element."""
+        doc = _two_factor_doc()
+        doc["uca_ref"] = "RESP-9:CA-1-1:WRONG_TIMING"
+        result = validate_projection_traceability(doc)
+        assert result.valid is False
+        matching = [
+            v
+            for v in result.violations
+            if v.code == StpaProjectionTraceabilityViolationCode.candidate_identity_mismatch
+        ]
+        assert matching
+        assert matching[0].element_id == "RESP-9:CA-1-1:WRONG_TIMING"
+
+    def test_forged_step_provenance_identifies_the_step(self):
+        """A forged step provenance names the earliest affected S-* element."""
+        doc = _two_factor_doc()
+        doc["steps"][0]["source_kind"] = "unsafe_control_action"
+        result = validate_projection_traceability(doc)
+        assert result.valid is False
+        matching = [
+            v
+            for v in result.violations
+            if v.code == StpaProjectionTraceabilityViolationCode.typed_provenance_mismatch
+        ]
+        assert matching
+        assert matching[0].element_id == "S-1"
+
+    def test_empty_steps_with_factors_is_uca_step_mismatch(self):
+        """Factors present but no steps is a fail-closed uca_step_mismatch."""
+        doc = _two_factor_doc()
+        doc["steps"] = []
+        result = validate_projection_traceability(doc)
+        assert result.valid is False
+        matching = [
+            v
+            for v in result.violations
+            if v.code == StpaProjectionTraceabilityViolationCode.uca_step_mismatch
+        ]
+        assert matching
+        assert matching[0].element_id == "steps"
 
 
 class TestIdentitySeparation:

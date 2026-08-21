@@ -386,6 +386,27 @@ class TestProj0305Determinism:
         assert "\\u00e9" in payload
         assert json.loads(payload)[0]["detail"] == "final step \u00e9 mismatch"
 
+    def test_canonical_violations_json_uses_sorted_keys(self):
+        """Canonical violation JSON serializes object keys in sorted order.
+
+        Byte stability requires deterministic key ordering so identical
+        violations always produce byte-identical JSON, independent of
+        the insertion order of the violation model fields.
+        """
+        result = StpaProjectionTraceabilityResult(
+            violations=[
+                StpaProjectionTraceabilityViolation(
+                    code=StpaProjectionTraceabilityViolationCode.uca_step_mismatch,
+                    detail="detail",
+                    element_id="S-3",
+                )
+            ]
+        )
+        payload = canonical_violations_json(result)
+        first_object = payload[payload.index("{") + 1 : payload.index("}")]
+        keys = [part.split(":")[0].strip('"') for part in first_object.split(",")]
+        assert keys == sorted(keys), keys
+
 
 class TestCanonicalDocument:
     """The canonical projection document underpins validation and export."""
