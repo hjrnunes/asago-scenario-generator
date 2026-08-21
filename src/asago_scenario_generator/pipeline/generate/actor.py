@@ -9,7 +9,6 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
 
-from asago_scenario_generator.data.atlas import TECHNIQUE_PROPERTIES
 from asago_scenario_generator.llm.client import (
     LengthFinishReasonError as LengthFinishReasonError,
     LLMClient,
@@ -25,14 +24,24 @@ from asago_scenario_generator.models.scenario import (
     ActorProfile,
 )
 from asago_scenario_generator.pipeline.generate.constants import (
-    _ACTOR_GOAL_INCOMPATIBLE,
     _ADVERSARIAL_INTENTION_KEYWORDS,
-    _ADVERSARIAL_ONLY_THREATS,
     _CAPABILITY_FLOORS,
     _CAPABILITY_ORDER,
     _INSIDER_ACTOR_TYPES,
-    ALL_ACTOR_TYPES,
-    CHAIN_TECHNIQUE_PAIRS,
+)
+from asago_scenario_generator.pipeline.generate.actor_rules import (
+    _ep_controllability_to_ingress_mode,
+)
+
+# Preserve the historical actor-module import surface while policy lives in
+# the cycle-free actor_rules leaf.
+from asago_scenario_generator.pipeline.generate.actor_rules import (
+    _max_capability_level,  # noqa: F401
+    compute_compatible_actor_types,  # noqa: F401
+    compute_minimum_capability_level,  # noqa: F401
+)
+from asago_scenario_generator.pipeline.generate.actor_context import (
+    build_call0_context,
 )
 from asago_scenario_generator.pipeline.generate.ontology import (
     _lookup_entry_point_controllability,
@@ -156,152 +165,6 @@ def _enforce_capability_floor(actor_type: str, capability_level: str) -> str:
         )
         return floor
     return capability_level
-
-
-def _max_capability_level(a: str, b: str) -> str:
-    """Return the higher of two capability levels."""
-    idx_a = _CAPABILITY_ORDER.index(a) if a in _CAPABILITY_ORDER else 0
-    idx_b = _CAPABILITY_ORDER.index(b) if b in _CAPABILITY_ORDER else 0
-    return _CAPABILITY_ORDER[max(idx_a, idx_b)]
-
-
-def compute_minimum_capability_level(
-    atlas_technique_ids: list[str] | tuple[str, ...] | None,
-    ep_controllability: str | None,
-    threat_id: str | None,
-) -> str:
-    """Compute the minimum capability level floor for a scenario seed.
-
-    Applies four rules and returns the highest triggered floor:
-
-    R1 -- Supply chain / training technique: advanced
-    R2 -- Multi-technique escalation (2+ techniques, unless chain pair): intermediate
-    R3 -- System EP access floor: intermediate
-    R4 -- Indirect EP + adversarial-only threat (except T2): intermediate
-
-    Returns:
-        The highest minimum capability level across all triggered rules.
-        Defaults to "novice" if no rules fire.
-    """
-    # Track the highest floor across all rules.
-    floor = "novice"
-
-    tech_ids = list(atlas_technique_ids) if atlas_technique_ids else []
-
-    # R1 -- Supply chain / training technique
-    for tid in tech_ids:
-        props = TECHNIQUE_PROPERTIES.get(tid)
-        if props and props.get("target_layer") in ("supply_chain", "training"):
-            floor = _max_capability_level(floor, "advanced")
-            break  # already at advanced, no need to check more
-
-    # R2 -- Multi-technique escalation
-    if len(tech_ids) >= 2:
-        # Check if the pair is a chain pair (only applies to exactly 2 techniques)
-        is_chain = False
-        if len(tech_ids) == 2:
-            pair = (tech_ids[0], tech_ids[1])
-            pair_rev = (tech_ids[1], tech_ids[0])
-            is_chain = (
-                pair in CHAIN_TECHNIQUE_PAIRS or pair_rev in CHAIN_TECHNIQUE_PAIRS
-            )
-        if not is_chain:
-            floor = _max_capability_level(floor, "intermediate")
-
-    # R3 -- System EP access floor
-    if ep_controllability == "system":
-        floor = _max_capability_level(floor, "intermediate")
-
-    # R4 -- Indirect EP + adversarial-only threat (except T2)
-    if (
-        ep_controllability == "indirect"
-        and threat_id in _ADVERSARIAL_ONLY_THREATS
-        and threat_id != "T2"
-    ):
-        floor = _max_capability_level(floor, "intermediate")
-
-    return floor
-
-
-def _ep_controllability_to_ingress_mode(ep_controllability: str | None) -> str | None:
-    """Map an entry point's effective controllability to an ingress mode.
-
-    Returns ``"direct"``, ``"indirect"``, or ``None`` (for ``system`` or
-    unknown — system entry points are not eligible ingress at all).
-    """
-    if ep_controllability in ("direct", "indirect"):
-        return ep_controllability
-    return None
-
-
-def compute_compatible_actor_types(
-    atlas_technique_ids: list[str] | tuple[str, ...] | None,
-    ep_controllability: str | None,
-    threat_id: str | None,
-    entry_point_name: str | None = None,
-    goal_id: str | None = None,
-) -> set[str]:
-    """Compute the set of structurally compatible actor types for a seed.
-
-    Applies rules in order, narrowing from the full actor-type set:
-
-    R1 -- Adversarial-only threat: remove negligent-insider
-    R2 -- (Removed cmps.6) The blanket indirect actor allowlist has been
-         removed.  Actor eligibility for indirect ingress is determined
-         by typed evidence validated post-hoc, not by a categorical
-         allowlist.  System controllability entry points are rejected
-         by ``is_attacker_accessible_ingress`` before generation.
-    R3 -- Technique requires direct access: remove negligent-insider and
-         supply-chain-actor; verify EP is direct
-    R4 -- Supply chain target layer: restrict to
-         {supply-chain-actor, nation-state, malicious-insider, automated-agent}
-    R5 -- Actor-goal consistency: remove actor types whose motivational
-         profile is incompatible with the assigned goal category
-
-    Returns:
-        Set of compatible actor type strings. Never empty.
-    """
-    compatible = set(ALL_ACTOR_TYPES)
-    tech_ids = list(atlas_technique_ids) if atlas_technique_ids else []
-
-    # R1 -- Adversarial-only threat exclusion
-    if threat_id in _ADVERSARIAL_ONLY_THREATS:
-        compatible.discard("negligent-insider")
-
-    # R2 removed (cmps.6): no blanket indirect actor allowlist.
-    # Actor eligibility for indirect ingress is determined by typed
-    # evidence (influence_source, influence_mechanism, trust_boundary)
-    # validated post-hoc by validate_actor_access_provenance.
-
-    # R3 -- Technique requires direct access
-    for tid in tech_ids:
-        props = TECHNIQUE_PROPERTIES.get(tid)
-        if props and props.get("requires_direct_access"):
-            compatible.discard("negligent-insider")
-            compatible.discard("supply-chain-actor")
-            break
-
-    # R4 -- Supply chain target layer
-    for tid in tech_ids:
-        props = TECHNIQUE_PROPERTIES.get(tid)
-        if props and props.get("target_layer") == "supply_chain":
-            compatible &= {
-                "supply-chain-actor",
-                "nation-state",
-                "malicious-insider",
-                "automated-agent",
-            }
-            break
-
-    # R5 -- Actor-goal consistency
-    if goal_id and goal_id in _ACTOR_GOAL_INCOMPATIBLE:
-        incompatible = _ACTOR_GOAL_INCOMPATIBLE[goal_id]
-        pruned = compatible - incompatible
-        # Safety: never empty the set — skip R5 if it would
-        if pruned:
-            compatible = pruned
-
-    return compatible
 
 
 def _validate_actor_type(actor_profile: ActorProfile) -> ActorProfile:
@@ -889,10 +752,3 @@ def _call_actor_profile(
         )
 
     return actor_profile, result, ctx.get("diversity_limitation")
-
-
-# Imported after actor rules are defined so the context module can reuse them
-# without introducing an import cycle during module initialization.
-from asago_scenario_generator.pipeline.generate.actor_context import (  # noqa: E402
-    build_call0_context,
-)

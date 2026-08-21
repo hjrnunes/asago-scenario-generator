@@ -6,12 +6,14 @@ import logging
 from typing import Any
 
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
-from asago_scenario_generator.pipeline.generate.actor import (
-    _CAPABILITY_ORDER,
-    _INSIDER_ACTOR_TYPES,
+from asago_scenario_generator.pipeline.generate.actor_rules import (
     _ep_controllability_to_ingress_mode,
     compute_compatible_actor_types,
     compute_minimum_capability_level,
+)
+from asago_scenario_generator.pipeline.generate.constants import (
+    _CAPABILITY_ORDER,
+    _INSIDER_ACTOR_TYPES,
 )
 from asago_scenario_generator.pipeline.generate.goals import (
     _build_attack_goal_context_block,
