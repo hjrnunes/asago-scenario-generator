@@ -10,6 +10,12 @@ attack chains, attack trees, behavior specifications, scenario envelopes, and
 run manifests. Shared LLM adapters, deterministic validators, evaluation, and
 reporting sit around those contracts.
 
+Generation lifecycle contracts (retry directives, causal provider controls,
+stage call evidence, and typed attempt failures) live in
+`pipeline.generation_contracts`. Stage adapters, lifecycle policy, and
+persistence consume that boundary without importing one another's
+implementation modules.
+
 ## Taxonomy and risk-driven workflow
 
 The `generate` workflow consumes a use-case description, policy risk

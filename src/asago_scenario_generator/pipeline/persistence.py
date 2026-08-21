@@ -60,7 +60,7 @@ from asago_scenario_generator.pipeline.finalization_gates import (
     NORMAL_POSTBEHAVIOR_EVIDENCE_IDS,
     AdmissionEvidenceId,
 )
-from asago_scenario_generator.pipeline.generate.stages import (
+from asago_scenario_generator.pipeline.generation_contracts import (
     CausalRetryControl,
     StageAttemptFailure,
     StageCallEvidence,

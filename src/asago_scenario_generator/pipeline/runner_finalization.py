@@ -51,10 +51,12 @@ from asago_scenario_generator.pipeline.finalization_admission import (
 from asago_scenario_generator.pipeline.finalization_gates import (
     make_prebehavior_finalizer,
 )
-from asago_scenario_generator.pipeline.generate.stages import (
-    GenerationRequest,
+from asago_scenario_generator.pipeline.generation_contracts import (
     StageAttemptFailure,
     StageCallEvidence,
+)
+from asago_scenario_generator.pipeline.generate.stages import (
+    GenerationRequest,
     assemble_final_envelope,
     generate_actor_stage,
     generate_narrative_stage,

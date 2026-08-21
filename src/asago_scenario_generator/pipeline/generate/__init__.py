@@ -194,15 +194,18 @@ from asago_scenario_generator.pipeline.generate.zones import (
     validate_attack_tree_zones,
 )
 
+from asago_scenario_generator.pipeline.generation_contracts import (
+    CausalRetryControl,
+    RetryDirective,
+    StageAttemptFailure,
+    StageCallEvidence,
+)
 from asago_scenario_generator.pipeline.generate.stages import (
     ActorStageResult,
     BehaviorStageResult,
     GenerationRequest,
     NarrativeStageResult,
     PreparedGeneration,
-    RetryDirective,
-    StageAttemptFailure,
-    StageCallEvidence,
     TreeStageResult,
     assemble_final_envelope,
     generate_actor_stage,
@@ -234,6 +237,7 @@ __all__ = [
     "ActorAccessViolation",
     "ActorStageResult",
     "BehaviorStageResult",
+    "CausalRetryControl",
     "GenerationRequest",
     "NarrativeStageResult",
     "PreparedGeneration",

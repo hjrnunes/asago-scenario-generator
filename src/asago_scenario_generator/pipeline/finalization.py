@@ -23,7 +23,7 @@ from asago_scenario_generator.pipeline.coverage_planning import (
     deserialize_qualified_candidate,
     revalidate_qualified_candidate,
 )
-from asago_scenario_generator.pipeline.generate.stages import (
+from asago_scenario_generator.pipeline.generation_contracts import (
     CausalRetryControl,
     RetryDirective,
     StageAttemptFailure,
