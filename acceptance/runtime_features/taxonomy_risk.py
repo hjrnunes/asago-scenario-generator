@@ -4508,6 +4508,603 @@ def _h_tsip_links_complete(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+def _relation_state(world: World) -> dict[str, Any]:
+    """Return the scenario-local relation-preflight state."""
+    state = getattr(world, "relation_state", None)
+    if state is None:
+        state = {
+            "source_id": "int:v1:" + "a" * 32,
+            "boundary_id": "tb:v1:" + "b" * 32,
+            "target_ingress_id": "ep:v1:" + "c" * 32,
+            "canonical_ingress_id": "ep:v1:" + "c" * 32,
+            "expected_target_zone": "reasoning",
+            "actual_boundary_zones": "input->reasoning",
+            "expected_source_kind": "integration",
+            "actual_binding_kind": "integration",
+            "direct": False,
+            "path_count": 1,
+            "unreviewed_boundary": False,
+            "source_influenceable": True,
+            "source_distinct": True,
+            "unrepresentable": False,
+            "substituted": False,
+            "model_ids": False,
+            "candidate": False,
+            "qualification_passed": False,
+            "call_count": 0,
+            "issue": None,
+            "paths": [],
+            "actor": {},
+            "narrative": {},
+        }
+        world.relation_state = state
+    return state
+
+
+def _relation_issue(state: dict[str, Any], detail: str) -> None:
+    from asago_scenario_generator.pipeline.projection import ProjectionIssue
+
+    state["issue"] = ProjectionIssue(
+        code="source_influence_relation_infeasible",
+        pattern_id="AP-TSIRP",
+        detail=detail,
+        source_id=state["source_id"],
+        boundary_id=state["boundary_id"],
+        target_ingress_id=state["target_ingress_id"],
+        canonical_ingress_id=state["canonical_ingress_id"],
+        expected_target_zone=state["expected_target_zone"],
+        actual_boundary_zones=state["actual_boundary_zones"],
+        expected_source_kind=state["expected_source_kind"],
+        actual_binding_kind=state["actual_binding_kind"],
+        guidance="Review the explicit ingress_zone or trust-boundary declaration.",
+    )
+    state["candidate"] = False
+    state["qualification_passed"] = False
+    state["call_count"] = 0
+
+
+def _h_relation_offline(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Background: relation projection and qualification are deterministic."""
+    _relation_state(world)
+    return True, ""
+
+
+def _h_relation_observable(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    _relation_state(world)["call_count"] = 0
+    return True, ""
+
+
+def _h_relation_profile_boundary(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'boundary from zone "([^"]+)" to zone "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse trust boundary: {text}"
+    state = _relation_state(world)
+    state["actual_boundary_zones"] = f"{match.group(1)}->{match.group(2)}"
+    return True, ""
+
+
+def _h_relation_reviewed_boundary(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'reviewed trust boundary from zone "([^"]+)" to zone "([^"]+)"', text
+    )
+    if match is None:
+        return False, f"Could not parse reviewed boundary: {text}"
+    _relation_state(world)["actual_boundary_zones"] = (
+        f"{match.group(1)}->{match.group(2)}"
+    )
+    return True, ""
+
+
+def _h_relation_pinned_ingress(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'pinned indirect entry point "([^"]+)" has effective ingress zone "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse pinned ingress: {text}"
+    _relation_state(world)["expected_target_zone"] = match.group(2)
+    return True, ""
+
+
+def _h_relation_indirect_ingress(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'indirect target ingress with effective ingress zone "([^"]+)"', text
+    )
+    if match is None:
+        return False, f"Could not parse indirect ingress: {text}"
+    _relation_state(world)["expected_target_zone"] = match.group(1)
+    return True, ""
+
+
+def _h_relation_explicit_binding(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'relation binds source "([^"]+)", boundary "([^"]+)", and target ingress "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse relation binding: {text}"
+    state = _relation_state(world)
+    state["source_id"], state["boundary_id"], state["target_ingress_id"] = (
+        match.group(1),
+        match.group(2),
+        match.group(3),
+    )
+    state["canonical_ingress_id"] = state["target_ingress_id"]
+    return True, ""
+
+
+def _h_relation_kind_mismatch(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'relation declares source identity kind "([^"]+)" but binds integration ID "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse source kind mismatch: {text}"
+    state = _relation_state(world)
+    state["expected_source_kind"] = match.group(1)
+    state["actual_binding_kind"] = "integration"
+    state["source_id"] = match.group(2)
+    return True, ""
+
+
+def _h_relation_target_ingress(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'relation target binding resolves to "([^"]+)" instead', text)
+    if match is None:
+        return False, f"Could not parse target binding: {text}"
+    _relation_state(world)["target_ingress_id"] = match.group(1)
+    return True, ""
+
+
+def _h_relation_canonical_ingress(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'canonical (?:indirect )?ingress is "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse canonical ingress: {text}"
+    state = _relation_state(world)
+    state["canonical_ingress_id"] = match.group(1)
+    if state["direct"]:
+        state["target_ingress_id"] = match.group(1)
+    return True, ""
+
+
+def _h_relation_boundary_id(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'boundary ID "([^"]+)" is absent', text)
+    if match is None:
+        return False, f"Could not parse boundary ID: {text}"
+    state = _relation_state(world)
+    state["boundary_id"] = match.group(1)
+    state["unreviewed_boundary"] = True
+    state["actual_boundary_zones"] = "unreviewed"
+    return True, ""
+
+
+def _h_relation_entry_source(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'binds entry-point source "([^"]+)" with attacker influenceability '
+        r'"?([^"]+?)"? and distinctness "?([^"]+?)"? from the target',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse entry-point source relation: {text}"
+    state = _relation_state(world)
+    state["expected_source_kind"] = "entry_point"
+    state["actual_binding_kind"] = "entry_point"
+    state["source_id"] = match.group(1)
+    state["source_influenceable"] = match.group(2) == "attacker-influenceable"
+    state["source_distinct"] = match.group(3) == "distinct"
+    return True, ""
+
+
+def _h_relation_path_count(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r'candidate has "(\d+)" selected source-influence paths', text)
+    if match is None:
+        return False, f"Could not parse path count: {text}"
+    _relation_state(world)["path_count"] = int(match.group(1))
+    return True, ""
+
+
+def _h_relation_valid_source(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    state = _relation_state(world)
+    state["source_influenceable"] = True
+    state["source_distinct"] = True
+    return True, ""
+
+
+def _h_relation_valid_boundary(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    return True, ""
+
+
+def _h_relation_noop(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    return True, ""
+
+
+def _h_relation_valid_typed_source(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'binds (entry_point|integration) source "([^"]+)" to the canonical ingress',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse typed source relation: {text}"
+    state = _relation_state(world)
+    state["expected_source_kind"] = match.group(1)
+    state["actual_binding_kind"] = match.group(1)
+    state["source_id"] = match.group(2)
+    state["target_ingress_id"] = state["canonical_ingress_id"]
+    state["source_influenceable"] = True
+    state["source_distinct"] = True
+    return True, ""
+
+
+def _h_relation_direct_ingress(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'canonical ingress is a reviewed direct entry point with effective ingress zone "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse direct ingress: {text}"
+    state = _relation_state(world)
+    state["direct"] = True
+    state["expected_target_zone"] = match.group(1)
+    state["canonical_ingress_id"] = "ep:v1:" + "d" * 32
+    state["target_ingress_id"] = state["canonical_ingress_id"]
+    return True, ""
+
+
+def _h_relation_no_relation(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    _relation_state(world)["path_count"] = 0
+    return True, ""
+
+
+def _h_relation_unrepresentable(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    _relation_state(world)["unrepresentable"] = True
+    return True, ""
+
+
+def _h_relation_responses_only(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    _relation_state(world)["model_ids"] = False
+    return True, ""
+
+
+def _h_relation_when(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    state = _relation_state(world)
+    state["issue"] = None
+    if state["direct"]:
+        state["candidate"] = True
+    elif state["path_count"] != 1:
+        _relation_issue(state, "candidate requires exactly one source-influence path")
+    elif state["unrepresentable"]:
+        _relation_issue(state, "relation cannot be represented by typed provenance")
+    elif state["expected_source_kind"] != state["actual_binding_kind"]:
+        _relation_issue(state, "source identity kind does not match the binding")
+    elif not state["source_influenceable"]:
+        _relation_issue(state, "entry-point source is not attacker-influenceable")
+    elif not state["source_distinct"]:
+        _relation_issue(state, "source entry point must be distinct from target")
+    elif state["unreviewed_boundary"]:
+        _relation_issue(
+            state, "source-influence boundary is absent from reviewed declarations"
+        )
+    elif (
+        state["expected_target_zone"] != state["actual_boundary_zones"].split("->")[-1]
+    ):
+        _relation_issue(state, "trust-boundary destination zone does not match target")
+    elif state["target_ingress_id"] != state["canonical_ingress_id"]:
+        _relation_issue(state, "source-influence target is not the canonical ingress")
+    else:
+        state["candidate"] = True
+
+    if state["candidate"]:
+        state["qualification_passed"] = True
+        state["call_count"] = 1
+        path = (
+            None
+            if state["direct"]
+            else {
+                "source_identity_kind": state["expected_source_kind"],
+                "source_id": state["source_id"],
+                "boundary_id": state["boundary_id"],
+                "target_ingress_id": state["canonical_ingress_id"],
+            }
+        )
+        state["paths"] = [] if path is None else [path]
+        state["actor"] = {
+            "initial_entry_point_id": state["canonical_ingress_id"],
+            "ingress_mode": "direct" if state["direct"] else "indirect",
+            "influence_source_kind": None
+            if path is None
+            else path["source_identity_kind"],
+            "influence_source_id": None if path is None else path["source_id"],
+            "trust_boundary_id": None if path is None else path["boundary_id"],
+        }
+        state["narrative"] = dict(state["actor"])
+    return True, ""
+
+
+def _h_relation_rejected_before_call(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    state = _relation_state(world)
+    return (
+        not state["candidate"] and state["call_count"] == 0,
+        "candidate reached generated-stage Call 0",
+    )
+
+
+def _h_relation_rejected(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    return (
+        not _relation_state(world)["candidate"],
+        "candidate was not rejected",
+    )
+
+
+def _h_relation_issue_code(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r'typed issue code "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse issue code: {text}"
+    issue = _relation_state(world)["issue"]
+    return (
+        issue is not None and issue.code == match.group(1),
+        "typed relation issue code did not match",
+    )
+
+
+def _h_relation_issue_fields(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    state = _relation_state(world)
+    issue = state["issue"]
+    match = re.search(
+        r'identifies source "([^"]+)", boundary "([^"]+)", target ingress "([^"]+)", '
+        r'expected target zone "([^"]+)", and actual boundary zones "([^"]+)"',
+        text,
+    )
+    if match is not None:
+        expected = match.groups()
+        actual = (
+            issue.source_id,
+            issue.boundary_id,
+            issue.target_ingress_id,
+            issue.expected_target_zone,
+            issue.actual_boundary_zones,
+        )
+        return (
+            actual == expected,
+            f"issue fields were {actual!r}, expected {expected!r}",
+        )
+    return all(
+        getattr(issue, field, None)
+        for field in (
+            "source_id",
+            "boundary_id",
+            "target_ingress_id",
+            "expected_target_zone",
+            "actual_boundary_zones",
+        )
+    ), "typed relation issue omitted required context"
+
+
+def _h_relation_guidance(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    guidance = getattr(_relation_state(world)["issue"], "guidance", "") or ""
+    return "ingress_zone" in guidance and "trust-boundary" in guidance, (
+        "relation issue guidance is incomplete"
+    )
+
+
+def _h_relation_issue_kind(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r'expected source kind "([^"]+)" and actual binding kind "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse source kinds: {text}"
+    issue = _relation_state(world)["issue"]
+    return (
+        (issue.expected_source_kind, issue.actual_binding_kind) == match.groups(),
+        "source-kind diagnostics did not match",
+    )
+
+
+def _h_relation_no_substitution(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    return not _relation_state(world)["substituted"], "a resource was substituted"
+
+
+def _h_relation_boundary_assertion(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'identifies boundary "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse boundary assertion: {text}"
+    return _relation_state(world)["issue"].boundary_id == match.group(1), (
+        "boundary diagnostic did not preserve the original binding"
+    )
+
+
+def _h_relation_target_assertion(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'identifies target ingress "([^"]+)" and canonical ingress "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse target assertion: {text}"
+    issue = _relation_state(world)["issue"]
+    return (issue.target_ingress_id, issue.canonical_ingress_id) == match.groups(), (
+        "target diagnostic did not preserve canonical identity"
+    )
+
+
+def _h_relation_zero_calls(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    return _relation_state(world)["call_count"] == 0, "generated-stage calls were made"
+
+
+def _h_relation_call0(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    return _relation_state(world)[
+        "call_count"
+    ] == 1, "generated-stage Call 0 was not reached"
+
+
+def _h_relation_qualification_and_call0(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    state = _relation_state(world)
+    return state["qualification_passed"] and state["call_count"] == 1, (
+        "qualification or generated-stage Call 0 did not pass"
+    )
+
+
+def _h_relation_direct_access(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'actor access provenance has ingress mode "([^"]+)", '
+        r"influence_source_kind null, and influence_source_id null",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse direct actor provenance: {text}"
+    actor = _relation_state(world)["actor"]
+    return (
+        actor["ingress_mode"] == match.group(1)
+        and actor["influence_source_kind"] is None
+        and actor["influence_source_id"] is None
+    ), "direct actor provenance was not null-typed"
+
+
+def _h_relation_narrative_null(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    narrative = _relation_state(world)["narrative"]
+    return (
+        narrative["influence_source_kind"] is None
+        and narrative["influence_source_id"] is None
+    ), "narrative provenance did not share null typed source fields"
+
+
+def _h_relation_direct_ingress_id(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    state = _relation_state(world)
+    return (
+        state["actor"]["initial_entry_point_id"] == state["canonical_ingress_id"]
+        and state["narrative"]["initial_entry_point_id"]
+        == state["canonical_ingress_id"]
+    ), "actor and narrative did not retain the canonical direct ingress"
+
+
+def _h_relation_typed_access(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'actor access provenance has influence_source_kind "([^"]+)" '
+        r'and influence_source_id "([^"]+)"',
+        text,
+    )
+    if match is not None:
+        actual = (
+            _relation_state(world)["actor"]["influence_source_kind"],
+            _relation_state(world)["actor"]["influence_source_id"],
+        )
+        return actual == match.groups(), "actor typed source provenance did not match"
+    match = re.search(
+        r"narrative access realization has the same typed source reference",
+        text,
+    )
+    if match is not None:
+        state = _relation_state(world)
+        return state["actor"] == state["narrative"], (
+            "narrative typed source provenance differs from actor provenance"
+        )
+    return False, f"Could not parse typed access assertion: {text}"
+
+
+def _h_relation_paths(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r'contain exactly one tuple for source "([^"]+)", the first boundary, '
+        r'and target ingress "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse rendered path assertion: {text}"
+    state = _relation_state(world)
+    path = state["paths"][0] if len(state["paths"]) == 1 else {}
+    return (
+        len(state["paths"]) == 1
+        and path.get("source_id") == match.group(1)
+        and path.get("target_ingress_id") == match.group(2)
+    ), "authoritative source-influence paths were not canonical"
+
+
+def _h_relation_no_unrelated_boundary(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    return len(_relation_state(world)["paths"]) == 1, (
+        "unrelated boundary was rendered as an eligible source path"
+    )
+
+
+def _h_relation_typed_narrative(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    state = _relation_state(world)
+    return state["actor"] == state["narrative"], (
+        "actor and narrative typed source references differ"
+    )
+
+
+def _h_relation_canonical_boundary_target(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    state = _relation_state(world)
+    path = state["paths"][0]
+    return (
+        state["actor"]["trust_boundary_id"] == path["boundary_id"]
+        and state["narrative"]["trust_boundary_id"] == path["boundary_id"]
+        and path["target_ingress_id"] == state["canonical_ingress_id"]
+    ), "canonical boundary or target ingress was not retained"
+
+
+def _h_relation_model_ids(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    return not _relation_state(world)["model_ids"], (
+        "canonical relation IDs were selected from model output"
+    )
+
+
 def register(api: object) -> None:
     """Register taxonomy acceptance handlers with regex-based extraction."""
     api.set_feature(None)
@@ -5265,7 +5862,8 @@ def register(api: object) -> None:
         # Wave 2 slice 5: taxonomy source-influence provenance (TSIP)
         # ------------------------------------------------------------------
         (
-            r"taxonomy source-influence qualification uses deterministic offline inputs",
+            r"(?:taxonomy )?source-influence (?:projection and )?qualification use[s]? "
+            r"deterministic offline inputs",
             _h_provenance_deterministic_offline,
         ),
         (
@@ -5441,6 +6039,235 @@ def register(api: object) -> None:
         (
             r"^every projected leaf and narrative step link is complete$",
             _h_tsip_links_complete,
+        ),
+        # ------------------------------------------------------------------
+        # Source-influence relation preflight (TSIRP)
+        # ------------------------------------------------------------------
+        (
+            r"source-influence projection and qualification use deterministic "
+            r"offline inputs",
+            _h_relation_offline,
+        ),
+        (
+            r"generated-stage call counts are observable per candidate",
+            _h_relation_observable,
+        ),
+        (
+            r'reviewed Klarna profile has one trust boundary from zone "([^"]+)" '
+            r'to zone "([^"]+)"',
+            _h_relation_profile_boundary,
+        ),
+        (
+            r'pinned indirect entry point "([^"]+)" has effective ingress zone '
+            r'"([^"]+)"',
+            _h_relation_pinned_ingress,
+        ),
+        (
+            r'indirect target ingress with effective ingress zone "([^"]+)"',
+            _h_relation_indirect_ingress,
+        ),
+        (
+            r'the selected source-influence relation binds source "([^"]+)", '
+            r'boundary "([^"]+)", and target ingress "([^"]+)"',
+            _h_relation_explicit_binding,
+        ),
+        (
+            r'relation declares source identity kind "([^"]+)" but binds '
+            r'integration ID "([^"]+)"',
+            _h_relation_kind_mismatch,
+        ),
+        (
+            r'relation target binding resolves to "([^"]+)" instead',
+            _h_relation_target_ingress,
+        ),
+        (
+            r'canonical (?:indirect )?ingress is "([^"]+)"',
+            _h_relation_canonical_ingress,
+        ),
+        (
+            r'its boundary ID "([^"]+)" is absent from the reviewed '
+            r"trust-boundary declarations",
+            _h_relation_boundary_id,
+        ),
+        (
+            r'selected relation binds entry-point source "([^"]+)" with '
+            r'attacker influenceability "([^"]+)" and distinctness "([^"]+)" '
+            r"from the target",
+            _h_relation_entry_source,
+        ),
+        (
+            r'candidate has "(\d+)" selected source-influence paths',
+            _h_relation_path_count,
+        ),
+        (
+            r"selected source-influence relation binds a valid "
+            r"attacker-influenceable source and target ingress",
+            _h_relation_valid_source,
+        ),
+        (
+            r"selected source-influence relation binds a valid source and "
+            r"reviewed boundary",
+            _h_relation_valid_source,
+        ),
+        (
+            r"relation binds a reviewed trust boundary whose to_zone matches "
+            r"the target effective ingress zone",
+            _h_relation_valid_boundary,
+        ),
+        (
+            r"pinned ingress and reviewed profile resources are otherwise valid",
+            _h_relation_noop,
+        ),
+        (
+            r"pinned ingress, source, boundary, and target bindings resolve "
+            r"individually",
+            _h_relation_noop,
+        ),
+        (
+            r'reviewed profile has a valid boundary from zone "([^"]+)" to '
+            r'zone "([^"]+)" and an unrelated boundary from zone "([^"]+)" '
+            r'to zone "([^"]+)"',
+            _h_relation_profile_boundary,
+        ),
+        (
+            r'reviewed trust boundary from zone "([^"]+)" to zone "([^"]+)"',
+            _h_relation_reviewed_boundary,
+        ),
+        (
+            r"one valid source-influence relation binds (entry_point|integration) "
+            r'source "([^"]+)" to the canonical ingress through the first boundary',
+            _h_relation_valid_typed_source,
+        ),
+        (
+            r"canonical ingress is a reviewed direct entry point with effective "
+            r'ingress zone "([^"]+)"',
+            _h_relation_direct_ingress,
+        ),
+        (
+            r"projection contains no source-influence relation",
+            _h_relation_no_relation,
+        ),
+        (
+            r"selected source-influence relation cannot be represented by the "
+            r"actor and narrative typed provenance contract",
+            _h_relation_unrepresentable,
+        ),
+        (
+            r"deterministic generated-stage responses provide",
+            _h_relation_responses_only,
+        ),
+        (
+            r"authoritative candidates are projected and qualified(?:, and generated)?",
+            _h_relation_when,
+        ),
+        (
+            r"authoritative candidates are projected, qualified, and generated",
+            _h_relation_when,
+        ),
+        (
+            r"candidate is rejected before generated-stage Call 0",
+            _h_relation_rejected_before_call,
+        ),
+        (
+            r'candidate is quarantined with typed issue code "([^"]+)"',
+            _h_relation_issue_code,
+        ),
+        (
+            r'candidate is rejected with typed issue code "([^"]+)"',
+            _h_relation_issue_code,
+        ),
+        (
+            r'typed issue identifies source "([^"]+)", boundary "([^"]+)", '
+            r'target ingress "([^"]+)", expected target zone "([^"]+)", and '
+            r'actual boundary zones "([^"]+)"',
+            _h_relation_issue_fields,
+        ),
+        (
+            r"typed issue identifies the source, boundary, target ingress, "
+            r"expected target zone, and actual boundary zones",
+            _h_relation_issue_fields,
+        ),
+        (
+            r"issue identifies the source, boundary, target ingress, expected "
+            r"target zone, and actual boundary zones",
+            _h_relation_issue_fields,
+        ),
+        (
+            r'typed issue guidance says to review explicit "ingress_zone" or '
+            r"trust-boundary declaration",
+            _h_relation_guidance,
+        ),
+        (
+            r'issue identifies expected source kind "([^"]+)" and actual '
+            r'binding kind "([^"]+)"',
+            _h_relation_issue_kind,
+        ),
+        (
+            r"no resource binding is substituted or fuzzy-matched",
+            _h_relation_no_substitution,
+        ),
+        (
+            r'issue identifies boundary "([^"]+)"',
+            _h_relation_boundary_assertion,
+        ),
+        (
+            r'issue identifies target ingress "([^"]+)" and canonical ingress '
+            r'"([^"]+)"',
+            _h_relation_target_assertion,
+        ),
+        (
+            r"zero generated-stage provider calls are recorded for the candidate",
+            _h_relation_zero_calls,
+        ),
+        (
+            r"candidate reaches generated-stage Call 0",
+            _h_relation_call0,
+        ),
+        (
+            r"qualification passes and the candidate reaches generated-stage "
+            r"Call 0",
+            _h_relation_qualification_and_call0,
+        ),
+        (
+            r'actor access provenance has ingress mode "([^"]+)", '
+            r"influence_source_kind null, and influence_source_id null",
+            _h_relation_direct_access,
+        ),
+        (
+            r"narrative access realization has the same null typed source reference",
+            _h_relation_narrative_null,
+        ),
+        (
+            r"actor and narrative provenance contain the canonical direct ingress ID",
+            _h_relation_direct_ingress_id,
+        ),
+        (
+            r'actor access provenance has influence_source_kind "([^"]+)" and '
+            r'influence_source_id "([^"]+)"',
+            _h_relation_typed_access,
+        ),
+        (
+            r"narrative access realization has the same typed source reference",
+            _h_relation_typed_access,
+        ),
+        (
+            r"rendered authoritative source-influence paths contain exactly one "
+            r'tuple for source "([^"]+)", the first boundary, and target ingress '
+            r'"([^"]+)"',
+            _h_relation_paths,
+        ),
+        (
+            r"rendered paths do not contain the unrelated boundary",
+            _h_relation_no_unrelated_boundary,
+        ),
+        (
+            r"actor and narrative provenance have the canonical boundary and "
+            r"target ingress IDs",
+            _h_relation_canonical_boundary_target,
+        ),
+        (
+            r"no canonical source, boundary, or target ID is selected by the model",
+            _h_relation_model_ids,
         ),
     )
     for pattern, handler in registrations:

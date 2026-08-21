@@ -221,6 +221,7 @@ class NarrativeAccessRealization(BaseModel):
     )
     influence_source_id: str | None = Field(
         default=None,
+        max_length=_NAME_MAX_LENGTH,
         description="Canonical upstream influence source ID, if indirect.",
     )
     trust_boundary_id: str | None = Field(
