@@ -720,6 +720,35 @@ def _source_influence_relation(
     return (path,), None
 
 
+def _validate_source_influence_paths(
+    candidate: ProjectedCandidate,
+    snapshot: CapabilityFactSnapshot,
+) -> None:
+    """Re-derive the authoritative relation at the persistence boundary.
+
+    Projection generation and serialized-candidate validation must share the
+    same relation rule.  Digest and candidate-identity checks prove that a
+    payload is self-consistent, but they do not prove that its derived path
+    matches the immutable bindings and profile.
+    """
+    expected_paths, issue = _source_influence_relation(
+        candidate.pattern_id,
+        candidate.projection.source_chain,
+        candidate.projection.selected_step_ids,
+        candidate.projection.bindings,
+        snapshot,
+    )
+    if issue is not None:
+        raise ValueError(
+            f"candidate source-influence relation is infeasible: {issue.detail}"
+        )
+    if candidate.projection.source_influence_paths != expected_paths:
+        raise ValueError(
+            "candidate source-influence paths do not match authoritative "
+            "bindings and profile"
+        )
+
+
 class ProjectionBatch(ProjectionModel):
     """Complete deterministic result, including typed non-candidate outcomes."""
 
@@ -1511,6 +1540,7 @@ def validate_projected_candidate(
     if candidate.projection.capability_fact_snapshot_digest != snapshot.snapshot_digest:
         raise ValueError("candidate capability snapshot digest pin does not match")
     validate_projection_snapshot(candidate.projection.model_dump(mode="json"), snapshot)
+    _validate_source_influence_paths(candidate, snapshot)
     for result in candidate.precondition_results:
         for evidence in result.evidence:
             if snapshot.fact(evidence.fact) != evidence:

@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+from hypothesis import given, settings, strategies as st
+import pytest
 from asago_scenario_generator.models.attack_pattern import (
     AttackPattern,
+    ProjectionSnapshot,
     compute_chain_semantic_digest,
+    compute_projection_digest,
 )
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.models.capability_profile import TrustBoundary
@@ -32,8 +36,10 @@ from asago_scenario_generator.pipeline.generate.names import (
 )
 from asago_scenario_generator.pipeline.projection import (
     ProjectionBudget,
+    _candidate_v2_id,
     capture_capability_snapshot,
     project_authoritative_candidates,
+    validate_projected_candidate,
 )
 from tests.test_projected_candidates import TaxonomyResolver, _pattern, _profile
 
@@ -279,3 +285,95 @@ def test_unreviewed_explicit_boundary_binding_is_quarantined_typed() -> None:
     assert issue.boundary_id == "tb:v1:" + "6" * 32
     assert issue.actual_boundary_zones == "unreviewed"
     assert issue.guidance is not None
+
+
+def test_serialized_candidate_revalidates_derived_relation() -> None:
+    base = _profile()
+    profile = base.model_copy(
+        update={
+            "entry_points": [
+                base.entry_points[0],
+                base.entry_points[1].model_copy(update={"ingress_zone": "reasoning"}),
+            ]
+        }
+    )
+    raw = _source_pattern(declared_source_kind="integration")
+    result = _project_source_pattern(raw, profile)
+    candidate = next(
+        item for item in result.candidates if item.ingress_controllability == "indirect"
+    )
+    forged = candidate.model_dump(mode="json")
+    forged_projection = forged["projection"]
+    forged_projection["source_influence_paths"][0]["boundary_zones"] = (
+        "input->tool_execution"
+    )
+    forged_projection["projection_digest"] = compute_projection_digest(
+        forged_projection
+    )
+    projection = ProjectionSnapshot.model_validate(forged_projection)
+    forged["candidate_id"] = _candidate_v2_id(candidate.pattern_id, projection)
+
+    snapshot = capture_capability_snapshot(profile)
+    resolver = TaxonomyResolver(
+        AttackPattern.model_validate(raw).canonical_chain.taxonomy_context
+    )
+    with pytest.raises(ValueError, match="source-influence paths"):
+        validate_projected_candidate(
+            forged,
+            snapshot,
+            raw,
+            resolver,
+            expected_catalog_pin=candidate.projection.catalog_pin,
+        )
+
+
+@given(
+    field=st.sampled_from(
+        (
+            "source_id",
+            "boundary_id",
+            "target_ingress_id",
+            "expected_target_zone",
+            "boundary_zones",
+        )
+    ),
+    value=st.text(min_size=1, max_size=40).map(lambda item: f"forged:{item}"),
+)
+@settings(max_examples=12, deadline=None)
+def test_relation_validation_rejects_arbitrary_path_mutations(
+    field: str, value: str
+) -> None:
+    """Self-consistent serialized paths still require authoritative re-derivation."""
+    base = _profile()
+    profile = base.model_copy(
+        update={
+            "entry_points": [
+                base.entry_points[0],
+                base.entry_points[1].model_copy(update={"ingress_zone": "reasoning"}),
+            ]
+        }
+    )
+    raw = _source_pattern(declared_source_kind="integration")
+    candidate = next(
+        item
+        for item in _project_source_pattern(raw, profile).candidates
+        if item.ingress_controllability == "indirect"
+    )
+    forged = candidate.model_dump(mode="json")
+    forged["projection"]["source_influence_paths"][0][field] = value
+    forged["projection"]["projection_digest"] = compute_projection_digest(
+        forged["projection"]
+    )
+    projection = ProjectionSnapshot.model_validate(forged["projection"])
+    forged["candidate_id"] = _candidate_v2_id(candidate.pattern_id, projection)
+
+    with pytest.raises(ValueError, match="source-influence paths"):
+        validate_projected_candidate(
+            forged,
+            capture_capability_snapshot(profile),
+            raw,
+            TaxonomyResolver(
+                AttackPattern.model_validate(raw).canonical_chain.taxonomy_context
+            ),
+            expected_catalog_pin=candidate.projection.catalog_pin,
+        )
