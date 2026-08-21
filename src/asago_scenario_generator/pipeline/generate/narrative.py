@@ -321,27 +321,33 @@ def _derive_zone_sequence(steps: list[Call1Step] | list[NarrativeStep]) -> list[
     return sequence
 
 
-def _canonical_realizations_for_step(
-    step: Call1Step,
+def _selected_projection_steps_by_id(
     projection_context: dict[str, Any],
-) -> tuple[ProjectedStepRealization, ...]:
-    """Resolve one response step to immutable canonical realizations."""
-    step_data_by_id: dict[str, dict[str, Any]] = {}
+) -> dict[str, dict[str, Any]]:
+    """Index selected projection steps while validating their identities."""
+    selected_steps_by_id: dict[str, dict[str, Any]] = {}
     for selected_step in projection_context.get("selected_steps", []):
         if not isinstance(selected_step, dict):
             raise ValueError("invalid projected step context entry")
         step_id = selected_step.get("step_id")
         if not isinstance(step_id, str):
             raise ValueError("invalid projected step context ID")
-        if step_id in step_data_by_id:
+        if step_id in selected_steps_by_id:
             raise ValueError(
                 f"duplicate projected step ID '{step_id}' in projection context"
             )
-        step_data_by_id[step_id] = selected_step
+        selected_steps_by_id[step_id] = selected_step
+    return selected_steps_by_id
 
+
+def _canonical_realizations_for_step(
+    step: Call1Step,
+    selected_steps_by_id: dict[str, dict[str, Any]],
+) -> tuple[ProjectedStepRealization, ...]:
+    """Resolve one response step to immutable canonical realizations."""
     realizations: list[ProjectedStepRealization] = []
     for projected_step_id in step.projected_step_ids:
-        selected_step = step_data_by_id.get(projected_step_id)
+        selected_step = selected_steps_by_id.get(projected_step_id)
         if selected_step is None:
             raise ValueError(
                 f"unknown projected step ID '{projected_step_id}' in narrative response"
@@ -366,6 +372,11 @@ def _map_call1_to_narrative(
     resp: Call1Response,
     projection_context: dict[str, Any] | None = None,
 ) -> NarrativeLayer:
+    selected_steps_by_id = (
+        _selected_projection_steps_by_id(projection_context)
+        if projection_context is not None
+        else None
+    )
     steps = [
         NarrativeStep(
             step_number=s.step_number,
@@ -375,8 +386,8 @@ def _map_call1_to_narrative(
             control_point=s.control_point,
             projected_step_ids=s.projected_step_ids,
             realizations=(
-                _canonical_realizations_for_step(s, projection_context)
-                if projection_context is not None
+                _canonical_realizations_for_step(s, selected_steps_by_id)
+                if selected_steps_by_id is not None
                 else ()
             ),
         )

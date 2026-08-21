@@ -335,6 +335,30 @@ def test_call1_semantically_incompatible_realization_fails_closed() -> None:
         _map_call1_to_narrative(response, context)
 
 
+@pytest.mark.parametrize(
+    ("selected_steps", "diagnostic"),
+    [
+        ([None], "invalid projected step context entry"),
+        ([{}], "invalid projected step context ID"),
+        (
+            [{"step_id": "step.1"}, {"step_id": "step.1"}],
+            "duplicate projected step ID",
+        ),
+    ],
+)
+def test_call1_projection_context_identity_is_validated_once(
+    selected_steps: list[Any],
+    diagnostic: str,
+) -> None:
+    response = Call1Response.model_validate(_call1_data())
+
+    with pytest.raises(ValueError, match=diagnostic):
+        _map_call1_to_narrative(
+            response,
+            {"selected_steps": selected_steps},
+        )
+
+
 @pytest.mark.parametrize(("selected_count", "maximum"), [(5, 7), (16, 16)])
 def test_call1_schema_uses_candidate_specific_step_bound(
     selected_count: int,
