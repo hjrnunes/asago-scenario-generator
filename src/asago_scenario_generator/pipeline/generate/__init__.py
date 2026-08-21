@@ -119,6 +119,7 @@ from asago_scenario_generator.pipeline.generate.narrative import (
     _sanitize_narrative,
     _sanitize_non_latin,
     build_call1_context,
+    build_call1_response_model,
 )
 
 # ontology
@@ -327,6 +328,7 @@ __all__ = [
     "build_actor_access_provenance",
     "build_call0_context",
     "build_call1_context",
+    "build_call1_response_model",
     "build_call2_context",
     "build_call3_context",
     "build_kc_definitions_block",

@@ -7,9 +7,9 @@ import re
 import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model, field_validator
 
 from asago_scenario_generator.llm.client import LLMClient, LLMResult
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
@@ -66,12 +66,24 @@ _CALL1_ENTRY_MAX_LENGTH = 200
 _CALL1_ZONE_MAX_LENGTH = 64
 _CALL1_STEP_IDS_MAX_ITEMS = 16
 _CALL1_STEP_ID_MAX_LENGTH = 200
-_CALL1_REALIZATIONS_MAX_ITEMS = 16
+
+_Call1Zone = Annotated[str, Field(min_length=1, max_length=_CALL1_ZONE_MAX_LENGTH)]
+_Call1StepId = Annotated[str, Field(min_length=1, max_length=_CALL1_STEP_ID_MAX_LENGTH)]
 
 
 class Call1Step(BaseModel):
+    """Model-owned fields returned by Call 1 for one narrative step.
+
+    Canonical realization records are deliberately absent from this
+    provider-facing model.  They are derived after parsing from the
+    immutable projection context.  ``extra='ignore'`` keeps older fixtures
+    and defensive extra-field injections from becoming published data.
+    """
+
+    model_config = {"extra": "ignore"}
+
     step_number: int
-    zone: str = Field(max_length=_CALL1_ZONE_MAX_LENGTH)
+    zone: _Call1Zone
     action: str = Field(max_length=_CALL1_PROSE_MAX_LENGTH)
     effect: str = Field(max_length=_CALL1_PROSE_MAX_LENGTH)
     control_point: str | None = Field(default=None, max_length=_CALL1_ZONE_MAX_LENGTH)
@@ -79,7 +91,7 @@ class Call1Step(BaseModel):
     # Required on every step; the LLM receives the IDs as opaque
     # constraints and must echo them back.  No defaults -- a missing
     # field is a typed violation, not an acceptable empty value.
-    projected_step_ids: tuple[str, ...] = Field(
+    projected_step_ids: tuple[_Call1StepId, ...] = Field(
         min_length=1,
         max_length=_CALL1_STEP_IDS_MAX_ITEMS,
         description=(
@@ -87,22 +99,22 @@ class Call1Step(BaseModel):
             "Must be echoed from the projection context constraints."
         ),
     )
-    realizations: tuple[ProjectedStepRealization, ...] = Field(
-        default=(),
-        max_length=_CALL1_REALIZATIONS_MAX_ITEMS,
-        description=(
-            "Per-projected-step canonical realization records.  Ignored "
-            "from LLM output — post-processing derives these "
-            "deterministically from the projection context."
-        ),
-    )
+
+    @field_validator("projected_step_ids")
+    @classmethod
+    def _reject_duplicate_projected_step_ids(
+        cls, value: tuple[str, ...]
+    ) -> tuple[str, ...]:
+        if len(set(value)) != len(value):
+            raise ValueError("duplicate projected step ID in narrative response")
+        return value
 
 
 class Call1Response(BaseModel):
     title: str = Field(max_length=_CALL1_TITLE_MAX_LENGTH)
     summary: str = Field(max_length=_CALL1_PROSE_MAX_LENGTH)
     entry_point: str = Field(max_length=_CALL1_ENTRY_MAX_LENGTH)
-    zone_sequence: list[str] = Field(
+    zone_sequence: list[_Call1Zone] = Field(
         min_length=1,
         max_length=MAX_NARRATIVE_STEPS,
         description=(
@@ -120,6 +132,42 @@ class Call1Response(BaseModel):
         ),
     )
     access_realization: NarrativeAccessRealization | None = None
+
+
+def build_call1_response_model(
+    selected_step_count: int | None = None,
+) -> type[Call1Response]:
+    """Build the provider-facing Call 1 schema for the current candidate.
+
+    Narrative steps include at most two connector steps beyond the selected
+    canonical projection steps, capped at ``MAX_NARRATIVE_STEPS``.  The
+    dynamic bound is applied to the schema sent to the provider, not only to
+    post-response finalization.
+    """
+    if selected_step_count is None:
+        return Call1Response
+    if selected_step_count < 0:
+        raise ValueError("selected_step_count must be non-negative")
+    maximum_steps = min(
+        MAX_NARRATIVE_STEPS,
+        selected_step_count + NARRATIVE_CONNECTOR_STEPS,
+    )
+    model_name = f"Call1ResponseSelected{selected_step_count}"
+    return create_model(
+        model_name,
+        __base__=Call1Response,
+        steps=(
+            list[Call1Step],
+            Field(
+                min_length=1,
+                max_length=maximum_steps,
+                description=(
+                    "Narrative steps. Must cover every selected canonical "
+                    "step and stay within the candidate-specific bound."
+                ),
+            ),
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +321,51 @@ def _derive_zone_sequence(steps: list[Call1Step] | list[NarrativeStep]) -> list[
     return sequence
 
 
-def _map_call1_to_narrative(resp: Call1Response) -> NarrativeLayer:
+def _canonical_realizations_for_step(
+    step: Call1Step,
+    projection_context: dict[str, Any],
+) -> tuple[ProjectedStepRealization, ...]:
+    """Resolve one response step to immutable canonical realizations."""
+    step_data_by_id: dict[str, dict[str, Any]] = {}
+    for selected_step in projection_context.get("selected_steps", []):
+        if not isinstance(selected_step, dict):
+            raise ValueError("invalid projected step context entry")
+        step_id = selected_step.get("step_id")
+        if not isinstance(step_id, str):
+            raise ValueError("invalid projected step context ID")
+        if step_id in step_data_by_id:
+            raise ValueError(
+                f"duplicate projected step ID '{step_id}' in projection context"
+            )
+        step_data_by_id[step_id] = selected_step
+
+    realizations: list[ProjectedStepRealization] = []
+    for projected_step_id in step.projected_step_ids:
+        selected_step = step_data_by_id.get(projected_step_id)
+        if selected_step is None:
+            raise ValueError(
+                f"unknown projected step ID '{projected_step_id}' in narrative response"
+            )
+        raw_realization = selected_step.get("realization")
+        if not isinstance(raw_realization, dict):
+            raise ValueError(
+                f"missing canonical realization for projected step ID "
+                f"'{projected_step_id}'"
+            )
+        realization = ProjectedStepRealization.model_validate(raw_realization)
+        if realization.projected_step_id != projected_step_id:
+            raise ValueError(
+                f"semantically incompatible projected step ID "
+                f"'{projected_step_id}' in narrative mapping"
+            )
+        realizations.append(realization)
+    return tuple(realizations)
+
+
+def _map_call1_to_narrative(
+    resp: Call1Response,
+    projection_context: dict[str, Any] | None = None,
+) -> NarrativeLayer:
     steps = [
         NarrativeStep(
             step_number=s.step_number,
@@ -282,10 +374,27 @@ def _map_call1_to_narrative(resp: Call1Response) -> NarrativeLayer:
             effect=s.effect,
             control_point=s.control_point,
             projected_step_ids=s.projected_step_ids,
-            realizations=s.realizations,
+            realizations=(
+                _canonical_realizations_for_step(s, projection_context)
+                if projection_context is not None
+                else ()
+            ),
         )
         for s in resp.steps
     ]
+    if projection_context is not None:
+        selected_step_ids = set(projection_context.get("selected_step_ids", ()))
+        covered_step_ids = {
+            projected_step_id
+            for step in steps
+            for projected_step_id in step.projected_step_ids
+        }
+        missing = sorted(selected_step_ids - covered_step_ids)
+        if missing:
+            raise ValueError(
+                "omitted projected step ID(s) from narrative response: "
+                + ", ".join(missing)
+            )
     # Derive zone_sequence from step zones rather than using the LLM's
     # zone_sequence field, which tends to collapse return traversals.
     zone_sequence = _derive_zone_sequence(resp.steps)
@@ -669,49 +778,6 @@ def build_call1_context(
     }
 
 
-# ---------------------------------------------------------------------------
-# Post-processing: deterministic realization derivation
-# ---------------------------------------------------------------------------
-
-
-def _fill_call1_realizations(
-    response: Call1Response,
-    projection_context: dict[str, Any] | None,
-) -> None:
-    """Derive realizations deterministically and set them on each Call1Step.
-
-    Ignores whatever the LLM returned for realizations.  For each step,
-    looks up the canonical realization record from the projection context
-    (which was built by ``_build_projection_context`` using
-    ``derive_step_realization``).
-
-    Mutates ``response.steps`` in place.
-    """
-    if projection_context is None:
-        return
-
-    step_data_by_id: dict[str, dict[str, Any]] = {
-        sd["step_id"]: sd for sd in projection_context.get("selected_steps", [])
-    }
-
-    for step in response.steps:
-        realizations: list[ProjectedStepRealization] = []
-        for psid in step.projected_step_ids:
-            sd = step_data_by_id.get(psid)
-            if sd is None:
-                logger.warning(
-                    "Call1Step %d references unknown projected step '%s' "
-                    "— cannot derive realization",
-                    step.step_number,
-                    psid,
-                )
-                continue
-            realizations.append(
-                ProjectedStepRealization.model_validate(sd["realization"])
-            )
-        step.realizations = tuple(realizations)
-
-
 def _call_narrative(
     seed: ScenarioSeed,
     profile: CapabilityProfile,
@@ -764,6 +830,11 @@ def _call_narrative(
     user_prompt = render_prompt("call1_user.j2", **ctx)
     if completion_length_feedback:
         user_prompt = f"{user_prompt}{completion_length_feedback}"
+    selected_step_count = (
+        len(projection_context.get("selected_step_ids", ()))
+        if projection_context is not None
+        else None
+    )
     result = client.complete(
         system_prompt=render_prompt(
             "call1_system.j2",
@@ -775,22 +846,19 @@ def _call_narrative(
             tool_inventory=ctx["tool_inventory"],
         ),
         user_prompt=user_prompt,
-        response_format=Call1Response,
+        response_format=build_call1_response_model(selected_step_count),
     )
-    # Post-processing: normalize echoed step-ID transport shapes to the
-    # canonical IDs before deterministic realization derivation.  Unknown,
-    # ambiguous, or duplicate echoes raise a stable ValueError here so no
-    # defective narrative is finalized.
+    # Normalize echoed step-ID transport shapes to canonical IDs before
+    # deriving deterministic realizations. Unknown, ambiguous, or duplicate
+    # echoes raise a stable ValueError, so no defective narrative is
+    # finalized.
     if projection_context is not None:
         canonical_ids = projection_context.get("selected_step_ids", [])
         for step in result.content.steps:
             step.projected_step_ids = normalize_projected_step_ids(
                 step.projected_step_ids, canonical_ids
             )
-    # Post-processing: derive realizations deterministically from
-    # the projection context, ignoring whatever the LLM returned.
-    _fill_call1_realizations(result.content, projection_context)
-    narrative = _map_call1_to_narrative(result.content)
+    narrative = _map_call1_to_narrative(result.content, projection_context)
     narrative = _sanitize_narrative(narrative)
     if projection_context is not None:
         # Stage-specific boundary validation: literal 'outside' is allowed

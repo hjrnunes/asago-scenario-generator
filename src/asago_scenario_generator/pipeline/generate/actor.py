@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
 
@@ -62,25 +62,27 @@ _CALL0_ITEM_MAX_LENGTH = 200
 _CALL0_ENUM_MAX_LENGTH = 64
 _CALL0_EVIDENCE_MAX_LENGTH = 300
 
+_Call0Item = Annotated[str, Field(min_length=1, max_length=_CALL0_ITEM_MAX_LENGTH)]
+
 
 class Call0Response(BaseModel):
     """LLM response model for Call 0: Actor Profile."""
 
     actor_type: str = Field(max_length=_CALL0_ENUM_MAX_LENGTH)
     capability_level: str = Field(max_length=_CALL0_ENUM_MAX_LENGTH)
-    beliefs: list[str] = Field(
+    beliefs: list[_Call0Item] = Field(
         max_length=_CALL0_LIST_MAX_ITEMS,
         description="Attacker beliefs; bounded list of concise strings.",
     )
-    desires: list[str] = Field(
+    desires: list[_Call0Item] = Field(
         max_length=_CALL0_LIST_MAX_ITEMS,
         description="Attacker desires; bounded list of concise strings.",
     )
-    intentions: list[str] = Field(
+    intentions: list[_Call0Item] = Field(
         max_length=_CALL0_LIST_MAX_ITEMS,
         description="Attacker intentions; bounded list of concise strings.",
     )
-    resources: list[str] = Field(
+    resources: list[_Call0Item] = Field(
         max_length=_CALL0_LIST_MAX_ITEMS,
         description="Attacker resources; bounded list of concise strings.",
     )

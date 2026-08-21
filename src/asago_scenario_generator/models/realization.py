@@ -18,7 +18,7 @@ there is no duplicate derivation path.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -33,6 +33,15 @@ from asago_scenario_generator.models.attack_pattern import (
 
 if TYPE_CHECKING:
     from asago_scenario_generator.models.attack_pattern import CanonicalChainStep
+
+
+_REALIZATION_ID_MAX_LENGTH = 200
+_REALIZATION_KIND_MAX_LENGTH = 32
+_REALIZATION_REFS_MAX_ITEMS = 16
+_RealizationId = Annotated[
+    str,
+    Field(min_length=1, max_length=_REALIZATION_ID_MAX_LENGTH),
+]
 
 
 class ProjectedStepRealization(BaseModel):
@@ -53,18 +62,12 @@ class ProjectedStepRealization(BaseModel):
     # Conservative static maxima so every generated realization field has a
     # finite schema bound regardless of the transport (LLM response_format
     # schemas include these nested records verbatim).
-    _ID_MAX_LENGTH = 200
-    _KIND_MAX_LENGTH = 32
-    _REFS_MAX_ITEMS = 16
-
-    projected_step_id: str = Field(
-        min_length=1,
-        max_length=_ID_MAX_LENGTH,
+    projected_step_id: _RealizationId = Field(
         description="Canonical projected step ID this record realizes.",
     )
     action_kind: str = Field(
         min_length=1,
-        max_length=_KIND_MAX_LENGTH,
+        max_length=_REALIZATION_KIND_MAX_LENGTH,
         description=(
             "Canonical action kind from the projected step (prepare, deliver, "
             "invoke, transform, persist, observe, impact)."
@@ -72,36 +75,36 @@ class ProjectedStepRealization(BaseModel):
     )
     executor_role: str = Field(
         min_length=1,
-        max_length=_KIND_MAX_LENGTH,
+        max_length=_REALIZATION_KIND_MAX_LENGTH,
         description="Canonical executor role from the projected step (attacker, system, operator).",
     )
     boundary_position: str = Field(
         min_length=1,
-        max_length=_KIND_MAX_LENGTH,
+        max_length=_REALIZATION_KIND_MAX_LENGTH,
         description="Canonical boundary position from the projected step (outside, crossing, inside).",
     )
-    resource_ref_ids: tuple[str, ...] = Field(
-        max_length=_REFS_MAX_ITEMS,
+    resource_ref_ids: tuple[_RealizationId, ...] = Field(
+        max_length=_REALIZATION_REFS_MAX_ITEMS,
         description="Concrete resource reference IDs for this step's resource_links.",
     )
-    consumed_ref_ids: tuple[str, ...] = Field(
-        max_length=_REFS_MAX_ITEMS,
+    consumed_ref_ids: tuple[_RealizationId, ...] = Field(
+        max_length=_REALIZATION_REFS_MAX_ITEMS,
         description="Consumed reference IDs (must match step.consumed[*].ref_id).",
     )
-    produced_ref_ids: tuple[str, ...] = Field(
-        max_length=_REFS_MAX_ITEMS,
+    produced_ref_ids: tuple[_RealizationId, ...] = Field(
+        max_length=_REALIZATION_REFS_MAX_ITEMS,
         description="Produced reference IDs (must match step.produced[*].ref_id).",
     )
-    produced_effect_ids: tuple[str, ...] = Field(
-        max_length=_REFS_MAX_ITEMS,
+    produced_effect_ids: tuple[_RealizationId, ...] = Field(
+        max_length=_REALIZATION_REFS_MAX_ITEMS,
         description="Produced effect IDs (subset of produced where kind == 'effect').",
     )
-    outcome_link_pc_ids: tuple[str, ...] = Field(
-        max_length=_REFS_MAX_ITEMS,
+    outcome_link_pc_ids: tuple[_RealizationId, ...] = Field(
+        max_length=_REALIZATION_REFS_MAX_ITEMS,
         description="Observable outcome link postcondition IDs.",
     )
-    postcondition_ids: tuple[str, ...] = Field(
-        max_length=_REFS_MAX_ITEMS,
+    postcondition_ids: tuple[_RealizationId, ...] = Field(
+        max_length=_REALIZATION_REFS_MAX_ITEMS,
         description="Owned observable postcondition IDs.",
     )
 
