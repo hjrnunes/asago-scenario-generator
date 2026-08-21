@@ -559,6 +559,41 @@ def _resource_id(reference: CanonicalResourceReference) -> str:
     raise TypeError(f"unsupported canonical resource reference: {reference!r}")
 
 
+_SOURCE_RELATION_GUIDANCE = (
+    "Review the explicit ingress_zone or trust-boundary declaration."
+)
+
+
+def _source_relation_issue(
+    pattern_id: str,
+    detail: str,
+    *,
+    source_id: str | None = None,
+    boundary_id: str | None = None,
+    target_ingress_id: str | None = None,
+    canonical_ingress_id: str | None = None,
+    expected_target_zone: str | None = None,
+    actual_boundary_zones: str | None = None,
+    expected_source_kind: str | None = None,
+    actual_binding_kind: str | None = None,
+) -> ProjectionIssue:
+    """Build the consistent typed failure for an invalid source relation."""
+    return ProjectionIssue(
+        code="source_influence_relation_infeasible",
+        pattern_id=pattern_id,
+        detail=detail,
+        source_id=source_id,
+        boundary_id=boundary_id,
+        target_ingress_id=target_ingress_id,
+        canonical_ingress_id=canonical_ingress_id,
+        expected_target_zone=expected_target_zone,
+        actual_boundary_zones=actual_boundary_zones,
+        expected_source_kind=expected_source_kind,
+        actual_binding_kind=actual_binding_kind,
+        guidance=_SOURCE_RELATION_GUIDANCE,
+    )
+
+
 def _source_influence_relation(
     pattern_id: str,
     chain: CanonicalAttackChain,
@@ -578,14 +613,10 @@ def _source_influence_relation(
     ]
     ingress_ref = bindings_by_slot[chain.initial_ingress_slot_id]
     if not isinstance(ingress_ref, EntryPointResourceReference):
-        return (), ProjectionIssue(
-            code="source_influence_relation_infeasible",
-            pattern_id=pattern_id,
-            detail="canonical ingress is not an entry-point binding",
+        return (), _source_relation_issue(
+            pattern_id,
+            "canonical ingress is not an entry-point binding",
             canonical_ingress_id=_resource_id(ingress_ref),
-            guidance=(
-                "Review the explicit ingress_zone or trust-boundary declaration."
-            ),
         )
     ingress = snapshot.profile.resolve_entry_point(ingress_ref.entry_point_id)
     assert ingress is not None
@@ -596,27 +627,23 @@ def _source_influence_relation(
     if ingress.effective_controllability == "direct":
         return (), None
     if not links:
-        return (), ProjectionIssue(
-            code="source_influence_relation_infeasible",
-            pattern_id=pattern_id,
-            detail="indirect canonical ingress has no selected source-influence path",
+        return (), _source_relation_issue(
+            pattern_id,
+            "indirect canonical ingress has no selected source-influence path",
             target_ingress_id=ingress_ref.entry_point_id,
             canonical_ingress_id=ingress_ref.entry_point_id,
             expected_target_zone=ingress.effective_ingress_zone,
-            guidance="Review the explicit ingress_zone or trust-boundary declaration.",
         )
     if len(links) != 1:
-        return (), ProjectionIssue(
-            code="source_influence_relation_infeasible",
-            pattern_id=pattern_id,
-            detail=(
+        return (), _source_relation_issue(
+            pattern_id,
+            (
                 "candidate requires exactly one selected source-to-boundary-"
                 f"to-ingress path, found {len(links)}"
             ),
             target_ingress_id=ingress_ref.entry_point_id,
             canonical_ingress_id=ingress_ref.entry_point_id,
             expected_target_zone=ingress.effective_ingress_zone,
-            guidance="Review the explicit ingress_zone or trust-boundary declaration.",
         )
 
     link = links[0]
@@ -668,9 +695,8 @@ def _source_influence_relation(
     elif target_id != ingress_ref.entry_point_id:
         issue_detail = "source-influence target is not the canonical ingress binding"
     if issue_detail is not None:
-        return (), ProjectionIssue(
-            code="source_influence_relation_infeasible",
-            pattern_id=pattern_id,
+        return (), _source_relation_issue(
+            pattern_id,
             detail=issue_detail,
             source_id=source_id,
             boundary_id=boundary_id,
@@ -680,9 +706,6 @@ def _source_influence_relation(
             actual_boundary_zones=actual_boundary_zones,
             expected_source_kind=expected_kind,
             actual_binding_kind=actual_kind,
-            guidance=(
-                "Review the explicit ingress_zone or trust-boundary declaration."
-            ),
         )
     assert boundary is not None
     assert target_id is not None
@@ -994,6 +1017,7 @@ def _references_for_slot(
     initial_ingress: bool,
 ) -> tuple[CanonicalResourceReference, ...]:
     """Resolve one slot using only its typed, adapter-neutral constraints."""
+    allowed_resource_ids = set(slot.allowed_resource_ids)
     references = _references_for_kind(
         slot.kind,
         snapshot,
@@ -1004,9 +1028,7 @@ def _references_for_slot(
     )
     compatible: list[CanonicalResourceReference] = []
     for reference in references:
-        if slot.allowed_resource_ids and _resource_id(reference) not in set(
-            slot.allowed_resource_ids
-        ):
+        if allowed_resource_ids and _resource_id(reference) not in allowed_resource_ids:
             continue
         if isinstance(reference, IntegrationResourceReference):
             integration = snapshot.profile.resolve_integration(reference.integration_id)
@@ -1234,11 +1256,8 @@ def _derive_execution_requirements_core(
     ``security_relevant`` flag alone.
     """
     slots_by_id = {slot.slot_id: slot for slot in chain.resource_slots}
-    selected_steps = [
-        step
-        for step in chain.steps
-        if step.step_id in set(projection.selected_step_ids)
-    ]
+    selected_ids = set(projection.selected_step_ids)
+    selected_steps = [step for step in chain.steps if step.step_id in selected_ids]
     requirements: list[ExecutionRequirement] = []
 
     for step in selected_steps:
@@ -2051,8 +2070,6 @@ def project_authoritative_candidates(
                         ),
                     )
                 )
-            if relation_links:
-                continue
             continue
 
         direct_ingress_options = tuple(

@@ -27,6 +27,9 @@ from asago_scenario_generator.pipeline.generate.narrative import (
     _apply_projection_access_realization,
     validate_narrative_access_realization,
 )
+from asago_scenario_generator.pipeline.generate.names import (
+    humanize_projection_context,
+)
 from asago_scenario_generator.pipeline.projection import (
     ProjectionBudget,
     capture_capability_snapshot,
@@ -100,6 +103,31 @@ def test_valid_relation_exposes_one_canonical_source_boundary_target_path() -> N
     assert path["boundary_id"].startswith("tb:v1:")
     assert path["target_ingress_id"] == candidate.canonical_ingress.entry_point_id
     assert path["boundary_zones"] == "input->reasoning"
+
+
+def test_humanized_relation_uses_typed_integration_name() -> None:
+    base = _profile()
+    profile = base.model_copy(
+        update={
+            "entry_points": [
+                base.entry_points[0],
+                base.entry_points[1].model_copy(update={"ingress_zone": "reasoning"}),
+            ]
+        }
+    )
+    result = _project_source_pattern(
+        _source_pattern(declared_source_kind="integration"), profile
+    )
+    candidate = next(
+        item for item in result.candidates if item.ingress_controllability == "indirect"
+    )
+    context = _build_projection_context(candidate)
+
+    humanized = humanize_projection_context(context, profile)
+
+    assert humanized is not None
+    path = humanized["source_influence_paths"][0]
+    assert path["source_name"] == profile.external_integrations[0].name
 
 
 def test_source_kind_mismatch_is_typed_and_never_substituted() -> None:
