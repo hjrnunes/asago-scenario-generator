@@ -58,7 +58,8 @@ keyed by semantic structural IDs, when the optional `projection_alignment`
 argument is supplied to their builders. The same canonical document is
 exported as standalone JSON/YAML (`stpa-execution-projection-v1`) with stable
 identifiers and typed provenance, and re-validated on load without project
-objects.
+objects. The public CLI command `validate-stpa-projection` applies that
+standalone check to a JSON or YAML export and prints typed violations.
 
 ## Acceptance boundary
 

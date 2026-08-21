@@ -1,5 +1,7 @@
 # End-to-end QA: STPA execution projection production wiring
 
+Executable form: `uv run python acceptance/qa/stpa/execution_projection_production_wiring.py`.
+
 Drive the public STPA CLI only:
 `uv run python scripts/run_sp3.py --enriched-threats <file> --control-structure
 <file> --loss-analysis <file> --output-dir <dir>`.
@@ -69,8 +71,8 @@ candidate ID.
 
 1. Copy a canonical projection file and remove each of
    `causal_factors`, `assertions`, and `steps` in separate copies. Validate
-   each copy through the supported projection-validation CLI affordance (or
-   the project’s documented artifact validation command).
+   each copy through
+   `asago-scenario-generator validate-stpa-projection <file>`.
 2. Create another copy with all three keys present as empty lists and validate
    it.
 3. Mutate candidate identity, an assertion source, the final step source, and

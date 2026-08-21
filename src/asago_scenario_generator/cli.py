@@ -41,6 +41,17 @@ def _validate_file(path: Path, label: str) -> None:
         raise typer.Exit(code=1)
 
 
+def _load_projection_payload(artifact: Path) -> dict:
+    """Parse a standalone STPA projection with standard JSON or YAML readers."""
+    text = artifact.read_text(encoding="utf-8")
+    payload = (
+        json.loads(text) if artifact.suffix.lower() == ".json" else yaml.safe_load(text)
+    )
+    if not isinstance(payload, dict):
+        raise ValueError("projection artifact must be a JSON or YAML object")
+    return payload
+
+
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context) -> None:
     """asago-scenario-generator: generate red-teaming scenarios for AI systems."""
@@ -436,6 +447,34 @@ def validate_catalog_qualification(
         typer.echo(json.dumps(validated.model_dump(mode="json"), indent=2))
     except Exception as exc:  # noqa: BLE001 - CLI validation boundary
         typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1)
+
+
+@app.command(name="validate-stpa-projection")
+def validate_stpa_projection(
+    artifact: Path = typer.Argument(
+        ...,
+        help="Canonical STPA execution projection JSON or YAML file.",
+    ),
+) -> None:
+    """Validate a standalone STPA execution projection document.
+
+    Parses the file with standard JSON or YAML readers and reports typed
+    traceability violations. A missing or malformed document is rejected
+    rather than treated as a valid empty projection.
+    """
+    _validate_file(artifact, "projection file")
+    try:
+        from asago_scenario_generator.stpa.scenario_prod.projection import (
+            validate_exported_projection,
+        )
+
+        result = validate_exported_projection(_load_projection_payload(artifact))
+    except Exception as exc:  # noqa: BLE001 - CLI validation boundary
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(json.dumps(result.model_dump(mode="json"), indent=2))
+    if not result.valid:
         raise typer.Exit(code=1)
 
 

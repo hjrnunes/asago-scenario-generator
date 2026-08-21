@@ -493,6 +493,7 @@ _ALLOWED_QA_HARNESS_IMPORTERS = (
     "acceptance/qa/stage1_ordering.py",
     "acceptance/qa/stage2_decomposition.py",
     "acceptance/qa/stage2_fallback.py",
+    "acceptance/qa/stpa/execution_projection_production_wiring.py",
 )
 _ENV_NAME_CHARS = string.ascii_letters + string.digits + "_"
 _ENV_VALUE_CHARS = string.ascii_letters + string.digits + " ._-"

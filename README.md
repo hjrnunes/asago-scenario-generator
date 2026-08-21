@@ -69,8 +69,9 @@ generated `run-manifest.yaml` and finalization inventory for admitted scenarios
 and recorded errors.
 
 Useful companion commands include `profile`, `resume`, `eval`, `report`,
-`qualify-catalog`, and `validate-catalog-qualification`. Run
-`asago-scenario-generator --help` for the complete interface.
+`qualify-catalog`, `validate-catalog-qualification`, and
+`validate-stpa-projection`. Run `asago-scenario-generator --help` for the
+complete interface.
 
 ## STPA-based generation
 
@@ -87,6 +88,15 @@ can also be regenerated independently:
 
 ```bash
 asago-scenario-generator stpa-report --output-dir output/my-system-stpa
+```
+
+Canonical Stage 6 projection artifacts (`stpa-execution-projection-v1`) can be
+checked through the public validation command without reconstructing project
+objects:
+
+```bash
+asago-scenario-generator validate-stpa-projection \
+  output/my-system-stpa/scenarios/canonical/SCN-001.projection.json
 ```
 
 ## Development
