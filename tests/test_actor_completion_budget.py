@@ -147,3 +147,32 @@ def test_actor_profile_lifecycle_retry_reuses_limit_with_suffix(monkeypatch) -> 
     assert retry_request["user_prompt"] == first_request["user_prompt"] + suffix
     assert retry_request["max_completion_tokens"] == 16384
     assert first[1].content is not None
+
+
+@pytest.mark.parametrize("invalid_floor", ["context", "seed"])
+def test_invalid_capability_floor_values_are_ignored(monkeypatch, invalid_floor) -> None:
+    """Malformed internal floor data must not turn a valid response into an error."""
+    client = MagicMock(max_completion_tokens=2048)
+    client.complete.return_value = _successful_actor_result()
+
+    minimum_capability_level = "not-a-capability-level" if invalid_floor == "context" else None
+    seed_min_complexity = "not-a-capability-level" if invalid_floor == "seed" else None
+    monkeypatch.setattr(
+        actor,
+        "build_call0_context",
+        lambda **_kwargs: {
+            "tool_inventory": [],
+            "minimum_capability_level": minimum_capability_level,
+            "diversity_limitation": None,
+        },
+    )
+    monkeypatch.setattr(actor, "render_prompt", lambda *_args, **_kwargs: "prompt")
+
+    result = actor._call_actor_profile(
+        seed=MagicMock(seed_id="seed-1", min_complexity=seed_min_complexity),
+        profile=MagicMock(zones_active=[]),
+        client=client,
+        use_case="test",
+    )
+
+    assert result[0].capability_level == "intermediate"

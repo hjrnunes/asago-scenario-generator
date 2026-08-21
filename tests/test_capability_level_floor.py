@@ -284,6 +284,13 @@ class TestMaxCapabilityLevel:
     def test_same_level(self):
         assert _max_capability_level("intermediate", "intermediate") == "intermediate"
 
+    @pytest.mark.parametrize(
+        ("first", "second"),
+        [("unknown", "novice"), ("novice", "unknown")],
+    )
+    def test_unknown_level_defaults_to_novice(self, first, second):
+        assert _max_capability_level(first, second) == "novice"
+
 
 # ---------------------------------------------------------------------------
 # Prompt template integration

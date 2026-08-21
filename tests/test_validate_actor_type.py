@@ -20,6 +20,10 @@ from asago_scenario_generator.pipeline.generate import (
     _validate_actor_type,
     generate_scenario,
 )
+from asago_scenario_generator.pipeline.generate.actor import (
+    _normalize_actor_type,
+    _normalize_capability_level,
+)
 from asago_scenario_generator.pipeline.seeds import RiskCardRef, ScenarioSeed
 from tests.helpers.projection_factory import get_projected_candidate, get_test_snapshot
 
@@ -201,7 +205,6 @@ class TestValidateActorType:
         assert result.desires == profile.desires
         assert result.intentions == profile.intentions
         assert result.resources == profile.resources
-
     @pytest.mark.parametrize(
         "keyword",
         [
@@ -304,6 +307,25 @@ class TestValidateActorType:
         assert result.actor_type == "adversarial-user", (
             f"v16 escapee keyword '{keyword}' in {sentence!r} was not caught"
         )
+
+
+class TestActorValueNormalization:
+    """Normalization accepts provider qualifiers without broadening values."""
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("cybercriminal", "cybercriminal"),
+            ("nation state", "nation-state"),
+            ("nation-state operative", "nation-state"),
+            ("cyber", "cybercriminal"),
+        ],
+    )
+    def test_actor_type_normalization(self, raw: str, expected: str) -> None:
+        assert _normalize_actor_type(raw) == expected
+
+    def test_capability_level_qualifier_is_normalized(self) -> None:
+        assert _normalize_capability_level("expert operator") == "expert"
 
 
 def _make_narrative_mock():

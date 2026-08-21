@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -61,17 +61,19 @@ _CALL3_IDS_MAX_ITEMS = 16
 _CALL3_ID_MAX_LENGTH = 200
 _CALL3_TEXT_MAX_LENGTH = 1000
 
+_Call3Id = Annotated[str, Field(min_length=1, max_length=_CALL3_ID_MAX_LENGTH)]
+
 
 class Call3Assertion(BaseModel):
     """A structured behavior assertion from Call 3, keyed by postcondition IDs."""
 
     model_config = ConfigDict(extra="forbid")
 
-    assertion_id: str = Field(min_length=1, max_length=_CALL3_ID_MAX_LENGTH)
-    source_step_ids: tuple[str, ...] = Field(
+    assertion_id: _Call3Id
+    source_step_ids: tuple[_Call3Id, ...] = Field(
         min_length=1, max_length=_CALL3_IDS_MAX_ITEMS
     )
-    projected_postcondition_ids: tuple[str, ...] = Field(
+    projected_postcondition_ids: tuple[_Call3Id, ...] = Field(
         min_length=1, max_length=_CALL3_IDS_MAX_ITEMS
     )
     text: str = Field(min_length=1, max_length=_CALL3_TEXT_MAX_LENGTH)

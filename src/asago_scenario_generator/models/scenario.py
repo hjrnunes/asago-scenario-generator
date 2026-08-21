@@ -215,7 +215,9 @@ class NarrativeAccessRealization(BaseModel):
             "if indirect.  Must match actor access provenance."
         ),
     )
-    influence_source_kind: Literal["entry_point", "integration"] | None = Field(
+    influence_source_kind: (
+        Annotated[Literal["entry_point", "integration"], Field(max_length=20)] | None
+    ) = Field(
         default=None,
         description="Typed kind of the canonical upstream influence source.",
     )
@@ -354,7 +356,9 @@ class ActorAccessProvenance(BaseModel):
             "Must resolve in the capability profile."
         ),
     )
-    influence_source_kind: Literal["entry_point", "integration"] | None = Field(
+    influence_source_kind: (
+        Annotated[Literal["entry_point", "integration"], Field(max_length=20)] | None
+    ) = Field(
         default=None,
         description="Typed kind of the canonical upstream influence source.",
     )

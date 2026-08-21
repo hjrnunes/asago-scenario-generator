@@ -2691,6 +2691,681 @@ def _h_narrative_selected_steps(
 
 
 # ===========================================================================
+# Structured response schema contract closure (TSSRC)
+# ===========================================================================
+
+
+def _structured_contract_state(world: World) -> dict[str, Any]:
+    """Return scenario-local state for the structured response contract."""
+    state = _taxonomy_state(world)
+    if "structured_contract" not in state:
+        state["structured_contract"] = {
+            "schemas": {},
+            "schema_issues": {},
+            "response_model": None,
+            "response_field": None,
+            "response_valid": None,
+            "realization_fields": [],
+            "realization_boundary_valid": None,
+            "realization_over_limit_rejected": None,
+            "projection_context": None,
+            "response": None,
+            "narrative": None,
+            "finalization_error": None,
+            "selected_step_count": None,
+            "call1_schema": None,
+            "grounding_helper": None,
+            "grounding_violations": None,
+        }
+    return state["structured_contract"]
+
+
+def _structured_projection_context(*, incompatible: bool = False) -> dict[str, Any]:
+    """Build the immutable two-step projection used by TSSRC scenarios."""
+    realization_one = {
+        "projected_step_id": "step.1",
+        "action_kind": "prepare",
+        "executor_role": "attacker",
+        "boundary_position": "crossing",
+        "resource_ref_ids": [],
+        "consumed_ref_ids": [],
+        "produced_ref_ids": [],
+        "produced_effect_ids": [],
+        "outcome_link_pc_ids": [],
+        "postcondition_ids": [],
+    }
+    realization_two = {
+        "projected_step_id": "step.other" if incompatible else "step.2",
+        "action_kind": "observe",
+        "executor_role": "system",
+        "boundary_position": "inside",
+        "resource_ref_ids": [],
+        "consumed_ref_ids": [],
+        "produced_ref_ids": [],
+        "produced_effect_ids": [],
+        "outcome_link_pc_ids": [],
+        "postcondition_ids": [],
+    }
+    return {
+        "selected_step_ids": ["step.1", "step.2"],
+        "selected_steps": [
+            {"step_id": "step.1", "realization": realization_one},
+            {"step_id": "step.2", "realization": realization_two},
+        ],
+    }
+
+
+def _structured_call1_data(
+    projected_step_ids: list[str],
+    *,
+    include_provider_realizations: bool = False,
+) -> dict[str, Any]:
+    """Build a minimal Call 1 payload for the acceptance contract."""
+    step: dict[str, Any] = {
+        "step_number": 1,
+        "zone": "input",
+        "action": "Action",
+        "effect": "Effect",
+        "control_point": None,
+        "projected_step_ids": projected_step_ids,
+    }
+    if include_provider_realizations:
+        step["realizations"] = [
+            {"projected_step_id": projected_step_ids[0], "action_kind": "forged"}
+        ]
+    return {
+        "title": "Title",
+        "summary": "Summary",
+        "entry_point": "Entry point",
+        "zone_sequence": ["input"],
+        "steps": [step],
+    }
+
+
+def _structured_schema_walk(
+    schema: dict[str, Any],
+    definitions: dict[str, Any],
+    *,
+    path: str,
+    active_refs: frozenset[str] = frozenset(),
+    resolved_refs: list[str] | None = None,
+) -> list[str]:
+    """Return unbounded reachable schema paths while resolving references."""
+    issues: list[str] = []
+    if resolved_refs is None:
+        resolved_refs = []
+    ref = schema.get("$ref")
+    if isinstance(ref, str):
+        prefix = "#/$defs/"
+        if not ref.startswith(prefix):
+            return [f"{path}: unsupported reference {ref!r}"]
+        name = ref[len(prefix) :]
+        if name in active_refs:
+            return []
+        target = definitions.get(name)
+        if not isinstance(target, dict):
+            return [f"{path}: missing definition {name!r}"]
+        resolved_refs.append(ref)
+        return _structured_schema_walk(
+            target,
+            definitions,
+            path=f"{path} -> {ref}",
+            active_refs=active_refs | {name},
+            resolved_refs=resolved_refs,
+        )
+
+    for keyword in ("anyOf", "oneOf", "allOf"):
+        for index, branch in enumerate(schema.get(keyword, ())):
+            if isinstance(branch, dict):
+                issues.extend(
+                    _structured_schema_walk(
+                        branch,
+                        definitions,
+                        path=f"{path}.{keyword}[{index}]",
+                        active_refs=active_refs,
+                        resolved_refs=resolved_refs,
+                    )
+                )
+
+    if schema.get("type") == "string" and not isinstance(schema.get("maxLength"), int):
+        issues.append(f"{path}: unbounded string")
+    if schema.get("type") == "array":
+        if not isinstance(schema.get("maxItems"), int):
+            issues.append(f"{path}: unbounded array")
+        items = schema.get("items")
+        if isinstance(items, dict):
+            issues.extend(
+                _structured_schema_walk(
+                    items,
+                    definitions,
+                    path=f"{path}[]",
+                    active_refs=active_refs,
+                    resolved_refs=resolved_refs,
+                )
+            )
+
+    properties = schema.get("properties", {})
+    if isinstance(properties, dict):
+        for name, property_schema in properties.items():
+            if isinstance(property_schema, dict):
+                issues.extend(
+                    _structured_schema_walk(
+                        property_schema,
+                        definitions,
+                        path=f"{path}.{name}",
+                        active_refs=active_refs,
+                        resolved_refs=resolved_refs,
+                    )
+                )
+    return issues
+
+
+def _h_capture_structured_schemas(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    from asago_scenario_generator.pipeline.generate.actor import Call0Response
+    from asago_scenario_generator.pipeline.generate.gherkin import Call3Response
+    from asago_scenario_generator.pipeline.generate.narrative import Call1Response
+
+    state = _structured_contract_state(world)
+    state["schemas"] = {
+        "Call 0": Call0Response.model_json_schema(),
+        "Call 1": Call1Response.model_json_schema(),
+        "Call 3": Call3Response.model_json_schema(),
+    }
+    return True, ""
+
+
+def _h_audit_structured_schemas(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    state = _structured_contract_state(world)
+    if not state["schemas"]:
+        return False, "provider schemas were not captured"
+    issues: dict[str, list[str]] = {}
+    for name, schema in state["schemas"].items():
+        resolved: list[str] = []
+        issues[name] = _structured_schema_walk(
+            schema,
+            schema.get("$defs", {}),
+            path=name,
+            resolved_refs=resolved,
+        )
+        state.setdefault("resolved_refs", {})[name] = resolved
+    state["schema_issues"] = issues
+    return True, ""
+
+
+def _h_schema_is_bounded(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    issues = _structured_contract_state(world).get("schema_issues", {})
+    unbounded = [f"{name}: {items}" for name, items in issues.items() if items]
+    return not unbounded, f"unbounded generated-schema paths: {unbounded}"
+
+
+def _h_schema_resolves_nested_shapes(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    state = _structured_contract_state(world)
+    resolved = state.get("resolved_refs", {})
+    return (
+        bool(resolved)
+        and any(resolved.values())
+        and not any(state.get("schema_issues", {}).values()),
+        "schema references were not resolved",
+    )
+
+
+def _h_schema_reports_no_unbounded_path(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    return _h_schema_is_bounded(world, text, examples)
+
+
+def _structured_response_data(
+    response_model: str,
+    field: str,
+    length: int,
+) -> tuple[type[BaseModel], dict[str, Any]]:
+    """Build response data for the boundary examples."""
+    value = "x" * length
+    if response_model == "Call 0":
+        from asago_scenario_generator.pipeline.generate.actor import Call0Response
+
+        data: dict[str, Any] = {
+            "actor_type": "adversarial-user",
+            "capability_level": "intermediate",
+            "beliefs": ["short"],
+            "desires": ["short"],
+            "intentions": ["short"],
+            "resources": ["short"],
+        }
+        data[field] = [value]
+        return Call0Response, data
+    if response_model == "Call 1":
+        from asago_scenario_generator.pipeline.generate.narrative import Call1Response
+
+        data = _structured_call1_data(["step.1"])
+        if field == "zone_sequence":
+            data["zone_sequence"] = [value]
+        else:
+            data["steps"][0][field] = [value]
+        return Call1Response, data
+    from asago_scenario_generator.pipeline.generate.gherkin import Call3Response
+
+    data = {
+        "assertions": [
+            {
+                "assertion_id": "assert.1",
+                "source_step_ids": ["step.1"],
+                "projected_postcondition_ids": ["pc.1"],
+                "text": "The expected effect occurs.",
+            }
+        ]
+    }
+    data["assertions"][0][field] = [value]
+    return Call3Response, data
+
+
+def _h_boundary_response_fixture(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'a valid "(Call 0|Call 1|Call 3)" response has a "([^"]+)" item '
+        r"with (\d+) characters",
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse response boundary: {text}"
+    state = _structured_contract_state(world)
+    state["response_model"] = match.group(1)
+    state["response_field"] = match.group(2)
+    state["response_length"] = int(match.group(3))
+    return True, ""
+
+
+def _h_validate_boundary_response(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'the "(Call 0|Call 1|Call 3)" response is validated', text)
+    if match is None:
+        return False, f"Could not parse validation step: {text}"
+    state = _structured_contract_state(world)
+    model, data = _structured_response_data(
+        state["response_model"],
+        state["response_field"],
+        state["response_length"],
+    )
+    try:
+        model.model_validate(data)
+    except Exception as exc:  # pragma: no cover - reported by the next step
+        state["response_valid"] = False
+        state["response_error"] = str(exc)
+    else:
+        state["response_valid"] = True
+        state["response_error"] = None
+    return True, ""
+
+
+def _h_boundary_validation_outcome(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'"(Call 0|Call 1|Call 3)" validation (succeeds|rejects)', text)
+    if match is None:
+        return False, f"Could not parse validation outcome: {text}"
+    expected = match.group(2) == "succeeds"
+    actual = _structured_contract_state(world).get("response_valid")
+    return actual is expected, f"validation was {actual!r}, expected {expected!r}"
+
+
+def _h_realization_fixture(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r'a canonical projected-step realization has bounded ID-list fields "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse realization fields: {text}"
+    _structured_contract_state(world)["realization_fields"] = _csv(match.group(1))
+    return True, ""
+
+
+def _h_validate_realization_boundaries(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    from asago_scenario_generator.models.realization import ProjectedStepRealization
+
+    state = _structured_contract_state(world)
+    base = {
+        "projected_step_id": "step.1",
+        "action_kind": "prepare",
+        "executor_role": "attacker",
+        "boundary_position": "crossing",
+        **{field: [] for field in state["realization_fields"]},
+    }
+    valid = True
+    rejected = True
+    for field in state["realization_fields"]:
+        valid_data = dict(base, **{field: ["x" * 200]})
+        over_data = dict(base, **{field: ["x" * 201]})
+        try:
+            ProjectedStepRealization.model_validate(valid_data)
+        except Exception:
+            valid = False
+        try:
+            ProjectedStepRealization.model_validate(over_data)
+        except Exception:
+            pass
+        else:
+            rejected = False
+    state["realization_boundary_valid"] = valid
+    state["realization_over_limit_rejected"] = rejected
+    return True, ""
+
+
+def _h_realization_boundaries_accepted(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    return bool(
+        _structured_contract_state(world).get("realization_boundary_valid")
+    ), "a boundary-length realization was rejected"
+
+
+def _h_realization_over_limits_rejected(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    return bool(
+        _structured_contract_state(world).get("realization_over_limit_rejected")
+    ), "an over-limit realization was accepted"
+
+
+def _h_projection_context_for_realizations(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    _structured_contract_state(world)["projection_context"] = (
+        _structured_projection_context()
+    )
+    return True, ""
+
+
+def _h_call1_model_owned_response(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    state = _structured_contract_state(world)
+    state["response"] = _structured_call1_data(
+        ["step.1", "step.2"],
+        include_provider_realizations=True,
+    )
+    return True, ""
+
+
+def _h_finalize_call1_contract(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    from asago_scenario_generator.pipeline.generate.narrative import (
+        Call1Response,
+        _map_call1_to_narrative,
+    )
+
+    state = _structured_contract_state(world)
+    response = Call1Response.model_validate(state["response"])
+    state["response_model_object"] = response
+    state["call1_schema"] = Call1Response.model_json_schema()
+    state["narrative"] = _map_call1_to_narrative(
+        response,
+        state["projection_context"],
+    )
+    return True, ""
+
+
+def _h_call1_step_schema_has_model_fields(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    schema = _structured_contract_state(world)["call1_schema"]
+    properties = schema["$defs"]["Call1Step"]["properties"]
+    expected = {
+        "step_number",
+        "zone",
+        "action",
+        "effect",
+        "control_point",
+        "projected_step_ids",
+    }
+    return set(properties) == expected, f"Call 1 step fields were {set(properties)!r}"
+
+
+def _h_call1_schema_omits_realizations(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    properties = _structured_contract_state(world)["call1_schema"]["$defs"][
+        "Call1Step"
+    ]["properties"]
+    return "realizations" not in properties, "Call 1 schema exposes realizations"
+
+
+def _h_finalized_realizations_complete(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    narrative = _structured_contract_state(world)["narrative"]
+    ids = [
+        realization.projected_step_id
+        for step in narrative.steps
+        for realization in step.realizations
+    ]
+    return ids == ["step.1", "step.2"], f"finalized IDs were {ids!r}"
+
+
+def _h_finalized_realizations_match_context(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    from asago_scenario_generator.models.realization import ProjectedStepRealization
+
+    state = _structured_contract_state(world)
+    expected = {
+        item["step_id"]: ProjectedStepRealization.model_validate(
+            item["realization"]
+        ).model_dump()
+        for item in state["projection_context"]["selected_steps"]
+    }
+    actual = {
+        realization.projected_step_id: realization.model_dump()
+        for step in state["narrative"].steps
+        for realization in step.realizations
+    }
+    return actual == expected, "finalized realization differs from projection context"
+
+
+def _h_provider_realizations_not_published(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    response = _structured_contract_state(world)["response_model_object"]
+    return "realizations" not in response.steps[0].model_dump(), (
+        "provider realization data was published"
+    )
+
+
+def _h_projection_defect(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r'the Call 1 response has projected-step resolution defect "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse projection defect: {text}"
+    state = _structured_contract_state(world)
+    state["defect"] = match.group(1)
+    state["projection_context"] = _structured_projection_context(
+        incompatible=match.group(1) == "semantically incompatible step"
+    )
+    defect = match.group(1)
+    state["response"] = _structured_call1_data(
+        {
+            "an unknown projected step ID": ["step.unknown"],
+            "a duplicate projected step ID": ["step.1", "step.1"],
+            "an omitted projected step ID": ["step.1"],
+            "semantically incompatible step": ["step.2"],
+        }[defect]
+    )
+    return True, ""
+
+
+def _h_finalize_defective_narrative(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    from asago_scenario_generator.pipeline.generate.narrative import (
+        Call1Response,
+        _map_call1_to_narrative,
+    )
+
+    state = _structured_contract_state(world)
+    try:
+        response = Call1Response.model_validate(state["response"])
+        _map_call1_to_narrative(response, state["projection_context"])
+    except Exception as exc:
+        state["finalization_error"] = str(exc)
+        state["narrative"] = None
+    else:
+        state["finalization_error"] = None
+        state["narrative"] = "published"
+    return True, ""
+
+
+def _h_defect_diagnostic(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r'finalization rejects the response with a diagnostic identifying "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse defect diagnostic: {text}"
+    diagnostic = match.group(1)
+    markers = {
+        "an unknown projected step ID": "unknown projected step ID",
+        "a duplicate projected step ID": "duplicate projected step ID",
+        "an omitted projected step ID": "omitted projected step ID",
+        "semantically incompatible step": "semantically incompatible",
+    }
+    error = _structured_contract_state(world).get("finalization_error") or ""
+    return markers[diagnostic] in error, f"diagnostic was {error!r}"
+
+
+def _h_no_defective_narrative_artifact(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    return _structured_contract_state(world).get("narrative") is None, (
+        "a defective narrative artifact was published"
+    )
+
+
+def _h_selected_step_count(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(
+        r"the current candidate selects (\d+) canonical projected steps", text
+    )
+    if match is None:
+        return False, f"Could not parse selected step count: {text}"
+    _structured_contract_state(world)["selected_step_count"] = int(match.group(1))
+    return True, ""
+
+
+def _h_build_candidate_call1_schema(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    from asago_scenario_generator.pipeline.generate.narrative import (
+        build_call1_response_model,
+    )
+
+    state = _structured_contract_state(world)
+    model = build_call1_response_model(state["selected_step_count"])
+    state["call1_schema"] = model.model_json_schema()
+    return True, ""
+
+
+def _h_candidate_step_bound(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r"the provider request contains steps\.maxItems equal to (\d+)", text
+    )
+    if match is None:
+        return False, f"Could not parse candidate step bound: {text}"
+    actual = _structured_contract_state(world)["call1_schema"]["properties"]["steps"][
+        "maxItems"
+    ]
+    return actual == int(match.group(1)), f"provider maxItems was {actual!r}"
+
+
+def _h_candidate_bound_present_before_request(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    return (
+        "maxItems"
+        in _structured_contract_state(world)["call1_schema"]["properties"]["steps"],
+        "candidate-specific maxItems was not present in the provider schema",
+    )
+
+
+def _h_import_grounding_helper(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    from asago_scenario_generator.pipeline.generate.tree import (
+        _check_tool_execution_leaf_grounding,
+    )
+
+    _structured_contract_state(world)["grounding_helper"] = (
+        _check_tool_execution_leaf_grounding
+    )
+    return True, ""
+
+
+def _h_typed_tool_execution_action(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(r'a tool_execution leaf uses the "([^"]+)" typed action', text)
+    if match is None:
+        return False, f"Could not parse typed action: {text}"
+    _structured_contract_state(world)["action_kind"] = match.group(1)
+    return True, ""
+
+
+def _h_check_tool_execution_grounding(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    from asago_scenario_generator.models.attack_tree import (
+        AiSystemAction,
+        AttackTreeNode,
+        GateType,
+        IntegrationInteractionAction,
+    )
+
+    state = _structured_contract_state(world)
+    action = (
+        IntegrationInteractionAction(integration_id="crm")
+        if state["action_kind"] == "integration_interaction"
+        else AiSystemAction()
+    )
+    node = AttackTreeNode(
+        id="n1",
+        label="tool execution",
+        gate=GateType.LEAF,
+        zone="tool_execution",
+        action=action,
+    )
+    violations: list[str] = []
+    state["grounding_helper"](node, violations)
+    state["grounding_violations"] = violations
+    return True, ""
+
+
+def _h_grounding_result(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    match = re.search(r'the result is "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse grounding outcome: {text}"
+    violations = _structured_contract_state(world)["grounding_violations"]
+    expected = match.group(1)
+    if expected == "no violation":
+        return not violations, f"unexpected grounding violations: {violations!r}"
+    return any("untyped-tool-execution" in item for item in violations), (
+        f"expected untyped violation, got {violations!r}"
+    )
+
+
+# ===========================================================================
 # Projection transport fix: step-ID echo normalization (TSIT)
 # ===========================================================================
 
@@ -6239,6 +6914,138 @@ def register(api: object) -> None:
             r"every generated prose field declares a finite static maximum length",
             _h_prose_field_bounds,
         ),
+        # ------------------------------------------------------------------
+        # Structured response schema contract closure (TSSRC)
+        # ------------------------------------------------------------------
+        (
+            r"the exact provider response_format schemas for Call 0, Call 1, "
+            r"and Call 3 are captured",
+            _h_capture_structured_schemas,
+        ),
+        (
+            r"the emitted JSON schemas are recursively audited",
+            _h_audit_structured_schemas,
+        ),
+        (
+            r"every reachable generated string has finite maxLength and every "
+            r"generated array has finite maxItems",
+            _h_schema_is_bounded,
+        ),
+        (
+            r"the audit resolves \$ref targets, anyOf branches, array items, "
+            r"and nested models",
+            _h_schema_resolves_nested_shapes,
+        ),
+        (
+            r"the audit reports no unbounded generated-schema path",
+            _h_schema_reports_no_unbounded_path,
+        ),
+        (
+            r'a valid "(Call 0|Call 1|Call 3)" response has a "([^"]+)" item '
+            r"with (\d+) characters",
+            _h_boundary_response_fixture,
+        ),
+        (
+            r'the "(Call 0|Call 1|Call 3)" response is validated by Pydantic',
+            _h_validate_boundary_response,
+        ),
+        (
+            r'"(Call 0|Call 1|Call 3)" validation (succeeds|rejects)',
+            _h_boundary_validation_outcome,
+        ),
+        (
+            r'a canonical projected-step realization has bounded ID-list fields "([^"]+)"',
+            _h_realization_fixture,
+        ),
+        (
+            r"each ID-list item is validated at its declared boundary and one "
+            r"item is made one character longer",
+            _h_validate_realization_boundaries,
+        ),
+        (
+            r"every boundary-length realization is accepted",
+            _h_realization_boundaries_accepted,
+        ),
+        (
+            r"every over-limit realization is rejected by Pydantic",
+            _h_realization_over_limits_rejected,
+        ),
+        (
+            r'immutable projection context contains selected canonical steps "([^"]+)"',
+            _h_projection_context_for_realizations,
+        ),
+        (
+            r"the Call 1 response supplies only step_number, zone, action, effect, "
+            r"control_point, and projected_step_ids",
+            _h_call1_model_owned_response,
+        ),
+        (
+            r"the Call 1 request and finalized narrative are produced",
+            _h_finalize_call1_contract,
+        ),
+        (
+            r"the provider Call 1 step schema contains only those model-owned fields",
+            _h_call1_step_schema_has_model_fields,
+        ),
+        (
+            r"the provider Call 1 step schema does not contain a realizations property",
+            _h_call1_schema_omits_realizations,
+        ),
+        (
+            r"the finalized narrative contains exactly one canonical realization "
+            r"for each resolved projected step ID",
+            _h_finalized_realizations_complete,
+        ),
+        (
+            r"every finalized realization exactly matches the immutable projection context",
+            _h_finalized_realizations_match_context,
+        ),
+        (
+            r"no provider-supplied realization record is published",
+            _h_provider_realizations_not_published,
+        ),
+        (
+            r'the Call 1 response has projected-step resolution defect "([^"]+)"',
+            _h_projection_defect,
+        ),
+        (r"the narrative is finalized", _h_finalize_defective_narrative),
+        (
+            r'finalization rejects the response with a diagnostic identifying "([^"]+)"',
+            _h_defect_diagnostic,
+        ),
+        (
+            r"no finalized narrative artifact is published",
+            _h_no_defective_narrative_artifact,
+        ),
+        (
+            r"the current candidate selects (\d+) canonical projected steps",
+            _h_selected_step_count,
+        ),
+        (
+            r"the Call 1 provider response_format schema is built",
+            _h_build_candidate_call1_schema,
+        ),
+        (
+            r"the provider request contains steps\.maxItems equal to (\d+)",
+            _h_candidate_step_bound,
+        ),
+        (
+            r"that bound is present before the provider receives the request",
+            _h_candidate_bound_present_before_request,
+        ),
+        (
+            r'the tool-execution grounding helper is imported from "([^"]+)"',
+            _h_import_grounding_helper,
+        ),
+        (
+            r'a tool_execution leaf uses the "([^"]+)" typed action',
+            _h_typed_tool_execution_action,
+        ),
+        (
+            r"direct tool-execution grounding consistency is checked",
+            _h_check_tool_execution_grounding,
+        ),
+        (r'the result is "([^"]+)"', _h_grounding_result),
         # ------------------------------------------------------------------
         # Projection transport fix: step-ID echo normalization (TSIT)
         # ------------------------------------------------------------------

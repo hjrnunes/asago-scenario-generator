@@ -347,15 +347,20 @@ def _assert_success(
     _assert_common_requests(requests, 2)
     actors = _actor_requests(requests)
     retry_prompt = _messages(actors[1]).lower()
-    assert "prior response was truncated" in retry_prompt
-    assert "concise schema-matching response" in retry_prompt
-    assert sum(_schema_name(request) == "Call1Response" for request in requests) >= 1
+    assert retry_prompt.endswith(
+        "return only a schema-matching object with bounded lists and concise prose."
+    )
+    assert (
+        sum(_schema_name(request).startswith("Call1Response") for request in requests)
+        >= 1
+    )
 
     actor_logs = [
         entry for entry in _call_log(run_dir) if entry.get("call") == "actor_profile"
     ]
-    assert len(actor_logs) == 1
-    assert "error" not in actor_logs[0]
+    assert len(actor_logs) == 2
+    assert "error" in actor_logs[0]
+    assert "error" not in actor_logs[1]
     required = {
         "capability-profile.yaml",
         "coverage-gaps.json",
@@ -379,9 +384,11 @@ def _assert_bounded(
     actor_logs = [
         entry for entry in _call_log(run_dir) if entry.get("call") == "actor_profile"
     ]
-    assert len(actor_logs) == 1
-    assert "LengthFinishReasonError" in actor_logs[0].get("error", "")
-    assert not any(_schema_name(request) == "Call1Response" for request in requests)
+    assert len(actor_logs) == 2
+    assert all(entry.get("code") == "completion_length" for entry in actor_logs)
+    assert not any(
+        _schema_name(request).startswith("Call1Response") for request in requests
+    )
 
 
 def _assert_nonlength(
@@ -390,14 +397,16 @@ def _assert_nonlength(
     requests: list[dict[str, Any]],
 ) -> None:
     _assert_degraded_run(result)
-    _assert_common_requests(requests, 1)
+    _assert_common_requests(requests, 3)
     actor_logs = [
         entry for entry in _call_log(run_dir) if entry.get("call") == "actor_profile"
     ]
-    assert len(actor_logs) == 1
-    assert "LengthFinishReasonError" not in actor_logs[0].get("error", "")
-    assert actor_logs[0].get("error")
-    assert not any(_schema_name(request) == "Call1Response" for request in requests)
+    assert len(actor_logs) == 3
+    assert all(entry.get("code") != "completion_length" for entry in actor_logs)
+    assert all(entry.get("error") for entry in actor_logs)
+    assert not any(
+        _schema_name(request).startswith("Call1Response") for request in requests
+    )
 
 
 def main() -> int:

@@ -5,12 +5,15 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
 
-from asago_scenario_generator.data.atlas import TECHNIQUE_PROPERTIES
-from asago_scenario_generator.llm.client import LLMClient, LLMResult
+from asago_scenario_generator.llm.client import (
+    LengthFinishReasonError as LengthFinishReasonError,
+    LLMClient,
+    LLMResult,
+)
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     is_attacker_accessible_ingress,
@@ -21,24 +24,27 @@ from asago_scenario_generator.models.scenario import (
     ActorProfile,
 )
 from asago_scenario_generator.pipeline.generate.constants import (
-    _ACTOR_GOAL_INCOMPATIBLE,
     _ADVERSARIAL_INTENTION_KEYWORDS,
-    _ADVERSARIAL_ONLY_THREATS,
     _CAPABILITY_FLOORS,
     _CAPABILITY_ORDER,
     _INSIDER_ACTOR_TYPES,
-    ALL_ACTOR_TYPES,
-    CHAIN_TECHNIQUE_PAIRS,
 )
-from asago_scenario_generator.pipeline.generate.goals import (
-    _build_attack_goal_context_block,
+from asago_scenario_generator.pipeline.generate.actor_rules import (
+    _ep_controllability_to_ingress_mode,
+)
+
+# Preserve the historical actor-module import surface while policy lives in
+# the cycle-free actor_rules leaf.
+from asago_scenario_generator.pipeline.generate.actor_rules import (
+    _max_capability_level,  # noqa: F401
+    compute_compatible_actor_types,  # noqa: F401
+    compute_minimum_capability_level,  # noqa: F401
+)
+from asago_scenario_generator.pipeline.generate.actor_context import (
+    build_call0_context,
 )
 from asago_scenario_generator.pipeline.generate.ontology import (
-    _build_ontology_context,
-    _build_technique_context_block,
     _lookup_entry_point_controllability,
-    _lookup_entry_point_direction,
-    build_kc_definitions_block,
 )
 from asago_scenario_generator.pipeline.seeds import ScenarioSeed
 from asago_scenario_generator.prompts import render_prompt
@@ -58,25 +64,27 @@ _CALL0_ITEM_MAX_LENGTH = 200
 _CALL0_ENUM_MAX_LENGTH = 64
 _CALL0_EVIDENCE_MAX_LENGTH = 300
 
+_Call0Item = Annotated[str, Field(min_length=1, max_length=_CALL0_ITEM_MAX_LENGTH)]
+
 
 class Call0Response(BaseModel):
     """LLM response model for Call 0: Actor Profile."""
 
     actor_type: str = Field(max_length=_CALL0_ENUM_MAX_LENGTH)
     capability_level: str = Field(max_length=_CALL0_ENUM_MAX_LENGTH)
-    beliefs: list[str] = Field(
+    beliefs: list[_Call0Item] = Field(
         max_length=_CALL0_LIST_MAX_ITEMS,
         description="Attacker beliefs; bounded list of concise strings.",
     )
-    desires: list[str] = Field(
+    desires: list[_Call0Item] = Field(
         max_length=_CALL0_LIST_MAX_ITEMS,
         description="Attacker desires; bounded list of concise strings.",
     )
-    intentions: list[str] = Field(
+    intentions: list[_Call0Item] = Field(
         max_length=_CALL0_LIST_MAX_ITEMS,
         description="Attacker intentions; bounded list of concise strings.",
     )
-    resources: list[str] = Field(
+    resources: list[_Call0Item] = Field(
         max_length=_CALL0_LIST_MAX_ITEMS,
         description="Attacker resources; bounded list of concise strings.",
     )
@@ -94,10 +102,6 @@ class Call0Response(BaseModel):
     material_insider_advantage: str | None = Field(
         default=None, max_length=_CALL0_EVIDENCE_MAX_LENGTH
     )
-
-
-class CompactCall0Response(Call0Response):
-    """Provider schema name for the one causal compact-response experiment."""
 
 
 # ---------------------------------------------------------------------------
@@ -161,152 +165,6 @@ def _enforce_capability_floor(actor_type: str, capability_level: str) -> str:
         )
         return floor
     return capability_level
-
-
-def _max_capability_level(a: str, b: str) -> str:
-    """Return the higher of two capability levels."""
-    idx_a = _CAPABILITY_ORDER.index(a) if a in _CAPABILITY_ORDER else 0
-    idx_b = _CAPABILITY_ORDER.index(b) if b in _CAPABILITY_ORDER else 0
-    return _CAPABILITY_ORDER[max(idx_a, idx_b)]
-
-
-def compute_minimum_capability_level(
-    atlas_technique_ids: list[str] | tuple[str, ...] | None,
-    ep_controllability: str | None,
-    threat_id: str | None,
-) -> str:
-    """Compute the minimum capability level floor for a scenario seed.
-
-    Applies four rules and returns the highest triggered floor:
-
-    R1 -- Supply chain / training technique: advanced
-    R2 -- Multi-technique escalation (2+ techniques, unless chain pair): intermediate
-    R3 -- System EP access floor: intermediate
-    R4 -- Indirect EP + adversarial-only threat (except T2): intermediate
-
-    Returns:
-        The highest minimum capability level across all triggered rules.
-        Defaults to "novice" if no rules fire.
-    """
-    # Track the highest floor across all rules.
-    floor = "novice"
-
-    tech_ids = list(atlas_technique_ids) if atlas_technique_ids else []
-
-    # R1 -- Supply chain / training technique
-    for tid in tech_ids:
-        props = TECHNIQUE_PROPERTIES.get(tid)
-        if props and props.get("target_layer") in ("supply_chain", "training"):
-            floor = _max_capability_level(floor, "advanced")
-            break  # already at advanced, no need to check more
-
-    # R2 -- Multi-technique escalation
-    if len(tech_ids) >= 2:
-        # Check if the pair is a chain pair (only applies to exactly 2 techniques)
-        is_chain = False
-        if len(tech_ids) == 2:
-            pair = (tech_ids[0], tech_ids[1])
-            pair_rev = (tech_ids[1], tech_ids[0])
-            is_chain = (
-                pair in CHAIN_TECHNIQUE_PAIRS or pair_rev in CHAIN_TECHNIQUE_PAIRS
-            )
-        if not is_chain:
-            floor = _max_capability_level(floor, "intermediate")
-
-    # R3 -- System EP access floor
-    if ep_controllability == "system":
-        floor = _max_capability_level(floor, "intermediate")
-
-    # R4 -- Indirect EP + adversarial-only threat (except T2)
-    if (
-        ep_controllability == "indirect"
-        and threat_id in _ADVERSARIAL_ONLY_THREATS
-        and threat_id != "T2"
-    ):
-        floor = _max_capability_level(floor, "intermediate")
-
-    return floor
-
-
-def _ep_controllability_to_ingress_mode(ep_controllability: str | None) -> str | None:
-    """Map an entry point's effective controllability to an ingress mode.
-
-    Returns ``"direct"``, ``"indirect"``, or ``None`` (for ``system`` or
-    unknown — system entry points are not eligible ingress at all).
-    """
-    if ep_controllability in ("direct", "indirect"):
-        return ep_controllability
-    return None
-
-
-def compute_compatible_actor_types(
-    atlas_technique_ids: list[str] | tuple[str, ...] | None,
-    ep_controllability: str | None,
-    threat_id: str | None,
-    entry_point_name: str | None = None,
-    goal_id: str | None = None,
-) -> set[str]:
-    """Compute the set of structurally compatible actor types for a seed.
-
-    Applies rules in order, narrowing from the full actor-type set:
-
-    R1 -- Adversarial-only threat: remove negligent-insider
-    R2 -- (Removed cmps.6) The blanket indirect actor allowlist has been
-         removed.  Actor eligibility for indirect ingress is determined
-         by typed evidence validated post-hoc, not by a categorical
-         allowlist.  System controllability entry points are rejected
-         by ``is_attacker_accessible_ingress`` before generation.
-    R3 -- Technique requires direct access: remove negligent-insider and
-         supply-chain-actor; verify EP is direct
-    R4 -- Supply chain target layer: restrict to
-         {supply-chain-actor, nation-state, malicious-insider, automated-agent}
-    R5 -- Actor-goal consistency: remove actor types whose motivational
-         profile is incompatible with the assigned goal category
-
-    Returns:
-        Set of compatible actor type strings. Never empty.
-    """
-    compatible = set(ALL_ACTOR_TYPES)
-    tech_ids = list(atlas_technique_ids) if atlas_technique_ids else []
-
-    # R1 -- Adversarial-only threat exclusion
-    if threat_id in _ADVERSARIAL_ONLY_THREATS:
-        compatible.discard("negligent-insider")
-
-    # R2 removed (cmps.6): no blanket indirect actor allowlist.
-    # Actor eligibility for indirect ingress is determined by typed
-    # evidence (influence_source, influence_mechanism, trust_boundary)
-    # validated post-hoc by validate_actor_access_provenance.
-
-    # R3 -- Technique requires direct access
-    for tid in tech_ids:
-        props = TECHNIQUE_PROPERTIES.get(tid)
-        if props and props.get("requires_direct_access"):
-            compatible.discard("negligent-insider")
-            compatible.discard("supply-chain-actor")
-            break
-
-    # R4 -- Supply chain target layer
-    for tid in tech_ids:
-        props = TECHNIQUE_PROPERTIES.get(tid)
-        if props and props.get("target_layer") == "supply_chain":
-            compatible &= {
-                "supply-chain-actor",
-                "nation-state",
-                "malicious-insider",
-                "automated-agent",
-            }
-            break
-
-    # R5 -- Actor-goal consistency
-    if goal_id and goal_id in _ACTOR_GOAL_INCOMPATIBLE:
-        incompatible = _ACTOR_GOAL_INCOMPATIBLE[goal_id]
-        pruned = compatible - incompatible
-        # Safety: never empty the set — skip R5 if it would
-        if pruned:
-            compatible = pruned
-
-    return compatible
 
 
 def _validate_actor_type(actor_profile: ActorProfile) -> ActorProfile:
@@ -376,6 +234,12 @@ def build_actor_access_provenance(
     supplied, these names are resolved to canonical hex IDs before
     constructing the provenance object.
 
+    When *projection_context* is supplied with exactly one authoritative
+    source-influence path, the typed source reference, kind, and trust
+    boundary are taken from the projection — the model does not choose the
+    canonical IDs.  Otherwise the LLM response fields (after name
+    resolution) are used.
+
     Unresolved/system controllability raises ``ValueError`` — system entry
     points are not eligible ingress and must never default to direct.
     """
@@ -391,6 +255,7 @@ def build_actor_access_provenance(
     influence_source_kind: str | None = None
     influence_source_id: str | None = None
     trust_boundary_id = resp.trust_boundary_id
+
     authoritative_paths = (
         projection_context.get("source_influence_paths", [])
         if projection_context is not None
@@ -403,22 +268,17 @@ def build_actor_access_provenance(
                     "projection context must contain exactly one source-influence path"
                 )
             path = authoritative_paths[0]
-            influence_source_kind = path["source_identity_kind"]
-            influence_source_id = path["source_id"]
-            influence_source = influence_source_id
-            trust_boundary_id = path["boundary_id"]
-        else:
-            # Direct ingress has no source or boundary provenance.  The LLM
-            # cannot add indirect references after projection.
-            influence_source = None
-            trust_boundary_id = None
-    if profile is not None:
+            influence_source = path.get("source_id")
+            influence_source_kind = path.get("source_identity_kind")
+            influence_source_id = path.get("source_id")
+            trust_boundary_id = path.get("boundary_id")
+    elif profile is not None:
         from asago_scenario_generator.pipeline.generate.names import (
             resolve_name_to_entry_point_id,
             resolve_name_to_trust_boundary_id,
         )
 
-        if influence_source and influence_source_kind != "integration":
+        if influence_source:
             resolved = resolve_name_to_entry_point_id(influence_source, profile)
             if resolved is not None:
                 influence_source = resolved
@@ -433,7 +293,7 @@ def build_actor_access_provenance(
         access_class=resp.access_class,
         influence_source=influence_source,
         influence_source_kind=influence_source_kind,
-        influence_source_id=influence_source_id or influence_source,
+        influence_source_id=influence_source_id,
         influence_mechanism=resp.influence_mechanism,
         trust_boundary_id=trust_boundary_id,
         material_insider_advantage=resp.material_insider_advantage,
@@ -542,7 +402,7 @@ def _canonical_checks(
                     rule="unresolved_influence_source",
                     message=(
                         f"influence_source '{source_id}' does not resolve "
-                        "to any entry point in the capability profile."
+                        f"to any entry point in the capability profile."
                     ),
                 )
             )
@@ -555,26 +415,36 @@ def _canonical_checks(
                     rule="self_relation_influence_source",
                     message=(
                         f"influence_source '{source_id}' is the same entry "
-                        "point as the initial ingress — self-relations are "
-                        "not representable."
+                        f"point as the initial ingress "
+                        f"'{access.initial_entry_point_id}' — no declared "
+                        f"self-relation model accepts this (cmps.6)."
                     ),
                 )
             )
             return
 
-        # 6b. Source must be attacker-accessible (not output-only/system).
+        # 6b. Source must be attacker-accessible (not output-only or system).
         if source_ep.direction == "output":
             violations.append(
                 ActorAccessViolation(
                     rule="output_influence_source",
-                    message=f"influence_source '{source_id}' is output-only.",
+                    message=(
+                        f"influence_source '{source_id}' resolves "
+                        f"to '{source_ep.name}' which is output-only — an "
+                        f"output channel cannot be an actor-controlled "
+                        f"influence source."
+                    ),
                 )
             )
         if source_ep.effective_controllability == "system":
             violations.append(
                 ActorAccessViolation(
                     rule="system_influence_source",
-                    message=f"influence_source '{source_id}' is system-controlled.",
+                    message=(
+                        f"influence_source '{source_id}' resolves "
+                        f"to '{source_ep.name}' which is system-controlled — "
+                        f"not an actor-accessible influence source."
+                    ),
                 )
             )
 
@@ -614,6 +484,8 @@ def _canonical_checks(
 
     # 7b. Boundary from_zone must correspond to the source EP's
     #      effective_ingress_zone or an explicitly modeled external zone.
+    #      External integration sources model their own zones; only
+    #      entry-point sources are zone-checked here.
     source_zone = source_ep.effective_ingress_zone if source_ep is not None else None
     if (
         source_ep is not None
@@ -741,8 +613,7 @@ def validate_actor_access_provenance(
     # 3. Indirect ingress evidence completeness
     if access.ingress_mode == "indirect":
         missing = []
-        source_id = access.influence_source_id or access.influence_source
-        if not source_id or not source_id.strip():
+        if not access.influence_source or not access.influence_source.strip():
             missing.append("influence_source")
         if not access.influence_mechanism or not access.influence_mechanism.strip():
             missing.append("influence_mechanism")
@@ -794,346 +665,8 @@ def validate_actor_access_provenance(
 # ---------------------------------------------------------------------------
 
 
-def build_call0_context(
-    seed: ScenarioSeed,
-    profile: CapabilityProfile,
-    use_case: str,
-    preferred_actor_type: str | None = None,
-    excluded_actor_types: list[str] | None = None,
-    preferred_capability_level: str | None = None,
-    attack_goal: dict[str, Any] | None = None,
-    pinned_technique_ids: list[str] | None = None,
-    forced_actor_type: str | None = None,
-    pinned_entry_point: str | None = None,
-    pinned_entry_point_id: str | None = None,
-    access_feedback: str | None = None,
-    projection_context: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Build prompt template variables for Call 0 (Actor Profile).
-
-    Pure data-preparation function that constructs all template variables
-    needed by ``call0_system.j2`` and ``call0_user.j2``.  No LLM calls.
-
-    Args:
-        seed: The scenario seed providing threat context.
-        profile: The system's capability profile.
-        use_case: Free-text description of the system under assessment.
-        preferred_actor_type: Suggested actor type for diversity (hint, not enforced).
-        excluded_actor_types: Actor types to avoid (already overused in this batch).
-        preferred_capability_level: Suggested capability level for diversity
-            (hint, not enforced).
-        attack_goal: Selected attack goal sub-goal dict from the taxonomy.
-        pinned_technique_ids: Hard-constrained ATLAS technique IDs from the
-            candidate filter.
-        forced_actor_type: Hard-constrained actor type override.
-        pinned_entry_point: Hard-constrained entry point from the candidate
-            filter.
-
-    Returns:
-        Dict mapping template variable names to their values.  Keys
-        include both system-prompt variables (``minimum_capability_level``,
-        ``compatible_actor_types``) and user-prompt variables
-        (``technique_context``, ``diversity_section``, etc.).
-    """
-    # Compute capability-level minimum floor (estu constraint)
-    _tech_ids_for_floor = (
-        pinned_technique_ids if pinned_technique_ids else seed.atlas_technique_ids
-    )
-    # Look up EP controllability early so it's available for floor computation
-    _ep_controllability_for_floor = _lookup_entry_point_controllability(
-        profile,
-        pinned_entry_point,
-        pinned_entry_point_id,
-    )
-    minimum_capability_level = compute_minimum_capability_level(
-        _tech_ids_for_floor,
-        _ep_controllability_for_floor,
-        seed.threat_id,
-    )
-
-    # Override preferred_capability_level if it falls below the computed floor
-    if preferred_capability_level and minimum_capability_level != "novice":
-        pref_idx = (
-            _CAPABILITY_ORDER.index(preferred_capability_level)
-            if preferred_capability_level in _CAPABILITY_ORDER
-            else 1
-        )
-        floor_idx = _CAPABILITY_ORDER.index(minimum_capability_level)
-        if pref_idx < floor_idx:
-            logger.debug(
-                "Capability floor override: preferred '%s' < minimum '%s' "
-                "for seed %s — bumping preferred",
-                preferred_capability_level,
-                minimum_capability_level,
-                seed.seed_id,
-            )
-            preferred_capability_level = minimum_capability_level
-
-    # Compute actor-type compatible set (ok0p constraint)
-    _goal_id = attack_goal["id"] if attack_goal else None
-    compatible_actor_types = compute_compatible_actor_types(
-        _tech_ids_for_floor,
-        _ep_controllability_for_floor,
-        seed.threat_id,
-        entry_point_name=pinned_entry_point,
-        goal_id=_goal_id,
-    )
-
-    # Override preferred_actor_type if not in compatible set
-    if preferred_actor_type and preferred_actor_type not in compatible_actor_types:
-        # Pick next best from compatible set (not excluded)
-        excluded_set = set(excluded_actor_types) if excluded_actor_types else set()
-        fallback_candidates = compatible_actor_types - excluded_set
-        if fallback_candidates:
-            preferred_actor_type = min(fallback_candidates)
-            logger.debug(
-                "Actor type constraint override: preferred '%s' not compatible "
-                "for seed %s — falling back to '%s'",
-                preferred_actor_type,
-                seed.seed_id,
-                preferred_actor_type,
-            )
-        else:
-            # All compatible types are excluded; pick any compatible type
-            preferred_actor_type = min(compatible_actor_types)
-
-    # Build actor type diversity guidance
-    diversity_section = ""
-    _diversity_limitation: str | None = None
-    if forced_actor_type:
-        # Hard constraint — override any preferred/excluded hints.
-        # cmps.6: incompatible forced types must be replaced before prompt
-        # rendering with a feasible actor; diversity must never force an
-        # incompatible actor.  Record the limitation so callers know.
-        if forced_actor_type not in compatible_actor_types:
-            _diversity_limitation = forced_actor_type
-            logger.warning(
-                "Forced actor_type '%s' not in compatible set %s for seed %s "
-                "— replacing with feasible fallback (cmps.6)",
-                forced_actor_type,
-                sorted(compatible_actor_types),
-                seed.seed_id,
-            )
-            forced_actor_type = min(compatible_actor_types)
-        diversity_section = (
-            "\n## Actor Type Constraint\n"
-            f"- You MUST use actor_type: {forced_actor_type}. "
-            "This is a hard constraint, not a suggestion. "
-            "Generate beliefs, desires, intentions, and resources that are "
-            f"appropriate and realistic for a {forced_actor_type} actor.\n"
-        )
-    elif preferred_actor_type or excluded_actor_types or preferred_capability_level:
-        diversity_lines = ["\n## Actor Type Guidance"]
-        if preferred_actor_type:
-            diversity_lines.append(
-                f"- Preferred actor type: {preferred_actor_type} "
-                "(use this unless it would be unrealistic for the threat)"
-            )
-        if excluded_actor_types:
-            diversity_lines.append(
-                f"- Avoid these overused actor types: {excluded_actor_types}"
-            )
-        if preferred_capability_level:
-            diversity_lines.append(
-                f"- Preferred capability level: {preferred_capability_level} "
-                "(use this unless it would be unrealistic for the threat)"
-            )
-        diversity_section = "\n".join(diversity_lines) + "\n"
-
-    # Build shared ATLAS technique context — pin to specific techniques if set
-    tech_ids_for_context = (
-        pinned_technique_ids if pinned_technique_ids else seed.atlas_technique_ids
-    )
-    technique_context = _build_technique_context_block(tech_ids_for_context)
-    if pinned_technique_ids:
-        technique_framing_0 = (
-            "You MUST use these ATLAS technique(s) to inform the actor's intentions "
-            "and resource selection — the actor should have plausible knowledge "
-            "and tools for these techniques. This is a hard constraint.\n"
-        )
-    else:
-        technique_framing_0 = (
-            "Use these techniques to inform the actor's intentions and resource "
-            "selection — the actor should have plausible knowledge and tools for "
-            "these techniques.\n"
-            if technique_context
-            else ""
-        )
-
-    # Build attack goal context block
-    goal_section = ""
-    if attack_goal is not None:
-        goal_section = _build_attack_goal_context_block(attack_goal)
-
-    # Compute technique count for BDI parsimony (intention budget)
-    pinned_technique_count = len(pinned_technique_ids) if pinned_technique_ids else 1
-
-    # Look up entry point direction and controllability from the capability profile
-    pinned_entry_point_direction = _lookup_entry_point_direction(
-        profile,
-        pinned_entry_point,
-        pinned_entry_point_id,
-    )
-    pinned_entry_point_controllability = _lookup_entry_point_controllability(
-        profile,
-        pinned_entry_point,
-        pinned_entry_point_id,
-    )
-
-    # Build KC/KCX definition block for the prompt
-    kc_definitions = build_kc_definitions_block(profile.kc_subcodes)
-
-    # Build focused ontology context block for this seed
-    ontology_context = _build_ontology_context(
-        entry_point_name=pinned_entry_point or "",
-        entry_point_direction=pinned_entry_point_direction,
-        zones=profile.zones_active,
-        technique_ids=list(tech_ids_for_context) if tech_ids_for_context else [],
-        entry_point_controllability=pinned_entry_point_controllability,
-    )
-
-    # Build access provenance section for the prompt (cmps.6)
-    access_provenance_section = ""
-    if pinned_entry_point_id:
-        ingress_mode = _ep_controllability_to_ingress_mode(
-            pinned_entry_point_controllability
-        )
-        if ingress_mode == "indirect":
-            # Build explicit lists of valid trust-boundary names and upstream
-            # entry-point names so the LLM can choose a valid source→boundary→
-            # ingress path using human-readable names (cmps.6, Phase 3).
-            _boundaries_ctx = ""
-            if profile.trust_boundaries:
-                _boundary_lines = []
-                for tb in profile.trust_boundaries:
-                    _boundary_lines.append(
-                        f"  - {tb.name} ({tb.from_zone}→{tb.to_zone})"
-                    )
-                _boundaries_ctx = (
-                    "\nValid trust_boundary_id values (choose one that "
-                    "connects the influence source zone to the pinned "
-                    "entry point zone):\n" + "\n".join(_boundary_lines) + "\n"
-                )
-
-            _upstream_eps_ctx = ""
-            _pinned_ep = profile.resolve_entry_point(pinned_entry_point_id)
-            if _pinned_ep is not None:
-                _upstream_eps = [
-                    ep
-                    for ep in profile.entry_points
-                    if ep.entry_point_id != pinned_entry_point_id
-                    and ep.direction != "output"
-                    and ep.effective_controllability != "system"
-                ]
-                if _upstream_eps:
-                    _up_lines = []
-                    for ep in _upstream_eps:
-                        _up_lines.append(
-                            f"  - {ep.name} "
-                            f"(direction={ep.direction}, "
-                            f"controllability={ep.effective_controllability}, "
-                            f"zone={ep.effective_ingress_zone})"
-                        )
-                    _upstream_eps_ctx = (
-                        "\nValid influence_source entry-point names "
-                        "(the upstream data source the actor influences):\n"
-                        + "\n".join(_up_lines)
-                        + "\n"
-                    )
-
-            access_provenance_section = (
-                "\n## Access Provenance Constraint (MANDATORY)\n"
-                "The pinned entry point is an **indirect** ingress surface — "
-                "the actor influences an upstream data source rather than "
-                "typing input directly. You MUST provide structured evidence:\n"
-                "- `access_class`: one of `public`, `authenticated`, "
-                "`privileged`, `supply_chain` — the actor's relationship to "
-                "the system\n"
-                "- `influence_source`: the name of the upstream entry point "
-                "(data source or channel) the actor influences\n"
-                "- `influence_mechanism`: how the actor exerts influence "
-                "(e.g. 'document poisoning', 'supply-chain staging')\n"
-                "- `trust_boundary_id`: the name of a TrustBoundary "
-                "declared in the capability profile\n"
-                f"{_upstream_eps_ctx}"
-                f"{_boundaries_ctx}"
-            )
-        elif ingress_mode == "direct":
-            # Check if the actor type might be an insider
-            _is_insider = (
-                forced_actor_type in _INSIDER_ACTOR_TYPES
-                if forced_actor_type
-                else (
-                    preferred_actor_type in _INSIDER_ACTOR_TYPES
-                    if preferred_actor_type
-                    else False
-                )
-            )
-            if _is_insider:
-                access_provenance_section = (
-                    "\n## Access Provenance Constraint (MANDATORY)\n"
-                    "The pinned entry point is a **direct** ingress surface "
-                    "and the actor is an insider. You MUST provide:\n"
-                    "- `access_class`: one of `public`, `authenticated`, "
-                    "`privileged` — the actor's relationship to the system\n"
-                    "- `material_insider_advantage`: a structured material "
-                    "advantage beyond public access that justifies why an "
-                    "insider uses this surface (e.g. 'knowledge of internal "
-                    "rate-limit bypass', 'access to pre-production config "
-                    "overrides affecting input validation')\n"
-                )
-            else:
-                access_provenance_section = (
-                    "\n## Access Provenance Constraint\n"
-                    "The pinned entry point is a **direct** ingress surface. "
-                    "The actor interacts through the normal user interface.\n"
-                    "- `access_class`: one of `public`, `authenticated`, "
-                    "`privileged` — the actor's relationship to the system\n"
-                )
-
-    # Humanize projection context for the template (Phase 3)
-    from asago_scenario_generator.pipeline.generate.names import (
-        humanize_projection_context,
-    )
-
-    humanized_projection = (
-        humanize_projection_context(projection_context, profile)
-        if projection_context is not None
-        else projection_context
-    )
-
-    return {
-        # System prompt variables
-        "minimum_capability_level": minimum_capability_level,
-        "compatible_actor_types": sorted(compatible_actor_types),
-        # User prompt variables
-        "use_case": use_case,
-        "seed": seed,
-        "profile": profile,
-        "technique_context": technique_context,
-        "technique_framing_0": technique_framing_0,
-        "goal_section": goal_section,
-        "diversity_section": diversity_section,
-        "diversity_limitation": _diversity_limitation,
-        "access_provenance_section": access_provenance_section,
-        "access_feedback": access_feedback or "",
-        "pinned_entry_point": pinned_entry_point,
-        "pinned_entry_point_direction": pinned_entry_point_direction,
-        "pinned_entry_point_id": pinned_entry_point_id,
-        "pinned_technique_count": pinned_technique_count,
-        "kc_definitions": kc_definitions,
-        "ontology_context": ontology_context,
-        "tool_inventory": profile.tool_inventory or [],
-        "projection_context": humanized_projection,
-    }
-
-
 def _complete_actor_profile(
-    client: LLMClient,
-    system_prompt: str,
-    user_prompt: str,
-    *,
-    compact_response_schema: bool = False,
+    client: LLMClient, system_prompt: str, user_prompt: str
 ) -> LLMResult:
     """Complete Call 0 exactly once with the operator-configured limit.
 
@@ -1144,9 +677,7 @@ def _complete_actor_profile(
     return client.complete(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        response_format=(
-            CompactCall0Response if compact_response_schema else Call0Response
-        ),
+        response_format=Call0Response,
         max_completion_tokens=client.max_completion_tokens,
     )
 
@@ -1166,7 +697,6 @@ def _call_actor_profile(
     pinned_entry_point_id: str | None = None,
     access_feedback: str | None = None,
     completion_length_feedback: str | None = None,
-    compact_response_schema: bool = False,
     projection_context: dict[str, Any] | None = None,
 ) -> tuple[ActorProfile, LLMResult, str | None]:
     """Generate a threat actor profile for a scenario seed (Call 0).
@@ -1205,12 +735,7 @@ def _call_actor_profile(
     user_prompt = render_prompt("call0_user.j2", **ctx)
     if completion_length_feedback:
         user_prompt = f"{user_prompt}{completion_length_feedback}"
-    result = _complete_actor_profile(
-        client,
-        system_prompt,
-        user_prompt,
-        compact_response_schema=compact_response_schema,
-    )
+    result = _complete_actor_profile(client, system_prompt, user_prompt)
 
     resp = result.content
     actor_type = _normalize_actor_type(resp.actor_type)
@@ -1276,3 +801,8 @@ def _call_actor_profile(
         )
 
     return actor_profile, result, ctx.get("diversity_limitation")
+
+
+# mutate4py-manifest-begin
+# {"version":1,"tested_at":"2026-08-21T12:04:02Z","module_hash":"6f394168dc1d5cdedbab851be26db81a56d4a01c0d842974c69ba842904810a9","source_sha256":"f9cb699bc56b29697555d2d8604cd47b47a4d564ea5144a6bda94b63f419e4fc","functions":[{"id":"func/_normalize_actor_type","name":"_normalize_actor_type","line":112,"end_line":129,"hash":"b14a12241134138150c3a650d05ea0c25e6d6f174234ad165964d5672753684d"},{"id":"func/_normalize_capability_level","name":"_normalize_capability_level","line":132,"end_line":142,"hash":"a9c1580791267cf62ecc36250e99295564baf4b3ce757ae961cd748a69b2fa7e"},{"id":"func/_enforce_capability_floor","name":"_enforce_capability_floor","line":145,"end_line":167,"hash":"aab9a89c8d440c382d9bd5d3bedd8ba1888349f2850606a2b0a3b5775f24149b"},{"id":"func/_validate_actor_type","name":"_validate_actor_type","line":170,"end_line":201,"hash":"c95cc34d0eda29274412d741a9f8aa01a477baf6df5bab2b52d6c7a4f48a23c2"},{"id":"func/build_actor_access_provenance","name":"build_actor_access_provenance","line":217,"end_line":272,"hash":"02ca2d66c246ac8997b0811d3574988d4bafc9e76f6c240f1286ecfdec0d95dc"},{"id":"func/_canonical_checks","name":"_canonical_checks","line":275,"end_line":484,"hash":"d2b36eff3a1be48d8dc66cf0f61f69277fb93102a1fd6ca075144e915365847e"},{"id":"func/validate_actor_access_provenance","name":"validate_actor_access_provenance","line":487,"end_line":612,"hash":"c1a7a8e202aa760b400b0946a93a5d99808ff6fae33042d55d2a99790b5bfde8"},{"id":"func/_complete_actor_profile","name":"_complete_actor_profile","line":620,"end_line":634,"hash":"299c1231324c1a3eeed4ba30713c3e16467c61a7b362a0b179ce590cb212c6ce"},{"id":"func/_call_actor_profile","name":"_call_actor_profile","line":637,"end_line":754,"hash":"f9ba3ac1cef0e9c8020df5551ac781249ae3b04b52f6b6e81fc0bfce02cfffc6"}]}
+# mutate4py-manifest-end
