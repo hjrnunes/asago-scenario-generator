@@ -160,6 +160,30 @@ def humanize_projection_context(
         humanized_steps.append(h_step)
     result["selected_steps"] = humanized_steps
 
+    # Keep canonical IDs in the authoritative path record so generated
+    # stages cannot replace them, while supplying names for prompt prose.
+    source_names = profile.integration_name_to_id()
+    source_names.update(profile.entry_point_name_to_id())
+    source_id_to_name = {value: key for key, value in source_names.items()}
+    boundary_id_to_name = {
+        boundary.trust_boundary_id: boundary.name
+        for boundary in profile.trust_boundaries or ()
+    }
+    humanized_paths = []
+    for path in projection_context.get("source_influence_paths", []):
+        h_path = dict(path)
+        h_path["source_name"] = source_id_to_name.get(
+            path.get("source_id"), path.get("source_id", "")
+        )
+        h_path["boundary_name"] = boundary_id_to_name.get(
+            path.get("boundary_id"), path.get("boundary_id", "")
+        )
+        h_path["target_ingress_name"] = id_to_ep.get(
+            path.get("target_ingress_id"), path.get("target_ingress_id", "")
+        )
+        humanized_paths.append(h_path)
+    result["source_influence_paths"] = humanized_paths
+
     # Note: resource_slots and bindings were removed from the projection
     # context in Phase 4 — they are no longer rendered in prompts.
 

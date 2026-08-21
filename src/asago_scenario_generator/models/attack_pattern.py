@@ -419,6 +419,9 @@ class StepResourceLink(ContractModel):
     role: Literal["ingress", "tool_fixture", "source_influence"]
     trust_boundary_slot_id: Identifier | None = None
     target_ingress_slot_id: Identifier | None = None
+    # Keep the declared relation kind separate from the bound slot kind so
+    # qualification can reject a forged kind without substituting a resource.
+    source_identity_kind: Literal["entry_point", "integration"] | None = None
 
     @model_validator(mode="after")
     def source_influence_fields_are_exclusive(self) -> StepResourceLink:
@@ -439,6 +442,10 @@ class StepResourceLink(ContractModel):
             if self.target_ingress_slot_id is not None:
                 raise ValueError(
                     "target_ingress_slot_id is only valid for source_influence links"
+                )
+            if self.source_identity_kind is not None:
+                raise ValueError(
+                    "source_identity_kind is only valid for source_influence links"
                 )
         return self
 
@@ -508,6 +515,17 @@ class SecurityOutcomeAssertionRequirement(ContractModel):
     kind: Literal["security_outcome_assertion"]
     source_step_id: Identifier
     postcondition_id: Identifier
+
+
+class SourceInfluencePath(ContractModel):
+    """One deterministic source-to-boundary-to-ingress relation."""
+
+    source_identity_kind: Literal["entry_point", "integration"]
+    source_id: str
+    boundary_id: str
+    target_ingress_id: str
+    expected_target_zone: str
+    boundary_zones: str
 
 
 ExecutionRequirement: TypeAlias = Annotated[
@@ -743,6 +761,7 @@ class ResourceSlot(ContractModel):
         Literal["input", "reasoning", "tool_execution", "memory", "inter_agent"],
         ...,
     ] = ()
+    allowed_resource_ids: tuple[Identifier, ...] = ()
     distinct_from_slot_ids: tuple[Identifier, ...] = ()
 
     @model_validator(mode="after")
@@ -773,6 +792,7 @@ class ResourceSlot(ContractModel):
             self.allowed_entry_point_ingress_zones,
             self.allowed_trust_boundary_from_zones,
             self.allowed_trust_boundary_to_zones,
+            self.allowed_resource_ids,
         )
         if any(len(values) != len(set(values)) for values in constraint_groups):
             raise ValueError("each resource-slot constraint list must be unique")
@@ -1101,6 +1121,7 @@ class ProjectionSnapshot(ContractModel):
     pattern_pin: Digest
     capability_fact_snapshot_digest: Digest
     projection_digest: Digest
+    source_influence_paths: tuple[SourceInfluencePath, ...] = ()
 
     @model_validator(mode="after")
     def semantics(self) -> ProjectionSnapshot:
@@ -1202,6 +1223,7 @@ _UNORDERED_FIELDS = {
     "allowed_entry_point_ingress_zones",
     "allowed_entry_point_types",
     "allowed_integration_types",
+    "allowed_resource_ids",
     "allowed_trust_boundary_from_zones",
     "allowed_trust_boundary_to_zones",
     "consumed",
@@ -1289,6 +1311,7 @@ def compute_chain_semantic_digest(chain: CanonicalAttackChain | dict[str, Any]) 
             "allowed_entry_point_ingress_zones",
             "allowed_trust_boundary_from_zones",
             "allowed_trust_boundary_to_zones",
+            "allowed_resource_ids",
             "distinct_from_slot_ids",
         )
         payload["resource_slots"] = [
@@ -1309,7 +1332,7 @@ def compute_chain_semantic_digest(chain: CanonicalAttackChain | dict[str, Any]) 
     # explicit-None/[] identically so callers can sign raw dicts that omit
     # the defaults.  Never mutates ``chain``.
     steps = payload.get("steps")
-    if isinstance(steps, list):
+    if isinstance(steps, (list, tuple)):
         normalized_steps = []
         for step in steps:
             if not isinstance(step, dict):
@@ -1323,17 +1346,26 @@ def compute_chain_semantic_digest(chain: CanonicalAttackChain | dict[str, Any]) 
             }
             # Canonicalize optional None fields within resource links.
             links = step["resource_links"]
-            if isinstance(links, list):
+            if isinstance(links, (list, tuple)):
                 step = {
                     **step,
                     "resource_links": [
                         {
-                            **link,
+                            **{
+                                key: value
+                                for key, value in link.items()
+                                if key != "source_identity_kind" or value is not None
+                            },
                             "trust_boundary_slot_id": link.get(
                                 "trust_boundary_slot_id"
                             ),
                             "target_ingress_slot_id": link.get(
                                 "target_ingress_slot_id"
+                            ),
+                            **(
+                                {"source_identity_kind": link["source_identity_kind"]}
+                                if link.get("source_identity_kind") is not None
+                                else {}
                             ),
                         }
                         if isinstance(link, dict)
@@ -1366,6 +1398,7 @@ def compute_projection_digest(snapshot: ProjectionSnapshot | dict[str, Any]) -> 
                 "allowed_entry_point_ingress_zones",
                 "allowed_trust_boundary_from_zones",
                 "allowed_trust_boundary_to_zones",
+                "allowed_resource_ids",
                 "distinct_from_slot_ids",
             }
             payload["source_chain"] = {
@@ -1381,6 +1414,36 @@ def compute_projection_digest(snapshot: ProjectionSnapshot | dict[str, Any]) -> 
                     for slot in resource_slots
                 ],
             }
+        steps = source_chain.get("steps")
+        if isinstance(steps, (list, tuple)):
+            payload["source_chain"] = {
+                **payload["source_chain"],
+                "steps": [
+                    {
+                        **step,
+                        "resource_links": [
+                            {
+                                key: value
+                                for key, value in link.items()
+                                if key != "source_identity_kind" or value is not None
+                            }
+                            if isinstance(link, dict)
+                            else link
+                            for link in step.get("resource_links", ())
+                        ],
+                    }
+                    if isinstance(step, dict)
+                    else step
+                    for step in steps
+                ],
+            }
+    # Empty relation paths are the backwards-compatible direct-ingress
+    # default.  Keep their digest equivalent to pre-relation snapshots while
+    # binding a non-empty authoritative path into the new digest.
+    if payload.get("source_influence_paths") == ():
+        payload.pop("source_influence_paths", None)
+    elif payload.get("source_influence_paths") == []:
+        payload.pop("source_influence_paths", None)
     return _semantic_digest(
         payload, "projection_digest", "asago-scenario-generator:projection:v1"
     )

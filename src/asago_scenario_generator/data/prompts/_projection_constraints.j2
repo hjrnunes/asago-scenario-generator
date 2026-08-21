@@ -9,6 +9,21 @@ trace back to these exact projected steps.
 - entry_point: {{ projection_context.canonical_ingress_name | default(projection_context.canonical_ingress.entry_point_id) }}
 - ingress_controllability: {{ projection_context.ingress_controllability }}
 
+### Authoritative Source-Influence Paths
+{% if projection_context.get("source_influence_paths", []) %}
+Exactly one projected path is authoritative.  Do not select or replace any
+source, boundary, or target identifier from model output:
+{% for path in projection_context.source_influence_paths %}- source_identity_kind: {{ path.source_identity_kind }}
+  source_id: {{ path.source_id }} ({{ path.source_name | default(path.source_id) }})
+  boundary_id: {{ path.boundary_id }} ({{ path.boundary_name | default(path.boundary_id) }})
+  target_ingress_id: {{ path.target_ingress_id }} ({{ path.target_ingress_name | default(path.target_ingress_id) }})
+  expected_target_zone: {{ path.expected_target_zone }}
+  boundary_zones: {{ path.boundary_zones }}
+{% endfor %}
+{% else %}The canonical ingress is direct.  influence_source_kind,
+influence_source_id, and trust_boundary_id must all be null.
+{% endif %}
+
 ### Selected Projected Step IDs (canonical order — echo these exact values)
 **Warning:** step IDs are semantic names, not positional labels.  Never
 replace a step ID with its numeric position or infer identity from ordering.

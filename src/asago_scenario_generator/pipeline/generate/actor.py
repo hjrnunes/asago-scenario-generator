@@ -362,6 +362,7 @@ def build_actor_access_provenance(
     actor_type: str,
     resp: Call0Response,
     profile: CapabilityProfile | None = None,
+    projection_context: dict[str, Any] | None = None,
 ) -> ActorAccessProvenance:
     """Construct an :class:`ActorAccessProvenance` from canonical EP identity
     and LLM-generated evidence.
@@ -387,14 +388,37 @@ def build_actor_access_provenance(
 
     # Phase 3: resolve LLM-output names to canonical hex IDs
     influence_source = resp.influence_source
+    influence_source_kind: str | None = None
+    influence_source_id: str | None = None
     trust_boundary_id = resp.trust_boundary_id
+    authoritative_paths = (
+        projection_context.get("source_influence_paths", [])
+        if projection_context is not None
+        else []
+    )
+    if projection_context is not None:
+        if authoritative_paths:
+            if len(authoritative_paths) != 1:
+                raise ValueError(
+                    "projection context must contain exactly one source-influence path"
+                )
+            path = authoritative_paths[0]
+            influence_source_kind = path["source_identity_kind"]
+            influence_source_id = path["source_id"]
+            influence_source = influence_source_id
+            trust_boundary_id = path["boundary_id"]
+        else:
+            # Direct ingress has no source or boundary provenance.  The LLM
+            # cannot add indirect references after projection.
+            influence_source = None
+            trust_boundary_id = None
     if profile is not None:
         from asago_scenario_generator.pipeline.generate.names import (
             resolve_name_to_entry_point_id,
             resolve_name_to_trust_boundary_id,
         )
 
-        if influence_source:
+        if influence_source and influence_source_kind != "integration":
             resolved = resolve_name_to_entry_point_id(influence_source, profile)
             if resolved is not None:
                 influence_source = resolved
@@ -408,6 +432,8 @@ def build_actor_access_provenance(
         ingress_mode=ingress_mode,
         access_class=resp.access_class,
         influence_source=influence_source,
+        influence_source_kind=influence_source_kind,
+        influence_source_id=influence_source_id or influence_source,
         influence_mechanism=resp.influence_mechanism,
         trust_boundary_id=trust_boundary_id,
         material_insider_advantage=resp.material_insider_advantage,
@@ -488,63 +514,69 @@ def _canonical_checks(
     if access.ingress_mode != "indirect":
         return
 
-    # influence_source must be present and resolve to a different EP.
-    if not access.influence_source or not access.influence_source.strip():
+    # The legacy influence_source field remains accepted, but the typed
+    # source kind/ID pair is authoritative when present.
+    source_id = access.influence_source_id or access.influence_source
+    source_kind = access.influence_source_kind or "entry_point"
+    if not source_id or not source_id.strip():
         return  # Already flagged as missing in structural checks.
 
-    source_ep = profile.resolve_entry_point(access.influence_source)
-    if source_ep is None:
-        violations.append(
-            ActorAccessViolation(
-                rule="unresolved_influence_source",
-                message=(
-                    f"influence_source '{access.influence_source}' "
-                    f"does not resolve to any entry point in the "
-                    f"capability profile."
-                ),
+    source_ep = None
+    if source_kind == "integration":
+        if profile.resolve_integration(source_id) is None:
+            violations.append(
+                ActorAccessViolation(
+                    rule="unresolved_influence_source",
+                    message=(
+                        f"influence_source '{source_id}' does not resolve "
+                        "to an integration in the capability profile."
+                    ),
+                )
             )
-        )
-        return
+            return
+    else:
+        source_ep = profile.resolve_entry_point(source_id)
+        if source_ep is None:
+            violations.append(
+                ActorAccessViolation(
+                    rule="unresolved_influence_source",
+                    message=(
+                        f"influence_source '{source_id}' does not resolve "
+                        "to any entry point in the capability profile."
+                    ),
+                )
+            )
+            return
 
-    # 6a. No self-relation — source must differ from initial ingress.
-    if source_ep.entry_point_id == initial_ep.entry_point_id:
-        violations.append(
-            ActorAccessViolation(
-                rule="self_relation_influence_source",
-                message=(
-                    f"influence_source '{access.influence_source}' is the "
-                    f"same entry point as the initial ingress "
-                    f"'{access.initial_entry_point_id}' — no declared "
-                    f"self-relation model accepts this (cmps.6)."
-                ),
+        # 6a. No self-relation — source must differ from initial ingress.
+        if source_ep.entry_point_id == initial_ep.entry_point_id:
+            violations.append(
+                ActorAccessViolation(
+                    rule="self_relation_influence_source",
+                    message=(
+                        f"influence_source '{source_id}' is the same entry "
+                        "point as the initial ingress — self-relations are "
+                        "not representable."
+                    ),
+                )
             )
-        )
-        return
+            return
 
-    # 6b. Source must be attacker-accessible (not output-only or system).
-    if source_ep.direction == "output":
-        violations.append(
-            ActorAccessViolation(
-                rule="output_influence_source",
-                message=(
-                    f"influence_source '{access.influence_source}' resolves "
-                    f"to '{source_ep.name}' which is output-only — an "
-                    f"output channel cannot be an actor-controlled "
-                    f"influence source."
-                ),
+        # 6b. Source must be attacker-accessible (not output-only/system).
+        if source_ep.direction == "output":
+            violations.append(
+                ActorAccessViolation(
+                    rule="output_influence_source",
+                    message=f"influence_source '{source_id}' is output-only.",
+                )
             )
-        )
-    if source_ep.effective_controllability == "system":
-        violations.append(
-            ActorAccessViolation(
-                rule="system_influence_source",
-                message=(
-                    f"influence_source '{access.influence_source}' resolves "
-                    f"to '{source_ep.name}' which is system-controlled — "
-                    f"not an actor-accessible influence source."
-                ),
+        if source_ep.effective_controllability == "system":
+            violations.append(
+                ActorAccessViolation(
+                    rule="system_influence_source",
+                    message=f"influence_source '{source_id}' is system-controlled.",
+                )
             )
-        )
 
     # 7. trust_boundary_id must resolve to a declared TrustBoundary.
     if not access.trust_boundary_id or not access.trust_boundary_id.strip():
@@ -582,9 +614,10 @@ def _canonical_checks(
 
     # 7b. Boundary from_zone must correspond to the source EP's
     #      effective_ingress_zone or an explicitly modeled external zone.
-    source_zone = source_ep.effective_ingress_zone
+    source_zone = source_ep.effective_ingress_zone if source_ep is not None else None
     if (
-        source_zone is not None
+        source_ep is not None
+        and source_zone is not None
         and boundary.from_zone != source_zone
         and boundary.from_zone != "external"
     ):
@@ -608,7 +641,8 @@ def _canonical_checks(
     #    the source EP must have indirect controllability (upstream data
     #    provider).  This is the relational proof — not just ID format.
     if (
-        boundary.from_zone == "external"
+        source_ep is not None
+        and boundary.from_zone == "external"
         and source_ep.effective_controllability != "indirect"
     ):
         violations.append(
@@ -707,7 +741,8 @@ def validate_actor_access_provenance(
     # 3. Indirect ingress evidence completeness
     if access.ingress_mode == "indirect":
         missing = []
-        if not access.influence_source or not access.influence_source.strip():
+        source_id = access.influence_source_id or access.influence_source
+        if not source_id or not source_id.strip():
             missing.append("influence_source")
         if not access.influence_mechanism or not access.influence_mechanism.strip():
             missing.append("influence_mechanism")
@@ -1225,6 +1260,7 @@ def _call_actor_profile(
             actor_type=actor_type,
             resp=resp,
             profile=profile,
+            projection_context=projection_context,
         )
 
     return actor_profile, result, ctx.get("diversity_limitation")

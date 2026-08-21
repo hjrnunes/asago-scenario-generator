@@ -37,6 +37,7 @@ from asago_scenario_generator.pipeline.generate.tree_transport import (
     normalize_attack_tree_transport,
 )
 from asago_scenario_generator.pipeline.generate.tree_validation import (
+    _check_tool_execution_leaf_grounding,  # noqa: F401
     _enumerate_root_to_leaf_paths,
     _validate_pinned_ingress,
     _validate_tree_against_projection,

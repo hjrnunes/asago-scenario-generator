@@ -70,6 +70,7 @@ You MUST include an `access_realization` object in your response with the canoni
 You MUST include an `access_realization` object in your response. It must contain:
 - `initial_entry_point_id`: the canonical entry point name from the Actor Access Provenance block above
 - `influence_source`: the influence_source name from the provenance block (or null for direct access)
+- `influence_source_kind` and `influence_source_id`: projection-derived typed provenance; do not invent, substitute, or fuzzy-match canonical IDs
 - `trust_boundary_id`: the trust_boundary_id name from the provenance block (or null for direct access)
 - `responsible_step_number`: the step number where the actor realizes the initial access described by the provenance block
 The access_realization must exactly match the Actor Access Provenance block — no keyword matching, no invention.

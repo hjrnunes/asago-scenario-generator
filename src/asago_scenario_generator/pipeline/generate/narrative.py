@@ -366,15 +366,31 @@ def validate_narrative_access_realization(
             )
         )
 
-    # 3. influence_source must match (or both None).
-    if (realization.influence_source or None) != (access.influence_source or None):
+    # 3. The legacy source field and the typed source identity must match.
+    realization_source_id = (
+        realization.influence_source_id or realization.influence_source
+    )
+    access_source_id = access.influence_source_id or access.influence_source
+    if (realization_source_id or None) != (access_source_id or None):
         violations.append(
             NarrativeRealizationViolation(
                 rule="realization_influence_source_mismatch",
                 message=(
                     f"Narrative access_realization influence_source "
-                    f"'{realization.influence_source}' does not match actor "
-                    f"access provenance '{access.influence_source}'."
+                    f"'{realization_source_id}' does not match actor "
+                    f"access provenance '{access_source_id}'."
+                ),
+            )
+        )
+    if (realization.influence_source_kind or None) != (
+        access.influence_source_kind or None
+    ):
+        violations.append(
+            NarrativeRealizationViolation(
+                rule="realization_influence_source_mismatch",
+                message=(
+                    "Narrative access_realization source kind does not match "
+                    "actor access provenance."
                 ),
             )
         )
@@ -408,7 +424,10 @@ def validate_narrative_access_realization(
 
     # 6. Direct access must omit indirect-only references.
     if access.ingress_mode == "direct":
-        if realization.influence_source is not None:
+        if (
+            realization.influence_source is not None
+            or realization.influence_source_id is not None
+        ):
             violations.append(
                 NarrativeRealizationViolation(
                     rule="direct_realization_has_indirect_ref",
@@ -712,6 +731,38 @@ def _fill_call1_realizations(
         step.realizations = tuple(realizations)
 
 
+def _apply_projection_access_realization(
+    narrative: NarrativeLayer,
+    projection_context: dict[str, Any] | None,
+) -> None:
+    """Replace model-selected access IDs with the projected typed relation."""
+    if projection_context is None:
+        return
+    canonical_ingress = projection_context["canonical_ingress"]["entry_point_id"]
+    paths = projection_context.get("source_influence_paths", [])
+    if len(paths) > 1:
+        raise ValueError("projection context contains multiple source-influence paths")
+    current = narrative.access_realization
+    step_numbers = {step.step_number for step in narrative.steps}
+    responsible_step = (
+        current.responsible_step_number
+        if current is not None and current.responsible_step_number in step_numbers
+        else min(step_numbers)
+    )
+    path = paths[0] if paths else None
+    if current is None:
+        current = NarrativeAccessRealization(
+            initial_entry_point_id=canonical_ingress,
+            responsible_step_number=responsible_step,
+        )
+        narrative.access_realization = current
+    current.initial_entry_point_id = canonical_ingress
+    current.influence_source = path["source_id"] if path else None
+    current.influence_source_kind = path["source_identity_kind"] if path else None
+    current.influence_source_id = path["source_id"] if path else None
+    current.trust_boundary_id = path["boundary_id"] if path else None
+
+
 def _call_narrative(
     seed: ScenarioSeed,
     profile: CapabilityProfile,
@@ -791,6 +842,7 @@ def _call_narrative(
     # the projection context, ignoring whatever the LLM returned.
     _fill_call1_realizations(result.content, projection_context)
     narrative = _map_call1_to_narrative(result.content)
+    _apply_projection_access_realization(narrative, projection_context)
     narrative = _sanitize_narrative(narrative)
     if projection_context is not None:
         # Stage-specific boundary validation: literal 'outside' is allowed
