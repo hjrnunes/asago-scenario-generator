@@ -33,16 +33,14 @@ __all__ = [
 ]
 
 
+def _esc(text: str | None) -> str:
+    """HTML-escape text safely for the standalone STPA renderer."""
+    return "" if text is None else html.escape(str(text))
+
+
 # ---------------------------------------------------------------------------
 # Escaping and syntax highlighting
 # ---------------------------------------------------------------------------
-
-
-def _esc(text: str | None) -> str:
-    """HTML-escape text safely."""
-    if text is None:
-        return ""
-    return html.escape(str(text))
 
 
 def _highlight_yaml(text: str) -> str:

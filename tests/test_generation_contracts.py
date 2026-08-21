@@ -5,6 +5,7 @@ from asago_scenario_generator.pipeline.generation_contracts import (
     RetryDirective,
     StageAttemptFailure,
 )
+from asago_scenario_generator.models.scenario import CallName
 
 
 @given(
@@ -33,3 +34,30 @@ def test_provider_retry_value_is_scoped_to_length_retries(
     assert length_retry.provider_retry_value(field) == retry_value
     assert length_retry.provider_retry_value("unrelated") is None
     assert semantic_retry.provider_retry_value(field) == retry_value
+
+
+def test_provider_retry_value_requires_a_matching_control() -> None:
+    control = CausalRetryControl(
+        control_id="fixture-control",
+        field="temperature",
+        initial_value=0.7,
+        retry_value=0.2,
+    )
+
+    assert RetryDirective().provider_retry_value("temperature") is None
+    retry = RetryDirective(causal_control=control)
+    assert retry.provider_retry_value("max_completion_tokens") is None
+    assert retry.provider_retry_value("temperature") == 0.2
+
+
+def test_stage_attempt_failure_preserves_request_controls() -> None:
+    request_controls = {"max_completion_tokens": 8192}
+    failure = StageAttemptFailure(
+        call_name=CallName.narrative,
+        exception=RuntimeError("fixture"),
+        phase="invocation",
+        invoked=True,
+        request_controls=request_controls,
+    )
+
+    assert failure.request_controls is request_controls

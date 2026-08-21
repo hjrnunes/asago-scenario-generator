@@ -6,7 +6,6 @@ Each section builder is a function returning an HTML string.
 
 from __future__ import annotations
 
-import html
 import json
 import logging
 import math
@@ -18,6 +17,7 @@ from typing import Any
 import yaml
 
 from asago_scenario_generator.data.atlas import ATLAS_TECHNIQUE_DESCRIPTIONS
+from asago_scenario_generator.html_utils import escape_html as _esc
 from asago_scenario_generator.data.loaders import (
     load_attack_goals_taxonomy,
     load_attack_patterns,
@@ -290,13 +290,6 @@ def _truncate(text: str, max_len: int = 200) -> str:
     if sentence_end > 0:
         return text[: sentence_end + 1]
     return text[:max_len] + "..."
-
-
-def _esc(text: str | None) -> str:
-    """HTML-escape text safely."""
-    if text is None:
-        return ""
-    return html.escape(str(text))
 
 
 _USAGE_METRIC_FIELDS: tuple[str, ...] = (

@@ -23,6 +23,7 @@ from typing import Any
 
 from asago_scenario_generator.models.attack_tree import AttackTree, AttackTreeNode
 from asago_scenario_generator.models.scenario import NarrativeLayer, NarrativeStep
+from asago_scenario_generator.pipeline.tree_utils import collect_tree_zones
 
 logger = logging.getLogger(__name__)
 
@@ -189,13 +190,7 @@ def _enforce_zones_narrative(
 
 def _collect_zones_from_tree(node: AttackTreeNode) -> set[str]:
     """Collect all non-None zones referenced in a tree."""
-    zones: set[str] = set()
-    if node.zone is not None:
-        zones.add(node.zone)
-    if node.children:
-        for child in node.children:
-            zones.update(_collect_zones_from_tree(child))
-    return zones
+    return collect_tree_zones(node)
 
 
 def _validate_tree_zones_node(

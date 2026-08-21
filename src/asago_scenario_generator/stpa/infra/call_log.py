@@ -112,9 +112,11 @@ def append_call_log(entries: list[dict], run_dir: Path) -> None:
     with _call_log_lock:
         run_dir.mkdir(parents=True, exist_ok=True)
         calls_path = run_dir / "calls.jsonl"
+        payload = "".join(
+            f"{json.dumps(entry, ensure_ascii=False)}\n" for entry in entries
+        )
         with calls_path.open("a", encoding="utf-8") as fh:
-            for entry in entries:
-                fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            fh.write(payload)
 
 
 # mutate4py-manifest-begin

@@ -1326,10 +1326,8 @@ def _h_actor_generate(world: World, text: str, examples: dict) -> tuple[bool, st
                 duration_ms=1,
             )
 
-    original_error = actor.LengthFinishReasonError
     original_context = actor.build_call0_context
     original_render_prompt = actor.render_prompt
-    actor.LengthFinishReasonError = length_error
     actor.build_call0_context = lambda **_kwargs: {
         "tool_inventory": [],
         "minimum_capability_level": None,
@@ -1360,7 +1358,6 @@ def _h_actor_generate(world: World, text: str, examples: dict) -> tuple[bool, st
         except length_error as exc:
             state["error"] = exc
     finally:
-        actor.LengthFinishReasonError = original_error
         actor.build_call0_context = original_context
         actor.render_prompt = original_render_prompt
     return True, ""
@@ -1788,10 +1785,10 @@ def _h_causal_control(world: World, text: str, examples: dict) -> tuple[bool, st
         "behavior": "standard",
     }[stage]
     field = {
-        "actor": "response schema",
+        "actor": "response_schema",
         "narrative": "max_completion_tokens",
         "tree": "temperature",
-        "behavior": "response schema",
+        "behavior": "response_schema",
     }[stage]
     trace = _stage_trace(world, stage)
     trace["causal"] = {
@@ -2472,6 +2469,7 @@ def _h_causal_field_change(world: World, text: str, examples: dict) -> tuple[boo
         return False, "causal retry request was not recorded"
     first_controls = calls[0]["controls"]
     second_controls = calls[1]["controls"]
+    field = {"response schema": "response_schema"}.get(field, field)
     changed = [
         key
         for key in first_controls

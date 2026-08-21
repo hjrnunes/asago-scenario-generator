@@ -25,6 +25,7 @@ from asago_scenario_generator.models.capability_profile import (
     inject_kc_subcodes_display,
 )
 from asago_scenario_generator.pipeline.candidates import FilterSeedQuarantine
+from asago_scenario_generator.pipeline.jsonl import append_jsonl
 from asago_scenario_generator.pipeline.threats import ThreatSurface
 
 logger = logging.getLogger(__name__)
@@ -93,11 +94,7 @@ def write_pipeline_call_log(entries: list[dict], run_dir: Path) -> None:
     """
     if not entries:
         return
-    run_dir.mkdir(parents=True, exist_ok=True)
-    calls_path = run_dir / "calls.jsonl"
-    with calls_path.open("a", encoding="utf-8") as fh:
-        for entry in entries:
-            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    append_jsonl(entries, run_dir / "calls.jsonl")
 
 
 def write_filter_quarantine_evidence(

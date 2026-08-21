@@ -25,14 +25,14 @@ protocol.
 from __future__ import annotations
 
 import hashlib
-import json
 import re
-import unicodedata
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 import yaml
+
+from asago_scenario_generator.data.canonical import _canonical_json, _nfc
 
 from asago_scenario_generator.models.attack_pattern import TaxonomyContext, TaxonomyPin
 
@@ -121,20 +121,6 @@ def load_atlas_identifiers(path: str | Path | None = None) -> frozenset[str]:
             f"ATLAS source {atlas_path} contains no tactic/technique identifiers"
         )
     return frozenset(identifiers)
-
-
-def _canonical_json(value: Any) -> str:
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    )
-
-
-def _nfc(value: str) -> str:
-    return unicodedata.normalize("NFC", value)
 
 
 def _mapping_set_paths(paths: Iterable[str | Path] | None) -> list[Path]:

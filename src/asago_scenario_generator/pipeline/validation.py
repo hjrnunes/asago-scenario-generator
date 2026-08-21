@@ -33,6 +33,7 @@ from asago_scenario_generator.models.attack_tree import (
     GateType,
     _repair_node,
 )
+from asago_scenario_generator.pipeline.tree_utils import collect_tree_zones
 
 if TYPE_CHECKING:
     from asago_scenario_generator.models.capability_profile import CapabilityProfile
@@ -1107,13 +1108,7 @@ def _collect_tree_node_threat_ids(node: AttackTreeNode) -> set[str]:
 
 def _collect_tree_node_zones(node: AttackTreeNode) -> set[str]:
     """Recursively collect all zone values from attack tree nodes."""
-    zones: set[str] = set()
-    if node.zone:
-        zones.add(node.zone)
-    if node.children:
-        for child in node.children:
-            zones.update(_collect_tree_node_zones(child))
-    return zones
+    return collect_tree_zones(node, include_empty=False)
 
 
 def _extract_gherkin_zones_for_validation(gherkin_text: str) -> set[str]:

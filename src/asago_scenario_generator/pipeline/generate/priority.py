@@ -15,28 +15,25 @@ from asago_scenario_generator.models.scenario import (
 )
 from asago_scenario_generator.pipeline.generate.zones import active_narrative_zones
 from asago_scenario_generator.pipeline.seeds import ScenarioSeed
+from asago_scenario_generator.pipeline.tree_utils import collect_tree_values
 
 
 def _extract_maestro_layers_from_tree(node: AttackTreeNode) -> set[int]:
-    layers: set[int] = set()
-    if node.maestro_layer is not None:
-        layers.add(node.maestro_layer)
-    if node.children:
-        for child in node.children:
-            layers.update(_extract_maestro_layers_from_tree(child))
-    return layers
+    return {
+        value
+        for value in collect_tree_values(node, "maestro_layer")
+        if isinstance(value, int)
+    }
 
 
 def _extract_structural_exposures_from_tree(
     node: AttackTreeNode,
 ) -> set[str]:
-    exposures: set[str] = set()
-    if node.structural_exposure is not None:
-        exposures.add(node.structural_exposure.value)
-    if node.children:
-        for child in node.children:
-            exposures.update(_extract_structural_exposures_from_tree(child))
-    return exposures
+    return {
+        getattr(value, "value", value)
+        for value in collect_tree_values(node, "structural_exposure")
+        if isinstance(getattr(value, "value", value), str)
+    }
 
 
 def _tree_depth(node: AttackTreeNode, current: int = 1) -> int:

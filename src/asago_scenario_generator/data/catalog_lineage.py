@@ -57,15 +57,19 @@ from that pinned revision.
 from __future__ import annotations
 
 import hashlib
-import json
 import re
-import unicodedata
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 import yaml
 from jsonschema import Draft202012Validator
+
+from asago_scenario_generator.data.canonical import (
+    _canonical_json,
+    _nfc,
+    _normalize,
+)
 
 _DEFAULT_LINEAGE_PATH = (
     Path(__file__).resolve().parents[3]
@@ -119,37 +123,6 @@ def load_catalog_lineage_schema(path: str | Path | None = None) -> dict[str, Any
         raise TypeError(f"catalog lineage schema {schema_path} is not a mapping")
     Draft202012Validator.check_schema(schema)
     return schema
-
-
-def _nfc(value: str) -> str:
-    return unicodedata.normalize("NFC", value)
-
-
-def _canonical_json(value: Any) -> str:
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    )
-
-
-def _normalize(value: Any) -> Any:
-    """Recursively NFC-normalize strings and frame arrays as sorted sets.
-
-    Dict key order is handled by the canonical-JSON sort_keys; arrays are
-    sorted by the canonical JSON of their normalized elements so the digest
-    is independent of authoring order.
-    """
-    if isinstance(value, dict):
-        return {str(k): _normalize(v) for k, v in value.items()}
-    if isinstance(value, list):
-        normalized = [_normalize(item) for item in value]
-        return sorted(normalized, key=_canonical_json)
-    if isinstance(value, str):
-        return _nfc(value)
-    return value
 
 
 def compute_catalog_lineage_digest(artifact: dict[str, Any]) -> str:
