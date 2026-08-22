@@ -16,6 +16,22 @@ stage call evidence, and typed attempt failures) live in
 persistence consume that boundary without importing one another's
 implementation modules.
 
+The taxonomy/risk workflow uses a semantic-author/compiler seam. The model
+authors actor intent, narrative causality, attack-tree AND topology, and
+concrete behavior interactions through request-local handles. Pure compilers
+resolve those handles to projection-owned IDs, actions, zones, techniques,
+realizations, postconditions, and Gherkin syntax. Semantic draft failure is a
+candidate failure; deterministic code may replace presentation text but never
+the required semantic structure. Finalization alone owns retries, and every
+stage invocation makes exactly one provider call.
+Accepted-draft evidence for all four stages persists the request and response
+digests, request-local handle map, effective controls, validation result, and
+any declared presentation fallback. A manifest can therefore distinguish a
+fully model-authored scenario from a failed or cosmetically repaired draft.
+Its `semantic_generation` summary states whether all four stages were accepted
+and retains bounded `stage_records` evidence; the HTML report presents the same
+semantic and presentation statuses separately.
+
 ## Taxonomy and risk-driven workflow
 
 The `generate` workflow consumes a use-case description, policy risk
@@ -23,17 +39,30 @@ extraction, and SSSOM mappings. It derives a capability profile and threat
 surface, expands and qualifies candidates, projects canonical chains, creates
 scenario artifacts, and runs deterministic admission and evaluation gates.
 
-The grouped taxonomy path keeps failures local and observable: malformed
-candidate-filter responses are retried within their seed and then quarantined
-with exact reconciliation evidence, while independent seeds continue. Before
-authoritative projection, the immutable profile/fact snapshot is checked for
-required architecture resources and qualification readings; missing evidence
-stops the run with profile or qualification guidance and never launches an
-enrichment workflow. Attack-tree transport may provide projected step IDs,
-but canonical realizations are derived from the projection before strict
-validation. The run manifest records status and admitted, quarantined, and
-failed counts; the CLI returns nonzero for degraded completion or no admitted
-scenarios.
+Generation planning separates canonical ingress identity from durable
+finalization-target identity. The default `exhaustive` policy creates one
+one-choice target per qualified projected candidate, so an admission or
+quarantine affects only that candidate and the remaining corpus continues.
+The explicit `coverage` policy instead creates one bounded fallback queue per
+feasible ingress and stops that target after its first admission. Coverage is
+reported by canonical ingress in both modes; lifecycle transitions, persistence,
+and resume are keyed by the distinct finalization target ID.
+
+The grouped taxonomy path keeps failures local and observable. Candidate
+filter responses use compact ordinals instead of canonical IDs. An
+irreconcilable advisory filter retains all deterministic-rule-eligible
+candidates with warning evidence; it cannot admit a scenario by itself.
+Before authoritative projection, the immutable profile/fact snapshot is
+checked for required architecture resources and qualification readings;
+missing evidence stops generation with profile or qualification guidance.
+The public `projection-preflight` command runs that readiness path and emits a
+complete fact template without constructing a model client. Its fact inventory
+distinguishes absent, explicitly unknown, stale, and contradictory readings
+before the immutable snapshot is built. Omitted generation facts use an
+explicit `omitted_compatibility` mode recorded in manifest configuration and
+generation notes. The run manifest records status and admitted, quarantined,
+and failed counts; the CLI returns nonzero for degraded completion or no
+admitted scenarios.
 
 ## STPA workflow
 

@@ -5,8 +5,9 @@ output, the published run directory, and requests captured by a deterministic
 local OpenAI-compatible fixture. Do not import project modules or contact a
 live model. Use valid offline taxonomy inputs, a reviewed capability profile,
 qualification facts, one qualified candidate with no fallback, a fresh output
-collection per case, and `max_completion_tokens: 16384` on the first request
-for each stage. Each length retry uses exactly one approved causal control,
+collection per case, and a transport cap of `max_completion_tokens: 16384`.
+The generated stages apply operation caps of 4096 (actor), 8192 (narrative),
+8192 (tree), and 4096 (behavior). Each length retry uses exactly one approved causal control,
 which the fixture journals separately from the prompt suffix.
 
 The fixture must expose ordered response scripts independently for actor,
@@ -21,7 +22,7 @@ fields. All responses not named by a case are valid and deterministic.
    with a first length response and a valid second response. For tree, do the
    same with the unstructured completion endpoint.
 2. Verify the fixture receives exactly two requests for the targeted stage,
-   the first uses `max_completion_tokens: 16384`, and the retry follows the
+   the first uses its stage operation cap, and the retry follows the
    configured causal-control experiment without increasing the fixed request
    budget.
 3. Inspect `finalization-inventory.json` and `calls.jsonl`.
@@ -43,8 +44,9 @@ reasons have the same project-owned typed and durable representation.
 3. Verify the fixture receives exactly two requests per generated stage,
    eight generated-stage requests in total, and no stage helper emits two
    requests during one lifecycle invocation.
-4. Verify all eight first requests use `max_completion_tokens: 16384` and
-   each retry changes only its selected approved causal control.
+4. Verify the first requests use the stage operation caps and each retry
+   changes only its selected approved causal control. Narrative changes from
+   8192 to 4096; the transport cap remains 16384.
 5. Verify the run reaches admission and publishes its normal scenario
    artifacts from the four second responses.
 
@@ -60,11 +62,11 @@ length-specific retry for each generated stage.
    `finalization-inventory.json`, and `calls.jsonl`.
 3. Verify exactly two target requests, no third target request, and no
    downstream request after the exhausted target.
-4. Verify each first target request uses `max_completion_tokens: 16384` and
-   each retry changes only its selected approved causal control.
+4. Verify each first target request uses its stage operation cap and each retry
+   changes only its selected approved causal control.
 5. Verify the candidate has terminal
    `generation_or_finalization_failed` evidence with code
-   `completion_length`; no fallback is attempted.
+   `semantic_draft_length_failed`; no fallback is attempted.
 6. Verify the stage's semantic owner-retry counter remains unchanged.
 
 **Expected:** A second length failure is terminal for that candidate and cannot
@@ -77,12 +79,12 @@ loop or consume semantic retry budget.
    `finish_reason: "length"`, then return a valid response.
 2. Verify each target has two lifecycle invocations, one semantic owner retry,
    and no `completion_length` retry reason, failure code, or length suffix.
-3. Repeat with three semantically invalid target responses.
-4. Verify the target receives the initial attempt plus two semantic owner
-   retries, then terminates under its existing semantic failure code.
+3. Repeat with two semantically invalid target responses.
+4. Verify the target receives the initial attempt plus one semantic owner
+   retry, then terminates under its existing semantic failure code.
 
 **Expected:** Non-length failures never enter length routing, and the existing
-semantic budget remains initial attempt plus two owner retries.
+semantic budget remains initial attempt plus one owner retry.
 
 ## QA-TCLLR-05: every provider request has durable attempt evidence
 

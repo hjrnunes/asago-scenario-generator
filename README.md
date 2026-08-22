@@ -38,9 +38,11 @@ variables:
 - `ASAGO_SCENARIO_GENERATOR_TEMPERATURE`
 - `ASAGO_SCENARIO_GENERATOR_EXTRA_HEADERS`
 
-For named STPA profiles, copy
+For named model profiles, copy
 `config/model-profiles.example.yaml` to `config/model-profiles.yaml`. The real
-file is ignored because it may contain credentials.
+file is ignored because it may contain credentials. Both `generate` and
+`stpa-run` accept named profiles; explicit endpoint/model options override the
+selected profile.
 
 ## Taxonomy and risk-driven generation
 
@@ -49,12 +51,29 @@ asago-scenario-generator generate \
   --use-case @use-case.txt \
   --risk-extraction risk-extraction.json \
   --sssom mappings.sssom.tsv \
-  --output-dir output/my-system
+  --output-dir output/my-system \
+  --model-profile gemma4-local \
+  --presentation-fallback allow
 ```
 
 The pipeline profiles capabilities, determines the threat surface, qualifies
 and projects candidates, generates scenario artifacts, evaluates them, and
 writes an immutable run directory beneath the requested output collection.
+Generation is exhaustive by default: every qualified projected candidate is
+given an independent finalization target and can produce one admitted scenario.
+Use `--generation-mode coverage` for a bounded smoke run that keeps one queue
+of at most three candidates per feasible ingress and stops each queue after its
+first admission.
+
+`--max-scenarios-per-pattern N` applies after projection and deduplication. In
+exhaustive mode it retains at most `N` qualified candidates per attack pattern,
+round-robin across ingress points before taking a second candidate from one
+ingress. Omitting the option means no pattern cap.
+
+Run counts describe successive funnel stages: expanded candidates have not yet
+passed filtering; qualified candidates have passed authoritative projection;
+attempted candidates entered finalization; admitted candidates produced a
+scenario; quarantined candidates exhausted generation or failed admission.
 
 Automatic capability inference produces an `inferred_partial` Stage 1 profile.
 Authoritative projection may also require operator-reviewed architecture data,
@@ -64,11 +83,44 @@ qualification facts. For a substantive run, pass that reviewed profile with
 An inferred-only run can finish with zero scenarios when the required
 architecture evidence is unavailable.
 
+Inspect the exact requirements without contacting an LLM endpoint:
+
+```bash
+asago-scenario-generator projection-preflight \
+  --use-case @use-case.txt \
+  --risk-extraction risk-extraction.json \
+  --sssom mappings.sssom.tsv \
+  --profile capability-profile.yaml \
+  --qualification-facts qualification-facts.yaml \
+  --facts-template qualification-facts.complete.yaml
+```
+
+The command reports every required resource and fact as structured JSON. Fact
+states distinguish a missing reading (`absent`), an explicit undecided reading
+(`unknown`), a supplied fact no longer required by the selected patterns
+(`stale`), and incompatible readings for one fact (`contradictory`). A requested
+facts template contains unknown values for operator review and is never allowed
+to overwrite an existing file. If generation omits `--qualification-facts`, the
+manifest records `qualification_facts_mode: omitted_compatibility`; command
+output and the returned pipeline result also explain that unresolved conditions
+are deferred to authoritative projection.
+
+`--presentation-fallback` accepts `allow` (the default) or `forbid`. Allowing
+fallback permits only cosmetic substitutions such as a missing narrative
+title; it records a `presentation_fallback:` warning and produces
+`completed_with_warnings`. It never synthesizes actor intent, narrative beats,
+attack-tree topology, behavior interactions, or assertions.
+
 Do not use process exit alone as the live-run success criterion. Inspect the
 generated `run-manifest.yaml` and finalization inventory for admitted scenarios
-and recorded errors.
+and recorded errors. The manifest's `semantic_generation` block summarizes
+whether every admitted candidate has accepted provider semantics for actor,
+narrative, tree, and behavior; its `stage_records` retain the bounded
+per-attempt evidence. The HTML report renders those stage outcomes and identifies
+presentation fallback separately.
 
-Useful companion commands include `profile`, `resume`, `eval`, `report`,
+Useful companion commands include `projection-preflight`, `profile`, `resume`,
+`eval`, `report`,
 `qualify-catalog`, `validate-catalog-qualification`, and
 `validate-stpa-projection`. Run `asago-scenario-generator --help` for the
 complete interface.

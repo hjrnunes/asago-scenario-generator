@@ -31,7 +31,7 @@ Feature: Taxonomy completion-length lifecycle retry
     When finalization runs the candidate lifecycle
     Then the <stage> stage helper makes exactly 1 provider request per invocation
     And finalization invokes the <stage> stage exactly 2 times
-    And the first <stage> provider request uses max_completion_tokens 16384
+    And the first <stage> provider request uses max_completion_tokens <operation_cap>
     And the retry request uses the configured causal control without increasing the total attempt budget
     And the accepted <stage> artifact comes from the second response
     And the retry directive reason is "completion_length"
@@ -44,11 +44,11 @@ Feature: Taxonomy completion-length lifecycle retry
     And the first <stage> call log entry has code "completion_length"
 
     Examples:
-      | stage     | suffix                                                                      |
-      | actor     | Return only a schema-matching object with bounded lists and concise prose. |
-      | narrative | Return only a schema-matching object with bounded lists and concise prose. |
-      | tree      | Return only a complete schema-matching YAML document.                      |
-      | behavior  | Return only the complete required Gherkin/assertion payload.                |
+      | stage     | operation_cap | suffix                                                                      |
+      | actor     | 4096          | Return only a schema-matching object with bounded lists and concise prose. |
+      | narrative | 8192          | Return only a schema-matching object with bounded lists and concise prose. |
+      | tree      | 8192          | Return only a complete schema-matching YAML document.                      |
+      | behavior  | 4096          | Return only the complete required Gherkin/assertion payload.                |
 
   # Taxonomy completion-length lifecycle retry 03 makes a second length failure terminal
   Scenario Outline: Taxonomy completion-length lifecycle retry 03 makes a second length failure terminal
@@ -56,11 +56,11 @@ Feature: Taxonomy completion-length lifecycle retry
     When finalization runs the candidate lifecycle
     Then finalization invokes the <stage> stage exactly 2 times
     And no third <stage> provider request is made
-    And the <stage> stage is terminal with code "completion_length"
+    And the <stage> stage is terminal with code "semantic_draft_length_failed"
     And the <stage> semantic retry budget is unchanged
     And the <stage> length retry budget is exactly 1
-    And the lifecycle inventory has 2 distinct <stage> completion-length failures
-    And the lifecycle call log has 2 distinct <stage> entries with code "completion_length"
+    And the lifecycle inventory has 1 distinct <stage> completion-length failures
+    And the lifecycle call log has 1 distinct <stage> entries with code "completion_length"
 
     Examples:
       | stage     |
@@ -85,10 +85,10 @@ Feature: Taxonomy completion-length lifecycle retry
       | narrative | 1                 | a valid response   | 2           | 1             | accepted |
       | tree      | 1                 | a valid response   | 2           | 1             | accepted |
       | behavior  | 1                 | a valid response   | 2           | 1             | accepted |
-      | actor     | 3                 | no response        | 3           | 2             | terminal |
-      | narrative | 3                 | no response        | 3           | 2             | terminal |
-      | tree      | 3                 | no response        | 3           | 2             | terminal |
-      | behavior  | 3                 | no response        | 3           | 2             | terminal |
+      | actor     | 2                 | no response        | 2           | 1             | terminal |
+      | narrative | 2                 | no response        | 2           | 1             | terminal |
+      | tree      | 2                 | no response        | 2           | 1             | terminal |
+      | behavior  | 2                 | no response        | 2           | 1             | terminal |
 
   # Taxonomy completion-length lifecycle retry 05 bounds narrative output shape
   Scenario Outline: Taxonomy completion-length lifecycle retry 05 bounds narrative output shape
@@ -158,6 +158,6 @@ Feature: Taxonomy completion-length lifecycle retry
     Examples:
       | stage     | causal_control                             | causal_field                         | initial_value | retry_value |
       | actor     | candidate-specific compact response schema | response schema                      | standard      | compact-v1  |
-      | narrative | stage-specific completion cap              | max_completion_tokens                | 16384         | 8192        |
+      | narrative | stage-specific completion cap              | max_completion_tokens                | 8192          | 4096        |
       | tree      | lower retry temperature                   | temperature                          | 0.4           | 0.1         |
       | behavior  | candidate-specific compact response schema | response schema                      | standard      | compact-v1  |

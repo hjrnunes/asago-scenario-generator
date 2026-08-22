@@ -1780,7 +1780,7 @@ def _h_causal_control(world: World, text: str, examples: dict) -> tuple[bool, st
     stage, control, retry_value = match.groups()
     initial = {
         "actor": "standard",
-        "narrative": "16384",
+        "narrative": "8192",
         "tree": "0.4",
         "behavior": "standard",
     }[stage]
@@ -1868,6 +1868,15 @@ def _execute_stage_lifecycle(trace: dict[str, Any], stage: str, limit: int) -> N
     trace["accepted_from_second"] = False
     trace["published"] = False
     trace["request_budget"] = 2
+    operation_cap = min(
+        limit,
+        {
+            "actor": 4096,
+            "narrative": 8192,
+            "tree": 8192,
+            "behavior": 4096,
+        }[stage],
+    )
     causal = trace.get("causal") or {
         "name": "approved-default",
         "field": {
@@ -1878,13 +1887,13 @@ def _execute_stage_lifecycle(trace: dict[str, Any], stage: str, limit: int) -> N
         }[stage],
         "initial": {
             "actor": "standard",
-            "narrative": "16384",
+            "narrative": "8192",
             "tree": "0.4",
             "behavior": "standard",
         }[stage],
         "retry": {
             "actor": "compact-v1",
-            "narrative": "8192",
+            "narrative": "4096",
             "tree": "0.1",
             "behavior": "compact-v1",
         }[stage],
@@ -1892,7 +1901,7 @@ def _execute_stage_lifecycle(trace: dict[str, Any], stage: str, limit: int) -> N
     trace["causal"] = causal
     base_controls = {
         "response_schema": "standard" if stage in ("actor", "behavior") else None,
-        "max_completion_tokens": limit,
+        "max_completion_tokens": operation_cap,
         "transport_token_cap": limit,
         "temperature": 0.4,
     }
@@ -1919,10 +1928,16 @@ def _execute_stage_lifecycle(trace: dict[str, Any], stage: str, limit: int) -> N
             }
         )
         if token == "length":
+            terminal_length = trace["length_retries"] > 0
+            length_code = (
+                "semantic_draft_length_failed"
+                if terminal_length
+                else "completion_length"
+            )
             trace["attempts"].append(
                 {
                     "kind": "StageAttemptFailure",
-                    "code": "completion_length",
+                    "code": length_code,
                     "finish_reason": "length",
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
@@ -1950,7 +1965,7 @@ def _execute_stage_lifecycle(trace: dict[str, Any], stage: str, limit: int) -> N
             )
             trace["call_log"].append(
                 {
-                    "code": "completion_length",
+                    "code": length_code,
                     "controls": controls,
                     "request_budget": trace["request_budget"],
                     **trace["attempts"][-1],
@@ -1972,7 +1987,7 @@ def _execute_stage_lifecycle(trace: dict[str, Any], stage: str, limit: int) -> N
                 continue
             # A second length failure is terminal for the candidate and
             # never consumes semantic owner-retry budget.
-            trace["terminal_code"] = "completion_length"
+            trace["terminal_code"] = "semantic_draft_length_failed"
             trace["outcome"] = "terminal"
             break
         if token == "semantic":
