@@ -44,6 +44,11 @@ file is ignored because it may contain credentials. Both `generate` and
 `stpa-run` accept named profiles; explicit endpoint/model options override the
 selected profile.
 
+Gemma 4 deployments used for structured generation need a compact JSON grammar
+configuration to avoid valid-prefix responses stalling on whitespace. See the
+[Gemma 4 vLLM runtime notes](docs/operations/gemma4-vllm-structured-output.md)
+for the required serving argument and rollout guidance.
+
 ## Taxonomy and risk-driven generation
 
 ```bash
