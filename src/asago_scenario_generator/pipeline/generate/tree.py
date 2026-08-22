@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import json
 from collections import Counter
 from typing import Any
 
@@ -545,6 +546,8 @@ def _call_attack_tree_once(
     pinned_technique_names: list[str] | None = None,
     consistency_feedback: str | None = None,
     completion_length_feedback: str | None = None,
+    temperature: float | None = None,
+    max_completion_tokens: int | None = None,
     pinned_entry_point_id: str | None = None,
     projection_context: dict[str, Any] | None = None,
 ) -> tuple[AttackTree, LLMResult]:
@@ -556,35 +559,81 @@ def _call_attack_tree_once(
     ``completion_length_feedback`` (the finalization-owned length-retry
     suffix) is appended verbatim to the end of the rendered user prompt.
     """
-    ctx = build_call2_context(
-        seed=seed,
-        narrative=narrative,
-        use_case=use_case,
-        profile=profile,
-        actor_profile=actor_profile,
-        pinned_technique_ids=pinned_technique_ids,
-        pinned_technique_names=pinned_technique_names,
-        consistency_feedback=consistency_feedback,
-        pinned_entry_point_id=pinned_entry_point_id,
-        projection_context=projection_context,
-    )
-    skeleton = ctx["skeleton"]
-    system_prompt = render_prompt(
-        "call2_system.j2",
-        zones_active=profile.zones_active if profile else [],
-        tool_inventory=ctx["tool_inventory"],
-        external_integrations=ctx["external_integrations"],
-        entry_points=ctx["entry_points"],
-        pinned_entry_point_name=ctx.get("pinned_entry_point_name"),
-    )
-    user_prompt = render_prompt("call2_user.j2", **ctx)
+    semantic_leaf_specs = None
+    response_format: Any = None
+    if projection_context is not None and profile is not None:
+        from asago_scenario_generator.pipeline.generate.tree_semantics import (
+            build_attack_tree_draft_response_model,
+            derive_canonical_leaf_specs,
+        )
+
+        semantic_leaf_specs = derive_canonical_leaf_specs(
+            projection_context, narrative, profile
+        )
+        response_format = build_attack_tree_draft_response_model(
+            [spec.leaf_handle for spec in semantic_leaf_specs]
+        )
+        skeleton: list[dict[str, str]] = []
+        system_prompt = (
+            "You author the semantic grouping of one concrete attack tree. "
+            "Return only the structured response. Partition every supplied "
+            "leaf handle into one or more ordered groups, use every handle "
+            "exactly once, and preserve the listed order across groups. You "
+            "control the root and group labels and descriptions. Never emit "
+            "nested nodes, canonical IDs, actions, zones, "
+            "techniques, or realizations; the compiler owns them."
+        )
+        inventory = [
+            {
+                "handle": spec.leaf_handle,
+                "meaning": spec.label,
+                "action_kind": spec.action.kind,
+                "position": index,
+            }
+            for index, spec in enumerate(semantic_leaf_specs)
+        ]
+        user_prompt = (
+            f"Use case:\n{use_case}\n\n"
+            f"Attack goal: {seed.attack_pattern_name}\n"
+            f"Narrative title: {narrative.title}\n"
+            f"Narrative summary: {narrative.summary}\n\n"
+            "Canonical leaf inventory (respond with handles only):\n"
+            f"{json.dumps(inventory, ensure_ascii=False, indent=2)}\n"
+        )
+        if consistency_feedback:
+            user_prompt += f"\nCorrection required:\n{consistency_feedback}\n"
+    else:
+        ctx = build_call2_context(
+            seed=seed,
+            narrative=narrative,
+            use_case=use_case,
+            profile=profile,
+            actor_profile=actor_profile,
+            pinned_technique_ids=pinned_technique_ids,
+            pinned_technique_names=pinned_technique_names,
+            consistency_feedback=consistency_feedback,
+            pinned_entry_point_id=pinned_entry_point_id,
+            projection_context=projection_context,
+        )
+        skeleton = ctx["skeleton"]
+        system_prompt = render_prompt(
+            "call2_system.j2",
+            zones_active=profile.zones_active if profile else [],
+            tool_inventory=ctx["tool_inventory"],
+            external_integrations=ctx["external_integrations"],
+            entry_points=ctx["entry_points"],
+            pinned_entry_point_name=ctx.get("pinned_entry_point_name"),
+        )
+        user_prompt = render_prompt("call2_user.j2", **ctx)
     if completion_length_feedback:
         user_prompt = f"{user_prompt}{completion_length_feedback}"
     try:
         result = client.complete(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_format=None,
+            response_format=response_format,
+            temperature=temperature,
+            max_completion_tokens=max_completion_tokens,
         )
     except Exception as exc:
         from asago_scenario_generator.pipeline.generate.stages import (
@@ -600,18 +649,51 @@ def _call_attack_tree_once(
             user_prompt=user_prompt,
         ) from exc
     try:
-        tree = _parse_attack_tree_yaml(result.content, seed, projection_context)
+        if semantic_leaf_specs is not None and not isinstance(result.content, str):
+            from asago_scenario_generator.pipeline.generate.tree_semantics import (
+                AttackTreeDraftV2,
+                AttackTreeDraftV3,
+                compile_flat_attack_tree_draft,
+                compile_attack_tree_draft,
+            )
+
+            if isinstance(result.content, AttackTreeDraftV3):
+                tree = compile_flat_attack_tree_draft(
+                    seed_id=seed.seed_id,
+                    goal=seed.attack_pattern_name,
+                    draft=result.content,
+                    leaf_specs=semantic_leaf_specs,
+                    threat_id=seed.threat_id,
+                )
+            else:
+                draft = (
+                    result.content
+                    if isinstance(result.content, AttackTreeDraftV2)
+                    else AttackTreeDraftV2.model_validate(result.content)
+                )
+                tree = compile_attack_tree_draft(
+                    seed_id=seed.seed_id,
+                    goal=seed.attack_pattern_name,
+                    draft=draft,
+                    leaf_specs=semantic_leaf_specs,
+                    threat_id=seed.threat_id,
+                )
+        else:
+            # Compatibility for recorded/scripted legacy YAML responses. New
+            # provider requests always use AttackTreeDraftV2 when projection
+            # context is available.
+            tree = _parse_attack_tree_yaml(result.content, seed, projection_context)
         tree = _validate_and_postprocess_tree(
             tree, profile, pinned_entry_point_id, skeleton, seed, projection_context
         )
     except Exception as exc:
         from asago_scenario_generator.pipeline.generate.stages import (
-            StageAttemptFailure,
+            stage_attempt_failure,
         )
 
-        raise StageAttemptFailure(
-            call_name=CallName.attack_tree,
-            exception=exc,
+        raise stage_attempt_failure(
+            CallName.attack_tree,
+            exc,
             phase="post_response",
             invoked=True,
             system_prompt=system_prompt,

@@ -30,9 +30,11 @@ from asago_scenario_generator.models.capability_profile import (
 )
 from asago_scenario_generator.models.scenario import RiskCardRef
 from asago_scenario_generator.pipeline.candidates import (
+    BatchFilterDraftV2,
     BatchFilterResponse,
     CandidateTriple,
     FilteredSeed,
+    FilterDecisionDraftV2,
     FilterProtocolError,
     FilterVerdict,
     _reconcile_filter_response,
@@ -41,6 +43,80 @@ from asago_scenario_generator.pipeline.candidates import (
     filter_candidates,
 )
 from asago_scenario_generator.pipeline.seeds import ScenarioSeed
+
+
+def test_filter_wire_protocol_uses_exact_key_map_and_restores_canonical_id() -> None:
+    candidate = _make_candidate()
+    client = MagicMock()
+    client.complete.side_effect = lambda **request: _make_llm_result(
+        request["response_format"].model_validate(
+            {
+                "c0": {
+                    "relevant": True,
+                    "rationale": "The entry path supports the selected technique.",
+                }
+            }
+        )
+    )
+
+    accepted, _, _ = filter_candidates(
+        [candidate], [_make_seed()], client, "test", _make_profile()
+    )
+
+    request = client.complete.call_args.kwargs
+    schema = request["response_format"].model_json_schema()
+    assert schema["required"] == ["c0"]
+    assert set(schema["properties"]) == {"c0"}
+    assert schema["additionalProperties"] is False
+    assert request["max_completion_tokens"] == 4096
+    assert "`c0`" in request["user_prompt"]
+    assert candidate.candidate_id not in request["user_prompt"]
+    assert accepted[0].candidate_id == candidate.candidate_id
+
+
+def test_filter_completion_cap_preserves_lower_operator_limit() -> None:
+    candidate = _make_candidate()
+    client = MagicMock(max_completion_tokens=2048)
+    client.complete.return_value = _make_llm_result(
+        BatchFilterDraftV2(
+            decisions=(
+                FilterDecisionDraftV2(
+                    candidate="c0",
+                    relevant=True,
+                    rationale="The candidate is relevant.",
+                ),
+            )
+        )
+    )
+
+    filter_candidates([candidate], [_make_seed()], client, "test", _make_profile())
+
+    assert client.complete.call_args.kwargs["max_completion_tokens"] == 2048
+
+
+def test_filter_protocol_failure_is_advisory_when_requested() -> None:
+    candidates = [
+        _make_candidate(),
+        _make_candidate(entry_point="api requests", direction="input"),
+    ]
+    client = MagicMock()
+    client.complete.side_effect = [RuntimeError("offline"), RuntimeError("offline")]
+
+    accepted, logs, rejected = filter_candidates(
+        candidates,
+        [_make_seed()],
+        client,
+        "test",
+        _make_profile(),
+        advisory_on_failure=True,
+    )
+
+    assert {item.candidate_id for item in accepted} == {
+        item.candidate_id for item in candidates
+    }
+    assert rejected == []
+    assert logs[-1]["warning"] == "candidate_filter_unavailable"
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -716,7 +792,9 @@ class TestFilterRetryExhaustion:
         assert len(quarantined) == 1
         evidence = quarantined[0].reconciliation
         assert evidence.seed_id == "AP-T7-01"
-        assert evidence.expected_ids == tuple(sorted(c.candidate_id for c in candidates))
+        assert evidence.expected_ids == tuple(
+            sorted(c.candidate_id for c in candidates)
+        )
         assert evidence.received_ids == (unknown,)
         assert evidence.missing_ids == evidence.expected_ids
         assert evidence.unknown_ids == (unknown,)
@@ -1368,7 +1446,9 @@ class TestCollisionsAndDigest:
         # Force same candidate_id but different identity inputs.
         c2_forged = c2.model_copy(update={"candidate_id": c1.candidate_id})
         with pytest.raises(ValueError, match="Candidate collision"):
-            from asago_scenario_generator.pipeline.candidates import _check_candidate_collisions
+            from asago_scenario_generator.pipeline.candidates import (
+                _check_candidate_collisions,
+            )
 
             _check_candidate_collisions([c1, c2_forged])
 

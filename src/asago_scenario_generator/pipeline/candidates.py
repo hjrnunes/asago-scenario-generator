@@ -16,7 +16,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from itertools import combinations
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    create_model,
+    model_validator,
+)
 
 from asago_scenario_generator.data.atlas import (
     ATLAS_TECHNIQUE_DESCRIPTIONS,
@@ -458,7 +465,7 @@ class CandidateTriple(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# LLM filter response models (wire protocol — opaque candidate IDs)
+# LLM filter response models
 # ---------------------------------------------------------------------------
 
 
@@ -493,6 +500,96 @@ class BatchFilterResponse(BaseModel):
     verdicts: list[FilterVerdict] = Field(
         description="Per-candidate accept/reject verdicts."
     )
+
+
+class FilterDecisionDraftV2(BaseModel):
+    """One advisory decision keyed by a compact request-local handle."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    candidate: str = Field(pattern=r"^c(?:0|[1-9][0-9]*)$")
+    relevant: bool
+    rationale: str = Field(min_length=1, max_length=240)
+
+
+class BatchFilterDraftV2(BaseModel):
+    """Provider-facing candidate filter protocol without canonical IDs."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    decisions: tuple[FilterDecisionDraftV2, ...] = Field(min_length=1)
+
+
+class FilterMapDecisionDraftV3(BaseModel):
+    """One advisory decision whose identity is owned by its object key."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    relevant: bool
+    rationale: str = Field(min_length=1, max_length=240)
+
+
+class FilterMapDraftV3(BaseModel):
+    """Base for request-local exact-key filter response models."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+def build_filter_map_response_model(
+    expected_handles: Sequence[str],
+) -> type[FilterMapDraftV3]:
+    """Build a schema with exactly one required field per local handle."""
+
+    handles = tuple(expected_handles)
+    if not handles or len(set(handles)) != len(handles):
+        raise ValueError("filter response handles must be non-empty and unique")
+    if any(
+        not handle.startswith("c") or not handle[1:].isdigit() for handle in handles
+    ):
+        raise ValueError("filter response handles must use cN ordinals")
+    return create_model(
+        f"FilterMapDraftV3For{len(handles)}Candidates",
+        __base__=FilterMapDraftV3,
+        **{handle: (FilterMapDecisionDraftV3, ...) for handle in handles},
+    )
+
+
+def reconcile_filter_map(
+    draft: FilterMapDraftV3,
+    expected_handles: Sequence[str],
+) -> dict[str, FilterMapDecisionDraftV3]:
+    """Resolve a request-local exact-key map after defensive set checking."""
+
+    expected = tuple(expected_handles)
+    actual = tuple(draft.model_dump(mode="python"))
+    if set(actual) != set(expected):
+        raise ValueError(
+            f"candidate handle mismatch: actual={sorted(actual)}; "
+            f"expected={sorted(expected)}"
+        )
+    return {handle: getattr(draft, handle) for handle in expected}
+
+
+def reconcile_filter_ordinals(
+    draft: BatchFilterDraftV2,
+    expected_handles: Sequence[str],
+) -> dict[str, FilterDecisionDraftV2]:
+    """Resolve an ordinal draft only after exact-set reconciliation."""
+    received = [item.candidate for item in draft.decisions]
+    duplicate = sorted(handle for handle in set(received) if received.count(handle) > 1)
+    if duplicate:
+        raise ValueError(f"duplicate candidate handles: {', '.join(duplicate)}")
+    expected = set(expected_handles)
+    actual = set(received)
+    unknown = sorted(actual - expected)
+    missing = sorted(expected - actual)
+    if unknown or missing:
+        raise ValueError(
+            "candidate handle mismatch: "
+            f"unknown={','.join(unknown) or 'none'}; "
+            f"missing={','.join(missing) or 'none'}"
+        )
+    return {item.candidate: item for item in draft.decisions}
 
 
 class RejectionRecord(BaseModel):
@@ -1193,6 +1290,16 @@ def canonicalize_and_dedup(
 # LLM batch filter: accept/reject candidates with rationale
 # ---------------------------------------------------------------------------
 
+_FILTER_COMPLETION_CAP = 4096
+
+
+def _filter_completion_cap(client: LLMClient) -> int:
+    """Bound filter output without increasing an operator transport cap."""
+    transport_cap = getattr(client, "max_completion_tokens", None)
+    if isinstance(transport_cap, int) and transport_cap > 0:
+        return min(_FILTER_COMPLETION_CAP, transport_cap)
+    return _FILTER_COMPLETION_CAP
+
 
 def _reconcile_filter_response(
     batch_response: BatchFilterResponse,
@@ -1267,6 +1374,7 @@ def _build_call_log_entry(
         "prompt_tokens": llm_result.prompt_tokens,
         "completion_tokens": llm_result.completion_tokens,
         "duration_ms": llm_result.duration_ms,
+        "request_controls": llm_result.request_controls,
     }
 
 
@@ -1278,12 +1386,14 @@ def filter_candidates(
     profile: CapabilityProfile,
     *,
     quarantine_on_failure: bool = False,
+    advisory_on_failure: bool = False,
 ) -> _FilterResult | _QuarantineFilterResult:
     """Filter candidates via one LLM call per seed (with retry-on-malformed).
 
     Groups candidates by ``seed_id``, renders a batch prompt for each seed
-    labelling candidates by opaque ``candidate_id``, and asks the LLM to
-    accept or reject every candidate with a rationale.
+    labelling candidates with request-local ordinals, and asks the LLM to
+    accept or reject every candidate with a rationale. Canonical candidate
+    IDs never cross the provider wire protocol.
 
     Each response is atomically reconciled against the exact submitted ID
     set: expected seed, exactly one verdict per submitted ID, no
@@ -1317,6 +1427,10 @@ def filter_candidates(
     if not candidates:
         logger.info("Filter: no candidates to filter")
         return ([], [], [], []) if quarantine_on_failure else ([], [], [])
+    if quarantine_on_failure and advisory_on_failure:
+        raise ValueError(
+            "quarantine_on_failure and advisory_on_failure are mutually exclusive"
+        )
 
     # Build seed lookup for constructing FilteredSeed with full fields
     seed_lookup: dict[str, ScenarioSeed] = {s.seed_id: s for s in seeds}
@@ -1377,11 +1491,29 @@ def filter_candidates(
         first = submitted_snapshot[0]
         submitted_ids: set[str] = {c.candidate_id for c in submitted_snapshot}
 
+        handle_lookup = {
+            f"c{index}": candidate for index, candidate in enumerate(submitted_snapshot)
+        }
+
         # Build candidate_id → CandidateTriple lookup from the snapshot.
         candidate_lookup: dict[str, CandidateTriple] = {
             c.candidate_id: c for c in submitted_snapshot
         }
 
+        prompt_candidates = [
+            {
+                "handle": handle,
+                "entry_point": candidate.entry_point,
+                "controllability": candidate.controllability,
+                "direction": candidate.direction,
+                "atlas_technique_ids": candidate.atlas_technique_ids,
+                "atlas_technique_names": candidate.atlas_technique_names,
+                "atlas_technique_descriptions": (
+                    candidate.atlas_technique_descriptions
+                ),
+            }
+            for handle, candidate in handle_lookup.items()
+        ]
         user_prompt = render_prompt(
             "filter_user.j2",
             seed_id=seed_id,
@@ -1391,8 +1523,23 @@ def filter_candidates(
             threat_name=first.threat_name,
             owasp_llm_ids=first.owasp_llm_ids,
             risk_card_ref=first.risk_card_ref,
-            candidates=submitted_snapshot,
+            candidates=prompt_candidates,
         )
+        response_model = build_filter_map_response_model(tuple(handle_lookup))
+
+        def map_to_batch(draft: FilterMapDraftV3) -> BatchFilterResponse:
+            decisions = reconcile_filter_map(draft, tuple(handle_lookup))
+            return BatchFilterResponse(
+                seed_id=seed_id,
+                verdicts=[
+                    FilterVerdict(
+                        candidate_id=handle_lookup[handle].candidate_id,
+                        verdict="accept" if decision.relevant else "reject",
+                        rationale=decision.rationale,
+                    )
+                    for handle, decision in decisions.items()
+                ],
+            )
 
         seed_call_logs: list[dict] = []
         batch_response: BatchFilterResponse | None = None
@@ -1403,7 +1550,8 @@ def filter_candidates(
                 llm_result = client.complete(
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
-                    response_format=BatchFilterResponse,
+                    response_format=response_model,
+                    max_completion_tokens=_filter_completion_cap(client),
                 )
             except Exception as exc:  # noqa: BLE001 - infrastructure/parse exception, records synthetic call log
                 # Infrastructure/parse exception — record a synthetic
@@ -1434,21 +1582,65 @@ def filter_candidates(
 
             seed_call_logs.append(_build_call_log_entry(seed_id, llm_result, attempt))
 
-            # Validate llm_result.content as BatchFilterResponse inside
-            # each attempt so wrong content types and validation errors
-            # are caught and retried.
+            # Validate the ordinal wire protocol and translate it to the
+            # established canonical verdict model only after exact-set
+            # reconciliation. Historical typed responses remain accepted
+            # for local test adapters; production requests V3 exclusively.
             try:
                 raw_content = llm_result.content
                 if raw_content is None:
                     raise ValueError("LLM returned None content (refusal or empty)")
-                if isinstance(raw_content, BatchFilterResponse):
+                if isinstance(raw_content, FilterMapDraftV3):
+                    batch_response = map_to_batch(raw_content)
+                elif isinstance(raw_content, BatchFilterDraftV2):
+                    ordinal_decisions = reconcile_filter_ordinals(
+                        raw_content, tuple(handle_lookup)
+                    )
+                    batch_response = BatchFilterResponse(
+                        seed_id=seed_id,
+                        verdicts=[
+                            FilterVerdict(
+                                candidate_id=handle_lookup[handle].candidate_id,
+                                verdict="accept" if decision.relevant else "reject",
+                                rationale=decision.rationale,
+                            )
+                            for handle, decision in ordinal_decisions.items()
+                        ],
+                    )
+                elif isinstance(raw_content, BatchFilterResponse):
                     batch_response = raw_content
                 elif isinstance(raw_content, dict):
-                    batch_response = BatchFilterResponse.model_validate(raw_content)
+                    try:
+                        mapped = response_model.model_validate(raw_content)
+                    except ValidationError:
+                        try:
+                            ordinal = BatchFilterDraftV2.model_validate(raw_content)
+                        except ValidationError:
+                            batch_response = BatchFilterResponse.model_validate(
+                                raw_content
+                            )
+                        else:
+                            ordinal_decisions = reconcile_filter_ordinals(
+                                ordinal, tuple(handle_lookup)
+                            )
+                            batch_response = BatchFilterResponse(
+                                seed_id=seed_id,
+                                verdicts=[
+                                    FilterVerdict(
+                                        candidate_id=handle_lookup[handle].candidate_id,
+                                        verdict=(
+                                            "accept" if decision.relevant else "reject"
+                                        ),
+                                        rationale=decision.rationale,
+                                    )
+                                    for handle, decision in ordinal_decisions.items()
+                                ],
+                            )
+                    else:
+                        batch_response = map_to_batch(mapped)
                 elif isinstance(raw_content, str):
-                    # Some clients may return raw JSON strings.
-                    batch_response = BatchFilterResponse.model_validate(
-                        json.loads(raw_content)
+                    batch_response = map_to_batch(
+                        response_model.model_validate(json.loads(raw_content))
                     )
                 else:
                     # Wrong content type — try to coerce via model_validate.
@@ -1604,6 +1796,26 @@ def filter_candidates(
     protocol_errors: list[FilterProtocolError] = []
     quarantined_seeds: list[FilterSeedQuarantine] = []
 
+    def _admit_rule_eligible(seed_id: str) -> list[FilteredSeed]:
+        """Preserve every rule-eligible candidate after advisory filter failure."""
+        original_seed = seed_lookup[seed_id]
+        return [
+            FilteredSeed(
+                **original_seed.model_dump(),
+                pinned_entry_point=candidate.entry_point,
+                pinned_technique_ids=candidate.atlas_technique_ids,
+                pinned_technique_names=candidate.atlas_technique_names,
+                entry_point_id=candidate.entry_point_id,
+                candidate_id=candidate.candidate_id,
+                origins=list(candidate.origins),
+                rejection_rationales=[],
+                accepted_rationale=(
+                    "Candidate filter unavailable; rule-eligible candidate retained."
+                ),
+            )
+            for candidate in groups[seed_id]
+        ]
+
     max_workers = min(8, len(groups))
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
@@ -1627,7 +1839,20 @@ def filter_candidates(
                 all_rejected_verdicts.extend(seed_rejected)
             except FilterProtocolError as exc:
                 logger.error("Filter protocol failure for seed %s: %s", seed_id, exc)
-                protocol_errors.append(exc)
+                if advisory_on_failure:
+                    results.extend(_admit_rule_eligible(seed_id))
+                    total_accepted += len(groups[seed_id])
+                    call_log_entries.extend(exc.call_log_entries)
+                    call_log_entries.append(
+                        {
+                            "call": "candidate_filter",
+                            "seed_id": seed_id,
+                            "warning": "candidate_filter_unavailable",
+                            "response": None,
+                        }
+                    )
+                else:
+                    protocol_errors.append(exc)
             except Exception as exc:
                 # Any unexpected exception from _filter_one_seed is an
                 # infrastructure/protocol failure, not an ordinary rejection.
@@ -1635,12 +1860,23 @@ def filter_candidates(
                 # with evidence rather than silently dropping a seed.
                 # Preserve any call logs the exception already carries.
                 logger.exception("Filter infrastructure failure for seed %s", seed_id)
-                protocol_errors.append(
-                    FilterProtocolError(
-                        f"Filter infrastructure failure for seed {seed_id}: {exc}",
-                        call_log_entries=[],
-                    )
+                failure = FilterProtocolError(
+                    f"Filter infrastructure failure for seed {seed_id}: {exc}",
+                    call_log_entries=[],
                 )
+                if advisory_on_failure:
+                    results.extend(_admit_rule_eligible(seed_id))
+                    total_accepted += len(groups[seed_id])
+                    call_log_entries.append(
+                        {
+                            "call": "candidate_filter",
+                            "seed_id": seed_id,
+                            "warning": "candidate_filter_unavailable",
+                            "response": None,
+                        }
+                    )
+                else:
+                    protocol_errors.append(failure)
 
     if protocol_errors:
         # Collect all call logs (including from successful seeds) so the

@@ -1031,6 +1031,46 @@ class TestZoneCoverageDropout:
     minor violations fire but zone_coverage_dropout does NOT.
     """
 
+    def test_outside_boundary_zone_is_not_an_artifact_coverage_zone(self):
+        """Outside is valid narrative context, not a tree/Gherkin zone."""
+        profile = _make_profile()
+        tree_root = AttackTreeNode(
+            id="n1",
+            label="Root",
+            gate=GateType.OR,
+            zone="input",
+            threat_id="T7",
+            children=[
+                _leaf("n1.1", zone="input", technique_id="AML.T0051", threat_id="T7"),
+                _leaf("n1.2", zone="input", technique_id="AML.T0054", threat_id="T7"),
+            ],
+        )
+        envelope = _make_envelope(
+            zone_sequence=["outside", "input"],
+            tree_root=tree_root,
+            behavior_spec="""\
+Feature: Attack
+  Scenario: Test
+    # Zone input
+    When the system receives the request
+""",
+            seed_metadata={"threat_id": "T7"},
+        )
+
+        validate_scenario_semantics([envelope], profile)
+
+        boundary_zone_rules = {
+            "zone_in_profile",
+            "zone_omission_tree",
+            "zone_omission_gherkin",
+            "zone_coverage_dropout",
+        }
+        assert not any(
+            violation.rule in boundary_zone_rules
+            and "outside" in violation.message
+            for violation in envelope.validation.semantic.violations
+        )
+
     def test_zone_missing_from_tree_only_no_dropout(self):
         """Zone absent from tree but present in Gherkin -> minor only, no dropout."""
         profile = _make_profile()

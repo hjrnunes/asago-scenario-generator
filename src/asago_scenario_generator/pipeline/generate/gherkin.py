@@ -8,14 +8,15 @@ Action-aware Gherkin projection (cmps.9):
 - Human labels remain display text only; the action discriminator
   determines step kind, not label text.
 
-Call 3 returns assertions keyed by exact projected postcondition IDs.  Actions
-are derived deterministically from the verified final tree and projection;
-the LLM cannot select, mutate, omit, add, or reorder them.  Accepted assertions
-are combined with those immutable actions and rendered as canonical Gherkin.
+Call 3 now requests semantic interactions through request-local action and
+assertion handles.  The provider authors grouping, wording, and examples;
+canonical actions, postconditions, IDs, and Gherkin syntax are compiler-owned.
+Legacy assertions-only scripted responses remain readable for compatibility.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Annotated, Any
@@ -526,8 +527,10 @@ def _call_behavior_spec(
     use_case: str,
     scenario_tag: str,
     pinned_technique_ids: list[str] | None = None,
+    semantic_feedback: str | None = None,
     completion_length_feedback: str | None = None,
     compact_response_schema: bool = False,
+    max_completion_tokens: int | None = None,
     projection_context: dict[str, Any] | None = None,
 ) -> tuple[BehaviorSpec, LLMResult]:
     """Generate a structured behavior spec for a scenario seed (Call 3).
@@ -545,33 +548,128 @@ def _call_behavior_spec(
     Returns:
         Tuple of (BehaviorSpec, LLMResult).
     """
-    ctx = build_call3_context(
-        seed=seed,
-        narrative=narrative,
-        attack_tree=attack_tree,
-        profile=profile,
-        scenario_tag=scenario_tag,
-        projection_context=projection_context,
-    )
-    actions = _derive_behavior_actions(attack_tree, profile, projection_context)
+    semantic_context = None
+    if projection_context is not None:
+        from asago_scenario_generator.pipeline.generate.behavior_semantics import (
+            build_behavior_draft_response_model,
+            derive_behavior_handles,
+            strip_compiler_owned_zone_suffix,
+        )
 
-    user_prompt = render_prompt("call3_user.j2", **ctx)
+        semantic_context = derive_behavior_handles(
+            attack_tree, profile, projection_context
+        )
+        response_model: type[BaseModel] = build_behavior_draft_response_model(
+            [
+                item.handle
+                for item in (
+                    *semantic_context.action_handles,
+                    *semantic_context.assertion_handles,
+                )
+            ],
+            compact=compact_response_schema,
+            examples_allowed=any(
+                item.parameters for item in semantic_context.action_handles
+            ),
+        )
+        system_prompt = (
+            "You author concrete behavioral interactions for one adversarial "
+            "scenario. Return only the structured response. Use every action "
+            "and assertion handle exactly once and preserve action order. "
+            "You control scenario grouping, titles, concrete interaction text, "
+            "example values, and assertion wording. The compiler places each "
+            "assertion immediately after its canonical owning action. Never emit Gherkin syntax "
+            "or canonical IDs; the compiler owns identity and rendering."
+        )
+        action_inventory = [
+            {
+                "handle": item.handle,
+                "interaction": strip_compiler_owned_zone_suffix(
+                    item.action.text, item.zone
+                ),
+                "keyword_semantics": item.action.gherkin_keyword,
+                "zone": item.zone,
+                "parameters": [
+                    parameter.model_dump(mode="json") for parameter in item.parameters
+                ],
+            }
+            for item in semantic_context.action_handles
+        ]
+        assertion_inventory = [
+            {
+                "handle": item.handle,
+                "required_outcome": item.description,
+                "after_action_handle": next(
+                    action.handle
+                    for action in semantic_context.action_handles
+                    if item.source_step_id in action.action.projected_step_ids
+                ),
+            }
+            for item in semantic_context.assertion_handles
+        ]
+        user_prompt = (
+            f"Use case:\n{use_case}\n\n"
+            f"Narrative title: {narrative.title}\n"
+            f"Narrative summary: {narrative.summary}\n\n"
+            "Action handles:\n"
+            f"{json.dumps(action_inventory, ensure_ascii=False, indent=2)}\n\n"
+            "Required assertion handles:\n"
+            f"{json.dumps(assertion_inventory, ensure_ascii=False, indent=2)}\n\n"
+            "Produce only the structured JSON assertions and interactions "
+            "defined by the response schema. When an action's parameters "
+            "list is empty, its examples object must be empty.\n"
+        )
+        if semantic_feedback:
+            user_prompt += f"\nCorrection required:\n{semantic_feedback}\n"
+    else:
+        ctx = build_call3_context(
+            seed=seed,
+            narrative=narrative,
+            attack_tree=attack_tree,
+            profile=profile,
+            scenario_tag=scenario_tag,
+            projection_context=projection_context,
+        )
+        response_model = (
+            CompactCall3Response if compact_response_schema else Call3Response
+        )
+        system_prompt = render_prompt("call3_system.j2")
+        user_prompt = render_prompt("call3_user.j2", **ctx)
     if completion_length_feedback:
         user_prompt = f"{user_prompt}{completion_length_feedback}"
     result = client.complete(
-        system_prompt=render_prompt("call3_system.j2"),
+        system_prompt=system_prompt,
         user_prompt=user_prompt,
-        response_format=(
-            CompactCall3Response if compact_response_schema else Call3Response
-        ),
+        response_format=response_model,
+        max_completion_tokens=max_completion_tokens,
     )
 
-    call3_response: Call3Response = result.content
+    if semantic_context is not None and (
+        not isinstance(result.content, Call3Response)
+        and (not isinstance(result.content, dict) or "scenarios" in result.content)
+    ):
+        from asago_scenario_generator.pipeline.generate.behavior_semantics import (
+            BehaviorDraftV2,
+            compile_behavior_draft,
+        )
 
-    # Validate the structured response against the projection and tree.
-    _validate_call3_response(call3_response, attack_tree, projection_context)
-
-    behavior_spec = _call3_response_to_behavior_spec(call3_response, actions)
+        draft = (
+            result.content
+            if isinstance(result.content, BehaviorDraftV2)
+            else BehaviorDraftV2.model_validate(result.content)
+        )
+        behavior_spec = compile_behavior_draft(draft, semantic_context)
+    else:
+        # Compatibility for recorded/scripted Call3Response fixtures. New
+        # provider requests use BehaviorDraftV2 when projection context exists.
+        call3_response = (
+            result.content
+            if isinstance(result.content, Call3Response)
+            else Call3Response.model_validate(result.content)
+        )
+        actions = _derive_behavior_actions(attack_tree, profile, projection_context)
+        _validate_call3_response(call3_response, attack_tree, projection_context)
+        behavior_spec = _call3_response_to_behavior_spec(call3_response, actions)
 
     return behavior_spec, result
 

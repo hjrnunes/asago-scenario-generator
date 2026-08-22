@@ -5,9 +5,10 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from typing import Annotated, Any
+from collections.abc import Mapping, Sequence
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
 
 from asago_scenario_generator.llm.client import (
     LengthFinishReasonError as LengthFinishReasonError,
@@ -67,6 +68,317 @@ _CALL0_EVIDENCE_MAX_LENGTH = 300
 _Call0Item = Annotated[str, Field(min_length=1, max_length=_CALL0_ITEM_MAX_LENGTH)]
 
 
+# The V2 protocol is deliberately separate from the legacy Call0 transport.
+# It is the provider/compiler seam for projected non-STPA candidates: the
+# provider authors bounded semantics using request-local handles, and the
+# compiler is the only place that can attach canonical values.
+_ACTOR_DRAFT_MAX_ITEMS = 4
+_ACTOR_DRAFT_RATIONALE_MAX_LENGTH = 400
+_ActorDraftItem = Annotated[str, Field(min_length=1, max_length=_CALL0_ITEM_MAX_LENGTH)]
+
+
+class ActorDraftV2(BaseModel):
+    """Provider-authored actor semantics without canonical access fields."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    actor_type_handle: str = Field(min_length=1, max_length=32)
+    capability_level_handle: str = Field(min_length=1, max_length=32)
+    beliefs: list[_ActorDraftItem] = Field(
+        min_length=1, max_length=_ACTOR_DRAFT_MAX_ITEMS
+    )
+    desires: list[_ActorDraftItem] = Field(
+        min_length=1, max_length=_ACTOR_DRAFT_MAX_ITEMS
+    )
+    intentions: list[_ActorDraftItem] = Field(
+        min_length=1, max_length=_ACTOR_DRAFT_MAX_ITEMS
+    )
+    resource_handles: list[Annotated[str, Field(min_length=1, max_length=32)]] = Field(
+        default_factory=list, max_length=_ACTOR_DRAFT_MAX_ITEMS
+    )
+    rationale: str | None = Field(
+        default=None, min_length=1, max_length=_ACTOR_DRAFT_RATIONALE_MAX_LENGTH
+    )
+
+    @field_validator("resource_handles")
+    @classmethod
+    def _reject_duplicate_resource_handles(cls, value: list[str]) -> list[str]:
+        if len(set(value)) != len(value):
+            raise ValueError("duplicate resource handle in actor draft")
+        return value
+
+
+@dataclass(frozen=True)
+class ActorDraftContext:
+    """Canonical inventory used to compile one actor semantic draft."""
+
+    actor_types: Mapping[str, str]
+    capability_levels: Mapping[str, str]
+    resources: Mapping[str, str]
+    access: ActorAccessProvenance
+    minimum_capability_level: str = "novice"
+
+
+@dataclass(frozen=True)
+class ActorDraftViolation:
+    """Machine-readable actor draft violation for a correction request."""
+
+    code: str
+    detail: str
+
+
+class ActorSemanticDraftError(ValueError):
+    """An actor draft cannot be compiled without changing its semantics."""
+
+    def __init__(self, violations: Sequence[ActorDraftViolation]) -> None:
+        self.violations = tuple(violations)
+        super().__init__("; ".join(item.detail for item in self.violations))
+
+
+def _literal_from_handles(handles: Sequence[str]) -> Any:
+    """Return a runtime ``Literal`` constrained to unique local handles."""
+    values = tuple(handles)
+    if not values or len(set(values)) != len(values):
+        raise ValueError("handle inventory must be non-empty and unique")
+    return Literal.__getitem__(values)
+
+
+def create_actor_draft_model(
+    *,
+    actor_type_handles: Sequence[str],
+    capability_level_handles: Sequence[str],
+    resource_handles: Sequence[str] = (),
+    compact: bool = False,
+) -> type[ActorDraftV2]:
+    """Build the finite provider schema for one actor request."""
+    actor_handle = _literal_from_handles(actor_type_handles)
+    capability_handle = _literal_from_handles(capability_level_handles)
+    fields: dict[str, Any] = {
+        "actor_type_handle": (actor_handle, ...),
+        "capability_level_handle": (capability_handle, ...),
+    }
+    if resource_handles:
+        resource_handle = _literal_from_handles(resource_handles)
+        fields["resource_handles"] = (
+            list[resource_handle],
+            Field(default_factory=list, max_length=_ACTOR_DRAFT_MAX_ITEMS),
+        )
+    else:
+        fields["resource_handles"] = (
+            list[Annotated[str, Field(min_length=1, max_length=32)]],
+            Field(default_factory=list, max_length=0),
+        )
+    model_name = (
+        "CompactActorDraftV2ForCandidate" if compact else "ActorDraftV2ForCandidate"
+    )
+    return create_model(model_name, __base__=ActorDraftV2, **fields)
+
+
+def compile_actor_draft(
+    context: ActorDraftContext, draft: ActorDraftV2
+) -> ActorProfile:
+    """Attach canonical actor choices and access to provider-authored BDI."""
+    violations: list[ActorDraftViolation] = []
+    actor_type = context.actor_types.get(draft.actor_type_handle)
+    if actor_type is None:
+        violations.append(
+            ActorDraftViolation(
+                "unknown_actor_type_handle",
+                f"unknown actor type handle '{draft.actor_type_handle}'",
+            )
+        )
+    capability_level = context.capability_levels.get(draft.capability_level_handle)
+    if capability_level is None:
+        violations.append(
+            ActorDraftViolation(
+                "unknown_capability_level_handle",
+                f"unknown capability level handle '{draft.capability_level_handle}'",
+            )
+        )
+    if actor_type is not None and capability_level is not None:
+        actor_floor = _CAPABILITY_FLOORS.get(actor_type, "novice")
+        required_floor = max(
+            (actor_floor, context.minimum_capability_level),
+            key=_CAPABILITY_ORDER.index,
+        )
+        if _CAPABILITY_ORDER.index(capability_level) < _CAPABILITY_ORDER.index(
+            required_floor
+        ):
+            violations.append(
+                ActorDraftViolation(
+                    "capability_below_floor",
+                    f"actor '{actor_type}' requires capability '{required_floor}' "
+                    f"or higher, got '{capability_level}'",
+                )
+            )
+    unknown_resources = [
+        handle for handle in draft.resource_handles if handle not in context.resources
+    ]
+    if unknown_resources:
+        violations.append(
+            ActorDraftViolation(
+                "unknown_resource_handle",
+                f"unknown resource handle(s): {unknown_resources}",
+            )
+        )
+    if violations:
+        raise ActorSemanticDraftError(violations)
+
+    # The checks above prove these lookups succeeded. Keeping canonical
+    # resolution here (rather than normalizing provider strings) makes the
+    # ownership rule visible and fail-closed.
+    assert actor_type is not None
+    assert capability_level is not None
+    return ActorProfile(
+        actor_type=actor_type,
+        capability_level=capability_level,
+        beliefs=list(draft.beliefs),
+        desires=list(draft.desires),
+        intentions=list(draft.intentions),
+        resources=[context.resources[handle] for handle in draft.resource_handles],
+        access=context.access.model_copy(deep=True),
+    )
+
+
+def _actor_draft_inventories(
+    prompt_context: Mapping[str, Any],
+    projection_context: dict[str, Any],
+    profile: CapabilityProfile,
+) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+    """Allocate deterministic local handles for one actor request."""
+    compatible_actor_types = list(prompt_context["compatible_actor_types"])
+    if projection_context.get("ingress_controllability") == "direct":
+        compatible_actor_types = [
+            actor_type
+            for actor_type in compatible_actor_types
+            if actor_type not in _INSIDER_ACTOR_TYPES
+        ]
+    if not compatible_actor_types:
+        raise ValueError(
+            "projection has no actor type with canonical direct-access provenance"
+        )
+    actor_types = {
+        f"a{index}": actor_type
+        for index, actor_type in enumerate(compatible_actor_types)
+    }
+    minimum = prompt_context.get("minimum_capability_level", "novice")
+    minimum_index = (
+        _CAPABILITY_ORDER.index(minimum) if minimum in _CAPABILITY_ORDER else 0
+    )
+    capability_levels = {
+        f"c{index}": level
+        for index, level in enumerate(_CAPABILITY_ORDER[minimum_index:])
+    }
+
+    from asago_scenario_generator.pipeline.generate.names import (
+        resource_name_for_kind,
+    )
+
+    resource_names: list[str] = []
+    for step in projection_context.get("selected_steps", []):
+        if not step.get("attacker_controlled", False):
+            continue
+        for link in step.get("resource_links", []):
+            reference = link.get("resource_ref")
+            if not isinstance(reference, dict):
+                continue
+            kind = reference.get("kind")
+            if kind == "agent_internal":
+                name = "agent internal working context"
+            else:
+                resource_id = next(
+                    (
+                        value
+                        for key, value in reference.items()
+                        if key.endswith("_id") and isinstance(value, str)
+                    ),
+                    None,
+                )
+                if resource_id is None:
+                    continue
+                name = resource_name_for_kind(kind, resource_id, profile)
+            if name not in resource_names:
+                resource_names.append(name)
+    resources = {f"r{index}": name for index, name in enumerate(resource_names)}
+    return actor_types, capability_levels, resources
+
+
+def _derive_canonical_actor_access(
+    projection_context: dict[str, Any], actor_type: str
+) -> ActorAccessProvenance:
+    """Derive access provenance solely from the accepted projection."""
+    ingress = projection_context.get("canonical_ingress", {})
+    entry_point_id = ingress.get("entry_point_id")
+    if not isinstance(entry_point_id, str):
+        raise ValueError("projection lacks a canonical ingress entry-point ID")
+    ingress_mode = _ep_controllability_to_ingress_mode(
+        projection_context.get("ingress_controllability")
+    )
+    if ingress_mode is None:
+        raise ValueError("projection lacks attacker-accessible ingress controllability")
+
+    if ingress_mode == "direct":
+        is_insider = actor_type in _INSIDER_ACTOR_TYPES
+        if is_insider:
+            raise ValueError(
+                "projection supplies no canonical material insider advantage"
+            )
+        return ActorAccessProvenance(
+            initial_entry_point_id=entry_point_id,
+            ingress_mode="direct",
+            access_class="public",
+        )
+
+    paths = projection_context.get("source_influence_paths", [])
+    if len(paths) != 1:
+        raise ValueError(
+            "indirect projection must contain exactly one source-influence path"
+        )
+    path = paths[0]
+    source_id = path.get("source_id")
+    source_kind = path.get("source_identity_kind")
+    boundary_id = path.get("boundary_id")
+    if not all(
+        isinstance(value, str) for value in (source_id, source_kind, boundary_id)
+    ):
+        raise ValueError("indirect projection has incomplete canonical access path")
+    return ActorAccessProvenance(
+        initial_entry_point_id=entry_point_id,
+        ingress_mode="indirect",
+        access_class="supply_chain",
+        influence_source=source_id,
+        influence_source_kind=source_kind,
+        influence_source_id=source_id,
+        influence_mechanism="Declared canonical upstream influence path",
+        trust_boundary_id=boundary_id,
+    )
+
+
+def _actor_draft_prompt(
+    actor_types: Mapping[str, str],
+    capability_levels: Mapping[str, str],
+    resources: Mapping[str, str],
+) -> str:
+    """Render the concise V2 handle protocol appended to the semantic prompt."""
+    lines = [
+        "\n\n## Semantic Draft V2 Response Protocol (MANDATORY)",
+        "Return actor_type_handle and capability_level_handle from these inventories.",
+        "The application owns access provenance; do not return access fields or IDs.",
+        "Author all beliefs, desires, and intentions yourself.",
+        "Actor handles:",
+        *(f"- {handle}: {value}" for handle, value in actor_types.items()),
+        "Capability handles:",
+        *(f"- {handle}: {value}" for handle, value in capability_levels.items()),
+        "Resource handles (select zero to four; do not invent resources):",
+        *(
+            (f"- {handle}: {value}" for handle, value in resources.items())
+            if resources
+            else ("- none available; return an empty resource_handles list",)
+        ),
+    ]
+    return "\n".join(lines)
+
+
 class Call0Response(BaseModel):
     """LLM response model for Call 0: Actor Profile."""
 
@@ -102,6 +414,10 @@ class Call0Response(BaseModel):
     material_insider_advantage: str | None = Field(
         default=None, max_length=_CALL0_EVIDENCE_MAX_LENGTH
     )
+
+
+class CompactCall0Response(Call0Response):
+    """Provider schema name for the one causal compact-response experiment."""
 
 
 # ---------------------------------------------------------------------------
@@ -666,7 +982,13 @@ def validate_actor_access_provenance(
 
 
 def _complete_actor_profile(
-    client: LLMClient, system_prompt: str, user_prompt: str
+    client: LLMClient,
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    compact_response_schema: bool = False,
+    response_format: type[BaseModel] | None = None,
+    max_completion_tokens: int | None = None,
 ) -> LLMResult:
     """Complete Call 0 exactly once with the operator-configured limit.
 
@@ -674,11 +996,17 @@ def _complete_actor_profile(
     ``CompletionLengthError`` evidence; this helper never retries.
     Retry ownership belongs to the finalization lifecycle.
     """
+    effective_max = (
+        max_completion_tokens
+        if max_completion_tokens is not None
+        else client.max_completion_tokens
+    )
     return client.complete(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        response_format=Call0Response,
-        max_completion_tokens=client.max_completion_tokens,
+        response_format=response_format
+        or (CompactCall0Response if compact_response_schema else Call0Response),
+        max_completion_tokens=effective_max,
     )
 
 
@@ -697,6 +1025,8 @@ def _call_actor_profile(
     pinned_entry_point_id: str | None = None,
     access_feedback: str | None = None,
     completion_length_feedback: str | None = None,
+    compact_response_schema: bool = False,
+    max_completion_tokens: int | None = None,
     projection_context: dict[str, Any] | None = None,
 ) -> tuple[ActorProfile, LLMResult, str | None]:
     """Generate a threat actor profile for a scenario seed (Call 0).
@@ -727,17 +1057,70 @@ def _call_actor_profile(
         projection_context=projection_context,
     )
 
+    semantic_draft_v2 = projection_context is not None
     system_prompt = render_prompt(
         "call0_system.j2",
         zones_active=profile.zones_active,
         tool_inventory=ctx["tool_inventory"],
+        semantic_draft_v2=semantic_draft_v2,
     )
-    user_prompt = render_prompt("call0_user.j2", **ctx)
+    user_prompt = render_prompt(
+        "call0_user.j2", **ctx, semantic_draft_v2=semantic_draft_v2
+    )
+    actor_types: dict[str, str] = {}
+    capability_levels: dict[str, str] = {}
+    resources: dict[str, str] = {}
+    response_model: type[BaseModel] | None = None
+    if semantic_draft_v2:
+        assert projection_context is not None
+        actor_types, capability_levels, resources = _actor_draft_inventories(
+            ctx, projection_context, profile
+        )
+        response_model = create_actor_draft_model(
+            actor_type_handles=tuple(actor_types),
+            capability_level_handles=tuple(capability_levels),
+            resource_handles=tuple(resources),
+            compact=compact_response_schema,
+        )
+        user_prompt += _actor_draft_prompt(actor_types, capability_levels, resources)
     if completion_length_feedback:
         user_prompt = f"{user_prompt}{completion_length_feedback}"
-    result = _complete_actor_profile(client, system_prompt, user_prompt)
+    result = _complete_actor_profile(
+        client,
+        system_prompt,
+        user_prompt,
+        compact_response_schema=compact_response_schema,
+        response_format=response_model,
+        max_completion_tokens=max_completion_tokens,
+    )
 
     resp = result.content
+    if isinstance(resp, ActorDraftV2):
+        actor_type = actor_types.get(resp.actor_type_handle)
+        if actor_type is None:
+            raise ActorSemanticDraftError(
+                (
+                    ActorDraftViolation(
+                        "unknown_actor_type_handle",
+                        f"unknown actor type handle '{resp.actor_type_handle}'",
+                    ),
+                )
+            )
+        access = _derive_canonical_actor_access(projection_context, actor_type)
+        actor_profile = compile_actor_draft(
+            ActorDraftContext(
+                actor_types=actor_types,
+                capability_levels=capability_levels,
+                resources=resources,
+                access=access,
+                minimum_capability_level=ctx["minimum_capability_level"],
+            ),
+            resp,
+        )
+        return actor_profile, result, ctx.get("diversity_limitation")
+
+    # Scripted fixtures using the historical response remain supported while
+    # live projected requests advertise and parse only ActorDraftV2.
     actor_type = _normalize_actor_type(resp.actor_type)
     capability_level = _normalize_capability_level(resp.capability_level)
     capability_level = _enforce_capability_floor(actor_type, capability_level)

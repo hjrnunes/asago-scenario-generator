@@ -37,6 +37,19 @@ if TYPE_CHECKING:
     from asago_scenario_generator.models.scenario import ScenarioEnvelope
 
 
+def _step_links_initial_ingress(step: Any, initial_ingress_slot_id: str) -> bool:
+    """Whether a projected step owns direct or source-influenced activation."""
+
+    return any(
+        (link.role == "ingress" and link.slot_id == initial_ingress_slot_id)
+        or (
+            link.role == "source_influence"
+            and link.target_ingress_slot_id == initial_ingress_slot_id
+        )
+        for link in step.resource_links
+    )
+
+
 def _check_narrative_realizations(
     envelope: ScenarioEnvelope,
     block: ProjectionEnvelopeBlock,
@@ -469,6 +482,7 @@ def _check_tree_resource_bindings(
     bindings_by_slot = {b.slot_id: b.resource_ref for b in block.projection.bindings}
 
     # Build a map: step_id → set of slot_ids linked to that step.
+    step_by_id = {step.step_id: step for step in chain.steps}
     step_to_slots: dict[str, set[str]] = {}
     step_to_links: dict[str, tuple[Any, ...]] = {}
     for step in chain.steps:
@@ -531,8 +545,18 @@ def _check_tree_resource_bindings(
                         element_id=leaf.id,
                     )
                 )
-            # Also verify the ingress slot is linked to at least one mapped step.
-            if chain.initial_ingress_slot_id not in all_step_slots:
+            # Also verify that at least one mapped step owns the activation.
+            # A source_influence link targeting the initial-ingress slot is
+            # the canonical indirect-ingress alternative to a direct ingress
+            # resource link.
+            owns_activation = any(
+                _step_links_initial_ingress(
+                    step_by_id[mapped_step_id], chain.initial_ingress_slot_id
+                )
+                for mapped_step_id in mapped_step_ids
+                if mapped_step_id in step_by_id
+            )
+            if not owns_activation:
                 violations.append(
                     ProjectionTraceabilityViolation(
                         code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
@@ -540,7 +564,7 @@ def _check_tree_resource_bindings(
                         detail=(
                             f"tree leaf '{leaf.id}' uses initial_ingress but "
                             f"none of mapped steps {list(mapped_step_ids)} "
-                            f"have an ingress resource_link"
+                            f"own an ingress activation link"
                         ),
                         element_id=leaf.id,
                         projected_step_id=mapped_step_ids[0],

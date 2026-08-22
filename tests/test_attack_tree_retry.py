@@ -28,6 +28,11 @@ from asago_scenario_generator.pipeline.generate import (
     _call_attack_tree_once,
 )
 from asago_scenario_generator.pipeline.generate.tree import _parse_attack_tree_yaml
+from asago_scenario_generator.pipeline.generate.tree_semantics import (
+    AttackTreeDraftNode,
+    AttackTreeDraftV2,
+    AttackTreeDraftV3,
+)
 from tests.helpers.realization_helper import make_realizations
 
 # ---------------------------------------------------------------------------
@@ -283,10 +288,12 @@ class TestAttackTreeRetry:
                 client=client,
                 use_case="A test use case",
                 profile=_make_profile(),
+                temperature=0.2,
                 pinned_entry_point_id="ep:v1:52306ddb893a33ef2dc0f20c01e815f1",
             )
 
         client.complete.assert_called_once()
+        assert client.complete.call_args.kwargs["temperature"] == 0.2
         failure = raised.value
         assert failure.phase == "post_response"
         assert failure.result is result
@@ -925,3 +932,72 @@ class TestCall2ExternalPreconditionRetry:
         assert client.complete.call_count == 2
         assert result is retry_result
         assert tree.root.id == "n1"
+
+
+def test_projected_provider_path_requests_and_compiles_topology_draft() -> None:
+    profile = _make_profile()
+    ingress_id = profile.entry_points[0].entry_point_id
+    projection_context = {
+        "selected_step_ids": ["step.1"],
+        "canonical_ingress": {
+            "kind": "entry_point",
+            "entry_point_id": ingress_id,
+        },
+        "selected_steps": [
+            {
+                "step_id": "step.1",
+                "order": 1,
+                "action_kind": "deliver",
+                "executor_role": "attacker",
+                "boundary_position": "crossing",
+                "resource_links": [
+                    {
+                        "role": "ingress",
+                        "resource_ref": {
+                            "kind": "entry_point",
+                            "entry_point_id": ingress_id,
+                        },
+                    }
+                ],
+                "observable_postconditions": [],
+                "realization": make_realizations(
+                    ("step.1",), action_kind="deliver"
+                )[0].model_dump(mode="json"),
+                "technique_ids": [],
+            }
+        ],
+    }
+    result = LLMResult(
+        content=AttackTreeDraftV2(
+            root=AttackTreeDraftNode(kind="leaf", leaf_handle="l0")
+        ),
+        prompt_tokens=20,
+        completion_tokens=10,
+        duration_ms=5,
+        system_prompt="",
+        user_prompt="",
+    )
+    client = MagicMock()
+    client.complete.return_value = result
+    seed = _make_seed()
+    seed.threat_id = "T2"
+
+    tree, returned = _call_attack_tree_once(
+        seed=seed,
+        narrative=_make_narrative(),
+        client=client,
+        use_case="Test",
+        profile=profile,
+        pinned_entry_point_id=ingress_id,
+        projection_context=projection_context,
+    )
+
+    assert returned is result
+    response_model = client.complete.call_args.kwargs["response_format"]
+    assert issubclass(response_model, AttackTreeDraftV3)
+    group_schema = response_model.model_json_schema()["$defs"][
+        "AttackTreeDraftGroupV3"
+    ]
+    assert group_schema["properties"]["leaf_handles"]["items"]["enum"] == ["l0"]
+    assert tree.root.projected_step_ids == ("step.1",)
+    assert tree.root.action.kind == "initial_ingress"

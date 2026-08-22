@@ -687,10 +687,7 @@ def _source_influence_relation(
         issue_detail = "source-influence boundary is absent from reviewed declarations"
     elif boundary.confidence.value == "hypothesized":
         issue_detail = "source-influence boundary is not a reviewed declaration"
-    elif (
-        ingress.ingress_zone is not None
-        and boundary.to_zone != ingress.effective_ingress_zone
-    ):
+    elif boundary.to_zone != ingress.effective_ingress_zone:
         issue_detail = "trust-boundary destination zone does not match target ingress"
     elif target_id != ingress_ref.entry_point_id:
         issue_detail = "source-influence target is not the canonical ingress binding"
@@ -869,6 +866,14 @@ def _readiness_fact_references(
             for reference in _condition_facts(condition):
                 fact_refs[_fact_key(reference)] = reference
     return fact_refs
+
+
+def required_fact_references(
+    patterns: Sequence[AttackPattern],
+) -> tuple[AuthoritativeFactReference, ...]:
+    """Return the complete canonical fact inventory used by readiness."""
+    references = _readiness_fact_references(patterns)
+    return tuple(references[key] for key in sorted(references))
 
 
 def _required_fact_ids(

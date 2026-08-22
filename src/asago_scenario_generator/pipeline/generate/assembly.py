@@ -34,6 +34,7 @@ from asago_scenario_generator.models.scenario import (
     ArchitectureMatch,
     BehaviorAction,
     BehaviorAssertion,
+    BehaviorScenario,
     BehaviorSpec,
     CallMetadata,
     CallName,
@@ -472,6 +473,7 @@ def render_gherkin_from_behavior_spec(
     assertions: list[BehaviorAssertion],
     *,
     zone_map: dict[str, str] | None = None,
+    scenarios: list[BehaviorScenario] | None = None,
 ) -> str:
     """Deterministically render Gherkin feature text from structured behavior.
 
@@ -491,7 +493,36 @@ def render_gherkin_from_behavior_spec(
     lines.append("    Given a target AI system with projected attack steps")
     lines.append("")
 
-    # Scenario outline with structured actions.
+    if scenarios:
+        action_by_id = {item.action_id: item for item in actions}
+        assertion_by_id = {item.assertion_id: item for item in assertions}
+        for scenario_index, scenario in enumerate(scenarios):
+            lines.append(f"  Scenario: {scenario.title}")
+            lines.append("")
+            previous_keyword: str | None = None
+            for step_id in scenario.step_ids:
+                if step_id in action_by_id:
+                    action = action_by_id[step_id]
+                    semantic_keyword = action.gherkin_keyword
+                    text = action.text
+                    zone_suffix = ""
+                    if zone_map and action.action_id in zone_map:
+                        zone_suffix = f" ({zone_map[action.action_id]})"
+                else:
+                    assertion = assertion_by_id[step_id]
+                    semantic_keyword = assertion.gherkin_keyword
+                    text = assertion.text
+                    zone_suffix = ""
+                keyword = (
+                    "And" if previous_keyword == semantic_keyword else semantic_keyword
+                )
+                lines.append(f"    {keyword} {text}{zone_suffix}")
+                previous_keyword = semantic_keyword
+            if scenario_index < len(scenarios) - 1:
+                lines.append("")
+        return "\n".join(lines) + "\n"
+
+    # Legacy single-scenario rendering for artifacts without explicit grouping.
     lines.append("  Scenario: Projected attack realization")
     lines.append("")
 
@@ -661,6 +692,14 @@ def _build_projection_context(candidate: ProjectedCandidate) -> dict[str, Any]:
                 "boundary_position": step.boundary_position,
                 "attacker_controlled": step.attacker_controlled,
                 "requirement": step.requirement,
+                # Canonical ATLAS bindings are exposed to the tree compiler,
+                # not echoed by the provider topology draft.
+                "technique_ids": [
+                    technique_id
+                    for mapping in step.mappings
+                    if mapping.taxonomy == "ATLAS" and mapping.decision == "exact"
+                    for technique_id in mapping.ids
+                ],
                 "resource_links": [
                     {
                         "role": link.role,

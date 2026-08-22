@@ -680,6 +680,7 @@ def _check_behavior_realizations(
             list(behavior_spec.actions),
             list(behavior_spec.assertions),
             zone_map=None,
+            scenarios=list(behavior_spec.scenarios),
         )
         # Strip zone annotations from both texts for comparison.
         _zone_pat = _re.compile(r"\s*\([^)]*\)\s*$", _re.MULTILINE)

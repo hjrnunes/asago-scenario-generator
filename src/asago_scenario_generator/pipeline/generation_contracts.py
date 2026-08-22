@@ -8,10 +8,15 @@ policy and durable persistence from importing the stage-call adapter.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from asago_scenario_generator.llm.client import LLMResult
 from asago_scenario_generator.models.scenario import CallMetadata, CallName
+
+if TYPE_CHECKING:
+    from asago_scenario_generator.pipeline.semantic_generation import (
+        StageGenerationEvidence,
+    )
 
 __all__ = [
     "CausalRetryControl",
@@ -37,6 +42,7 @@ class RetryDirective:
     forced_actor_type: str | None = None
     prior_titles: tuple[str, ...] | None = None
     causal_control: CausalRetryControl | None = None
+    attempt_index: int = 1
 
     def provider_retry_value(self, field: str) -> str | int | float | None:
         """Return the approved retry value when its control targets ``field``."""
@@ -63,6 +69,7 @@ class StageCallEvidence:
     call_name: CallName
     result: LLMResult
     metadata: CallMetadata
+    semantic_evidence: StageGenerationEvidence | None = None
 
 
 class StageAttemptFailure(Exception):
@@ -80,6 +87,11 @@ class StageAttemptFailure(Exception):
 
     DEFAULT_CODE = "stage_attempt_failed"
     COMPLETION_LENGTH_CODE = "completion_length"
+    SEMANTIC_DRAFT_LENGTH_CODE = "semantic_draft_length_failed"
+    SEMANTIC_DRAFT_PROTOCOL_CODE = "semantic_draft_protocol_failed"
+    SEMANTIC_DRAFT_INVALID_CODE = "semantic_draft_invalid"
+    PROJECTION_INFEASIBLE_CODE = "projection_infeasible"
+    CANONICAL_COMPILATION_CODE = "canonical_compilation_failed"
 
     def __init__(
         self,
@@ -106,6 +118,8 @@ class StageAttemptFailure(Exception):
         partial_preview_suffix: str | None = None,
         elapsed_ms: int | None = None,
         request_controls: dict[str, Any] | None = None,
+        retryable: bool = True,
+        semantic_evidence: StageGenerationEvidence | None = None,
     ) -> None:
         super().__init__(str(exception))
         self.call_name = call_name
@@ -131,6 +145,8 @@ class StageAttemptFailure(Exception):
         self.partial_preview_suffix = partial_preview_suffix
         self.elapsed_ms = elapsed_ms
         self.request_controls = request_controls or {}
+        self.retryable = retryable
+        self.semantic_evidence = semantic_evidence
 
 
 def stage_attempt_failure(
@@ -144,6 +160,9 @@ def stage_attempt_failure(
     result: LLMResult | None = None,
     raw_response: Any | None = None,
     request_controls: dict[str, Any] | None = None,
+    code: str | None = None,
+    retryable: bool | None = None,
+    semantic_evidence: StageGenerationEvidence | None = None,
 ) -> StageAttemptFailure:
     """Build a typed StageAttemptFailure, normalizing length exhaustion.
 
@@ -177,7 +196,18 @@ def stage_attempt_failure(
             partial_preview_suffix=exception.partial_preview_suffix,
             elapsed_ms=exception.elapsed_ms,
             request_controls=request_controls,
+            retryable=True,
+            semantic_evidence=semantic_evidence,
         )
+    code = code or getattr(exception, "stage_failure_code", None)
+    if retryable is None:
+        retryable = getattr(exception, "stage_failure_retryable", None)
+    if code is None:
+        from pydantic import ValidationError
+
+        if invoked and isinstance(exception, ValidationError):
+            code = StageAttemptFailure.SEMANTIC_DRAFT_PROTOCOL_CODE
+            retryable = True
     return StageAttemptFailure(
         call_name=call_name,
         exception=exception,
@@ -187,5 +217,8 @@ def stage_attempt_failure(
         user_prompt=user_prompt,
         result=result,
         raw_response=raw_response,
+        code=code or StageAttemptFailure.DEFAULT_CODE,
         request_controls=request_controls,
+        retryable=True if retryable is None else bool(retryable),
+        semantic_evidence=semantic_evidence,
     )

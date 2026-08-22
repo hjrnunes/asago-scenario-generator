@@ -972,6 +972,28 @@ class BehaviorAssertion(BaseModel):
         return self
 
 
+class BehaviorScenario(BaseModel):
+    """Provider-authored grouping of canonical behavior steps.
+
+    ``step_ids`` contains behavior action and assertion IDs in the exact order
+    chosen by the semantic draft.  The IDs themselves remain compiler-owned.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    scenario_id: str = Field(min_length=1)
+    title: str = Field(min_length=1, max_length=160)
+    step_ids: tuple[str, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _step_ids_are_unique(self) -> BehaviorScenario:
+        if len(set(self.step_ids)) != len(self.step_ids):
+            raise ValueError(
+                f"behavior scenario '{self.scenario_id}' has duplicate step IDs"
+            )
+        return self
+
+
 class BehaviorSpec(BaseModel):
     """Structured behavior specification with projection traceability.
 
@@ -989,10 +1011,46 @@ class BehaviorSpec(BaseModel):
     assertions: tuple[BehaviorAssertion, ...] = Field(
         description="Structured behavior assertions tied to projected postconditions.",
     )
+    scenarios: tuple[BehaviorScenario, ...] = Field(
+        default=(),
+        description=(
+            "Optional provider-authored scenario grouping. Empty preserves the "
+            "legacy single-scenario rendering contract."
+        ),
+    )
     gherkin_text: str = Field(
         description="Rendered Gherkin feature text.",
         min_length=1,
     )
+
+    @model_validator(mode="after")
+    def _validate_scenario_grouping(self) -> BehaviorSpec:
+        if not self.scenarios:
+            return self
+        action_ids = tuple(item.action_id for item in self.actions)
+        assertion_ids = tuple(item.assertion_id for item in self.assertions)
+        known = set(action_ids) | set(assertion_ids)
+        grouped = tuple(
+            step_id for scenario in self.scenarios for step_id in scenario.step_ids
+        )
+        unknown = set(grouped) - known
+        if unknown:
+            raise ValueError(
+                f"behavior scenarios reference unknown step IDs: {sorted(unknown)}"
+            )
+        if len(set(grouped)) != len(grouped):
+            raise ValueError("behavior scenarios must place every step ID exactly once")
+        missing = known - set(grouped)
+        if missing:
+            raise ValueError(
+                f"behavior scenarios omit canonical step IDs: {sorted(missing)}"
+            )
+        grouped_actions = tuple(step_id for step_id in grouped if step_id in action_ids)
+        if grouped_actions != action_ids:
+            raise ValueError(
+                "behavior scenario grouping must preserve canonical action order"
+            )
+        return self
 
 
 # ---------------------------------------------------------------------------

@@ -793,7 +793,12 @@ def test_source_influence_activates_indirect_ingress() -> None:
     profile = CapabilityProfile(
         zones_active=["input", "reasoning", "tool_execution"],
         entry_points=[
-            {"name": "chat", "direction": "input", "controllability": "indirect"},
+            {
+                "name": "chat",
+                "direction": "input",
+                "controllability": "indirect",
+                "ingress_zone": "reasoning",
+            },
         ],
         confidence=ConfidenceLevel.high,
         kc_subcodes=["KC1.1", "KC5.1"],

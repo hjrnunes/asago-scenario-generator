@@ -29,7 +29,9 @@ The minimum capability_level for this scenario is "{{ minimum_capability_level }
 {% endif %}
 ---
 
+{% if not semantic_draft_v2 | default(false) %}
 {% include "_projection_constraints.j2" %}
+{% endif %}
 ## Your Task
 Produce a BDI actor profile for this attack pattern applied to the target system above.
 {% if pinned_entry_point %}

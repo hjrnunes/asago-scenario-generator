@@ -1167,8 +1167,10 @@ def _validate_scenario_semantics_mutating(
     Checks:
       1. ``technique_exists``: every technique_id in the attack tree exists
          in ``ATLAS_TECHNIQUE_NAMES``.
-      2. ``zone_in_profile``: every zone referenced in the narrative's
-         zone_sequence is in the profile's ``zones_active``.
+      2. ``zone_in_profile``: every active zone referenced in the narrative's
+         zone_sequence is in the profile's ``zones_active``. The canonical
+         ``outside`` boundary marker is valid narrative context, not an active
+         Schneider zone.
       3. ``threat_id_range``: threat_id on attack tree nodes is in T1-T17.
       4. ``missing_scenario_threat_id``: at least one tree node carries the
          scenario's own threat_id from ``scenario_seed_metadata``.
@@ -1178,8 +1180,9 @@ def _validate_scenario_semantics_mutating(
       7. ``zone_omission_gherkin``: narrative zones missing from Gherkin.
       8. Typed action IDs resolve to canonical profile resources, and
          tool_execution leaves carry tool_invocation actions.
-      9. ``seed_technique_provenance``: at least one seed technique from
-         ``laaf_technique_ids`` must appear in the attack tree.
+      9. ``seed_technique_provenance``: at least one ATLAS provenance
+         technique must appear in the attack tree. LAAF S/M identifiers are
+         provenance in a different namespace and are not tree technique IDs.
      10. ``zone_coverage_dropout``: narrative zone absent from BOTH tree
          AND Gherkin — a hard consistency failure (cxy4).
 
@@ -1197,7 +1200,7 @@ def _validate_scenario_semantics_mutating(
     )
 
     valid_technique_ids = set(ATLAS_TECHNIQUE_NAMES.keys())
-    valid_zones = set(profile.zones_active)
+    valid_zones = {*profile.zones_active, "outside"}
 
     for scenario in scenarios:
         violations: list[SemanticViolation] = []
@@ -1274,10 +1277,14 @@ def _validate_scenario_semantics_mutating(
 
         # 6. Zone omission checks (bv5s).
         narrative_zones = set(scenario.narrative.zone_sequence)
+        # ``outside`` represents activity before crossing the assessed system
+        # boundary. Tree leaves for those external preconditions intentionally
+        # have zone=None, and Gherkin annotations cover active system zones.
+        artifact_coverage_zones = narrative_zones - {"outside"}
 
         # 6a. Zone omission — tree.
         tree_zones = _collect_tree_node_zones(scenario.attack_tree.root)
-        omitted_tree_zones = sorted(narrative_zones - tree_zones)
+        omitted_tree_zones = sorted(artifact_coverage_zones - tree_zones)
         zone_seq = scenario.narrative.zone_sequence
         terminal_zone = zone_seq[-1] if zone_seq else None
         compound_omission = len(omitted_tree_zones) >= 2
@@ -1306,7 +1313,7 @@ def _validate_scenario_semantics_mutating(
         gherkin_zones: set[str] = set()
         if gherkin_text:
             gherkin_zones = _extract_gherkin_zones_for_validation(gherkin_text)
-            for zone in sorted(narrative_zones - gherkin_zones):
+            for zone in sorted(artifact_coverage_zones - gherkin_zones):
                 violations.append(
                     SemanticViolation(
                         rule="zone_omission_gherkin",
@@ -1320,7 +1327,7 @@ def _validate_scenario_semantics_mutating(
 
         # 10. Zone coverage dropout — a zone present in narrative but absent
         #     from BOTH tree AND Gherkin is a hard consistency failure (cxy4).
-        dropped_zones = narrative_zones - (tree_zones | gherkin_zones)
+        dropped_zones = artifact_coverage_zones - (tree_zones | gherkin_zones)
         for zone in sorted(dropped_zones):
             violations.append(
                 SemanticViolation(
@@ -1427,10 +1434,21 @@ def _validate_scenario_semantics_mutating(
                     )
                 )
 
-        # 9. Seed technique provenance — at least one seed technique from
-        #    laaf_technique_ids must appear in the attack tree (0lfx).
-        if seed_metadata and seed_metadata.get("laaf_technique_ids"):
-            seed_techniques = set(seed_metadata["laaf_technique_ids"])
+        # 9. Seed technique provenance. Attack-tree technique IDs use the
+        #    ATLAS AML.* namespace. LAAF S*/M* IDs describe upstream
+        #    provenance and cannot be directly compared to those tree IDs.
+        #    Retain compatibility for legacy envelopes that incorrectly put
+        #    AML.* identifiers in laaf_technique_ids.
+        seed_techniques: set[str] = set()
+        if seed_metadata:
+            seed_techniques.update(seed_metadata.get("atlas_provenance_ids") or ())
+            if not seed_techniques:
+                seed_techniques.update(
+                    technique_id
+                    for technique_id in seed_metadata.get("laaf_technique_ids") or ()
+                    if str(technique_id).startswith("AML.")
+                )
+        if seed_techniques:
             all_tree_techniques = _collect_technique_ids(scenario.attack_tree.root)
             if not seed_techniques & all_tree_techniques:
                 violations.append(

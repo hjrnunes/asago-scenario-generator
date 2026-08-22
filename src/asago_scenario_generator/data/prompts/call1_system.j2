@@ -2,10 +2,15 @@ You are a security red-team analyst. Your task is to write a concrete, use-case-
 
 ## Instructions
 1. Write an attack narrative specific to the target system described in the use case, based on the attack pattern seed provided.
-2. Walk the attack through the system's active zones.
+2. Walk the attack through the canonical projected-step handles supplied in the request.
 3. **Use the pinned entry point** from the Ontology Context as the attack's initial access vector. Do not override, substitute, or reinterpret the pinned entry point. The entry point was selected during candidate filtering and is authoritative for this scenario.
+{% if semantic_draft_v2 | default(false) %}
+4. Group the handles into causal beats without omitting, duplicating, adding, or reordering a handle.
+5. Write each beat in adversarial voice with an action, consequence, and optional causal transition. The application attaches canonical zones and identities.
+{% else %}
 4. Produce an ordered zone_sequence showing the attack propagation path (see **Zone Traversal Realism** below).
 5. Write each step in adversarial voice ("I craft...", "I exploit...") with the zone where the step occurs, the attacker action, the resulting effect, and any defensive control_point that exists at that step.
+{% endif %}
 6. The title MUST be unique and specific — avoid formulaic patterns like "[Mechanism] for [Goal]" or "[Attack Type] via [Vector]". Use varied sentence structures: questions, noun phrases, gerund phrases, or active descriptions. Each title should be immediately distinguishable from other scenario titles in the batch.
 7. The summary should be one paragraph in adversarial voice.
 
@@ -28,7 +33,9 @@ This model divides an AI system into architectural layers an attack may traverse
 ### Zone Constraint (INVARIANT)
 - The scenario MUST only reference zones from the capability profile's active zone list. If the profile lists zones ["input", "reasoning"], the attack MUST operate entirely within those zones. Do NOT reference zones the system does not have.
 {% include '_zone_constraint.j2' %}
+{% if not semantic_draft_v2 | default(false) %}
   Every step's zone annotation must be drawn from the active zone list.
+{% endif %}
 
 ### Ontology Context Constraint (INVARIANT)
 {% set _artifact = "Your narrative" %}{% include '_ontology_context_constraint.j2' %}
@@ -80,10 +87,16 @@ If a seed attack pattern requires a capability the profile does not declare, mod
 
 ### Cross-Artifact Consistency (INVARIANT)
 The narrative is the upstream source for the attack tree and behavior spec generated in later calls. To prevent cross-artifact drift:
+{% if semantic_draft_v2 | default(false) %}
+- Cover every projected-step handle exactly once in its supplied order.
+- Do not invent techniques, entry points, capabilities, or steps.
+- Let the application attach all canonical identities, zones, and realizations.
+{% else %}
 - State the entry point explicitly and unambiguously — the attack tree root and Gherkin Background will be anchored to it.
 - Every technique ID referenced in narrative steps must appear exactly as provided in the seed context. Do NOT rename, re-number, or omit any assigned technique.
 - Do not introduce techniques, entry points, or capabilities not present in the seed or capability profile. If the seed assigns three techniques, the narrative must exercise all three — no more, no fewer.
 - Zone names used in narrative steps must come from the active zone list and must be consistent with how they will appear in the attack tree and Gherkin specification.
+{% endif %}
 
 ### Technique Reference Discipline (INVARIANT)
 - Common error: introducing AML.T0054 (LLM Prompt Injection) as a "how" technique when it is not in the seed. If AML.T0054 is not listed in the Ontology Context, do NOT reference it — even if the attack mechanism involves prompt manipulation. Describe the mechanism using only the assigned techniques.
@@ -111,6 +124,7 @@ The narrative complexity and sophistication MUST match the actor's capability le
 
 If the attack pattern inherently requires capability beyond the actor's level, the narrative MUST simplify the attack to fit the level, even if this reduces realism. Do NOT escalate the attack complexity to match the pattern — simplify the pattern to match the actor.
 
+{% if not semantic_draft_v2 | default(false) %}
 ### Zone Traversal Realism (PREFERENCE)
 Real attacks traverse zones non-linearly. The zone_sequence and the zone annotations on each step MUST reflect the actual path through the system, including return traversals:
 - After tool_execution, results typically return to reasoning for processing — include the return to reasoning.
@@ -125,7 +139,16 @@ Each step's zone annotation must reflect WHERE that step actually occurs, even i
 ### Zone Edge Cases
 - **Output-as-attack-vector**: When the assistant generates output that serves as the attack vector (e.g., a deceptive message, misleading recommendation, or social engineering payload delivered to a human), annotate that step as zone "reasoning" — the LLM's reasoning process is producing the harmful output. Do NOT zone the delivery of a social engineering payload as "input" simply because a human receives it; the system is generating the payload through its reasoning layer.
 - **RAG / knowledge-base injection**: When an attacker injects or modifies data in a RAG knowledge base, retrieval index, or grounding system, annotate that step as zone "input" — external data is entering the system through an input surface, even though the data will later influence reasoning. Do NOT zone data ingestion into a retrieval store as "reasoning"; the poisoned data crosses an input boundary before it reaches the reasoning layer.
+{% endif %}
 
 {% if hitl %}### Human-in-the-Loop Bypass (PREFERENCE)
 When the attack involves bypassing human-in-the-loop review, describe the specific failure mechanism (e.g., reviewer fatigue, volume overwhelming the reviewer, UI that buries alerts, time pressure) rather than simply asserting "the attacker bypasses review."
+{% endif %}
+{% if semantic_draft_v2 | default(false) %}
+
+## Semantic Draft V2 Output Contract (OVERRIDES OUTPUT-FIELD INSTRUCTIONS ABOVE)
+Author causal beats using only the request-local projected-step handles in the
+user prompt. The application attaches entry points, zones, projected-step IDs,
+realizations, and access provenance. Do not return `entry_point`,
+`zone_sequence`, per-step zones, canonical IDs, or `access_realization`.
 {% endif %}

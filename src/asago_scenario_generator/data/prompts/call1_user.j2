@@ -36,9 +36,16 @@ The following tactical progression is derived from real-world case study evidenc
 {% endif %}
 ---
 
+{% if not semantic_draft_v2 | default(false) %}
 {% include "_projection_constraints.j2" %}
 {% include "_projection_alignment.j2" %}
+{% endif %}
 ## Narrative Zone Rules (INVARIANT)
+{% if semantic_draft_v2 | default(false) %}
+- Canonical zones are shown beside the request-local step handles and are
+  attached by the application. Group handles in one causal beat only when
+  their listed canonical zones are identical.
+{% else %}
 - The literal zone `outside` is permitted only on a narrative step whose
   mapped `projected_step_ids` are ALL outside-boundary canonical steps.
   `outside` represents activity outside the assessed AI boundary — it is
@@ -48,6 +55,7 @@ The following tactical progression is derived from real-world case study evidenc
   Schneider zone from `zones_active`; never label them `outside`.
 - One narrative step must NOT combine outside-boundary and non-outside
   projected step IDs.
+{% endif %}
 
 ## Your Task
 Write a concrete attack narrative for this attack pattern applied to the target system above.
@@ -59,6 +67,7 @@ Write a concrete attack narrative for this attack pattern applied to the target 
 **Entry point direction: BIDIRECTIONAL.** The attack involves "{{ pinned_entry_point }}" (direction: BIDIRECTIONAL). The attacker can both send data into the system and observe data coming out through this channel. Describe how the attacker exploits either or both directions of this channel.
 {% endif %}
 {{ technique_context }}{{ technique_framing }}{{ actor_section }}{{ access_provenance_block | default('') }}{{ goal_section | default('') }}{{ diversity_section }}{{ pattern_section }}{{ structural_section }}
+{% if not semantic_draft_v2 | default(false) %}
 {% if realization_feedback is defined and realization_feedback %}
 ## Narrative Access Realization Feedback (RETRY — cmps.6)
 The previous narrative's typed access_realization did not match the actor access provenance. Fix these specific issues:
@@ -74,6 +83,12 @@ You MUST include an `access_realization` object in your response. It must contai
 - `trust_boundary_id`: the trust_boundary_id name from the provenance block (or null for direct access)
 - `responsible_step_number`: the step number where the actor realizes the initial access described by the provenance block
 The access_realization must exactly match the Actor Access Provenance block — no keyword matching, no invention.
+{% endif %}
+{% else %}
+## Canonical Narrative Access
+The application derives `access_realization` from the accepted actor and
+projection. Author how access causally enables the attack, but do not return
+access fields or canonical identifiers.
 {% endif %}
 {% if access_feedback is defined and access_feedback %}
 ## Actor Access Feedback (RETRY — cmps.6)

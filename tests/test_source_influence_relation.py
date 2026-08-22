@@ -41,6 +41,9 @@ from asago_scenario_generator.pipeline.projection import (
     project_authoritative_candidates,
     validate_projected_candidate,
 )
+from asago_scenario_generator.pipeline.projection_realizations import (
+    _step_links_initial_ingress,
+)
 from tests.test_projected_candidates import TaxonomyResolver, _pattern, _profile
 
 
@@ -109,6 +112,38 @@ def test_valid_relation_exposes_one_canonical_source_boundary_target_path() -> N
     assert path["boundary_id"].startswith("tb:v1:")
     assert path["target_ingress_id"] == candidate.canonical_ingress.entry_point_id
     assert path["boundary_zones"] == "input->reasoning"
+
+
+def test_source_influence_link_is_an_initial_ingress_activation() -> None:
+    pattern = AttackPattern.model_validate(
+        _source_pattern(declared_source_kind="integration")
+    )
+    activation_step = next(
+        step
+        for step in pattern.canonical_chain.steps
+        if any(link.role == "source_influence" for link in step.resource_links)
+    )
+
+    assert _step_links_initial_ingress(
+        activation_step, pattern.canonical_chain.initial_ingress_slot_id
+    )
+
+
+def test_implicit_ingress_zone_mismatch_is_typed_before_generation() -> None:
+    profile = _profile()
+
+    result = _project_source_pattern(
+        _source_pattern(declared_source_kind="integration"), profile
+    )
+
+    assert result.candidates == ()
+    issue = next(
+        item
+        for item in result.infeasibilities
+        if item.code == "source_influence_relation_infeasible"
+    )
+    assert issue.expected_target_zone == "input"
+    assert issue.actual_boundary_zones == "input->reasoning"
 
 
 def test_humanized_relation_uses_typed_integration_name() -> None:

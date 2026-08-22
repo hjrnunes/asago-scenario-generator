@@ -37,6 +37,7 @@ EXECUTOR_ROLE_TO_LEAF_COMPAT: dict[str, set[str]] = {
         "tool_invocation",
     },
     "system": {
+        "initial_ingress",
         "ai_system_action",
         "tool_invocation",
         "integration_interaction",

@@ -7,9 +7,9 @@ import re
 import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, create_model, field_validator
+from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
 
 from asago_scenario_generator.llm.client import LLMClient, LLMResult
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
@@ -69,6 +69,383 @@ _CALL1_STEP_ID_MAX_LENGTH = 200
 
 _Call1Zone = Annotated[str, Field(min_length=1, max_length=_CALL1_ZONE_MAX_LENGTH)]
 _Call1StepId = Annotated[str, Field(min_length=1, max_length=_CALL1_STEP_ID_MAX_LENGTH)]
+
+
+_NARRATIVE_DRAFT_TRANSITION_MAX_LENGTH = 500
+_NarrativeDraftProse = Annotated[
+    str, Field(min_length=1, max_length=_CALL1_PROSE_MAX_LENGTH)
+]
+
+
+class NarrativeCausalBeatV2(BaseModel):
+    """One provider-authored causal beat over request-local step handles."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    step_handles: list[Annotated[str, Field(min_length=1, max_length=32)]] = Field(
+        min_length=1, max_length=MAX_NARRATIVE_STEPS
+    )
+    action: _NarrativeDraftProse
+    consequence: _NarrativeDraftProse
+    transition: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=_NARRATIVE_DRAFT_TRANSITION_MAX_LENGTH,
+    )
+
+
+class NarrativeDraftV2(BaseModel):
+    """Provider-authored narrative meaning without canonical transport data."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(
+        default=None, min_length=1, max_length=_CALL1_TITLE_MAX_LENGTH
+    )
+    summary: _NarrativeDraftProse
+    beats: list[NarrativeCausalBeatV2] = Field(
+        min_length=1, max_length=MAX_NARRATIVE_STEPS
+    )
+
+
+@dataclass(frozen=True)
+class NarrativeProjectedStep:
+    """Canonical projection data hidden behind one local narrative handle."""
+
+    projected_step_id: str
+    order: int
+    zone: str
+    realization: ProjectedStepRealization
+
+    def __post_init__(self) -> None:
+        if self.realization.projected_step_id != self.projected_step_id:
+            raise ValueError(
+                "narrative projected-step realization must match its canonical ID"
+            )
+
+
+@dataclass(frozen=True)
+class NarrativeDraftContext:
+    """Canonical inventory used to compile one narrative semantic draft."""
+
+    title_fallback: str
+    entry_point: str
+    ordered_step_handles: tuple[str, ...]
+    projected_steps: dict[str, NarrativeProjectedStep]
+    access_realization: NarrativeAccessRealization | None = None
+    presentation_fallback_allowed: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.ordered_step_handles:
+            raise ValueError("narrative context requires at least one projected step")
+        if len(set(self.ordered_step_handles)) != len(self.ordered_step_handles):
+            raise ValueError("narrative context has duplicate projected-step handles")
+        if set(self.ordered_step_handles) != set(self.projected_steps):
+            raise ValueError(
+                "ordered narrative handles must exactly match projected-step inventory"
+            )
+        canonical_ids = [
+            self.projected_steps[handle].projected_step_id
+            for handle in self.ordered_step_handles
+        ]
+        if len(set(canonical_ids)) != len(canonical_ids):
+            raise ValueError("narrative context has duplicate canonical step IDs")
+
+
+@dataclass(frozen=True)
+class NarrativeDraftViolation:
+    """Machine-readable narrative violation for a correction request."""
+
+    code: str
+    detail: str
+
+
+class NarrativeSemanticDraftError(ValueError):
+    """A narrative draft cannot compile without semantic repair."""
+
+    def __init__(self, violations: Sequence[NarrativeDraftViolation]) -> None:
+        self.violations = tuple(violations)
+        super().__init__("; ".join(item.detail for item in self.violations))
+
+
+def _narrative_handle_literal(handles: Sequence[str]) -> Any:
+    values = tuple(handles)
+    if not values or len(set(values)) != len(values):
+        raise ValueError("narrative handle inventory must be non-empty and unique")
+    return Literal.__getitem__(values)
+
+
+def create_narrative_draft_model(
+    step_handles: Sequence[str],
+) -> type[NarrativeDraftV2]:
+    """Build a finite provider schema for one candidate's narrative draft."""
+    values = tuple(step_handles)
+    handle_type = _narrative_handle_literal(values)
+    beat_model = create_model(
+        "NarrativeCausalBeatV2ForCandidate",
+        __base__=NarrativeCausalBeatV2,
+        step_handles=(
+            list[handle_type],
+            Field(min_length=1, max_length=len(values)),
+        ),
+    )
+    return create_model(
+        "NarrativeDraftV2ForCandidate",
+        __base__=NarrativeDraftV2,
+        beats=(
+            list[beat_model],
+            Field(min_length=1, max_length=len(values)),
+        ),
+    )
+
+
+def _validate_narrative_draft(
+    context: NarrativeDraftContext, draft: NarrativeDraftV2
+) -> list[NarrativeDraftViolation]:
+    flattened = [handle for beat in draft.beats for handle in beat.step_handles]
+    expected = set(context.ordered_step_handles)
+    unknown = sorted(set(flattened) - expected)
+    missing = sorted(expected - set(flattened))
+    duplicate = sorted(
+        handle for handle in set(flattened) if flattened.count(handle) > 1
+    )
+    violations: list[NarrativeDraftViolation] = []
+    if unknown:
+        violations.append(
+            NarrativeDraftViolation(
+                "unknown_step_handle", f"unknown projected-step handle(s): {unknown}"
+            )
+        )
+    if missing:
+        violations.append(
+            NarrativeDraftViolation(
+                "missing_step_handle", f"missing projected-step handle(s): {missing}"
+            )
+        )
+    if duplicate:
+        violations.append(
+            NarrativeDraftViolation(
+                "duplicate_step_handle",
+                f"duplicate projected-step handle(s): {duplicate}",
+            )
+        )
+
+    known_handles = [handle for handle in flattened if handle in expected]
+    positions = {
+        handle: index for index, handle in enumerate(context.ordered_step_handles)
+    }
+    if any(
+        positions[current] >= positions[following]
+        for current, following in zip(known_handles, known_handles[1:])
+        if current != following
+    ):
+        violations.append(
+            NarrativeDraftViolation(
+                "illegal_step_order",
+                "projected-step handles violate the canonical partial order",
+            )
+        )
+
+    for index, beat in enumerate(draft.beats, start=1):
+        zones = {
+            context.projected_steps[handle].zone
+            for handle in beat.step_handles
+            if handle in context.projected_steps
+        }
+        if len(zones) > 1:
+            violations.append(
+                NarrativeDraftViolation(
+                    "mixed_step_zones",
+                    f"causal beat {index} combines incompatible canonical zones: "
+                    f"{sorted(zones)}",
+                )
+            )
+        boundaries = {
+            context.projected_steps[handle].realization.boundary_position
+            for handle in beat.step_handles
+            if handle in context.projected_steps
+        }
+        if len(boundaries) > 1:
+            violations.append(
+                NarrativeDraftViolation(
+                    "mixed_boundary_positions",
+                    f"causal beat {index} combines incompatible canonical "
+                    f"boundary positions: {sorted(boundaries)}",
+                )
+            )
+    if draft.title is None and not context.presentation_fallback_allowed:
+        violations.append(
+            NarrativeDraftViolation(
+                "missing_title",
+                "narrative title is required when fallback is forbidden",
+            )
+        )
+    return violations
+
+
+def compile_narrative_draft(
+    context: NarrativeDraftContext, draft: NarrativeDraftV2
+) -> NarrativeLayer:
+    """Attach projection truth while preserving provider-authored causality."""
+    violations = _validate_narrative_draft(context, draft)
+    if violations:
+        raise NarrativeSemanticDraftError(violations)
+
+    steps: list[NarrativeStep] = []
+    for number, beat in enumerate(draft.beats, start=1):
+        projected = [context.projected_steps[handle] for handle in beat.step_handles]
+        effect = beat.consequence
+        if beat.transition:
+            effect = f"{effect} {beat.transition}"
+        steps.append(
+            NarrativeStep(
+                step_number=number,
+                zone=projected[0].zone,
+                action=beat.action,
+                effect=effect,
+                projected_step_ids=tuple(item.projected_step_id for item in projected),
+                realizations=tuple(item.realization for item in projected),
+            )
+        )
+    return NarrativeLayer(
+        title=draft.title or context.title_fallback,
+        summary=draft.summary,
+        entry_point=context.entry_point,
+        zone_sequence=_derive_zone_sequence(steps),
+        steps=steps,
+        access_realization=(
+            context.access_realization.model_copy(deep=True)
+            if context.access_realization is not None
+            else None
+        ),
+    )
+
+
+def _canonical_narrative_zone(
+    step: dict[str, Any],
+    projection_context: dict[str, Any],
+    profile: CapabilityProfile,
+) -> str:
+    """Derive one narrative zone from canonical projection semantics."""
+    boundary = step.get("boundary_position")
+    if boundary == "outside":
+        return "outside"
+
+    active = tuple(profile.zones_active or ())
+    ingress_id = projection_context.get("canonical_ingress", {}).get("entry_point_id")
+    if boundary == "crossing" and isinstance(ingress_id, str):
+        entry_point = profile.resolve_entry_point(ingress_id)
+        ingress_zone = (
+            entry_point.effective_ingress_zone if entry_point is not None else None
+        )
+        if isinstance(ingress_zone, str) and ingress_zone in active:
+            return ingress_zone
+        if "input" in active:
+            return "input"
+
+    resource_kinds = {
+        resource_ref.get("kind")
+        for link in step.get("resource_links", ())
+        if isinstance(link, dict)
+        and isinstance((resource_ref := link.get("resource_ref")), dict)
+    }
+    action_kind = step.get("action_kind")
+    if (
+        action_kind == "invoke"
+        and resource_kinds.intersection({"tool", "integration"})
+        and "tool_execution" in active
+    ):
+        return "tool_execution"
+    if action_kind == "persist" and "memory" in active:
+        return "memory"
+    if "reasoning" in active:
+        return "reasoning"
+    if active:
+        return active[0]
+    raise ValueError("profile has no active zone for an inside projected step")
+
+
+def _build_narrative_draft_context(
+    *,
+    seed: ScenarioSeed,
+    profile: CapabilityProfile,
+    actor_profile: ActorProfile | None,
+    pinned_entry_point: str | None,
+    projection_context: dict[str, Any],
+    presentation_fallback_allowed: bool = True,
+) -> NarrativeDraftContext:
+    """Allocate handles and canonical compilation data for one narrative."""
+    selected_by_id = _selected_projection_steps_by_id(projection_context)
+    selected_ids = tuple(projection_context.get("selected_step_ids", ()))
+    if not selected_ids:
+        raise ValueError("projection has no selected steps for narrative generation")
+    if set(selected_ids) != set(selected_by_id):
+        raise ValueError(
+            "projection selected_step_ids must exactly match selected_steps"
+        )
+    handles = tuple(f"s{index}" for index in range(len(selected_ids)))
+    projected_steps: dict[str, NarrativeProjectedStep] = {}
+    for index, (handle, step_id) in enumerate(zip(handles, selected_ids), start=1):
+        selected = selected_by_id[step_id]
+        raw_realization = selected.get("realization")
+        if not isinstance(raw_realization, dict):
+            raise ValueError(
+                f"missing canonical realization for projected step ID '{step_id}'"
+            )
+        projected_steps[handle] = NarrativeProjectedStep(
+            projected_step_id=step_id,
+            order=int(selected.get("order", index)),
+            zone=_canonical_narrative_zone(selected, projection_context, profile),
+            realization=ProjectedStepRealization.model_validate(raw_realization),
+        )
+
+    ingress_id = projection_context.get("canonical_ingress", {}).get("entry_point_id")
+    entry_point = pinned_entry_point
+    if not entry_point and isinstance(ingress_id, str):
+        resolved = profile.resolve_entry_point(ingress_id)
+        entry_point = resolved.name if resolved is not None else ingress_id
+    if not entry_point:
+        raise ValueError("projection lacks a displayable canonical entry point")
+
+    access_realization = None
+    if actor_profile is not None and actor_profile.access is not None:
+        access = actor_profile.access
+        access_realization = NarrativeAccessRealization(
+            initial_entry_point_id=access.initial_entry_point_id,
+            influence_source=access.influence_source,
+            influence_source_kind=access.influence_source_kind,
+            influence_source_id=access.influence_source_id,
+            trust_boundary_id=access.trust_boundary_id,
+            responsible_step_number=1,
+        )
+    return NarrativeDraftContext(
+        title_fallback=seed.attack_pattern_name,
+        entry_point=entry_point,
+        ordered_step_handles=handles,
+        projected_steps=projected_steps,
+        access_realization=access_realization,
+        presentation_fallback_allowed=presentation_fallback_allowed,
+    )
+
+
+def _narrative_draft_prompt(context: NarrativeDraftContext) -> str:
+    """Render the request-local step inventory for NarrativeDraftV2."""
+    lines = [
+        "\n\n## Semantic Draft V2 Response Protocol (MANDATORY)",
+        "Author title, summary, causal grouping, actions, consequences, and transitions.",
+        "Reference every step handle exactly once and preserve the listed order.",
+        "The application owns entry point, zones, IDs, realizations, and access provenance.",
+        "Do not return canonical IDs, zones, zone_sequence, or access_realization.",
+        "Projected-step handles:",
+    ]
+    for handle in context.ordered_step_handles:
+        step = context.projected_steps[handle]
+        lines.append(
+            f"- {handle}: order={step.order}; zone={step.zone}; "
+            f"action_kind={step.realization.action_kind}; "
+            f"boundary={step.realization.boundary_position}"
+        )
+    return "\n".join(lines)
 
 
 class Call1Step(BaseModel):
@@ -859,6 +1236,7 @@ def _call_narrative(
     completion_length_feedback: str | None = None,
     max_completion_tokens: int | None = None,
     projection_context: dict[str, Any] | None = None,
+    presentation_fallback_allowed: bool = True,
 ) -> tuple[NarrativeLayer, LLMResult]:
     """Generate an attack narrative for a scenario seed (Call 1).
 
@@ -890,14 +1268,30 @@ def _call_narrative(
         projection_context=projection_context,
     )
 
-    user_prompt = render_prompt("call1_user.j2", **ctx)
+    semantic_draft_v2 = projection_context is not None
+    user_prompt = render_prompt(
+        "call1_user.j2", **ctx, semantic_draft_v2=semantic_draft_v2
+    )
+    draft_context: NarrativeDraftContext | None = None
+    response_model: type[BaseModel]
+    if semantic_draft_v2:
+        assert projection_context is not None
+        draft_context = _build_narrative_draft_context(
+            seed=seed,
+            profile=profile,
+            actor_profile=actor_profile,
+            pinned_entry_point=pinned_entry_point,
+            projection_context=projection_context,
+            presentation_fallback_allowed=presentation_fallback_allowed,
+        )
+        response_model = create_narrative_draft_model(
+            draft_context.ordered_step_handles
+        )
+        user_prompt += _narrative_draft_prompt(draft_context)
+    else:
+        response_model = build_call1_response_model(None)
     if completion_length_feedback:
         user_prompt = f"{user_prompt}{completion_length_feedback}"
-    selected_step_count = (
-        len(projection_context.get("selected_step_ids", ()))
-        if projection_context is not None
-        else None
-    )
     result = client.complete(
         system_prompt=render_prompt(
             "call1_system.j2",
@@ -907,22 +1301,31 @@ def _call_narrative(
             zones_active=profile.zones_active,
             kc_subcodes=profile.kc_subcodes,
             tool_inventory=ctx["tool_inventory"],
+            semantic_draft_v2=semantic_draft_v2,
         ),
         user_prompt=user_prompt,
-        response_format=build_call1_response_model(selected_step_count),
+        response_format=response_model,
         max_completion_tokens=max_completion_tokens,
     )
+    if isinstance(result.content, NarrativeDraftV2):
+        assert draft_context is not None
+        narrative = compile_narrative_draft(draft_context, result.content)
+    else:
+        # Scripted fixtures using the historical response remain supported
+        # while live projected requests advertise only NarrativeDraftV2.
+        # Normalize echoed step-ID transport shapes to canonical IDs before
+        # deriving deterministic realizations.
+        if projection_context is not None:
+            canonical_ids = projection_context.get("selected_step_ids", [])
+            for step in result.content.steps:
+                step.projected_step_ids = normalize_projected_step_ids(
+                    step.projected_step_ids, canonical_ids
+                )
+        narrative = _map_call1_to_narrative(result.content, projection_context)
     # Normalize echoed step-ID transport shapes to canonical IDs before
     # deriving deterministic realizations. Unknown, ambiguous, or duplicate
-    # echoes raise a stable ValueError, so no defective narrative is
+    # legacy echoes raise a stable ValueError, so no defective narrative is
     # finalized.
-    if projection_context is not None:
-        canonical_ids = projection_context.get("selected_step_ids", [])
-        for step in result.content.steps:
-            step.projected_step_ids = normalize_projected_step_ids(
-                step.projected_step_ids, canonical_ids
-            )
-    narrative = _map_call1_to_narrative(result.content, projection_context)
     _apply_projection_access_realization(narrative, projection_context)
     narrative = _sanitize_narrative(narrative)
     if projection_context is not None:

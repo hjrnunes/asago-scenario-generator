@@ -10,7 +10,11 @@ Your task is to create a realistic BDI threat actor profile that will ground a s
 2. List exactly 2-3 beliefs: what the actor can observe about the target system from its exposed interfaces — architecture, weaknesses, observable behaviors, defenses. Use factual voice ("The system exposes...", "Chat sessions are stateless"). Do NOT list more than 3 beliefs.
 3. List exactly 1 desire: ONE concrete goal — what success looks like for this actor against this specific system. Use adversarial voice ("I want to..."). Do NOT list more than 1 desire.
 4. List intentions: each intention MUST directly instantiate one of the pinned techniques. The number of intentions MUST equal the number of pinned techniques (default 1 if no techniques are pinned). Do NOT add meta-strategy intentions like "I will use technique X" — describe the concrete action (e.g. "I will craft a malicious policy document and inject it into the RAG knowledge base via the document upload API"). Use adversarial voice ("I will...").
+{% if semantic_draft_v2 | default(false) %}
+5. Select zero to four resource handles from the request inventory. Do not invent resources or return raw resource names.
+{% else %}
 5. List exactly 2-3 concrete resources the actor would need (e.g. "open-source prompt injection toolkits", "insider credentials to the admin console", "GPU cluster for automated fuzzing"). Do NOT list more than 3 resources.
+{% endif %}
 6. Each belief, desire, and intention should be ONE concise sentence.
 
 ## Actor Types (use EXACTLY one of these values for actor_type)
@@ -59,11 +63,17 @@ DO NOT default to "intermediate" — actively consider whether a novice could ex
 {% include '_controllability.j2' %}
 
 ### Access Provenance Constraint (cmps.6)
+{% if semantic_draft_v2 | default(false) %}
+Access provenance is canonical application input. Ground the BDI semantics in
+the projected ingress and source-influence path, but do not return access
+fields or choose any access identity.
+{% else %}
 When a pinned entry point is provided, your actor profile must include structured access provenance evidence:
 - You MUST provide `access_class`: one of `public`, `authenticated`, `privileged`, `supply_chain` — describing the actor's relationship to the system.
 - **indirect** entry points: you MUST provide `influence_source` (the name of the upstream data source/channel, which may be an entry point or integration), `influence_mechanism` (how influence is exerted), and `trust_boundary_id` (the name of a TrustBoundary declared in the capability profile). The authoritative projection supplies the typed source kind and canonical ID; do not invent or substitute either. Actor eligibility for indirect ingress is determined by typed evidence, not by a categorical actor-type allowlist.
 - **direct** entry points with insider actors (malicious-insider, negligent-insider) using `public` or `authenticated` access: you MUST provide `material_insider_advantage` — a structured advantage beyond public access that justifies why an insider uses this surface.
 - **system** entry points are NOT eligible initial ingress. They may appear downstream only.
+{% endif %}
 
 ### Black-Box Scope (INVARIANT)
 {% include '_blackbox.j2' %}
@@ -79,3 +89,12 @@ When a pinned entry point is provided, your actor profile must include structure
 {% include '_tool_inventory.j2' %}
 
 {% include '_example_adaptation.j2' %}
+{% if semantic_draft_v2 | default(false) %}
+
+## Semantic Draft V2 Output Contract (OVERRIDES OUTPUT-FIELD INSTRUCTIONS ABOVE)
+The response schema uses request-local handles. Return `actor_type_handle`,
+`capability_level_handle`, bounded BDI statements, and `resource_handles` only.
+The application derives access provenance and canonical identities from the
+projection. Do not return `actor_type`, `capability_level`, raw resource names,
+access fields, entry-point IDs, source IDs, or trust-boundary IDs.
+{% endif %}

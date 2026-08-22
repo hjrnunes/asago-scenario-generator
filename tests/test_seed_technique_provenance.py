@@ -226,6 +226,26 @@ class TestSeedTechniqueProvenance:
         ]
         assert len(provenance_violations) == 0
 
+    def test_atlas_provenance_is_checked_instead_of_laaf_namespace(self):
+        """LAAF S/M provenance cannot be compared to ATLAS tree IDs."""
+        profile = _make_profile()
+        envelope = _make_envelope(
+            seed_metadata={
+                "threat_id": "T10",
+                "laaf_technique_ids": ["S3", "M5"],
+                "atlas_provenance_ids": ["AML.T0029"],
+            },
+        )
+
+        validate_scenario_semantics([envelope], profile)
+
+        provenance_violations = [
+            violation
+            for violation in envelope.validation.semantic.violations
+            if violation.rule == "seed_technique_provenance"
+        ]
+        assert provenance_violations == []
+
     def test_seed_technique_absent_from_tree_flagged(self):
         """Violation when no seed technique appears in the attack tree."""
         profile = _make_profile()

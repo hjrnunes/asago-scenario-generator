@@ -47,6 +47,9 @@ from asago_scenario_generator.pipeline.generate.assembly import (
     _build_projection_context,
     render_gherkin_from_behavior_spec,
 )
+from asago_scenario_generator.pipeline.generate.behavior_semantics import (
+    BehaviorDraftV2,
+)
 from asago_scenario_generator.pipeline.generate.gherkin import (
     Call3Assertion,
     Call3Response,
@@ -924,7 +927,9 @@ class TestCallBehaviorSpecIntegration:
             or "step" in call_args.lower()
         )
         assert "Produce only the structured JSON assertions" in call_args
-        assert client.complete.call_args.kwargs["response_format"] is Call3Response
+        assert issubclass(
+            client.complete.call_args.kwargs["response_format"], BehaviorDraftV2
+        )
 
 
 def mock_client_complete_user_prompt(client: MagicMock) -> str:
