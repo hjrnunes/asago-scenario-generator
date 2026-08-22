@@ -203,3 +203,74 @@ def test_successful_pipeline_call_has_no_failure_marker() -> None:
     html = build_pipeline_calls_section([entry])
 
     assert "FAILED" not in html
+
+
+def test_pipeline_report_shows_semantic_stage_status_and_presentation_fallback() -> (
+    None
+):
+    actor = _pipeline_call(
+        call="actor_profile",
+        semantic_evidence={
+            "stage": "actor",
+            "compiler_name": "compile_actor_draft_v2",
+            "handle_map": {"a0": "external_attacker"},
+            "attempts": [
+                {
+                    "attempt_index": 0,
+                    "result": "accepted",
+                }
+            ],
+            "accepted_draft_digest": "a" * 64,
+            "warnings": [],
+        },
+    )
+    narrative = _pipeline_call(
+        call="narrative",
+        semantic_evidence={
+            "stage": "narrative",
+            "compiler_name": "compile_narrative_draft_v2",
+            "handle_map": {"s0": "step-1"},
+            "attempts": [
+                {
+                    "attempt_index": 0,
+                    "result": "accepted",
+                }
+            ],
+            "accepted_draft_digest": "b" * 64,
+            "warnings": ["presentation_fallback: narrative title was synthesized"],
+        },
+    )
+
+    html = build_pipeline_calls_section([actor, narrative])
+
+    assert "Actor semantic draft" in html
+    assert "Narrative semantic draft" in html
+    assert html.count("Accepted provider semantics") == 2
+    assert "Presentation fallback used" in html
+    assert "narrative title was synthesized" in html
+
+
+def test_pipeline_report_shows_terminal_semantic_failure_separately() -> None:
+    entry = _pipeline_call(
+        call="attack_tree",
+        code="semantic_draft_invalid",
+        semantic_evidence={
+            "stage": "tree",
+            "compiler_name": "compile_attack_tree_draft_v2",
+            "handle_map": {"l0": "step-1"},
+            "attempts": [
+                {
+                    "attempt_index": 0,
+                    "result": "invalid_draft",
+                }
+            ],
+            "accepted_draft_digest": None,
+            "warnings": [],
+        },
+    )
+
+    html = build_pipeline_calls_section([entry])
+
+    assert "Attack tree semantic draft" in html
+    assert "Rejected: invalid draft" in html
+    assert "Accepted provider semantics" not in html

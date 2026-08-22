@@ -10,14 +10,19 @@
 
 For each numbered candidate below, decide whether the (entry_point, technique combo) combination is a plausible attack vector for the attack pattern described above against the target system.
 
-Each candidate is labelled with an opaque **candidate ID**.  You MUST use this exact candidate ID in your response — do not echo entry-point names or technique IDs.
+Each candidate is labelled with a request-local **candidate handle**. Use the
+handle in your response; do not emit candidate IDs, entry-point names, or
+technique IDs as identifiers.
 
 {% for c in candidates %}
-{{ loop.index }}. **Candidate ID:** `{{ c.candidate_id }}`
+{{ loop.index }}. **Candidate handle:** `{{ c.handle }}`
    **Entry point:** {{ c.entry_point }}{% if c.controllability %} ({{ c.controllability }}{% if c.direction %}, {{ c.direction }}{% endif %}){% endif %}
    **Technique(s):** {{ c.atlas_technique_ids | join(" + ") }}{% for name in c.atlas_technique_names %} — {{ name }}{% endfor %}
    {% for desc in c.atlas_technique_descriptions %}{% if desc %}**Technique description:** {{ desc }}
    {% endif %}{% endfor %}
 {% endfor %}
 
-Return a structured response with the seed_id "{{ seed_id }}" and exactly one verdict per candidate above. Each verdict must include the candidate_id (copied verbatim from the list above), a verdict of "accept" or "reject", and a rationale explaining why. Do not include entry_point or atlas_technique_ids in the verdicts — only the candidate_id.
+Return an object with exactly one required field per candidate handle above.
+Each field value must contain a boolean `relevant` value and a concise
+`rationale`; do not echo the handle inside the field value. Do not include
+seed, entry-point, candidate, or technique IDs in the response.

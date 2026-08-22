@@ -20,6 +20,7 @@ from asago_scenario_generator.models.projection_envelope import (
     ProjectionTraceabilityStage,
     ProjectionTraceabilityViolationCode,
 )
+from asago_scenario_generator.models.scenario import ValidationBlock
 from asago_scenario_generator.pipeline.finalization import (
     AdmissionDecision,
     GeneratedArtifacts,
@@ -42,7 +43,6 @@ from asago_scenario_generator.pipeline.complexity import (
 )
 from asago_scenario_generator.pipeline.generate.gherkin import (
     _collect_leaf_nodes_dfs,
-    _format_leaf_step_text,
     _leaf_step_kind,
 )
 from asago_scenario_generator.pipeline.projection import (
@@ -615,6 +615,23 @@ class PostbehaviorAdmissionPort:
             NORMAL_POSTBEHAVIOR_EVIDENCE_IDS
         ):
             raise RuntimeError("successful admission requires canonical gate evidence")
+        validation = ValidationBlock(
+            structural=structural,
+            phantom=phantom_copy.validation.phantom,
+            semantic=semantic,
+        )
+        validated_envelope = envelope.model_copy(
+            update={
+                "validation": validation,
+                "validation_passed": (
+                    validation.structural.valid
+                    and validation.phantom.valid
+                    and validation.semantic.valid
+                ),
+            },
+            deep=True,
+        )
+        report = PostbehaviorAdmissionReport(validated_envelope, tuple(gate_results))
         return AdmissionDecision(
             True,
             value=report,
@@ -655,7 +672,6 @@ class PostbehaviorAdmissionPort:
                 or action.source_leaf_id != leaf.id
                 or tuple(action.projected_step_ids) != tuple(leaf.projected_step_ids)
                 or action.gherkin_keyword != _keyword(leaf)
-                or action.text != _format_leaf_step_text(leaf, self.profile)
                 or tuple(action.realizations) != tuple(leaf.realizations)
             )
             if mismatch:

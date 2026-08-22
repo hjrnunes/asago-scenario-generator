@@ -106,6 +106,18 @@ def generate(
         None,
         help="LLM model name (overrides ASAGO_SCENARIO_GENERATOR_MODEL_NAME).",
     ),
+    model_profile: str | None = typer.Option(
+        None,
+        help="Named model profile; explicit endpoint/model/key options override it.",
+    ),
+    profiles_file: Path = typer.Option(
+        "config/model-profiles.yaml",
+        help="Path to model profiles YAML file.",
+    ),
+    presentation_fallback: str = typer.Option(
+        "allow",
+        help="Cosmetic fallback policy: allow or forbid.",
+    ),
     max_scenario_techniques: int = typer.Option(
         1,
         help="Max ATLAS techniques per candidate combo (1=single, 2=pairs+singles, etc.).",
@@ -113,6 +125,11 @@ def generate(
     max_scenarios_per_pattern: int | None = typer.Option(
         None,
         help="Max scenarios per attack pattern. Caps popular patterns; prioritises entry-point diversity.",
+    ),
+    generation_mode: str = typer.Option(
+        "exhaustive",
+        "--generation-mode",
+        help="Generation policy: exhaustive (all qualified candidates) or coverage (bounded smoke run).",
     ),
     zones: str | None = typer.Option(
         None,
@@ -151,6 +168,16 @@ def generate(
         _validate_file(profile_path, "capability profile file")
     if qualification_facts is not None:
         _validate_file(qualification_facts, "qualification facts file")
+    if model_profile is not None:
+        _validate_file(profiles_file, "model profiles file")
+    if presentation_fallback not in {"allow", "forbid"}:
+        raise typer.BadParameter(
+            "must be 'allow' or 'forbid'", param_hint="--presentation-fallback"
+        )
+    if generation_mode not in {"exhaustive", "coverage"}:
+        raise typer.BadParameter(
+            "must be 'exhaustive' or 'coverage'", param_hint="--generation-mode"
+        )
 
     outcome_exit_code = 1
     try:
@@ -168,8 +195,12 @@ def generate(
             base_url=base_url,
             api_key=api_key,
             model=model,
+            model_profile=model_profile,
+            profiles_file=profiles_file,
+            presentation_fallback=presentation_fallback,
             max_techniques=max_scenario_techniques,
             max_scenarios_per_pattern=max_scenarios_per_pattern,
+            generation_mode=generation_mode,
             zones=zones,
             eval=eval,
             log_level=log_level,
@@ -232,6 +263,62 @@ def resume(
     except Exception as exc:  # noqa: BLE001 - CLI boundary
         typer.echo(f"\nError: {exc}", err=True)
         raise typer.Exit(code=1)
+
+
+@app.command(name="projection-preflight")
+def projection_preflight(
+    use_case: str = typer.Option(
+        ..., help="Use-case description (or @file.txt to read from file)."
+    ),
+    risk_extraction: Path = typer.Option(...),
+    sssom: Path = typer.Option(...),
+    profile: Path = typer.Option(..., help="Reviewed capability-profile YAML."),
+    qualification_facts: Path | None = typer.Option(None),
+    cross_taxonomy: Path | None = typer.Option(None),
+    threats_path: Path | None = typer.Option(None),
+    facts_template: Path | None = typer.Option(
+        None,
+        help="Write a complete unknown-valued facts template; never overwrites.",
+    ),
+    max_scenario_techniques: int = typer.Option(1),
+) -> None:
+    """Report projection requirements without contacting an LLM endpoint."""
+    from asago_scenario_generator.pipeline.preflight import (
+        run_projection_preflight,
+        write_facts_template,
+    )
+
+    for path, label in (
+        (risk_extraction, "risk-extraction file"),
+        (sssom, "SSSOM file"),
+        (profile, "capability profile file"),
+    ):
+        _validate_file(path, label)
+    for path, label in (
+        (qualification_facts, "qualification facts file"),
+        (cross_taxonomy, "cross-taxonomy file"),
+        (threats_path, "agentic threats file"),
+    ):
+        if path is not None:
+            _validate_file(path, label)
+
+    try:
+        outcome = run_projection_preflight(
+            use_case=_resolve_use_case(use_case),
+            risk_extraction_path=risk_extraction,
+            sssom_path=sssom,
+            profile_path=profile,
+            qualification_facts_path=qualification_facts,
+            cross_taxonomy_path=cross_taxonomy,
+            threats_path=threats_path,
+            max_techniques=max_scenario_techniques,
+        )
+        if facts_template is not None:
+            write_facts_template(outcome, facts_template)
+        typer.echo(json.dumps(outcome.model_dump(mode="json"), indent=2))
+    except Exception as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
 
 @app.command()

@@ -59,6 +59,7 @@ from asago_scenario_generator.pipeline.finalization_gates import (
     ProjectionSemanticSnapshot,
     RepairRecord,
     TreeParsimonyResult,
+    check_tree_parsimony,
     finalize_tree_parsimony,
     make_prebehavior_finalizer,
     run_prebehavior_gates,
@@ -702,6 +703,32 @@ def _tree_with_required_preconditions() -> AttackTree:
     )
 
 
+def test_default_leaf_budget_respects_projected_step_floor() -> None:
+    _, _, _, tree = _valid_parts()
+    children = [
+        child.model_copy(update={"technique_id": None})
+        for child in tree.root.children
+    ]
+    children[0] = children[0].model_copy(update={"technique_id": "AML.T0051"})
+    for index in (4, 5):
+        step_id = f"step.{index}"
+        children.append(
+            AttackTreeNode(
+                id=f"n1.{index}",
+                label=f"Required setup {index}",
+                gate=GateType.LEAF,
+                action=ExternalPreconditionAction(),
+                projected_step_ids=(step_id,),
+                realizations=make_realizations((step_id,)),
+            )
+        )
+    expanded = tree.model_copy(
+        update={"root": tree.root.model_copy(update={"children": children})}
+    )
+
+    assert not check_tree_parsimony(expanded).violations
+
+
 def test_typed_external_preconditions_are_never_pruned() -> None:
     tree = _tree_with_required_preconditions()
     before = FinalTreeSemanticSnapshot.capture(tree)
@@ -1051,9 +1078,36 @@ def test_positive_complete_postbehavior_admission_is_verify_only() -> None:
     assert decision.admitted
     assert isinstance(decision.value, PostbehaviorAdmissionReport)
     assert all(result.valid for result in decision.value.gate_results)
+    assert decision.value.envelope.validation is not None
+    assert decision.value.envelope.validation.semantic is not None
+    assert len(
+        decision.value.envelope.validation.semantic.corpus_claim_applicability
+    ) == 2
+    assert decision.value.envelope.validation_passed
     evidence_ids = [result.evidence_id for result in decision.value.gate_results]
     assert len(evidence_ids) == len(set(evidence_ids))
     assert set(evidence_ids) == set(NORMAL_POSTBEHAVIOR_EVIDENCE_IDS)
+
+
+def test_postbehavior_admits_provider_authored_action_prose() -> None:
+    candidate, _, _, tree = _valid_parts()
+    behavior = _phase3b_behavior(candidate, tree)
+    authored_actions = tuple(
+        action.model_copy(update={"text": f"Concrete interaction {index}"})
+        for index, action in enumerate(behavior.actions, 1)
+    )
+    authored_behavior = behavior.model_copy(
+        update={
+            "actions": authored_actions,
+            "gherkin_text": render_gherkin_from_behavior_spec(
+                list(authored_actions), list(behavior.assertions)
+            ),
+        }
+    )
+
+    decision = _admit_behavior(authored_behavior)
+
+    assert decision.admitted
 
 
 def test_postbehavior_report_rejects_duplicate_evidence_ids() -> None:

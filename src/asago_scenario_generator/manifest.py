@@ -26,6 +26,7 @@ import tempfile
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path, PurePosixPath
+from collections.abc import Iterable
 from typing import Any
 
 import yaml
@@ -60,12 +61,18 @@ class RunStatus(str, Enum):
 
     STARTED = "started"
     COMPLETED = "completed"
+    COMPLETED_WITH_WARNINGS = "completed_with_warnings"
     COMPLETED_WITH_ERRORS = "completed_with_errors"
     FAILED = "failed"
 
     @classmethod
     def final_statuses(cls) -> set[RunStatus]:
-        return {cls.COMPLETED, cls.COMPLETED_WITH_ERRORS, cls.FAILED}
+        return {
+            cls.COMPLETED,
+            cls.COMPLETED_WITH_WARNINGS,
+            cls.COMPLETED_WITH_ERRORS,
+            cls.FAILED,
+        }
 
     @property
     def is_final(self) -> bool:
@@ -73,8 +80,34 @@ class RunStatus(str, Enum):
 
     @property
     def is_authoritative(self) -> bool:
-        """Only ``completed`` runs are authoritative."""
-        return self == self.COMPLETED
+        """Whether a run satisfied all ordinary completion gates."""
+        return self.requires_complete_inventory
+
+    @property
+    def requires_complete_inventory(self) -> bool:
+        """Whether the final run must satisfy completed inventory invariants."""
+        return self in {self.COMPLETED, self.COMPLETED_WITH_WARNINGS}
+
+
+_DECLARED_AUTHORITATIVE_WARNING_PREFIXES = (
+    "candidate_filter_unavailable:",
+    "presentation_fallback:",
+)
+
+
+def select_final_run_status(
+    ordinary_completion_succeeded: bool,
+    generation_notes: Iterable[str],
+) -> RunStatus:
+    """Select the final status without promoting undeclared warning classes."""
+    if not ordinary_completion_succeeded:
+        return RunStatus.COMPLETED_WITH_ERRORS
+    if any(
+        note.startswith(_DECLARED_AUTHORITATIVE_WARNING_PREFIXES)
+        for note in generation_notes
+    ):
+        return RunStatus.COMPLETED_WITH_WARNINGS
+    return RunStatus.COMPLETED
 
 
 class ArtifactRole(str, Enum):
@@ -360,9 +393,17 @@ class ModelConfig(BaseModel):
     """Resolved LLM model configuration (effective values, not raw None args)."""
 
     model: str
-    base_url: str
+    base_url: str | None = None
     temperature: float
     max_completion_tokens: int | None = None
+    timeout: float | None = None
+    top_p: float | None = None
+    top_k: int | None = None
+    use_guided_decoding: bool = False
+    profile_name: str | None = None
+    profiles_file: str | None = None
+    header_names: list[str] = Field(default_factory=list)
+    sources: dict[str, str] = Field(default_factory=dict)
 
 
 class CommandProvenance(BaseModel):
@@ -420,6 +461,7 @@ class RunManifest(BaseModel):
     phantom_validation: dict[str, Any] = Field(default_factory=dict)
     structural_validation: dict[str, Any] = Field(default_factory=dict)
     semantic_validation: dict[str, Any] = Field(default_factory=dict)
+    semantic_generation: dict[str, Any] = Field(default_factory=dict)
     leaf_technique_provenance: dict[str, Any] = Field(default_factory=dict)
     parsimony: dict[str, Any] = Field(default_factory=dict)
 
@@ -876,11 +918,11 @@ class ManifestInventoryResolver:
     def _validate(self) -> None:
         """Validate the full inventory integrity globally.
 
-        For non-``completed`` manifests (failed, completed_with_errors),
+        For non-authoritative manifests (failed, completed_with_errors),
         YAML/feature pairing is relaxed — a partial scenario (YAML without
         feature or vice versa) is tolerated as evidence, not rejected.
         """
-        is_completed = self.manifest.status == RunStatus.COMPLETED
+        requires_complete_inventory = self.manifest.status.requires_complete_inventory
         seen_canonical: set[str] = set()
         seen_physical: set[tuple[int, int]] = set()
         singleton_counts: dict[ArtifactRole, int] = {}
@@ -1165,7 +1207,7 @@ class ManifestInventoryResolver:
         # Exact stem pairing — relaxed for non-completed manifests so
         # failed runs can retain partial evidence (YAML without feature
         # or vice versa) without being rejected.
-        if is_completed:
+        if requires_complete_inventory:
             yaml_only = yaml_stems - feature_stems
             feature_only = feature_stems - yaml_stems
             if yaml_only or feature_only:
@@ -1249,6 +1291,7 @@ class ManifestInventoryResolver:
 
         if self.manifest.manifest_version == MANIFEST_V3 and self.manifest.status in {
             RunStatus.COMPLETED,
+            RunStatus.COMPLETED_WITH_WARNINGS,
             RunStatus.COMPLETED_WITH_ERRORS,
         }:
             for role in (
@@ -1264,10 +1307,27 @@ class ManifestInventoryResolver:
 
             # Keep v3-only policy out of current production v2 reads.
             from asago_scenario_generator.pipeline.persistence import (
+                FinalizationInventoryV1,
+                build_semantic_generation_summary,
                 validate_v3_inventories,
             )
 
             validate_v3_inventories(self)
+            if self.manifest.semantic_generation:
+                finalization_entry = self.entry_by_role(
+                    ArtifactRole.FINALIZATION_INVENTORY
+                )
+                assert finalization_entry is not None
+                authoritative_inventory = FinalizationInventoryV1.model_validate(
+                    self.read_json(finalization_entry)
+                )
+                expected_semantic_generation = build_semantic_generation_summary(
+                    authoritative_inventory
+                )
+                if self.manifest.semantic_generation != expected_semantic_generation:
+                    raise ManifestIntegrityError(
+                        "semantic_generation does not match finalization inventory"
+                    )
             _validate_v3_scorecard_binding(self.manifest, self)
 
         # --- 12. Orphan detection ---
@@ -1446,7 +1506,7 @@ def _validate_v3_scorecard_binding(
             f"does not match inventory count={feature_count}"
         )
     if (
-        manifest.status is RunStatus.COMPLETED
+        manifest.status.requires_complete_inventory
         and scorecard.qualification.status.value != "pass"
     ):
         raise ManifestIntegrityError(
@@ -2115,7 +2175,7 @@ def validate_completed_inventory(
                             f"manifest run_id={manifest.run_id!r}"
                         )
                     if (
-                        manifest.status is RunStatus.COMPLETED
+                        manifest.status.requires_complete_inventory
                         and scorecard.qualification.status.value != "pass"
                     ):
                         raise ManifestIntegrityError(

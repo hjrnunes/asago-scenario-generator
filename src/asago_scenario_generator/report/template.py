@@ -6522,6 +6522,54 @@ def _build_priority_signals(signals: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _semantic_stage_status_html(entry: dict[str, Any]) -> str:
+    """Render accepted provider semantics independently from presentation status."""
+    evidence = entry.get("semantic_evidence")
+    if not isinstance(evidence, dict):
+        return ""
+
+    stage = str(evidence.get("stage") or entry.get("call") or "semantic")
+    stage_label = {
+        "actor": "Actor",
+        "narrative": "Narrative",
+        "tree": "Attack tree",
+        "behavior": "Behavior",
+    }.get(stage, stage.replace("_", " ").title())
+    attempts = evidence.get("attempts")
+    last_result = None
+    if isinstance(attempts, list) and attempts and isinstance(attempts[-1], dict):
+        last_result = attempts[-1].get("result")
+    accepted = bool(evidence.get("accepted_draft_digest")) and last_result == "accepted"
+    if accepted:
+        status = "Accepted provider semantics"
+    else:
+        failure = str(last_result or entry.get("code") or "failed")
+        status = f"Rejected: {failure.replace('_', ' ')}"
+
+    warning_items = []
+    warnings = evidence.get("warnings")
+    if isinstance(warnings, list):
+        for warning in warnings:
+            detail = str(warning)
+            prefix = "presentation_fallback:"
+            if detail.startswith(prefix):
+                detail = detail[len(prefix) :].strip()
+                warning_items.append(
+                    f"<div><strong>Presentation fallback used:</strong> {_esc(detail)}</div>"
+                )
+            else:
+                warning_items.append(
+                    f"<div><strong>Warning:</strong> {_esc(detail)}</div>"
+                )
+
+    return (
+        '<div class="warning-banner" role="status">'
+        f"<div><strong>{_esc(stage_label)} semantic draft:</strong> {_esc(status)}</div>"
+        f"{''.join(warning_items)}"
+        "</div>"
+    )
+
+
 def _build_pipeline_call_item(
     entry: dict[str, Any],
     index: int,
@@ -6547,8 +6595,10 @@ def _build_pipeline_call_item(
 
     failure_suffix = _usage_failure_suffix(entry)
     warning_html = _usage_warning_html(call_label, usage)
+    semantic_status_html = _semantic_stage_status_html(entry)
     item_html = f"""
         {warning_html}
+        {semantic_status_html}
         <details class="expandable">
           <summary>Call {index}: {_esc(display_name)}{seed_label} ({_esc(_usage_summary(usage))}){failure_suffix}</summary>
           <div style="padding:8px 0;">

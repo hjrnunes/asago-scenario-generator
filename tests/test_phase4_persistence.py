@@ -46,7 +46,9 @@ from asago_scenario_generator.pipeline.finalization import (
     PrebehaviorFinalizationResult,
     TargetFinalizationMachine,
 )
-from asago_scenario_generator.pipeline.finalization_admission import PostbehaviorAdmissionReport
+from asago_scenario_generator.pipeline.finalization_admission import (
+    PostbehaviorAdmissionReport,
+)
 from asago_scenario_generator.pipeline.finalization_gates import (
     CONDITIONALLY_APPLICABLE_EVIDENCE_IDS,
     DIAGNOSTIC_BACKED_EVIDENCE_IDS,
@@ -90,7 +92,9 @@ from tests.helpers.projection_factory import get_projected_candidates
 
 RUN_ID = "20260101T000000_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 HASH = "0" * 64
-SCHEMA_DIR = Path(__file__).resolve().parents[1] / "src/asago_scenario_generator/data/schemas"
+SCHEMA_DIR = (
+    Path(__file__).resolve().parents[1] / "src/asago_scenario_generator/data/schemas"
+)
 
 
 _PROJECTED_CANDIDATES = get_projected_candidates()
@@ -161,6 +165,83 @@ def _plan(*, attempted: list[str] | None = None) -> CoveragePlanV2:
         ],
         selection_limitation_target_ids=[],
     )
+
+
+def test_plan_allows_distinct_targets_for_candidates_sharing_an_ingress() -> None:
+    first = _choice(PRIMARY_ID, 0)
+    second = _choice(FALLBACK_ID, 0)
+
+    plan = CoveragePlanV2(
+        schema_version="2",
+        completeness="not_applicable",
+        evidence_refs=[],
+        targets=[
+            CoverageTargetEntry(
+                target_id="candidate-target:first",
+                entry_point_id=ENTRY_POINT_ID,
+                entry_point_name="input",
+                ordered_choices=[first],
+                primary_candidate_id=first.candidate_id,
+                attempted_candidate_ids=[],
+                admitted_candidate_id=None,
+                target_state=TargetState.selected,
+                fallback_available=[first],
+            ),
+            CoverageTargetEntry(
+                target_id="candidate-target:second",
+                entry_point_id=ENTRY_POINT_ID,
+                entry_point_name="input",
+                ordered_choices=[second],
+                primary_candidate_id=second.candidate_id,
+                attempted_candidate_ids=[],
+                admitted_candidate_id=None,
+                target_state=TargetState.selected,
+                fallback_available=[second],
+            ),
+        ],
+        selection_limitation_target_ids=[],
+    )
+
+    assert [target.effective_target_id for target in plan.targets] == [
+        "candidate-target:first",
+        "candidate-target:second",
+    ]
+
+
+def test_plan_rejects_duplicate_durable_target_ids() -> None:
+    first = _choice(PRIMARY_ID, 0)
+    second = _choice(FALLBACK_ID, 0)
+    first_target = CoverageTargetEntry(
+        target_id="candidate-target:duplicate",
+        entry_point_id=ENTRY_POINT_ID,
+        entry_point_name="input",
+        ordered_choices=[first],
+        primary_candidate_id=first.candidate_id,
+        attempted_candidate_ids=[],
+        admitted_candidate_id=None,
+        target_state=TargetState.selected,
+        fallback_available=[first],
+    )
+    second_target = CoverageTargetEntry(
+        target_id="candidate-target:duplicate",
+        entry_point_id=ENTRY_POINT_ID,
+        entry_point_name="input",
+        ordered_choices=[second],
+        primary_candidate_id=second.candidate_id,
+        attempted_candidate_ids=[],
+        admitted_candidate_id=None,
+        target_state=TargetState.selected,
+        fallback_available=[second],
+    )
+
+    with pytest.raises(ValueError, match="duplicate target IDs"):
+        CoveragePlanV2(
+            schema_version="2",
+            completeness="not_applicable",
+            evidence_refs=[],
+            targets=[first_target, second_target],
+            selection_limitation_target_ids=[],
+        )
 
 
 def _inventory(coverage_hash: str = HASH) -> FinalizationInventoryV1:
@@ -1341,6 +1422,114 @@ def test_real_machine_adapter_primary_rejection_then_fallback_admission(
         )
     assert not (tmp_path / "scenarios/scenario-changed.yaml").exists()
     assert not (tmp_path / "scenarios/scenario-changed.feature").exists()
+
+
+def test_second_repair_can_precede_its_retried_behavior_attempt(tmp_path: Path):
+    plan = _plan()
+    adapter = make_finalization_persistence_adapter(
+        tmp_path, run_id=RUN_ID, coverage_plan=plan
+    )
+
+    class Snapshot:
+        def __init__(self, tree):
+            self.tree = tree
+            self.digest = canonical_sha256(tree)
+
+        def verify_digest(self):
+            assert self.digest == canonical_sha256(self.tree)
+
+    def stage(candidate, invocation):
+        return GeneratedStageResult(
+            artifact={
+                "candidate_id": candidate.candidate_id,
+                "stage": invocation.stage.value,
+                "index": invocation.invocation_index,
+            },
+            evidence=_stage_evidence(invocation.stage),
+        )
+
+    def finalize(_candidate, artifacts):
+        digest = canonical_sha256(artifacts.tree)
+        return PrebehaviorFinalizationResult(
+            Snapshot(artifacts.tree),
+            repair_record=RepairRecord(
+                before_digest=digest,
+                after_digest=digest,
+                removed_ids=(),
+                preserved_projected_ids=("step-1",),
+                accepted=True,
+                detail="already within budget",
+            ),
+        )
+
+    admission_calls = 0
+
+    def admit(candidate, _artifacts, _snapshot):
+        nonlocal admission_calls
+        admission_calls += 1
+        if admission_calls == 1:
+            return AdmissionDecision(
+                False,
+                (
+                    LifecycleViolation(
+                        detail="regenerate narrative and downstream artifacts",
+                        owner=GeneratedStage.narrative,
+                        code="semantic_validity",
+                    ),
+                ),
+            )
+        return AdmissionDecision(
+            True,
+            value=AdmittedTerminalPayload(
+                report=PostbehaviorAdmissionReport(
+                    envelope=object(),
+                    gate_results=_passing_normal_gate_results(),
+                ),
+                publication=AdmittedArtifactPublication(
+                    candidate_id=candidate.candidate_id,
+                    scenario_id="scenario-retried",
+                    yaml_text=(
+                        "scenario_id: scenario-retried\n"
+                        f"candidate_id: {candidate.candidate_id}\n"
+                    ),
+                    feature_text="Feature: retried\n",
+                ),
+            ),
+        )
+
+    target = plan.targets[0]
+    machine = TargetFinalizationMachine(
+        entry=CoveragePlanEntry(
+            entry_point_id=target.entry_point_id,
+            entry_point_name=target.entry_point_name,
+            ordered_choices=[
+                item.model_dump(mode="json") for item in target.ordered_choices
+            ],
+            primary_candidate_id=target.primary_candidate_id,
+            primary_state="selected",
+            fallback_available=[target.ordered_choices[1].model_dump(mode="json")],
+        ),
+        stage_callbacks={item: stage for item in GENERATION_ORDER},
+        candidate_revalidator=lambda ref: CandidateValidation(
+            deserialize_qualified_candidate(ref).projected
+        ),
+        prebehavior_finalizer=finalize,
+        admission_callback=admit,
+        persistence=adapter,
+        attempted_candidate_ids=set(),
+    )
+
+    result = machine.run()
+
+    assert result.state is LifecycleState.admitted
+    assert result.candidate_id == PRIMARY_ID
+    inventory = read_finalization_inventory(tmp_path)
+    assert len(inventory.repairs) == 2
+    assert [
+        item.invocation_index
+        for item in inventory.stage_attempts
+        if item.stage is GeneratedStage.behavior
+    ] == [0, 1]
 
 
 def test_interrupted_second_document_write_recovers_from_journal(

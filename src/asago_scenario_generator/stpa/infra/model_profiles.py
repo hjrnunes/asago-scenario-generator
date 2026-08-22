@@ -19,6 +19,7 @@ OPTIONAL_FIELDS: tuple[str, ...] = (
     "top_k",
     "headers",
     "use_guided_decoding",
+    "timeout",
 )
 
 

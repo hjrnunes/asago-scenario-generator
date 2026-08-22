@@ -1,10 +1,8 @@
-"""Target-scoped finalization/admission lifecycle through cmps.5 Phase 3B.
+"""Production target-scoped finalization and admission lifecycle.
 
-This controller is deliberately not wired into the production runner.  It
-owns candidate choice, targeted retry routing, and admission sequencing while
-all generation, validation, finalization, admission, and persistence effects
-remain dependency-injected ports.  Manifest v3, quarantine persistence, and
-runner integration belong to later phases.
+The controller owns candidate choice, targeted retry routing, and admission
+sequencing while generation, validation, finalization, admission, and
+persistence effects remain dependency-injected ports.
 """
 
 from __future__ import annotations
@@ -29,7 +27,7 @@ from asago_scenario_generator.pipeline.generation_contracts import (
     StageAttemptFailure,
 )
 
-MAX_OWNER_RETRIES = 2
+MAX_OWNER_RETRIES = 1
 MAX_TARGETED_RETRIES = MAX_OWNER_RETRIES  # Compatibility name.
 MAX_TARGET_CHOICES = 3
 MAX_COMPLETION_LENGTH_RETRIES = 1
@@ -79,8 +77,8 @@ COMPLETION_LENGTH_RETRY_CONTROLS: dict[GeneratedStage, CausalRetryControl] = {
     GeneratedStage.narrative: CausalRetryControl(
         control_id="stage-specific-completion-cap",
         field="max_completion_tokens",
-        initial_value=16384,
-        retry_value=8192,
+        initial_value=8192,
+        retry_value=4096,
     ),
     GeneratedStage.tree: CausalRetryControl(
         control_id="lower-retry-temperature",
@@ -114,6 +112,8 @@ class CandidateTerminalStatus(str, Enum):
 
 class FinalizationPersistenceError(RuntimeError):
     """Durable lifecycle state could not be committed and must be recovered."""
+
+    failure_code = "persistence_failed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -413,7 +413,7 @@ class TargetFinalizationMachine:
             candidate_id=candidate_id,
             reason=reason,
             transition_index=self.transition_index_offset + len(self.transitions),
-            target_entry_point_id=self.entry.entry_point_id,
+            target_entry_point_id=self.entry.effective_target_id,
         )
         self.persistence.record_transition(transition)
         self.state = state
@@ -454,11 +454,17 @@ class TargetFinalizationMachine:
         try:
             result = self.stage_callbacks[stage](candidate, invocation)
         except StageAttemptFailure as exc:
-            # Every stage helper now performs exactly one provider request
-            # per invocation.  All stage attempt failures are retryable;
-            # finalization routes completion-length failures through their
-            # own one-shot retry channel and everything else through the
-            # semantic owner-retry budget.
+            if (
+                exc.code == StageAttemptFailure.COMPLETION_LENGTH_CODE
+                and self.length_retry_counts.get(stage, 0)
+                >= MAX_COMPLETION_LENGTH_RETRIES
+            ):
+                exc.code = StageAttemptFailure.SEMANTIC_DRAFT_LENGTH_CODE
+                exc.retryable = False
+            # Every stage helper performs exactly one provider request per
+            # invocation. Finalization alone interprets retryability: provider-
+            # correctable draft/protocol failures use the owner budget, while
+            # projection infeasibility and compiler defects terminate.
             result = GeneratedStageResult(
                 artifact=None,
                 evidence=exc,
@@ -467,7 +473,7 @@ class TargetFinalizationMachine:
                         owner=stage,
                         code=exc.code,
                         detail=f"{exc.exception_type}: {exc.detail}",
-                        retryable=True,
+                        retryable=exc.retryable,
                     ),
                 ),
             )
@@ -873,7 +879,7 @@ class TargetFinalizationMachine:
                 candidate_id=ref_id,
                 reason=f"candidate terminal status: {terminal.status.value}",
                 transition_index=self.transition_index_offset + len(self.transitions),
-                target_entry_point_id=self.entry.entry_point_id,
+                target_entry_point_id=self.entry.effective_target_id,
             )
             self.state = terminal_state
             self.transitions.append(terminal_transition)
@@ -938,6 +944,7 @@ def retry_directive_for(invocation: StageInvocation) -> RetryDirective | None:
         feedback=invocation.retry_feedback,
         reason=invocation.retry_reason,
         causal_control=invocation.retry_control,
+        attempt_index=invocation.invocation_index,
     )
 
 

@@ -36,6 +36,7 @@ state machine.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
@@ -61,6 +62,13 @@ MAX_FALLBACK_CHOICES = 3
 
 # Schema version for the persisted coverage plan.
 COVERAGE_PLAN_SCHEMA_VERSION = "1"
+
+
+class GenerationMode(str, Enum):
+    """How qualified candidates are converted into finalization targets."""
+
+    EXHAUSTIVE = "exhaustive"
+    COVERAGE = "coverage"
 
 
 # ---------------------------------------------------------------------------
@@ -1084,9 +1092,16 @@ class CoveragePlanEntry:
     primary_candidate_id: str | None
     primary_state: str
     fallback_available: list[dict]
+    target_id: str | None = None
+
+    @property
+    def effective_target_id(self) -> str:
+        """Durable finalization identity, distinct from the canonical ingress."""
+        return self.target_id or self.entry_point_id
 
     def to_dict(self) -> dict:
         return {
+            "target_id": self.effective_target_id,
             "entry_point_id": self.entry_point_id,
             "entry_point_name": self.entry_point_name,
             "ordered_choices": self.ordered_choices,
@@ -1172,6 +1187,7 @@ def build_coverage_plan(
 
         entries.append(
             CoveragePlanEntry(
+                target_id=ep_id,
                 entry_point_id=ep_id,
                 entry_point_name=target.name,
                 ordered_choices=ordered_refs,
@@ -1189,6 +1205,197 @@ def build_coverage_plan(
         selection_limitation_target_ids=list(
             selection_result.selection_limitation_target_ids
         ),
+    )
+
+
+@dataclass
+class GenerationPlanningResult:
+    """Complete planning result for either exhaustive or coverage generation.
+
+    ``target_queues`` drives durable finalization.  ``coverage_queues`` remains
+    keyed by canonical ingress and is used only for coverage-gap analysis.
+    Keeping those concerns separate lets the finalization state machine remain
+    target-scoped while exhaustive mode creates one target per candidate.
+    """
+
+    mode: GenerationMode
+    selection: SelectionResult
+    plan: CoveragePlan
+    target_queues: dict[str, TargetFallbackQueue]
+    coverage_queues: dict[str, TargetFallbackQueue]
+
+
+def _exhaustive_target_id(candidate_id: str) -> str:
+    """Return a stable, opaque finalization target ID for one candidate."""
+    digest = hashlib.sha256(candidate_id.encode("utf-8")).hexdigest()
+    return f"candidate-target:{digest}"
+
+
+def _select_exhaustive_candidates(
+    qualified: list[QualifiedCandidate],
+    max_per_pattern: int | None,
+) -> list[QualifiedCandidate]:
+    """Select the exhaustive corpus, applying an explicit pattern cap if set.
+
+    Within each pattern, candidates are selected round-robin across canonical
+    ingresses before taking a second candidate from any ingress.  Ordering
+    within an ingress is the existing intrinsic candidate-v2 sort order.
+    """
+    ranked = sorted(qualified, key=_qualified_sort_key)
+    if max_per_pattern is None:
+        return [replace(candidate, rank=rank) for rank, candidate in enumerate(ranked)]
+
+    by_pattern: dict[str, dict[str, list[QualifiedCandidate]]] = {}
+    for candidate in ranked:
+        by_pattern.setdefault(candidate.pattern_id, {}).setdefault(
+            candidate.entry_point_id, []
+        ).append(candidate)
+
+    selected: list[QualifiedCandidate] = []
+    for pattern_id in sorted(by_pattern):
+        by_ingress = by_pattern[pattern_id]
+        ingress_ids = sorted(by_ingress)
+        cursors = {entry_point_id: 0 for entry_point_id in ingress_ids}
+        pattern_count = 0
+        while pattern_count < max_per_pattern:
+            progressed = False
+            for entry_point_id in ingress_ids:
+                cursor = cursors[entry_point_id]
+                choices = by_ingress[entry_point_id]
+                if cursor >= len(choices):
+                    continue
+                selected.append(choices[cursor])
+                cursors[entry_point_id] = cursor + 1
+                pattern_count += 1
+                progressed = True
+                if pattern_count >= max_per_pattern:
+                    break
+            if not progressed:
+                break
+
+    selected.sort(key=_qualified_sort_key)
+    return [replace(candidate, rank=rank) for rank, candidate in enumerate(selected)]
+
+
+def plan_generation(
+    qualified: list[QualifiedCandidate],
+    universe: CoverageUniverse,
+    *,
+    mode: GenerationMode | str = GenerationMode.EXHAUSTIVE,
+    max_per_pattern: int | None = None,
+) -> GenerationPlanningResult:
+    """Plan qualified candidates for exhaustive corpus or coverage generation.
+
+    Exhaustive mode creates one one-choice durable target per selected
+    candidate.  Coverage mode preserves the historical one bounded fallback
+    queue per feasible ingress.
+    """
+    generation_mode = GenerationMode(mode)
+    if max_per_pattern is not None and max_per_pattern < 1:
+        raise ValueError("max_per_pattern must be a positive integer")
+    coverage_queues = build_fallback_queues(qualified, universe)
+    if generation_mode is GenerationMode.COVERAGE:
+        selection = select_with_coverage_priority(
+            qualified,
+            coverage_queues,
+            universe,
+            max_per_pattern=max_per_pattern,
+        )
+        plan = build_coverage_plan(universe, coverage_queues, selection)
+        return GenerationPlanningResult(
+            mode=generation_mode,
+            selection=selection,
+            plan=plan,
+            target_queues=coverage_queues,
+            coverage_queues=coverage_queues,
+        )
+
+    selected = _select_exhaustive_candidates(qualified, max_per_pattern)
+    selected_ids = {candidate.candidate_id for candidate in selected}
+    selected_ingresses = {candidate.entry_point_id for candidate in selected}
+    target_names = {
+        target.entry_point_id: target.name for target in universe.feasible_targets
+    }
+    target_queues: dict[str, TargetFallbackQueue] = {}
+    plan_targets: list[CoveragePlanEntry] = []
+    primary_candidate_ids: dict[str, str] = {}
+    for candidate in selected:
+        target_id = _exhaustive_target_id(candidate.candidate_id)
+        queue_candidate = replace(candidate, rank=0)
+        target_queues[target_id] = TargetFallbackQueue(
+            entry_point_id=target_id,
+            choices=[queue_candidate],
+        )
+        primary_candidate_ids[target_id] = candidate.candidate_id
+        candidate_ref = queue_candidate.to_plan_ref()
+        plan_targets.append(
+            CoveragePlanEntry(
+                target_id=target_id,
+                entry_point_id=candidate.entry_point_id,
+                entry_point_name=target_names.get(
+                    candidate.entry_point_id, candidate.entry_point_id
+                ),
+                ordered_choices=[candidate_ref],
+                primary_candidate_id=candidate.candidate_id,
+                primary_state="selected",
+                fallback_available=[],
+            )
+        )
+
+    uncovered_target_ids = sorted(universe.feasible_target_ids - selected_ingresses)
+    cap_limited_target_ids = sorted(
+        target_id
+        for target_id in uncovered_target_ids
+        if not coverage_queues[target_id].is_empty
+    )
+    for target in sorted(
+        universe.feasible_targets, key=lambda item: item.entry_point_id
+    ):
+        if target.entry_point_id not in uncovered_target_ids:
+            continue
+        target_queues[target.entry_point_id] = TargetFallbackQueue(
+            entry_point_id=target.entry_point_id,
+            choices=[],
+        )
+        plan_targets.append(
+            CoveragePlanEntry(
+                target_id=target.entry_point_id,
+                entry_point_id=target.entry_point_id,
+                entry_point_name=target.name,
+                ordered_choices=[],
+                primary_candidate_id=None,
+                primary_state="uncovered",
+                fallback_available=[],
+            )
+        )
+
+    per_pattern_counts: dict[str, int] = {}
+    for candidate in selected:
+        per_pattern_counts[candidate.pattern_id] = (
+            per_pattern_counts.get(candidate.pattern_id, 0) + 1
+        )
+    selection = SelectionResult(
+        selected=selected,
+        capped_count=len(qualified) - len(selected),
+        uncovered_target_ids=uncovered_target_ids,
+        per_pattern_counts=per_pattern_counts,
+        primary_candidate_ids=primary_candidate_ids,
+        attempted_candidate_ids=selected_ids,
+        selection_limitation_target_ids=cap_limited_target_ids,
+    )
+    plan = CoveragePlan(
+        schema_version=COVERAGE_PLAN_SCHEMA_VERSION,
+        completeness=universe.completeness.value,
+        evidence_refs=list(universe.evidence_refs),
+        targets=plan_targets,
+        selection_limitation_target_ids=cap_limited_target_ids,
+    )
+    return GenerationPlanningResult(
+        mode=generation_mode,
+        selection=selection,
+        plan=plan,
+        target_queues=target_queues,
+        coverage_queues=coverage_queues,
     )
 
 

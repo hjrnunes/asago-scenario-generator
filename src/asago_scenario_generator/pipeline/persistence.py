@@ -191,6 +191,12 @@ class CoverageTargetEntry(StrictModel):
     fallback_available: list[QualifiedCandidateRef] = Field(
         max_length=MAX_TARGET_CHOICES
     )
+    target_id: str | None = Field(default=None, min_length=1)
+
+    @property
+    def effective_target_id(self) -> str:
+        """Durable target identity, falling back for pre-field plan artifacts."""
+        return self.target_id or self.entry_point_id
 
     @model_validator(mode="after")
     def _validate_queue(self) -> CoverageTargetEntry:
@@ -270,7 +276,7 @@ class CoveragePlanV2(StrictModel):
 
     @model_validator(mode="after")
     def _unique_targets_and_candidates(self) -> CoveragePlanV2:
-        target_ids = [target.entry_point_id for target in self.targets]
+        target_ids = [target.effective_target_id for target in self.targets]
         if len(target_ids) != len(set(target_ids)):
             raise ValueError("coverage plan contains duplicate target IDs")
         candidates = [
@@ -341,6 +347,7 @@ class StageCallEvidenceRecord(StrictModel):
     call_name: str
     result: LLMResultRecord
     metadata: CallMetadataRecord
+    semantic_evidence: dict[str, JsonValue] | None = None
 
 
 class StageAttemptFailureRecord(StrictModel):
@@ -353,6 +360,8 @@ class StageAttemptFailureRecord(StrictModel):
     # exhaustion (with finish reason and usage) or the generic
     # "stage_attempt_failed" code.  Never derived from exception text.
     code: str = Field(min_length=1)
+    retryable: bool = True
+    semantic_evidence: dict[str, JsonValue] | None = None
     finish_reason: str | None = None
     prompt_tokens: int | None = Field(default=None, ge=0)
     completion_tokens: int | None = Field(default=None, ge=0)
@@ -758,13 +767,17 @@ class FinalizationInventoryV1(StrictModel):
                 or repair.target_entry_point_id != attempt.target_entry_point_id
             ):
                 raise ValueError("repair record does not match its candidate attempt")
-            behavior_inputs = [
+            subsequent_behavior_inputs = [
                 item.final_tree_snapshot_sha256
                 for item in self.stage_attempts
                 if item.candidate_id == repair.candidate_id
                 and item.stage is GeneratedStage.behavior
+                and item.sequence > repair.sequence
             ]
-            if behavior_inputs and repair.after_digest not in behavior_inputs:
+            if (
+                subsequent_behavior_inputs
+                and repair.after_digest not in subsequent_behavior_inputs
+            ):
                 raise ValueError(
                     "repair output is not bound to behavior final-tree input"
                 )
@@ -1495,6 +1508,66 @@ def read_finalization_inventory(
     )
 
 
+def build_semantic_generation_summary(
+    inventory: FinalizationInventoryV1,
+) -> dict[str, Any]:
+    """Derive the bounded manifest view from finalization authority."""
+    required_stages = ("actor", "narrative", "tree", "behavior")
+    decisions = {item.candidate_id: item for item in inventory.admission_decisions}
+    records: list[dict[str, Any]] = []
+    candidates: dict[str, dict[str, Any]] = {}
+    for item in sorted(inventory.stage_attempts, key=lambda value: value.sequence):
+        carrier = item.call if item.call is not None else item.failure
+        semantic = carrier.semantic_evidence if carrier is not None else None
+        stage_name = item.stage.value
+        outcome = "missing_semantic_evidence"
+        warnings: list[str] = []
+        if semantic is not None:
+            attempts = semantic.get("attempts", [])
+            latest = attempts[-1] if attempts else {}
+            outcome = str(latest.get("result") or "missing_attempt_result")
+            warnings = [str(value) for value in semantic.get("warnings", [])]
+        records.append(
+            {
+                "candidate_id": item.candidate_id,
+                "stage": stage_name,
+                "invocation_index": item.invocation_index,
+                "outcome": outcome,
+                "semantic_evidence": semantic,
+            }
+        )
+        candidate = candidates.setdefault(
+            item.candidate_id,
+            {
+                "admitted": bool(
+                    decisions.get(item.candidate_id)
+                    and decisions[item.candidate_id].admitted
+                ),
+                "complete_provider_semantics": False,
+                "presentation_fallbacks": [],
+                "stages": {},
+            },
+        )
+        candidate["stages"][stage_name] = outcome
+        candidate["presentation_fallbacks"].extend(
+            warning
+            for warning in warnings
+            if warning.startswith("presentation_fallback:")
+            and warning not in candidate["presentation_fallbacks"]
+        )
+
+    for candidate in candidates.values():
+        candidate["complete_provider_semantics"] = all(
+            candidate["stages"].get(stage) == "accepted" for stage in required_stages
+        )
+    return {
+        "schema_version": "1",
+        "required_stages": list(required_stages),
+        "candidates": candidates,
+        "stage_records": records,
+    }
+
+
 def write_quarantine_bundle(run_dir: Path, bundle: QuarantineBundleV1) -> ArtifactEntry:
     rel_path = f"quarantine/{bundle.attempt_id}.json"
     bundle = QuarantineBundleV1.model_validate(bundle.model_dump(mode="python"))
@@ -1532,13 +1605,13 @@ def validate_planning_checkpoint(
 ) -> None:
     """Bind immutable completion-tail evidence to the durable target plan."""
     expected_fallbacks = {
-        target.entry_point_id: [
+        target.effective_target_id: [
             choice.candidate_id for choice in target.ordered_choices
         ]
         for target in plan.targets
     }
     expected_primaries = {
-        target.entry_point_id: target.primary_candidate_id
+        target.effective_target_id: target.primary_candidate_id
         for target in plan.targets
         if target.primary_candidate_id is not None
     }
@@ -1553,12 +1626,14 @@ def validate_planning_checkpoint(
     if checkpoint.attempted_candidate_ids != sorted(checkpoint.selected_candidate_ids):
         raise ManifestIntegrityError("planning checkpoint attempted selection mismatch")
     if checkpoint.uncovered_target_ids != sorted(
-        target.entry_point_id for target in plan.targets if not target.ordered_choices
+        target.effective_target_id
+        for target in plan.targets
+        if not target.ordered_choices
     ):
         raise ManifestIntegrityError(
             "planning checkpoint uncovered targets mismatch plan"
         )
-    plan_target_ids = {target.entry_point_id for target in plan.targets}
+    plan_target_ids = {target.effective_target_id for target in plan.targets}
     if not set(checkpoint.projection_limitation_target_ids) <= plan_target_ids:
         raise ManifestIntegrityError(
             "planning checkpoint projection limitations are absent from plan"
@@ -1725,7 +1800,7 @@ def validate_v3_inventories(resolver: Any) -> None:
         for target in coverage.targets
         for choice in target.ordered_choices
     }
-    plan_target_ids = {target.entry_point_id for target in coverage.targets}
+    plan_target_ids = {target.effective_target_id for target in coverage.targets}
     for transition in final.transitions:
         if transition.target_entry_point_id not in plan_target_ids:
             raise ManifestIntegrityError(
@@ -1735,7 +1810,7 @@ def validate_v3_inventories(resolver: Any) -> None:
             planned = plan_by_candidate.get(transition.candidate_id)
             if (
                 planned is None
-                or planned[0].entry_point_id != transition.target_entry_point_id
+                or planned[0].effective_target_id != transition.target_entry_point_id
             ):
                 raise ManifestIntegrityError(
                     "Lifecycle transition candidate/target is absent from plan"
@@ -1752,7 +1827,7 @@ def validate_v3_inventories(resolver: Any) -> None:
             )
         target, choice = planned
         if (
-            attempt.target_entry_point_id != target.entry_point_id
+            attempt.target_entry_point_id != target.effective_target_id
             or attempt.queue_rank != choice.rank
         ):
             raise ManifestIntegrityError(
@@ -1768,7 +1843,7 @@ def validate_v3_inventories(resolver: Any) -> None:
     }
     for target in coverage.targets:
         if target.attempted_candidate_ids != attempts_by_target_id.get(
-            target.entry_point_id, []
+            target.effective_target_id, []
         ):
             raise ManifestIntegrityError(
                 "Coverage plan attempted candidates do not match finalization inventory"
@@ -1828,7 +1903,7 @@ def validate_v3_inventories(resolver: Any) -> None:
         target_transitions = [
             item
             for item in final.transitions
-            if item.target_entry_point_id == target.entry_point_id
+            if item.target_entry_point_id == target.effective_target_id
         ]
         expected_terminal = (
             LifecycleState.admitted
@@ -2076,6 +2151,11 @@ def _call_evidence(value: StageCallEvidence) -> StageCallEvidenceRecord:
             completion_tokens=value.metadata.completion_tokens,
             duration_ms=value.metadata.duration_ms,
         ),
+        semantic_evidence=(
+            _json_value(value.semantic_evidence.as_dict())
+            if value.semantic_evidence is not None
+            else None
+        ),
     )
 
 
@@ -2095,6 +2175,12 @@ def _attempt_failure(value: StageAttemptFailure) -> StageAttemptFailureRecord:
         phase=value.phase,
         invoked=value.invoked,
         code=value.code,
+        retryable=value.retryable,
+        semantic_evidence=(
+            _json_value(value.semantic_evidence.as_dict())
+            if value.semantic_evidence is not None
+            else None
+        ),
         finish_reason=value.finish_reason,
         prompt_tokens=value.prompt_tokens,
         completion_tokens=value.completion_tokens,
@@ -2239,7 +2325,7 @@ class FinalizationPersistenceAdapter:
         self.coverage_plan = coverage_plan
         self._lock = threading.Lock()
         self._candidate_plan = {
-            choice.candidate_id: (target.entry_point_id, choice.rank)
+            choice.candidate_id: (target.effective_target_id, choice.rank)
             for target in coverage_plan.targets
             for choice in target.ordered_choices
         }
@@ -2286,7 +2372,7 @@ class FinalizationPersistenceAdapter:
                 for item in sorted(
                     inventory.candidate_attempts, key=lambda item: item.sequence
                 )
-                if item.target_entry_point_id == target.entry_point_id
+                if item.target_entry_point_id == target.effective_target_id
             ]
             admitted = next(
                 (
@@ -2597,6 +2683,11 @@ class FinalizationPersistenceAdapter:
                         "completion_tokens": llm_result.completion_tokens,
                         "duration_ms": llm_result.duration_ms,
                         "request_controls": llm_result.request_controls,
+                        "semantic_evidence": (
+                            evidence.semantic_evidence.as_dict()
+                            if evidence.semantic_evidence is not None
+                            else None
+                        ),
                     }
                 )
             elif isinstance(result.evidence, StageAttemptFailure):
@@ -2633,6 +2724,12 @@ class FinalizationPersistenceAdapter:
                 entry["error"] = f"{evidence.exception_type}: {evidence.detail}"
                 # Stable typed routing evidence for every failed attempt row.
                 entry["code"] = evidence.code
+                entry["retryable"] = evidence.retryable
+                entry["semantic_evidence"] = (
+                    evidence.semantic_evidence.as_dict()
+                    if evidence.semantic_evidence is not None
+                    else None
+                )
                 if evidence.finish_reason is not None:
                     entry["finish_reason"] = evidence.finish_reason
                 entry.update(

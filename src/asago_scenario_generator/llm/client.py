@@ -187,6 +187,38 @@ def _response_schema_label(response_format: type[BaseModel] | None) -> str | Non
     )
 
 
+def _recover_complete_structured_partial(
+    content: Any,
+    response_format: type[BaseModel] | None,
+) -> BaseModel | None:
+    """Recover one schema-valid JSON value followed only by whitespace.
+
+    Some OpenAI-compatible deployments keep emitting whitespace after a
+    complete structured value until the token limit. The SDK reports that as a
+    length failure even though the semantic payload is complete. Recovery is
+    deliberately narrower than JSON repair: incomplete values, additional
+    values, non-whitespace suffixes, and schema-invalid values all fail closed.
+    """
+    if not isinstance(content, str) or response_format is None:
+        return None
+    try:
+        if not issubclass(response_format, BaseModel):
+            return None
+    except TypeError:
+        return None
+    stripped = content.lstrip()
+    try:
+        value, end = json.JSONDecoder().raw_decode(stripped)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if stripped[end:].strip():
+        return None
+    try:
+        return response_format.model_validate(value)
+    except (TypeError, ValueError):
+        return None
+
+
 class LLMResult(BaseModel):
     """Wrapper carrying the LLM response plus usage telemetry."""
 
@@ -220,6 +252,10 @@ class LLMClient:
         max_completion_tokens: int | None = None,
         temperature: float | None = None,
         extra_headers: dict[str, str] | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        use_guided_decoding: bool = False,
+        timeout: float | None = None,
     ) -> None:
         self.base_url = (
             base_url
@@ -243,6 +279,10 @@ class LLMClient:
             self.temperature = float(env_temp)
         else:
             self.temperature = self.DEFAULT_TEMPERATURE
+        self.top_p = top_p
+        self.top_k = top_k
+        self.use_guided_decoding = use_guided_decoding
+        self.timeout = timeout
 
         # --- extra headers resolution ---
         self.extra_headers = self._resolve_extra_headers(extra_headers)
@@ -252,11 +292,14 @@ class LLMClient:
                 "No LLM endpoint configured."
                 " Set ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL or pass --base-url."
             )
-        self._client = OpenAI(
+        openai_kwargs: dict[str, Any] = dict(
             base_url=self.base_url,
             api_key=self.api_key,
             default_headers=self.extra_headers or None,
         )
+        if timeout is not None:
+            openai_kwargs["timeout"] = timeout
+        self._client = OpenAI(**openai_kwargs)
 
     def _resolve_extra_headers(
         self, explicit: dict[str, str] | None
@@ -284,8 +327,11 @@ class LLMClient:
         max_completion_tokens: int | None = None,
         temperature: float | None = None,
     ) -> LLMResult:
-        effective_max = max_completion_tokens or self.max_completion_tokens
+        transport_token_cap = getattr(self, "max_completion_tokens", None)
+        effective_max = max_completion_tokens or transport_token_cap
         effective_temp = temperature if temperature is not None else self.temperature
+        top_p = getattr(self, "top_p", None)
+        top_k = getattr(self, "top_k", None)
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -295,10 +341,16 @@ class LLMClient:
         extra_kwargs: dict[str, Any] = {"temperature": effective_temp}
         if effective_max is not None:
             extra_kwargs["max_completion_tokens"] = effective_max
+        if top_p is not None:
+            extra_kwargs["top_p"] = top_p
+        if top_k is not None:
+            extra_kwargs["extra_body"] = {"top_k": top_k}
 
         t0 = time.perf_counter_ns()
         try:
-            response, content = self._complete(messages, response_format, extra_kwargs)
+            response, content, recovered_whitespace = self._complete(
+                messages, response_format, extra_kwargs
+            )
         except CompletionLengthError as exc:
             exc.elapsed_ms = max(0, (time.perf_counter_ns() - t0) // 1_000_000)
             raise
@@ -315,8 +367,11 @@ class LLMClient:
             request_controls={
                 "response_schema": (_response_schema_label(response_format)),
                 "max_completion_tokens": effective_max,
-                "transport_token_cap": self.max_completion_tokens,
+                "transport_token_cap": transport_token_cap,
                 "temperature": effective_temp,
+                "top_p": top_p,
+                "top_k": top_k,
+                "structured_whitespace_recovered": recovered_whitespace,
             },
         )
 
@@ -325,8 +380,8 @@ class LLMClient:
         messages: list[dict[str, Any]],
         response_format: type[BaseModel] | None,
         extra_kwargs: dict[str, Any],
-    ) -> tuple[Any, Any]:
-        """Run exactly one provider request, returning ``(response, content)``.
+    ) -> tuple[Any, Any, bool]:
+        """Run one request, returning response, content, and recovery evidence.
 
         Normalizes both provider length shapes — the structured SDK
         ``LengthFinishReasonError`` and an unstructured choice whose
@@ -352,6 +407,11 @@ class LLMClient:
         except LengthFinishReasonError as exc:
             completion = exc.completion
             partial_content = _choice_content(completion)
+            recovered = _recover_complete_structured_partial(
+                partial_content, response_format
+            )
+            if recovered is not None:
+                return completion, recovered, True
             raise CompletionLengthError.from_usage(
                 completion.usage,
                 response=completion,
@@ -367,7 +427,7 @@ class LLMClient:
                 response=response,
                 partial_content=_choice_content(response),
             )
-        return response, content
+        return response, content, False
 
 
 def _choice_content(response: Any) -> Any | None:

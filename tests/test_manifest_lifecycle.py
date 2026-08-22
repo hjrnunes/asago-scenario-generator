@@ -50,6 +50,7 @@ from asago_scenario_generator.manifest import (
     load_strict_resolver,
     required_singleton_roles,
     resolve_run_dir,
+    select_final_run_status,
     validate_attempt_equations,
     validate_completed_inventory,
     validate_run_id,
@@ -255,15 +256,48 @@ class TestManifestSentinel:
 
     def test_completed_status_is_authoritative(self):
         assert RunStatus.COMPLETED.is_authoritative
+        assert RunStatus.COMPLETED_WITH_WARNINGS.is_authoritative
         assert not RunStatus.COMPLETED_WITH_ERRORS.is_authoritative
         assert not RunStatus.FAILED.is_authoritative
 
     def test_final_statuses(self):
         finals = RunStatus.final_statuses()
         assert RunStatus.COMPLETED in finals
+        assert RunStatus.COMPLETED_WITH_WARNINGS in finals
         assert RunStatus.COMPLETED_WITH_ERRORS in finals
         assert RunStatus.FAILED in finals
         assert RunStatus.STARTED not in finals
+
+    @pytest.mark.parametrize(
+        ("notes", "expected"),
+        [
+            ([], RunStatus.COMPLETED),
+            (
+                ["candidate_filter_unavailable: provider timed out"],
+                RunStatus.COMPLETED_WITH_WARNINGS,
+            ),
+            (
+                ["presentation_fallback: narrative title was synthesized"],
+                RunStatus.COMPLETED_WITH_WARNINGS,
+            ),
+            (
+                ["Risk card R-1 may describe a different system."],
+                RunStatus.COMPLETED,
+            ),
+        ],
+    )
+    def test_successful_completion_only_promotes_declared_warnings(
+        self, notes: list[str], expected: RunStatus
+    ):
+        assert select_final_run_status(True, notes) is expected
+
+    def test_failed_completion_gates_keep_completed_with_errors(self):
+        assert (
+            select_final_run_status(
+                False, ["candidate_filter_unavailable: provider timed out"]
+            )
+            is RunStatus.COMPLETED_WITH_ERRORS
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -1644,6 +1678,22 @@ def _valid_run(run_dir: Path, *, status=RunStatus.COMPLETED) -> RunManifest:
 
 
 class TestCompletedRunWithAdmittedPair:
+    def test_completed_with_warnings_requires_complete_scenario_pairs(
+        self, tmp_path: Path
+    ):
+        run_dir = tmp_path / _VALID_RUN_ID
+        manifest = _valid_run(run_dir, status=RunStatus.COMPLETED_WITH_WARNINGS)
+        manifest.inventory = [
+            entry
+            for entry in manifest.inventory
+            if entry.role is not ArtifactRole.SCENARIO_FEATURE
+        ]
+
+        with pytest.raises(
+            ManifestIntegrityError, match="Incomplete scenario YAML/feature pairs"
+        ):
+            ManifestInventoryResolver(run_dir, manifest, check_orphans=False)
+
     def test_completed_run_with_real_admitted_pair(self, tmp_path: Path):
         run_dir = tmp_path / _VALID_RUN_ID
         manifest = _valid_run(run_dir)

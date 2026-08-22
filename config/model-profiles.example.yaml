@@ -11,6 +11,11 @@ gemma4-local:
   model: gemma-4-26b-a4b-it
   api_key: unused
   temperature: 0.4
+gemma4-oc-taxonomy:
+  base_url: https://your-openshift-gemma-endpoint.example.com/v1
+  model: gemma-4-26b-a4b-it
+  api_key: unused
+  temperature: 0.4
 sonnet-4:
   base_url: https://openrouter.ai/api/v1
   model: anthropic/claude-sonnet-4

@@ -41,6 +41,7 @@ from asago_scenario_generator.manifest import (
     finalize_manifest,
     load_manifest,
     resolve_run_dir,
+    select_final_run_status,
     validate_completed_inventory,
     validate_generation_run_id,
     write_failed_manifest,
@@ -82,13 +83,12 @@ from asago_scenario_generator.pipeline.coverage_planning import (
     STAGE_QUARANTINE,
     STAGE_RULES,
     STAGE_SELECTION,
+    GenerationMode,
     StageLedger,
-    build_coverage_plan,
     build_coverage_universe,
-    build_fallback_queues,
     build_qualified_candidates,
     emit_quality_gaps,
-    select_with_coverage_priority,
+    plan_generation,
 )
 from asago_scenario_generator.pipeline.generate import generate_run_id
 from asago_scenario_generator.pipeline.io import (
@@ -100,6 +100,9 @@ from asago_scenario_generator.pipeline.io import (
     write_use_case,
 )
 from asago_scenario_generator.pipeline.profile import infer_capability_profile
+from asago_scenario_generator.pipeline.model_configuration import (
+    resolve_effective_model_config,
+)
 from asago_scenario_generator.pipeline.projection import (
     ProjectedCandidate,
     ProjectionReadinessError,
@@ -228,6 +231,7 @@ def _complete_v3_run(
 ) -> PipelineResult:
     """Run the single shared v3 coverage, eval, report, and manifest tail."""
     from asago_scenario_generator.pipeline.persistence import (
+        build_semantic_generation_summary,
         read_finalization_inventory,
     )
     from asago_scenario_generator.pipeline.runner_finalization import build_v3_inventory
@@ -237,21 +241,34 @@ def _complete_v3_run(
         raise ManifestIntegrityError("v3 completion tail requires STARTED manifest")
     ManifestInventoryResolver(run_dir, started_manifest, check_orphans=False)
     final_inventory_doc = read_finalization_inventory(run_dir)
+    semantic_generation = build_semantic_generation_summary(final_inventory_doc)
     admitted_scenarios = _load_admitted_scenarios(
         run_dir, run_id, timestamp_start, provenance, final_inventory_doc
     )
+    for scenario in admitted_scenarios:
+        for note in scenario.generation.notes or ():
+            if (
+                note.startswith("presentation_fallback:")
+                and note not in generation_notes
+            ):
+                generation_notes.append(note)
     coverage_gaps = analyze_coverage_gaps(profile, threat_surface, admitted_scenarios)
     decisions = {
         item.candidate_id: item for item in final_inventory_doc.admission_decisions
+    }
+    target_to_ingress = {
+        target.effective_target_id: target.entry_point_id
+        for target in finalization.coverage_plan.targets
     }
     generated_target_ids: set[str] = set()
     quarantined_target_ids: set[str] = set()
     for candidate_attempt in final_inventory_doc.candidate_attempts:
         decision = decisions[candidate_attempt.candidate_id]
+        entry_point_id = target_to_ingress[candidate_attempt.target_entry_point_id]
         if decision.admitted:
-            generated_target_ids.add(candidate_attempt.target_entry_point_id)
+            generated_target_ids.add(entry_point_id)
             stage_ledger.record(
-                candidate_attempt.target_entry_point_id,
+                entry_point_id,
                 candidate_attempt.candidate_id,
                 STAGE_GENERATION,
                 "generated",
@@ -265,9 +282,9 @@ def _complete_v3_run(
                 "Candidate passed postbehavior admission.",
             )
         else:
-            quarantined_target_ids.add(candidate_attempt.target_entry_point_id)
+            quarantined_target_ids.add(entry_point_id)
             stage_ledger.record(
-                candidate_attempt.target_entry_point_id,
+                entry_point_id,
                 candidate_attempt.candidate_id,
                 STAGE_QUARANTINE,
                 decision.status.value,
@@ -435,15 +452,16 @@ def _complete_v3_run(
             (run_dir / "report.html").unlink(missing_ok=True)
             logger.warning("Authoritative eval/report finalization failed: %s", exc)
 
-    final_status = (
-        RunStatus.COMPLETED
-        if terminal_processing_succeeded
+    ordinary_completion_succeeded = (
+        terminal_processing_succeeded
         and not had_quarantine
         and eval_enabled
         and eval_success
         and report_success
         and qualification_passed
-        else RunStatus.COMPLETED_WITH_ERRORS
+    )
+    final_status = select_final_run_status(
+        ordinary_completion_succeeded, generation_notes
     )
     inventory = build_v3_inventory(
         run_dir,
@@ -467,8 +485,9 @@ def _complete_v3_run(
         package_version=importlib.metadata.version("asago-scenario-generator"),
         provenance=provenance,
         inventory=inventory,
+        semantic_generation=semantic_generation,
     )
-    if final_status is RunStatus.COMPLETED:
+    if final_status.requires_complete_inventory:
         validate_completed_inventory(
             final_manifest, eval_enabled=eval_enabled, run_dir=run_dir
         )
@@ -476,7 +495,9 @@ def _complete_v3_run(
         ManifestInventoryResolver(run_dir, final_manifest, check_orphans=True)
     finalize_manifest(run_dir, final_manifest)
     filter_quarantine_count = len(filter_quarantines or [])
-    admitted_count = len(final_inventory_doc.admitted_inventory)
+    admitted_count = sum(
+        decision.admitted for decision in final_inventory_doc.admission_decisions
+    )
     finalization_quarantine_count = len(final_inventory_doc.quarantine_inventory)
     failed_count = sum(
         decision.status.value == "generation_or_finalization_failed"
@@ -500,8 +521,8 @@ def _complete_v3_run(
 
 
 def _hydrate_planning_inputs(
-    planning: object, durable_plan: object
-) -> tuple[object, dict]:
+    planning: object, durable_plan: object, coverage_universe: object
+) -> tuple[object, dict, dict]:
     """Rebuild the exact typed selection inputs persisted before finalization."""
     from asago_scenario_generator.pipeline.coverage_planning import (
         QualifiedCandidate,
@@ -511,7 +532,8 @@ def _hydrate_planning_inputs(
     )
 
     hydrated_by_id: dict[str, QualifiedCandidate] = {}
-    fallback_queues: dict[str, TargetFallbackQueue] = {}
+    target_queues: dict[str, TargetFallbackQueue] = {}
+    coverage_candidates: dict[str, list[QualifiedCandidate]] = {}
     for target in durable_plan.targets:
         choices: list[QualifiedCandidate] = []
         for ref in target.ordered_choices:
@@ -523,8 +545,9 @@ def _hydrate_planning_inputs(
             )
             choices.append(candidate)
             hydrated_by_id[candidate.candidate_id] = candidate
-        fallback_queues[target.entry_point_id] = TargetFallbackQueue(
-            entry_point_id=target.entry_point_id,
+            coverage_candidates.setdefault(target.entry_point_id, []).append(candidate)
+        target_queues[target.effective_target_id] = TargetFallbackQueue(
+            entry_point_id=target.effective_target_id,
             choices=choices,
         )
     try:
@@ -557,7 +580,26 @@ def _hydrate_planning_inputs(
         attempted_candidate_ids=set(planning.attempted_candidate_ids),
         selection_limitation_target_ids=list(planning.selection_limitation_target_ids),
     )
-    return selection_result, fallback_queues
+    coverage_queues = {
+        target.entry_point_id: TargetFallbackQueue(
+            entry_point_id=target.entry_point_id,
+            choices=[
+                QualifiedCandidate(
+                    projected=candidate.projected,
+                    accepted_filters=candidate.accepted_filters,
+                    rank=rank,
+                )
+                for rank, candidate in enumerate(
+                    sorted(
+                        coverage_candidates.get(target.entry_point_id, []),
+                        key=lambda item: (item.pattern_id, item.candidate_id),
+                    )[:3]
+                )
+            ],
+        )
+        for target in coverage_universe.feasible_targets
+    }
+    return selection_result, target_queues, coverage_queues
 
 
 def resume_pipeline(
@@ -641,6 +683,20 @@ def resume_pipeline(
     persisted_eval = options.get("eval")
     if not isinstance(persisted_eval, bool):
         raise ManifestIntegrityError("resume eval provenance must be boolean")
+    persisted_presentation_fallback = options.get("presentation_fallback", "allow")
+    if persisted_presentation_fallback not in {"allow", "forbid"}:
+        raise ManifestIntegrityError(
+            "resume presentation fallback provenance is invalid"
+        )
+    persisted_generation_mode = options.get(
+        "generation_mode", GenerationMode.COVERAGE.value
+    )
+    try:
+        GenerationMode(persisted_generation_mode)
+    except ValueError as exc:
+        raise ManifestIntegrityError(
+            "resume generation mode provenance is invalid"
+        ) from exc
     if eval is not None and eval is not persisted_eval:
         raise ManifestIntegrityError("resume eval override conflicts with provenance")
     current_hashes = _capture_input_hashes(
@@ -722,7 +778,10 @@ def resume_pipeline(
         raise ManifestIntegrityError(
             f"resume durable candidate provenance drift: {exc}"
         ) from exc
-    selection_result, fallback_queues = _hydrate_planning_inputs(planning, durable_plan)
+    coverage_universe = build_coverage_universe(profile)
+    selection_result, _target_queues, coverage_queues = _hydrate_planning_inputs(
+        planning, durable_plan, coverage_universe
+    )
 
     setup_logging(log_level=log_level, output_dir=supplied, structured=structured)
     persisted_model = provenance.model_config_provenance
@@ -760,6 +819,7 @@ def resume_pipeline(
         taxonomy_resolver=taxonomy_resolver,
         capability_snapshot=capability_snapshot,
         trusted_catalog=trusted_catalog,
+        presentation_fallback=persisted_presentation_fallback,
     )
     durable_plan = finalization.coverage_plan
     from asago_scenario_generator.pipeline.coverage_planning import StageEvent
@@ -778,10 +838,10 @@ def resume_pipeline(
         profile=profile,
         threat_surface=threat_surface,
         finalization=finalization,
-        coverage_universe=build_coverage_universe(profile),
+        coverage_universe=coverage_universe,
         stage_ledger=stage_ledger,
         selection_result=selection_result,
-        fallback_queues=fallback_queues,
+        fallback_queues=coverage_queues,
         projection_limitation_target_ids=set(planning.projection_limitation_target_ids),
         threats_path=Path(options["threats_path"]),
         eval_enabled=persisted_eval,
@@ -1016,8 +1076,12 @@ def run_pipeline(
     base_url: str | None = None,
     api_key: str | None = None,
     model: str | None = None,
+    model_profile: str | None = None,
+    profiles_file: Path = Path("config/model-profiles.yaml"),
+    presentation_fallback: str = "allow",
     max_techniques: int = 1,
     max_scenarios_per_pattern: int | None = None,
+    generation_mode: str = GenerationMode.EXHAUSTIVE.value,
     zones: str | None = None,
     eval: bool = True,
     log_level: str = "INFO",
@@ -1039,6 +1103,7 @@ def run_pipeline(
         api_key: LLM API key override.
         model: LLM model name override.
         max_scenarios_per_pattern: Cap on scenarios per attack pattern (None = no cap).
+        generation_mode: ``exhaustive`` (default) or the bounded ``coverage`` smoke mode.
         eval: Whether to run deterministic eval metrics after generation (default True).
         log_level: Logging level for the console handler.
         structured: Whether the run-local file log uses JSON-lines format.
@@ -1046,6 +1111,14 @@ def run_pipeline(
     Returns:
         PipelineResult with all artifacts from the pipeline run.
     """
+    if presentation_fallback not in {"allow", "forbid"}:
+        raise ValueError("presentation_fallback must be 'allow' or 'forbid'")
+    if max_scenarios_per_pattern is not None and max_scenarios_per_pattern < 1:
+        raise ValueError("max_scenarios_per_pattern must be a positive integer")
+    try:
+        resolved_generation_mode = GenerationMode(generation_mode)
+    except ValueError as exc:
+        raise ValueError("generation_mode must be 'exhaustive' or 'coverage'") from exc
     ct_path = cross_taxonomy_path or _DEFAULT_CROSS_TAXONOMY_PATH
     generation_notes: list[str] = []
 
@@ -1091,9 +1164,27 @@ def run_pipeline(
             qualification_facts = _parse_qualification_facts(
                 qualification_facts_bytes
             ).facts
+        else:
+            generation_notes.append(
+                "qualification_facts_omitted: compatibility mode defers "
+                "unresolved fact conditions to authoritative projection"
+            )
+        logger.info(
+            "Qualification facts mode: %s",
+            "explicit"
+            if qualification_facts_path is not None
+            else "omitted_compatibility",
+        )
 
         # --- Client construction (after sentinel) ---
-        client = LLMClient(base_url=base_url, api_key=api_key, model=model)
+        effective_model = resolve_effective_model_config(
+            model_profile=model_profile,
+            profiles_file=profiles_file,
+            base_url=base_url,
+            api_key=api_key,
+            model=model,
+        )
+        client = LLMClient(**effective_model.client_kwargs())
 
         # --- Capture provenance at run start, before inputs can change ---
         # This captures Git state, resolved model config, prompt hashes,
@@ -1130,8 +1221,29 @@ def run_pipeline(
             "max_completion_tokens": client.max_completion_tokens,
             "max_techniques": max_techniques,
             "max_scenarios_per_pattern": max_scenarios_per_pattern,
+            "generation_mode": resolved_generation_mode.value,
             "zones": effective_zones,
             "eval": eval,
+            "model_profile": model_profile,
+            "profiles_file": (
+                str(profiles_file.resolve()) if model_profile is not None else None
+            ),
+            "model_control_sources": {
+                key: value.value
+                for key, value in effective_model.sources.items()
+                if key != "api_key"
+            },
+            "timeout": effective_model.timeout,
+            "top_p": effective_model.top_p,
+            "top_k": effective_model.top_k,
+            "use_guided_decoding": effective_model.use_guided_decoding,
+            "header_names": sorted((effective_model.extra_headers or {}).keys()),
+            "presentation_fallback": presentation_fallback,
+            "qualification_facts_mode": (
+                "explicit"
+                if qualification_facts_path is not None
+                else "omitted_compatibility"
+            ),
         }
         if qualification_facts_path is not None:
             effective_options["qualification_facts_path"] = str(
@@ -1143,12 +1255,7 @@ def run_pipeline(
             timestamp_start=timestamp_start,
             command="generate",
             options=effective_options,
-            model_config=ModelConfig(
-                model=client.model,
-                base_url=client.base_url,
-                temperature=client.temperature,
-                max_completion_tokens=client.max_completion_tokens,
-            ),
+            model_config=ModelConfig(**effective_model.public_controls()),
             prompt_template_hashes=hash_prompt_templates(),
             input_hashes=input_hashes,
             config_digest=config_digest,
@@ -1349,7 +1456,7 @@ def run_pipeline(
                 client,
                 use_case,
                 profile,
-                quarantine_on_failure=True,
+                advisory_on_failure=True,
             )
             if len(filter_result) == 4:
                 (
@@ -1373,6 +1480,14 @@ def run_pipeline(
             raise
         # Log candidate filter LLM calls to top-level calls.jsonl.
         write_pipeline_call_log(filter_call_logs, run_dir)
+        if any(
+            item.get("warning") == "candidate_filter_unavailable"
+            for item in filter_call_logs
+        ):
+            generation_notes.append(
+                "candidate_filter_unavailable: all rule-eligible candidates "
+                "continued to mandatory semantic generation"
+            )
         write_filter_quarantine_evidence(filter_quarantines, run_dir)
         if filter_quarantines:
             logger.warning(
@@ -1571,13 +1686,9 @@ def run_pipeline(
             filtered_seeds, projected_by_pattern
         )
 
-        # --- Stage 3.7: Coverage-Aware Planning (cmps.4) ---
-        # Build deterministic ranked fallback queues per feasible target
-        # from qualified projected candidates, bounded to at most three
-        # choices per target.  Ranking is deterministic and
-        # encounter-independent: (pattern_id, candidate_id) — NOT
-        # pinned-technique count and NOT filter-result arrival order.
-        fallback_queues = build_fallback_queues(qualified_candidates, coverage_universe)
+        # --- Stage 3.7: Generation Planning (cmps.4) ---
+        # Exhaustive mode creates one durable target per qualified candidate.
+        # Coverage mode retains one bounded fallback queue per ingress.
 
         # cmps.4 blocker 4: Do NOT append synthetic selection/no_qualified
         # events for empty queues.  Selection limitation requires qualified
@@ -1648,17 +1759,15 @@ def run_pipeline(
                 payload=limitation.model_dump(mode="json"),
             )
 
-        # Coverage-aware selection: first hard objective is one candidate
-        # for every feasible coverage target.  Only then optimize secondary
-        # diversity / per-pattern caps.  Capping must not discard a target's
-        # sole accepted candidate.  Phase 1 is cap-immune.  Only primaries
-        # are selected — remaining choices are fallback_available for cmps.5.
-        selection_result = select_with_coverage_priority(
+        planning_result = plan_generation(
             qualified_candidates,
-            fallback_queues,
             coverage_universe,
+            mode=resolved_generation_mode,
             max_per_pattern=max_scenarios_per_pattern,
         )
+        selection_result = planning_result.selection
+        fallback_queues = planning_result.target_queues
+        coverage_fallback_queues = planning_result.coverage_queues
         selected_count = len(selection_result.selected)
         candidates_capped = selection_result.capped_count
 
@@ -1677,21 +1786,26 @@ def run_pipeline(
         # selection limitations where qualified candidates were deliberately
         # not chosen for cap reasons — not synthetic events for empty queues).
         for ep_id in selection_result.selection_limitation_target_ids:
+            limitation_detail = (
+                "Per-pattern cap excluded all qualified candidates for this "
+                "ingress target."
+                if resolved_generation_mode is GenerationMode.EXHAUSTIVE
+                else "Per-pattern cap could not be respected for this target; "
+                "coverage preserved but cap violated."
+            )
             stage_ledger.record(
                 entry_point_id=ep_id,
                 candidate_id=selection_result.primary_candidate_ids.get(ep_id, ""),
                 stage=STAGE_SELECTION,
                 reason="selection_limitation",
-                detail=(
-                    "Per-pattern cap could not be respected for this target; "
-                    "coverage preserved but cap violated."
-                ),
+                detail=limitation_detail,
             )
 
         if candidates_capped > 0:
             logger.info(
-                "  Coverage-aware selection: %d candidates capped by "
-                "per-pattern limit (sole-target candidates preserved).",
+                "  %s generation planning: %d candidates capped by "
+                "the per-pattern limit.",
+                resolved_generation_mode.value.capitalize(),
                 candidates_capped,
             )
         if selection_result.uncovered_target_ids:
@@ -1721,9 +1835,7 @@ def run_pipeline(
             strict_v3_coverage_plan,
         )
 
-        initial_plan = build_coverage_plan(
-            coverage_universe, fallback_queues, selection_result
-        )
+        initial_plan = planning_result.plan
         planning_checkpoint = PlanningCheckpointV1(
             qualification_facts_source=qualification_facts_source,
             qualification_facts_sha256=input_hashes.qualification_facts_hash,
@@ -1778,6 +1890,7 @@ def run_pipeline(
             taxonomy_resolver=taxonomy_resolver,
             capability_snapshot=capability_snapshot,
             trusted_catalog=attack_pattern_records,
+            presentation_fallback=presentation_fallback,
         )
         return _complete_v3_run(
             run_dir=run_dir,
@@ -1790,7 +1903,7 @@ def run_pipeline(
             coverage_universe=coverage_universe,
             stage_ledger=stage_ledger,
             selection_result=selection_result,
-            fallback_queues=fallback_queues,
+            fallback_queues=coverage_fallback_queues,
             projection_limitation_target_ids=projection_limitation_target_ids,
             threats_path=threats_path,
             eval_enabled=eval,
@@ -1843,7 +1956,10 @@ def run_pipeline(
                     )
             failed_manifest.status = RunStatus.FAILED
             failed_manifest.timestamp_end = datetime.now(UTC).isoformat()
-            failed_manifest.error = str(exc)
+            failure_code = getattr(exc, "failure_code", None)
+            failed_manifest.error = (
+                f"{failure_code}: {exc}" if failure_code else str(exc)
+            )
             if failed_manifest.provenance:
                 failed_manifest.provenance.timestamp_end = failed_manifest.timestamp_end
             # Finish any interrupted two-document publication before the

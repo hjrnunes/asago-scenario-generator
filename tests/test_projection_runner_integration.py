@@ -28,7 +28,9 @@ from asago_scenario_generator.models.capability_profile import (
     EntryPoint,
     InventoryCompleteness,
 )
-from asago_scenario_generator.models.projection_envelope import ProjectionTraceabilityResult
+from asago_scenario_generator.models.projection_envelope import (
+    ProjectionTraceabilityResult,
+)
 from asago_scenario_generator.models.scenario import CallMetadata, CallName
 from asago_scenario_generator.pipeline.candidates import (
     FilteredSeed,
@@ -314,7 +316,9 @@ def _arrange(tmp_path: Path, *, entry_point_id: str, projected_candidates: list)
         }
 
     stack.enter_context(
-        patch("asago_scenario_generator.eval.runner.run_evaluation", side_effect=evaluate)
+        patch(
+            "asago_scenario_generator.eval.runner.run_evaluation", side_effect=evaluate
+        )
     )
 
     def report(data, out_dir):
@@ -323,7 +327,10 @@ def _arrange(tmp_path: Path, *, entry_point_id: str, projected_candidates: list)
         return path
 
     stack.enter_context(
-        patch("asago_scenario_generator.report.generator.generate_report", side_effect=report)
+        patch(
+            "asago_scenario_generator.report.generator.generate_report",
+            side_effect=report,
+        )
     )
     stack.enter_context(
         patch(
@@ -353,6 +360,7 @@ def test_exact_projection_match_uses_authoritative_identity(tmp_path: Path) -> N
         result = run_pipeline(**args)
 
     assert result.scenarios[0].candidate_id == projected.candidate_id
+    assert result.admitted_count == 1
     manifest = load_manifest(result.run_dir)
     scenario_inventory = [item for item in manifest.inventory if item.scenario_id]
     assert scenario_inventory
@@ -364,6 +372,28 @@ def test_exact_projection_match_uses_authoritative_identity(tmp_path: Path) -> N
     assert manifest.funnel == {}
     assert manifest.provenance is not None
     assert "qualification_facts_path" not in manifest.provenance.command.options
+    assert (
+        manifest.provenance.command.options["qualification_facts_mode"]
+        == "omitted_compatibility"
+    )
+    assert manifest.provenance.command.options["generation_mode"] == "exhaustive"
+    assert any(
+        note.startswith("qualification_facts_omitted:")
+        for note in result.generation_notes
+    )
+    assert manifest.semantic_generation["required_stages"] == [
+        "actor",
+        "narrative",
+        "tree",
+        "behavior",
+    ]
+    tampered = manifest.model_copy(deep=True)
+    tampered.semantic_generation["schema_version"] = "tampered"
+    with pytest.raises(
+        ManifestIntegrityError,
+        match="semantic_generation does not match finalization inventory",
+    ):
+        ManifestInventoryResolver(result.run_dir, tampered, check_orphans=True)
     planning_entry = next(
         item
         for item in manifest.inventory
@@ -406,6 +436,11 @@ def test_runner_binds_nonempty_qualification_facts_to_v3_planning(
 
     manifest = load_manifest(result.run_dir)
     assert manifest.provenance is not None
+    assert manifest.provenance.command.options["qualification_facts_mode"] == "explicit"
+    assert not any(
+        note.startswith("qualification_facts_omitted:")
+        for note in result.generation_notes
+    )
     assert (
         manifest.provenance.input_hashes.qualification_facts_hash
         == hashlib.sha256(source).hexdigest()
@@ -710,7 +745,10 @@ def test_completion_recomputes_scorecard_and_report_from_strict_inventory(
         return path
 
     stack.enter_context(
-        patch("asago_scenario_generator.report.generator.generate_report", side_effect=report)
+        patch(
+            "asago_scenario_generator.report.generator.generate_report",
+            side_effect=report,
+        )
     )
 
     with stack:
@@ -828,7 +866,10 @@ def test_orphan_injected_before_strict_completion_blocks_completed(
         return path
 
     stack.enter_context(
-        patch("asago_scenario_generator.report.generator.generate_report", side_effect=report)
+        patch(
+            "asago_scenario_generator.report.generator.generate_report",
+            side_effect=report,
+        )
     )
 
     with stack, pytest.raises(ManifestIntegrityError, match="orphan"):
@@ -919,7 +960,9 @@ def test_tree_is_immutable_through_admission_persistence_and_evaluation(
         }
 
     stack.enter_context(
-        patch("asago_scenario_generator.eval.runner.run_evaluation", side_effect=evaluate)
+        patch(
+            "asago_scenario_generator.eval.runner.run_evaluation", side_effect=evaluate
+        )
     )
 
     with stack:
@@ -1063,11 +1106,22 @@ def test_multiple_exact_projection_matches_fan_out(tmp_path: Path) -> None:
     manifest = load_manifest(result.run_dir)
     assert manifest.funnel == {}
     plan = read_coverage_plan(result.run_dir)
-    target = next(item for item in plan.targets if item.ordered_choices)
-    assert [item.candidate_id for item in target.ordered_choices] == [
+    populated_targets = [item for item in plan.targets if item.ordered_choices]
+    assert len(populated_targets) == 2
+    assert len({item.effective_target_id for item in populated_targets}) == 2
+    assert {item.entry_point_id for item in populated_targets} == {
+        first.canonical_ingress.entry_point_id
+    }
+    assert {target.ordered_choices[0].candidate_id for target in populated_targets} == {
         first.candidate_id,
         second.candidate_id,
-    ]
+    }
+    assert all(len(target.ordered_choices) == 1 for target in populated_targets)
+    inventory = read_finalization_inventory(result.run_dir)
+    assert {item.candidate_id for item in inventory.candidate_attempts} == {
+        first.candidate_id,
+        second.candidate_id,
+    }
 
 
 def test_runner_uses_unmodified_derived_projected_candidate(tmp_path: Path) -> None:
@@ -1142,7 +1196,7 @@ def test_production_primary_quarantine_then_fallback_admits(tmp_path: Path) -> N
 
     stack.enter_context(
         patch(
-            "asago_scenario_generator.pipeline.runner.select_with_coverage_priority",
+            "asago_scenario_generator.pipeline.coverage_planning.select_with_coverage_priority",
             side_effect=lambda qualified, _queues, universe, **_kwargs: SelectionResult(
                 selected=[
                     item
@@ -1197,16 +1251,19 @@ def test_production_primary_quarantine_then_fallback_admits(tmp_path: Path) -> N
         )
     )
     with stack:
-        result = run_pipeline(**args)
+        result = run_pipeline(**args, generation_mode="coverage")
 
     assert actor.call_count == 4
     inventory = read_finalization_inventory(result.run_dir)
     assert [item.admitted for item in inventory.admission_decisions] == [False, True]
-    assert load_manifest(result.run_dir).status is RunStatus.COMPLETED_WITH_ERRORS
+    manifest = load_manifest(result.run_dir)
+    assert manifest.status is RunStatus.COMPLETED_WITH_ERRORS
+    assert manifest.provenance.command.options["generation_mode"] == "coverage"
 
 
+@pytest.mark.parametrize("generation_mode", ["coverage", "exhaustive"])
 def test_public_resume_terminalizes_unknown_actor_without_reissue(
-    tmp_path: Path,
+    tmp_path: Path, generation_mode: str
 ) -> None:
     profile, snapshot, projected = _same_snapshot_fallbacks()
     stack, _, _, args = _arrange(
@@ -1240,7 +1297,7 @@ def test_public_resume_terminalizes_unknown_actor_without_reissue(
 
     stack.enter_context(
         patch(
-            "asago_scenario_generator.pipeline.runner.select_with_coverage_priority",
+            "asago_scenario_generator.pipeline.coverage_planning.select_with_coverage_priority",
             side_effect=lambda qualified, _queues, universe, **_kwargs: SelectionResult(
                 selected=[
                     item
@@ -1269,7 +1326,7 @@ def test_public_resume_terminalizes_unknown_actor_without_reissue(
     )
     with stack:
         with pytest.raises(KeyboardInterrupt):
-            run_pipeline(**args)
+            run_pipeline(**args, generation_mode=generation_mode)
         run_dir = next(args["output_dir"].iterdir())
         started = load_manifest(run_dir)
         assert started.status is RunStatus.STARTED
@@ -1312,6 +1369,9 @@ def test_public_resume_terminalizes_unknown_actor_without_reissue(
     assert actor.call_count == 2  # crashed primary call plus fallback only
     inventory = read_finalization_inventory(run_dir)
     assert [item.admitted for item in inventory.admission_decisions] == [False, True]
+    plan = read_coverage_plan(run_dir)
+    populated_targets = [target for target in plan.targets if target.ordered_choices]
+    assert len(populated_targets) == (1 if generation_mode == "coverage" else 2)
     unknown = inventory.admission_decisions[0]
     assert [item.code for item in unknown.violations] == ["unknown_invocation_outcome"]
     assert unknown.terminal_receipts[0].role is ArtifactRole.QUARANTINE_BUNDLE
@@ -1332,7 +1392,9 @@ def test_resume_preserves_persisted_no_eval_policy(tmp_path: Path) -> None:
         )
     )
     evaluator = MagicMock(side_effect=AssertionError("evaluation must stay disabled"))
-    stack.enter_context(patch("asago_scenario_generator.eval.runner.run_evaluation", evaluator))
+    stack.enter_context(
+        patch("asago_scenario_generator.eval.runner.run_evaluation", evaluator)
+    )
 
     with stack:
         with pytest.raises(KeyboardInterrupt):
@@ -1418,7 +1480,9 @@ def test_resume_passes_persisted_custom_threats_path_to_evaluator(
         return {"evaluation": {}, "metrics": {}}
 
     stack.enter_context(
-        patch("asago_scenario_generator.eval.runner.run_evaluation", side_effect=evaluate)
+        patch(
+            "asago_scenario_generator.eval.runner.run_evaluation", side_effect=evaluate
+        )
     )
 
     with stack:
@@ -1656,7 +1720,9 @@ def test_public_resume_reuses_only_causal_frontier_after_owner_retry(
         GateResult,
         GateViolation,
     )
-    from asago_scenario_generator.pipeline.persistence import FinalizationPersistenceAdapter
+    from asago_scenario_generator.pipeline.persistence import (
+        FinalizationPersistenceAdapter,
+    )
     from asago_scenario_generator.pipeline.runner_finalization import (
         make_postbehavior_admission as real_admission_factory,
     )
@@ -1843,7 +1909,9 @@ def _run_and_get_coverage_report(tmp_path: Path, *, confirmed: bool) -> dict:
                 fromlist=["patch"],
             ).patch("asago_scenario_generator.pipeline.runner.infer_capability_profile")
         )
-        from asago_scenario_generator.pipeline.projection import capture_capability_snapshot
+        from asago_scenario_generator.pipeline.projection import (
+            capture_capability_snapshot,
+        )
 
         stack.enter_context(
             patch(

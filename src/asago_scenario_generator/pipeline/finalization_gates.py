@@ -284,10 +284,18 @@ def _nodes(node: AttackTreeNode) -> list[AttackTreeNode]:
     return [node, *(item for child in node.children or () for item in _nodes(child))]
 
 
+def _default_leaf_budget(tree: AttackTree) -> int:
+    technique_budget = compute_leaf_budget(len(set(tree.collect_technique_ids())))
+    projected_step_floor = len(
+        {step_id for leaf in _leaves(tree.root) for step_id in leaf.projected_step_ids}
+    )
+    return max(technique_budget, projected_step_floor)
+
+
 def check_tree_parsimony(tree: AttackTree, *, budget: int | None = None) -> GateResult:
     leaves = _leaves(tree.root)
     if budget is None:
-        budget = compute_leaf_budget(len(set(tree.collect_technique_ids())))
+        budget = _default_leaf_budget(tree)
     if len(leaves) <= budget:
         return GateResult(AdmissionEvidenceId.tree_parsimony)
     return GateResult(
@@ -372,7 +380,7 @@ def finalize_tree_parsimony(
     working = tree.model_dump(mode="json")
     leaves = _leaves(tree.root)
     if budget is None:
-        budget = compute_leaf_budget(len(set(tree.collect_technique_ids())))
+        budget = _default_leaf_budget(tree)
     needed = [max(0, len(leaves) - budget)]
     removed: list[str] = []
     if needed[0]:

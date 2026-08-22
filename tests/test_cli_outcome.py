@@ -9,6 +9,7 @@ from asago_scenario_generator.cli import _default_generate_exit_code
     ("status", "admitted", "expected"),
     [
         ("completed", 2, 0),
+        ("completed_with_warnings", 2, 0),
         ("completed_with_errors", 1, 1),
         ("completed", 0, 1),
     ],

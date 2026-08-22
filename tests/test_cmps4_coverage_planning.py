@@ -32,6 +32,8 @@ from asago_scenario_generator.pipeline.coverage_planning import (
     CoverageUniverse,
     DeserializedPlanRef,
     ExcludedTarget,
+    GenerationMode,
+    GenerationPlanningResult,
     QualifiedCandidate,
     SelectionResult,
     StageLedger,
@@ -42,6 +44,7 @@ from asago_scenario_generator.pipeline.coverage_planning import (
     deserialize_plan_ref,
     deserialize_qualified_candidate,
     emit_quality_gaps,
+    plan_generation,
     revalidate_qualified_candidate,
     select_with_coverage_priority,
 )
@@ -343,6 +346,92 @@ class TestBuildFallbackQueues:
         ].candidate_ids() == [q.candidate_id for q in choices]
 
 
+class TestGenerationPolicy:
+    @pytest.mark.parametrize("mode", list(GenerationMode))
+    def test_generation_policy_rejects_a_nonpositive_pattern_cap(
+        self, mode: GenerationMode
+    ) -> None:
+        with pytest.raises(ValueError, match="positive integer"):
+            plan_generation([], _universe(_REAL_EP_ID), mode=mode, max_per_pattern=0)
+
+    def test_exhaustive_mode_selects_every_qualified_candidate(self) -> None:
+        candidates = [_qc(i) for i in range(1, 6)]
+
+        result = plan_generation(
+            candidates,
+            _universe(_REAL_EP_ID),
+            mode=GenerationMode.EXHAUSTIVE,
+        )
+
+        assert isinstance(result, GenerationPlanningResult)
+        assert [item.candidate_id for item in result.selection.selected] == [
+            item.candidate_id for item in candidates
+        ]
+        assert len(result.plan.targets) == len(candidates)
+        assert len({target.target_id for target in result.plan.targets}) == len(
+            candidates
+        )
+        assert {target.entry_point_id for target in result.plan.targets} == {
+            _REAL_EP_ID
+        }
+        assert all(len(target.ordered_choices) == 1 for target in result.plan.targets)
+
+    def test_coverage_mode_preserves_one_bounded_queue_per_ingress(self) -> None:
+        candidates = [_qc(i) for i in range(1, 6)]
+
+        result = plan_generation(
+            candidates,
+            _universe(_REAL_EP_ID),
+            mode=GenerationMode.COVERAGE,
+        )
+
+        assert len(result.selection.selected) == 1
+        assert len(result.plan.targets) == 1
+        assert result.plan.targets[0].target_id == _REAL_EP_ID
+        assert len(result.plan.targets[0].ordered_choices) == MAX_FALLBACK_CHOICES
+
+    def test_exhaustive_pattern_cap_prioritizes_ingress_diversity(self) -> None:
+        first_ep = _ep_id(10)
+        second_ep = _ep_id(11)
+        candidates = [
+            _qc(1, ep=first_ep, pattern="AP-SAME"),
+            _qc(2, ep=first_ep, pattern="AP-SAME"),
+            _qc(3, ep=second_ep, pattern="AP-SAME"),
+            _qc(4, ep=second_ep, pattern="AP-SAME"),
+        ]
+
+        result = plan_generation(
+            candidates,
+            _universe(first_ep, second_ep),
+            mode=GenerationMode.EXHAUSTIVE,
+            max_per_pattern=2,
+        )
+
+        assert len(result.selection.selected) == 2
+        assert {item.entry_point_id for item in result.selection.selected} == {
+            first_ep,
+            second_ep,
+        }
+        assert result.selection.capped_count == 2
+
+    def test_exhaustive_cap_reports_ingress_left_without_a_selection(self) -> None:
+        first_ep = _ep_id(10)
+        second_ep = _ep_id(11)
+
+        result = plan_generation(
+            [
+                _qc(1, ep=first_ep, pattern="AP-SAME"),
+                _qc(2, ep=second_ep, pattern="AP-SAME"),
+            ],
+            _universe(first_ep, second_ep),
+            mode=GenerationMode.EXHAUSTIVE,
+            max_per_pattern=1,
+        )
+
+        assert result.selection.uncovered_target_ids == [second_ep]
+        assert result.selection.selection_limitation_target_ids == [second_ep]
+
+
 class TestSelectWithCoveragePriority:
     def _select(
         self,
@@ -618,15 +707,16 @@ class TestNoRawSeedGeneration:
     def test_run_pipeline_uses_coverage_aware_planning_without_remediation(
         self,
     ) -> None:
-        from asago_scenario_generator.pipeline.runner import _complete_v3_run, run_pipeline
+        from asago_scenario_generator.pipeline.runner import (
+            _complete_v3_run,
+            run_pipeline,
+        )
 
         planning_source = inspect.getsource(run_pipeline)
         for call in (
             "build_coverage_universe(",
             "build_qualified_candidates(",
-            "build_fallback_queues(",
-            "select_with_coverage_priority(",
-            "build_coverage_plan(",
+            "plan_generation(",
         ):
             assert call in planning_source
         completion_source = inspect.getsource(_complete_v3_run)
@@ -1849,7 +1939,9 @@ class TestExecutablePersistedFallback:
         the pin of the complete catalog, without bounded reprojection."""
         from copy import deepcopy
 
-        from asago_scenario_generator.models.attack_pattern import compute_chain_semantic_digest
+        from asago_scenario_generator.models.attack_pattern import (
+            compute_chain_semantic_digest,
+        )
         from asago_scenario_generator.pipeline.projection import (
             ProjectionBudget,
             project_authoritative_candidates,

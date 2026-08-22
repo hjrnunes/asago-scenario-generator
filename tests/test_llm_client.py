@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import BaseModel
 
 from asago_scenario_generator.llm.client import (
     CompletionLengthError,
@@ -22,6 +23,10 @@ def _client() -> LLMClient:
 
 def _usage(prompt_tokens: int, completion_tokens: int) -> MagicMock:
     return MagicMock(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens)
+
+
+class _StructuredFixture(BaseModel):
+    value: str
 
 
 def test_unstructured_stop_response_returns_content_and_usage() -> None:
@@ -109,6 +114,73 @@ def test_structured_sdk_length_error_is_normalized_typed() -> None:
     assert raised.value.completion_tokens == 22
     client._client.beta.chat.completions.parse.assert_called_once()
     assert client._client.chat.completions.create.call_count == 0
+
+
+def test_structured_length_recovers_complete_json_with_only_trailing_whitespace() -> None:
+    from openai import LengthFinishReasonError
+
+    client = _client()
+    completion = SimpleNamespace(
+        id="fixture-response-001",
+        model="fixture-model-v1",
+        usage=_usage(41, 4096),
+        choices=[
+            SimpleNamespace(
+                finish_reason="length",
+                message=SimpleNamespace(content='{"value":"complete"}\n   '),
+            )
+        ],
+    )
+    client._client.beta.chat.completions.parse.side_effect = (
+        LengthFinishReasonError(completion=completion)
+    )
+
+    result = client.complete(
+        system_prompt="system",
+        user_prompt="user",
+        response_format=_StructuredFixture,
+        max_completion_tokens=4096,
+    )
+
+    assert result.content == _StructuredFixture(value="complete")
+    assert result.completion_tokens == 4096
+    assert result.request_controls["structured_whitespace_recovered"] is True
+
+
+@pytest.mark.parametrize(
+    "partial",
+    [
+        '{"value":"incomplete"',
+        '{"value":"complete"} trailing',
+        '{"value":"complete"}{"value":"second"}',
+        '{"wrong":"shape"}',
+    ],
+)
+def test_structured_length_does_not_recover_non_whitespace_or_invalid_content(
+    partial: str,
+) -> None:
+    from openai import LengthFinishReasonError
+
+    client = _client()
+    completion = SimpleNamespace(
+        usage=_usage(41, 4096),
+        choices=[
+            SimpleNamespace(
+                finish_reason="length",
+                message=SimpleNamespace(content=partial),
+            )
+        ],
+    )
+    client._client.beta.chat.completions.parse.side_effect = (
+        LengthFinishReasonError(completion=completion)
+    )
+
+    with pytest.raises(CompletionLengthError):
+        client.complete(
+            system_prompt="system",
+            user_prompt="user",
+            response_format=_StructuredFixture,
+        )
 
 
 def test_structured_length_error_preserves_bounded_diagnostic_evidence() -> None:

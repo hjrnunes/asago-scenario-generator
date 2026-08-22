@@ -55,6 +55,11 @@ from asago_scenario_generator.pipeline.generation_contracts import (
     StageAttemptFailure,
     StageCallEvidence,
 )
+from asago_scenario_generator.pipeline.semantic_generation import (
+    DraftViolation,
+    StageAttemptEvidence,
+    StageGenerationEvidence,
+)
 from asago_scenario_generator.pipeline.generate.stages import (
     GenerationRequest,
     assemble_final_envelope,
@@ -81,10 +86,42 @@ def _hydrate_stage_evidence(record: Any) -> StageCallEvidence | None:
     if record.call is None:
         return None
     call = record.call
+    semantic = call.semantic_evidence
+    semantic_evidence = None
+    if semantic is not None:
+        semantic_evidence = StageGenerationEvidence(
+            stage=semantic["stage"],
+            compiler_name=semantic["compiler_name"],
+            handle_map=semantic["handle_map"],
+            attempts=tuple(
+                StageAttemptEvidence(
+                    attempt_index=attempt["attempt_index"],
+                    request_digest=attempt["request_digest"],
+                    response_digest=attempt["response_digest"],
+                    finish_reason=attempt["finish_reason"],
+                    result=attempt["result"],
+                    effective_controls=attempt["effective_controls"],
+                    validation_violations=tuple(
+                        DraftViolation(
+                            violation["code"],
+                            violation["detail"],
+                            tuple(violation["handles"]),
+                        )
+                        for violation in attempt["validation_violations"]
+                    ),
+                    retry_class=attempt["retry_class"],
+                    failure_detail=attempt["failure_detail"],
+                )
+                for attempt in semantic["attempts"]
+            ),
+            accepted_draft_digest=semantic["accepted_draft_digest"],
+            warnings=tuple(semantic.get("warnings", ())),
+        )
     return StageCallEvidence(
         call_name=CallName(call.call_name),
         result=LLMResult.model_validate(call.result.model_dump(mode="json")),
         metadata=CallMetadata.model_validate(call.metadata.model_dump(mode="json")),
+        semantic_evidence=semantic_evidence,
     )
 
 
@@ -107,6 +144,7 @@ def strict_v3_coverage_plan(plan: CoveragePlan) -> CoveragePlanV2:
         empty = not choices
         targets.append(
             CoverageTargetEntry(
+                target_id=target.effective_target_id,
                 entry_point_id=target.entry_point_id,
                 entry_point_name=target.entry_point_name,
                 ordered_choices=choices,
@@ -230,6 +268,7 @@ def run_target_finalization(
     taxonomy_resolver: Any,
     capability_snapshot: Any,
     trusted_catalog: Sequence[dict[str, Any]],
+    presentation_fallback: str = "allow",
 ) -> Any:
     """Finalize every persisted target; plan/inventory precede all candidate calls."""
     plan_path = Path(run_dir) / "coverage-plan.json"
@@ -251,7 +290,7 @@ def run_target_finalization(
         if target.target_state == "admitted":
             continue
         if target.target_state == "exhausted" and any(
-            item.target_entry_point_id == target.entry_point_id
+            item.target_entry_point_id == target.effective_target_id
             and item.current.value == "exhausted"
             for item in persistence.inventory.transitions
         ):
@@ -263,7 +302,7 @@ def run_target_finalization(
             (
                 item
                 for item in reversed(persistence.inventory.candidate_attempts)
-                if item.target_entry_point_id == target.entry_point_id
+                if item.target_entry_point_id == target.effective_target_id
                 and item.candidate_id not in terminal_ids
             ),
             None,
@@ -460,6 +499,7 @@ def run_target_finalization(
                         pinned_technique_names=accepted.pinned_technique_names,
                         run_id=run_id,
                         candidate_id=qualified.candidate_id,
+                        presentation_fallback=presentation_fallback,
                     )
                 )
                 return CandidateValidation(qualified.projected)
@@ -520,6 +560,12 @@ def run_target_finalization(
                 tree,
                 behavior,
                 tuple(evidence[stage] for stage in GeneratedStage),
+                notes=tuple(
+                    warning
+                    for stage in GeneratedStage
+                    if evidence[stage].semantic_evidence is not None
+                    for warning in evidence[stage].semantic_evidence.warnings
+                ),
             )
             ref = ref_by_id[candidate.candidate_id]  # noqa: B023
             envelope.candidate_filter = {
@@ -579,6 +625,7 @@ def run_target_finalization(
                 ],
             ]
         legacy_entry = CoveragePlanEntry(
+            target_id=target.effective_target_id,
             entry_point_id=target.entry_point_id,
             entry_point_name=target.entry_point_name,
             ordered_choices=[
@@ -607,7 +654,7 @@ def run_target_finalization(
                 (
                     item.current
                     for item in reversed(persistence.inventory.transitions)
-                    if item.target_entry_point_id == target.entry_point_id
+                    if item.target_entry_point_id == target.effective_target_id
                 ),
                 LifecycleState.pending,
             ),
@@ -651,7 +698,7 @@ def run_target_finalization(
                     (
                         item.index
                         for item in persistence.inventory.transitions
-                        if item.target_entry_point_id == target.entry_point_id
+                        if item.target_entry_point_id == target.effective_target_id
                     ),
                     default=-1,
                 )

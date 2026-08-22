@@ -85,6 +85,7 @@ def test_strict_v3_plan_is_primary_first_and_all_choices_start_available() -> No
         evidence_refs=[],
         targets=[
             CoveragePlanEntry(
+                target_id="candidate-target:primary",
                 entry_point_id=ENTRY_POINT_ID,
                 entry_point_name="input",
                 ordered_choices=[fallback, primary],
@@ -106,6 +107,8 @@ def test_strict_v3_plan_is_primary_first_and_all_choices_start_available() -> No
     assert [item.rank for item in target.ordered_choices] == [0, 1]
     assert target.fallback_available == target.ordered_choices
     assert target.attempted_candidate_ids == []
+    assert target.target_id == "candidate-target:primary"
+    assert target.entry_point_id == ENTRY_POINT_ID
 
 
 def test_strict_v3_plan_marks_structural_empty_target_exhausted() -> None:

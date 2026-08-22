@@ -75,6 +75,23 @@ def test_actor_profile_call_does_not_supply_a_fallback_limit(monkeypatch) -> Non
     assert client.complete.call_args.kwargs["max_completion_tokens"] is None
 
 
+def test_actor_profile_call_supports_compact_response_schema(monkeypatch) -> None:
+    """The lifecycle's causal retry can select the compact provider schema."""
+    _stub_actor_context(monkeypatch)
+    client = MagicMock(max_completion_tokens=2048)
+    client.complete.return_value = _successful_actor_result()
+
+    actor._call_actor_profile(
+        seed=MagicMock(min_complexity=None),
+        profile=MagicMock(zones_active=[]),
+        client=client,
+        use_case="test",
+        compact_response_schema=True,
+    )
+
+    assert client.complete.call_args.kwargs["response_format"] is actor.CompactCall0Response
+
+
 def test_actor_profile_length_failure_is_typed_and_never_retried(monkeypatch) -> None:
     """One invocation performs exactly one completion; length is typed data.
 

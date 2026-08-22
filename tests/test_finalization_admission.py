@@ -164,7 +164,6 @@ def test_owner_retry_budgets_are_separate() -> None:
         (
             GeneratedStage.tree,
             GeneratedStage.narrative,
-            GeneratedStage.narrative,
         )
     )
 
@@ -448,6 +447,79 @@ def test_stage_attempt_failure_evidence_is_persisted_on_every_failed_invocation(
     )
 
 
+@pytest.mark.parametrize(
+    "code", ["projection_infeasible", "canonical_compilation_failed"]
+)
+def test_nonretryable_stage_classifications_terminate_without_owner_retry(
+    code: str,
+) -> None:
+    failure = StageAttemptFailure(
+        call_name=CallName.attack_tree,
+        exception=RuntimeError(code),
+        phase="post_response",
+        invoked=True,
+        code=code,
+        retryable=False,
+    )
+
+    def stage(candidate, invocation):
+        if invocation.stage is GeneratedStage.tree:
+            raise failure
+        return GeneratedStageResult(invocation.stage.value)
+
+    machine, _, persistence = _machine(
+        callbacks={stage_name: stage for stage_name in GENERATION_ORDER}
+    )
+    result = machine.run()
+
+    failed_results = [
+        item
+        for invocation, item in persistence.stage_results
+        if invocation.stage is GeneratedStage.tree
+    ]
+    assert result.state is LifecycleState.exhausted
+    assert len(failed_results) == 1
+    assert failed_results[0].violations[0].code == code
+    assert failed_results[0].violations[0].retryable is False
+    assert machine.owner_retry_counts == {}
+
+
+@pytest.mark.parametrize(
+    "code", ["semantic_draft_protocol_failed", "semantic_draft_invalid"]
+)
+def test_provider_correctable_stage_classifications_use_owner_retry_budget(
+    code: str,
+) -> None:
+    failure = StageAttemptFailure(
+        call_name=CallName.attack_tree,
+        exception=RuntimeError(code),
+        phase="post_response",
+        invoked=True,
+        code=code,
+        retryable=True,
+    )
+
+    def stage(candidate, invocation):
+        if invocation.stage is GeneratedStage.tree:
+            raise failure
+        return GeneratedStageResult(invocation.stage.value)
+
+    machine, _, persistence = _machine(
+        callbacks={stage_name: stage for stage_name in GENERATION_ORDER}
+    )
+    machine.run()
+
+    failed_results = [
+        item
+        for invocation, item in persistence.stage_results
+        if invocation.stage is GeneratedStage.tree
+    ]
+    assert len(failed_results) == MAX_OWNER_RETRIES + 1
+    assert all(item.violations[0].code == code for item in failed_results)
+    assert all(item.violations[0].retryable is True for item in failed_results)
+    assert machine.owner_retry_counts == {GeneratedStage.tree: MAX_OWNER_RETRIES}
+
+
 def test_actor_attempt_failure_consumes_the_semantic_owner_budget() -> None:
     """Actor stage attempts are exactly one request and retried by the lifecycle.
 
@@ -488,6 +560,38 @@ def test_actor_attempt_failure_consumes_the_semantic_owner_budget() -> None:
     assert machine.owner_retry_counts == {GeneratedStage.actor: MAX_OWNER_RETRIES}
 
 
+def test_canonical_compilation_failure_is_not_retried_by_finalization() -> None:
+    failure = StageAttemptFailure(
+        call_name=CallName.narrative,
+        exception=RuntimeError("canonical compiler defect"),
+        phase="post_response",
+        invoked=True,
+        code="canonical_compilation_failed",
+        retryable=False,
+    )
+
+    def stage(candidate, invocation):
+        if invocation.stage is GeneratedStage.narrative:
+            raise failure
+        return GeneratedStageResult(invocation.stage.value)
+
+    machine, _, persistence = _machine(
+        callbacks={stage_name: stage for stage_name in GENERATION_ORDER}
+    )
+    result = machine.run()
+
+    assert result.state is LifecycleState.exhausted
+    failed = [
+        item
+        for invocation, item in persistence.stage_results
+        if invocation.stage is GeneratedStage.narrative
+    ]
+    assert len(failed) == 1
+    assert failed[0].violations[0].code == "canonical_compilation_failed"
+    assert failed[0].violations[0].retryable is False
+    assert machine.owner_retry_counts == {}
+
+
 def _completion_length_failure() -> StageAttemptFailure:
     return StageAttemptFailure(
         call_name=CallName.actor_profile,
@@ -521,6 +625,7 @@ def test_second_completion_length_failure_is_terminal_without_semantic_budget() 
     assert result.state is LifecycleState.exhausted
     terminal = persistence.candidate_results[0][1]
     assert terminal.status is CandidateTerminalStatus.generation_or_finalization_failed
+    assert terminal.violations[0].code == "semantic_draft_length_failed"
     actor_results = [
         (invocation, outcome)
         for invocation, outcome in persistence.stage_results
@@ -571,7 +676,7 @@ def test_completion_length_retry_then_success_admits_without_semantic_budget() -
     ("stage", "field", "initial", "retry"),
     (
         (GeneratedStage.actor, "response_schema", "standard", "compact-v1"),
-        (GeneratedStage.narrative, "max_completion_tokens", 16384, 8192),
+        (GeneratedStage.narrative, "max_completion_tokens", 8192, 4096),
         (GeneratedStage.tree, "temperature", 0.4, 0.1),
         (GeneratedStage.behavior, "response_schema", "standard", "compact-v1"),
     ),
