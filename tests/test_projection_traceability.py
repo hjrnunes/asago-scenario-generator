@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Any
 
 import pytest
+from hypothesis import given, settings, strategies as st
 from pydantic import ValidationError
 
 from asago_scenario_generator.models.attack_pattern import (
@@ -65,6 +66,9 @@ from asago_scenario_generator.models.scenario import (
 from asago_scenario_generator.pipeline.generate.gherkin import (
     Call3Assertion,
     Call3Response,
+)
+from asago_scenario_generator.pipeline.projection_realizations import (
+    _check_order_preservation,
 )
 from asago_scenario_generator.pipeline.projection import (
     ProjectionBudget,
@@ -1357,11 +1361,16 @@ class TestRecomputationDrift:
         _candidate, resolver, snapshot, raw = _project()
         envelope = _make_envelope()
         # Compute the expected catalog pin the same way projection does.
-        from asago_scenario_generator.pipeline.projection import _content_pin, _pattern_pin
+        from asago_scenario_generator.pipeline.projection import (
+            _content_pin,
+            _pattern_pin,
+        )
 
         pattern = AttackPattern.model_validate(raw)
         pp = _pattern_pin(pattern)
-        catalog_pin = _content_pin("asago-scenario-generator:authoritative-catalog:v1", [pp])
+        catalog_pin = _content_pin(
+            "asago-scenario-generator:authoritative-catalog:v1", [pp]
+        )
         result = validate_projection_traceability(
             envelope,
             authoritative_pattern=raw,
@@ -1946,7 +1955,9 @@ class TestStandaloneForgedRequirements:
         bypasses validators.  The standalone validator must also catch it
         by deriving controllability from the embedded capability evidence.
         """
-        from asago_scenario_generator.pipeline.projection import compute_derivation_context_digest
+        from asago_scenario_generator.pipeline.projection import (
+            compute_derivation_context_digest,
+        )
 
         block = _make_block()
         # Flip controllability from direct to indirect
@@ -4016,7 +4027,9 @@ class TestCall2ProjectionValidation:
             AttackTreeNode,
             GateType,
         )
-        from asago_scenario_generator.pipeline.generate.assembly import _build_projection_context
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _build_projection_context,
+        )
         from asago_scenario_generator.pipeline.generate.tree import (
             _validate_tree_against_projection,
         )
@@ -4064,7 +4077,9 @@ class TestCall2ProjectionValidation:
             ExternalPreconditionAction,
             GateType,
         )
-        from asago_scenario_generator.pipeline.generate.assembly import _build_projection_context
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _build_projection_context,
+        )
         from asago_scenario_generator.pipeline.generate.tree import (
             _validate_tree_against_projection,
         )
@@ -4112,7 +4127,9 @@ class TestCall2ProjectionValidation:
             AttackTreeNode,
             GateType,
         )
-        from asago_scenario_generator.pipeline.generate.assembly import _build_projection_context
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _build_projection_context,
+        )
         from asago_scenario_generator.pipeline.generate.tree import (
             _validate_tree_against_projection,
         )
@@ -4167,7 +4184,9 @@ class TestCall2ProjectionValidation:
         no longer checks realization equality (it's tautological after
         post-processing).
         """
-        from asago_scenario_generator.pipeline.generate.assembly import _build_projection_context
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _build_projection_context,
+        )
         from asago_scenario_generator.pipeline.generate.tree import (
             _fill_tree_realizations,
             _validate_tree_against_projection,
@@ -4196,7 +4215,9 @@ class TestCall2ProjectionValidation:
 
     def test_valid_tree_passes(self):
         """A valid tree with correct projection metadata passes validation."""
-        from asago_scenario_generator.pipeline.generate.assembly import _build_projection_context
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _build_projection_context,
+        )
         from asago_scenario_generator.pipeline.generate.tree import (
             _validate_tree_against_projection,
         )
@@ -4347,7 +4368,9 @@ class TestExternalPreconditionBypass:
     def test_model_rejects_external_precondition_with_realizations(self):
         """AttackTreeNode model must reject external_precondition with
         nonempty realizations even when projected_step_ids is empty."""
-        from asago_scenario_generator.models.attack_tree import ExternalPreconditionAction
+        from asago_scenario_generator.models.attack_tree import (
+            ExternalPreconditionAction,
+        )
         from asago_scenario_generator.models.realization import ProjectedStepRealization
 
         fake_realization = ProjectedStepRealization(
@@ -4378,9 +4401,13 @@ class TestExternalPreconditionBypass:
     def test_call2_rejects_external_precondition_with_realizations(self):
         """Call2 tree validation must reject external_precondition with
         nonempty realizations."""
-        from asago_scenario_generator.models.attack_tree import ExternalPreconditionAction
+        from asago_scenario_generator.models.attack_tree import (
+            ExternalPreconditionAction,
+        )
         from asago_scenario_generator.models.realization import ProjectedStepRealization
-        from asago_scenario_generator.pipeline.generate.assembly import _build_projection_context
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _build_projection_context,
+        )
         from asago_scenario_generator.pipeline.generate.tree import (
             _validate_tree_against_projection,
         )
@@ -4434,7 +4461,9 @@ class TestExternalPreconditionBypass:
     def test_final_validation_rejects_external_precondition_with_realizations(self):
         """Final projection validation must report violations for
         external_precondition leaves with nonempty realizations."""
-        from asago_scenario_generator.models.attack_tree import ExternalPreconditionAction
+        from asago_scenario_generator.models.attack_tree import (
+            ExternalPreconditionAction,
+        )
         from asago_scenario_generator.models.realization import ProjectedStepRealization
 
         block = _make_block()
@@ -4493,7 +4522,9 @@ class TestExternalPreconditionBypass:
         """Final projection validation must report violations for
         external_precondition leaves with nonempty projected_step_ids even
         when realizations is empty (the bypass from the surgical fix)."""
-        from asago_scenario_generator.models.attack_tree import ExternalPreconditionAction
+        from asago_scenario_generator.models.attack_tree import (
+            ExternalPreconditionAction,
+        )
 
         block = _make_block()
         narrative = _make_narrative(block.canonical_ingress.entry_point_id)
@@ -4553,3 +4584,240 @@ def _make_tree_leaf(candidate, index):
         projected_step_ids=(sid,),
         realizations=make_step_realizations((sid,)),
     )
+
+
+# ---------------------------------------------------------------------------#
+# Zero-coverage internals: _check_order_preservation (CRAP slice 4)
+# ---------------------------------------------------------------------------#
+
+
+class TestCheckOrderPreservation:
+    """Direct unit tests for the tuple-position order preservation check."""
+
+    @staticmethod
+    def _realizations(
+        *pairs: tuple[str, tuple[str, ...]],
+    ) -> tuple[ArtifactRealizationMapping, ...]:
+        return tuple(
+            ArtifactRealizationMapping(
+                artifact_stage=ArtifactStage.behavior,
+                element_id=element_id,
+                projected_step_ids=step_ids,
+            )
+            for element_id, step_ids in pairs
+        )
+
+    @staticmethod
+    def _order() -> dict[str, int]:
+        return {"step.1": 0, "step.2": 1, "step.3": 2}
+
+    def test_in_order_sequence_is_clean(self) -> None:
+        realizations = self._realizations(
+            ("a", ("step.1",)),
+            ("b", ("step.2",)),
+            ("c", ("step.3",)),
+        )
+
+        assert (
+            _check_order_preservation(
+                realizations,
+                self._order(),
+                ProjectionTraceabilityStage.behavior_spec,
+                "behavior",
+            )
+            == []
+        )
+
+    def test_reordered_element_without_shared_steps_is_flagged(self) -> None:
+        realizations = self._realizations(
+            ("a", ("step.1", "step.3")),
+            ("b", ("step.2",)),
+        )
+
+        violations = _check_order_preservation(
+            realizations,
+            self._order(),
+            ProjectionTraceabilityStage.narrative,
+            "narrative",
+        )
+
+        assert len(violations) == 1
+        violation = violations[0]
+        assert (
+            violation.code
+            is ProjectionTraceabilityViolationCode.reordered_projected_step
+        )
+        assert violation.stage is ProjectionTraceabilityStage.narrative
+        assert violation.element_id == "b"
+        assert "narrative element 'b'" in violation.detail
+
+    def test_shared_step_split_is_allowed(self) -> None:
+        realizations = self._realizations(
+            ("a", ("step.1", "step.2")),
+            ("b", ("step.2", "step.3")),
+        )
+
+        assert (
+            _check_order_preservation(
+                realizations,
+                self._order(),
+                ProjectionTraceabilityStage.behavior_spec,
+                "behavior",
+            )
+            == []
+        )
+
+    def test_elements_with_unknown_step_ids_are_skipped(self) -> None:
+        realizations = self._realizations(
+            ("a", ("step.unknown",)),
+            ("b", ("step.2",)),
+        )
+
+        assert (
+            _check_order_preservation(
+                realizations,
+                self._order(),
+                ProjectionTraceabilityStage.behavior_spec,
+                "behavior",
+            )
+            == []
+        )
+
+    def test_empty_realizations_are_clean(self) -> None:
+        assert (
+            _check_order_preservation(
+                (),
+                self._order(),
+                ProjectionTraceabilityStage.behavior_spec,
+                "behavior",
+            )
+            == []
+        )
+
+    def test_skipped_element_does_not_mispair_earlier_element_citation(
+        self,
+    ) -> None:
+        """A realization with only unknown steps must not shift pair indices.
+
+        Regression: the pair check indexed the filtered ``elements`` list in
+        lockstep with the unfiltered ``realizations`` tuple, so a skipped
+        realization made the violation cite a wrong earlier element.
+        """
+        realizations = self._realizations(
+            ("a-unknown", ("step.unknown",)),
+            ("b", ("step.2",)),
+            ("c", ("step.1",)),
+        )
+
+        violations = _check_order_preservation(
+            realizations,
+            self._order(),
+            ProjectionTraceabilityStage.behavior_spec,
+            "behavior",
+        )
+
+        assert len(violations) == 1
+        violation = violations[0]
+        assert violation.element_id == "c"
+        assert "earlier element 'b'" in violation.detail
+        assert "a-unknown" not in violation.detail
+
+    def test_skipped_element_cannot_mask_a_real_reorder(self) -> None:
+        """The sharing exemption must use the paired elements, not neighbors.
+
+        Regression: 'c' (step.1) precedes 'b' (step.2) with no shared steps,
+        but the skip of 'a-unknown' made the sharing check compare
+        'a-unknown' against 'b' (both carrying 'step.unknown'), silently
+        allowing the reorder.
+        """
+        realizations = self._realizations(
+            ("a-unknown", ("step.unknown",)),
+            ("b", ("step.2", "step.unknown")),
+            ("c", ("step.1",)),
+        )
+
+        violations = _check_order_preservation(
+            realizations,
+            self._order(),
+            ProjectionTraceabilityStage.behavior_spec,
+            "behavior",
+        )
+
+        assert len(violations) == 1
+        assert violations[0].element_id == "c"
+
+    @settings(max_examples=100, deadline=None)
+    @given(
+        realizations=st.lists(
+            st.tuples(
+                st.text(alphabet="abc", min_size=1, max_size=4),
+                st.lists(
+                    st.sampled_from(("step.1", "step.2", "step.3", "step.unknown")),
+                    min_size=1,
+                    max_size=4,
+                    unique=True,
+                ),
+            ),
+            min_size=0,
+            max_size=8,
+        )
+    )
+    def test_order_check_matches_an_independent_reference(
+        self,
+        realizations: list[tuple[str, list[str]]],
+    ) -> None:
+        """Flagged reorder set matches a reference pairing each element with
+        its own ordinals and step IDs (unknown steps skipped in both)."""
+        ordered = self._realizations(
+            *[(element_id, tuple(step_ids)) for element_id, step_ids in realizations]
+        )
+        order = self._order()
+
+        # Independent reference: filter unknown-step elements like the
+        # production helper, then flag each element whose minimum ordinal
+        # precedes an earlier element's maximum without shared steps
+        # (first violating later element per element, like the checker).
+        elements = [
+            (element_id, frozenset(step_ids))
+            for element_id, step_ids in realizations
+            if any(step_id in order for step_id in step_ids)
+        ]
+        expected: list[str] = []
+        for i in range(len(elements)):
+            i_sids = elements[i][1]
+            i_max = max(order[sid] for sid in i_sids if sid in order)
+            for j in range(i + 1, len(elements)):
+                j_id, j_sids = elements[j]
+                j_min = min(order[sid] for sid in j_sids if sid in order)
+                if j_min < i_max and not (i_sids & j_sids):
+                    expected.append(j_id)
+                    break
+
+        got = [
+            violation.element_id
+            for violation in _check_order_preservation(
+                ordered,
+                order,
+                ProjectionTraceabilityStage.behavior_spec,
+                "behavior",
+            )
+        ]
+        assert got == expected
+
+
+class TestPostconditionsForStep:
+    """ProjectionEnvelopeBlock.postconditions_for_step contract."""
+
+    def test_returns_postcondition_ids_for_known_step(self) -> None:
+        block = _make_block()
+        chain = block.projection.source_chain
+        step = chain.steps[0]
+
+        assert block.postconditions_for_step(step.step_id) == tuple(
+            pc.postcondition_id for pc in step.observable_postconditions
+        )
+
+    def test_unknown_step_returns_empty(self) -> None:
+        block = _make_block()
+
+        assert block.postconditions_for_step("step.does-not-exist") == ()

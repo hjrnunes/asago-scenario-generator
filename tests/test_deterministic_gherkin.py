@@ -18,6 +18,7 @@ from asago_scenario_generator.models.attack_tree import (
     AiSystemAction,
     AttackTree,
     AttackTreeNode,
+    ExternalPreconditionAction,
     GateType,
     InitialIngressAction,
     ToolInvocationAction,
@@ -43,8 +44,14 @@ from asago_scenario_generator.pipeline.generate import (
     _collect_leaf_nodes_dfs,
     _enumerate_paths,
 )
+from asago_scenario_generator.models.projection_envelope import (
+    ProjectionEnvelopeBlock,
+)
 from asago_scenario_generator.pipeline.generate.assembly import (
     _build_projection_context,
+)
+from asago_scenario_generator.pipeline.generate.behavior_compiler import (
+    build_behavior_spec_from_tree,
     render_gherkin_from_behavior_spec,
 )
 from asago_scenario_generator.pipeline.generate.behavior_semantics import (
@@ -57,6 +64,7 @@ from asago_scenario_generator.pipeline.generate.gherkin import (
 from asago_scenario_generator.pipeline.seeds import ScenarioSeed
 from tests.helpers.projection_factory import (
     get_projected_candidate,
+    make_projection_block,
     make_step_realizations,
 )
 from tests.helpers.realization_helper import make_realizations
@@ -1642,3 +1650,338 @@ class TestCall3TupleOwnershipAdversarial:
                 scenario_tag="abc123",
                 projection_context=_make_projection_context(),
             )
+
+
+# ---------------------------------------------------------------------------#
+# Deterministic compiler: build_behavior_spec_from_tree (CRAP slice 4)
+# ---------------------------------------------------------------------------#
+
+
+def _tree_with_leaves(leaves: list[AttackTreeNode]) -> AttackTree:
+    """Build a minimal AND-rooted tree carrying the given leaves.
+
+    AND gates require at least two children, so single-leaf trees get a
+    filler unprojected leaf (external precondition, zone-less) that the
+    compiler filters out.
+    """
+    children = list(leaves)
+    if len(children) < 2:
+        children.append(
+            AttackTreeNode(
+                id="n1.9",
+                label="Filler no-op",
+                gate=GateType.LEAF,
+                zone=None,
+                action=ExternalPreconditionAction(),
+            )
+        )
+    return AttackTree(
+        id="tree-AP-T1-01",
+        seed_id="AP-T1-01",
+        goal="Compile projected leaves",
+        root=AttackTreeNode(
+            id="n1",
+            label="Root",
+            gate=GateType.AND,
+            zone="input",
+            children=children,
+        ),
+    )
+
+
+def _project_candidate(raw_pattern: dict[str, Any]) -> tuple[Any, Any]:
+    """Project one raw pattern dict; returns (candidate, snapshot)."""
+    from asago_scenario_generator.models.attack_pattern import AttackPattern
+    from asago_scenario_generator.pipeline.projection import (
+        ProjectionBudget,
+        capture_capability_snapshot,
+        project_authoritative_candidates,
+    )
+    from tests.test_projected_candidates import _evidence, _profile
+
+    pattern = AttackPattern.model_validate(raw_pattern)
+    resolver = type("Resolver", (), {})()
+    resolver.taxonomy_context = pattern.canonical_chain.taxonomy_context
+    resolver.contains = lambda taxonomy, identifier: (
+        (taxonomy, identifier) in {("ATLAS", "AML.T0001")}
+    )
+    snapshot = capture_capability_snapshot(_profile(), (_evidence(),))
+    batch = project_authoritative_candidates(
+        [raw_pattern], resolver, snapshot, budget=ProjectionBudget(max_candidates=100)
+    )
+    assert len(batch.candidates) >= 1
+    return batch.candidates[0], snapshot
+
+
+def _block_for_candidate(candidate: Any, snapshot: Any) -> ProjectionEnvelopeBlock:
+    """Build a valid projection envelope block for a freshly projected candidate."""
+    from asago_scenario_generator.pipeline.projection import (
+        compute_derivation_context_digest,
+    )
+
+    return ProjectionEnvelopeBlock(
+        projection=candidate.projection,
+        canonical_ingress=candidate.canonical_ingress,
+        ingress_controllability=candidate.ingress_controllability,
+        projected_mappings=candidate.projected_mappings,
+        capability_snapshot=snapshot,
+        execution_requirements=candidate.execution_requirements,
+        requirement_derivation_version=candidate.requirement_derivation_version,
+        execution_requirements_digest=candidate.execution_requirements_digest,
+        derivation_context_digest=compute_derivation_context_digest(
+            candidate.projection.projection_digest,
+            candidate.projection.source_chain.pattern_id,
+            candidate.ingress_controllability,
+        ),
+    )
+
+
+def _pattern_with_second_terminal_postcondition() -> dict[str, Any]:
+    """Fixture pattern whose terminal step owns two security postconditions."""
+    from asago_scenario_generator.models.attack_pattern import (
+        compute_chain_semantic_digest,
+    )
+    from tests.test_projected_candidates import _pattern
+
+    raw = _pattern(conditional=True)
+    terminal = raw["canonical_chain"]["steps"][2]
+    terminal["observable_postconditions"].append(
+        {
+            "postcondition_id": "post.4",
+            "description": "second outcome",
+            "security_relevant": True,
+            "terminal": True,
+        }
+    )
+    # Security-relevant postconditions must own an observable outcome link.
+    terminal["observable_outcome_links"].append(
+        {
+            "postcondition_id": "post.4",
+            "observation": "model_context",
+            "binding_slot_id": "ingress",
+        }
+    )
+    raw["canonical_chain"]["semantic_digest"] = compute_chain_semantic_digest(
+        raw["canonical_chain"]
+    )
+    return raw
+
+
+class TestBuildBehaviorSpecFromTree:
+    """Deterministic tree+projection → BehaviorSpec compiler (CRAP slice 4)."""
+
+    def _projected_leaves(self) -> list[AttackTreeNode]:
+        candidate = get_projected_candidate()
+        return [
+            _make_leaf(
+                f"n1.{i + 1}",
+                f"Leaf action {sid}",
+                "input" if i == 0 else "reasoning",
+                projected_step_ids=(sid,),
+                realizations=make_step_realizations((sid,)),
+            )
+            for i, sid in enumerate(candidate.projection.selected_step_ids)
+        ]
+
+    def test_actions_derive_from_fully_projected_leaves_in_dfs_order(self) -> None:
+        leaves = self._projected_leaves()
+        spec = build_behavior_spec_from_tree(
+            _tree_with_leaves(leaves), make_projection_block()
+        )
+
+        assert [a.action_id for a in spec.actions] == [
+            f"ba-{leaf.id}" for leaf in leaves
+        ]
+        assert [a.source_leaf_id for a in spec.actions] == [leaf.id for leaf in leaves]
+        assert [a.projected_step_ids for a in spec.actions] == [
+            leaf.projected_step_ids for leaf in leaves
+        ]
+        assert [a.text for a in spec.actions] == [leaf.label for leaf in leaves]
+        assert all(a.gherkin_keyword == "When" for a in spec.actions)
+
+    def test_actions_carry_leaf_realizations_for_each_projected_step(self) -> None:
+        selected = get_projected_candidate().projection.selected_step_ids
+        first_id = selected[0]
+        realizations = make_step_realizations((first_id,))
+        leaf = _make_leaf(
+            "n1.1",
+            "ingress leaf",
+            "input",
+            projected_step_ids=(first_id,),
+            realizations=realizations,
+        )
+        spec = build_behavior_spec_from_tree(
+            _tree_with_leaves([leaf]), make_projection_block()
+        )
+
+        action = spec.actions[0]
+        assert action.realizations == realizations
+        assert [r.projected_step_id for r in action.realizations] == [first_id]
+
+    @pytest.mark.parametrize(
+        "case",
+        ["no_projected_steps", "partially_outside_selected"],
+    )
+    def test_leaf_filters_skip_leaves_outside_the_projection_selection(
+        self, case: str
+    ) -> None:
+        selected = get_projected_candidate().projection.selected_step_ids
+        kept = _make_leaf(
+            "n1.1",
+            "kept leaf",
+            "input",
+            projected_step_ids=(selected[0],),
+            realizations=make_step_realizations((selected[0],)),
+        )
+        if case == "no_projected_steps":
+            filtered = _make_leaf("n1.2", "no projected steps", "input")
+        else:
+            filtered = AttackTreeNode(
+                id="n1.2",
+                label="partially outside selection",
+                gate=GateType.LEAF,
+                zone="input",
+                action=AiSystemAction(),
+                projected_step_ids=(selected[0], "step.outside"),
+                realizations=make_realizations((selected[0], "step.outside")),
+            )
+
+        spec = build_behavior_spec_from_tree(
+            _tree_with_leaves([kept, filtered]), make_projection_block()
+        )
+
+        assert len(spec.actions) == 1
+        assert spec.actions[0].source_leaf_id == "n1.1"
+
+    @pytest.mark.parametrize(
+        ("label", "description", "expected"),
+        [
+            ("Leaf label", None, "Leaf label"),
+            ("Leaf label", "Description wins", "Description wins"),
+            ("", None, "n1.1"),
+        ],
+    )
+    def test_action_text_prefers_description_then_label_then_id(
+        self, label: str, description: str | None, expected: str
+    ) -> None:
+        selected = get_projected_candidate().projection.selected_step_ids
+        leaf = AttackTreeNode(
+            id="n1.1",
+            label=label,
+            gate=GateType.LEAF,
+            zone="input",
+            action=AiSystemAction(),
+            projected_step_ids=(selected[0],),
+            realizations=make_step_realizations((selected[0],)),
+            description=description,
+        )
+
+        spec = build_behavior_spec_from_tree(
+            _tree_with_leaves([leaf]), make_projection_block()
+        )
+
+        assert spec.actions[0].text == expected
+
+    def test_assertions_use_stable_ids_over_security_relevant_postconditions(
+        self,
+    ) -> None:
+        leaves = self._projected_leaves()
+        spec = build_behavior_spec_from_tree(
+            _tree_with_leaves(leaves), make_projection_block()
+        )
+
+        assert [
+            (
+                a.assertion_id,
+                a.source_step_ids,
+                a.projected_postcondition_ids,
+                a.gherkin_keyword,
+                a.text,
+            )
+            for a in spec.assertions
+        ] == [("assert-step.3-post.3", ("step.3",), ("post.3",), "Then", "observable")]
+
+    def test_assertion_ids_join_multiple_postconditions_with_dash(self) -> None:
+        candidate, snapshot = _project_candidate(
+            _pattern_with_second_terminal_postcondition()
+        )
+        selected = candidate.projection.selected_step_ids
+        leaves = [
+            _make_leaf(
+                f"n1.{i + 1}",
+                f"Leaf action {sid}",
+                "input" if i == 0 else "reasoning",
+                projected_step_ids=(sid,),
+                realizations=make_step_realizations((sid,)),
+            )
+            for i, sid in enumerate(selected)
+        ]
+
+        spec = build_behavior_spec_from_tree(
+            _tree_with_leaves(leaves), _block_for_candidate(candidate, snapshot)
+        )
+
+        assert [(a.assertion_id, a.text) for a in spec.assertions] == [
+            ("assert-step.3-post.3-post.4", "observable; second outcome")
+        ]
+
+    def test_gherkin_renders_actions_then_assertions_with_zone_annotations(
+        self,
+    ) -> None:
+        leaves = self._projected_leaves()
+        spec = build_behavior_spec_from_tree(
+            _tree_with_leaves(leaves), make_projection_block()
+        )
+        lines = [
+            line.strip()
+            for line in spec.gherkin_text.splitlines()
+            if line.strip().startswith(("When ", "And ", "Then "))
+        ]
+
+        assert lines[0] == "When Leaf action step.1 (input)"
+        assert lines[1] == "And Leaf action step.2 (reasoning)"
+        assert lines[2] == "And Leaf action step.3 (reasoning)"
+        assert lines[3] == "Then observable"
+
+    def test_zone_map_excludes_leaves_without_a_zone(self) -> None:
+        selected = get_projected_candidate().projection.selected_step_ids
+        zoned = _make_leaf(
+            "n1.1",
+            "Zoned leaf",
+            "input",
+            projected_step_ids=(selected[0],),
+            realizations=make_step_realizations((selected[0],)),
+        )
+        unzoned = AttackTreeNode(
+            id="n1.2",
+            label="Unzoned leaf",
+            gate=GateType.LEAF,
+            zone=None,
+            action=ExternalPreconditionAction(),
+            projected_step_ids=(selected[1],),
+            realizations=make_step_realizations((selected[1],)),
+        )
+
+        spec = build_behavior_spec_from_tree(
+            _tree_with_leaves([zoned, unzoned]), make_projection_block()
+        )
+
+        assert "When Zoned leaf (input)" in spec.gherkin_text
+        assert "Unzoned leaf" in spec.gherkin_text
+        assert "Unzoned leaf (None)" not in spec.gherkin_text
+
+    def test_compilation_is_deterministic_and_ignores_gherkin_text_argument(
+        self,
+    ) -> None:
+        leaves = self._projected_leaves()
+        first = build_behavior_spec_from_tree(
+            _tree_with_leaves(leaves), make_projection_block()
+        )
+        second = build_behavior_spec_from_tree(
+            _tree_with_leaves(leaves),
+            make_projection_block(),
+            gherkin_text="LLM-authored text is cross-checked, never spliced",
+        )
+
+        assert first == second
+        assert "LLM-authored text" not in first.gherkin_text

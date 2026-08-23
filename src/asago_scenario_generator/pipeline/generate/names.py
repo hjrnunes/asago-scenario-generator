@@ -14,6 +14,7 @@ import logging
 from typing import Any
 
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
+from asago_scenario_generator.models.scenario import ActorAccessProvenance
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +24,48 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def _influence_source_line(
+    access: ActorAccessProvenance, profile: CapabilityProfile
+) -> str:
+    """One-line rendering of the upstream influence source, or empty."""
+    if not access.influence_source:
+        return ""
+    source_name = resource_name_for_kind(
+        getattr(access, "influence_source_kind", None) or "entry_point",
+        access.influence_source,
+        profile,
+    )
+    return f"- influence_source: {source_name}\n"
+
+
+def _influence_mechanism_line(access: ActorAccessProvenance) -> str:
+    """One-line rendering of the influence mechanism, or empty."""
+    if not access.influence_mechanism:
+        return ""
+    return f"- influence_mechanism: {access.influence_mechanism}\n"
+
+
+def _trust_boundary_line(
+    access: ActorAccessProvenance, profile: CapabilityProfile
+) -> str:
+    """One-line rendering of the trust boundary name, or empty."""
+    if not access.trust_boundary_id:
+        return ""
+    tb_name = resource_name_for_kind(
+        "trust_boundary", access.trust_boundary_id, profile
+    )
+    return f"- trust_boundary_id: {tb_name}\n"
+
+
+def _insider_advantage_line(access: ActorAccessProvenance) -> str:
+    """One-line rendering of the material insider advantage, or empty."""
+    if not access.material_insider_advantage:
+        return ""
+    return f"- material_insider_advantage: {access.material_insider_advantage}\n"
+
+
 def access_provenance_block_with_names(
-    access: Any,
+    access: ActorAccessProvenance | None,
     profile: CapabilityProfile,
     *,
     header: str = (
@@ -46,30 +87,20 @@ def access_provenance_block_with_names(
     ep_name = resource_name_for_kind(
         "entry_point", access.initial_entry_point_id, profile
     )
-    block = (
-        f"{header}"
+    base_lines = (
         f"- initial_entry_point_id: {ep_name}\n"
         f"- ingress_mode: {access.ingress_mode}\n"
         f"- access_class: {access.access_class}\n"
     )
-    if access.influence_source:
-        source_name = resource_name_for_kind(
-            getattr(access, "influence_source_kind", None) or "entry_point",
-            access.influence_source,
-            profile,
+    optional_lines = "".join(
+        (
+            _influence_source_line(access, profile),
+            _influence_mechanism_line(access),
+            _trust_boundary_line(access, profile),
+            _insider_advantage_line(access),
         )
-        block += f"- influence_source: {source_name}\n"
-    if access.influence_mechanism:
-        block += f"- influence_mechanism: {access.influence_mechanism}\n"
-    if access.trust_boundary_id:
-        tb_name = resource_name_for_kind(
-            "trust_boundary", access.trust_boundary_id, profile
-        )
-        block += f"- trust_boundary_id: {tb_name}\n"
-    if access.material_insider_advantage:
-        block += f"- material_insider_advantage: {access.material_insider_advantage}\n"
-
-    return block
+    )
+    return f"{header}{base_lines}{optional_lines}"
 
 
 def pinned_entry_point_name_from_id(

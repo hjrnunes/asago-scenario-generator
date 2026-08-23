@@ -685,3 +685,19 @@ def test_tree_compiler_preserves_authored_grouping_and_expands_canonical_leaves(
     assert tree.root.children[0].action == specs[0].action
     assert tree.root.children[0].technique_id == "AML.T0001"
     assert tree.root.children[1].realizations == specs[1].realizations
+
+
+def test_canonical_semantics_for_step_resolves_known_step() -> None:
+    profile = _profile()
+    semantics = derive_canonical_projection_semantics(_context(profile), profile)
+    first = semantics.steps[0]
+
+    assert semantics.for_step(first.projected_step_id) is first
+
+
+def test_canonical_semantics_for_step_fails_with_ownership_for_unknown_step() -> None:
+    profile = _profile()
+    semantics = derive_canonical_projection_semantics(_context(profile), profile)
+
+    with pytest.raises(ProjectionInfeasible, match="step.unknown.*absent"):
+        semantics.for_step("step.unknown")

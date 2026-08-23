@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import pytest
 
 from asago_scenario_generator.models.scenario import CallName
-from asago_scenario_generator.pipeline.coverage_planning import CoveragePlanEntry
+from asago_scenario_generator.pipeline.coverage_planning import (
+    CoveragePlan,
+    CoveragePlanEntry,
+)
 from asago_scenario_generator.pipeline.generate.stages import StageAttemptFailure
 from asago_scenario_generator.pipeline.finalization import (
     COMPLETION_LENGTH_RETRY_SUFFIXES,
@@ -25,6 +28,7 @@ from asago_scenario_generator.pipeline.finalization import (
     StageInvocation,
     TargetFinalizationMachine,
     earliest_generated_owner,
+    fallback_candidates_for_target,
     ordered_target_choice_refs,
 )
 
@@ -749,3 +753,131 @@ def test_semantic_failure_after_length_retry_clears_the_length_reason() -> None:
     ]
     assert machine.length_retry_counts == {GeneratedStage.actor: 1}
     assert machine.owner_retry_counts == {GeneratedStage.actor: 1}
+
+
+# ---------------------------------------------------------------------------#
+# Zero-coverage internals: fallback_candidates_for_target (CRAP slice 4)
+# ---------------------------------------------------------------------------#
+
+
+class TestFallbackCandidatesForTarget:
+    """fallback_candidates_for_target: primary-first authoritative revalidation."""
+
+    def _plan(self, entry: CoveragePlanEntry | None = None) -> CoveragePlan:
+        return CoveragePlan(
+            schema_version="1",
+            completeness="complete",
+            evidence_refs=[],
+            targets=[entry or _entry()],
+        )
+
+    def _patch_loaders(self, monkeypatch) -> None:
+        self.deserialized: list[dict] = []
+        self.revalidated: list[dict] = []
+        monkeypatch.setattr(
+            "asago_scenario_generator.pipeline.finalization."
+            "deserialize_qualified_candidate",
+            lambda ref: self.deserialized.append(ref) or Candidate(ref["candidate_id"]),
+        )
+        monkeypatch.setattr(
+            "asago_scenario_generator.pipeline.finalization."
+            "revalidate_qualified_candidate",
+            lambda ref, taxonomy_resolver, snapshot, trusted_catalog: (
+                self.revalidated.append(ref)
+            ),
+        )
+
+    def test_unknown_target_returns_empty(self, monkeypatch) -> None:
+        self._patch_loaders(monkeypatch)
+
+        candidates = fallback_candidates_for_target(
+            self._plan(),
+            "ep:v1:unknown",
+            taxonomy_resolver=object(),
+            snapshot=object(),
+            trusted_catalog=[],
+            attempted_candidate_ids=set(),
+        )
+
+        assert candidates == []
+        assert self.deserialized == []
+
+    def test_primary_first_then_fallbacks_with_revalidation(self, monkeypatch) -> None:
+        self._patch_loaders(monkeypatch)
+        attempted: set[str] = set()
+
+        candidates = fallback_candidates_for_target(
+            self._plan(_entry(primary="primary", fallbacks=("f1", "f2"))),
+            "ep:v1:test",
+            taxonomy_resolver=object(),
+            snapshot=object(),
+            trusted_catalog=[object()],
+            attempted_candidate_ids=attempted,
+        )
+
+        assert [c.candidate_id for c in candidates] == ["primary", "f1", "f2"]
+        # ordered_choices were reordered: primary first, then fallbacks.
+        assert [ref["candidate_id"] for ref in self.revalidated] == [
+            "primary",
+            "f1",
+            "f2",
+        ]
+        assert attempted == {"primary", "f1", "f2"}
+
+    def test_attempted_candidates_are_skipped(self, monkeypatch) -> None:
+        self._patch_loaders(monkeypatch)
+        attempted = {"primary"}
+
+        candidates = fallback_candidates_for_target(
+            self._plan(_entry(primary="primary", fallbacks=("f1", "f2"))),
+            "ep:v1:test",
+            taxonomy_resolver=object(),
+            snapshot=object(),
+            trusted_catalog=[],
+            attempted_candidate_ids=attempted,
+        )
+
+        assert [c.candidate_id for c in candidates] == ["f1", "f2"]
+        assert attempted == {"primary", "f1", "f2"}
+
+    def test_unlisted_primary_falls_back_to_available_choices(
+        self, monkeypatch
+    ) -> None:
+        self._patch_loaders(monkeypatch)
+        entry = CoveragePlanEntry(
+            entry_point_id="ep:v1:test",
+            entry_point_name="test",
+            ordered_choices=[_ref("f1"), _ref("f2")],
+            primary_candidate_id="ghost",
+            primary_state="selected",
+            fallback_available=[_ref("f1"), _ref("f2")],
+        )
+
+        candidates = fallback_candidates_for_target(
+            self._plan(entry),
+            "ep:v1:test",
+            taxonomy_resolver=object(),
+            snapshot=object(),
+            trusted_catalog=[],
+            attempted_candidate_ids=set(),
+        )
+
+        assert [c.candidate_id for c in candidates] == ["f1", "f2"]
+
+    def test_duplicate_refs_are_deduplicated_across_sections(self, monkeypatch) -> None:
+        self._patch_loaders(monkeypatch)
+        entry = replace(
+            _entry(primary="primary", fallbacks=("f1",)),
+            fallback_available=[_ref("f1"), _ref("f1")],
+        )
+
+        candidates = fallback_candidates_for_target(
+            self._plan(entry),
+            "ep:v1:test",
+            taxonomy_resolver=object(),
+            snapshot=object(),
+            trusted_catalog=[],
+            attempted_candidate_ids=set(),
+        )
+
+        assert [c.candidate_id for c in candidates] == ["primary", "f1"]

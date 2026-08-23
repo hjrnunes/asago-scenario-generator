@@ -488,7 +488,7 @@ def _compile_behavior_draft(
             )
         )
 
-    from asago_scenario_generator.pipeline.generate.assembly import (
+    from asago_scenario_generator.pipeline.generate.behavior_compiler import (
         render_gherkin_from_behavior_spec,
     )
 

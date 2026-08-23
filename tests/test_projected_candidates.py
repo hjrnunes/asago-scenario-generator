@@ -20,6 +20,7 @@ from asago_scenario_generator.models.capability_profile import (
 )
 from asago_scenario_generator.pipeline.projection import (
     ProjectionBudget,
+    _PatternProjectionState,
     capture_capability_snapshot,
     project_authoritative_candidates,
     validate_projected_candidate,
@@ -239,7 +240,9 @@ def _project(
     raw = pattern or _pattern()
     resolver_pattern = raw if "canonical_chain" in raw else _pattern()
     resolver = TaxonomyResolver(
-        __import__("asago_scenario_generator.models.attack_pattern", fromlist=["AttackPattern"])
+        __import__(
+            "asago_scenario_generator.models.attack_pattern", fromlist=["AttackPattern"]
+        )
         .AttackPattern.model_validate(resolver_pattern)
         .canonical_chain.taxonomy_context
     )
@@ -412,7 +415,9 @@ def test_explicit_execution_requirements_are_versioned_and_digest_verified() -> 
     snapshot = capture_capability_snapshot(_profile(), (_evidence(),))
     raw = _pattern()
     resolver = TaxonomyResolver(
-        __import__("asago_scenario_generator.models.attack_pattern", fromlist=["AttackPattern"])
+        __import__(
+            "asago_scenario_generator.models.attack_pattern", fromlist=["AttackPattern"]
+        )
         .AttackPattern.model_validate(raw)
         .canonical_chain.taxonomy_context
     )
@@ -591,7 +596,9 @@ def test_catalog_pin_and_candidate_identity_ignore_record_order_and_duplicates()
         second["canonical_chain"]
     )
     resolver = TaxonomyResolver(
-        __import__("asago_scenario_generator.models.attack_pattern", fromlist=["AttackPattern"])
+        __import__(
+            "asago_scenario_generator.models.attack_pattern", fromlist=["AttackPattern"]
+        )
         .AttackPattern.model_validate(first)
         .canonical_chain.taxonomy_context
     )
@@ -1448,7 +1455,9 @@ def test_output_surface_slot_enumerates_output_and_bidirectional_entry_points() 
     direction is 'output' or 'bidirectional', but not 'input'.
     A bidirectional entry point supports both input and output, so it
     qualifies as an output surface."""
-    from asago_scenario_generator.models.attack_pattern import OutputSurfaceResourceReference
+    from asago_scenario_generator.models.attack_pattern import (
+        OutputSurfaceResourceReference,
+    )
     from asago_scenario_generator.models.capability_profile import (
         CapabilityProfile,
         ConfidenceLevel,
@@ -1516,7 +1525,9 @@ def test_output_surface_slot_with_no_output_entry_points_yields_no_options() -> 
 def test_agent_internal_slot_yields_only_intrinsic_typed_resource() -> None:
     """Agent working state resolves to one intrinsic typed singleton, never
     to an unrelated profile inventory resource."""
-    from asago_scenario_generator.models.attack_pattern import AgentInternalResourceReference
+    from asago_scenario_generator.models.attack_pattern import (
+        AgentInternalResourceReference,
+    )
     from asago_scenario_generator.models.capability_profile import (
         CapabilityProfile,
         ConfidenceLevel,
@@ -1609,3 +1620,125 @@ def test_ap_t1_06_catalog_projection_binds_intrinsic_agent_state() -> None:
     assert bindings["agent_internal_state"].kind == "agent_internal"
     assert snapshot.contains_resource(bindings["agent_internal_state"])
     assert not [i for i in batch.infeasibilities if i.pattern_id == "AP-T1-06"]
+
+
+# ---------------------------------------------------------------------------#
+# Zero-coverage internals: _PatternProjectionState.next_candidate (CRAP slice 4)
+# ---------------------------------------------------------------------------#
+
+
+class TestPatternProjectionState:
+    """Lazy per-pattern candidate iteration contract."""
+
+    def _state(self, combinations: list[Any]) -> _PatternProjectionState:
+        return _PatternProjectionState(
+            pattern_id="AP-T1-01",
+            chain=object(),
+            selected=("step.1",),
+            condition_results=(),
+            omissions=(),
+            option_sets=(),
+            total_bindings=len(combinations),
+            catalog_pin="catalog-pin",
+            pattern_pin="pattern-pin",
+            precondition_results=(),
+            combination_iter=combinations,
+            snapshot=object(),
+        )
+
+    def test_candidates_returned_in_iterator_order_and_counted(
+        self, monkeypatch
+    ) -> None:
+        results = iter(["candidate-1", "candidate-2"])
+        monkeypatch.setattr(
+            "asago_scenario_generator.pipeline.projection."
+            "_build_candidate_from_combination",
+            lambda *args: (next(results), None),
+        )
+        state = self._state([("res-a",), ("res-b",)])
+
+        first = state.next_candidate()
+        second = state.next_candidate()
+
+        assert first == "candidate-1"
+        assert second == "candidate-2"
+        assert state.emitted == 2
+        assert state.feasible_remaining is True
+        assert state.generated == ["candidate-1", "candidate-2"]
+
+    def test_infeasible_combinations_are_skipped(self, monkeypatch) -> None:
+        calls: list[tuple[str, ...]] = []
+
+        def build(*args):
+            resources = args[5]
+            calls.append(resources)
+            if len(calls) == 1:
+                return None, "structural-issue"
+            return resources, None
+
+        state = self._state([("res-a",), ("res-b",)])
+        monkeypatch.setattr(
+            "asago_scenario_generator.pipeline.projection."
+            "_build_candidate_from_combination",
+            build,
+        )
+
+        candidate = state.next_candidate()
+
+        assert calls == [("res-a",), ("res-b",)]
+        assert candidate == ("res-b",)
+        assert state.emitted == 1
+
+    def test_issues_appended_only_when_issues_list_provided(self, monkeypatch) -> None:
+        collected: list[str] = []
+
+        def build(*args):
+            return None, "structural-issue"
+
+        state = self._state([("res-a",), ("res-b",)])
+        monkeypatch.setattr(
+            "asago_scenario_generator.pipeline.projection."
+            "_build_candidate_from_combination",
+            build,
+        )
+
+        assert state.next_candidate(collected) is None
+        assert collected == ["structural-issue", "structural-issue"]
+        assert state.iterator_exhausted is True
+
+        # A subsequent call returns None without consuming the iterator.
+        assert state.next_candidate() is None
+
+    def test_no_issues_list_does_not_accumulate_issues(self, monkeypatch) -> None:
+        def build(*args):
+            return None, "structural-issue"
+
+        state = self._state([("res-a",)])
+        monkeypatch.setattr(
+            "asago_scenario_generator.pipeline.projection."
+            "_build_candidate_from_combination",
+            build,
+        )
+
+        assert state.next_candidate() is None
+        assert state.iterator_exhausted is True
+        assert state.emitted == 0
+
+    def test_exhausted_state_returns_none_without_consuming(self, monkeypatch) -> None:
+        def build(*args):
+            return "candidate", None
+
+        state = self._state([("res-a",)])
+        monkeypatch.setattr(
+            "asago_scenario_generator.pipeline.projection."
+            "_build_candidate_from_combination",
+            build,
+        )
+
+        assert state.next_candidate() == "candidate"
+        # Second call: iterator exhausted on the next() from the for loop.
+        assert state.next_candidate() is None
+        assert state.iterator_exhausted is True
+        assert state.feasible_remaining is False
+        # Exhausted short-circuit: no further iterator consumption.
+        assert state.next_candidate() is None
