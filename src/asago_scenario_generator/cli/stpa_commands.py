@@ -9,9 +9,18 @@ import typer
 
 from asago_scenario_generator.cli._app import app
 from asago_scenario_generator.cli._shared import (
+    _abort,
     _load_projection_payload,
     _validate_file,
 )
+
+
+def _first_stopping_error(stage_errors: list[str]) -> str | None:
+    """Return the first pipeline-abort error, or None if the run degraded."""
+    for error in stage_errors:
+        if "stopping pipeline" in error:
+            return error
+    return None
 
 
 @app.command(name="validate-stpa-projection")
@@ -35,8 +44,7 @@ def validate_stpa_projection(
 
         result = validate_exported_projection(_load_projection_payload(artifact))
     except Exception as exc:  # noqa: BLE001 - CLI validation boundary
-        typer.echo(f"Error: {exc}", err=True)
-        raise typer.Exit(code=1)
+        _abort(exc)
     typer.echo(json.dumps(result.model_dump(mode="json"), indent=2))
     if not result.valid:
         raise typer.Exit(code=1)
@@ -64,20 +72,15 @@ def stpa_report_cmd(
     """
     from asago_scenario_generator.stpa.report import generate_report
 
-    try:
-        if not output_dir.exists():
-            typer.echo(f"Error: output directory not found: {output_dir}", err=True)
-            raise typer.Exit(code=1)
+    if not output_dir.exists():
+        typer.echo(f"Error: output directory not found: {output_dir}", err=True)
+        raise typer.Exit(code=1)
 
+    try:
         result_path = generate_report(output_dir, output)
         typer.echo(f"STPA report written to: {result_path}")
-
     except Exception as exc:
-        msg = f"\nError: {exc}"
-        if exc.__cause__:
-            msg += f"\n  Caused by: {exc.__cause__}"
-        typer.echo(msg, err=True)
-        raise typer.Exit(code=1)
+        _abort(exc)
 
 
 @app.command(name="stpa-run")
@@ -145,17 +148,15 @@ def stpa_run_cmd(
             resume=resume,
         )
     except FileNotFoundError as exc:
-        typer.echo(f"Error: {exc}", err=True)
-        raise typer.Exit(code=1)
+        _abort(exc)
     except Exception as exc:
-        typer.echo(f"Error: {exc}", err=True)
-        raise typer.Exit(code=1)
+        _abort(exc)
 
     # Abort-level errors (missing critical artifacts) stop the pipeline
     # early.  Degrade-level errors (stage_errors from individual stages
     # that still produced artifacts) allow the pipeline to continue and
     # exit with code 0.
-    abort_errors = [e for e in result.stage_errors if "stopping pipeline" in e]
-    if abort_errors:
-        typer.echo(f"Error: {abort_errors[0]}", err=True)
+    abort_error = _first_stopping_error(result.stage_errors)
+    if abort_error is not None:
+        typer.echo(f"Error: {abort_error}", err=True)
         raise typer.Exit(code=1)

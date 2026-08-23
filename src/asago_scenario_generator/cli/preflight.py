@@ -8,7 +8,35 @@ from pathlib import Path
 import typer
 
 from asago_scenario_generator.cli._app import app
-from asago_scenario_generator.cli._shared import _resolve_use_case, _validate_file
+from asago_scenario_generator.cli._shared import (
+    _abort,
+    _resolve_use_case,
+    _validate_file,
+)
+
+
+def _validate_inputs(
+    risk_extraction: Path,
+    sssom: Path,
+    profile: Path,
+    qualification_facts: Path | None,
+    cross_taxonomy: Path | None,
+    threats_path: Path | None,
+) -> None:
+    """Validate projection-preflight input paths, required and optional."""
+    for path, label in (
+        (risk_extraction, "risk-extraction file"),
+        (sssom, "SSSOM file"),
+        (profile, "capability profile file"),
+    ):
+        _validate_file(path, label)
+    for path, label in (
+        (qualification_facts, "qualification facts file"),
+        (cross_taxonomy, "cross-taxonomy file"),
+        (threats_path, "agentic threats file"),
+    ):
+        if path is not None:
+            _validate_file(path, label)
 
 
 @app.command(name="projection-preflight")
@@ -34,19 +62,14 @@ def projection_preflight(
         write_facts_template,
     )
 
-    for path, label in (
-        (risk_extraction, "risk-extraction file"),
-        (sssom, "SSSOM file"),
-        (profile, "capability profile file"),
-    ):
-        _validate_file(path, label)
-    for path, label in (
-        (qualification_facts, "qualification facts file"),
-        (cross_taxonomy, "cross-taxonomy file"),
-        (threats_path, "agentic threats file"),
-    ):
-        if path is not None:
-            _validate_file(path, label)
+    _validate_inputs(
+        risk_extraction,
+        sssom,
+        profile,
+        qualification_facts,
+        cross_taxonomy,
+        threats_path,
+    )
 
     try:
         outcome = run_projection_preflight(
@@ -63,5 +86,4 @@ def projection_preflight(
             write_facts_template(outcome, facts_template)
         typer.echo(json.dumps(outcome.model_dump(mode="json"), indent=2))
     except Exception as exc:
-        typer.echo(f"Error: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
+        _abort(exc)

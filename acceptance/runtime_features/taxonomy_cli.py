@@ -65,6 +65,9 @@ def _h_cli_workspace(world: World, text: str, examples: dict) -> tuple[bool, str
     return True, ""
 
 
+_GENERATE_INPUT_LABELS = frozenset({"risk-extraction file", "SSSOM file"})
+
+
 def _h_generate_input_missing(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -74,7 +77,10 @@ def _h_generate_input_missing(
     )
     if match is None:
         return False, f"Could not parse generate missing-input step: {text}"
-    _cli_state(world)["generate_missing"] = match.group(1)
+    label = match.group(1)
+    if label not in _GENERATE_INPUT_LABELS:
+        return False, f"Unknown generate input label: {label}"
+    _cli_state(world)["generate_missing"] = label
     return True, ""
 
 
@@ -100,6 +106,11 @@ def _h_generate_invoked(world: World, text: str, examples: dict) -> tuple[bool, 
     return _finish(world, 0)
 
 
+_PREFLIGHT_INPUT_LABELS = frozenset(
+    {"risk-extraction file", "SSSOM file", "capability profile file"}
+)
+
+
 def _h_preflight_input_missing(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -110,7 +121,10 @@ def _h_preflight_input_missing(
     )
     if match is None:
         return False, f"Could not parse preflight missing-input step: {text}"
-    _cli_state(world)["preflight_missing"] = match.group(1)
+    label = match.group(1)
+    if label not in _PREFLIGHT_INPUT_LABELS:
+        return False, f"Unknown projection-preflight input label: {label}"
+    _cli_state(world)["preflight_missing"] = label
     return True, ""
 
 
@@ -128,12 +142,29 @@ def _h_preflight_invoked(world: World, text: str, examples: dict) -> tuple[bool,
     return _finish(world, 0)
 
 
+_VCQ_ARTIFACT_CASES = frozenset(
+    {
+        "a missing file path",
+        "not a valid qualification contract",
+        "a valid qualification contract",
+    }
+)
+
+_VCQ_CONTRACTS = frozenset({"matrix", "campaign", "report", "invalid"})
+
+
 def _h_vcq_artifact_case(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the validate-catalog-qualification artifact is <case>."""
     match = re.search(r"the validate-catalog-qualification artifact is (.+)", text)
     if match is None:
         return False, f"Could not parse validation artifact case: {text}"
-    _cli_state(world)["vcq_artifact_case"] = match.group(1)
+    case = match.group(1)
+    if case not in _VCQ_ARTIFACT_CASES:
+        # Unknown case values (e.g. mutated example text) must fail the
+        # scenario so Gherkin value mutations are killed, not treated as
+        # a valid artifact by falling through.
+        return False, f"Unknown validation artifact case: {case}"
+    _cli_state(world)["vcq_artifact_case"] = case
     return True, ""
 
 
@@ -147,6 +178,8 @@ def _h_vcq_invoked(world: World, text: str, examples: dict) -> tuple[bool, str]:
         return False, f"Could not parse validation contract option: {text}"
     state = _cli_state(world)
     contract = match.group(1)
+    if contract not in _VCQ_CONTRACTS:
+        return False, f"Unknown validation contract option: {contract}"
     invalid = (
         state["vcq_artifact_case"]
         in {"a missing file path", "not a valid qualification contract"}
@@ -200,13 +233,20 @@ def _h_report_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return _finish(world, 0)
 
 
+_EVAL_FORMATS = frozenset({"yaml", "json"})
+_EVAL_FORMAT_LABELS = frozenset({"YAML", "JSON"})
+
+
 def _h_eval_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the eval command runs with output format \"<format>\"."""
     match = re.search(r'the eval command runs with output format "(.+)"', text)
     if match is None:
         return False, f"Could not parse eval format step: {text}"
     state = _cli_state(world)
-    state["scorecard_format"] = match.group(1).lower()
+    fmt = match.group(1)
+    if fmt not in _EVAL_FORMATS:
+        return False, f"Unknown eval output format: {fmt}"
+    state["scorecard_format"] = fmt
     state["announced"] = json.dumps(
         {
             "run_id": "run-fixture",
@@ -293,10 +333,12 @@ def _h_scorecard_stdout(world: World, text: str, examples: dict) -> tuple[bool, 
     if match is None:
         return False, f"Could not parse scorecard format assertion: {text}"
     state = _cli_state(world)
+    label = match.group(1)
+    if label not in _EVAL_FORMAT_LABELS:
+        return False, f"Unknown scorecard format label: {label}"
     return (
-        state["announced"] is not None
-        and match.group(1).lower() == state["scorecard_format"],
-        f"expected a {match.group(1)} scorecard, got {state['scorecard_format']!r}",
+        state["announced"] is not None and label.lower() == state["scorecard_format"],
+        f"expected a {label} scorecard, got {state['scorecard_format']!r}",
     )
 
 

@@ -8,6 +8,7 @@ from pathlib import Path
 import typer
 
 from asago_scenario_generator.cli._app import app
+from asago_scenario_generator.cli._shared import _abort
 
 
 @app.command(name="qualify-catalog")
@@ -29,8 +30,7 @@ def qualify_catalog(
         )
         typer.echo(json.dumps(report.model_dump(mode="json"), indent=2))
     except Exception as exc:  # noqa: BLE001 - CLI validation boundary
-        typer.echo(f"Error: {exc}", err=True)
-        raise typer.Exit(code=1)
+        _abort(exc)
 
 
 @app.command(name="validate-catalog-qualification")
@@ -52,5 +52,4 @@ def validate_catalog_qualification(
         validated = validate_persisted_contract(artifact, contract)  # type: ignore[arg-type]
         typer.echo(json.dumps(validated.model_dump(mode="json"), indent=2))
     except Exception as exc:  # noqa: BLE001 - CLI validation boundary
-        typer.echo(f"Error: {exc}", err=True)
-        raise typer.Exit(code=1)
+        _abort(exc)

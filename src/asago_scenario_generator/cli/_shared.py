@@ -43,6 +43,15 @@ def _validate_file(path: Path, label: str) -> None:
         raise typer.Exit(code=1)
 
 
+def _abort(exc: Exception) -> None:
+    """Announce a command failure on stderr and exit with code 1."""
+    msg = f"Error: {exc}"
+    if exc.__cause__:
+        msg += f"\n  Caused by: {exc.__cause__}"
+    typer.echo(msg, err=True)
+    raise typer.Exit(code=1)
+
+
 def _load_projection_payload(artifact: Path) -> dict:
     """Parse a standalone STPA projection with standard JSON or YAML readers."""
     text = artifact.read_text(encoding="utf-8")

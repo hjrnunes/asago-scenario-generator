@@ -4,13 +4,60 @@ from __future__ import annotations
 
 import json
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 import typer
 import yaml
 
 from asago_scenario_generator.cli._app import app
-from asago_scenario_generator.cli._shared import _print_banner
+from asago_scenario_generator.cli._shared import _abort, _print_banner
+
+
+def _write_report_artifact(
+    generator: Callable, report_data: object, output: Path
+) -> Path:
+    """Generate the report HTML into *output*'s parent, creating it if needed."""
+    output.parent.mkdir(parents=True, exist_ok=True)
+    report_path = generator(report_data, output.parent)
+    # generate_report writes to <parent>/report.html; rename if needed
+    if report_path.name != output.name:
+        report_path = report_path.rename(output)
+    return report_path
+
+
+def _render_report_stdout(generator: Callable, report_data: object) -> str:
+    """Render the report HTML to a string via a temporary directory."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        generator(report_data, tmp_path)
+        return (tmp_path / "report.html").read_text(encoding="utf-8")
+
+
+def _reject_output_inside_run_directory(output: Path, run_dir: Path) -> None:
+    """Announce and reject an output destination inside the immutable run."""
+    try:
+        output.resolve().relative_to(run_dir.resolve())
+    except ValueError:
+        return  # output is outside — OK
+    typer.echo(
+        f"Error: output path {output} is inside the immutable run "
+        f"directory {run_dir}. Choose a destination outside.",
+        err=True,
+    )
+    raise typer.Exit(code=1)
+
+
+def _render_scorecard(scorecard: object, format: str) -> str:
+    """Render an eval scorecard in the requested format."""
+    if format.lower() == "json":
+        return json.dumps(scorecard, indent=2, default=str)
+    return yaml.dump(
+        scorecard,
+        default_flow_style=False,
+        sort_keys=False,
+        allow_unicode=True,
+    )
 
 
 @app.command()
@@ -68,37 +115,20 @@ def report(
 
         if output is not None:
             # Reject destination inside the run directory (immutable)
-            output_resolved = output.resolve()
-            run_resolved = actual_run_dir.resolve()
-            try:
-                output_resolved.relative_to(run_resolved)
-                typer.echo(
-                    f"Error: output path {output} is inside the immutable run "
-                    f"directory {actual_run_dir}. Choose a destination outside.",
-                    err=True,
-                )
-                raise typer.Exit(code=1)
-            except ValueError:
-                pass  # output is outside — OK
-            output.parent.mkdir(parents=True, exist_ok=True)
-            report_path = generate_report(report_data, output.parent)
-            # generate_report writes to <parent>/report.html; rename if needed
-            if report_path.name != output.name:
-                report_path = report_path.rename(output)
+            _reject_output_inside_run_directory(output, actual_run_dir)
+            report_path = _write_report_artifact(generate_report, report_data, output)
             typer.echo(f"\nReport written to {report_path}")
         else:
             # Emit to stdout
-            with tempfile.TemporaryDirectory() as tmp:
-                tmp_path = Path(tmp)
-                generate_report(report_data, tmp_path)
-                typer.echo((tmp_path / "report.html").read_text(encoding="utf-8"))
+            typer.echo(_render_report_stdout(generate_report, report_data))
 
+    except typer.Exit:
+        # A rejection raised inside the try already announced itself (e.g.
+        # the immutable-run-directory check); let its exit code propagate
+        # instead of folding it into the generic error handler below.
+        raise
     except Exception as exc:
-        msg = f"\nError: {exc}"
-        if exc.__cause__:
-            msg += f"\n  Caused by: {exc.__cause__}"
-        typer.echo(msg, err=True)
-        raise typer.Exit(code=1)
+        _abort(exc)
 
 
 @app.command(name="eval")
@@ -149,22 +179,8 @@ def eval_cmd(
             output_dir, allow_non_authoritative=allow_non_authoritative
         )
 
-        if format.lower() == "json":
-            output_text = json.dumps(scorecard, indent=2, default=str)
-        else:
-            output_text = yaml.dump(
-                scorecard,
-                default_flow_style=False,
-                sort_keys=False,
-                allow_unicode=True,
-            )
-
         typer.echo("")
-        typer.echo(output_text)
+        typer.echo(_render_scorecard(scorecard, format))
 
     except Exception as exc:
-        msg = f"\nError: {exc}"
-        if exc.__cause__:
-            msg += f"\n  Caused by: {exc.__cause__}"
-        typer.echo(msg, err=True)
-        raise typer.Exit(code=1)
+        _abort(exc)

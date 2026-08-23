@@ -3,17 +3,82 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import typer
 import yaml
 
 from asago_scenario_generator.cli._app import app
 from asago_scenario_generator.cli._shared import (
+    _abort,
     _default_generate_exit_code,
     _print_banner,
     _resolve_use_case,
     _validate_file,
 )
+
+
+def _validate_optional_inputs(
+    *,
+    cross_taxonomy: Path | None,
+    threats_path: Path | None,
+    profile_path: Path | None,
+    qualification_facts: Path | None,
+    model_profile: str | None,
+    profiles_file: Path,
+) -> None:
+    """Validate optional generate inputs that were supplied."""
+    for path, label in (
+        (cross_taxonomy, "cross-taxonomy file"),
+        (threats_path, "agentic threats file"),
+        (profile_path, "capability profile file"),
+        (qualification_facts, "qualification facts file"),
+    ):
+        if path is not None:
+            _validate_file(path, label)
+    if model_profile is not None:
+        _validate_file(profiles_file, "model profiles file")
+
+
+def _validate_generate_enums(presentation_fallback: str, generation_mode: str) -> None:
+    """Reject unsupported generate option values."""
+    if presentation_fallback not in {"allow", "forbid"}:
+        raise typer.BadParameter(
+            "must be 'allow' or 'forbid'", param_hint="--presentation-fallback"
+        )
+    if generation_mode not in {"exhaustive", "coverage"}:
+        raise typer.BadParameter(
+            "must be 'exhaustive' or 'coverage'", param_hint="--generation-mode"
+        )
+
+
+def _print_pipeline_summary(result: Any) -> int:
+    """Echo the pipeline outcome summary; return the outcome exit code."""
+    status = result.manifest_status.value
+    exit_code = _default_generate_exit_code(status, result.admitted_count)
+    typer.echo(
+        "\nPipeline complete."
+        if exit_code == 0
+        else "\nPipeline completed with errors."
+    )
+    typer.echo(f"  Manifest status:      {status}")
+    typer.echo(f"  Candidates admitted:  {result.admitted_count}")
+    typer.echo(f"  Candidates quarantined: {result.quarantined_count}")
+    typer.echo(f"  Candidates failed:     {result.failed_count}")
+    typer.echo(f"  Scenarios generated: {len(result.scenarios)}/{len(result.seeds)}")
+    typer.echo(f"  Governance-only:     {result.governance_only_count}")
+    typer.echo(f"  Run directory:       {result.run_dir}")
+    return exit_code
+
+
+def _dump_profile_yaml(cap_profile: Any) -> str:
+    """Render a capability profile object as YAML text."""
+    return yaml.dump(
+        cap_profile.model_dump(mode="json"),
+        default_flow_style=False,
+        sort_keys=False,
+        allow_unicode=True,
+    )
 
 
 @app.command()
@@ -117,26 +182,16 @@ def generate(
     use_case_text = _resolve_use_case(use_case)
     _validate_file(risk_extraction, "risk-extraction file")
     _validate_file(sssom, "SSSOM file")
-    if cross_taxonomy is not None:
-        _validate_file(cross_taxonomy, "cross-taxonomy file")
-    if threats_path is not None:
-        _validate_file(threats_path, "agentic threats file")
-    if profile_path is not None:
-        _validate_file(profile_path, "capability profile file")
-    if qualification_facts is not None:
-        _validate_file(qualification_facts, "qualification facts file")
-    if model_profile is not None:
-        _validate_file(profiles_file, "model profiles file")
-    if presentation_fallback not in {"allow", "forbid"}:
-        raise typer.BadParameter(
-            "must be 'allow' or 'forbid'", param_hint="--presentation-fallback"
-        )
-    if generation_mode not in {"exhaustive", "coverage"}:
-        raise typer.BadParameter(
-            "must be 'exhaustive' or 'coverage'", param_hint="--generation-mode"
-        )
+    _validate_optional_inputs(
+        cross_taxonomy=cross_taxonomy,
+        threats_path=threats_path,
+        profile_path=profile_path,
+        qualification_facts=qualification_facts,
+        model_profile=model_profile,
+        profiles_file=profiles_file,
+    )
+    _validate_generate_enums(presentation_fallback, generation_mode)
 
-    outcome_exit_code = 1
     try:
         from asago_scenario_generator.pipeline.runner import run_pipeline
 
@@ -164,29 +219,10 @@ def generate(
             structured=structured,
         )
 
-        status = result.manifest_status.value
-        outcome_exit_code = _default_generate_exit_code(status, result.admitted_count)
-        typer.echo(
-            "\nPipeline complete."
-            if outcome_exit_code == 0
-            else "\nPipeline completed with errors."
-        )
-        typer.echo(f"  Manifest status:      {status}")
-        typer.echo(f"  Candidates admitted:  {result.admitted_count}")
-        typer.echo(f"  Candidates quarantined: {result.quarantined_count}")
-        typer.echo(f"  Candidates failed:     {result.failed_count}")
-        typer.echo(
-            f"  Scenarios generated: {len(result.scenarios)}/{len(result.seeds)}"
-        )
-        typer.echo(f"  Governance-only:     {result.governance_only_count}")
-        typer.echo(f"  Run directory:       {result.run_dir}")
+        outcome_exit_code = _print_pipeline_summary(result)
 
     except Exception as exc:
-        msg = f"\nError: {exc}"
-        if exc.__cause__:
-            msg += f"\n  Caused by: {exc.__cause__}"
-        typer.echo(msg, err=True)
-        raise typer.Exit(code=1)
+        _abort(exc)
     if outcome_exit_code:
         raise typer.Exit(code=outcome_exit_code)
 
@@ -218,8 +254,7 @@ def resume(
         typer.echo(f"\nPipeline resumed: {result.run_id}")
         typer.echo(f"  Run directory: {result.run_dir}")
     except Exception as exc:  # noqa: BLE001 - CLI boundary
-        typer.echo(f"\nError: {exc}", err=True)
-        raise typer.Exit(code=1)
+        _abort(exc)
 
 
 @app.command()
@@ -273,12 +308,7 @@ def profile(
             model=model,
         )
 
-        profile_yaml = yaml.dump(
-            cap_profile.model_dump(mode="json"),
-            default_flow_style=False,
-            sort_keys=False,
-            allow_unicode=True,
-        )
+        profile_yaml = _dump_profile_yaml(cap_profile)
 
         if output is not None:
             output.parent.mkdir(parents=True, exist_ok=True)
@@ -295,8 +325,4 @@ def profile(
         )
 
     except Exception as exc:
-        msg = f"\nError: {exc}"
-        if exc.__cause__:
-            msg += f"\n  Caused by: {exc.__cause__}"
-        typer.echo(msg, err=True)
-        raise typer.Exit(code=1)
+        _abort(exc)
