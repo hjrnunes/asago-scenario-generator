@@ -77,6 +77,13 @@ _ACTOR_DRAFT_RATIONALE_MAX_LENGTH = 400
 _ActorDraftItem = Annotated[str, Field(min_length=1, max_length=_CALL0_ITEM_MAX_LENGTH)]
 
 
+def _validate_distinct_resource_handles(value: list[str]) -> list[str]:
+    """Reject duplicate resource handles in one actor draft."""
+    if len(set(value)) != len(value):
+        raise ValueError("duplicate resource handle in actor draft")
+    return value
+
+
 class ActorDraftV2(BaseModel):
     """Provider-authored actor semantics without canonical access fields."""
 
@@ -100,12 +107,9 @@ class ActorDraftV2(BaseModel):
         default=None, min_length=1, max_length=_ACTOR_DRAFT_RATIONALE_MAX_LENGTH
     )
 
-    @field_validator("resource_handles")
-    @classmethod
-    def _reject_duplicate_resource_handles(cls, value: list[str]) -> list[str]:
-        if len(set(value)) != len(value):
-            raise ValueError("duplicate resource handle in actor draft")
-        return value
+    _reject_duplicate_resource_handles = field_validator("resource_handles")(
+        _validate_distinct_resource_handles
+    )
 
 
 class ActorDraftV3(BaseModel):
@@ -130,12 +134,9 @@ class ActorDraftV3(BaseModel):
         default=None, min_length=1, max_length=_ACTOR_DRAFT_RATIONALE_MAX_LENGTH
     )
 
-    @field_validator("resource_handles")
-    @classmethod
-    def _reject_duplicate_resource_handles(cls, value: list[str]) -> list[str]:
-        if len(set(value)) != len(value):
-            raise ValueError("duplicate resource handle in actor draft")
-        return value
+    _reject_duplicate_resource_handles = field_validator("resource_handles")(
+        _validate_distinct_resource_handles
+    )
 
 
 @dataclass(frozen=True)

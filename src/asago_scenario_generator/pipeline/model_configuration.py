@@ -6,6 +6,7 @@ import json
 import os
 from dataclasses import dataclass
 from enum import Enum
+from collections.abc import Callable
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
@@ -111,22 +112,22 @@ def _choose(
     return default, ConfigSource.application_default
 
 
-def _optional_int(value: Any, field: str) -> int | None:
+def _coerce_positive(value: Any, field: str, parser: Callable[[Any], Any]) -> Any:
+    """Parse *value* with *parser* and require it to be strictly positive."""
     if value is None:
         return None
-    parsed = int(value)
+    parsed = parser(value)
     if parsed <= 0:
         raise ValueError(f"{field} must be positive")
     return parsed
+
+
+def _optional_int(value: Any, field: str) -> int | None:
+    return _coerce_positive(value, field, int)
 
 
 def _optional_float(value: Any, field: str) -> float | None:
-    if value is None:
-        return None
-    parsed = float(value)
-    if parsed <= 0:
-        raise ValueError(f"{field} must be positive")
-    return parsed
+    return _coerce_positive(value, field, float)
 
 
 def _bool(value: Any, field: str) -> bool:
