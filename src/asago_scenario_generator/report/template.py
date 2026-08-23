@@ -6028,6 +6028,11 @@ def _build_scenario_card(
         scenario, threat_surface=threat_surface, capability_profile=capability_profile
     )
 
+    # Scenario Seed block: renders only when seed metadata is present and
+    # complete (attack pattern name and seed ID), so absent or partial
+    # metadata degrades honestly.
+    seed_metadata_html = _build_seed_metadata_block(scenario)
+
     # ATLAS techniques section
     atlas_techniques_html = _build_atlas_techniques_block(scenario, feature_content)
 
@@ -6206,6 +6211,7 @@ def _build_scenario_card(
         <div class="tab-panels">
           <div class="tab-panel">
             {provenance_chain_html}
+            {seed_metadata_html}
           </div>
           <div class="tab-panel">
             {generation_inputs_html}
