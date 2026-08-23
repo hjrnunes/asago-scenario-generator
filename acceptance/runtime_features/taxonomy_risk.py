@@ -4566,16 +4566,16 @@ def _h_derive_all_alignment_rows(
 def _h_all_rows_intersection(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    from asago_scenario_generator.pipeline.projection_validation import (
-        EXECUTOR_ROLE_TO_LEAF_COMPAT,
-        STEP_TO_LEAF_ACTION_COMPAT,
+    from asago_scenario_generator.pipeline.generate.canonical_projection import (
+        compatible_leaf_action_kinds_for_step,
     )
 
     rows = _contract_state(world).get("all_alignment_rows", [])
+    steps = _contract_state(world).get("all_selected_steps", [])
+    steps_by_id = {step["step_id"]: step for step in steps}
     for row in rows:
         expected = sorted(
-            STEP_TO_LEAF_ACTION_COMPAT.get(row["action"], set())
-            & EXECUTOR_ROLE_TO_LEAF_COMPAT.get(row["executor"], set())
+            compatible_leaf_action_kinds_for_step(steps_by_id[row["canonical_id"]])
         )
         if row["allowed_tree_kinds"] != expected:
             return False, f"row {row['canonical_id']} tree kinds drifted from validator"
@@ -7259,7 +7259,7 @@ def register(api: object) -> None:
             _h_derive_all_alignment_rows,
         ),
         (
-            r"each allowed tree-kind set equals the intersection of the action-kind and executor-role validator mappings",
+            r"each allowed tree-kind set equals canonical ownership-aware validator compatibility",
             _h_all_rows_intersection,
         ),
         (

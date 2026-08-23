@@ -26,7 +26,8 @@ warning that IDs are semantic names.
 2. Repeat with one action-kind, executor-role, boundary/zone, or resource
    binding changed at a time through bounded retries.
 
-**Expected:** Rows declare the action/executor intersection actually accepted
+**Expected:** Rows declare the action/executor intersection narrowed by the
+step's explicit ingress ownership and boundary position, exactly as accepted
 by validation. Outside rows use narrative zone `outside`, tree kind
 `external_precondition`, and null tree zone. Inside/crossing rows use active
 Schneider zones. Resource cells contain only that step's bindings. Every

@@ -38,7 +38,7 @@ Feature: Taxonomy projection prompt alignment
   # Taxonomy projection prompt alignment 03 stays synchronized with validator functions
   Scenario: Taxonomy projection prompt alignment 03 stays synchronized with validator functions
     When projection alignment rows are derived for every supported action, executor, and boundary combination
-    Then each allowed tree-kind set equals the intersection of the action-kind and executor-role validator mappings
+    Then each allowed tree-kind set equals canonical ownership-aware validator compatibility
     And narrative-zone and tree-zone values equal their stage-specific boundary validator rules
     And each bound-resources value comes from that canonical step
     And an empty compatibility intersection is rendered as an empty set
