@@ -133,6 +133,42 @@ def _resource_id(references: list[dict[str, Any]], kind: str, key: str) -> str |
     return values[0] if values else None
 
 
+def _derive_ingress_action(
+    step: dict[str, Any],
+    projection_context: dict[str, Any],
+    compatible: set[str],
+    entry_point_id: str | None,
+) -> InitialIngressAction:
+    """Compile the canonical initial-ingress action for an ingress-owning step."""
+    if "initial_ingress" not in compatible:
+        raise ProjectionInfeasible(
+            f"ingress-owning step '{step.get('step_id')}' is incompatible "
+            "with initial_ingress"
+        )
+    canonical_ingress = projection_context.get("canonical_ingress", {})
+    if not entry_point_id and isinstance(canonical_ingress, dict):
+        entry_point_id = canonical_ingress.get("entry_point_id")
+    if not entry_point_id:
+        raise ProjectionInfeasible(
+            f"ingress-owning step '{step.get('step_id')}' has no canonical entry point"
+        )
+    return InitialIngressAction(entry_point_id=str(entry_point_id))
+
+
+def _derive_impact_action(step: dict[str, Any], boundary: str) -> ImpactAction:
+    """Compile the canonical impact action from observable postconditions."""
+    descriptions = [
+        str(postcondition.get("description"))
+        for postcondition in step.get("observable_postconditions", ())
+        if isinstance(postcondition, dict) and postcondition.get("description")
+    ]
+    target = descriptions[0] if descriptions else "Projected security impact"
+    return ImpactAction(
+        boundary="external" if boundary == "outside" else "internal",
+        target=target[:200],
+    )
+
+
 def _derive_action(
     step: dict[str, Any], projection_context: dict[str, Any]
 ) -> LeafAction:
@@ -145,34 +181,14 @@ def _derive_action(
     integration_id = _resource_id(references, "integration", "integration_id")
 
     if _owns_initial_ingress(step, projection_context):
-        if "initial_ingress" not in compatible:
-            raise ProjectionInfeasible(
-                f"ingress-owning step '{step.get('step_id')}' is incompatible "
-                "with initial_ingress"
-            )
-        canonical_ingress = projection_context.get("canonical_ingress", {})
-        if not entry_point_id and isinstance(canonical_ingress, dict):
-            entry_point_id = canonical_ingress.get("entry_point_id")
-        if not entry_point_id:
-            raise ProjectionInfeasible(
-                f"ingress-owning step '{step.get('step_id')}' has no canonical "
-                "entry point"
-            )
-        return InitialIngressAction(entry_point_id=str(entry_point_id))
+        return _derive_ingress_action(
+            step, projection_context, compatible, entry_point_id
+        )
 
     if boundary == "outside" and "external_precondition" in compatible:
         return ExternalPreconditionAction()
     if action_kind == "impact" and "impact" in compatible:
-        descriptions = [
-            str(postcondition.get("description"))
-            for postcondition in step.get("observable_postconditions", ())
-            if isinstance(postcondition, dict) and postcondition.get("description")
-        ]
-        target = descriptions[0] if descriptions else "Projected security impact"
-        return ImpactAction(
-            boundary="external" if boundary == "outside" else "internal",
-            target=target[:200],
-        )
+        return _derive_impact_action(step, boundary)
     if tool_id is not None and "tool_invocation" in compatible:
         return ToolInvocationAction(tool_id=tool_id, integration_id=integration_id)
     if integration_id is not None and "integration_interaction" in compatible:

@@ -140,23 +140,27 @@ def build_attack_tree_draft_response_model(
     )
 
 
-def _validate_flat_attack_tree_draft(
-    draft: AttackTreeDraftV3,
-    leaf_specs: tuple[CanonicalLeafSpec, ...] | list[CanonicalLeafSpec],
-) -> DraftValidation:
-    expected = tuple(spec.leaf_handle for spec in leaf_specs)
-    actual = tuple(handle for group in draft.groups for handle in group.leaf_handles)
+def _handle_membership_violations(
+    expected: tuple[str, ...],
+    actual: tuple[str, ...],
+    noun: str,
+) -> tuple[list[SemanticDraftViolation], tuple[str, ...], tuple[str, ...]]:
+    """Collect unknown and duplicate handle violations for a draft.
+
+    The two shortfall kinds share this membership pass; callers append
+    their own ``missing_handle`` messages when their contract splits
+    shortages differently.
+    """
     counts = Counter(actual)
     violations: list[SemanticDraftViolation] = []
     unknown = tuple(sorted(set(actual) - set(expected)))
     duplicates = tuple(sorted(handle for handle, count in counts.items() if count > 1))
-    missing = tuple(handle for handle in expected if handle not in counts)
     if unknown:
         violations.append(
             SemanticDraftViolation(
                 code="unknown_handle",
                 handles=unknown,
-                message=f"unknown leaf handles: {list(unknown)}",
+                message=f"unknown {noun} handles: {list(unknown)}",
             )
         )
     if duplicates:
@@ -164,17 +168,41 @@ def _validate_flat_attack_tree_draft(
             SemanticDraftViolation(
                 code="duplicate_handle",
                 handles=duplicates,
-                message=f"duplicate leaf handles: {list(duplicates)}",
+                message=f"duplicate {noun} handles: {list(duplicates)}",
             )
         )
+    return violations, unknown, duplicates
+
+
+def _coverage_violations(
+    expected: tuple[str, ...],
+    actual: tuple[str, ...],
+    noun: str,
+) -> list[SemanticDraftViolation]:
+    """Collect unknown, duplicate, and missing handle violations."""
+    violations, _unknown, _duplicates = _handle_membership_violations(
+        expected, actual, noun
+    )
+    counts = Counter(actual)
+    missing = tuple(handle for handle in expected if handle not in counts)
     if missing:
         violations.append(
             SemanticDraftViolation(
                 code="missing_handle",
                 handles=missing,
-                message=f"missing leaf handles: {list(missing)}",
+                message=f"missing {noun} handles: {list(missing)}",
             )
         )
+    return violations
+
+
+def _validate_flat_attack_tree_draft(
+    draft: AttackTreeDraftV3,
+    leaf_specs: tuple[CanonicalLeafSpec, ...] | list[CanonicalLeafSpec],
+) -> DraftValidation:
+    expected = tuple(spec.leaf_handle for spec in leaf_specs)
+    actual = tuple(handle for group in draft.groups for handle in group.leaf_handles)
+    violations = _coverage_violations(expected, actual, "leaf")
     if not violations and actual != expected:
         violations.append(
             SemanticDraftViolation(
@@ -416,6 +444,29 @@ def _draft_stats(node: AttackTreeDraftNode, depth: int = 1) -> tuple[int, int]:
     )
 
 
+def _topology_violations(
+    root: AttackTreeDraftNode, expected_count: int
+) -> list[SemanticDraftViolation]:
+    """Collect depth and node-count violations for one drafted topology."""
+    violations: list[SemanticDraftViolation] = []
+    depth, node_count = _draft_stats(root)
+    if depth > 5:
+        violations.append(
+            SemanticDraftViolation(
+                code="excessive_depth",
+                message=f"tree draft depth {depth} exceeds maximum 5",
+            )
+        )
+    if node_count > max(1, 2 * expected_count + 4):
+        violations.append(
+            SemanticDraftViolation(
+                code="excessive_nodes",
+                message=f"tree draft has {node_count} nodes for {expected_count} leaves",
+            )
+        )
+    return violations
+
+
 def validate_attack_tree_draft(
     draft: AttackTreeDraftV2,
     leaf_specs: tuple[CanonicalLeafSpec, ...] | list[CanonicalLeafSpec],
@@ -424,37 +475,9 @@ def validate_attack_tree_draft(
 
     expected = tuple(spec.leaf_handle for spec in leaf_specs)
     actual = tuple(_draft_leaf_handles(draft.root))
-    counts = Counter(actual)
-    violations: list[SemanticDraftViolation] = []
-    unknown = tuple(sorted(set(actual) - set(expected)))
-    duplicates = tuple(sorted(handle for handle, count in counts.items() if count > 1))
-    missing = tuple(handle for handle in expected if handle not in counts)
-    if unknown:
-        violations.append(
-            SemanticDraftViolation(
-                code="unknown_handle",
-                handles=unknown,
-                message=f"unknown leaf handles: {list(unknown)}",
-            )
-        )
-    if duplicates:
-        violations.append(
-            SemanticDraftViolation(
-                code="duplicate_handle",
-                handles=duplicates,
-                message=f"duplicate leaf handles: {list(duplicates)}",
-            )
-        )
-    if missing:
-        violations.append(
-            SemanticDraftViolation(
-                code="missing_handle",
-                handles=missing,
-                message=f"missing leaf handles: {list(missing)}",
-            )
-        )
+    violations = _coverage_violations(expected, actual, "leaf")
     known_actual = tuple(handle for handle in actual if handle in set(expected))
-    if not unknown and not duplicates and not missing and known_actual != expected:
+    if not violations and known_actual != expected:
         violations.append(
             SemanticDraftViolation(
                 code="illegal_order",
@@ -462,21 +485,7 @@ def validate_attack_tree_draft(
                 message="leaf handles do not preserve canonical projected-step order",
             )
         )
-    depth, node_count = _draft_stats(draft.root)
-    if depth > 5:
-        violations.append(
-            SemanticDraftViolation(
-                code="excessive_depth",
-                message=f"tree draft depth {depth} exceeds maximum 5",
-            )
-        )
-    if node_count > max(1, 2 * len(expected) + 4):
-        violations.append(
-            SemanticDraftViolation(
-                code="excessive_nodes",
-                message=f"tree draft has {node_count} nodes for {len(expected)} leaves",
-            )
-        )
+    violations.extend(_topology_violations(draft.root, len(expected)))
     return DraftValidation(accepted=not violations, violations=tuple(violations))
 
 

@@ -5,13 +5,20 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from asago_scenario_generator.models.attack_tree import InitialIngressAction
+from asago_scenario_generator.models.attack_tree import (
+    ExternalPreconditionAction,
+    ImpactAction,
+    InitialIngressAction,
+    IntegrationInteractionAction,
+    ToolInvocationAction,
+)
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     ConfidenceLevel,
 )
 from asago_scenario_generator.models.scenario import NarrativeLayer, NarrativeStep
 from asago_scenario_generator.pipeline.generate.canonical_projection import (
+    _derive_action,
     derive_canonical_projection_semantics,
 )
 from asago_scenario_generator.pipeline.generate.tree_semantics import (
@@ -22,6 +29,7 @@ from asago_scenario_generator.pipeline.generate.tree_semantics import (
     ProjectionInfeasible,
     build_attack_tree_draft_response_model,
     _coalesce_canonical_leaf_specs,
+    _validate_flat_attack_tree_draft,
     compile_flat_attack_tree_draft,
     compile_attack_tree_draft,
     derive_canonical_leaf_specs,
@@ -490,6 +498,278 @@ def test_observation_that_owns_ingress_compiles_as_initial_ingress() -> None:
 
     assert specs[0].action.kind == "initial_ingress"
     assert specs[0].initial_ingress is True
+
+
+def _leaf(handle: str) -> AttackTreeDraftNode:
+    return AttackTreeDraftNode(kind="leaf", leaf_handle=handle)
+
+
+def _group(label: str, *children: AttackTreeDraftNode) -> AttackTreeDraftNode:
+    return AttackTreeDraftNode(kind="group", label=label, children=children)
+
+
+def test_flat_tree_draft_reports_unknown_duplicate_and_missing_handles() -> None:
+    profile = _profile()
+    specs = derive_canonical_leaf_specs(_context(profile), _narrative(), profile)
+    draft = AttackTreeDraftV3(
+        root_label="Bad coverage",
+        groups=(
+            AttackTreeDraftGroupV3(
+                label="Mixed group", leaf_handles=("l0", "l9", "l0")
+            ),
+        ),
+    )
+
+    validation = _validate_flat_attack_tree_draft(draft, specs)
+
+    assert not validation.accepted
+    assert [(v.code, v.handles) for v in validation.violations] == [
+        ("unknown_handle", ("l9",)),
+        ("duplicate_handle", ("l0",)),
+        ("missing_handle", ("l1",)),
+    ]
+
+
+def test_flat_tree_draft_rejects_reordered_leaf_handles() -> None:
+    profile = _profile()
+    specs = derive_canonical_leaf_specs(_context(profile), _narrative(), profile)
+    draft = AttackTreeDraftV3(
+        root_label="Reordered",
+        groups=(AttackTreeDraftGroupV3(label="Group one", leaf_handles=("l1", "l0")),),
+    )
+
+    validation = _validate_flat_attack_tree_draft(draft, specs)
+
+    assert not validation.accepted
+    assert [(v.code, v.handles) for v in validation.violations] == [
+        ("illegal_order", ("l1", "l0")),
+    ]
+
+
+def test_tree_draft_reports_unknown_handle_with_missing_partner() -> None:
+    profile = _profile()
+    specs = derive_canonical_leaf_specs(_context(profile), _narrative(), profile)
+    draft = AttackTreeDraftV2(root=_group("Root", _leaf("l0"), _leaf("l9")))
+
+    validation = validate_attack_tree_draft(draft, specs)
+
+    assert not validation.accepted
+    assert {(v.code, v.handles) for v in validation.violations} == {
+        ("unknown_handle", ("l9",)),
+        ("missing_handle", ("l1",)),
+    }
+
+
+def test_tree_draft_rejects_reordered_handles_without_coverage_noise() -> None:
+    profile = _profile()
+    specs = derive_canonical_leaf_specs(_context(profile), _narrative(), profile)
+    draft = AttackTreeDraftV2(root=_group("Root", _leaf("l1"), _leaf("l0")))
+
+    validation = validate_attack_tree_draft(draft, specs)
+
+    assert not validation.accepted
+    assert [(v.code, v.handles) for v in validation.violations] == [
+        ("illegal_order", ("l1", "l0")),
+    ]
+
+
+def test_tree_draft_rejects_excessive_depth() -> None:
+    profile = _profile()
+    base = derive_canonical_leaf_specs(_context(profile), _narrative(), profile)[0]
+    spec_count = 32
+    specs = tuple(
+        base.model_copy(update={"leaf_handle": f"l{index}"})
+        for index in range(spec_count)
+    )
+    handles = iter(specs)
+
+    def balanced(depth: int) -> AttackTreeDraftNode:
+        if depth == 0:
+            return _leaf(next(handles).leaf_handle)
+        return _group(f"level {depth}", balanced(depth - 1), balanced(depth - 1))
+
+    draft = AttackTreeDraftV2(root=balanced(5))
+
+    validation = validate_attack_tree_draft(draft, specs)
+
+    assert not validation.accepted
+    assert [(v.code, v.handles) for v in validation.violations] == [
+        ("excessive_depth", ()),
+    ]
+
+
+def test_tree_draft_rejects_excessive_nodes() -> None:
+    profile = _profile()
+    specs = derive_canonical_leaf_specs(_context(profile), _narrative(), profile)
+    draft = AttackTreeDraftV2(
+        root=_group(
+            "Root",
+            _group("a", _leaf("l0"), _leaf("l0")),
+            _group("b", _leaf("l1"), _leaf("l1")),
+            _group("c", _leaf("l0"), _leaf("l1")),
+        )
+    )
+
+    validation = validate_attack_tree_draft(draft, specs)
+
+    assert not validation.accepted
+    assert any(v.code == "excessive_nodes" for v in validation.violations)
+
+
+# ---------------------------------------------------------------------------#
+# _derive_action: canonical leaf action selection (CRAP slice 5)
+# ---------------------------------------------------------------------------#
+
+
+def _derive_step(**overrides: object) -> dict[str, object]:
+    fields: dict[str, object] = {
+        "step_id": "step.1",
+        "action_kind": "transform",
+        "executor_role": "attacker",
+        "boundary_position": "inside",
+        "resource_links": [],
+        "observable_postconditions": [],
+    }
+    fields.update(overrides)
+    return fields
+
+
+def test_derive_action_outside_prepare_step_is_external_precondition() -> None:
+    action = _derive_action(
+        _derive_step(
+            action_kind="prepare",
+            executor_role="attacker",
+            boundary_position="outside",
+        ),
+        {},
+    )
+
+    assert isinstance(action, ExternalPreconditionAction)
+
+
+def test_derive_action_impact_step_carries_observable_target() -> None:
+    action = _derive_action(
+        _derive_step(
+            action_kind="impact",
+            executor_role="system",
+            boundary_position="inside",
+            observable_postconditions=[
+                {
+                    "postcondition_id": "post.3",
+                    "description": "customer data leaves the tenant",
+                    "security_relevant": True,
+                    "terminal": True,
+                }
+            ],
+        ),
+        {},
+    )
+
+    assert isinstance(action, ImpactAction)
+    assert action.boundary == "internal"
+    assert action.target == "customer data leaves the tenant"
+
+
+def test_derive_action_outside_impact_step_uses_default_target() -> None:
+    action = _derive_action(
+        _derive_step(
+            action_kind="impact",
+            executor_role="operator",
+            boundary_position="outside",
+        ),
+        {},
+    )
+
+    assert isinstance(action, ImpactAction)
+    assert action.boundary == "external"
+    assert action.target == "Projected security impact"
+
+
+def test_derive_action_invoke_with_tool_binding_is_tool_invocation() -> None:
+    action = _derive_action(
+        _derive_step(
+            action_kind="invoke",
+            executor_role="system",
+            resource_links=[
+                {
+                    "role": "tool",
+                    "resource_ref": {"kind": "tool", "tool_id": "tool:writer"},
+                }
+            ],
+        ),
+        {},
+    )
+
+    assert isinstance(action, ToolInvocationAction)
+    assert action.tool_id == "tool:writer"
+    assert action.integration_id is None
+
+
+def test_derive_action_invoke_with_integration_binding_is_integration_interaction() -> (
+    None
+):
+    action = _derive_action(
+        _derive_step(
+            action_kind="invoke",
+            executor_role="system",
+            resource_links=[
+                {
+                    "role": "source",
+                    "resource_ref": {
+                        "kind": "integration",
+                        "integration_id": "integration:rag-source",
+                    },
+                }
+            ],
+        ),
+        {},
+    )
+
+    assert isinstance(action, IntegrationInteractionAction)
+    assert action.integration_id == "integration:rag-source"
+
+
+def test_derive_action_incompatible_step_raises_projection_infeasible() -> None:
+    with pytest.raises(ProjectionInfeasible, match="no canonical tree action"):
+        _derive_action(
+            _derive_step(action_kind="persist", executor_role="operator"),
+            {},
+        )
+
+
+def test_derive_action_ingress_owning_step_must_be_ingress_compatible() -> None:
+    with pytest.raises(ProjectionInfeasible, match="incompatible with initial_ingress"):
+        _derive_action(
+            _derive_step(
+                action_kind="impact",
+                executor_role="system",
+                resource_links=[
+                    {
+                        "role": "ingress",
+                        "resource_ref": {
+                            "kind": "entry_point",
+                            "entry_point_id": "ep:v1:chat",
+                        },
+                    }
+                ],
+            ),
+            {},
+        )
+
+
+def test_derive_action_ingress_owning_step_requires_canonical_entry_point() -> None:
+    with pytest.raises(ProjectionInfeasible, match="has no canonical entry point"):
+        _derive_action(
+            _derive_step(
+                action_kind="deliver",
+                executor_role="attacker",
+                boundary_position="crossing",
+                resource_links=[
+                    {"role": "ingress", "resource_ref": {"kind": "entry_point"}}
+                ],
+            ),
+            {},
+        )
 
 
 def test_post_ingress_attacker_delivery_compiles_as_attacker_action() -> None:

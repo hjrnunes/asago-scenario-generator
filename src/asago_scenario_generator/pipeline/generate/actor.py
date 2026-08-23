@@ -17,6 +17,7 @@ from asago_scenario_generator.llm.client import (
 )
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
+    EntryPoint,
     is_attacker_accessible_ingress,
 )
 from asago_scenario_generator.models.scenario import (
@@ -233,11 +234,12 @@ def create_actor_draft_v3_model(
     return create_model(model_name, __base__=ActorDraftV3, **fields)
 
 
-def compile_actor_draft(
-    context: ActorDraftContext, draft: ActorDraftV2 | ActorDraftV3
-) -> ActorProfile:
-    """Attach canonical actor choices and access to provider-authored BDI."""
-    violations: list[ActorDraftViolation] = []
+def _resolve_actor_handles(
+    context: ActorDraftContext,
+    draft: ActorDraftV2 | ActorDraftV3,
+    violations: list[ActorDraftViolation],
+) -> tuple[str | None, str | None]:
+    """Resolve provider handles against the canonical actor inventories."""
     if isinstance(draft, ActorDraftV3):
         choice = (context.actor_choices or {}).get(draft.actor_choice_handle)
         if choice is None:
@@ -247,44 +249,61 @@ def compile_actor_draft(
                     f"unknown actor choice handle '{draft.actor_choice_handle}'",
                 )
             )
-            actor_type = None
-            capability_level = None
-        else:
-            actor_type, capability_level = choice
-    else:
-        actor_type = context.actor_types.get(draft.actor_type_handle)
-        if actor_type is None:
-            violations.append(
-                ActorDraftViolation(
-                    "unknown_actor_type_handle",
-                    f"unknown actor type handle '{draft.actor_type_handle}'",
-                )
+            return None, None
+        return choice
+    actor_type = context.actor_types.get(draft.actor_type_handle)
+    if actor_type is None:
+        violations.append(
+            ActorDraftViolation(
+                "unknown_actor_type_handle",
+                f"unknown actor type handle '{draft.actor_type_handle}'",
             )
-        capability_level = context.capability_levels.get(draft.capability_level_handle)
-        if capability_level is None:
-            violations.append(
-                ActorDraftViolation(
-                    "unknown_capability_level_handle",
-                    f"unknown capability level handle "
-                    f"'{draft.capability_level_handle}'",
-                )
-            )
-    if actor_type is not None and capability_level is not None:
-        actor_floor = _CAPABILITY_FLOORS.get(actor_type, "novice")
-        required_floor = max(
-            (actor_floor, context.minimum_capability_level),
-            key=_CAPABILITY_ORDER.index,
         )
-        if _CAPABILITY_ORDER.index(capability_level) < _CAPABILITY_ORDER.index(
-            required_floor
-        ):
-            violations.append(
-                ActorDraftViolation(
-                    "capability_below_floor",
-                    f"actor '{actor_type}' requires capability '{required_floor}' "
-                    f"or higher, got '{capability_level}'",
-                )
+    capability_level = context.capability_levels.get(draft.capability_level_handle)
+    if capability_level is None:
+        violations.append(
+            ActorDraftViolation(
+                "unknown_capability_level_handle",
+                f"unknown capability level handle '{draft.capability_level_handle}'",
             )
+        )
+    return actor_type, capability_level
+
+
+def _capability_floor_violation(
+    actor_type: str,
+    capability_level: str,
+    minimum_capability_level: str,
+) -> ActorDraftViolation | None:
+    """Return the floor violation when capability sits below the required floor."""
+    actor_floor = _CAPABILITY_FLOORS.get(actor_type, "novice")
+    required_floor = max(
+        (actor_floor, minimum_capability_level),
+        key=_CAPABILITY_ORDER.index,
+    )
+    if _CAPABILITY_ORDER.index(capability_level) < _CAPABILITY_ORDER.index(
+        required_floor
+    ):
+        return ActorDraftViolation(
+            "capability_below_floor",
+            f"actor '{actor_type}' requires capability '{required_floor}' "
+            f"or higher, got '{capability_level}'",
+        )
+    return None
+
+
+def compile_actor_draft(
+    context: ActorDraftContext, draft: ActorDraftV2 | ActorDraftV3
+) -> ActorProfile:
+    """Attach canonical actor choices and access to provider-authored BDI."""
+    violations: list[ActorDraftViolation] = []
+    actor_type, capability_level = _resolve_actor_handles(context, draft, violations)
+    if actor_type is not None and capability_level is not None:
+        floor_violation = _capability_floor_violation(
+            actor_type, capability_level, context.minimum_capability_level
+        )
+        if floor_violation is not None:
+            violations.append(floor_violation)
     unknown_resources = [
         handle for handle in draft.resource_handles if handle not in context.resources
     ]
@@ -314,12 +333,11 @@ def compile_actor_draft(
     )
 
 
-def _actor_draft_inventories(
+def _compatible_actor_types_for_projection(
     prompt_context: Mapping[str, Any],
-    projection_context: dict[str, Any],
-    profile: CapabilityProfile,
-) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
-    """Allocate deterministic local handles for one actor request."""
+    projection_context: Mapping[str, Any],
+) -> list[str]:
+    """Narrow the compatible actor pool to canonical direct-access provenance."""
     compatible_actor_types = list(prompt_context["compatible_actor_types"])
     if projection_context.get("ingress_controllability") == "direct":
         compatible_actor_types = [
@@ -331,19 +349,27 @@ def _actor_draft_inventories(
         raise ValueError(
             "projection has no actor type with canonical direct-access provenance"
         )
-    actor_types = {
-        f"a{index}": actor_type
-        for index, actor_type in enumerate(compatible_actor_types)
-    }
+    return compatible_actor_types
+
+
+def _capability_level_inventory(
+    prompt_context: Mapping[str, Any],
+) -> dict[str, str]:
+    """Allocate deterministic capability handles from the minimum floor onward."""
     minimum = prompt_context.get("minimum_capability_level", "novice")
     minimum_index = (
         _CAPABILITY_ORDER.index(minimum) if minimum in _CAPABILITY_ORDER else 0
     )
-    capability_levels = {
+    return {
         f"c{index}": level
         for index, level in enumerate(_CAPABILITY_ORDER[minimum_index:])
     }
 
+
+def _selected_step_resource_names(
+    projection_context: Mapping[str, Any], profile: CapabilityProfile
+) -> list[str]:
+    """Collect distinct attacker-controlled resource names from selected steps."""
     from asago_scenario_generator.pipeline.generate.names import (
         resource_name_for_kind,
     )
@@ -373,6 +399,24 @@ def _actor_draft_inventories(
                 name = resource_name_for_kind(kind, resource_id, profile)
             if name not in resource_names:
                 resource_names.append(name)
+    return resource_names
+
+
+def _actor_draft_inventories(
+    prompt_context: Mapping[str, Any],
+    projection_context: dict[str, Any],
+    profile: CapabilityProfile,
+) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+    """Allocate deterministic local handles for one actor request."""
+    compatible_actor_types = _compatible_actor_types_for_projection(
+        prompt_context, projection_context
+    )
+    actor_types = {
+        f"a{index}": actor_type
+        for index, actor_type in enumerate(compatible_actor_types)
+    }
+    capability_levels = _capability_level_inventory(prompt_context)
+    resource_names = _selected_step_resource_names(projection_context, profile)
     resources = {f"r{index}": name for index, name in enumerate(resource_names)}
     return actor_types, capability_levels, resources
 
@@ -708,17 +752,15 @@ def build_actor_access_provenance(
     )
 
 
-def _canonical_checks(
+def _check_initial_ingress(
     violations: list[ActorAccessViolation],
     access: ActorAccessProvenance,
-    actor_type: str,
     profile: CapabilityProfile,
-) -> None:
-    """Populate *violations* with canonical-profile resolution checks.
+) -> EntryPoint | None:
+    """Append initial-ingress resolution and eligibility violations.
 
-    Pure function — no I/O, no logging.  Separated from
-    :func:`validate_actor_access_provenance` so it can be unit-tested
-    in isolation and reused by semantic validation.
+    Returns the resolved initial entry point, or ``None`` when canonical
+    checks cannot continue.
     """
     # 5. Resolve initial entry point — must be eligible ingress.
     initial_ep = profile.resolve_entry_point(access.initial_entry_point_id)
@@ -734,7 +776,7 @@ def _canonical_checks(
             )
         )
         # Cannot continue canonical checks without the initial EP.
-        return
+        return None
 
     if not is_attacker_accessible_ingress(
         initial_ep,
@@ -753,8 +795,8 @@ def _canonical_checks(
         )
 
     # 5b. effective_controllability must match the declared ingress_mode.
-    _ep_ctrl = initial_ep.effective_controllability
-    if _ep_ctrl == "system":
+    ep_ctrl = initial_ep.effective_controllability
+    if ep_ctrl == "system":
         violations.append(
             ActorAccessViolation(
                 rule="system_entry_point_as_ingress",
@@ -765,31 +807,40 @@ def _canonical_checks(
                 ),
             )
         )
-    elif _ep_ctrl != access.ingress_mode:
+    elif ep_ctrl != access.ingress_mode:
         violations.append(
             ActorAccessViolation(
                 rule="ingress_mode_controllability_mismatch",
                 message=(
                     f"ingress_mode '{access.ingress_mode}' does not match "
                     f"the entry point's effective controllability "
-                    f"'{_ep_ctrl}' (entry_point_id "
+                    f"'{ep_ctrl}' (entry_point_id "
                     f"'{access.initial_entry_point_id}')."
                 ),
             )
         )
+    return initial_ep
 
-    # 6–8. Indirect ingress canonical relation checks.
-    if access.ingress_mode != "indirect":
-        return
 
+def _check_influence_source(
+    violations: list[ActorAccessViolation],
+    access: ActorAccessProvenance,
+    profile: CapabilityProfile,
+    initial_ep: EntryPoint,
+) -> tuple[bool, EntryPoint | None]:
+    """Append influence-source resolution and accessibility violations.
+
+    Returns ``(continue, source_ep)``; ``continue`` is False when checks
+    must stop, and ``source_ep`` is the resolved entry-point source (or
+    ``None`` for integration sources).
+    """
     # The legacy influence_source field remains accepted, but the typed
     # source kind/ID pair is authoritative when present.
     source_id = access.influence_source_id or access.influence_source
     source_kind = access.influence_source_kind or "entry_point"
     if not source_id or not source_id.strip():
-        return  # Already flagged as missing in structural checks.
+        return False, None  # Already flagged as missing in structural checks.
 
-    source_ep = None
     if source_kind == "integration":
         if profile.resolve_integration(source_id) is None:
             violations.append(
@@ -801,61 +852,72 @@ def _canonical_checks(
                     ),
                 )
             )
-            return
-    else:
-        source_ep = profile.resolve_entry_point(source_id)
-        if source_ep is None:
-            violations.append(
-                ActorAccessViolation(
-                    rule="unresolved_influence_source",
-                    message=(
-                        f"influence_source '{source_id}' does not resolve "
-                        f"to any entry point in the capability profile."
-                    ),
-                )
-            )
-            return
+            return False, None
+        return True, None
 
-        # 6a. No self-relation — source must differ from initial ingress.
-        if source_ep.entry_point_id == initial_ep.entry_point_id:
-            violations.append(
-                ActorAccessViolation(
-                    rule="self_relation_influence_source",
-                    message=(
-                        f"influence_source '{source_id}' is the same entry "
-                        f"point as the initial ingress "
-                        f"'{access.initial_entry_point_id}' — no declared "
-                        f"self-relation model accepts this (cmps.6)."
-                    ),
-                )
+    source_ep = profile.resolve_entry_point(source_id)
+    if source_ep is None:
+        violations.append(
+            ActorAccessViolation(
+                rule="unresolved_influence_source",
+                message=(
+                    f"influence_source '{source_id}' does not resolve "
+                    f"to any entry point in the capability profile."
+                ),
             )
-            return
+        )
+        return False, None
 
-        # 6b. Source must be attacker-accessible (not output-only or system).
-        if source_ep.direction == "output":
-            violations.append(
-                ActorAccessViolation(
-                    rule="output_influence_source",
-                    message=(
-                        f"influence_source '{source_id}' resolves "
-                        f"to '{source_ep.name}' which is output-only — an "
-                        f"output channel cannot be an actor-controlled "
-                        f"influence source."
-                    ),
-                )
+    # 6a. No self-relation — source must differ from initial ingress.
+    if source_ep.entry_point_id == initial_ep.entry_point_id:
+        violations.append(
+            ActorAccessViolation(
+                rule="self_relation_influence_source",
+                message=(
+                    f"influence_source '{source_id}' is the same entry "
+                    f"point as the initial ingress "
+                    f"'{access.initial_entry_point_id}' — no declared "
+                    f"self-relation model accepts this (cmps.6)."
+                ),
             )
-        if source_ep.effective_controllability == "system":
-            violations.append(
-                ActorAccessViolation(
-                    rule="system_influence_source",
-                    message=(
-                        f"influence_source '{source_id}' resolves "
-                        f"to '{source_ep.name}' which is system-controlled — "
-                        f"not an actor-accessible influence source."
-                    ),
-                )
-            )
+        )
+        return False, None
 
+    # 6b. Source must be attacker-accessible (not output-only or system).
+    if source_ep.direction == "output":
+        violations.append(
+            ActorAccessViolation(
+                rule="output_influence_source",
+                message=(
+                    f"influence_source '{source_id}' resolves "
+                    f"to '{source_ep.name}' which is output-only — an "
+                    f"output channel cannot be an actor-controlled "
+                    f"influence source."
+                ),
+            )
+        )
+    if source_ep.effective_controllability == "system":
+        violations.append(
+            ActorAccessViolation(
+                rule="system_influence_source",
+                message=(
+                    f"influence_source '{source_id}' resolves "
+                    f"to '{source_ep.name}' which is system-controlled — "
+                    f"not an actor-accessible influence source."
+                ),
+            )
+        )
+    return True, source_ep
+
+
+def _check_trust_boundary(
+    violations: list[ActorAccessViolation],
+    access: ActorAccessProvenance,
+    profile: CapabilityProfile,
+    initial_ep: EntryPoint,
+    source_ep: EntryPoint | None,
+) -> None:
+    """Append trust-boundary resolution, zone relation, and flow violations."""
     # 7. trust_boundary_id must resolve to a declared TrustBoundary.
     if not access.trust_boundary_id or not access.trust_boundary_id.strip():
         return  # Already flagged as missing in structural checks.
@@ -938,6 +1000,34 @@ def _canonical_checks(
                 ),
             )
         )
+
+
+def _canonical_checks(
+    violations: list[ActorAccessViolation],
+    access: ActorAccessProvenance,
+    actor_type: str,
+    profile: CapabilityProfile,
+) -> None:
+    """Populate *violations* with canonical-profile resolution checks.
+
+    Pure function — no I/O, no logging.  Separated from
+    :func:`validate_actor_access_provenance` so it can be unit-tested
+    in isolation and reused by semantic validation.
+    """
+    initial_ep = _check_initial_ingress(violations, access, profile)
+    if initial_ep is None:
+        return
+
+    # 6–8. Indirect ingress canonical relation checks.
+    if access.ingress_mode != "indirect":
+        return
+
+    continue_sources, source_ep = _check_influence_source(
+        violations, access, profile, initial_ep
+    )
+    if not continue_sources:
+        return
+    _check_trust_boundary(violations, access, profile, initial_ep, source_ep)
 
 
 def validate_actor_access_provenance(
@@ -1102,6 +1192,110 @@ def _complete_actor_profile(
     )
 
 
+def _bump_capability_level(
+    capability_level: str,
+    required_floor: str | None,
+    *,
+    seed_id: str,
+    floor_label: str,
+) -> str:
+    """Raise a capability level to a required floor when it sits below it."""
+    if not required_floor or required_floor not in _CAPABILITY_ORDER:
+        return capability_level
+    floor_idx = _CAPABILITY_ORDER.index(required_floor)
+    current_idx = (
+        _CAPABILITY_ORDER.index(capability_level)
+        if capability_level in _CAPABILITY_ORDER
+        else 1
+    )
+    if current_idx < floor_idx:
+        logger.warning(
+            "%s: seed %s requires '%s', actor had '%s' — bumped",
+            floor_label,
+            seed_id,
+            required_floor,
+            capability_level,
+        )
+        return required_floor
+    return capability_level
+
+
+def _compile_legacy_actor_profile(
+    seed: ScenarioSeed,
+    ctx: Mapping[str, Any],
+    resp: Call0Response,
+) -> ActorProfile:
+    """Normalize the historical Call0Response into a canonical actor profile."""
+    actor_type = _normalize_actor_type(resp.actor_type)
+    capability_level = _normalize_capability_level(resp.capability_level)
+    capability_level = _enforce_capability_floor(actor_type, capability_level)
+    # Enforce computed capability-level minimum floor (estu constraint)
+    capability_level = _bump_capability_level(
+        capability_level,
+        ctx.get("minimum_capability_level"),
+        seed_id=seed.seed_id,
+        floor_label="Capability-level floor (estu)",
+    )
+    # Enforce seed-level min_complexity constraint
+    capability_level = _bump_capability_level(
+        capability_level,
+        seed.min_complexity,
+        seed_id=seed.seed_id,
+        floor_label="Seed min_complexity floor",
+    )
+    return ActorProfile(
+        actor_type=actor_type,
+        capability_level=capability_level,
+        beliefs=resp.beliefs,
+        desires=resp.desires,
+        intentions=resp.intentions,
+        resources=resp.resources,
+    )
+
+
+def _compile_projected_actor_draft(
+    *,
+    resp: ActorDraftV2 | ActorDraftV3,
+    actor_types: Mapping[str, str],
+    capability_levels: Mapping[str, str],
+    resources: Mapping[str, str],
+    actor_choices: Mapping[str, tuple[str, str]],
+    minimum_capability_level: str,
+    projection_context: dict[str, Any],
+) -> ActorProfile:
+    """Compile one projected semantic draft with canonical actor identity."""
+    if isinstance(resp, ActorDraftV3):
+        choice = actor_choices.get(resp.actor_choice_handle)
+        actor_type = choice[0] if choice is not None else None
+        unknown_detail = f"unknown actor choice handle '{resp.actor_choice_handle}'"
+        unknown_code = "unknown_actor_choice_handle"
+    else:
+        actor_type = actor_types.get(resp.actor_type_handle)
+        unknown_detail = f"unknown actor type handle '{resp.actor_type_handle}'"
+        unknown_code = "unknown_actor_type_handle"
+    if actor_type is None:
+        raise ActorSemanticDraftError(
+            (
+                ActorDraftViolation(
+                    unknown_code,
+                    unknown_detail,
+                ),
+            )
+        )
+    access = _derive_canonical_actor_access(projection_context, actor_type)
+    return compile_actor_draft(
+        ActorDraftContext(
+            actor_types=actor_types,
+            capability_levels=capability_levels,
+            resources=resources,
+            access=access,
+            minimum_capability_level=minimum_capability_level,
+            actor_choices=actor_choices,
+        ),
+        resp,
+    )
+
+
 def _call_actor_profile(
     seed: ScenarioSeed,
     profile: CapabilityProfile,
@@ -1189,85 +1383,23 @@ def _call_actor_profile(
 
     resp = result.content
     if isinstance(resp, (ActorDraftV2, ActorDraftV3)):
-        if isinstance(resp, ActorDraftV3):
-            choice = actor_choices.get(resp.actor_choice_handle)
-            actor_type = choice[0] if choice is not None else None
-            unknown_detail = f"unknown actor choice handle '{resp.actor_choice_handle}'"
-            unknown_code = "unknown_actor_choice_handle"
-        else:
-            actor_type = actor_types.get(resp.actor_type_handle)
-            unknown_detail = f"unknown actor type handle '{resp.actor_type_handle}'"
-            unknown_code = "unknown_actor_type_handle"
-        if actor_type is None:
-            raise ActorSemanticDraftError(
-                (
-                    ActorDraftViolation(
-                        unknown_code,
-                        unknown_detail,
-                    ),
-                )
-            )
-        access = _derive_canonical_actor_access(projection_context, actor_type)
-        actor_profile = compile_actor_draft(
-            ActorDraftContext(
+        return (
+            _compile_projected_actor_draft(
+                resp=resp,
                 actor_types=actor_types,
                 capability_levels=capability_levels,
                 resources=resources,
-                access=access,
-                minimum_capability_level=ctx["minimum_capability_level"],
                 actor_choices=actor_choices,
+                minimum_capability_level=ctx["minimum_capability_level"],
+                projection_context=projection_context,
             ),
-            resp,
+            result,
+            ctx.get("diversity_limitation"),
         )
-        return actor_profile, result, ctx.get("diversity_limitation")
 
     # Scripted fixtures using the historical response remain supported while
     # live projected requests advertise and parse only ActorDraftV3.
-    actor_type = _normalize_actor_type(resp.actor_type)
-    capability_level = _normalize_capability_level(resp.capability_level)
-    capability_level = _enforce_capability_floor(actor_type, capability_level)
-    # Enforce computed capability-level minimum floor (estu constraint)
-    minimum_capability_level = ctx["minimum_capability_level"]
-    if minimum_capability_level and minimum_capability_level in _CAPABILITY_ORDER:
-        min_floor_idx = _CAPABILITY_ORDER.index(minimum_capability_level)
-        current_idx = (
-            _CAPABILITY_ORDER.index(capability_level)
-            if capability_level in _CAPABILITY_ORDER
-            else 1
-        )
-        if current_idx < min_floor_idx:
-            logger.warning(
-                "Capability-level floor (estu): seed %s requires '%s', "
-                "actor had '%s' — bumped",
-                seed.seed_id,
-                minimum_capability_level,
-                capability_level,
-            )
-            capability_level = minimum_capability_level
-    # Enforce seed-level min_complexity constraint
-    if seed.min_complexity and seed.min_complexity in _CAPABILITY_ORDER:
-        seed_floor_idx = _CAPABILITY_ORDER.index(seed.min_complexity)
-        current_idx = (
-            _CAPABILITY_ORDER.index(capability_level)
-            if capability_level in _CAPABILITY_ORDER
-            else 1
-        )
-        if current_idx < seed_floor_idx:
-            logger.warning(
-                "Seed min_complexity floor: %s requires '%s', actor had '%s' — bumped",
-                seed.seed_id,
-                seed.min_complexity,
-                capability_level,
-            )
-            capability_level = seed.min_complexity
-    actor_profile = ActorProfile(
-        actor_type=actor_type,
-        capability_level=capability_level,
-        beliefs=resp.beliefs,
-        desires=resp.desires,
-        intentions=resp.intentions,
-        resources=resp.resources,
-    )
+    actor_profile = _compile_legacy_actor_profile(seed, ctx, resp)
 
     # Build typed access provenance from canonical EP identity (cmps.6)
     if pinned_entry_point_id:
@@ -1279,7 +1411,7 @@ def _call_actor_profile(
         actor_profile.access = build_actor_access_provenance(
             entry_point_id=pinned_entry_point_id,
             ep_controllability=ep_controllability,
-            actor_type=actor_type,
+            actor_type=actor_profile.actor_type,
             resp=resp,
             profile=profile,
             projection_context=projection_context,

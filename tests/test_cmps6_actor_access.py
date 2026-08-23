@@ -378,6 +378,296 @@ class TestBuildActorAccessProvenance:
             )
 
 
+class TestCanonicalAccessChecks:
+    """Rule coverage for the canonical-profile resolution helper.
+
+    Each case drives ``validate_actor_access_provenance`` with a profile so
+    the canonical checks (rules 5-8) run against real profile inventories.
+    """
+
+    def _actor(
+        self,
+        entry_point_id: str,
+        *,
+        ingress_mode: str = "indirect",
+        access_class: str = "authenticated",
+        source_id: str | None = None,
+        source_kind: str | None = None,
+        mechanism: str = "document poisoning",
+        boundary_id: str | None = None,
+    ) -> ActorProfile:
+        return _make_actor_with_access(
+            actor_type="cybercriminal",
+            entry_point_id=entry_point_id,
+            ingress_mode=ingress_mode,
+            access_class=access_class,
+            influence_source=source_id,
+            influence_mechanism=mechanism,
+            trust_boundary_id=boundary_id,
+        )
+
+    def _rules(self, actor: ActorProfile, profile: CapabilityProfile) -> list[str]:
+        return [v.rule for v in validate_actor_access_provenance(actor, profile)]
+
+    def test_system_controllability_ingress_flagged(self):
+        profile = _make_profile([_make_entry_point(controllability="system")])
+        actor = self._actor(
+            profile.entry_points[0].entry_point_id,
+            ingress_mode="direct",
+            access_class="public",
+        )
+
+        rules = self._rules(actor, profile)
+
+        assert "system_entry_point_as_ingress" in rules
+        assert "ineligible_ingress_entry_point" in rules
+
+    def test_ingress_mode_controllability_mismatch_flagged(self):
+        profile = _make_profile([_make_entry_point()])
+        target_id = profile.entry_points[0].entry_point_id
+        source = EntryPoint(
+            name="memory store feed",
+            direction="input",
+            controllability="indirect",
+            ingress_zone="memory",
+        )
+        boundary = TrustBoundary(
+            name="memory-to-input",
+            from_zone="memory",
+            to_zone="input",
+            confidence=BoundaryConfidence.explicit,
+        )
+        profile = _make_profile(
+            [_make_entry_point(), source],
+            trust_boundaries=[boundary],
+        )
+        actor = self._actor(
+            target_id,
+            source_id=source.entry_point_id,
+            boundary_id=boundary.trust_boundary_id,
+        )
+
+        assert self._rules(actor, profile) == ["ingress_mode_controllability_mismatch"]
+
+    def _integration_actor(
+        self,
+        entry_point_id: str,
+        *,
+        source_id: str,
+        boundary_id: str,
+    ) -> ActorProfile:
+        return ActorProfile(
+            actor_type="cybercriminal",
+            capability_level="intermediate",
+            beliefs=["b"],
+            desires=["d"],
+            intentions=["i"],
+            resources=["r"],
+            access=ActorAccessProvenance(
+                initial_entry_point_id=entry_point_id,
+                ingress_mode="indirect",
+                access_class="supply_chain",
+                influence_source=source_id,
+                influence_source_kind="integration",
+                influence_mechanism="poisoned source data",
+                trust_boundary_id=boundary_id,
+            ),
+        )
+
+    def test_unresolved_integration_source_flagged(self):
+        profile, target_id, _, _ = _make_indirect_profile()
+        boundary = TrustBoundary(
+            name="external-to-input",
+            from_zone="input",
+            to_zone="input",
+            confidence=BoundaryConfidence.explicit,
+        )
+        profile = _make_profile(
+            profile.entry_points,
+            trust_boundaries=[boundary],
+        )
+        actor = self._integration_actor(
+            target_id,
+            source_id="integration:missing",
+            boundary_id=boundary.trust_boundary_id,
+        )
+
+        assert self._rules(actor, profile) == ["unresolved_influence_source"]
+
+    def test_resolved_integration_source_passes(self):
+        profile, target_id, _, _ = _make_indirect_profile()
+        integrations = [
+            {
+                "name": "CRM",
+                "integration_type": "api",
+                "auth_method": "oauth",
+                "data_sensitivity": "high",
+            }
+        ]
+        boundary = TrustBoundary(
+            name="external-to-input",
+            from_zone="input",
+            to_zone="input",
+            confidence=BoundaryConfidence.explicit,
+        )
+        profile = CapabilityProfile(
+            zones_active=profile.zones_active,
+            entry_points=profile.entry_points,
+            trust_boundaries=[boundary],
+            confidence=ConfidenceLevel.high,
+            kc_subcodes=["KC1.1"],
+            external_integrations=integrations,
+        )
+        integration_id = profile.external_integrations[0].integration_id
+        actor = self._integration_actor(
+            target_id,
+            source_id=integration_id,
+            boundary_id=boundary.trust_boundary_id,
+        )
+
+        assert self._rules(actor, profile) == []
+
+    def test_self_relation_influence_source_flagged(self):
+        profile = _make_profile([_make_entry_point(controllability="indirect")])
+        target_id = profile.entry_points[0].entry_point_id
+        actor = self._actor(
+            target_id,
+            source_id=target_id,
+            boundary_id="tb:v1:cccccccccccccccccccccccccccccccc",
+        )
+
+        assert self._rules(actor, profile) == ["self_relation_influence_source"]
+
+    def test_output_influence_source_flagged(self):
+        target = _make_entry_point("RAG retrieval", controllability="indirect")
+        source = EntryPoint(
+            name="status notifications",
+            direction="output",
+            controllability="direct",
+        )
+        boundary = TrustBoundary(
+            name="output-to-input",
+            from_zone="output",
+            to_zone="input",
+            confidence=BoundaryConfidence.explicit,
+        )
+        profile = _make_profile(
+            [target, source],
+            trust_boundaries=[boundary],
+        )
+        actor = self._actor(
+            target.entry_point_id,
+            source_id=source.entry_point_id,
+            boundary_id=boundary.trust_boundary_id,
+        )
+
+        assert self._rules(actor, profile) == ["output_influence_source"]
+
+    def test_system_influence_source_flagged(self):
+        target = _make_entry_point("RAG retrieval", controllability="indirect")
+        source = EntryPoint(
+            name="telemetry feed",
+            direction="input",
+            controllability="system",
+        )
+        boundary = TrustBoundary(
+            name="telemetry-to-input",
+            from_zone="input",
+            to_zone="input",
+            confidence=BoundaryConfidence.explicit,
+        )
+        profile = _make_profile(
+            [target, source],
+            trust_boundaries=[boundary],
+        )
+        actor = self._actor(
+            target.entry_point_id,
+            source_id=source.entry_point_id,
+            boundary_id=boundary.trust_boundary_id,
+        )
+
+        assert self._rules(actor, profile) == ["system_influence_source"]
+
+    def test_trust_boundary_target_zone_mismatch_flagged(self):
+        target = EntryPoint(
+            name="RAG retrieval",
+            direction="input",
+            controllability="indirect",
+            ingress_zone="reasoning",
+        )
+        source = EntryPoint(
+            name="memory store feed",
+            direction="input",
+            controllability="indirect",
+            ingress_zone="memory",
+        )
+        boundary = TrustBoundary(
+            name="memory-to-input",
+            from_zone="memory",
+            to_zone="input",
+            confidence=BoundaryConfidence.explicit,
+        )
+        profile = _make_profile(
+            [target, source],
+            trust_boundaries=[boundary],
+        )
+        actor = self._actor(
+            target.entry_point_id,
+            source_id=source.entry_point_id,
+            boundary_id=boundary.trust_boundary_id,
+        )
+
+        assert self._rules(actor, profile) == ["trust_boundary_target_zone_mismatch"]
+
+    def test_trust_boundary_source_zone_mismatch_flagged(self):
+        target = _make_entry_point("RAG retrieval", controllability="indirect")
+        source = EntryPoint(
+            name="memory store feed",
+            direction="input",
+            controllability="indirect",
+            ingress_zone="memory",
+        )
+        boundary = TrustBoundary(
+            name="input-to-input",
+            from_zone="input",
+            to_zone="input",
+            confidence=BoundaryConfidence.explicit,
+        )
+        profile = _make_profile(
+            [target, source],
+            trust_boundaries=[boundary],
+        )
+        actor = self._actor(
+            target.entry_point_id,
+            source_id=source.entry_point_id,
+            boundary_id=boundary.trust_boundary_id,
+        )
+
+        assert self._rules(actor, profile) == ["trust_boundary_source_zone_mismatch"]
+
+    def test_external_boundary_source_not_indirect_flagged(self):
+        target = _make_entry_point("RAG retrieval", controllability="indirect")
+        source = _make_entry_point("batch upload")
+        boundary = TrustBoundary(
+            name="external-to-input",
+            from_zone="external",
+            to_zone="input",
+            confidence=BoundaryConfidence.explicit,
+        )
+        profile = _make_profile(
+            [target, source],
+            trust_boundaries=[boundary],
+        )
+        actor = self._actor(
+            target.entry_point_id,
+            access_class="supply_chain",
+            source_id=source.entry_point_id,
+            boundary_id=boundary.trust_boundary_id,
+        )
+
+        assert self._rules(actor, profile) == ["external_boundary_source_not_indirect"]
+
+
 class TestIngressAndDiversity:
     def test_system_and_output_entry_points_are_not_ingress(self):
         assert not is_attacker_accessible_ingress(
