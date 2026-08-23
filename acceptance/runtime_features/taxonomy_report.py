@@ -76,6 +76,20 @@ def _seed_meta(
     }
 
 
+# Complete seed metadata used when a step does not declare its own values.
+_DEFAULT_SEED_META = {
+    "seed_id": "AP-T6-01",
+    "attack_pattern_name": "Prompt injection with hidden intent",
+    "attack_pattern_description": "A short attack pattern description.",
+    "threat_id": "T6",
+    "threat_name": "Social engineering",
+    "owasp_origin": "LLM01",
+}
+
+# HTML marker delimiting the Scenario Seed section.
+_SEED_SECTION_MARKER = "<summary>Scenario Seed</summary>"
+
+
 def _scn(world: World, sid: str) -> dict[str, Any]:
     """Return the fixture scenario with id *sid*."""
     for scenario in world.trpt_scenarios:
@@ -262,14 +276,7 @@ def _h_contains_scenario_seed_case(
     scenario = _new_scenario(sid)
     metadata_case = examples.get("metadata_case", "")
     if metadata_case == "present with attack pattern name and seed ID":
-        scenario["scenario_seed_metadata"] = _seed_meta(
-            "AP-T6-01",
-            "Prompt injection with hidden intent",
-            "A short attack pattern description.",
-            "T6",
-            "Social engineering",
-            "LLM01",
-        )
+        scenario["scenario_seed_metadata"] = dict(_DEFAULT_SEED_META)
     elif metadata_case == "present without attack pattern name or seed ID":
         scenario["scenario_seed_metadata"] = {"threat_id": "T6"}
     world.trpt_scenarios.append(scenario)
@@ -388,14 +395,7 @@ def _h_seed_description_case(
     if not match:
         return False, f"Could not parse description-case step: {text}"
     scenario = _scn(world, match.group(1))
-    metadata = scenario.get("scenario_seed_metadata") or _seed_meta(
-        "AP-T6-01",
-        "Prompt injection with hidden intent",
-        "A short attack pattern description.",
-        "T6",
-        "Social engineering",
-        "LLM01",
-    )
+    metadata = scenario.get("scenario_seed_metadata") or dict(_DEFAULT_SEED_META)
     description_case = examples.get("description_case", "")
     if "400-character" in description_case:
         metadata["attack_pattern_description"] = "x" * 400
@@ -755,8 +755,11 @@ def _chain_for(world: World, text: str, examples: dict) -> tuple[bool, str]:
 
 def _h_t_provenance_tab(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the scenario card for "X" contains a Provenance tab."""
+    match = re.search(r'the scenario card for "([^"]+)"', text)
+    if not match:
+        return False, f"Could not parse Provenance tab step: {text}"
     try:
-        region = _card_region(_html(world), "scn-01")
+        region = _card_region(_html(world), match.group(1))
     except AssertionError as exc:
         return False, str(exc)
     return ">Provenance</label>" in region, "Provenance tab is missing"
@@ -1146,16 +1149,17 @@ def _h_t_seed_section(world: World, text: str, examples: dict) -> tuple[bool, st
     if not match:
         return False, f"Could not parse Scenario Seed section assertion: {text}"
     renders = match.group(1) == "renders"
-    marker = "<summary>Scenario Seed</summary>"
-    return (marker in _html(world)) is renders, "Scenario Seed section mismatch"
+    return (
+        (_SEED_SECTION_MARKER in _html(world)) is renders,
+        "Scenario Seed section mismatch",
+    )
 
 
 def _h_t_seed_section_present(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the report contains a "Scenario Seed" section."""
-    marker = "<summary>Scenario Seed</summary>"
-    return marker in _html(world), "Scenario Seed section is missing"
+    return _SEED_SECTION_MARKER in _html(world), "Scenario Seed section is missing"
 
 
 def _h_t_seed_name(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -1204,10 +1208,9 @@ def _h_t_seed_origin(world: World, text: str, examples: dict) -> tuple[bool, str
 
 
 def _seed_region(html: str) -> str:
-    marker = "<summary>Scenario Seed</summary>"
-    if marker not in html:
+    if _SEED_SECTION_MARKER not in html:
         raise AssertionError("Scenario Seed section is not rendered")
-    region = html.split(marker, 1)[1]
+    region = html.split(_SEED_SECTION_MARKER, 1)[1]
     return region.split("</details>", 1)[0]
 
 
@@ -1502,32 +1505,32 @@ def register(api: object) -> None:
     api.register(
         r'the Scenario Seed section shows the attack pattern name "([^"]+)"',
         _h_t_seed_name,
-        source_order=6228,
+        source_order=6229,
     )
     api.register(
         r'the Scenario Seed section shows the description "([^"]+)"',
         _h_t_seed_description,
-        source_order=6229,
+        source_order=6230,
     )
     api.register(
         r'the Scenario Seed section shows threat "([^"]+)" with threat name "([^"]+)"',
         _h_t_seed_threat,
-        source_order=6230,
+        source_order=6231,
     )
     api.register(
         r'the Scenario Seed section shows origin "([^"]+)" and seed "([^"]+)"',
         _h_t_seed_origin,
-        source_order=6231,
+        source_order=6232,
     )
     api.register(
         r'the report contains no "Eval Scorecard" section',
         _h_t_no_scorecard_section,
-        source_order=6232,
+        source_order=6233,
     )
     api.register(
         "the report contains no scorecard sidebar link",
         _h_t_no_sidebar_link,
-        source_order=6233,
+        source_order=6234,
     )
 
 

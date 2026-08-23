@@ -312,18 +312,7 @@ def _visible(fragment: str) -> str:
     return text.strip()
 
 
-def _labels_in_order(chain: str, labels: list[str]) -> bool:
-    """Return whether *labels* appear in the chain in document order."""
-    position = -1
-    for label in labels:
-        idx = chain.find(label)
-        if idx == -1 or idx < position:
-            return False
-        position = idx
-    return True
-
-
-def _values_in_order(fragment: str, values: list[str]) -> bool:
+def _in_order(fragment: str, values: list[str]) -> bool:
     """Return whether *values* appear in *fragment* in document order."""
     position = -1
     for value in values:
@@ -383,7 +372,7 @@ def test_provenance_chain_renders_full_chain_in_order(tmp_path: Path) -> None:
 
     html = _html(data, tmp_path)
     chain = _prov_chain(html, "scn-01")
-    assert _labels_in_order(chain, _PROV_LABELS)
+    assert _in_order(chain, _PROV_LABELS)
 
     steps = _prov_steps(chain)
     kv = _step_kv(_step(steps, "1. Risk Card"))
@@ -392,22 +381,22 @@ def test_provenance_chain_renders_full_chain_in_order(tmp_path: Path) -> None:
     assert "ibm-risk-atlas" in kv["Taxonomy"]
     assert kv["Confidence"] == "0.85"
 
-    assert _values_in_order(_step(steps, "2. OWASP LLM IDs"), ["LLM01", "LLM06"])
-    assert _values_in_order(_step(steps, "3. Agentic Threats"), ["T6", "T11"])
+    assert _in_order(_step(steps, "2. OWASP LLM IDs"), ["LLM01", "LLM06"])
+    assert _in_order(_step(steps, "3. Agentic Threats"), ["T6", "T11"])
 
     pattern_body = _step(steps, "4a. Attack Pattern")
     assert _highlighted_value(pattern_body, "AP-T6-01")
     assert "AP-T11-01" in pattern_body
 
     atlas_body = _step(steps, "4c. Scenario classifications")
-    assert _values_in_order(atlas_body, ["AML.T0015", "AML.T0053"])
+    assert _in_order(atlas_body, ["AML.T0015", "AML.T0053"])
     assert "prov-highlight" not in atlas_body
 
     entry_body = _step(steps, "5. Entry Point")
     assert _highlighted_value(entry_body, "ze-rag")
     assert "prov-dim" in entry_body
 
-    assert _values_in_order(_step(steps, "6. Zone Sequence"), ["Z1", "Z2"])
+    assert _in_order(_step(steps, "6. Zone Sequence"), ["Z1", "Z2"])
 
 
 def test_provenance_chain_degrades_missing_risk_card(tmp_path: Path) -> None:
@@ -479,7 +468,7 @@ def test_provenance_chain_without_seed_metadata_still_renders_other_steps(
     assert _visible(kv["Name"]) == ""
     assert _visible(kv["Threat"]) == ""
     assert "Description" not in pattern_body
-    assert _labels_in_order(chain, ["Attack Goal", "Entry Point", "Zone Sequence"])
+    assert _in_order(chain, ["Attack Goal", "Entry Point", "Zone Sequence"])
 
 
 def test_provenance_truncates_long_description_at_300(tmp_path: Path) -> None:
@@ -680,6 +669,15 @@ def test_versioned_scorecard_status_badges(
 # Scenario Seed block
 # ---------------------------------------------------------------------------
 
+_SEED_SECTION_MARKER = "<summary>Scenario Seed</summary>"
+
+
+def _seed_region(html: str) -> str:
+    """HTML of the Scenario Seed section inside the report."""
+    assert _SEED_SECTION_MARKER in html, "Scenario Seed section is not rendered"
+    region = html.split(_SEED_SECTION_MARKER, 1)[1]
+    return region.split("</details>", 1)[0]
+
 
 @pytest.mark.parametrize(
     ("metadata_case", "renders"),
@@ -703,10 +701,9 @@ def test_scenario_seed_section_rendering_cases(
     data = ReportData(scenarios=[_scenario(seed_metadata=seed_metadata)])
 
     html = _html(data, tmp_path)
-    marker = "<summary>Scenario Seed</summary>"
-    assert (marker in html) is renders
+    assert (_SEED_SECTION_MARKER in html) is renders
     if renders:
-        assert marker in _card_region(html, "scn-01")
+        assert _SEED_SECTION_MARKER in _card_region(html, "scn-01")
 
 
 def test_scenario_seed_section_shows_seed_fields(tmp_path: Path) -> None:
@@ -721,8 +718,7 @@ def test_scenario_seed_section_shows_seed_fields(tmp_path: Path) -> None:
     )
 
     html = _html(data, tmp_path)
-    seed_region = html.split("<summary>Scenario Seed</summary>", 1)[1]
-    seed_region = seed_region.split("</details>", 1)[0]
+    seed_region = _seed_region(html)
 
     assert "Prompt injection with hidden intent" in seed_region
     assert "A short attack pattern description." in seed_region
