@@ -361,7 +361,7 @@ def _call_actor_profile(
     after every semantic section.
 
     Returns:
-        Tuple of (ActorProfile, LLMResult).
+        Tuple of (ActorProfile, LLMResult, diversity_limitation).
     """
     ctx = build_call0_context(
         seed=seed,
