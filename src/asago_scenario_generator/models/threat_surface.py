@@ -32,3 +32,8 @@ class ThreatSurface(BaseModel):
 
     entries: list[ThreatSurfaceEntry]
     governance_only: list[ThreatSurfaceEntry]
+
+
+# mutate4py-manifest-begin
+# {"version":1,"tested_at":"2026-08-23T04:10:41Z","module_hash":"7a49ec4871b25237ad803133fa412176abdac1cee69db1f18f1d4d55ca0e3bf5","source_sha256":"3336410d347349314670776784a7ce1303d7ab2af1d17df021e0c245ad0f5869","functions":[]}
+# mutate4py-manifest-end

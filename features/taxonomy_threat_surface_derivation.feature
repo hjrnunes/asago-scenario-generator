@@ -1,3 +1,7 @@
+# acceptance-mutation-manifest-begin
+# {"version":1,"tested_at":"2026-08-23T04:28:23.492057Z","feature_name":"Taxonomy threat-surface derivation","feature_path":"features/taxonomy_threat_surface_derivation.feature","background_hash":"e8ad8418d2689dba0956477a8b3f95906bacb424431f103e4cb098212251aabb","implementation_hash":"unknown","scenarios":[{"index":0,"name":"Taxonomy threat-surface derivation 01 resolves the three-hop chain in first-seen order","scenario_hash":"877b0addf118711f8e12c4f96a889db2fbc95097c85bc51075414117ce4f5373","mutation_count":4,"result":{"Total":4,"Killed":4,"Survived":0,"Errors":0},"tested_at":"2026-08-23T04:28:23.492057Z"},{"index":5,"name":"Taxonomy threat-surface derivation 06 applies the KC6 gate to ATLAS techniques","scenario_hash":"f7a6d6009164d38a68e56af93ed559b35e4740d8c6218e44b485c37cad2b86d2","mutation_count":4,"result":{"Total":4,"Killed":4,"Survived":0,"Errors":0},"tested_at":"2026-08-23T04:28:23.492057Z"}]}
+# acceptance-mutation-manifest-end
+
 Feature: Taxonomy threat-surface derivation
   Threat-surface derivation walks each Risk Atlas card through its OWASP
   LLM Top 10 entries to in-scope agentic T-threats, then joins

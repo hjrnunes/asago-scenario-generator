@@ -37,3 +37,8 @@ class ThreatScope(BaseModel):
 
     in_scope: list[ThreatScopeEntry] = Field(default_factory=list)
     out_of_scope: list[OutOfScopeEntry] = Field(default_factory=list)
+
+
+# mutate4py-manifest-begin
+# {"version":1,"tested_at":"2026-08-23T04:10:41Z","module_hash":"9d276a3e1e7efe5051d0541eb653c77419fe0748dc5e2765088e36061894c1a1","source_sha256":"23a9988df729047d057ef72cad57d8c5e625cafff6369a7e3a00bef31a903272","functions":[]}
+# mutate4py-manifest-end

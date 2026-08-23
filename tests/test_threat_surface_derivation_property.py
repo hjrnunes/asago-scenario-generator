@@ -359,6 +359,10 @@ def test_every_risk_card_yields_exactly_one_entry(fixture: SurfaceFixture):
     assert actionable_ids.isdisjoint(governance_ids)
     assert actionable_ids | governance_ids == set(fixture.risks)
     assert len(surface.entries) + len(surface.governance_only) == len(fixture.risks)
+    for entry in surface.entries:
+        assert entry.governance_only is False
+    for entry in surface.governance_only:
+        assert entry.governance_only is True
 
 
 @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
