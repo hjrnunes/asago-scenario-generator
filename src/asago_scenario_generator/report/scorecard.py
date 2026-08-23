@@ -124,6 +124,39 @@ _SCORECARD_METRIC_TOOLTIPS: dict[str, str] = {
 }
 
 
+def _join_strs(items: list[Any], sep: str = ", ") -> str:
+    """Stringify and join *items* with *sep*."""
+    return sep.join(str(item) for item in items)
+
+
+def _display_or_dash(value: str) -> str:
+    """Return *value* when non-empty, else '-'."""
+    if value:
+        return value
+    return "-"
+
+
+def _badge_css_class(value: float, invert: bool) -> str:
+    """Return the badge CSS class for a metric value."""
+    if invert:
+        # For counts: 0 = green, >0 = red
+        if value == 0:
+            return "scorecard-badge-green"
+        return "scorecard-badge-red"
+    if value >= 0.9:
+        return "scorecard-badge-green"
+    if value >= 0.7:
+        return "scorecard-badge-yellow"
+    return "scorecard-badge-red"
+
+
+def _badge_display_value(value: float) -> str:
+    """Format a metric value for display (2 decimals for non-integer floats)."""
+    if isinstance(value, float) and not value.is_integer():
+        return f"{value:.2f}"
+    return str(int(value))
+
+
 def _scorecard_badge(
     value: float, label: str, *, invert: bool = False, tooltip: str = ""
 ) -> str:
@@ -136,48 +169,42 @@ def _scorecard_badge(
         tooltip: Optional tooltip text. If empty, looks up from
                  ``_SCORECARD_METRIC_TOOLTIPS`` using *label*.
     """
-    if invert:
-        # For counts: 0 = green, >0 = red
-        css_cls = "scorecard-badge-green" if value == 0 else "scorecard-badge-red"
-    else:
-        if value >= 0.9:
-            css_cls = "scorecard-badge-green"
-        elif value >= 0.7:
-            css_cls = "scorecard-badge-yellow"
-        else:
-            css_cls = "scorecard-badge-red"
-    if isinstance(value, float) and not value.is_integer():
-        display = f"{value:.2f}"
-    else:
-        display = str(int(value))
+    css_cls = _badge_css_class(value, invert)
+    display = _badge_display_value(value)
     tip = tooltip or _SCORECARD_METRIC_TOOLTIPS.get(label, "")
     tip_attr = f' data-tooltip="{_esc(tip)}"' if tip else ""
     return f'<span class="scorecard-badge {css_cls}"{tip_attr}>{_esc(label)}: {display}</span>'
 
 
-def _collect_scorecard_outliers(
-    ev: dict[str, Any],
-) -> list[tuple[str, str, str, float | int | str, str]]:
-    """Scan scorecard evaluation data and return outlier rows.
+def _low_value_rank(
+    value: float, warn_below: float, red_below: float
+) -> tuple[str, str] | None:
+    """Classify a below-threshold value as an outlier.
 
-    Each row is ``(severity, scenario_id, group, metric, value, css_cls)``
-    where *severity* is ``"red"`` or ``"yellow"`` (for sort ordering) and
-    *css_cls* is the badge CSS class.
-
-    Returns:
-        Sorted list: red items first, then yellow, each alphabetical by
-        scenario ID within its severity tier.
+    Returns ``(severity, css_cls)`` when *value* is below *warn_below*
+    (``"red"`` below *red_below*, otherwise ``"yellow"``), or None when the
+    value is within range.
     """
-    outliers: list[tuple[str, str, str, str, float | int | str, str]] = []
+    if value >= warn_below:
+        return None
+    if value < red_below:
+        return "red", "scorecard-badge-red"
+    return "yellow", "scorecard-badge-yellow"
 
-    # --- Per-scenario consistency ---
+
+def _collect_consistency_outliers(
+    ev: dict[str, Any],
+) -> list[tuple[str, str, str, str, float | int | str, str]]:
+    """Collect per-scenario consistency outlier rows."""
+    outliers: list[tuple[str, str, str, str, float | int | str, str]] = []
     per_scenario_c = ev.get("consistency", {}).get("per_scenario", {})
     for sid, metrics in per_scenario_c.items():
         za = metrics.get("zone_alignment", 1.0)
-        if za < 0.9:
-            css = "scorecard-badge-red" if za < 0.7 else "scorecard-badge-yellow"
-            sev = "red" if za < 0.7 else "yellow"
-            outliers.append((sev, sid, "Consistency", "Zone Alignment", za, css))
+        za_rank = _low_value_rank(za, 0.9, 0.7)
+        if za_rank:
+            outliers.append(
+                (za_rank[0], sid, "Consistency", "Zone Alignment", za, za_rank[1])
+            )
         epa = metrics.get("entry_point_agreement", 1)
         if epa < 1:
             outliers.append(
@@ -191,88 +218,109 @@ def _collect_scorecard_outliers(
                 )
             )
         snc = metrics.get("step_node_correspondence", 1.0)
-        if snc < 0.9:
-            css = "scorecard-badge-red" if snc < 0.7 else "scorecard-badge-yellow"
-            sev = "red" if snc < 0.7 else "yellow"
+        snc_rank = _low_value_rank(snc, 0.9, 0.7)
+        if snc_rank:
             outliers.append(
-                (sev, sid, "Consistency", "Step-Node Correspondence", snc, css)
+                (
+                    snc_rank[0],
+                    sid,
+                    "Consistency",
+                    "Step-Node Correspondence",
+                    snc,
+                    snc_rank[1],
+                )
             )
+    return outliers
 
-    # --- Per-scenario technique agreement ---
+
+def _missing_parts(
+    missing_narr: list[str], missing_tree: list[str], missing_spec: list[str]
+) -> list[str]:
+    """Build human-readable missing-technique parts."""
+    parts = []
+    for label, items in (
+        ("narrative", missing_narr),
+        ("tree", missing_tree),
+        ("spec", missing_spec),
+    ):
+        if items:
+            parts.append(f"{label}: {', '.join(items)}")
+    return parts
+
+
+def _mapping_row(
+    sid: str, detail: dict[str, Any]
+) -> tuple[str, str, str, str, float | int | str, str] | None:
+    """Return the mapping-agreement outlier row for one scenario, or None."""
+    score = detail.get("technique_agreement", 1.0)
+    score_rank = _low_value_rank(score, 0.9, 0.7)
+    if score_rank:
+        return (
+            score_rank[0],
+            sid,
+            "Projected-step Mapping Agreement",
+            "Mapping Agreement",
+            score,
+            score_rank[1],
+        )
+    missing_narr = detail.get("missing_from_narrative", [])
+    missing_tree = detail.get("missing_from_tree", [])
+    missing_spec = detail.get("missing_from_spec", [])
+    parts = _missing_parts(missing_narr, missing_tree, missing_spec)
+    if parts:
+        return (
+            "yellow",
+            sid,
+            "Projected-step Mapping Agreement",
+            "Missing Techniques",
+            "; ".join(parts),
+            "scorecard-badge-yellow",
+        )
+    return None
+
+
+def _collect_technique_agreement_outliers(
+    ev: dict[str, Any],
+) -> list[tuple[str, str, str, str, float | int | str, str]]:
+    """Collect per-scenario projected-step mapping agreement outlier rows."""
+    outliers: list[tuple[str, str, str, str, float | int | str, str]] = []
     ta = ev.get("technique_agreement", {})
     per_scenario_ta = ta.get("per_scenario", {})
     for sid, detail in per_scenario_ta.items():
-        score = detail.get("technique_agreement", 1.0)
-        missing_narr = detail.get("missing_from_narrative", [])
-        missing_tree = detail.get("missing_from_tree", [])
-        missing_spec = detail.get("missing_from_spec", [])
-        if score < 0.9:
-            css = "scorecard-badge-red" if score < 0.7 else "scorecard-badge-yellow"
-            sev = "red" if score < 0.7 else "yellow"
-            outliers.append(
-                (
-                    sev,
-                    sid,
-                    "Projected-step Mapping Agreement",
-                    "Mapping Agreement",
-                    score,
-                    css,
-                )
-            )
-        elif missing_narr or missing_tree or missing_spec:
-            parts = []
-            if missing_narr:
-                parts.append(f"narrative: {', '.join(missing_narr)}")
-            if missing_tree:
-                parts.append(f"tree: {', '.join(missing_tree)}")
-            if missing_spec:
-                parts.append(f"spec: {', '.join(missing_spec)}")
-            outliers.append(
-                (
-                    "yellow",
-                    sid,
-                    "Projected-step Mapping Agreement",
-                    "Missing Techniques",
-                    "; ".join(parts),
-                    "scorecard-badge-yellow",
-                )
-            )
+        row = _mapping_row(sid, detail)
+        if row:
+            outliers.append(row)
+    return outliers
 
-    # --- Per-scenario plausibility ---
+
+def _plausibility_issue_rows(
+    sid: str, issues: Any
+) -> list[tuple[str, str, str, str, str, str]]:
+    """Return one outlier row per capability violation issue."""
+    rows: list[tuple[str, str, str, str, str, str]] = []
+    if isinstance(issues, list):
+        for issue in issues:
+            rows.append(
+                (
+                    "red",
+                    sid,
+                    "Plausibility",
+                    "Capability Violation",
+                    str(issue),
+                    "scorecard-badge-red",
+                )
+            )
+    return rows
+
+
+def _collect_plausibility_outliers(
+    ev: dict[str, Any],
+) -> list[tuple[str, str, str, str, float | int | str, str]]:
+    """Collect per-scenario and aggregate plausibility outlier rows."""
+    outliers: list[tuple[str, str, str, str, float | int | str, str]] = []
     per_scenario_p = ev.get("plausibility", {}).get("per_scenario", {})
     for sid, issues in per_scenario_p.items():
-        if issues and isinstance(issues, list):
-            for issue in issues:
-                outliers.append(
-                    (
-                        "red",
-                        sid,
-                        "Plausibility",
-                        "Capability Violation",
-                        str(issue),
-                        "scorecard-badge-red",
-                    )
-                )
-
-    # --- Aggregate diversity outliers ---
-    diversity = ev.get("diversity", {})
-    tu = diversity.get("title_uniqueness", 1.0)
-    if isinstance(tu, (int, float)) and tu < 0.7:
-        css = "scorecard-badge-red" if tu < 0.5 else "scorecard-badge-yellow"
-        sev = "red" if tu < 0.5 else "yellow"
-        outliers.append((sev, "(aggregate)", "Diversity", "Title Uniqueness", tu, css))
-
-    ep_ent = diversity.get("entry_point_entropy", {})
-    if isinstance(ep_ent, dict):
-        ep_cov = ep_ent.get("entry_point_coverage", 1.0)
-        if ep_cov < 0.7:
-            css = "scorecard-badge-red" if ep_cov < 0.5 else "scorecard-badge-yellow"
-            sev = "red" if ep_cov < 0.5 else "yellow"
-            outliers.append(
-                (sev, "(aggregate)", "Diversity", "EP Coverage", ep_cov, css)
-            )
-
-    # --- Aggregate plausibility ---
+        outliers.extend(_plausibility_issue_rows(sid, issues))
     violation_count = ev.get("plausibility", {}).get(
         "capability_complexity_violation_count", 0
     )
@@ -287,6 +335,67 @@ def _collect_scorecard_outliers(
                 "scorecard-badge-red",
             )
         )
+    return outliers
+
+
+def _collect_title_outliers(
+    diversity: dict[str, Any],
+) -> list[tuple[str, str, str, str, float | int | str, str]]:
+    """Collect the aggregate Title Uniqueness outlier row."""
+    tu = diversity.get("title_uniqueness", 1.0)
+    if not isinstance(tu, (int, float)):
+        return []
+    tu_rank = _low_value_rank(tu, 0.7, 0.5)
+    if not tu_rank:
+        return []
+    return [
+        (tu_rank[0], "(aggregate)", "Diversity", "Title Uniqueness", tu, tu_rank[1])
+    ]
+
+
+def _collect_ep_coverage_outliers(
+    diversity: dict[str, Any],
+) -> list[tuple[str, str, str, str, float | int | str, str]]:
+    """Collect the aggregate EP Coverage outlier row."""
+    ep_ent = diversity.get("entry_point_entropy", {})
+    if not isinstance(ep_ent, dict):
+        return []
+    ep_cov = ep_ent.get("entry_point_coverage", 1.0)
+    ep_rank = _low_value_rank(ep_cov, 0.7, 0.5)
+    if not ep_rank:
+        return []
+    return [(ep_rank[0], "(aggregate)", "Diversity", "EP Coverage", ep_cov, ep_rank[1])]
+
+
+def _collect_diversity_outliers(
+    ev: dict[str, Any],
+) -> list[tuple[str, str, str, str, float | int | str, str]]:
+    """Collect aggregate diversity outlier rows."""
+    outliers: list[tuple[str, str, str, str, float | int | str, str]] = []
+    diversity = ev.get("diversity", {})
+    outliers.extend(_collect_title_outliers(diversity))
+    outliers.extend(_collect_ep_coverage_outliers(diversity))
+    return outliers
+
+
+def _collect_scorecard_outliers(
+    ev: dict[str, Any],
+) -> list[tuple[str, str, str, str, float | int | str, str]]:
+    """Scan scorecard evaluation data and return outlier rows.
+
+    Each row is ``(severity, scenario_id, group, metric, value, css_cls)``
+    where *severity* is ``"red"`` or ``"yellow"`` (for sort ordering) and
+    *css_cls* is the badge CSS class.
+
+    Returns:
+        Sorted list: red items first, then yellow, each alphabetical by
+        scenario ID within its severity tier.
+    """
+    outliers: list[tuple[str, str, str, str, float | int | str, str]] = []
+    outliers.extend(_collect_consistency_outliers(ev))
+    outliers.extend(_collect_technique_agreement_outliers(ev))
+    outliers.extend(_collect_plausibility_outliers(ev))
+    outliers.extend(_collect_diversity_outliers(ev))
 
     # Sort: red first, then yellow; within each tier, alphabetical by scenario
     severity_order = {"red": 0, "yellow": 1}
@@ -343,47 +452,387 @@ def _build_outliers_panel(
     )
 
 
-def _build_versioned_scorecard_section(scorecard_data: dict[str, Any]) -> str:
-    """Render strict typed metrics without inferring meaning from missing values."""
-    labels = (
-        ("presence_coverage", "Presence / Coverage"),
-        ("validity_grounding", "Validity / Grounding"),
-        ("cross_artifact_agreement", "Cross-artifact Agreement"),
-        ("semantic_quality_diagnostics", "Semantic Quality / Diagnostics"),
-        ("release_qualification", "Release Qualification"),
-    )
-    groups = ""
-    for key, label in labels:
-        metrics = scorecard_data.get(key, {}).get("metrics", {})
-        rows = ""
-        for metric_id, metric in metrics.items():
-            status = str(metric.get("status", "error"))
-            css = {
-                "pass": "scorecard-badge-green",
-                "fail": "scorecard-badge-red",
-                "not_applicable": "scorecard-badge-yellow",
-                "error": "scorecard-badge-red",
-            }.get(status, "scorecard-badge-red")
-            numerator = metric.get("numerator")
-            denominator = metric.get("denominator")
-            fraction = "—"
-            if numerator is not None:
-                fraction = str(numerator)
-                if denominator is not None:
-                    fraction += f" / {denominator}"
-            value = metric.get("value")
-            rendered_value = "—" if value is None else f"{float(value):.4f}"
-            evidence = "; ".join(str(item) for item in metric.get("evidence", []))
-            affected = ", ".join(str(item) for item in metric.get("affected_ids", []))
-            rows += (
-                "<tr>"
-                f"<td>{_esc(metric_id)}</td>"
-                f'<td><span class="scorecard-badge {css}">{_esc(status)}</span></td>'
-                f"<td>{_esc(fraction)}</td><td>{_esc(rendered_value)}</td>"
-                f"<td>{_esc(evidence)}</td><td>{_esc(affected) or '—'}</td>"
-                "</tr>"
+def _metric_badge_class(value: float) -> str:
+    """Return the scorecard badge class for a 0-1 metric value."""
+    if value >= 0.9:
+        return "scorecard-badge-green"
+    if value >= 0.7:
+        return "scorecard-badge-yellow"
+    return "scorecard-badge-red"
+
+
+def _build_consistency_detail(per_scenario_consistency: dict[str, Any]) -> str:
+    """Render the per-scenario consistency breakdown table."""
+    if not per_scenario_consistency:
+        return ""
+    rows = ""
+    for sid, metrics in per_scenario_consistency.items():
+        za = metrics.get("zone_alignment", 0)
+        epa = metrics.get("entry_point_agreement", 0)
+        snc = metrics.get("step_node_correspondence", 0)
+        za_cls = _metric_badge_class(za)
+        epa_cls = "scorecard-badge-green" if epa == 1 else "scorecard-badge-red"
+        snc_cls = _metric_badge_class(snc)
+        rows += (
+            f"<tr>"
+            f"<td>{_esc(sid)}</td>"
+            f'<td><span class="scorecard-badge {za_cls}">{za:.2f}</span></td>'
+            f'<td><span class="scorecard-badge {epa_cls}">{epa}</span></td>'
+            f'<td><span class="scorecard-badge {snc_cls}">{snc:.2f}</span></td>'
+            f"</tr>"
+        )
+    return f"""
+        <details class="expandable" style="margin-top:10px;">
+          <summary>Per-Scenario Breakdown</summary>
+          <table class="scorecard-detail-table">
+            <thead><tr>
+              <th>Scenario</th>
+              <th data-tooltip="{_esc(_SCORECARD_METRIC_TOOLTIPS.get("Zone Alignment", ""))}">Zone Alignment</th>
+              <th data-tooltip="{_esc(_SCORECARD_METRIC_TOOLTIPS.get("Entry Point Agreement", ""))}">Entry Point Agreement</th>
+              <th data-tooltip="{_esc(_SCORECARD_METRIC_TOOLTIPS.get("Step-Node Correspondence", ""))}">Step-Node Correspondence</th>
+            </tr></thead>
+            <tbody>{rows}</tbody>
+          </table>
+        </details>"""
+
+
+def _build_consistency_group(ev: dict[str, Any]) -> str:
+    """Render the Consistency metric group."""
+    consistency = ev.get("consistency", {})
+    consistency_badges = ""
+    if consistency:
+        mean = consistency.get("mean", 0)
+        stddev = consistency.get("stddev", 0)
+        consistency_badges += _scorecard_badge(mean, "Mean")
+        consistency_badges += _scorecard_badge(
+            1.0 - stddev,
+            f"Stddev: {stddev:.3f}",
+            invert=False,
+            tooltip=(
+                "Standard deviation of per-scenario consistency scores. "
+                "Lower values mean more uniform quality across scenarios"
+            ),
+        )
+
+    per_scenario_consistency = consistency.get("per_scenario", {})
+    consistency_detail = _build_consistency_detail(per_scenario_consistency)
+
+    consistency_tip = _SCORECARD_METRIC_TOOLTIPS.get("Consistency", "")
+    return f"""
+    <div class="scorecard-group">
+      <div class="scorecard-group-title" data-tooltip="{_esc(consistency_tip)}">Consistency</div>
+      <div class="scorecard-metrics">{consistency_badges}</div>
+      {consistency_detail}
+    </div>"""
+
+
+def _build_gherkin_group(ev: dict[str, Any]) -> str:
+    """Render the Gherkin Quality metric group ('' when no Gherkin data)."""
+    gherkin = ev.get("gherkin", {})
+    gherkin_badges = ""
+    if gherkin:
+        psr = gherkin.get("parse_success_rate", 0)
+        msc = gherkin.get("mean_step_count", 0)
+        tag_con = gherkin.get("tag_consistency", {})
+        ig = tag_con.get("inconsistent_groups", 0)
+        bm_warnings = gherkin.get("background_missing_warnings", [])
+        gherkin_badges += _scorecard_badge(psr, "Parse Success Rate")
+        msc_tip = _SCORECARD_METRIC_TOOLTIPS.get("Mean Step Count", "")
+        gherkin_badges += (
+            f'<span class="scorecard-badge scorecard-badge-green"'
+            f' data-tooltip="{_esc(msc_tip)}">'
+            f"Mean Step Count: {msc:.1f}</span>"
+        )
+        gherkin_badges += _scorecard_badge(ig, "Inconsistent Tag Groups", invert=True)
+        if bm_warnings:
+            bw_tip = _SCORECARD_METRIC_TOOLTIPS.get("Background Warnings", "")
+            gherkin_badges += (
+                f'<span class="scorecard-badge scorecard-badge-yellow"'
+                f' data-tooltip="{_esc(bw_tip)}">'
+                f"Background Warnings: {len(bm_warnings)}</span>"
             )
-        groups += f"""
+
+    gherkin_tip = _SCORECARD_METRIC_TOOLTIPS.get("Gherkin Quality", "")
+    if not gherkin_badges:
+        return ""
+    return f"""
+    <div class="scorecard-group">
+      <div class="scorecard-group-title" data-tooltip="{_esc(gherkin_tip)}">Gherkin Quality</div>
+      <div class="scorecard-metrics">{gherkin_badges}</div>
+    </div>"""
+
+
+def _build_grounding_group(ev: dict[str, Any]) -> str:
+    """Render the Grounding metric group ('' when no grounding data)."""
+    grounding = ev.get("grounding", {})
+    grounding_badges = ""
+    if grounding:
+        tiv = grounding.get("threat_id_validity", 0)
+        dr = grounding.get("dangling_references", 0)
+        tig = grounding.get("technique_id_grounding", 0)
+        utr = grounding.get("ungrounded_technique_references", 0)
+        grounding_badges += _scorecard_badge(tiv, "Threat ID Validity")
+        grounding_badges += _scorecard_badge(dr, "Dangling References", invert=True)
+        grounding_badges += _scorecard_badge(tig, "Technique ID Grounding")
+        grounding_badges += _scorecard_badge(
+            utr, "Ungrounded Technique Refs", invert=True
+        )
+
+    grounding_tip = _SCORECARD_METRIC_TOOLTIPS.get("Grounding", "")
+    if not grounding_badges:
+        return ""
+    return f"""
+    <div class="scorecard-group">
+      <div class="scorecard-group-title" data-tooltip="{_esc(grounding_tip)}">Grounding</div>
+      <div class="scorecard-metrics">{grounding_badges}</div>
+    </div>"""
+
+
+def _ta_row(sid: str, detail: dict[str, Any]) -> str:
+    """Render one per-scenario mapping-agreement table row."""
+    score = detail.get("technique_agreement", 0)
+    score_cls = _metric_badge_class(score)
+    classifications = _display_or_dash(
+        _join_strs(detail.get("scenario_classifications", []))
+    )
+    missing_tree = _display_or_dash(_join_strs(detail.get("missing_from_tree", [])))
+    missing_spec = _display_or_dash(_join_strs(detail.get("missing_from_spec", [])))
+    return (
+        f"<tr>"
+        f"<td>{_esc(sid)}</td>"
+        f'<td><span class="scorecard-badge {score_cls}">{score:.2f}</span></td>'
+        f"<td>{_esc(classifications)}</td>"
+        f"<td>{_esc(missing_tree)}</td>"
+        f"<td>{_esc(missing_spec)}</td>"
+        f"</tr>"
+    )
+
+
+def _build_ta_per_scenario(ta_per_scenario: dict[str, Any]) -> str:
+    """Render the per-scenario mapping disagreement table."""
+    if not ta_per_scenario:
+        return ""
+    ta_rows = ""
+    for sid, detail in ta_per_scenario.items():
+        ta_rows += _ta_row(sid, detail)
+    return f"""
+        <details class="expandable" style="margin-top:10px;">
+          <summary>Per-Scenario Disagreements</summary>
+          <table class="scorecard-detail-table">
+            <thead><tr>
+              <th>Scenario</th>
+              <th>Agreement</th>
+              <th>Scenario Classifications</th>
+              <th data-tooltip="Exact projected-step mappings present in behavior spec but missing from attack tree">Missing from Tree</th>
+              <th data-tooltip="Exact projected-step mappings present in attack tree but missing from behavior spec">Missing from Spec</th>
+            </tr></thead>
+            <tbody>{ta_rows}</tbody>
+          </table>
+        </details>"""
+
+
+def _build_technique_agreement_group(ev: dict[str, Any]) -> str:
+    """Render the Projected-step Mapping Agreement group ('' when absent)."""
+    technique_agreement = ev.get("technique_agreement", {})
+    if not technique_agreement:
+        return ""
+    mta = technique_agreement.get("mean_technique_agreement", 0)
+    ta_badges = _scorecard_badge(mta, "Mean Technique Agreement")
+
+    ta_per_scenario = technique_agreement.get("per_scenario", {})
+    ta_detail = _build_ta_per_scenario(ta_per_scenario)
+
+    ta_tip = _SCORECARD_METRIC_TOOLTIPS.get("Technique Agreement", "")
+    return f"""
+    <div class="scorecard-group">
+      <div class="scorecard-group-title" data-tooltip="{_esc(ta_tip)}">Projected-step Mapping Agreement</div>
+      <div class="scorecard-metrics">{ta_badges}</div>
+      {ta_detail}
+    </div>"""
+
+
+def _build_diversity_entropy_badges(ep_ent: Any) -> str:
+    """Render the entry-point entropy/coverage badges ('' when absent)."""
+    if not isinstance(ep_ent, dict):
+        return ""
+    entropy = ep_ent.get("entropy", 0)
+    ep_cov = ep_ent.get("entry_point_coverage", 0)
+    ep_ent_tip = _SCORECARD_METRIC_TOOLTIPS.get("EP Entropy", "")
+    badges = (
+        f'<span class="scorecard-badge scorecard-badge-green"'
+        f' data-tooltip="{_esc(ep_ent_tip)}">'
+        f"EP Entropy: {entropy:.2f}</span>"
+    )
+    return badges + _scorecard_badge(ep_cov, "EP Coverage")
+
+
+def _build_diversity_zone_badges(zone_cov: Any) -> str:
+    """Render the zone-coverage badges ('' when absent)."""
+    if not isinstance(zone_cov, dict):
+        return ""
+    azc = zone_cov.get("active_zone_coverage", 0)
+    badges = _scorecard_badge(azc, "Active Zone Coverage")
+    violations = zone_cov.get("out_of_scope_zone_violations", [])
+    if violations:
+        badges += _scorecard_badge(len(violations), "Zone Violations", invert=True)
+    return badges
+
+
+def _scalar_scorecard_badge(diversity: dict[str, Any], key: str, label: str) -> str:
+    """Render a scalar diversity metric badge ('' when not numeric)."""
+    value = diversity.get(key, 0)
+    if not isinstance(value, (int, float)):
+        return ""
+    return _scorecard_badge(value, label)
+
+
+def _diversity_badges(diversity: dict[str, Any]) -> str:
+    """Render all diversity badges for the diversity group."""
+    badges = ""
+    if diversity:
+        badges += _build_diversity_entropy_badges(
+            diversity.get("entry_point_entropy", {})
+        )
+        badges += _build_diversity_zone_badges(diversity.get("zone_coverage", {}))
+        badges += _scalar_scorecard_badge(
+            diversity, "actor_type_entropy", "Actor Type Entropy"
+        )
+        badges += _scalar_scorecard_badge(
+            diversity, "capability_level_evenness", "Capability Evenness"
+        )
+        badges += _scalar_scorecard_badge(
+            diversity, "title_uniqueness", "Title Uniqueness"
+        )
+    return badges
+
+
+def _build_diversity_group(ev: dict[str, Any]) -> str:
+    """Render the Diversity metric group ('' when no diversity data)."""
+    diversity = ev.get("diversity", {})
+    diversity_badges = _diversity_badges(diversity)
+
+    diversity_tip = _SCORECARD_METRIC_TOOLTIPS.get("Diversity", "")
+    if not diversity_badges:
+        return ""
+    return f"""
+    <div class="scorecard-group">
+      <div class="scorecard-group-title" data-tooltip="{_esc(diversity_tip)}">Diversity</div>
+      <div class="scorecard-metrics">{diversity_badges}</div>
+    </div>"""
+
+
+def _violation_rows(per_scenario_p: dict[str, Any]) -> str:
+    """Render the per-scenario capability violation table rows."""
+    violation_items = ""
+    for sid, issues in per_scenario_p.items():
+        if isinstance(issues, list):
+            for issue in issues:
+                violation_items += (
+                    f"<tr><td>{_esc(sid)}</td><td>{_esc(str(issue))}</td></tr>"
+                )
+    return violation_items
+
+
+def _build_violations_detail(per_scenario_p: dict[str, Any]) -> str:
+    """Render the per-scenario capability violation details table."""
+    violation_items = _violation_rows(per_scenario_p)
+    if not violation_items:
+        return ""
+    return f"""
+        <details class="expandable" style="margin-top:10px;">
+          <summary>Violation Details</summary>
+          <table class="scorecard-detail-table">
+            <thead><tr><th>Scenario</th><th>Issue</th></tr></thead>
+            <tbody>{violation_items}</tbody>
+          </table>
+        </details>"""
+
+
+def _build_plausibility_group(ev: dict[str, Any]) -> str:
+    """Render the Plausibility metric group ('' when absent)."""
+    plausibility = ev.get("plausibility", {})
+    if not plausibility:
+        return ""
+    violation_count = plausibility.get("capability_complexity_violation_count", 0)
+    plausibility_badges = _scorecard_badge(
+        violation_count, "Capability Violations", invert=True
+    )
+
+    per_scenario_p = plausibility.get("per_scenario", {})
+    violations_detail = _build_violations_detail(per_scenario_p)
+
+    plausibility_tip = _SCORECARD_METRIC_TOOLTIPS.get("Plausibility", "")
+    return f"""
+    <div class="scorecard-group">
+      <div class="scorecard-group-title" data-tooltip="{_esc(plausibility_tip)}">Plausibility</div>
+      <div class="scorecard-metrics">{plausibility_badges}</div>
+      {violations_detail}
+    </div>"""
+
+
+def _build_legacy_summary_html(ev: dict[str, Any]) -> str:
+    """Render the legacy scorecard summary stat blocks."""
+    scenario_count = ev.get("scenario_count", 0)
+    feature_file_count = ev.get("feature_file_count", 0)
+    return f"""
+    <div class="scorecard-summary">
+      <div class="scorecard-stat">
+        <div class="scorecard-stat-value">{scenario_count}</div>
+        <div class="scorecard-stat-label">Scenarios</div>
+      </div>
+      <div class="scorecard-stat">
+        <div class="scorecard-stat-value">{feature_file_count}</div>
+        <div class="scorecard-stat-label">Feature Files</div>
+      </div>
+    </div>"""
+
+
+_SCORECARD_VERSIONED_GROUPS: tuple[tuple[str, str], ...] = (
+    ("presence_coverage", "Presence / Coverage"),
+    ("validity_grounding", "Validity / Grounding"),
+    ("cross_artifact_agreement", "Cross-artifact Agreement"),
+    ("semantic_quality_diagnostics", "Semantic Quality / Diagnostics"),
+    ("release_qualification", "Release Qualification"),
+)
+
+
+def _build_versioned_metric_row(metric_id: str, metric: dict[str, Any]) -> str:
+    """Render one metric row of a versioned scorecard group."""
+    status = str(metric.get("status", "error"))
+    css = {
+        "pass": "scorecard-badge-green",
+        "fail": "scorecard-badge-red",
+        "not_applicable": "scorecard-badge-yellow",
+        "error": "scorecard-badge-red",
+    }.get(status, "scorecard-badge-red")
+    numerator = metric.get("numerator")
+    denominator = metric.get("denominator")
+    fraction = "—"
+    if numerator is not None:
+        fraction = str(numerator)
+        if denominator is not None:
+            fraction += f" / {denominator}"
+    value = metric.get("value")
+    rendered_value = "—" if value is None else f"{float(value):.4f}"
+    evidence = _join_strs(metric.get("evidence", []), "; ")
+    affected = _join_strs(metric.get("affected_ids", []))
+    return (
+        "<tr>"
+        f"<td>{_esc(metric_id)}</td>"
+        f'<td><span class="scorecard-badge {css}">{_esc(status)}</span></td>'
+        f"<td>{_esc(fraction)}</td><td>{_esc(rendered_value)}</td>"
+        f"<td>{_esc(evidence)}</td><td>{_esc(affected) or '—'}</td>"
+        "</tr>"
+    )
+
+
+def _build_versioned_group(group_data: dict[str, Any], label: str) -> str:
+    """Render one metric group of the versioned scorecard."""
+    metrics = group_data.get("metrics", {})
+    rows = ""
+    for metric_id, metric in metrics.items():
+        rows += _build_versioned_metric_row(metric_id, metric)
+    return f"""
         <div class="scorecard-group">
           <div class="scorecard-group-title">{_esc(label)}</div>
           <table class="scorecard-detail-table">
@@ -392,6 +841,13 @@ def _build_versioned_scorecard_section(scorecard_data: dict[str, Any]) -> str:
             <tbody>{rows}</tbody>
           </table>
         </div>"""
+
+
+def _build_versioned_scorecard_section(scorecard_data: dict[str, Any]) -> str:
+    """Render strict typed metrics without inferring meaning from missing values."""
+    groups = ""
+    for key, label in _SCORECARD_VERSIONED_GROUPS:
+        groups += _build_versioned_group(scorecard_data.get(key, {}), label)
     qualification = scorecard_data.get("qualification", {})
     qualification_status = str(qualification.get("status", "error"))
     failures = qualification.get("failed_gate_ids", [])
@@ -435,296 +891,18 @@ def build_scorecard_section(scorecard_data: dict[str, Any]) -> str:
     if not ev:
         return ""
 
-    scenario_count = ev.get("scenario_count", 0)
-    feature_file_count = ev.get("feature_file_count", 0)
-
-    # --- Summary stats ---
-    summary_html = f"""
-    <div class="scorecard-summary">
-      <div class="scorecard-stat">
-        <div class="scorecard-stat-value">{scenario_count}</div>
-        <div class="scorecard-stat-label">Scenarios</div>
-      </div>
-      <div class="scorecard-stat">
-        <div class="scorecard-stat-value">{feature_file_count}</div>
-        <div class="scorecard-stat-label">Feature Files</div>
-      </div>
-    </div>"""
+    summary_html = _build_legacy_summary_html(ev)
 
     # --- Outliers panel (rendered after summary, before metric groups) ---
     outliers = _collect_scorecard_outliers(ev)
     outliers_html = _build_outliers_panel(outliers)
 
-    # --- Consistency ---
-    consistency = ev.get("consistency", {})
-    consistency_badges = ""
-    if consistency:
-        mean = consistency.get("mean", 0)
-        stddev = consistency.get("stddev", 0)
-        consistency_badges += _scorecard_badge(mean, "Mean")
-        consistency_badges += _scorecard_badge(
-            1.0 - stddev,
-            f"Stddev: {stddev:.3f}",
-            invert=False,
-            tooltip=(
-                "Standard deviation of per-scenario consistency scores. "
-                "Lower values mean more uniform quality across scenarios"
-            ),
-        )
-
-    per_scenario_consistency = consistency.get("per_scenario", {})
-    consistency_detail = ""
-    if per_scenario_consistency:
-        rows = ""
-        for sid, metrics in per_scenario_consistency.items():
-            za = metrics.get("zone_alignment", 0)
-            epa = metrics.get("entry_point_agreement", 0)
-            snc = metrics.get("step_node_correspondence", 0)
-            za_cls = (
-                "scorecard-badge-green"
-                if za >= 0.9
-                else ("scorecard-badge-yellow" if za >= 0.7 else "scorecard-badge-red")
-            )
-            epa_cls = "scorecard-badge-green" if epa == 1 else "scorecard-badge-red"
-            snc_cls = (
-                "scorecard-badge-green"
-                if snc >= 0.9
-                else ("scorecard-badge-yellow" if snc >= 0.7 else "scorecard-badge-red")
-            )
-            rows += (
-                f"<tr>"
-                f"<td>{_esc(sid)}</td>"
-                f'<td><span class="scorecard-badge {za_cls}">{za:.2f}</span></td>'
-                f'<td><span class="scorecard-badge {epa_cls}">{epa}</span></td>'
-                f'<td><span class="scorecard-badge {snc_cls}">{snc:.2f}</span></td>'
-                f"</tr>"
-            )
-        consistency_detail = f"""
-        <details class="expandable" style="margin-top:10px;">
-          <summary>Per-Scenario Breakdown</summary>
-          <table class="scorecard-detail-table">
-            <thead><tr>
-              <th>Scenario</th>
-              <th data-tooltip="{_esc(_SCORECARD_METRIC_TOOLTIPS.get("Zone Alignment", ""))}">Zone Alignment</th>
-              <th data-tooltip="{_esc(_SCORECARD_METRIC_TOOLTIPS.get("Entry Point Agreement", ""))}">Entry Point Agreement</th>
-              <th data-tooltip="{_esc(_SCORECARD_METRIC_TOOLTIPS.get("Step-Node Correspondence", ""))}">Step-Node Correspondence</th>
-            </tr></thead>
-            <tbody>{rows}</tbody>
-          </table>
-        </details>"""
-
-    consistency_tip = _SCORECARD_METRIC_TOOLTIPS.get("Consistency", "")
-    consistency_html = f"""
-    <div class="scorecard-group">
-      <div class="scorecard-group-title" data-tooltip="{_esc(consistency_tip)}">Consistency</div>
-      <div class="scorecard-metrics">{consistency_badges}</div>
-      {consistency_detail}
-    </div>"""
-
-    # --- Gherkin ---
-    gherkin = ev.get("gherkin", {})
-    gherkin_badges = ""
-    if gherkin:
-        psr = gherkin.get("parse_success_rate", 0)
-        msc = gherkin.get("mean_step_count", 0)
-        tag_con = gherkin.get("tag_consistency", {})
-        ig = tag_con.get("inconsistent_groups", 0)
-        bm_warnings = gherkin.get("background_missing_warnings", [])
-        gherkin_badges += _scorecard_badge(psr, "Parse Success Rate")
-        msc_tip = _SCORECARD_METRIC_TOOLTIPS.get("Mean Step Count", "")
-        gherkin_badges += (
-            f'<span class="scorecard-badge scorecard-badge-green"'
-            f' data-tooltip="{_esc(msc_tip)}">'
-            f"Mean Step Count: {msc:.1f}</span>"
-        )
-        gherkin_badges += _scorecard_badge(ig, "Inconsistent Tag Groups", invert=True)
-        if bm_warnings:
-            bw_tip = _SCORECARD_METRIC_TOOLTIPS.get("Background Warnings", "")
-            gherkin_badges += (
-                f'<span class="scorecard-badge scorecard-badge-yellow"'
-                f' data-tooltip="{_esc(bw_tip)}">'
-                f"Background Warnings: {len(bm_warnings)}</span>"
-            )
-
-    gherkin_tip = _SCORECARD_METRIC_TOOLTIPS.get("Gherkin Quality", "")
-    gherkin_html = (
-        f"""
-    <div class="scorecard-group">
-      <div class="scorecard-group-title" data-tooltip="{_esc(gherkin_tip)}">Gherkin Quality</div>
-      <div class="scorecard-metrics">{gherkin_badges}</div>
-    </div>"""
-        if gherkin_badges
-        else ""
-    )
-
-    # --- Grounding ---
-    grounding = ev.get("grounding", {})
-    grounding_badges = ""
-    if grounding:
-        tiv = grounding.get("threat_id_validity", 0)
-        dr = grounding.get("dangling_references", 0)
-        tig = grounding.get("technique_id_grounding", 0)
-        utr = grounding.get("ungrounded_technique_references", 0)
-        grounding_badges += _scorecard_badge(tiv, "Threat ID Validity")
-        grounding_badges += _scorecard_badge(dr, "Dangling References", invert=True)
-        grounding_badges += _scorecard_badge(tig, "Technique ID Grounding")
-        grounding_badges += _scorecard_badge(
-            utr, "Ungrounded Technique Refs", invert=True
-        )
-
-    grounding_tip = _SCORECARD_METRIC_TOOLTIPS.get("Grounding", "")
-    grounding_html = (
-        f"""
-    <div class="scorecard-group">
-      <div class="scorecard-group-title" data-tooltip="{_esc(grounding_tip)}">Grounding</div>
-      <div class="scorecard-metrics">{grounding_badges}</div>
-    </div>"""
-        if grounding_badges
-        else ""
-    )
-
-    # --- Technique Agreement ---
-    technique_agreement = ev.get("technique_agreement", {})
-    technique_agreement_html = ""
-    if technique_agreement:
-        mta = technique_agreement.get("mean_technique_agreement", 0)
-        ta_badges = _scorecard_badge(mta, "Mean Technique Agreement")
-
-        ta_per_scenario = technique_agreement.get("per_scenario", {})
-        ta_detail = ""
-        if ta_per_scenario:
-            ta_rows = ""
-            for sid, detail in ta_per_scenario.items():
-                score = detail.get("technique_agreement", 0)
-                classifications = ", ".join(detail.get("scenario_classifications", []))
-                missing_tree = ", ".join(detail.get("missing_from_tree", []))
-                missing_spec = ", ".join(detail.get("missing_from_spec", []))
-                score_cls = (
-                    "scorecard-badge-green"
-                    if score >= 0.9
-                    else (
-                        "scorecard-badge-yellow"
-                        if score >= 0.7
-                        else "scorecard-badge-red"
-                    )
-                )
-                ta_rows += (
-                    f"<tr>"
-                    f"<td>{_esc(sid)}</td>"
-                    f'<td><span class="scorecard-badge {score_cls}">{score:.2f}</span></td>'
-                    f"<td>{_esc(classifications) or '-'}</td>"
-                    f"<td>{_esc(missing_tree) or '-'}</td>"
-                    f"<td>{_esc(missing_spec) or '-'}</td>"
-                    f"</tr>"
-                )
-            ta_detail = f"""
-        <details class="expandable" style="margin-top:10px;">
-          <summary>Per-Scenario Disagreements</summary>
-          <table class="scorecard-detail-table">
-            <thead><tr>
-              <th>Scenario</th>
-              <th>Agreement</th>
-              <th>Scenario Classifications</th>
-              <th data-tooltip="Exact projected-step mappings present in behavior spec but missing from attack tree">Missing from Tree</th>
-              <th data-tooltip="Exact projected-step mappings present in attack tree but missing from behavior spec">Missing from Spec</th>
-            </tr></thead>
-            <tbody>{ta_rows}</tbody>
-          </table>
-        </details>"""
-
-        ta_tip = _SCORECARD_METRIC_TOOLTIPS.get("Technique Agreement", "")
-        technique_agreement_html = f"""
-    <div class="scorecard-group">
-      <div class="scorecard-group-title" data-tooltip="{_esc(ta_tip)}">Projected-step Mapping Agreement</div>
-      <div class="scorecard-metrics">{ta_badges}</div>
-      {ta_detail}
-    </div>"""
-
-    # --- Diversity ---
-    diversity = ev.get("diversity", {})
-    diversity_badges = ""
-    if diversity:
-        ep_ent = diversity.get("entry_point_entropy", {})
-        if isinstance(ep_ent, dict):
-            entropy = ep_ent.get("entropy", 0)
-            ep_cov = ep_ent.get("entry_point_coverage", 0)
-            ep_ent_tip = _SCORECARD_METRIC_TOOLTIPS.get("EP Entropy", "")
-            diversity_badges += (
-                f'<span class="scorecard-badge scorecard-badge-green"'
-                f' data-tooltip="{_esc(ep_ent_tip)}">'
-                f"EP Entropy: {entropy:.2f}</span>"
-            )
-            diversity_badges += _scorecard_badge(ep_cov, "EP Coverage")
-
-        zone_cov = diversity.get("zone_coverage", {})
-        if isinstance(zone_cov, dict):
-            azc = zone_cov.get("active_zone_coverage", 0)
-            diversity_badges += _scorecard_badge(azc, "Active Zone Coverage")
-            violations = zone_cov.get("out_of_scope_zone_violations", [])
-            if violations:
-                diversity_badges += _scorecard_badge(
-                    len(violations), "Zone Violations", invert=True
-                )
-
-        ate = diversity.get("actor_type_entropy", 0)
-        if isinstance(ate, (int, float)):
-            diversity_badges += _scorecard_badge(ate, "Actor Type Entropy")
-
-        cle = diversity.get("capability_level_evenness", 0)
-        if isinstance(cle, (int, float)):
-            diversity_badges += _scorecard_badge(cle, "Capability Evenness")
-
-        tu = diversity.get("title_uniqueness", 0)
-        if isinstance(tu, (int, float)):
-            diversity_badges += _scorecard_badge(tu, "Title Uniqueness")
-
-    diversity_tip = _SCORECARD_METRIC_TOOLTIPS.get("Diversity", "")
-    diversity_html = (
-        f"""
-    <div class="scorecard-group">
-      <div class="scorecard-group-title" data-tooltip="{_esc(diversity_tip)}">Diversity</div>
-      <div class="scorecard-metrics">{diversity_badges}</div>
-    </div>"""
-        if diversity_badges
-        else ""
-    )
-
-    # --- Plausibility ---
-    plausibility = ev.get("plausibility", {})
-    plausibility_html = ""
-    if plausibility:
-        violation_count = plausibility.get("capability_complexity_violation_count", 0)
-        plausibility_badges = _scorecard_badge(
-            violation_count, "Capability Violations", invert=True
-        )
-
-        per_scenario_p = plausibility.get("per_scenario", {})
-        violations_detail = ""
-        if per_scenario_p:
-            violation_items = ""
-            for sid, issues in per_scenario_p.items():
-                if issues and isinstance(issues, list):
-                    for issue in issues:
-                        violation_items += (
-                            f"<tr><td>{_esc(sid)}</td><td>{_esc(str(issue))}</td></tr>"
-                        )
-            if violation_items:
-                violations_detail = f"""
-        <details class="expandable" style="margin-top:10px;">
-          <summary>Violation Details</summary>
-          <table class="scorecard-detail-table">
-            <thead><tr><th>Scenario</th><th>Issue</th></tr></thead>
-            <tbody>{violation_items}</tbody>
-          </table>
-        </details>"""
-
-        plausibility_tip = _SCORECARD_METRIC_TOOLTIPS.get("Plausibility", "")
-        plausibility_html = f"""
-    <div class="scorecard-group">
-      <div class="scorecard-group-title" data-tooltip="{_esc(plausibility_tip)}">Plausibility</div>
-      <div class="scorecard-metrics">{plausibility_badges}</div>
-      {violations_detail}
-    </div>"""
+    consistency_html = _build_consistency_group(ev)
+    gherkin_html = _build_gherkin_group(ev)
+    grounding_html = _build_grounding_group(ev)
+    technique_agreement_html = _build_technique_agreement_group(ev)
+    diversity_html = _build_diversity_group(ev)
+    plausibility_html = _build_plausibility_group(ev)
 
     return f"""
     <div id="sec-scorecard" class="section">

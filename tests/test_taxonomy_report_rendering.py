@@ -734,3 +734,44 @@ def test_no_scorecard_omits_section_and_sidebar_link(tmp_path: Path) -> None:
 
     assert "Eval Scorecard" not in html
     assert '<a href="#sec-scorecard">' not in html
+
+
+# ---------------------------------------------------------------------------
+# Priority bucket statistics
+# ---------------------------------------------------------------------------
+
+_STAT_NUM_RE = re.compile(
+    r'stat-number">(\d+)</span>\s*<span class="stat-label">'
+    r"(High|Medium|Low) Priority</span>"
+)
+
+
+def test_priority_bucket_counts_rendered_in_dashboard(tmp_path: Path) -> None:
+    scenarios = [
+        _scenario(sid=f"scn-p{i}", agentic_threat_ids=["T6"]) for i in range(6)
+    ]
+    for scenario, composite in zip(scenarios, [0.7, 0.4, 0.9, 0.5, 0.2]):
+        scenario["priority"] = {"composite": composite}
+    # The last scenario has no priority block: its composite defaults to 0.
+    scenarios[-1].pop("priority")
+    data = ReportData(
+        scenarios=scenarios,
+        manifest_data={"seeds_generated": 6, "funnel": {}},
+    )
+
+    html = _html(data, tmp_path)
+
+    # The scenario dashboard self-counts buckets; the run summary renders the
+    # counts computed by the report generator, so pin both.
+    assert {label: int(c) for c, label in _STAT_NUM_RE.findall(html)} == {
+        "High": 2,
+        "Medium": 2,
+        "Low": 2,
+    }
+    idx = html.find('scenario-section-title">Outcome Summary</div>')
+    assert idx != -1
+    summary_stats = {
+        label: int(c)
+        for c, label in _STAT_NUM_RE.findall(html[idx : idx + 2000])
+    }
+    assert summary_stats == {"High": 2, "Medium": 2, "Low": 2}
