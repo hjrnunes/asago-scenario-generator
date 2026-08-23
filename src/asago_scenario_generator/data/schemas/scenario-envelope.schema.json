@@ -1425,7 +1425,7 @@
               "type": "array",
               "items": {
                 "type": "string",
-                "pattern": "^AML\\.T\\d{4}(\\.\\d{3})?$"
+                "pattern": "^(AML\\.T\\d{4}(\\.\\d{3})?|S[123468]|M[1234578]|L[1-5]|T[12358]|EX\\d+)$"
               }
             },
             {
