@@ -231,6 +231,8 @@ def _filter_attack_patterns(
 def determine_threat_scope(
     profile: CapabilityProfile,
     threats_path: str | Path | None = None,
+    kc_mapping_path: str | Path | None = None,
+    attack_patterns_path: str | Path | None = None,
 ) -> ThreatScope:
     """Determine which threats are in scope for a given capability profile.
 
@@ -242,6 +244,10 @@ def determine_threat_scope(
         profile: The capability profile to evaluate.
         threats_path: Path to the agentic threats YAML. Defaults to the
             bundled data file.
+        kc_mapping_path: Path to the KC sub-code -> threat mapping YAML.
+            Defaults to the bundled kc-threat-mapping.yaml.
+        attack_patterns_path: Path to a single attack-patterns YAML.
+            Defaults to the bundled attack-pattern catalog.
 
     Returns:
         ThreatScope with in_scope and out_of_scope entries.
@@ -250,11 +256,11 @@ def determine_threat_scope(
     threats = load_agentic_threats(path)
 
     # Load KC→T mapping
-    kc_mapping = load_kc_threat_mapping()
+    kc_mapping = load_kc_threat_mapping(kc_mapping_path)
     enabled = _compute_kc_enabled_threats(profile, kc_mapping)
 
     # Load attack patterns and group by threat_id for data-driven gating
-    patterns = load_attack_patterns()
+    patterns = load_attack_patterns(attack_patterns_path)
     threat_to_patterns = build_threat_to_patterns_index(patterns)
     logger.info(
         "Loaded %d attack patterns across %d threats for data-driven gating",

@@ -131,6 +131,7 @@ _STEM_TAGS: dict[str, str] = {
     "duplicate-assertion": "shadow_cleanup",
     "no-shadowing-invariant": "shadow_cleanup",
     "registration-priority": "shadow_cleanup",
+    "taxonomy_threat_surface_derivation": "taxonomy_threat_surface",
 }
 
 # Stem-prefix to tag mapping (checked after exact stems).

@@ -185,6 +185,8 @@ def determine_threat_surface(
     sssom_path: str | Path,
     cross_taxonomy_path: str | Path,
     threats_path: str | Path | None = None,
+    kc_mapping_path: str | Path | None = None,
+    attack_patterns_path: str | Path | None = None,
 ) -> ThreatSurface:
     """Walk the taxonomy chain to build the threat surface.
 
@@ -199,6 +201,12 @@ def determine_threat_surface(
         sssom_path: Path to the SSSOM TSV mapping file.
         cross_taxonomy_path: Path to cross-taxonomy-mappings.yaml.
         threats_path: Optional path to OWASP agentic threats YAML.
+        kc_mapping_path: Optional path to the KC sub-code -> threat
+            mapping YAML used for scope gating. Defaults to the bundled
+            kc-threat-mapping.yaml.
+        attack_patterns_path: Optional path to an attack-patterns YAML
+            used for gating. Defaults to the bundled attack-pattern
+            catalog.
 
     Returns:
         ThreatSurface with actionable entries and governance-only entries.
@@ -218,7 +226,9 @@ def determine_threat_surface(
     t_to_asi = _build_t_to_asi_index(cross_taxonomy)
 
     # --- Hop 3: Filter by capability profile ---
-    threat_scope = determine_threat_scope(profile, threats_path)
+    threat_scope = determine_threat_scope(
+        profile, threats_path, kc_mapping_path, attack_patterns_path
+    )
     in_scope_ids = {e.threat_id for e in threat_scope.in_scope}
     # Build threat_id -> applicable attack pattern IDs
     threat_attack_patterns: dict[str, list[str]] = {
