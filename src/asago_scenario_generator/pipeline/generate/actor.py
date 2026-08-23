@@ -4,39 +4,18 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
-from collections.abc import Mapping, Sequence
-from typing import Annotated, Any, Literal
+from collections.abc import Mapping
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, create_model, field_validator
+from pydantic import BaseModel
 
 from asago_scenario_generator.llm.client import (
     LengthFinishReasonError as LengthFinishReasonError,
     LLMClient,
     LLMResult,
 )
-from asago_scenario_generator.models.capability_profile import (
-    CapabilityProfile,
-    EntryPoint,
-    is_attacker_accessible_ingress,
-)
-from asago_scenario_generator.models.scenario import (
-    ACTOR_TYPES,
-    ActorAccessProvenance,
-    ActorProfile,
-)
-from asago_scenario_generator.pipeline.generate.constants import (
-    _ADVERSARIAL_INTENTION_KEYWORDS,
-    _CAPABILITY_FLOORS,
-    _CAPABILITY_ORDER,
-    _INSIDER_ACTOR_TYPES,
-)
-from asago_scenario_generator.pipeline.generate.actor_rules import (
-    _ep_controllability_to_ingress_mode,
-)
-
-# Preserve the historical actor-module import surface while policy lives in
-# the cycle-free actor_rules leaf.
+from asago_scenario_generator.models.capability_profile import CapabilityProfile
+from asago_scenario_generator.models.scenario import ACTOR_TYPES, ActorProfile
 from asago_scenario_generator.pipeline.generate.actor_rules import (
     _max_capability_level,  # noqa: F401
     compute_compatible_actor_types,  # noqa: F401
@@ -45,515 +24,57 @@ from asago_scenario_generator.pipeline.generate.actor_rules import (
 from asago_scenario_generator.pipeline.generate.actor_context import (
     build_call0_context,
 )
+from asago_scenario_generator.pipeline.generate.constants import (
+    _ADVERSARIAL_INTENTION_KEYWORDS,
+    _CAPABILITY_FLOORS,
+    _CAPABILITY_ORDER,
+)
 from asago_scenario_generator.pipeline.generate.ontology import (
     _lookup_entry_point_controllability,
 )
 from asago_scenario_generator.pipeline.seeds import ScenarioSeed
 from asago_scenario_generator.prompts import render_prompt
 
+# The provider draft protocol and the typed access-provenance policy live in
+# sibling leaf modules (`actor_semantics`, `actor_access`); every name they
+# own is re-exported here so the historical ``generate.actor`` import
+# surface stays intact.
+from asago_scenario_generator.pipeline.generate.actor_semantics import (  # noqa: F401
+    ActorDraftContext,
+    ActorDraftV2,
+    ActorDraftV3,
+    ActorDraftViolation,
+    ActorSemanticDraftError,
+    _actor_choice_inventory,
+    _actor_draft_inventories,
+    _actor_draft_prompt,
+    _capability_floor_violation,
+    _capability_level_inventory,
+    _compatible_actor_types_for_projection,
+    _compile_projected_actor_draft,
+    _derive_canonical_actor_access,
+    _literal_from_handles,
+    _resolve_actor_handles,
+    _selected_step_resource_names,
+    _validate_distinct_resource_handles,
+    compile_actor_draft,
+    create_actor_draft_model,
+    create_actor_draft_v3_model,
+)
+from asago_scenario_generator.pipeline.generate.actor_access import (  # noqa: F401
+    ActorAccessViolation,
+    Call0Response,
+    CompactCall0Response,
+    _Call0Item,
+    _CALL0_ENUM_MAX_LENGTH,
+    _CALL0_EVIDENCE_MAX_LENGTH,
+    _CALL0_ITEM_MAX_LENGTH,
+    _CALL0_LIST_MAX_ITEMS,
+    build_actor_access_provenance,
+    validate_actor_access_provenance,
+)
+
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Intermediate model for structured output
-# ---------------------------------------------------------------------------
-
-# Conservative static bounds for every generated Call 0 field.  The schema
-# is sent to the provider (response_format), so finite maxima keep
-# completion-length risk bounded without reducing the operator-configured
-# completion limit.
-_CALL0_LIST_MAX_ITEMS = 8
-_CALL0_ITEM_MAX_LENGTH = 200
-_CALL0_ENUM_MAX_LENGTH = 64
-_CALL0_EVIDENCE_MAX_LENGTH = 300
-
-_Call0Item = Annotated[str, Field(min_length=1, max_length=_CALL0_ITEM_MAX_LENGTH)]
-
-
-# The V2 protocol is deliberately separate from the legacy Call0 transport.
-# It is the provider/compiler seam for projected non-STPA candidates: the
-# provider authors bounded semantics using request-local handles, and the
-# compiler is the only place that can attach canonical values.
-_ACTOR_DRAFT_MAX_ITEMS = 4
-_ACTOR_DRAFT_RATIONALE_MAX_LENGTH = 400
-_ActorDraftItem = Annotated[str, Field(min_length=1, max_length=_CALL0_ITEM_MAX_LENGTH)]
-
-
-def _validate_distinct_resource_handles(value: list[str]) -> list[str]:
-    """Reject duplicate resource handles in one actor draft."""
-    if len(set(value)) != len(value):
-        raise ValueError("duplicate resource handle in actor draft")
-    return value
-
-
-class ActorDraftV2(BaseModel):
-    """Provider-authored actor semantics without canonical access fields."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    actor_type_handle: str = Field(min_length=1, max_length=32)
-    capability_level_handle: str = Field(min_length=1, max_length=32)
-    beliefs: list[_ActorDraftItem] = Field(
-        min_length=1, max_length=_ACTOR_DRAFT_MAX_ITEMS
-    )
-    desires: list[_ActorDraftItem] = Field(
-        min_length=1, max_length=_ACTOR_DRAFT_MAX_ITEMS
-    )
-    intentions: list[_ActorDraftItem] = Field(
-        min_length=1, max_length=_ACTOR_DRAFT_MAX_ITEMS
-    )
-    resource_handles: list[Annotated[str, Field(min_length=1, max_length=32)]] = Field(
-        default_factory=list, max_length=_ACTOR_DRAFT_MAX_ITEMS
-    )
-    rationale: str | None = Field(
-        default=None, min_length=1, max_length=_ACTOR_DRAFT_RATIONALE_MAX_LENGTH
-    )
-
-    _reject_duplicate_resource_handles = field_validator("resource_handles")(
-        _validate_distinct_resource_handles
-    )
-
-
-class ActorDraftV3(BaseModel):
-    """Provider-authored actor semantics using one compatible pair handle."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    actor_choice_handle: str = Field(min_length=1, max_length=32)
-    beliefs: list[_ActorDraftItem] = Field(
-        min_length=1, max_length=_ACTOR_DRAFT_MAX_ITEMS
-    )
-    desires: list[_ActorDraftItem] = Field(
-        min_length=1, max_length=_ACTOR_DRAFT_MAX_ITEMS
-    )
-    intentions: list[_ActorDraftItem] = Field(
-        min_length=1, max_length=_ACTOR_DRAFT_MAX_ITEMS
-    )
-    resource_handles: list[Annotated[str, Field(min_length=1, max_length=32)]] = Field(
-        default_factory=list, max_length=_ACTOR_DRAFT_MAX_ITEMS
-    )
-    rationale: str | None = Field(
-        default=None, min_length=1, max_length=_ACTOR_DRAFT_RATIONALE_MAX_LENGTH
-    )
-
-    _reject_duplicate_resource_handles = field_validator("resource_handles")(
-        _validate_distinct_resource_handles
-    )
-
-
-@dataclass(frozen=True)
-class ActorDraftContext:
-    """Canonical inventory used to compile one actor semantic draft."""
-
-    actor_types: Mapping[str, str]
-    capability_levels: Mapping[str, str]
-    resources: Mapping[str, str]
-    access: ActorAccessProvenance
-    minimum_capability_level: str = "novice"
-    actor_choices: Mapping[str, tuple[str, str]] | None = None
-
-
-@dataclass(frozen=True)
-class ActorDraftViolation:
-    """Machine-readable actor draft violation for a correction request."""
-
-    code: str
-    detail: str
-
-
-class ActorSemanticDraftError(ValueError):
-    """An actor draft cannot be compiled without changing its semantics."""
-
-    def __init__(self, violations: Sequence[ActorDraftViolation]) -> None:
-        self.violations = tuple(violations)
-        super().__init__("; ".join(item.detail for item in self.violations))
-
-
-def _literal_from_handles(handles: Sequence[str]) -> Any:
-    """Return a runtime ``Literal`` constrained to unique local handles."""
-    values = tuple(handles)
-    if not values or len(set(values)) != len(values):
-        raise ValueError("handle inventory must be non-empty and unique")
-    return Literal.__getitem__(values)
-
-
-def create_actor_draft_model(
-    *,
-    actor_type_handles: Sequence[str],
-    capability_level_handles: Sequence[str],
-    resource_handles: Sequence[str] = (),
-    compact: bool = False,
-) -> type[ActorDraftV2]:
-    """Build the finite provider schema for one actor request."""
-    actor_handle = _literal_from_handles(actor_type_handles)
-    capability_handle = _literal_from_handles(capability_level_handles)
-    fields: dict[str, Any] = {
-        "actor_type_handle": (actor_handle, ...),
-        "capability_level_handle": (capability_handle, ...),
-    }
-    if resource_handles:
-        resource_handle = _literal_from_handles(resource_handles)
-        fields["resource_handles"] = (
-            list[resource_handle],
-            Field(default_factory=list, max_length=_ACTOR_DRAFT_MAX_ITEMS),
-        )
-    else:
-        fields["resource_handles"] = (
-            list[Annotated[str, Field(min_length=1, max_length=32)]],
-            Field(default_factory=list, max_length=0),
-        )
-    model_name = (
-        "CompactActorDraftV2ForCandidate" if compact else "ActorDraftV2ForCandidate"
-    )
-    return create_model(model_name, __base__=ActorDraftV2, **fields)
-
-
-def create_actor_draft_v3_model(
-    *,
-    actor_choice_handles: Sequence[str],
-    resource_handles: Sequence[str] = (),
-    compact: bool = False,
-) -> type[ActorDraftV3]:
-    """Build the finite provider schema for compatible actor choices."""
-
-    choice_handle = _literal_from_handles(actor_choice_handles)
-    fields: dict[str, Any] = {"actor_choice_handle": (choice_handle, ...)}
-    if resource_handles:
-        resource_handle = _literal_from_handles(resource_handles)
-        fields["resource_handles"] = (
-            list[resource_handle],
-            Field(default_factory=list, max_length=_ACTOR_DRAFT_MAX_ITEMS),
-        )
-    else:
-        fields["resource_handles"] = (
-            list[Annotated[str, Field(min_length=1, max_length=32)]],
-            Field(default_factory=list, max_length=0),
-        )
-    model_name = (
-        "CompactActorDraftV3ForCandidate" if compact else "ActorDraftV3ForCandidate"
-    )
-    return create_model(model_name, __base__=ActorDraftV3, **fields)
-
-
-def _resolve_actor_handles(
-    context: ActorDraftContext,
-    draft: ActorDraftV2 | ActorDraftV3,
-    violations: list[ActorDraftViolation],
-) -> tuple[str | None, str | None]:
-    """Resolve provider handles against the canonical actor inventories."""
-    if isinstance(draft, ActorDraftV3):
-        choice = (context.actor_choices or {}).get(draft.actor_choice_handle)
-        if choice is None:
-            violations.append(
-                ActorDraftViolation(
-                    "unknown_actor_choice_handle",
-                    f"unknown actor choice handle '{draft.actor_choice_handle}'",
-                )
-            )
-            return None, None
-        return choice
-    actor_type = context.actor_types.get(draft.actor_type_handle)
-    if actor_type is None:
-        violations.append(
-            ActorDraftViolation(
-                "unknown_actor_type_handle",
-                f"unknown actor type handle '{draft.actor_type_handle}'",
-            )
-        )
-    capability_level = context.capability_levels.get(draft.capability_level_handle)
-    if capability_level is None:
-        violations.append(
-            ActorDraftViolation(
-                "unknown_capability_level_handle",
-                f"unknown capability level handle '{draft.capability_level_handle}'",
-            )
-        )
-    return actor_type, capability_level
-
-
-def _capability_floor_violation(
-    actor_type: str,
-    capability_level: str,
-    minimum_capability_level: str,
-) -> ActorDraftViolation | None:
-    """Return the floor violation when capability sits below the required floor."""
-    actor_floor = _CAPABILITY_FLOORS.get(actor_type, "novice")
-    required_floor = max(
-        (actor_floor, minimum_capability_level),
-        key=_CAPABILITY_ORDER.index,
-    )
-    if _CAPABILITY_ORDER.index(capability_level) < _CAPABILITY_ORDER.index(
-        required_floor
-    ):
-        return ActorDraftViolation(
-            "capability_below_floor",
-            f"actor '{actor_type}' requires capability '{required_floor}' "
-            f"or higher, got '{capability_level}'",
-        )
-    return None
-
-
-def compile_actor_draft(
-    context: ActorDraftContext, draft: ActorDraftV2 | ActorDraftV3
-) -> ActorProfile:
-    """Attach canonical actor choices and access to provider-authored BDI."""
-    violations: list[ActorDraftViolation] = []
-    actor_type, capability_level = _resolve_actor_handles(context, draft, violations)
-    if actor_type is not None and capability_level is not None:
-        floor_violation = _capability_floor_violation(
-            actor_type, capability_level, context.minimum_capability_level
-        )
-        if floor_violation is not None:
-            violations.append(floor_violation)
-    unknown_resources = [
-        handle for handle in draft.resource_handles if handle not in context.resources
-    ]
-    if unknown_resources:
-        violations.append(
-            ActorDraftViolation(
-                "unknown_resource_handle",
-                f"unknown resource handle(s): {unknown_resources}",
-            )
-        )
-    if violations:
-        raise ActorSemanticDraftError(violations)
-
-    # The checks above prove these lookups succeeded. Keeping canonical
-    # resolution here (rather than normalizing provider strings) makes the
-    # ownership rule visible and fail-closed.
-    assert actor_type is not None
-    assert capability_level is not None
-    return ActorProfile(
-        actor_type=actor_type,
-        capability_level=capability_level,
-        beliefs=list(draft.beliefs),
-        desires=list(draft.desires),
-        intentions=list(draft.intentions),
-        resources=[context.resources[handle] for handle in draft.resource_handles],
-        access=context.access.model_copy(deep=True),
-    )
-
-
-def _compatible_actor_types_for_projection(
-    prompt_context: Mapping[str, Any],
-    projection_context: Mapping[str, Any],
-) -> list[str]:
-    """Narrow the compatible actor pool to canonical direct-access provenance."""
-    compatible_actor_types = list(prompt_context["compatible_actor_types"])
-    if projection_context.get("ingress_controllability") == "direct":
-        compatible_actor_types = [
-            actor_type
-            for actor_type in compatible_actor_types
-            if actor_type not in _INSIDER_ACTOR_TYPES
-        ]
-    if not compatible_actor_types:
-        raise ValueError(
-            "projection has no actor type with canonical direct-access provenance"
-        )
-    return compatible_actor_types
-
-
-def _capability_level_inventory(
-    prompt_context: Mapping[str, Any],
-) -> dict[str, str]:
-    """Allocate deterministic capability handles from the minimum floor onward."""
-    minimum = prompt_context.get("minimum_capability_level", "novice")
-    minimum_index = (
-        _CAPABILITY_ORDER.index(minimum) if minimum in _CAPABILITY_ORDER else 0
-    )
-    return {
-        f"c{index}": level
-        for index, level in enumerate(_CAPABILITY_ORDER[minimum_index:])
-    }
-
-
-def _selected_step_resource_names(
-    projection_context: Mapping[str, Any], profile: CapabilityProfile
-) -> list[str]:
-    """Collect distinct attacker-controlled resource names from selected steps."""
-    from asago_scenario_generator.pipeline.generate.names import (
-        resource_name_for_kind,
-    )
-
-    resource_names: list[str] = []
-    for step in projection_context.get("selected_steps", []):
-        if not step.get("attacker_controlled", False):
-            continue
-        for link in step.get("resource_links", []):
-            reference = link.get("resource_ref")
-            if not isinstance(reference, dict):
-                continue
-            kind = reference.get("kind")
-            if kind == "agent_internal":
-                name = "agent internal working context"
-            else:
-                resource_id = next(
-                    (
-                        value
-                        for key, value in reference.items()
-                        if key.endswith("_id") and isinstance(value, str)
-                    ),
-                    None,
-                )
-                if resource_id is None:
-                    continue
-                name = resource_name_for_kind(kind, resource_id, profile)
-            if name not in resource_names:
-                resource_names.append(name)
-    return resource_names
-
-
-def _actor_draft_inventories(
-    prompt_context: Mapping[str, Any],
-    projection_context: dict[str, Any],
-    profile: CapabilityProfile,
-) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
-    """Allocate deterministic local handles for one actor request."""
-    compatible_actor_types = _compatible_actor_types_for_projection(
-        prompt_context, projection_context
-    )
-    actor_types = {
-        f"a{index}": actor_type
-        for index, actor_type in enumerate(compatible_actor_types)
-    }
-    capability_levels = _capability_level_inventory(prompt_context)
-    resource_names = _selected_step_resource_names(projection_context, profile)
-    resources = {f"r{index}": name for index, name in enumerate(resource_names)}
-    return actor_types, capability_levels, resources
-
-
-def _actor_choice_inventory(
-    actor_types: Mapping[str, str], capability_levels: Mapping[str, str]
-) -> dict[str, tuple[str, str]]:
-    """Allocate handles only for compatible actor/capability pairs."""
-
-    choices: dict[str, tuple[str, str]] = {}
-    for actor_type in actor_types.values():
-        actor_floor = _CAPABILITY_FLOORS.get(actor_type, "novice")
-        floor_index = _CAPABILITY_ORDER.index(actor_floor)
-        for capability_level in capability_levels.values():
-            if _CAPABILITY_ORDER.index(capability_level) < floor_index:
-                continue
-            choices[f"ac{len(choices)}"] = (actor_type, capability_level)
-    if not choices:
-        raise ValueError("projection has no compatible actor/capability choice")
-    return choices
-
-
-def _derive_canonical_actor_access(
-    projection_context: dict[str, Any], actor_type: str
-) -> ActorAccessProvenance:
-    """Derive access provenance solely from the accepted projection."""
-    ingress = projection_context.get("canonical_ingress", {})
-    entry_point_id = ingress.get("entry_point_id")
-    if not isinstance(entry_point_id, str):
-        raise ValueError("projection lacks a canonical ingress entry-point ID")
-    ingress_mode = _ep_controllability_to_ingress_mode(
-        projection_context.get("ingress_controllability")
-    )
-    if ingress_mode is None:
-        raise ValueError("projection lacks attacker-accessible ingress controllability")
-
-    if ingress_mode == "direct":
-        is_insider = actor_type in _INSIDER_ACTOR_TYPES
-        if is_insider:
-            raise ValueError(
-                "projection supplies no canonical material insider advantage"
-            )
-        return ActorAccessProvenance(
-            initial_entry_point_id=entry_point_id,
-            ingress_mode="direct",
-            access_class="public",
-        )
-
-    paths = projection_context.get("source_influence_paths", [])
-    if len(paths) != 1:
-        raise ValueError(
-            "indirect projection must contain exactly one source-influence path"
-        )
-    path = paths[0]
-    source_id = path.get("source_id")
-    source_kind = path.get("source_identity_kind")
-    boundary_id = path.get("boundary_id")
-    if not all(
-        isinstance(value, str) for value in (source_id, source_kind, boundary_id)
-    ):
-        raise ValueError("indirect projection has incomplete canonical access path")
-    return ActorAccessProvenance(
-        initial_entry_point_id=entry_point_id,
-        ingress_mode="indirect",
-        access_class="supply_chain",
-        influence_source=source_id,
-        influence_source_kind=source_kind,
-        influence_source_id=source_id,
-        influence_mechanism="Declared canonical upstream influence path",
-        trust_boundary_id=boundary_id,
-    )
-
-
-def _actor_draft_prompt(
-    actor_choices: Mapping[str, tuple[str, str]],
-    resources: Mapping[str, str],
-) -> str:
-    """Render the concise V3 handle protocol appended to the semantic prompt."""
-    lines = [
-        "\n\n## Semantic Draft V3 Response Protocol (MANDATORY)",
-        "Return one actor_choice_handle from the compatible inventory.",
-        "The application owns access provenance; do not return access fields or IDs.",
-        "Author all beliefs, desires, and intentions yourself.",
-        "Compatible actor/capability choices:",
-        *(
-            f"- {handle}: actor={actor_type}; capability={capability_level}"
-            for handle, (actor_type, capability_level) in actor_choices.items()
-        ),
-        "Resource handles (select zero to four; do not invent resources):",
-        *(
-            (f"- {handle}: {value}" for handle, value in resources.items())
-            if resources
-            else ("- none available; return an empty resource_handles list",)
-        ),
-    ]
-    return "\n".join(lines)
-
-
-class Call0Response(BaseModel):
-    """LLM response model for Call 0: Actor Profile."""
-
-    actor_type: str = Field(max_length=_CALL0_ENUM_MAX_LENGTH)
-    capability_level: str = Field(max_length=_CALL0_ENUM_MAX_LENGTH)
-    beliefs: list[_Call0Item] = Field(
-        max_length=_CALL0_LIST_MAX_ITEMS,
-        description="Attacker beliefs; bounded list of concise strings.",
-    )
-    desires: list[_Call0Item] = Field(
-        max_length=_CALL0_LIST_MAX_ITEMS,
-        description="Attacker desires; bounded list of concise strings.",
-    )
-    intentions: list[_Call0Item] = Field(
-        max_length=_CALL0_LIST_MAX_ITEMS,
-        description="Attacker intentions; bounded list of concise strings.",
-    )
-    resources: list[_Call0Item] = Field(
-        max_length=_CALL0_LIST_MAX_ITEMS,
-        description="Attacker resources; bounded list of concise strings.",
-    )
-    # cmps.6 access provenance evidence (LLM-generated, validated post-hoc)
-    access_class: str | None = Field(default=None, max_length=_CALL0_ENUM_MAX_LENGTH)
-    influence_source: str | None = Field(
-        default=None, max_length=_CALL0_EVIDENCE_MAX_LENGTH
-    )
-    influence_mechanism: str | None = Field(
-        default=None, max_length=_CALL0_EVIDENCE_MAX_LENGTH
-    )
-    trust_boundary_id: str | None = Field(
-        default=None, max_length=_CALL0_EVIDENCE_MAX_LENGTH
-    )
-    material_insider_advantage: str | None = Field(
-        default=None, max_length=_CALL0_EVIDENCE_MAX_LENGTH
-    )
-
-
-class CompactCall0Response(Call0Response):
-    """Provider schema name for the one causal compact-response experiment."""
 
 
 # ---------------------------------------------------------------------------
@@ -653,511 +174,6 @@ def _validate_actor_type(actor_profile: ActorProfile) -> ActorProfile:
     return actor_profile
 
 
-# ---------------------------------------------------------------------------#
-# Actor access provenance (cmps.6)
-# ---------------------------------------------------------------------------#
-
-
-@dataclass
-class ActorAccessViolation:
-    """A single actor/access provenance violation detected during generation."""
-
-    rule: str
-    message: str
-
-
-def build_actor_access_provenance(
-    entry_point_id: str,
-    ep_controllability: str | None,
-    actor_type: str,
-    resp: Call0Response,
-    profile: CapabilityProfile | None = None,
-    projection_context: dict[str, Any] | None = None,
-) -> ActorAccessProvenance:
-    """Construct an :class:`ActorAccessProvenance` from canonical EP identity
-    and LLM-generated evidence.
-
-    ``ingress_mode`` is derived from the entry point's canonical
-    ``effective_controllability`` — never LLM-inferred.  ``access_class``
-    and the evidence fields are taken from the LLM response.
-
-    Phase 3: The LLM now outputs human-readable names for
-    ``influence_source`` and ``trust_boundary_id``.  When *profile* is
-    supplied, these names are resolved to canonical hex IDs before
-    constructing the provenance object.
-
-    When *projection_context* is supplied with exactly one authoritative
-    source-influence path, the typed source reference, kind, and trust
-    boundary are taken from the projection — the model does not choose the
-    canonical IDs.  Otherwise the LLM response fields (after name
-    resolution) are used.
-
-    Unresolved/system controllability raises ``ValueError`` — system entry
-    points are not eligible ingress and must never default to direct.
-    """
-    ingress_mode = _ep_controllability_to_ingress_mode(ep_controllability)
-    if ingress_mode is None:
-        raise ValueError(
-            f"Entry point '{entry_point_id}' has effective controllability "
-            f"'{ep_controllability}' — not eligible ingress (system/unknown)."
-        )
-
-    # Phase 3: resolve LLM-output names to canonical hex IDs
-    influence_source = resp.influence_source
-    influence_source_kind: str | None = None
-    influence_source_id: str | None = None
-    trust_boundary_id = resp.trust_boundary_id
-
-    authoritative_paths = (
-        projection_context.get("source_influence_paths", [])
-        if projection_context is not None
-        else []
-    )
-    if projection_context is not None:
-        if authoritative_paths:
-            if len(authoritative_paths) != 1:
-                raise ValueError(
-                    "projection context must contain exactly one source-influence path"
-                )
-            path = authoritative_paths[0]
-            influence_source = path.get("source_id")
-            influence_source_kind = path.get("source_identity_kind")
-            influence_source_id = path.get("source_id")
-            trust_boundary_id = path.get("boundary_id")
-    elif profile is not None:
-        from asago_scenario_generator.pipeline.generate.names import (
-            resolve_name_to_entry_point_id,
-            resolve_name_to_trust_boundary_id,
-        )
-
-        if influence_source:
-            resolved = resolve_name_to_entry_point_id(influence_source, profile)
-            if resolved is not None:
-                influence_source = resolved
-        if trust_boundary_id:
-            resolved_tb = resolve_name_to_trust_boundary_id(trust_boundary_id, profile)
-            if resolved_tb is not None:
-                trust_boundary_id = resolved_tb
-
-    return ActorAccessProvenance(
-        initial_entry_point_id=entry_point_id,
-        ingress_mode=ingress_mode,
-        access_class=resp.access_class,
-        influence_source=influence_source,
-        influence_source_kind=influence_source_kind,
-        influence_source_id=influence_source_id,
-        influence_mechanism=resp.influence_mechanism,
-        trust_boundary_id=trust_boundary_id,
-        material_insider_advantage=resp.material_insider_advantage,
-    )
-
-
-def _check_initial_ingress(
-    violations: list[ActorAccessViolation],
-    access: ActorAccessProvenance,
-    profile: CapabilityProfile,
-) -> EntryPoint | None:
-    """Append initial-ingress resolution and eligibility violations.
-
-    Returns the resolved initial entry point, or ``None`` when canonical
-    checks cannot continue.
-    """
-    # 5. Resolve initial entry point — must be eligible ingress.
-    initial_ep = profile.resolve_entry_point(access.initial_entry_point_id)
-    if initial_ep is None:
-        violations.append(
-            ActorAccessViolation(
-                rule="unresolved_entry_point_id",
-                message=(
-                    f"initial_entry_point_id "
-                    f"'{access.initial_entry_point_id}' does not resolve "
-                    f"to any entry point in the capability profile."
-                ),
-            )
-        )
-        # Cannot continue canonical checks without the initial EP.
-        return None
-
-    if not is_attacker_accessible_ingress(
-        initial_ep,
-        set(profile.zones_active) if profile.zones_active else set(),
-    ):
-        violations.append(
-            ActorAccessViolation(
-                rule="ineligible_ingress_entry_point",
-                message=(
-                    f"initial_entry_point_id "
-                    f"'{access.initial_entry_point_id}' resolves to "
-                    f"'{initial_ep.name}' which is not an attacker-"
-                    f"accessible ingress route."
-                ),
-            )
-        )
-
-    # 5b. effective_controllability must match the declared ingress_mode.
-    ep_ctrl = initial_ep.effective_controllability
-    if ep_ctrl == "system":
-        violations.append(
-            ActorAccessViolation(
-                rule="system_entry_point_as_ingress",
-                message=(
-                    f"initial_entry_point_id "
-                    f"'{access.initial_entry_point_id}' has effective "
-                    f"controllability 'system' — not eligible ingress."
-                ),
-            )
-        )
-    elif ep_ctrl != access.ingress_mode:
-        violations.append(
-            ActorAccessViolation(
-                rule="ingress_mode_controllability_mismatch",
-                message=(
-                    f"ingress_mode '{access.ingress_mode}' does not match "
-                    f"the entry point's effective controllability "
-                    f"'{ep_ctrl}' (entry_point_id "
-                    f"'{access.initial_entry_point_id}')."
-                ),
-            )
-        )
-    return initial_ep
-
-
-def _check_influence_source(
-    violations: list[ActorAccessViolation],
-    access: ActorAccessProvenance,
-    profile: CapabilityProfile,
-    initial_ep: EntryPoint,
-) -> tuple[bool, EntryPoint | None]:
-    """Append influence-source resolution and accessibility violations.
-
-    Returns ``(continue, source_ep)``; ``continue`` is False when checks
-    must stop, and ``source_ep`` is the resolved entry-point source (or
-    ``None`` for integration sources).
-    """
-    # The legacy influence_source field remains accepted, but the typed
-    # source kind/ID pair is authoritative when present.
-    source_id = access.influence_source_id or access.influence_source
-    source_kind = access.influence_source_kind or "entry_point"
-    if not source_id or not source_id.strip():
-        return False, None  # Already flagged as missing in structural checks.
-
-    if source_kind == "integration":
-        if profile.resolve_integration(source_id) is None:
-            violations.append(
-                ActorAccessViolation(
-                    rule="unresolved_influence_source",
-                    message=(
-                        f"influence_source '{source_id}' does not resolve "
-                        "to an integration in the capability profile."
-                    ),
-                )
-            )
-            return False, None
-        return True, None
-
-    source_ep = profile.resolve_entry_point(source_id)
-    if source_ep is None:
-        violations.append(
-            ActorAccessViolation(
-                rule="unresolved_influence_source",
-                message=(
-                    f"influence_source '{source_id}' does not resolve "
-                    f"to any entry point in the capability profile."
-                ),
-            )
-        )
-        return False, None
-
-    # 6a. No self-relation — source must differ from initial ingress.
-    if source_ep.entry_point_id == initial_ep.entry_point_id:
-        violations.append(
-            ActorAccessViolation(
-                rule="self_relation_influence_source",
-                message=(
-                    f"influence_source '{source_id}' is the same entry "
-                    f"point as the initial ingress "
-                    f"'{access.initial_entry_point_id}' — no declared "
-                    f"self-relation model accepts this (cmps.6)."
-                ),
-            )
-        )
-        return False, None
-
-    # 6b. Source must be attacker-accessible (not output-only or system).
-    if source_ep.direction == "output":
-        violations.append(
-            ActorAccessViolation(
-                rule="output_influence_source",
-                message=(
-                    f"influence_source '{source_id}' resolves "
-                    f"to '{source_ep.name}' which is output-only — an "
-                    f"output channel cannot be an actor-controlled "
-                    f"influence source."
-                ),
-            )
-        )
-    if source_ep.effective_controllability == "system":
-        violations.append(
-            ActorAccessViolation(
-                rule="system_influence_source",
-                message=(
-                    f"influence_source '{source_id}' resolves "
-                    f"to '{source_ep.name}' which is system-controlled — "
-                    f"not an actor-accessible influence source."
-                ),
-            )
-        )
-    return True, source_ep
-
-
-def _check_trust_boundary(
-    violations: list[ActorAccessViolation],
-    access: ActorAccessProvenance,
-    profile: CapabilityProfile,
-    initial_ep: EntryPoint,
-    source_ep: EntryPoint | None,
-) -> None:
-    """Append trust-boundary resolution, zone relation, and flow violations."""
-    # 7. trust_boundary_id must resolve to a declared TrustBoundary.
-    if not access.trust_boundary_id or not access.trust_boundary_id.strip():
-        return  # Already flagged as missing in structural checks.
-
-    boundary = profile.resolve_trust_boundary(access.trust_boundary_id)
-    if boundary is None:
-        violations.append(
-            ActorAccessViolation(
-                rule="unresolved_trust_boundary",
-                message=(
-                    f"trust_boundary_id '{access.trust_boundary_id}' does "
-                    f"not resolve to any TrustBoundary in the capability "
-                    f"profile — fabricated boundaries are not accepted."
-                ),
-            )
-        )
-        return
-
-    # 7a. Boundary to_zone must match the initial EP's effective_ingress_zone.
-    initial_zone = initial_ep.effective_ingress_zone
-    if initial_zone is not None and boundary.to_zone != initial_zone:
-        violations.append(
-            ActorAccessViolation(
-                rule="trust_boundary_target_zone_mismatch",
-                message=(
-                    f"trust_boundary_id '{access.trust_boundary_id}' has "
-                    f"to_zone '{boundary.to_zone}' but the initial entry "
-                    f"point '{initial_ep.name}' has effective_ingress_zone "
-                    f"'{initial_zone}' — boundary must target the initial "
-                    f"ingress zone."
-                ),
-            )
-        )
-
-    # 7b. Boundary from_zone must correspond to the source EP's
-    #      effective_ingress_zone or an explicitly modeled external zone.
-    #      External integration sources model their own zones; only
-    #      entry-point sources are zone-checked here.
-    source_zone = source_ep.effective_ingress_zone if source_ep is not None else None
-    if (
-        source_ep is not None
-        and source_zone is not None
-        and boundary.from_zone != source_zone
-        and boundary.from_zone != "external"
-    ):
-        violations.append(
-            ActorAccessViolation(
-                rule="trust_boundary_source_zone_mismatch",
-                message=(
-                    f"trust_boundary_id '{access.trust_boundary_id}' "
-                    f"has from_zone '{boundary.from_zone}' but the "
-                    f"influence source '{source_ep.name}' has "
-                    f"effective_ingress_zone '{source_zone}' — boundary "
-                    f"source side must correspond to the influence "
-                    f"source zone or 'external'."
-                ),
-            )
-        )
-
-    # 8. Declared profile flow: the boundary must connect source→initial
-    #    ingress zones, proving a declared profile flow rather than a
-    #    fabricated relation.  If the boundary's from_zone is "external",
-    #    the source EP must have indirect controllability (upstream data
-    #    provider).  This is the relational proof — not just ID format.
-    if (
-        source_ep is not None
-        and boundary.from_zone == "external"
-        and source_ep.effective_controllability != "indirect"
-    ):
-        violations.append(
-            ActorAccessViolation(
-                rule="external_boundary_source_not_indirect",
-                message=(
-                    f"trust_boundary_id '{access.trust_boundary_id}' "
-                    f"has from_zone 'external' but influence source "
-                    f"'{source_ep.name}' has effective controllability "
-                    f"'{source_ep.effective_controllability}' — external "
-                    f"boundary source requires an indirect-controllable "
-                    f"upstream entry point."
-                ),
-            )
-        )
-
-
-def _canonical_checks(
-    violations: list[ActorAccessViolation],
-    access: ActorAccessProvenance,
-    actor_type: str,
-    profile: CapabilityProfile,
-) -> None:
-    """Populate *violations* with canonical-profile resolution checks.
-
-    Pure function — no I/O, no logging.  Separated from
-    :func:`validate_actor_access_provenance` so it can be unit-tested
-    in isolation and reused by semantic validation.
-    """
-    initial_ep = _check_initial_ingress(violations, access, profile)
-    if initial_ep is None:
-        return
-
-    # 6–8. Indirect ingress canonical relation checks.
-    if access.ingress_mode != "indirect":
-        return
-
-    continue_sources, source_ep = _check_influence_source(
-        violations, access, profile, initial_ep
-    )
-    if not continue_sources:
-        return
-    _check_trust_boundary(violations, access, profile, initial_ep, source_ep)
-
-
-def validate_actor_access_provenance(
-    actor_profile: ActorProfile,
-    profile: CapabilityProfile | None = None,
-) -> list[ActorAccessViolation]:
-    """Validate typed access provenance evidence on an actor profile.
-
-    Returns a list of violations (empty if valid).  This replaces keyword-
-    based insider access checks and blanket allowlists with structured
-    access provenance grounded in the canonical entry-point identity
-    (cmps.6).
-
-    Checks (structural — no profile needed):
-    1. ``access`` provenance must be present.
-    2. ``ingress_mode`` / ``access_class`` consistency (e.g. supply_chain
-       access with direct ingress is inconsistent; public access with
-       indirect ingress is inconsistent).
-    3. Indirect ingress requires ``influence_source``,
-       ``influence_mechanism``, and ``trust_boundary_id``.
-    4. Insider actors using ``direct`` ingress require
-       ``material_insider_advantage`` regardless of ``access_class`` —
-       enum choice is not evidence.
-
-    Checks (canonical — when *profile* is supplied):
-    5. ``initial_entry_point_id`` must resolve to an eligible ingress EP.
-       Its ``effective_controllability`` must match the declared
-       ``ingress_mode`` and must not be ``system`` (unresolved/system
-       fails, never defaults to direct).
-    6. ``influence_source`` must resolve to a **different** canonical EP
-       (no self-relation unless explicitly modeled).  The source EP must
-       be attacker-accessible (not output-only or system-controlled).
-    7. ``trust_boundary_id`` must resolve to a ``TrustBoundary`` declared
-       in the profile.  The boundary's ``to_zone`` must equal the initial
-       EP's ``effective_ingress_zone``.  The boundary's ``from_zone`` must
-       correspond to the source EP's ``effective_ingress_zone`` or an
-       explicitly modeled external relation (``external`` zone).
-    8. There must be a declared profile flow connecting
-       source→boundary→initial-ingress; profiles lacking enough data fail
-       explicitly (partial), never silently infer the relation.
-    """
-    violations: list[ActorAccessViolation] = []
-
-    access = actor_profile.access
-    if access is None:
-        violations.append(
-            ActorAccessViolation(
-                rule="missing_access_provenance",
-                message=(
-                    f"Actor '{actor_profile.actor_type}' has no typed access "
-                    f"provenance (cmps.6)."
-                ),
-            )
-        )
-        return violations
-
-    # 2. Ingress-mode / access-class consistency
-    if access.ingress_mode == "direct" and access.access_class == "supply_chain":
-        violations.append(
-            ActorAccessViolation(
-                rule="access_class_ingress_mode_incompatible",
-                message=(
-                    f"Actor '{actor_profile.actor_type}' has access_class "
-                    f"'supply_chain' but ingress_mode 'direct' — supply-chain "
-                    f"access requires indirect ingress (upstream influence)."
-                ),
-            )
-        )
-    if access.ingress_mode == "indirect" and access.access_class == "public":
-        violations.append(
-            ActorAccessViolation(
-                rule="access_class_ingress_mode_incompatible",
-                message=(
-                    f"Actor '{actor_profile.actor_type}' has access_class "
-                    f"'public' but ingress_mode 'indirect' — public access "
-                    f"cannot influence upstream data sources."
-                ),
-            )
-        )
-
-    # 3. Indirect ingress evidence completeness
-    if access.ingress_mode == "indirect":
-        missing = []
-        if not access.influence_source or not access.influence_source.strip():
-            missing.append("influence_source")
-        if not access.influence_mechanism or not access.influence_mechanism.strip():
-            missing.append("influence_mechanism")
-        if not access.trust_boundary_id or not access.trust_boundary_id.strip():
-            missing.append("trust_boundary_id")
-        if missing:
-            violations.append(
-                ActorAccessViolation(
-                    rule="incomplete_indirect_evidence",
-                    message=(
-                        f"Indirect ingress requires structured evidence: "
-                        f"missing {missing}."
-                    ),
-                )
-            )
-
-    # 4. Insider + direct ingress → material_insider_advantage (regardless
-    #    of access_class — enum choice is not evidence).
-    if (
-        access.ingress_mode == "direct"
-        and actor_profile.actor_type in _INSIDER_ACTOR_TYPES
-        and (
-            not access.material_insider_advantage
-            or not access.material_insider_advantage.strip()
-        )
-    ):
-        violations.append(
-            ActorAccessViolation(
-                rule="missing_insider_advantage",
-                message=(
-                    f"Insider actor '{actor_profile.actor_type}' using "
-                    f"direct ingress requires structured "
-                    f"material_insider_advantage evidence regardless of "
-                    f"access_class ('{access.access_class}') — enum choice "
-                    f"is not evidence (cmps.6)."
-                ),
-            )
-        )
-
-    # 5–8. Canonical resolution (when profile is provided)
-    if profile is not None:
-        _canonical_checks(violations, access, actor_profile.actor_type, profile)
-
-    return violations
-
-
 # ---------------------------------------------------------------------------
 # Context builder and LLM call
 # ---------------------------------------------------------------------------
@@ -1253,47 +269,67 @@ def _compile_legacy_actor_profile(
     )
 
 
-def _compile_projected_actor_draft(
-    *,
-    resp: ActorDraftV2 | ActorDraftV3,
-    actor_types: Mapping[str, str],
-    capability_levels: Mapping[str, str],
-    resources: Mapping[str, str],
-    actor_choices: Mapping[str, tuple[str, str]],
-    minimum_capability_level: str,
+def _semantic_draft_request_parts(
+    ctx: Mapping[str, Any],
     projection_context: dict[str, Any],
-) -> ActorProfile:
-    """Compile one projected semantic draft with canonical actor identity."""
-    if isinstance(resp, ActorDraftV3):
-        choice = actor_choices.get(resp.actor_choice_handle)
-        actor_type = choice[0] if choice is not None else None
-        unknown_detail = f"unknown actor choice handle '{resp.actor_choice_handle}'"
-        unknown_code = "unknown_actor_choice_handle"
-    else:
-        actor_type = actor_types.get(resp.actor_type_handle)
-        unknown_detail = f"unknown actor type handle '{resp.actor_type_handle}'"
-        unknown_code = "unknown_actor_type_handle"
-    if actor_type is None:
-        raise ActorSemanticDraftError(
-            (
-                ActorDraftViolation(
-                    unknown_code,
-                    unknown_detail,
-                ),
-            )
-        )
-    access = _derive_canonical_actor_access(projection_context, actor_type)
-    return compile_actor_draft(
-        ActorDraftContext(
-            actor_types=actor_types,
-            capability_levels=capability_levels,
-            resources=resources,
-            access=access,
-            minimum_capability_level=minimum_capability_level,
-            actor_choices=actor_choices,
-        ),
-        resp,
+    profile: CapabilityProfile,
+    *,
+    compact_response_schema: bool,
+) -> tuple[
+    dict[str, str],
+    dict[str, str],
+    dict[str, tuple[str, str]],
+    dict[str, str],
+    type[BaseModel],
+    str,
+]:
+    """Build the V3 handle inventories, response model, and prompt suffix."""
+    actor_types, capability_levels, resources = _actor_draft_inventories(
+        ctx, projection_context, profile
     )
+    actor_choices = _actor_choice_inventory(actor_types, capability_levels)
+    response_model = create_actor_draft_v3_model(
+        actor_choice_handles=tuple(actor_choices),
+        resource_handles=tuple(resources),
+        compact=compact_response_schema,
+    )
+    draft_suffix = _actor_draft_prompt(actor_choices, resources)
+    return (
+        actor_types,
+        capability_levels,
+        actor_choices,
+        resources,
+        response_model,
+        draft_suffix,
+    )
+
+
+def _attach_legacy_access_provenance(
+    actor_profile: ActorProfile,
+    resp: Call0Response,
+    profile: CapabilityProfile,
+    *,
+    pinned_entry_point_id: str | None,
+    pinned_entry_point: str | None,
+    projection_context: dict[str, Any] | None,
+) -> ActorProfile:
+    """Attach typed access provenance to a legacy Call0 actor profile."""
+    if not pinned_entry_point_id:
+        return actor_profile
+    ep_controllability = _lookup_entry_point_controllability(
+        profile,
+        pinned_entry_point,
+        pinned_entry_point_id,
+    )
+    actor_profile.access = build_actor_access_provenance(
+        entry_point_id=pinned_entry_point_id,
+        ep_controllability=ep_controllability,
+        actor_type=actor_profile.actor_type,
+        resp=resp,
+        profile=profile,
+        projection_context=projection_context,
+    )
+    return actor_profile
 
 
 def _call_actor_profile(
@@ -1359,17 +395,20 @@ def _call_actor_profile(
     resources: dict[str, str] = {}
     response_model: type[BaseModel] | None = None
     if semantic_draft_v2:
-        assert projection_context is not None
-        actor_types, capability_levels, resources = _actor_draft_inventories(
-            ctx, projection_context, profile
+        (
+            actor_types,
+            capability_levels,
+            actor_choices,
+            resources,
+            response_model,
+            draft_suffix,
+        ) = _semantic_draft_request_parts(
+            ctx,
+            projection_context,
+            profile,
+            compact_response_schema=compact_response_schema,
         )
-        actor_choices = _actor_choice_inventory(actor_types, capability_levels)
-        response_model = create_actor_draft_v3_model(
-            actor_choice_handles=tuple(actor_choices),
-            resource_handles=tuple(resources),
-            compact=compact_response_schema,
-        )
-        user_prompt += _actor_draft_prompt(actor_choices, resources)
+        user_prompt += draft_suffix
     if completion_length_feedback:
         user_prompt = f"{user_prompt}{completion_length_feedback}"
     result = _complete_actor_profile(
@@ -1402,20 +441,14 @@ def _call_actor_profile(
     actor_profile = _compile_legacy_actor_profile(seed, ctx, resp)
 
     # Build typed access provenance from canonical EP identity (cmps.6)
-    if pinned_entry_point_id:
-        ep_controllability = _lookup_entry_point_controllability(
-            profile,
-            pinned_entry_point,
-            pinned_entry_point_id,
-        )
-        actor_profile.access = build_actor_access_provenance(
-            entry_point_id=pinned_entry_point_id,
-            ep_controllability=ep_controllability,
-            actor_type=actor_profile.actor_type,
-            resp=resp,
-            profile=profile,
-            projection_context=projection_context,
-        )
+    actor_profile = _attach_legacy_access_provenance(
+        actor_profile,
+        resp,
+        profile,
+        pinned_entry_point_id=pinned_entry_point_id,
+        pinned_entry_point=pinned_entry_point,
+        projection_context=projection_context,
+    )
 
     return actor_profile, result, ctx.get("diversity_limitation")
 

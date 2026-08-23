@@ -169,6 +169,62 @@ def _derive_impact_action(step: dict[str, Any], boundary: str) -> ImpactAction:
     )
 
 
+def _derive_boundary_action(
+    step: dict[str, Any],
+    compatible: set[str],
+    boundary: str,
+) -> ExternalPreconditionAction | None:
+    """Compile the outside-step precondition when the kind is compatible."""
+    if boundary == "outside" and "external_precondition" in compatible:
+        return ExternalPreconditionAction()
+    return None
+
+
+def _derive_impact_action_for_step(
+    step: dict[str, Any],
+    compatible: set[str],
+    boundary: str,
+    action_kind: str,
+) -> ImpactAction | None:
+    """Compile the canonical impact action when the step declares impact."""
+    if action_kind == "impact" and "impact" in compatible:
+        return _derive_impact_action(step, boundary)
+    return None
+
+
+def _derive_tool_invocation_action(
+    tool_id: str | None,
+    integration_id: str | None,
+    compatible: set[str],
+) -> ToolInvocationAction | None:
+    """Compile the tool invocation when a tool binding is compatible."""
+    if tool_id is not None and "tool_invocation" in compatible:
+        return ToolInvocationAction(tool_id=tool_id, integration_id=integration_id)
+    return None
+
+
+def _derive_integration_action(
+    integration_id: str | None,
+    compatible: set[str],
+) -> IntegrationInteractionAction | None:
+    """Compile the integration interaction when its binding is compatible."""
+    if integration_id is not None and "integration_interaction" in compatible:
+        return IntegrationInteractionAction(integration_id=integration_id)
+    return None
+
+
+def _derive_generic_action(step: dict[str, Any], compatible: set[str]) -> LeafAction:
+    """Compile the generic actor/ai-system action or fail projection ownership."""
+    if "attacker_action" in compatible:
+        return AttackerAction()
+    if "ai_system_action" in compatible:
+        return AiSystemAction()
+    raise ProjectionInfeasible(
+        f"no canonical tree action can be derived for step '{step.get('step_id')}' "
+        f"from compatible kinds {sorted(compatible)} and its resource bindings"
+    )
+
+
 def _derive_action(
     step: dict[str, Any], projection_context: dict[str, Any]
 ) -> LeafAction:
@@ -185,22 +241,16 @@ def _derive_action(
             step, projection_context, compatible, entry_point_id
         )
 
-    if boundary == "outside" and "external_precondition" in compatible:
-        return ExternalPreconditionAction()
-    if action_kind == "impact" and "impact" in compatible:
-        return _derive_impact_action(step, boundary)
-    if tool_id is not None and "tool_invocation" in compatible:
-        return ToolInvocationAction(tool_id=tool_id, integration_id=integration_id)
-    if integration_id is not None and "integration_interaction" in compatible:
-        return IntegrationInteractionAction(integration_id=integration_id)
-    if "attacker_action" in compatible:
-        return AttackerAction()
-    if "ai_system_action" in compatible:
-        return AiSystemAction()
-    raise ProjectionInfeasible(
-        f"no canonical tree action can be derived for step '{step.get('step_id')}' "
-        f"from compatible kinds {sorted(compatible)} and its resource bindings"
+    candidates = (
+        _derive_boundary_action(step, compatible, boundary),
+        _derive_impact_action_for_step(step, compatible, boundary, action_kind),
+        _derive_tool_invocation_action(tool_id, integration_id, compatible),
+        _derive_integration_action(integration_id, compatible),
     )
+    for candidate in candidates:
+        if candidate is not None:
+            return candidate
+    return _derive_generic_action(step, compatible)
 
 
 def _derive_zone(

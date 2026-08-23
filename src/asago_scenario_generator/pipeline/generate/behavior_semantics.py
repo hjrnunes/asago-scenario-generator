@@ -299,54 +299,79 @@ def _step_kind_violations(
     return []
 
 
-def _step_parameter_violations(
-    step: BehaviorDraftStep, action: ActionHandle
-) -> list[SemanticDraftViolation]:
-    """Collect example-parameter contract violations for one action step."""
-    parameter_by_name = {item.name: item for item in action.parameters}
-    violations: list[SemanticDraftViolation] = []
+def _unknown_parameter_violation(
+    step: BehaviorDraftStep,
+    parameter_by_name: dict[str, BehaviorParameterSpec],
+) -> SemanticDraftViolation | None:
+    """Return the unknown-example-parameter violation, when present."""
     unknown_parameters = tuple(sorted(set(step.examples) - set(parameter_by_name)))
-    if unknown_parameters:
-        violations.append(
-            SemanticDraftViolation(
-                code="unknown_example_parameter",
-                handles=(step.handle,),
-                message=(
-                    f"action '{step.handle}' uses unknown example parameters "
-                    f"{list(unknown_parameters)}"
-                ),
-            )
-        )
+    if not unknown_parameters:
+        return None
+    return SemanticDraftViolation(
+        code="unknown_example_parameter",
+        handles=(step.handle,),
+        message=(
+            f"action '{step.handle}' uses unknown example parameters "
+            f"{list(unknown_parameters)}"
+        ),
+    )
+
+
+def _missing_parameter_violation(
+    step: BehaviorDraftStep,
+    parameter_by_name: dict[str, BehaviorParameterSpec],
+) -> SemanticDraftViolation | None:
+    """Return the missing-required-parameter violation, when present."""
     missing_parameters = tuple(
         name
         for name, item in parameter_by_name.items()
         if item.required and name not in step.examples
     )
-    if missing_parameters:
-        violations.append(
-            SemanticDraftViolation(
-                code="missing_example_parameter",
-                handles=(step.handle,),
-                message=(
-                    f"action '{step.handle}' omits required example parameters "
-                    f"{list(missing_parameters)}"
-                ),
-            )
-        )
+    if not missing_parameters:
+        return None
+    return SemanticDraftViolation(
+        code="missing_example_parameter",
+        handles=(step.handle,),
+        message=(
+            f"action '{step.handle}' omits required example parameters "
+            f"{list(missing_parameters)}"
+        ),
+    )
+
+
+def _invalid_parameter_type_violation(
+    step: BehaviorDraftStep,
+    parameter_by_name: dict[str, BehaviorParameterSpec],
+) -> SemanticDraftViolation | None:
+    """Return the invalid-example-type violation, when present."""
     invalid = tuple(
         name
         for name, value in step.examples.items()
         if name in parameter_by_name
         and not _example_matches(value, parameter_by_name[name].value_type)
     )
-    if invalid:
-        violations.append(
-            SemanticDraftViolation(
-                code="invalid_example_type",
-                handles=(step.handle,),
-                message=f"action '{step.handle}' has invalid example types for {list(invalid)}",
-            )
-        )
+    if not invalid:
+        return None
+    return SemanticDraftViolation(
+        code="invalid_example_type",
+        handles=(step.handle,),
+        message=f"action '{step.handle}' has invalid example types for {list(invalid)}",
+    )
+
+
+def _step_parameter_violations(
+    step: BehaviorDraftStep, action: ActionHandle
+) -> list[SemanticDraftViolation]:
+    """Collect example-parameter contract violations for one action step."""
+    parameter_by_name = {item.name: item for item in action.parameters}
+    violations: list[SemanticDraftViolation] = []
+    for violation in (
+        _unknown_parameter_violation(step, parameter_by_name),
+        _missing_parameter_violation(step, parameter_by_name),
+        _invalid_parameter_type_violation(step, parameter_by_name),
+    ):
+        if violation is not None:
+            violations.append(violation)
     return violations
 
 
@@ -375,49 +400,110 @@ def _assertion_owner_violations(
     return []
 
 
+def _action_order_violation(
+    expected_actions: tuple[str, ...],
+    actual_action_order: tuple[str, ...],
+    duplicates: tuple[str, ...],
+    unknown: tuple[str, ...],
+) -> SemanticDraftViolation | None:
+    """Return the ordering violation when coverage is exact but order is not."""
+    if duplicates or unknown or actual_action_order == expected_actions:
+        return None
+    return SemanticDraftViolation(
+        code="illegal_order",
+        handles=actual_action_order,
+        message="action handles do not preserve canonical projected-step order",
+    )
+
+
+def _step_validation_violations(
+    step: BehaviorDraftStep,
+    action_by_handle: dict[str, ActionHandle],
+    assertion_by_handle: dict[str, AssertionHandle],
+    context: BehaviorCompilationContext,
+) -> list[SemanticDraftViolation]:
+    """Collect kind, parameter, and ownership violations for one authored step."""
+    violations = _step_kind_violations(step, action_by_handle, assertion_by_handle)
+    if step.handle in action_by_handle:
+        violations.extend(
+            _step_parameter_violations(step, action_by_handle[step.handle])
+        )
+    if step.handle in assertion_by_handle:
+        violations.extend(
+            _assertion_owner_violations(step, assertion_by_handle[step.handle], context)
+        )
+    return violations
+
+
+def _flatten_scenario_steps(draft: BehaviorDraftV2) -> list[BehaviorDraftStep]:
+    """Return every authored step across scenarios in draft order."""
+    return [step for scenario in draft.scenarios for step in scenario.steps]
+
+
+def _expected_handle_tuples(
+    context: BehaviorCompilationContext,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return the canonical action and assertion handle tuples."""
+    return (
+        tuple(item.handle for item in context.action_handles),
+        tuple(item.handle for item in context.assertion_handles),
+    )
+
+
+def _handle_lookup_maps(
+    context: BehaviorCompilationContext,
+) -> tuple[dict[str, ActionHandle], dict[str, AssertionHandle]]:
+    """Return handle lookup maps for canonical actions and assertions."""
+    return (
+        {item.handle: item for item in context.action_handles},
+        {item.handle: item for item in context.assertion_handles},
+    )
+
+
+def _actual_handle_sequence(all_steps: list[BehaviorDraftStep]) -> tuple[str, ...]:
+    """Return the authored handle sequence in exact draft order."""
+    return tuple(step.handle for step in all_steps)
+
+
+def _authored_action_order(
+    all_steps: list[BehaviorDraftStep],
+    action_by_handle: dict[str, ActionHandle],
+) -> tuple[str, ...]:
+    """Return the authored action-handle sequence, skipping assertion handles."""
+    return tuple(step.handle for step in all_steps if step.handle in action_by_handle)
+
+
 def validate_behavior_draft(
     draft: BehaviorDraftV2,
     context: BehaviorCompilationContext,
 ) -> DraftValidation:
     """Validate exact coverage, ordering, parameters, and assertion placement."""
 
-    expected_actions = tuple(item.handle for item in context.action_handles)
-    expected_assertions = tuple(item.handle for item in context.assertion_handles)
-    all_steps = [step for scenario in draft.scenarios for step in scenario.steps]
-    actual = tuple(step.handle for step in all_steps)
+    all_steps = _flatten_scenario_steps(draft)
+    expected_actions, expected_assertions = _expected_handle_tuples(context)
     violations, unknown, duplicates = _behavior_handle_violations(
-        expected_actions, expected_assertions, actual
+        expected_actions,
+        expected_assertions,
+        _actual_handle_sequence(all_steps),
     )
 
-    action_by_handle = {item.handle: item for item in context.action_handles}
-    assertion_by_handle = {item.handle: item for item in context.assertion_handles}
-    actual_action_order = tuple(
-        step.handle for step in all_steps if step.handle in action_by_handle
+    action_by_handle, assertion_by_handle = _handle_lookup_maps(context)
+    order_violation = _action_order_violation(
+        expected_actions,
+        _authored_action_order(all_steps, action_by_handle),
+        duplicates,
+        unknown,
     )
-    if not duplicates and not unknown and actual_action_order != expected_actions:
-        violations.append(
-            SemanticDraftViolation(
-                code="illegal_order",
-                handles=actual_action_order,
-                message="action handles do not preserve canonical projected-step order",
-            )
-        )
+    if order_violation is not None:
+        violations.append(order_violation)
 
     for scenario in draft.scenarios:
         for step in scenario.steps:
             violations.extend(
-                _step_kind_violations(step, action_by_handle, assertion_by_handle)
+                _step_validation_violations(
+                    step, action_by_handle, assertion_by_handle, context
+                )
             )
-            if step.handle in action_by_handle:
-                violations.extend(
-                    _step_parameter_violations(step, action_by_handle[step.handle])
-                )
-            if step.handle in assertion_by_handle:
-                violations.extend(
-                    _assertion_owner_violations(
-                        step, assertion_by_handle[step.handle], context
-                    )
-                )
     return DraftValidation(accepted=not violations, violations=tuple(violations))
 
 
