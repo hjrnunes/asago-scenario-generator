@@ -902,24 +902,32 @@ def _check_complete_coverage(
 def _order_preservation_elements(
     realizations: tuple[ArtifactRealizationMapping, ...],
     order: dict[str, int],
-) -> list[tuple[str, int, int]]:
-    """Map each realization to (element_id, min_ordinal, max_ordinal).
+) -> list[tuple[str, int, int, tuple[str, ...]]]:
+    """Map each realization to (element_id, min, max, projected_step_ids).
 
     Elements whose projected steps are all unknown to the projection are
-    skipped — the projection cannot attest to their order.
+    skipped — the projection cannot attest to their order.  Each entry
+    carries its own realization's step IDs so pair checks never have to
+    index back into the unfiltered ``realizations`` tuple.
     """
-    elements: list[tuple[str, int, int]] = []
+    elements: list[tuple[str, int, int, tuple[str, ...]]] = []
     for realization in realizations:
         ords = [order[sid] for sid in realization.projected_step_ids if sid in order]
         if not ords:
             continue
-        elements.append((realization.element_id, min(ords), max(ords)))
+        elements.append(
+            (
+                realization.element_id,
+                min(ords),
+                max(ords),
+                realization.projected_step_ids,
+            )
+        )
     return elements
 
 
 def _order_violation_for_pair(
-    realizations: tuple[ArtifactRealizationMapping, ...],
-    elements: list[tuple[str, int, int]],
+    elements: list[tuple[str, int, int, tuple[str, ...]]],
     i: int,
     j: int,
     stage: ProjectionTraceabilityStage,
@@ -932,11 +940,9 @@ def _order_violation_for_pair(
     element's maximum ordinal unless the two elements share a projected
     step.
     """
-    r_i = realizations[i]
-    r_j = realizations[j]
-    shared = set(r_i.projected_step_ids) & set(r_j.projected_step_ids)
-    _, _, i_max = elements[i]
-    j_id, j_min, _ = elements[j]
+    i_id, _, i_max, i_step_ids = elements[i]
+    j_id, j_min, _, j_step_ids = elements[j]
+    shared = set(i_step_ids) & set(j_step_ids)
     if j_min < i_max and not shared:
         return ProjectionTraceabilityViolation(
             code=ProjectionTraceabilityViolationCode.reordered_projected_step,
@@ -944,7 +950,7 @@ def _order_violation_for_pair(
             detail=(
                 f"{artifact_name} element '{j_id}' (min ordinal "
                 f"{j_min}) precedes earlier element "
-                f"'{r_i.element_id}' (max ordinal {i_max}) "
+                f"'{i_id}' (max ordinal {i_max}) "
                 f"without shared steps — total order violated"
             ),
             element_id=j_id,
@@ -974,7 +980,6 @@ def _check_order_preservation(
     for i in range(len(elements)):
         for j in range(i + 1, len(elements)):
             violation = _order_violation_for_pair(
-                realizations,
                 elements,
                 i,
                 j,

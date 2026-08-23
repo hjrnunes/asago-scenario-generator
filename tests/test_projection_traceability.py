@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Any
 
 import pytest
+from hypothesis import given, settings, strategies as st
 from pydantic import ValidationError
 
 from asago_scenario_generator.models.attack_pattern import (
@@ -4692,6 +4693,116 @@ class TestCheckOrderPreservation:
             )
             == []
         )
+
+    def test_skipped_element_does_not_mispair_earlier_element_citation(
+        self,
+    ) -> None:
+        """A realization with only unknown steps must not shift pair indices.
+
+        Regression: the pair check indexed the filtered ``elements`` list in
+        lockstep with the unfiltered ``realizations`` tuple, so a skipped
+        realization made the violation cite a wrong earlier element.
+        """
+        realizations = self._realizations(
+            ("a-unknown", ("step.unknown",)),
+            ("b", ("step.2",)),
+            ("c", ("step.1",)),
+        )
+
+        violations = _check_order_preservation(
+            realizations,
+            self._order(),
+            ProjectionTraceabilityStage.behavior_spec,
+            "behavior",
+        )
+
+        assert len(violations) == 1
+        violation = violations[0]
+        assert violation.element_id == "c"
+        assert "earlier element 'b'" in violation.detail
+        assert "a-unknown" not in violation.detail
+
+    def test_skipped_element_cannot_mask_a_real_reorder(self) -> None:
+        """The sharing exemption must use the paired elements, not neighbors.
+
+        Regression: 'c' (step.1) precedes 'b' (step.2) with no shared steps,
+        but the skip of 'a-unknown' made the sharing check compare
+        'a-unknown' against 'b' (both carrying 'step.unknown'), silently
+        allowing the reorder.
+        """
+        realizations = self._realizations(
+            ("a-unknown", ("step.unknown",)),
+            ("b", ("step.2", "step.unknown")),
+            ("c", ("step.1",)),
+        )
+
+        violations = _check_order_preservation(
+            realizations,
+            self._order(),
+            ProjectionTraceabilityStage.behavior_spec,
+            "behavior",
+        )
+
+        assert len(violations) == 1
+        assert violations[0].element_id == "c"
+
+    @settings(max_examples=100, deadline=None)
+    @given(
+        realizations=st.lists(
+            st.tuples(
+                st.text(alphabet="abc", min_size=1, max_size=4),
+                st.lists(
+                    st.sampled_from(("step.1", "step.2", "step.3", "step.unknown")),
+                    min_size=1,
+                    max_size=4,
+                    unique=True,
+                ),
+            ),
+            min_size=0,
+            max_size=8,
+        )
+    )
+    def test_order_check_matches_an_independent_reference(
+        self,
+        realizations: list[tuple[str, list[str]]],
+    ) -> None:
+        """Flagged reorder set matches a reference pairing each element with
+        its own ordinals and step IDs (unknown steps skipped in both)."""
+        ordered = self._realizations(
+            *[(element_id, tuple(step_ids)) for element_id, step_ids in realizations]
+        )
+        order = self._order()
+
+        # Independent reference: filter unknown-step elements like the
+        # production helper, then flag each element whose minimum ordinal
+        # precedes an earlier element's maximum without shared steps
+        # (first violating later element per element, like the checker).
+        elements = [
+            (element_id, frozenset(step_ids))
+            for element_id, step_ids in realizations
+            if any(step_id in order for step_id in step_ids)
+        ]
+        expected: list[str] = []
+        for i in range(len(elements)):
+            i_sids = elements[i][1]
+            i_max = max(order[sid] for sid in i_sids if sid in order)
+            for j in range(i + 1, len(elements)):
+                j_id, j_sids = elements[j]
+                j_min = min(order[sid] for sid in j_sids if sid in order)
+                if j_min < i_max and not (i_sids & j_sids):
+                    expected.append(j_id)
+                    break
+
+        got = [
+            violation.element_id
+            for violation in _check_order_preservation(
+                ordered,
+                order,
+                ProjectionTraceabilityStage.behavior_spec,
+                "behavior",
+            )
+        ]
+        assert got == expected
 
 
 class TestPostconditionsForStep:
