@@ -505,25 +505,35 @@ def _h_transport_normalized_before_validation(
     return True, ""
 
 
+_BOUNDARY_POSITIONS = frozenset({"inside", "crossing", "outside"})
+_STEP_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
+
+
+def _canonical_step_values(step_id: str, boundary: str) -> bool:
+    """True when the Given's step ID and boundary position are canonical values.
+
+    Soft acceptance mutation flips example-cell spelling; the runtime must not
+    silently accept a misspelled canonical value as if it were the same input.
+    """
+    return bool(_STEP_ID_PATTERN.fullmatch(step_id)) and boundary in _BOUNDARY_POSITIONS
+
+
 def _h_contract_step(world: World, text: str, examples: dict) -> tuple[bool, str]:
     match = re.search(
         r'projected step "([^"]+)" has action kind "([^"]+)", '
         r'executor role "([^"]+)", and boundary position "([^"]+)"',
         text,
     )
-    if match is None:
+    if match is not None:
+        step_id, action_kind, executor_role, boundary = match.groups()
+    else:
         match = re.search(
             r'projection selects impact step "([^"]+)" at boundary position "([^"]+)"',
             text,
         )
         if match is not None:
             step_id, boundary = match.groups()
-            step = {
-                "step_id": step_id,
-                "action_kind": "impact",
-                "executor_role": "system",
-                "boundary_position": boundary,
-            }
+            action_kind, executor_role = "impact", "system"
         else:
             match = re.search(
                 r'projection selects step "([^"]+)" at boundary position "([^"]+)"',
@@ -532,20 +542,18 @@ def _h_contract_step(world: World, text: str, examples: dict) -> tuple[bool, str
             if match is None:
                 return False, f"Could not parse projected step: {text}"
             step_id, boundary = match.groups()
-            step = {
-                "step_id": step_id,
-                "action_kind": "observe",
-                "executor_role": "system",
-                "boundary_position": boundary,
-            }
-    else:
-        step_id, action_kind, executor_role, boundary = match.groups()
-        step = {
-            "step_id": step_id,
-            "action_kind": action_kind,
-            "executor_role": executor_role,
-            "boundary_position": boundary,
-        }
+            action_kind, executor_role = "observe", "system"
+    if not _canonical_step_values(step_id, boundary):
+        return False, (
+            f"non-canonical projected step values: step_id={step_id!r}, "
+            f"boundary position={boundary!r}"
+        )
+    step = {
+        "step_id": step_id,
+        "action_kind": action_kind,
+        "executor_role": executor_role,
+        "boundary_position": boundary,
+    }
     state = _contract_state(world)
     state["steps"] = [step]
     state["current_step"] = step

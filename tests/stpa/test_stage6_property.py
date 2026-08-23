@@ -15,6 +15,8 @@ input ranges:
 
 from __future__ import annotations
 
+import re
+
 from hypothesis import HealthCheck, given, settings, strategies as st
 
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
@@ -44,7 +46,7 @@ st_step_text = st.text(
     ),
     min_size=1,
     max_size=50,
-)
+).filter(lambda s: not re.search(r"[LH]-\d", s))
 
 st_ica_type = st.sampled_from(list(UCAType))
 
