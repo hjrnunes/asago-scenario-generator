@@ -19,12 +19,13 @@ from pathlib import Path
 
 import yaml
 
-from asago_scenario_generator.models import CapabilityProfile, RiskCard
-from asago_scenario_generator.models.capability_profile import ToolInventoryEntry
-from asago_scenario_generator.pipeline.threats import (
+from asago_scenario_generator.models import (
+    CapabilityProfile,
+    RiskCard,
     ThreatSurface,
-    determine_threat_surface,
 )
+from asago_scenario_generator.models.capability_profile import ToolInventoryEntry
+from asago_scenario_generator.pipeline.threats import determine_threat_surface
 
 # ---------------------------------------------------------------------------
 # Fixture builders

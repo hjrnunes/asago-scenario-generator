@@ -1691,7 +1691,7 @@ class TestStructuredEntryPointGaps:
     def test_same_name_different_id_gaps_remain_distinct(self):
         """Two same-name EPs with different IDs produce distinct gaps."""
         from asago_scenario_generator.pipeline.coverage import analyze_coverage_gaps
-        from asago_scenario_generator.pipeline.threats import ThreatSurface
+        from asago_scenario_generator.models import ThreatSurface
 
         profile = CapabilityProfile(
             zones_active=["input", "reasoning"],
@@ -1796,7 +1796,7 @@ class TestIngressOnlyFallback:
         """A legacy/no-provenance scenario covering the unique ingress EP
         by name produces no ingress coverage gap."""
         from asago_scenario_generator.pipeline.coverage import analyze_coverage_gaps
-        from asago_scenario_generator.pipeline.threats import ThreatSurface
+        from asago_scenario_generator.models import ThreatSurface
 
         profile = self._make_profile()
         threat_surface = ThreatSurface(entries=[], governance_only=[])

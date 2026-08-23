@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from pydantic import BaseModel, Field
 
 from asago_scenario_generator.data.loaders import (
     build_threat_to_patterns_index,
@@ -29,6 +28,11 @@ from asago_scenario_generator.data.loaders import (
     load_kc_threat_mapping,
 )
 from asago_scenario_generator.models import CapabilityProfile, MemoryScope, MemoryType
+from asago_scenario_generator.models.threat_scope import (
+    OutOfScopeEntry,
+    ThreatScope,
+    ThreatScopeEntry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,43 +47,8 @@ _DEFAULT_THREATS_PATH = (
 
 
 # ---------------------------------------------------------------------------
-# Output models
-# ---------------------------------------------------------------------------
-
-
-class ThreatScopeEntry(BaseModel):
-    """A threat that is in scope for the assessed system."""
-
-    threat_id: str = Field(description="Threat ID (e.g. 'T2')")
-    threat_name: str = Field(description="Human-readable threat name")
-    attack_pattern_ids: list[str] = Field(
-        default_factory=list,
-        description="Attack pattern IDs applicable to this system (e.g. ['AP-T2-01', 'AP-T2-03'])",
-    )
-    gating_reason: str = Field(
-        description="Why this threat is in scope (e.g. 'always in scope', 'has_persistent_memory is true')",
-    )
-
-
-class OutOfScopeEntry(BaseModel):
-    """A group of threats that are out of scope, with the reason."""
-
-    threat_ids: list[str] = Field(description="Threat IDs that are out of scope")
-    reason: str = Field(description="Why these threats are out of scope")
-
-
-class ThreatScope(BaseModel):
-    """The complete threat scope determination for a capability profile."""
-
-    in_scope: list[ThreatScopeEntry] = Field(default_factory=list)
-    out_of_scope: list[OutOfScopeEntry] = Field(default_factory=list)
-
-
-# ---------------------------------------------------------------------------
 # KC-based threat gating
 # ---------------------------------------------------------------------------
-
-_ALL_THREAT_IDS = [f"T{i}" for i in range(1, 18)]
 
 
 def _compute_kc_enabled_threats(
@@ -242,7 +211,11 @@ def _evaluate_threats(
     patterns: dict[str, dict],
     profile: CapabilityProfile,
 ) -> tuple[list[ThreatScopeEntry], list[str]]:
-    """Evaluate every known threat ID against the profile.
+    """Evaluate every threat ID loaded from the threats taxonomy against the profile.
+
+    The threat inventory is the loaded data itself, so taxonomy growth
+    (e.g. a new T18) is evaluated automatically.  Iteration follows the
+    file's declaration order and stays deterministic.
 
     Returns the in-scope entries and the IDs skipped because no KC
     sub-code enabled them.
@@ -250,12 +223,9 @@ def _evaluate_threats(
     in_scope: list[ThreatScopeEntry] = []
     out_of_scope_ids: list[str] = []
 
-    for tid in _ALL_THREAT_IDS:
-        if tid not in threats:
-            continue
-
+    for tid, threat in threats.items():
         entry = _build_in_scope_entry(
-            tid, threats[tid], enabled, threat_to_patterns, patterns, profile
+            tid, threat, enabled, threat_to_patterns, patterns, profile
         )
         if entry is None:
             out_of_scope_ids.append(tid)

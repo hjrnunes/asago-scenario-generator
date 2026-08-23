@@ -95,6 +95,14 @@ _DEFAULT_KC_THREAT_MAPPING_PATH = (
 )
 
 
+@functools.lru_cache(maxsize=4)
+def _load_kc_threat_mapping_cached(path_str: str | None) -> dict[str, Any]:
+    """Internal cached loader — takes a string path for hashability."""
+    p = Path(path_str) if path_str else _DEFAULT_KC_THREAT_MAPPING_PATH
+    with open(p) as f:
+        return yaml.safe_load(f)
+
+
 def load_kc_threat_mapping(
     path: str | Path | None = None,
 ) -> dict[str, Any]:
@@ -107,9 +115,7 @@ def load_kc_threat_mapping(
         The full parsed YAML as a dict with keys: metadata,
         kc_subcodes, kc_to_threats, threat_to_kc_subcodes, hitl.
     """
-    p = Path(path) if path is not None else _DEFAULT_KC_THREAT_MAPPING_PATH
-    with open(p) as f:
-        return yaml.safe_load(f)
+    return _load_kc_threat_mapping_cached(str(path) if path else None)
 
 
 def _parse_evidence(raw: dict) -> EvidenceSpan:

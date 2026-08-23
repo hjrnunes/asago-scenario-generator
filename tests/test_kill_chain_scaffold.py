@@ -21,7 +21,7 @@ from asago_scenario_generator.models.scenario import (
 from asago_scenario_generator.pipeline.generate.narrative import build_call1_context
 from asago_scenario_generator.pipeline.generate.tree import build_call2_context
 from asago_scenario_generator.pipeline.seeds import ScenarioSeed, expand_seeds
-from asago_scenario_generator.pipeline.threats import ThreatSurface, ThreatSurfaceEntry
+from asago_scenario_generator.models import ThreatSurface, ThreatSurfaceEntry
 from asago_scenario_generator.prompts import render_prompt
 from tests.helpers.realization_helper import make_realizations
 

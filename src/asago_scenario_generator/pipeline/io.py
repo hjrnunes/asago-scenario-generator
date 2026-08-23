@@ -20,13 +20,13 @@ from pathlib import Path
 
 import yaml
 
+from asago_scenario_generator.models import ThreatSurface
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     inject_kc_subcodes_display,
 )
 from asago_scenario_generator.pipeline.candidates import FilterSeedQuarantine
 from asago_scenario_generator.pipeline.jsonl import append_jsonl
-from asago_scenario_generator.pipeline.threats import ThreatSurface
 
 logger = logging.getLogger(__name__)
 

@@ -12,7 +12,7 @@ from unittest.mock import patch
 from asago_scenario_generator.models.capability_profile import ConfidenceLevel
 from asago_scenario_generator.models.scenario import RiskCardRef
 from asago_scenario_generator.pipeline.seeds import ScenarioSeed, expand_seeds
-from asago_scenario_generator.pipeline.threats import ThreatSurface, ThreatSurfaceEntry
+from asago_scenario_generator.models import ThreatSurface, ThreatSurfaceEntry
 
 
 # ---------------------------------------------------------------------------

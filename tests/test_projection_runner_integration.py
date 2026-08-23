@@ -63,7 +63,7 @@ from asago_scenario_generator.pipeline.runner import (
     run_pipeline,
 )
 from asago_scenario_generator.pipeline.seeds import ScenarioSeed
-from asago_scenario_generator.pipeline.threats import ThreatSurface
+from asago_scenario_generator.models import ThreatSurface
 from tests.helpers.projection_factory import (
     _evidence,
     _pattern,

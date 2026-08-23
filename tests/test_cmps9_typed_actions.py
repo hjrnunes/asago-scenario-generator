@@ -3129,11 +3129,8 @@ def _make_minimal_seed(seed_id: str = "AP-T5-01"):
 
 
 def _make_minimal_threat_surface():
+    from asago_scenario_generator.models import ThreatSurface, ThreatSurfaceEntry
     from asago_scenario_generator.models.scenario import RiskCardRef
-    from asago_scenario_generator.pipeline.threats import (
-        ThreatSurface,
-        ThreatSurfaceEntry,
-    )
 
     risk_card = RiskCardRef(
         risk_id="R1",

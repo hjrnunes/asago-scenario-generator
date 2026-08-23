@@ -112,11 +112,9 @@ from asago_scenario_generator.pipeline.projection import (
     ensure_projection_readiness,
     project_authoritative_candidates,
 )
+from asago_scenario_generator.models import ThreatSurface
 from asago_scenario_generator.pipeline.seeds import ScenarioSeed, expand_seeds
-from asago_scenario_generator.pipeline.threats import (
-    ThreatSurface,
-    determine_threat_surface,
-)
+from asago_scenario_generator.pipeline.threats import determine_threat_surface
 from asago_scenario_generator.prompts import hash_prompt_templates
 
 logger = logging.getLogger(__name__)

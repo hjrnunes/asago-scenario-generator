@@ -20,16 +20,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
-
-from asago_scenario_generator.data.loaders import load_cross_taxonomy_mappings
-from asago_scenario_generator.data.sssom import build_risk_to_llm_index, load_sssom
-from asago_scenario_generator.data.threat_gating import (
-    ThreatScope,
-    determine_threat_scope,
+from asago_scenario_generator.data.loaders import (
+    load_cross_taxonomy_mappings,
+    load_kc_threat_mapping,
 )
+from asago_scenario_generator.data.sssom import build_risk_to_llm_index, load_sssom
+from asago_scenario_generator.data.threat_gating import determine_threat_scope
 from asago_scenario_generator.models import CapabilityProfile, RiskCard
 from asago_scenario_generator.models.scenario import RiskCardRef
+from asago_scenario_generator.models.threat_scope import ThreatScope
+from asago_scenario_generator.models.threat_surface import (
+    ThreatSurface,
+    ThreatSurfaceEntry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,36 +54,25 @@ _KC6_GATED_TECHNIQUES: frozenset[str] = frozenset(
     }
 )
 
-_KC6_SUBCODES: frozenset[str] = frozenset(
-    {
-        "KC6.1.1",
-        "KC6.1.2",
-        "KC6.2.1",
-        "KC6.2.2",
-        "KC6.3.1",
-        "KC6.3.2",
-        "KC6.3.3",
-        "KC6.4",
-        "KC6.5",
-        "KC6.6",
-        "KC6.7",
+
+def _kc6_subcodes(kc_mapping: dict[str, Any]) -> frozenset[str]:
+    """Return the KC6-family sub-codes declared by the KC mapping data.
+
+    The family is derived from both the structured ``kc_subcodes``
+    section and the compact ``kc_to_threats`` keys so the ATLAS KC6 gate
+    stays aligned with the pinned taxonomy regardless of which shape a
+    mapping file uses (acceptance fixtures declare only the compact
+    section).
+    """
+    declared = {
+        entry["kc_subcode"]
+        for entry in kc_mapping.get("kc_subcodes", [])
+        if str(entry.get("kc_subcode", "")).startswith("KC6.")
     }
-)
-
-
-class ThreatSurfaceEntry(BaseModel):
-    risk_card: RiskCardRef
-    owasp_llm_ids: list[str]
-    agentic_threat_ids: list[str]
-    atlas_technique_ids: list[str] = Field(default_factory=list)
-    attack_pattern_ids: list[str] = Field(default_factory=list)
-    owasp_asi_ids: list[str] = Field(default_factory=list)
-    governance_only: bool = False
-
-
-class ThreatSurface(BaseModel):
-    entries: list[ThreatSurfaceEntry]
-    governance_only: list[ThreatSurfaceEntry]
+    compact = {
+        code for code in kc_mapping.get("kc_to_threats", {}) if code.startswith("KC6.")
+    }
+    return frozenset(declared | compact)
 
 
 def _build_llm_to_t_index(cross_taxonomy: dict[str, Any]) -> dict[str, list[str]]:
@@ -344,6 +336,7 @@ def determine_threat_surface(
     t_to_asi = _build_t_to_asi_index(cross_taxonomy)
 
     # --- Hop 3: Filter by capability profile ---
+    kc_mapping = load_kc_threat_mapping(kc_mapping_path)
     threat_scope = determine_threat_scope(
         profile, threats_path, kc_mapping_path, attack_patterns_path
     )
@@ -357,7 +350,7 @@ def determine_threat_surface(
         threat_attack_patterns=threat_attack_patterns,
         in_scope_ids=in_scope_ids,
         direct_t_ids=_resolve_direct_threats(cross_taxonomy, in_scope_ids),
-        has_kc6=bool(_KC6_SUBCODES.intersection(profile.kc_subcodes)),
+        has_kc6=bool(_kc6_subcodes(kc_mapping).intersection(profile.kc_subcodes)),
         kc_subcodes=profile.kc_subcodes,
     )
 

@@ -16,8 +16,8 @@ from asago_scenario_generator.data.loaders import (
     load_attack_pattern_provenance,
     load_attack_patterns,
 )
+from asago_scenario_generator.models import ThreatSurface
 from asago_scenario_generator.models.scenario import RiskCardRef
-from asago_scenario_generator.pipeline.threats import ThreatSurface
 
 _DEFAULT_THREATS_PATH = (
     Path(__file__).resolve().parents[3]
