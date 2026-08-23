@@ -23,22 +23,27 @@ from runtime_features.taxonomy_risk import _taxonomy_state
 FEATURE_ID = "taxonomy_cli"
 
 
+def _fresh_cli_state() -> dict[str, Any]:
+    """Return an empty CLI contract state for a scenario."""
+    return {
+        "workspace": None,
+        "generate_missing": None,
+        "preflight_missing": None,
+        "vcq_artifact_case": None,
+        "missing_run_dir_command": None,
+        "report_dest": None,
+        "scorecard_format": None,
+        "announced": None,
+        "error": False,
+        "exit_code": None,
+    }
+
+
 def _cli_state(world: World) -> dict[str, Any]:
     """Return the scenario-local CLI contract state, creating it when needed."""
     state = getattr(world, "cli_commands_state", None)
     if state is None:
-        state = {
-            "workspace": None,
-            "generate_missing": None,
-            "preflight_missing": None,
-            "vcq_artifact_case": None,
-            "missing_run_dir_command": None,
-            "report_dest": None,
-            "scorecard_format": None,
-            "announced": None,
-            "error": False,
-            "exit_code": None,
-        }
+        state = _fresh_cli_state()
         world.cli_commands_state = state
     return state
 
@@ -54,17 +59,9 @@ def _finish(world: World, exit_code: int, error: bool = False) -> tuple[bool, st
 
 def _h_cli_workspace(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a disposable CLI fixtures workspace."""
-    state = _cli_state(world)
+    state = _fresh_cli_state()
     state["workspace"] = Path(tempfile.mkdtemp(prefix="taxonomy-cli-"))
-    state["generate_missing"] = None
-    state["preflight_missing"] = None
-    state["vcq_artifact_case"] = None
-    state["missing_run_dir_command"] = None
-    state["report_dest"] = None
-    state["scorecard_format"] = None
-    state["announced"] = None
-    state["error"] = False
-    state["exit_code"] = None
+    world.cli_commands_state = state
     return True, ""
 
 
