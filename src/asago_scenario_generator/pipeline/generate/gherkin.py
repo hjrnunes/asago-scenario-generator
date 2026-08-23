@@ -100,7 +100,7 @@ class CompactCall3Response(Call3Response):
 
 # Step kinds derived from action discriminator, not labels.
 _STEP_KIND_GIVEN = "given"  # external_precondition
-_STEP_KIND_WHEN = "when"  # initial_ingress, ai_system_action, tool_invocation, integration_interaction
+_STEP_KIND_WHEN = "when"  # ingress, attacker/system actions, tools, integrations
 _STEP_KIND_THEN = "then"  # impact
 
 
@@ -120,7 +120,8 @@ def _leaf_step_kind(leaf: AttackTreeNode) -> str:
         return _STEP_KIND_GIVEN
     if kind == "impact":
         return _STEP_KIND_THEN
-    # initial_ingress, ai_system_action, tool_invocation, integration_interaction
+    # initial_ingress, attacker_action, ai_system_action, tool_invocation,
+    # integration_interaction
     return _STEP_KIND_WHEN
 
 

@@ -108,6 +108,36 @@ class ActorDraftV2(BaseModel):
         return value
 
 
+class ActorDraftV3(BaseModel):
+    """Provider-authored actor semantics using one compatible pair handle."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    actor_choice_handle: str = Field(min_length=1, max_length=32)
+    beliefs: list[_ActorDraftItem] = Field(
+        min_length=1, max_length=_ACTOR_DRAFT_MAX_ITEMS
+    )
+    desires: list[_ActorDraftItem] = Field(
+        min_length=1, max_length=_ACTOR_DRAFT_MAX_ITEMS
+    )
+    intentions: list[_ActorDraftItem] = Field(
+        min_length=1, max_length=_ACTOR_DRAFT_MAX_ITEMS
+    )
+    resource_handles: list[Annotated[str, Field(min_length=1, max_length=32)]] = Field(
+        default_factory=list, max_length=_ACTOR_DRAFT_MAX_ITEMS
+    )
+    rationale: str | None = Field(
+        default=None, min_length=1, max_length=_ACTOR_DRAFT_RATIONALE_MAX_LENGTH
+    )
+
+    @field_validator("resource_handles")
+    @classmethod
+    def _reject_duplicate_resource_handles(cls, value: list[str]) -> list[str]:
+        if len(set(value)) != len(value):
+            raise ValueError("duplicate resource handle in actor draft")
+        return value
+
+
 @dataclass(frozen=True)
 class ActorDraftContext:
     """Canonical inventory used to compile one actor semantic draft."""
@@ -117,6 +147,7 @@ class ActorDraftContext:
     resources: Mapping[str, str]
     access: ActorAccessProvenance
     minimum_capability_level: str = "novice"
+    actor_choices: Mapping[str, tuple[str, str]] | None = None
 
 
 @dataclass(frozen=True)
@@ -174,27 +205,69 @@ def create_actor_draft_model(
     return create_model(model_name, __base__=ActorDraftV2, **fields)
 
 
+def create_actor_draft_v3_model(
+    *,
+    actor_choice_handles: Sequence[str],
+    resource_handles: Sequence[str] = (),
+    compact: bool = False,
+) -> type[ActorDraftV3]:
+    """Build the finite provider schema for compatible actor choices."""
+
+    choice_handle = _literal_from_handles(actor_choice_handles)
+    fields: dict[str, Any] = {"actor_choice_handle": (choice_handle, ...)}
+    if resource_handles:
+        resource_handle = _literal_from_handles(resource_handles)
+        fields["resource_handles"] = (
+            list[resource_handle],
+            Field(default_factory=list, max_length=_ACTOR_DRAFT_MAX_ITEMS),
+        )
+    else:
+        fields["resource_handles"] = (
+            list[Annotated[str, Field(min_length=1, max_length=32)]],
+            Field(default_factory=list, max_length=0),
+        )
+    model_name = (
+        "CompactActorDraftV3ForCandidate" if compact else "ActorDraftV3ForCandidate"
+    )
+    return create_model(model_name, __base__=ActorDraftV3, **fields)
+
+
 def compile_actor_draft(
-    context: ActorDraftContext, draft: ActorDraftV2
+    context: ActorDraftContext, draft: ActorDraftV2 | ActorDraftV3
 ) -> ActorProfile:
     """Attach canonical actor choices and access to provider-authored BDI."""
     violations: list[ActorDraftViolation] = []
-    actor_type = context.actor_types.get(draft.actor_type_handle)
-    if actor_type is None:
-        violations.append(
-            ActorDraftViolation(
-                "unknown_actor_type_handle",
-                f"unknown actor type handle '{draft.actor_type_handle}'",
+    if isinstance(draft, ActorDraftV3):
+        choice = (context.actor_choices or {}).get(draft.actor_choice_handle)
+        if choice is None:
+            violations.append(
+                ActorDraftViolation(
+                    "unknown_actor_choice_handle",
+                    f"unknown actor choice handle '{draft.actor_choice_handle}'",
+                )
             )
-        )
-    capability_level = context.capability_levels.get(draft.capability_level_handle)
-    if capability_level is None:
-        violations.append(
-            ActorDraftViolation(
-                "unknown_capability_level_handle",
-                f"unknown capability level handle '{draft.capability_level_handle}'",
+            actor_type = None
+            capability_level = None
+        else:
+            actor_type, capability_level = choice
+    else:
+        actor_type = context.actor_types.get(draft.actor_type_handle)
+        if actor_type is None:
+            violations.append(
+                ActorDraftViolation(
+                    "unknown_actor_type_handle",
+                    f"unknown actor type handle '{draft.actor_type_handle}'",
+                )
             )
-        )
+        capability_level = context.capability_levels.get(draft.capability_level_handle)
+        if capability_level is None:
+            violations.append(
+                ActorDraftViolation(
+                    "unknown_capability_level_handle",
+                    f"unknown capability level handle "
+                    f"'{draft.capability_level_handle}'",
+                )
+            )
     if actor_type is not None and capability_level is not None:
         actor_floor = _CAPABILITY_FLOORS.get(actor_type, "novice")
         required_floor = max(
@@ -303,6 +376,24 @@ def _actor_draft_inventories(
     return actor_types, capability_levels, resources
 
 
+def _actor_choice_inventory(
+    actor_types: Mapping[str, str], capability_levels: Mapping[str, str]
+) -> dict[str, tuple[str, str]]:
+    """Allocate handles only for compatible actor/capability pairs."""
+
+    choices: dict[str, tuple[str, str]] = {}
+    for actor_type in actor_types.values():
+        actor_floor = _CAPABILITY_FLOORS.get(actor_type, "novice")
+        floor_index = _CAPABILITY_ORDER.index(actor_floor)
+        for capability_level in capability_levels.values():
+            if _CAPABILITY_ORDER.index(capability_level) < floor_index:
+                continue
+            choices[f"ac{len(choices)}"] = (actor_type, capability_level)
+    if not choices:
+        raise ValueError("projection has no compatible actor/capability choice")
+    return choices
+
+
 def _derive_canonical_actor_access(
     projection_context: dict[str, Any], actor_type: str
 ) -> ActorAccessProvenance:
@@ -355,20 +446,20 @@ def _derive_canonical_actor_access(
 
 
 def _actor_draft_prompt(
-    actor_types: Mapping[str, str],
-    capability_levels: Mapping[str, str],
+    actor_choices: Mapping[str, tuple[str, str]],
     resources: Mapping[str, str],
 ) -> str:
-    """Render the concise V2 handle protocol appended to the semantic prompt."""
+    """Render the concise V3 handle protocol appended to the semantic prompt."""
     lines = [
-        "\n\n## Semantic Draft V2 Response Protocol (MANDATORY)",
-        "Return actor_type_handle and capability_level_handle from these inventories.",
+        "\n\n## Semantic Draft V3 Response Protocol (MANDATORY)",
+        "Return one actor_choice_handle from the compatible inventory.",
         "The application owns access provenance; do not return access fields or IDs.",
         "Author all beliefs, desires, and intentions yourself.",
-        "Actor handles:",
-        *(f"- {handle}: {value}" for handle, value in actor_types.items()),
-        "Capability handles:",
-        *(f"- {handle}: {value}" for handle, value in capability_levels.items()),
+        "Compatible actor/capability choices:",
+        *(
+            f"- {handle}: actor={actor_type}; capability={capability_level}"
+            for handle, (actor_type, capability_level) in actor_choices.items()
+        ),
         "Resource handles (select zero to four; do not invent resources):",
         *(
             (f"- {handle}: {value}" for handle, value in resources.items())
@@ -1069,6 +1160,7 @@ def _call_actor_profile(
     )
     actor_types: dict[str, str] = {}
     capability_levels: dict[str, str] = {}
+    actor_choices: dict[str, tuple[str, str]] = {}
     resources: dict[str, str] = {}
     response_model: type[BaseModel] | None = None
     if semantic_draft_v2:
@@ -1076,13 +1168,13 @@ def _call_actor_profile(
         actor_types, capability_levels, resources = _actor_draft_inventories(
             ctx, projection_context, profile
         )
-        response_model = create_actor_draft_model(
-            actor_type_handles=tuple(actor_types),
-            capability_level_handles=tuple(capability_levels),
+        actor_choices = _actor_choice_inventory(actor_types, capability_levels)
+        response_model = create_actor_draft_v3_model(
+            actor_choice_handles=tuple(actor_choices),
             resource_handles=tuple(resources),
             compact=compact_response_schema,
         )
-        user_prompt += _actor_draft_prompt(actor_types, capability_levels, resources)
+        user_prompt += _actor_draft_prompt(actor_choices, resources)
     if completion_length_feedback:
         user_prompt = f"{user_prompt}{completion_length_feedback}"
     result = _complete_actor_profile(
@@ -1095,14 +1187,22 @@ def _call_actor_profile(
     )
 
     resp = result.content
-    if isinstance(resp, ActorDraftV2):
-        actor_type = actor_types.get(resp.actor_type_handle)
+    if isinstance(resp, (ActorDraftV2, ActorDraftV3)):
+        if isinstance(resp, ActorDraftV3):
+            choice = actor_choices.get(resp.actor_choice_handle)
+            actor_type = choice[0] if choice is not None else None
+            unknown_detail = f"unknown actor choice handle '{resp.actor_choice_handle}'"
+            unknown_code = "unknown_actor_choice_handle"
+        else:
+            actor_type = actor_types.get(resp.actor_type_handle)
+            unknown_detail = f"unknown actor type handle '{resp.actor_type_handle}'"
+            unknown_code = "unknown_actor_type_handle"
         if actor_type is None:
             raise ActorSemanticDraftError(
                 (
                     ActorDraftViolation(
-                        "unknown_actor_type_handle",
-                        f"unknown actor type handle '{resp.actor_type_handle}'",
+                        unknown_code,
+                        unknown_detail,
                     ),
                 )
             )
@@ -1114,13 +1214,14 @@ def _call_actor_profile(
                 resources=resources,
                 access=access,
                 minimum_capability_level=ctx["minimum_capability_level"],
+                actor_choices=actor_choices,
             ),
             resp,
         )
         return actor_profile, result, ctx.get("diversity_limitation")
 
     # Scripted fixtures using the historical response remain supported while
-    # live projected requests advertise and parse only ActorDraftV2.
+    # live projected requests advertise and parse only ActorDraftV3.
     actor_type = _normalize_actor_type(resp.actor_type)
     capability_level = _normalize_capability_level(resp.capability_level)
     capability_level = _enforce_capability_floor(actor_type, capability_level)

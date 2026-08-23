@@ -91,9 +91,10 @@ When a pinned entry point is provided, your actor profile must include structure
 {% include '_example_adaptation.j2' %}
 {% if semantic_draft_v2 | default(false) %}
 
-## Semantic Draft V2 Output Contract (OVERRIDES OUTPUT-FIELD INSTRUCTIONS ABOVE)
-The response schema uses request-local handles. Return `actor_type_handle`,
-`capability_level_handle`, bounded BDI statements, and `resource_handles` only.
+## Semantic Draft V3 Output Contract (OVERRIDES OUTPUT-FIELD INSTRUCTIONS ABOVE)
+The response schema uses request-local handles. Return one
+`actor_choice_handle`, bounded BDI statements, and `resource_handles` only.
+The actor choice already represents a compatible actor/capability pair.
 The application derives access provenance and canonical identities from the
 projection. Do not return `actor_type`, `capability_level`, raw resource names,
 access fields, entry-point IDs, source IDs, or trust-boundary IDs.

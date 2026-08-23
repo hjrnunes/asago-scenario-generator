@@ -2610,6 +2610,18 @@ class TestProjectionConstraintsInPrompts:
         assert "Execution Requirements" not in rendered
         assert "Projected Taxonomy Mappings" not in rendered
 
+    def test_context_preserves_explicit_ingress_link_identity(self):
+        ctx = self._projection_context()
+        assert ctx["initial_ingress_slot_id"] == "ingress"
+        ingress_links = [
+            link
+            for step in ctx["selected_steps"]
+            for link in step["resource_links"]
+            if link["role"] == "ingress"
+        ]
+        assert len(ingress_links) == 1
+        assert ingress_links[0]["slot_id"] == ctx["initial_ingress_slot_id"]
+
     def test_call0_prompt_contains_projection_constraints(self):
         from asago_scenario_generator.prompts import render_prompt
         from tests.test_actor_type_compatible_set import (

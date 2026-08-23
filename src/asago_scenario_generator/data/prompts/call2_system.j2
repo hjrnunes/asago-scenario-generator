@@ -149,9 +149,10 @@ Action kinds and their rules:
 1. `initial_ingress`: Attacker gains initial access. Required field: `entry_point_id` (the entry point NAME from the Entry Points list above). Zone must be a valid Schneider zone reflecting entry-point semantics.
 2. `external_precondition`: Attacker preparation OUTSIDE the AI system. Zone MUST be null/omitted — external infrastructure never receives a Schneider zone. Optional field: `access_provenance` (e.g. "phishing", "supply-chain-staging").
 3. `ai_system_action`: Internal AI processing/action. Zone must be an active Schneider zone from the profile.
-4. `tool_invocation`: AI agent invokes a specific tool. Required field: `tool_id` (the tool NAME from the Tool Inventory above). Zone MUST be exactly `tool_execution`. Optional field: `integration_id` (the integration NAME from the External Integrations list).
-5. `integration_interaction`: Direct interaction with a connected integration. Required field: `integration_id` (the integration NAME from the External Integrations list). Zone must be an active internal execution zone (including `tool_execution`).
-6. `impact`: Explicit attack impact. Required fields: `boundary` ("internal" or "external") and `target` (description of the impact). When boundary is "internal", zone must be a valid Schneider zone. When boundary is "external", zone MUST be null/omitted.
+4. `attacker_action`: Attacker-controlled discovery, probing, invocation, or persistence after ingress. Zone must be an active Schneider zone from the profile.
+5. `tool_invocation`: AI agent invokes a specific tool. Required field: `tool_id` (the tool NAME from the Tool Inventory above). Zone MUST be exactly `tool_execution`. Optional field: `integration_id` (the integration NAME from the External Integrations list).
+6. `integration_interaction`: Direct interaction with a connected integration. Required field: `integration_id` (the integration NAME from the External Integrations list). Zone must be an active internal execution zone (including `tool_execution`).
+7. `impact`: Explicit attack impact. Required fields: `boundary` ("internal" or "external") and `target` (description of the impact). When boundary is "internal", zone must be a valid Schneider zone. When boundary is "external", zone MUST be null/omitted.
 
 Example LEAF node YAML:
 ```yaml

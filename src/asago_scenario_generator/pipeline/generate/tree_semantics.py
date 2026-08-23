@@ -13,23 +13,17 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from asago_scenario_generator.models.attack_tree import (
-    AiSystemAction,
     AttackTree,
     AttackTreeNode,
-    ExternalPreconditionAction,
     GateType,
-    ImpactAction,
-    InitialIngressAction,
-    IntegrationInteractionAction,
     LeafAction,
-    ToolInvocationAction,
 )
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.models.realization import ProjectedStepRealization
 from asago_scenario_generator.models.scenario import NarrativeLayer
-from asago_scenario_generator.pipeline.compatibility import (
-    EXECUTOR_ROLE_TO_LEAF_COMPAT,
-    STEP_TO_LEAF_ACTION_COMPAT,
+from asago_scenario_generator.pipeline.generate.canonical_projection import (
+    ProjectionInfeasible as ProjectionInfeasible,
+    derive_canonical_projection_semantics,
 )
 
 
@@ -309,13 +303,6 @@ class InvalidSemanticDraft(ValueError):
         super().__init__("; ".join(v.message for v in validation.violations))
 
 
-class ProjectionInfeasible(ValueError):
-    """Canonical leaf semantics cannot be derived without invention."""
-
-    stage_failure_code = "projection_infeasible"
-    stage_failure_retryable = False
-
-
 class CanonicalCompilationError(RuntimeError):
     """An accepted draft could not be compiled into the domain model."""
 
@@ -323,104 +310,13 @@ class CanonicalCompilationError(RuntimeError):
     stage_failure_retryable = False
 
 
-def _step_zone(narrative: NarrativeLayer, step_id: str) -> str | None:
-    matches = [
-        step.zone for step in narrative.steps if step_id in step.projected_step_ids
-    ]
-    if len(matches) != 1:
-        raise ProjectionInfeasible(
-            f"projected step '{step_id}' must map to exactly one narrative step; "
-            f"found {len(matches)}"
-        )
-    return None if matches[0] == "outside" else matches[0]
-
-
-def _resource_refs(step: dict[str, Any]) -> list[dict[str, Any]]:
-    return [
-        ref
-        for link in step.get("resource_links", [])
-        if isinstance(link, dict)
-        and isinstance((ref := link.get("resource_ref")), dict)
-    ]
-
-
-def _resource_id(refs: list[dict[str, Any]], kind: str, key: str) -> str | None:
-    values = [str(ref[key]) for ref in refs if ref.get("kind") == kind and ref.get(key)]
-    if len(set(values)) > 1:
-        raise ProjectionInfeasible(
-            f"projected step has more than one {kind} binding: {sorted(set(values))}"
-        )
-    return values[0] if values else None
-
-
-def _compatible_action_kinds(step: dict[str, Any]) -> set[str]:
-    return STEP_TO_LEAF_ACTION_COMPAT.get(str(step.get("action_kind", "")), set()) & (
-        EXECUTOR_ROLE_TO_LEAF_COMPAT.get(str(step.get("executor_role", "")), set())
-    )
-
-
-def _derive_action(
-    step: dict[str, Any],
+def validate_tree_projection_realizability(
     projection_context: dict[str, Any],
-    zone: str | None,
-) -> LeafAction:
-    compatible = _compatible_action_kinds(step)
-    refs = _resource_refs(step)
-    boundary = str(step.get("boundary_position", ""))
-    action_kind = str(step.get("action_kind", ""))
-    entry_point_id = _resource_id(refs, "entry_point", "entry_point_id")
-    tool_id = _resource_id(refs, "tool", "tool_id")
-    integration_id = _resource_id(refs, "integration", "integration_id")
-    canonical_ingress = projection_context.get("canonical_ingress", {})
+    profile: CapabilityProfile,
+) -> None:
+    """Fail before generation unless the complete inventory can be compiled."""
 
-    # Indirect ingress is commonly performed by the system fetching or
-    # ingesting attacker-influenced content. The boundary crossing is the
-    # canonical ingress event even when the same step binds an integration.
-    if boundary == "crossing" and "initial_ingress" in compatible:
-        if not entry_point_id and isinstance(canonical_ingress, dict):
-            entry_point_id = canonical_ingress.get("entry_point_id")
-        if entry_point_id:
-            return InitialIngressAction(entry_point_id=str(entry_point_id))
-
-    if boundary == "outside" and "external_precondition" in compatible:
-        return ExternalPreconditionAction()
-    if action_kind == "impact" and "impact" in compatible:
-        descriptions = [
-            str(pc.get("description"))
-            for pc in step.get("observable_postconditions", [])
-            if isinstance(pc, dict) and pc.get("description")
-        ]
-        target = descriptions[0] if descriptions else "Projected security impact"
-        return ImpactAction(
-            boundary="external" if boundary == "outside" else "internal",
-            target=target[:200],
-        )
-    if tool_id is not None and "tool_invocation" in compatible:
-        return ToolInvocationAction(tool_id=tool_id, integration_id=integration_id)
-    if integration_id is not None and "integration_interaction" in compatible:
-        return IntegrationInteractionAction(integration_id=integration_id)
-    if "initial_ingress" in compatible:
-        if not entry_point_id and isinstance(canonical_ingress, dict):
-            entry_point_id = canonical_ingress.get("entry_point_id")
-        if entry_point_id:
-            return InitialIngressAction(entry_point_id=str(entry_point_id))
-    if "ai_system_action" in compatible:
-        return AiSystemAction()
-    raise ProjectionInfeasible(
-        f"no canonical tree action can be derived for step '{step.get('step_id')}' "
-        f"from compatible kinds {sorted(compatible)} and its resource bindings"
-    )
-
-
-def _canonical_label(step: dict[str, Any], action: LeafAction) -> str:
-    postconditions = [
-        str(pc.get("description"))
-        for pc in step.get("observable_postconditions", [])
-        if isinstance(pc, dict) and pc.get("description")
-    ]
-    if postconditions:
-        return postconditions[0][:120]
-    return f"{action.kind.replace('_', ' ')} projected step"[:120]
+    derive_canonical_projection_semantics(projection_context, profile)
 
 
 def _coalesce_canonical_leaf_specs(
@@ -473,71 +369,34 @@ def derive_canonical_leaf_specs(
     The returned order is the canonical selected-step order.
     """
 
-    step_by_id = {
-        str(step["step_id"]): step
-        for step in projection_context.get("selected_steps", [])
-        if isinstance(step, dict) and step.get("step_id")
-    }
-    selected_ids = tuple(
-        str(item) for item in projection_context.get("selected_step_ids", [])
-    )
-    if not selected_ids:
-        raise ProjectionInfeasible("projection contains no selected steps")
-
+    semantics = derive_canonical_projection_semantics(projection_context, profile)
     specs: list[CanonicalLeafSpec] = []
-    for index, step_id in enumerate(selected_ids):
-        step = step_by_id.get(step_id)
-        if step is None:
-            raise ProjectionInfeasible(f"selected projected step '{step_id}' is absent")
-        zone = _step_zone(narrative, step_id)
-        action = _derive_action(step, projection_context, zone)
-        if action.kind == "initial_ingress":
-            entry_point = profile.resolve_entry_point(action.entry_point_id)
-            if entry_point is None or entry_point.effective_ingress_zone is None:
-                raise ProjectionInfeasible(
-                    f"initial ingress '{action.entry_point_id}' has no canonical zone"
-                )
-            zone = entry_point.effective_ingress_zone
-        if zone is not None and zone not in profile.zones_active:
-            raise ProjectionInfeasible(
-                f"projected step '{step_id}' uses inactive narrative zone '{zone}'"
-            )
-        realization_data = step.get("realization")
-        if not isinstance(realization_data, dict):
-            raise ProjectionInfeasible(
-                f"projected step '{step_id}' has no canonical realization"
-            )
-        realization = ProjectedStepRealization.model_validate(realization_data)
-        if realization.projected_step_id != step_id:
-            raise ProjectionInfeasible(
-                f"projected step '{step_id}' realization identifies "
-                f"'{realization.projected_step_id}'"
-            )
-        raw_techniques = step.get("technique_ids", ())
-        if isinstance(raw_techniques, str):
-            raw_techniques = (raw_techniques,)
-        technique_ids = tuple(str(item) for item in raw_techniques)
-        if len(technique_ids) > 1:
-            raise ProjectionInfeasible(
-                f"projected step '{step_id}' has ambiguous technique bindings "
-                f"{list(technique_ids)}"
+    for index, semantic in enumerate(semantics.steps):
+        narrative_matches = [
+            step.zone
+            for step in narrative.steps
+            if semantic.projected_step_id in step.projected_step_ids
+        ]
+        if narrative_matches != [semantic.zone]:
+            raise CanonicalCompilationError(
+                f"projected step '{semantic.projected_step_id}' narrative zone "
+                f"{narrative_matches} disagrees with canonical zone "
+                f"'{semantic.zone}'"
             )
         specs.append(
             CanonicalLeafSpec(
                 leaf_handle=f"l{index}",
-                label=_canonical_label(step, action),
+                label=semantic.label,
                 description=None,
-                action=action,
-                zone=zone,
-                technique_id=technique_ids[0] if technique_ids else None,
-                projected_step_ids=(step_id,),
-                realizations=(realization,),
-                initial_ingress=action.kind == "initial_ingress",
+                action=semantic.action,
+                zone=None if semantic.zone == "outside" else semantic.zone,
+                technique_id=semantic.technique_id,
+                projected_step_ids=(semantic.projected_step_id,),
+                realizations=(semantic.realization,),
+                initial_ingress=semantic.initial_ingress,
             )
         )
     specs = _coalesce_canonical_leaf_specs(specs)
-    if not any(spec.initial_ingress for spec in specs):
-        raise ProjectionInfeasible("canonical leaves contain no initial ingress")
     return tuple(specs)
 
 

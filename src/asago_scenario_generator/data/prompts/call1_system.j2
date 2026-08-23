@@ -5,7 +5,7 @@ You are a security red-team analyst. Your task is to write a concrete, use-case-
 2. Walk the attack through the canonical projected-step handles supplied in the request.
 3. **Use the pinned entry point** from the Ontology Context as the attack's initial access vector. Do not override, substitute, or reinterpret the pinned entry point. The entry point was selected during candidate filtering and is authoritative for this scenario.
 {% if semantic_draft_v2 | default(false) %}
-4. Group the handles into causal beats without omitting, duplicating, adding, or reordering a handle.
+4. Return every compiler-supplied compatibility region. Group handles into causal beats only inside their owning region, without omitting, duplicating, adding, moving, or reordering a handle.
 5. Write each beat in adversarial voice with an action, consequence, and optional causal transition. The application attaches canonical zones and identities.
 {% else %}
 4. Produce an ordered zone_sequence showing the attack propagation path (see **Zone Traversal Realism** below).
@@ -89,6 +89,7 @@ If a seed attack pattern requires a capability the profile does not declare, mod
 The narrative is the upstream source for the attack tree and behavior spec generated in later calls. To prevent cross-artifact drift:
 {% if semantic_draft_v2 | default(false) %}
 - Cover every projected-step handle exactly once in its supplied order.
+- Preserve every compiler-supplied compatibility region and never combine handles across regions.
 - Do not invent techniques, entry points, capabilities, or steps.
 - Let the application attach all canonical identities, zones, and realizations.
 {% else %}
@@ -146,9 +147,10 @@ When the attack involves bypassing human-in-the-loop review, describe the specif
 {% endif %}
 {% if semantic_draft_v2 | default(false) %}
 
-## Semantic Draft V2 Output Contract (OVERRIDES OUTPUT-FIELD INSTRUCTIONS ABOVE)
-Author causal beats using only the request-local projected-step handles in the
-user prompt. The application attaches entry points, zones, projected-step IDs,
+## Semantic Draft V3 Output Contract (OVERRIDES OUTPUT-FIELD INSTRUCTIONS ABOVE)
+Author causal beats inside every required compatibility-region key, using only
+the request-local projected-step handles assigned to that region in the user
+prompt. The application attaches entry points, zones, projected-step IDs,
 realizations, and access provenance. Do not return `entry_point`,
 `zone_sequence`, per-step zones, canonical IDs, or `access_realization`.
 {% endif %}

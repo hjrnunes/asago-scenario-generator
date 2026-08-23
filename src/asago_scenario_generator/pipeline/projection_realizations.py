@@ -674,8 +674,8 @@ def _check_security_actions_mapped(
         kind = leaf.action.kind
         if kind == "external_precondition":
             continue
-        # All attack-action leaves (initial_ingress, ai_system_action,
-        # tool_invocation, integration_interaction, impact) are
+        # All attack-action leaves (initial_ingress, attacker_action,
+        # ai_system_action, tool_invocation, integration_interaction, impact) are
         # security-bearing and must map to ≥1 projected step.
         if leaf.id not in mapped_leaves:
             violations.append(

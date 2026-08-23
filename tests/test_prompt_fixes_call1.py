@@ -118,6 +118,29 @@ def _render_call1_user(**overrides: object) -> str:
     return render_prompt("call1_user.j2", **defaults)
 
 
+def test_semantic_draft_v2_retry_includes_compiler_feedback() -> None:
+    """A semantic retry tells the provider what invalidated the prior draft."""
+    prompt = _render_call1_user(
+        semantic_draft_v2=True,
+        realization_feedback=(
+            "causal beat 3 combines incompatible canonical zones: "
+            "['memory', 'reasoning']"
+        ),
+    )
+
+    assert "Semantic Narrative Feedback (RETRY)" in prompt
+    assert (
+        "causal beat 3 combines incompatible canonical zones: ['memory', 'reasoning']"
+    ) in prompt
+
+
+def test_semantic_draft_v3_prohibits_cross_region_grouping() -> None:
+    """Semantic beats may group only handles in one canonical region."""
+    prompt = _render_call1_user(semantic_draft_v2=True)
+
+    assert "Never move a handle to another region or combine regions" in prompt
+
+
 # ---------------------------------------------------------------------------
 # ksur — Actor Profile Grounding elevated to INVARIANT
 # ---------------------------------------------------------------------------

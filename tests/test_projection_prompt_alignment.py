@@ -16,6 +16,9 @@ from asago_scenario_generator.pipeline.generate.alignment import (
     derive_projection_alignment_row,
     derive_projection_alignment_rows,
 )
+from asago_scenario_generator.pipeline.generate.canonical_projection import (
+    compatible_leaf_action_kinds_for_step,
+)
 from asago_scenario_generator.pipeline.projection_validation import (
     _EXECUTOR_ROLE_TO_LEAF_COMPAT,
     _STEP_TO_LEAF_ACTION_COMPAT,
@@ -150,7 +153,9 @@ class TestRowDerivation:
         assert row["executor"] == executor
         assert row["boundary"] == boundary
         assert row["allowed_narrative_zone"] == allowed_narrative_zone
-        expected_kinds = sorted(allowed_tree_kinds.split()) if allowed_tree_kinds else []
+        expected_kinds = (
+            sorted(allowed_tree_kinds.split()) if allowed_tree_kinds else []
+        )
         assert row["allowed_tree_kinds"] == expected_kinds
         assert row["tree_zone"] == tree_zone
         assert row["bound_resources"] == bound_resources
@@ -162,17 +167,12 @@ class TestRowDerivation:
 
 
 class TestSynchronization:
-    def test_tree_kinds_equal_validator_intersection_for_all_combinations(self):
+    def test_tree_kinds_equal_canonical_ownership_compatibility(self):
         for action_kind in _STEP_TO_LEAF_ACTION_COMPAT:
             for executor_role in _EXECUTOR_ROLE_TO_LEAF_COMPAT:
-                step = _step(
-                    "step.x", action_kind, executor_role, "inside"
-                )
+                step = _step("step.x", action_kind, executor_role, "inside")
                 row = derive_projection_alignment_row(step)
-                expected = sorted(
-                    _STEP_TO_LEAF_ACTION_COMPAT[action_kind]
-                    & _EXECUTOR_ROLE_TO_LEAF_COMPAT[executor_role]
-                )
+                expected = sorted(compatible_leaf_action_kinds_for_step(step))
                 assert row["allowed_tree_kinds"] == expected
 
     def test_narrative_and_tree_zone_equal_stage_boundary_rules(self):

@@ -12,14 +12,21 @@ from __future__ import annotations
 # Mapping from canonical chain step action_kind to valid tree leaf action kinds.
 # Canonical action_kinds: prepare, deliver, invoke, transform, persist, observe, impact
 # Tree leaf action kinds: initial_ingress, external_precondition, ai_system_action,
-#   tool_invocation, integration_interaction, impact
+#   attacker_action, tool_invocation, integration_interaction, impact
 STEP_TO_LEAF_ACTION_COMPAT: dict[str, set[str]] = {
     "prepare": {"external_precondition", "initial_ingress"},
-    "deliver": {"initial_ingress"},
-    "invoke": {"initial_ingress", "tool_invocation", "integration_interaction"},
+    "deliver": {"initial_ingress", "attacker_action"},
+    "invoke": {
+        "initial_ingress",
+        "attacker_action",
+        "tool_invocation",
+        "integration_interaction",
+    },
     "transform": {"ai_system_action"},
-    "persist": {"ai_system_action", "tool_invocation"},
+    "persist": {"ai_system_action", "attacker_action", "tool_invocation"},
     "observe": {
+        "initial_ingress",
+        "attacker_action",
         "ai_system_action",
         "integration_interaction",
         "external_precondition",
@@ -32,6 +39,7 @@ STEP_TO_LEAF_ACTION_COMPAT: dict[str, set[str]] = {
 EXECUTOR_ROLE_TO_LEAF_COMPAT: dict[str, set[str]] = {
     "attacker": {
         "initial_ingress",
+        "attacker_action",
         "external_precondition",
         "impact",
         "tool_invocation",

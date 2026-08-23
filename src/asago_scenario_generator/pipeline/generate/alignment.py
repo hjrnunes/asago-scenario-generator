@@ -11,9 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from asago_scenario_generator.pipeline.compatibility import (
-    EXECUTOR_ROLE_TO_LEAF_COMPAT,
-    STEP_TO_LEAF_ACTION_COMPAT,
+from asago_scenario_generator.pipeline.generate.canonical_projection import (
+    compatible_leaf_action_kinds_for_step,
 )
 
 _OUTSIDE_ZONE = "outside"
@@ -30,14 +29,6 @@ _RESOURCE_KIND_LABELS: dict[str, str] = {
     "output_surface": "effect",
     "agent_internal": "agent_internal",
 }
-
-
-def _allowed_tree_kinds(action_kind: str, executor_role: str) -> list[str]:
-    """Intersection of the action-kind and executor-role validator mappings."""
-    return sorted(
-        STEP_TO_LEAF_ACTION_COMPAT.get(action_kind, set())
-        & EXECUTOR_ROLE_TO_LEAF_COMPAT.get(executor_role, set())
-    )
 
 
 # Identity keys tried in order when rendering one bound resource.
@@ -94,6 +85,7 @@ def derive_projection_alignment_row(step: dict[str, Any]) -> dict[str, Any]:
     null tree zone; inside/crossing steps use an active Schneider zone.
     """
     boundary = str(step.get("boundary_position", ""))
+    allowed_tree_kinds = sorted(compatible_leaf_action_kinds_for_step(step))
     if boundary == _OUTSIDE_ZONE:
         narrative_zone = _OUTSIDE_ZONE
         tree_zone = "null"
@@ -106,9 +98,7 @@ def derive_projection_alignment_row(step: dict[str, Any]) -> dict[str, Any]:
         "executor": step.get("executor_role", ""),
         "boundary": boundary,
         "allowed_narrative_zone": narrative_zone,
-        "allowed_tree_kinds": _allowed_tree_kinds(
-            str(step.get("action_kind", "")), str(step.get("executor_role", ""))
-        ),
+        "allowed_tree_kinds": allowed_tree_kinds,
         "tree_zone": tree_zone,
         "bound_resources": bound_resources_from_step(step),
     }

@@ -92,6 +92,7 @@ ACTION_ZONE_RULES: dict[str, dict[str, Any]] = {
     "initial_ingress": {"zone_required": True, "valid_zones": _VALID_ZONES},
     "external_precondition": {"zone_required": False, "valid_zones": frozenset()},
     "ai_system_action": {"zone_required": True, "valid_zones": _VALID_ZONES},
+    "attacker_action": {"zone_required": True, "valid_zones": _VALID_ZONES},
     "tool_invocation": {
         "zone_required": True,
         "valid_zones": frozenset({"tool_execution"}),
@@ -156,6 +157,19 @@ class AiSystemAction(BaseModel):
     kind: Literal["ai_system_action"] = "ai_system_action"
 
 
+class AttackerAction(BaseModel):
+    """Attacker-controlled activity after ingress inside the assessed system.
+
+    This represents discovery, probing, invocation, or persistence performed by
+    the attacker when no canonical tool or integration binding exists.  It is
+    deliberately distinct from both initial ingress and AI-system execution.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["attacker_action"] = "attacker_action"
+
+
 class ToolInvocationAction(BaseModel):
     """The AI agent invokes a specific tool from the inventory.
 
@@ -217,6 +231,7 @@ LeafAction = Annotated[
     InitialIngressAction
     | ExternalPreconditionAction
     | AiSystemAction
+    | AttackerAction
     | ToolInvocationAction
     | IntegrationInteractionAction
     | ImpactAction,
@@ -240,6 +255,7 @@ class AttackTreeNode(BaseModel):
 
     - ``external_precondition``: zone must be ``None``
     - ``ai_system_action``: zone must be a valid Schneider zone
+    - ``attacker_action``: zone must be a valid Schneider zone
     - ``tool_invocation``: zone must be exactly ``tool_execution``
     - ``integration_interaction``: zone must be a valid internal zone
     - ``impact``: zone required when ``boundary == "internal"``, forbidden when ``"external"``

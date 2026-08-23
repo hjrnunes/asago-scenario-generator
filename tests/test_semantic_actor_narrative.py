@@ -11,19 +11,24 @@ from asago_scenario_generator.models.scenario import ActorAccessProvenance
 from asago_scenario_generator.pipeline.generate.actor import (
     ActorDraftContext,
     ActorDraftV2,
+    ActorDraftV3,
     compile_actor_draft,
     create_actor_draft_model,
+    create_actor_draft_v3_model,
     _call_actor_profile,
+    _actor_choice_inventory,
     _actor_draft_inventories,
     _derive_canonical_actor_access,
 )
 from asago_scenario_generator.pipeline.generate.narrative import (
     NarrativeDraftContext,
     NarrativeDraftV2,
+    NarrativeDraftV3,
     NarrativeProjectedStep,
     NarrativeSemanticDraftError,
     compile_narrative_draft,
     create_narrative_draft_model,
+    create_narrative_draft_v3_model,
     _call_narrative,
 )
 
@@ -103,6 +108,25 @@ def test_actor_draft_schema_is_finite_and_excludes_access_provenance() -> None:
                 "resource_handles": [],
             }
         )
+
+
+def test_actor_v3_schema_excludes_below_floor_actor_pairs() -> None:
+    choices = _actor_choice_inventory(
+        {"a0": "supply-chain-actor"},
+        {"c0": "intermediate", "c1": "advanced", "c2": "expert"},
+    )
+
+    assert set(choices.values()) == {
+        ("supply-chain-actor", "advanced"),
+        ("supply-chain-actor", "expert"),
+    }
+    model = create_actor_draft_v3_model(
+        actor_choice_handles=tuple(choices), resource_handles=()
+    )
+    schema = model.model_json_schema()
+    assert schema["properties"]["actor_choice_handle"]["enum"] == ["ac0", "ac1"]
+    assert "actor_type_handle" not in schema["properties"]
+    assert "capability_level_handle" not in schema["properties"]
 
 
 def _narrative_context() -> NarrativeDraftContext:
@@ -249,6 +273,91 @@ def test_narrative_draft_schema_accepts_only_request_local_handles() -> None:
     assert schema["properties"]["beats"]["maxItems"] == 2
 
 
+def test_narrative_v3_schema_makes_cross_region_grouping_unrepresentable() -> None:
+    base = _narrative_context()
+    context = NarrativeDraftContext(
+        title_fallback=base.title_fallback,
+        entry_point=base.entry_point,
+        ordered_step_handles=base.ordered_step_handles,
+        projected_steps={
+            "s0": NarrativeProjectedStep(
+                projected_step_id="projected.prepare",
+                order=1,
+                zone="outside",
+                realization=_realization("projected.prepare", "outside"),
+                region="r0",
+            ),
+            "s1": NarrativeProjectedStep(
+                projected_step_id="projected.deliver",
+                order=2,
+                zone="input",
+                realization=_realization("projected.deliver", "crossing"),
+                region="r1",
+            ),
+            "s2": NarrativeProjectedStep(
+                projected_step_id="projected.observe",
+                order=3,
+                zone="input",
+                realization=_realization("projected.observe", "crossing"),
+                region="r1",
+            ),
+        },
+    )
+    model = create_narrative_draft_v3_model(context)
+
+    valid = model.model_validate(
+        {
+            "title": "Partitioned narrative",
+            "summary": "The payload moves from preparation to ingress.",
+            "regions": {
+                "r0": [
+                    {
+                        "step_handles": ["s0"],
+                        "action": "Prepare the payload.",
+                        "consequence": "The payload is ready.",
+                    }
+                ],
+                "r1": [
+                    {
+                        "step_handles": ["s1", "s2"],
+                        "action": "Deliver and observe the payload.",
+                        "consequence": "The response reveals the effect.",
+                    }
+                ],
+            },
+        }
+    )
+    narrative = compile_narrative_draft(context, valid)
+    assert [step.projected_step_ids for step in narrative.steps] == [
+        ("projected.prepare",),
+        ("projected.deliver", "projected.observe"),
+    ]
+
+    with pytest.raises(ValidationError):
+        model.model_validate(
+            {
+                "title": "Invalid partition",
+                "summary": "This tries to cross a canonical region.",
+                "regions": {
+                    "r0": [
+                        {
+                            "step_handles": ["s0", "s1"],
+                            "action": "Combine incompatible steps.",
+                            "consequence": "The invalid grouping is rejected.",
+                        }
+                    ],
+                    "r1": [
+                        {
+                            "step_handles": ["s2"],
+                            "action": "Observe the response.",
+                            "consequence": "The response is visible.",
+                        }
+                    ],
+                },
+            }
+        )
+
+
 def test_narrative_draft_rejects_grouping_across_canonical_boundaries() -> None:
     draft = NarrativeDraftV2(
         title="Draft",
@@ -276,7 +385,7 @@ def test_narrative_draft_rejects_grouping_across_canonical_boundaries() -> None:
     }
 
 
-def test_projected_actor_call_uses_v2_schema_and_compiles_provider_draft(
+def test_projected_actor_call_uses_v3_schema_and_compiles_provider_draft(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -299,8 +408,7 @@ def test_projected_actor_call_uses_v2_schema_and_compiles_provider_draft(
         response_model = request["response_format"]
         return MagicMock(
             content=response_model(
-                actor_type_handle="a0",
-                capability_level_handle="c0",
+                actor_choice_handle="ac0",
                 beliefs=["The assistant accepts untrusted input."],
                 desires=["Change its policy-governed response."],
                 intentions=["Submit a tailored conflicting instruction."],
@@ -327,12 +435,12 @@ def test_projected_actor_call_uses_v2_schema_and_compiles_provider_draft(
     )
 
     response_model = client.complete.call_args.kwargs["response_format"]
-    assert issubclass(response_model, ActorDraftV2)
+    assert issubclass(response_model, ActorDraftV3)
     assert actor.actor_type == "adversarial-user"
     assert actor.capability_level == "intermediate"
     assert actor.access is not None
     assert actor.access.initial_entry_point_id == "ep:v1:canonical"
-    assert "Semantic Draft V2" in client.complete.call_args.kwargs["user_prompt"]
+    assert "Semantic Draft V3" in client.complete.call_args.kwargs["user_prompt"]
 
 
 def test_direct_actor_inventory_does_not_invent_insider_advantage() -> None:
@@ -363,7 +471,7 @@ def test_direct_actor_inventory_does_not_invent_insider_advantage() -> None:
         )
 
 
-def test_projected_narrative_call_uses_v2_schema_and_compiles_provider_draft(
+def test_projected_narrative_call_uses_v3_schema_and_compiles_provider_draft(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -382,13 +490,17 @@ def test_projected_narrative_call_uses_v2_schema_and_compiles_provider_draft(
             content=response_model(
                 title="Payload reaches reasoning",
                 summary="A crafted payload crosses the declared ingress.",
-                beats=[
-                    {
-                        "step_handles": ["s0"],
-                        "action": "The actor submits the crafted payload.",
-                        "consequence": "The assistant interprets it as instruction.",
-                    }
-                ],
+                regions={
+                    "r0": [
+                        {
+                            "step_handles": ["s0"],
+                            "action": "The actor submits the crafted payload.",
+                            "consequence": (
+                                "The assistant interprets it as instruction."
+                            ),
+                        }
+                    ]
+                },
             )
         )
 
@@ -396,14 +508,25 @@ def test_projected_narrative_call_uses_v2_schema_and_compiles_provider_draft(
     projection = {
         "canonical_ingress": {"entry_point_id": "ep:v1:canonical"},
         "ingress_controllability": "direct",
+        "initial_ingress_slot_id": "ingress",
         "selected_step_ids": ["projected.deliver"],
         "selected_steps": [
             {
                 "step_id": "projected.deliver",
                 "order": 1,
                 "action_kind": "deliver",
+                "executor_role": "attacker",
                 "boundary_position": "crossing",
-                "resource_links": [],
+                "resource_links": [
+                    {
+                        "role": "ingress",
+                        "slot_id": "ingress",
+                        "resource_ref": {
+                            "kind": "entry_point",
+                            "entry_point_id": "ep:v1:canonical",
+                        },
+                    }
+                ],
                 "realization": _realization("projected.deliver", "crossing").model_dump(
                     mode="json"
                 ),
@@ -437,6 +560,7 @@ def test_projected_narrative_call_uses_v2_schema_and_compiles_provider_draft(
         hitl=False,
         kc_subcodes=[],
     )
+    profile.resolve_entry_point.return_value = MagicMock(effective_ingress_zone="input")
 
     narrative, _ = _call_narrative(
         seed=MagicMock(),
@@ -450,8 +574,8 @@ def test_projected_narrative_call_uses_v2_schema_and_compiles_provider_draft(
     )
 
     response_model = client.complete.call_args.kwargs["response_format"]
-    assert issubclass(response_model, NarrativeDraftV2)
+    assert issubclass(response_model, NarrativeDraftV3)
     assert narrative.steps[0].projected_step_ids == ("projected.deliver",)
     assert narrative.steps[0].zone == "input"
     assert narrative.entry_point == "Chat interface"
-    assert "Semantic Draft V2" in client.complete.call_args.kwargs["user_prompt"]
+    assert "Semantic Draft V3" in client.complete.call_args.kwargs["user_prompt"]

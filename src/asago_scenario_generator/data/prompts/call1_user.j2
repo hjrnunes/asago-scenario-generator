@@ -43,8 +43,9 @@ The following tactical progression is derived from real-world case study evidenc
 ## Narrative Zone Rules (INVARIANT)
 {% if semantic_draft_v2 | default(false) %}
 - Canonical zones are shown beside the request-local step handles and are
-  attached by the application. Group handles in one causal beat only when
-  their listed canonical zones are identical.
+  attached by the application. The handles are partitioned into required
+  compatibility regions. Group handles only inside their supplied region.
+- Never move a handle to another region or combine regions in one causal beat.
 {% else %}
 - The literal zone `outside` is permitted only on a narrative step whose
   mapped `projected_step_ids` are ALL outside-boundary canonical steps.
@@ -89,6 +90,12 @@ The access_realization must exactly match the Actor Access Provenance block — 
 The application derives `access_realization` from the accepted actor and
 projection. Author how access causally enables the attack, but do not return
 access fields or canonical identifiers.
+{% if realization_feedback is defined and realization_feedback %}
+
+## Semantic Narrative Feedback (RETRY)
+The previous semantic draft could not be compiled. Fix these specific issues:
+{{ realization_feedback }}
+{% endif %}
 {% endif %}
 {% if access_feedback is defined and access_feedback %}
 ## Actor Access Feedback (RETRY — cmps.6)

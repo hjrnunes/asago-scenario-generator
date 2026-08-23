@@ -29,6 +29,7 @@ from asago_scenario_generator.pipeline.generate.stages import (
     generate_behavior_stage,
     generate_narrative_stage,
     generate_tree_stage,
+    prepare_generation,
 )
 from asago_scenario_generator.pipeline.generation_contracts import CausalRetryControl
 from asago_scenario_generator.pipeline.generate.tree_semantics import (
@@ -66,6 +67,33 @@ def _prepared() -> PreparedGeneration:
         run_id="20260101T000000_0123456789abcdef0123456789abcdef",
     )
     return PreparedGeneration(request, "cand:v2:test", "scenario:v2:test", {"x": 1})
+
+
+def test_prepare_generation_runs_tree_realizability_before_provider_calls() -> None:
+    candidate = get_projected_candidate()
+    snapshot = get_test_snapshot()
+    request = GenerationRequest(
+        seed=cast(Any, MagicMock(threat_id="T2")),
+        profile=snapshot.profile,
+        client=cast(Any, MagicMock(model="test-model")),
+        use_case="test",
+        pinned_entry_point_id=candidate.canonical_ingress.entry_point_id,
+        projected_candidate=candidate,
+        capability_snapshot=snapshot,
+        run_id="20260101T000000_0123456789abcdef0123456789abcdef",
+    )
+
+    with (
+        patch(
+            "asago_scenario_generator.pipeline.generate.tree_semantics."
+            "validate_tree_projection_realizability",
+            side_effect=ProjectionInfeasible("unrepresentable projection"),
+        ) as validate,
+        pytest.raises(ProjectionInfeasible, match="unrepresentable projection"),
+    ):
+        prepare_generation(request)
+
+    validate.assert_called_once()
 
 
 def test_each_stage_delegates_to_exactly_one_call_primitive() -> None:
@@ -537,9 +565,10 @@ def test_tree_and_behavior_stage_failures_preserve_typed_single_attempt_codes(
         if stage == "tree"
         else "asago_scenario_generator.pipeline.generate._call_behavior_spec"
     )
-    with patch(target, side_effect=fail_after_one_call), pytest.raises(
-        StageAttemptFailure
-    ) as raised:
+    with (
+        patch(target, side_effect=fail_after_one_call),
+        pytest.raises(StageAttemptFailure) as raised,
+    ):
         if stage == "tree":
             generate_tree_stage(prepared, cast(Any, object()), cast(Any, object()))
         else:
@@ -561,14 +590,19 @@ def test_behavior_provider_validation_error_is_typed_protocol_failure() -> None:
     with pytest.raises(Exception) as invalid:
         BehaviorDraftV2.model_validate({})
 
-    def reject_protocol(seed, narrative, tree, profile, client, use_case, tag, **kwargs):
+    def reject_protocol(
+        seed, narrative, tree, profile, client, use_case, tag, **kwargs
+    ):
         client.complete(system_prompt="system", user_prompt="user")
         raise invalid.value
 
-    with patch(
-        "asago_scenario_generator.pipeline.generate._call_behavior_spec",
-        side_effect=reject_protocol,
-    ), pytest.raises(StageAttemptFailure) as raised:
+    with (
+        patch(
+            "asago_scenario_generator.pipeline.generate._call_behavior_spec",
+            side_effect=reject_protocol,
+        ),
+        pytest.raises(StageAttemptFailure) as raised,
+    ):
         generate_behavior_stage(prepared, cast(Any, object()), cast(Any, object()))
 
     assert prepared.request.client.complete.call_count == 1

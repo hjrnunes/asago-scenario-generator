@@ -24,10 +24,12 @@ from asago_scenario_generator.pipeline.generate.constants import (
 )
 from asago_scenario_generator.pipeline.generate.actor import (
     ActorDraftV2,
+    ActorDraftV3,
     ActorSemanticDraftError,
 )
 from asago_scenario_generator.pipeline.generate.narrative import (
     NarrativeDraftV2,
+    NarrativeDraftV3,
     NarrativeSemanticDraftError,
 )
 from asago_scenario_generator.pipeline.generation_contracts import (
@@ -318,10 +320,15 @@ def _semantic_request_digest(
 def _actor_handle_map(draft: Any, actor: ActorProfile | None) -> dict[str, str]:
     if actor is None:
         return {}
-    resolved = {
-        draft.actor_type_handle: actor.actor_type,
-        draft.capability_level_handle: actor.capability_level,
-    }
+    if isinstance(draft, ActorDraftV3):
+        resolved = {
+            draft.actor_choice_handle: f"{actor.actor_type}:{actor.capability_level}"
+        }
+    else:
+        resolved = {
+            draft.actor_type_handle: actor.actor_type,
+            draft.capability_level_handle: actor.capability_level,
+        }
     resolved.update(zip(draft.resource_handles, actor.resources, strict=True))
     return resolved
 
@@ -480,6 +487,9 @@ def prepare_generation(request: GenerationRequest) -> PreparedGeneration:
         _validate_run_id,
         compute_scenario_id,
     )
+    from asago_scenario_generator.pipeline.generate.tree_semantics import (
+        validate_tree_projection_realizability,
+    )
 
     candidate_id = request.candidate_id or request.projected_candidate.candidate_id
     if candidate_id != request.projected_candidate.candidate_id:
@@ -499,11 +509,13 @@ def prepare_generation(request: GenerationRequest) -> PreparedGeneration:
     ):
         excluded.append("negligent-insider")
     normalized = replace(request, excluded_actor_types=tuple(excluded))
+    projection_context = _build_projection_context(request.projected_candidate)
+    validate_tree_projection_realizability(projection_context, request.profile)
     return PreparedGeneration(
         request=normalized,
         candidate_id=candidate_id,
         scenario_id=compute_scenario_id(request.run_id, candidate_id, request.attempt),
-        projection_context=_build_projection_context(request.projected_candidate),
+        projection_context=projection_context,
     )
 
 
@@ -552,7 +564,7 @@ def generate_actor_stage(
             retryable = True
             semantic_evidence = _semantic_attempt_evidence(
                 call_name=CallName.actor_profile,
-                compiler_name="compile_actor_draft:v2",
+                compiler_name="compile_actor_draft:v3",
                 recorder=recorder,
                 handle_map={},
                 result_kind="invalid_draft",
@@ -560,13 +572,13 @@ def generate_actor_stage(
                 failure_detail=str(exc),
             )
         elif recorder.result is not None and isinstance(
-            recorder.result.content, ActorDraftV2
+            recorder.result.content, (ActorDraftV2, ActorDraftV3)
         ):
             code = StageAttemptFailure.CANONICAL_COMPILATION_CODE
             retryable = False
             semantic_evidence = _semantic_attempt_evidence(
                 call_name=CallName.actor_profile,
-                compiler_name="compile_actor_draft:v2",
+                compiler_name="compile_actor_draft:v3",
                 recorder=recorder,
                 handle_map={},
                 result_kind="compiler_failure",
@@ -583,7 +595,7 @@ def generate_actor_stage(
                     retryable = True
                     semantic_evidence = _semantic_attempt_evidence(
                         call_name=CallName.actor_profile,
-                        compiler_name="compile_actor_draft:v2",
+                        compiler_name="compile_actor_draft:v3",
                         recorder=recorder,
                         handle_map={},
                         result_kind="protocol_failure",
@@ -603,15 +615,15 @@ def generate_actor_stage(
         raise _attach_failure_evidence(
             failure,
             call_name=CallName.actor_profile,
-            compiler_name="compile_actor_draft:v2",
+            compiler_name="compile_actor_draft:v3",
             recorder=recorder,
             handle_map={},
         ) from exc
     semantic_evidence = None
-    if isinstance(result.content, ActorDraftV2):
+    if isinstance(result.content, (ActorDraftV2, ActorDraftV3)):
         semantic_evidence = _semantic_attempt_evidence(
             call_name=CallName.actor_profile,
-            compiler_name="compile_actor_draft:v2",
+            compiler_name="compile_actor_draft:v3",
             recorder=recorder,
             handle_map=_actor_handle_map(result.content, actor),
             result_kind="accepted",
@@ -681,7 +693,7 @@ def generate_narrative_stage(
             retryable = True
             semantic_evidence = _semantic_attempt_evidence(
                 call_name=CallName.narrative,
-                compiler_name="compile_narrative_draft:v2",
+                compiler_name="compile_narrative_draft:v3",
                 recorder=recorder,
                 handle_map=handle_map,
                 result_kind="invalid_draft",
@@ -689,13 +701,13 @@ def generate_narrative_stage(
                 failure_detail=str(exc),
             )
         elif recorder.result is not None and isinstance(
-            recorder.result.content, NarrativeDraftV2
+            recorder.result.content, (NarrativeDraftV2, NarrativeDraftV3)
         ):
             code = StageAttemptFailure.CANONICAL_COMPILATION_CODE
             retryable = False
             semantic_evidence = _semantic_attempt_evidence(
                 call_name=CallName.narrative,
-                compiler_name="compile_narrative_draft:v2",
+                compiler_name="compile_narrative_draft:v3",
                 recorder=recorder,
                 handle_map=handle_map,
                 result_kind="compiler_failure",
@@ -712,7 +724,7 @@ def generate_narrative_stage(
                     retryable = True
                     semantic_evidence = _semantic_attempt_evidence(
                         call_name=CallName.narrative,
-                        compiler_name="compile_narrative_draft:v2",
+                        compiler_name="compile_narrative_draft:v3",
                         recorder=recorder,
                         handle_map=handle_map,
                         result_kind="protocol_failure",
@@ -732,12 +744,12 @@ def generate_narrative_stage(
         raise _attach_failure_evidence(
             failure,
             call_name=CallName.narrative,
-            compiler_name="compile_narrative_draft:v2",
+            compiler_name="compile_narrative_draft:v3",
             recorder=recorder,
             handle_map=handle_map,
         ) from exc
     semantic_evidence = None
-    if isinstance(result.content, NarrativeDraftV2):
+    if isinstance(result.content, (NarrativeDraftV2, NarrativeDraftV3)):
         warnings = (
             ("presentation_fallback: narrative title was synthesized",)
             if result.content.title is None
@@ -745,7 +757,7 @@ def generate_narrative_stage(
         )
         semantic_evidence = _semantic_attempt_evidence(
             call_name=CallName.narrative,
-            compiler_name="compile_narrative_draft:v2",
+            compiler_name="compile_narrative_draft:v3",
             recorder=recorder,
             handle_map=_narrative_handle_map(prepared.projection_context),
             result_kind="accepted",
