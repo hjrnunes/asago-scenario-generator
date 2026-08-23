@@ -107,7 +107,10 @@ _SEMANTIC_OWNER_BY_RULE: dict[str, GeneratedStage | None] = {
     "inaccessible_ingress_entry_point": GeneratedStage.tree,
     "phantom_tool": GeneratedStage.tree,
     "unknown_integration_id": GeneratedStage.tree,
-    "seed_technique_provenance": GeneratedStage.tree,
+    "scenario_classification_mismatch": None,
+    "projected_step_mapping_evidence_mismatch": None,
+    "narrative_reference_evidence_mismatch": None,
+    "leaf_technique_mapping_mismatch": None,
     "goal_actor_mismatch": GeneratedStage.actor,
     "goal_mechanism_mismatch": GeneratedStage.actor,
     "missing_access_provenance": GeneratedStage.actor,
@@ -168,9 +171,20 @@ _CAPABILITY_RULES = frozenset(
         "narrative_technique_orphan",
         "zone_in_profile",
         "zone_coverage_dropout",
-        "seed_technique_provenance",
+        "scenario_classification_mismatch",
+        "projected_step_mapping_evidence_mismatch",
+        "narrative_reference_evidence_mismatch",
+        "leaf_technique_mapping_mismatch",
         "goal_actor_mismatch",
         "goal_mechanism_mismatch",
+    }
+)
+_CANONICAL_COMPILATION_RULES = frozenset(
+    {
+        "scenario_classification_mismatch",
+        "projected_step_mapping_evidence_mismatch",
+        "narrative_reference_evidence_mismatch",
+        "leaf_technique_mapping_mismatch",
     }
 )
 _CLASSIFIED_SEMANTIC_RULES = (
@@ -486,7 +500,12 @@ class PostbehaviorAdmissionPort:
             if item.rule == "initial_entry_point_id_mismatch":
                 continue
             owner = _SEMANTIC_OWNER_BY_RULE.get(item.rule)
-            violation = _gate(GateCode.semantic, item.message, owner)
+            gate_code = (
+                GateCode.canonical_compilation_failed
+                if item.rule in _CANONICAL_COMPILATION_RULES
+                else GateCode.semantic
+            )
+            violation = _gate(gate_code, item.message, owner)
             if item.rule in _SEMANTIC_DIAGNOSTIC_RULES:
                 semantic_diagnostics.append(violation)
             else:

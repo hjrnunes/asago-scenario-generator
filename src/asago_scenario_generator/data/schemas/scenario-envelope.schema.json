@@ -151,6 +151,17 @@
     "projection": {
       "$ref": "#/$defs/ProjectionEnvelopeBlock",
       "description": "Deeply immutable, standalone canonical projection snapshot with execution requirements and artifact realization mappings. Every generated scenario must embed exactly one projection block."
+    },
+    "technique_scope_evidence": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/TechniqueScopeEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Explicit scenario-classification, projected-step-mapping, and narrative-reference ATLAS scopes. Older envelopes may omit this field and are read using legacy-derived evidence."
     }
   },
   "$defs": {
@@ -593,6 +604,19 @@
       },
       "additionalProperties": false
     },
+    "AttackerAction": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "attacker_action",
+          "default": "attacker_action"
+        }
+      },
+      "additionalProperties": false
+    },
     "ExternalPreconditionAction": {
       "type": "object",
       "required": [
@@ -760,6 +784,9 @@
               "$ref": "#/$defs/AiSystemAction"
             },
             {
+              "$ref": "#/$defs/AttackerAction"
+            },
+            {
               "$ref": "#/$defs/ExternalPreconditionAction"
             },
             {
@@ -915,6 +942,9 @@
                 "oneOf": [
                   {
                     "$ref": "#/$defs/AiSystemAction"
+                  },
+                  {
+                    "$ref": "#/$defs/AttackerAction"
                   },
                   {
                     "$ref": "#/$defs/ExternalPreconditionAction"
@@ -1330,6 +1360,34 @@
               "type": "null"
             }
           ]
+        }
+      }
+    },
+    "TechniqueScopeEvidence": {
+      "description": "Explicitly separated ATLAS identity scopes used by admission. Scenario classifications describe why the scenario was selected. Projected step mappings are exact catalog annotations carried by canonical tree leaves. Narrative references may be grounded in either scope.",
+      "type": "object",
+      "properties": {
+        "scenario_classification_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "projected_step_mapping_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "narrative_reference_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "legacy_derived": {
+          "type": "boolean",
+          "default": false
         }
       }
     },

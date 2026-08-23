@@ -5403,35 +5403,51 @@ def _collect_used_technique_ids(
 def _build_atlas_techniques_block(
     scenario: dict[str, Any], gherkin_text: str = ""
 ) -> str:
-    """Build an ATLAS Techniques section showing *used* technique IDs + names.
-
-    Intersects the seed's ``atlas_technique_ids`` pool with techniques actually
-    referenced in the attack tree and Gherkin spec.  Returns empty string when
-    no techniques are present.
-    """
-    used = _collect_used_technique_ids(scenario, gherkin_text)
-    if not used:
-        return ""
-    technique_ids = sorted(used)
-
-    if not technique_ids:
-        return ""
-
-    badges = ""
-    for tid in technique_ids:
-        name = _ATLAS_TECHNIQUE_NAMES.get(tid, "")
-        label = f"{tid}: {name}" if name else tid
-        tip = _technique_id_tooltip(tid)
-        badges += (
-            f'<span style="display:inline-block;padding:3px 10px;border-radius:4px;'
-            f"font-size:12px;font-weight:600;background:rgba(249,115,22,0.15);"
-            f"color:#f97316;font-family:'SF Mono','Fira Code',monospace;"
-            f'margin:0 4px 4px 0;"{tip}>{_esc(label)}</span>'
+    """Build separately labelled scenario and projected-step ATLAS scopes."""
+    evidence = scenario.get("technique_scope_evidence") or {}
+    scenario_ids = list(
+        dict.fromkeys(
+            evidence.get("scenario_classification_ids")
+            or scenario.get("faceting", {})
+            .get("taxonomy_chain", {})
+            .get("atlas_technique_ids", [])
         )
+    )
+    mapping_ids = list(
+        dict.fromkeys(
+            evidence.get("projected_step_mapping_ids")
+            or sorted(_collect_used_technique_ids(scenario, ""))
+        )
+    )
+    if not scenario_ids and not mapping_ids:
+        return ""
+
+    def _badges(technique_ids: list[str]) -> str:
+        badges = ""
+        for tid in technique_ids:
+            name = _ATLAS_TECHNIQUE_NAMES.get(tid, "")
+            label = f"{tid}: {name}" if name else tid
+            tip = _technique_id_tooltip(tid)
+            badges += (
+                f'<span style="display:inline-block;padding:3px 10px;border-radius:4px;'
+                f"font-size:12px;font-weight:600;background:rgba(249,115,22,0.15);"
+                f"color:#f97316;font-family:'SF Mono','Fira Code',monospace;"
+                f'margin:0 4px 4px 0;"{tip}>{_esc(label)}</span>'
+            )
+        return badges or '<span class="prov-badge prov-badge-muted">none</span>'
 
     return f"""
+            <div style="font-size:11px;font-weight:700;margin-bottom:4px;">
+              Scenario classifications
+            </div>
+            <div style="display:flex;flex-wrap:wrap;margin-bottom:10px;">
+              {_badges(scenario_ids)}
+            </div>
+            <div style="font-size:11px;font-weight:700;margin-bottom:4px;">
+              Projected-step mappings
+            </div>
             <div style="display:flex;flex-wrap:wrap;">
-              {badges}
+              {_badges(mapping_ids)}
             </div>"""
 
 
@@ -5744,7 +5760,7 @@ def _build_provenance_chain(
         f"</div></div>"
     )
 
-    # --- Step 6: ATLAS Techniques ---
+    # --- Step 6: Scenario ATLAS classifications ---
     cf = scenario.get("candidate_filter", {}) or {}
     # Support both plural (new) and singular (old YAML) field names
     pinned_ids_raw = cf.get("pinned_technique_ids") or []
@@ -5789,7 +5805,7 @@ def _build_provenance_chain(
 
     steps.append(
         f'<div class="prov-step">'
-        f'<div class="prov-step-label">4c. ATLAS Techniques '
+        f'<div class="prov-step-label">4c. Scenario classifications '
         f'<span style="font-size:9px;color:var(--text-muted);font-variant:normal;">'
         f"(highlighted = pinned for this scenario)</span></div>"
         f'<div class="prov-step-content">{atlas_body}</div></div>'
@@ -7353,12 +7369,12 @@ _SCORECARD_METRIC_TOOLTIPS: dict[str, str] = {
     ),
     # Technique Agreement group
     "Technique Agreement": (
-        "Whether narrative, attack tree, and behavior spec reference "
-        "the same set of ATLAS technique IDs"
+        "Whether attack tree and behavior spec carry the same exact "
+        "projected-step ATLAS mappings; scenario classifications are separate"
     ),
     "Mean Technique Agreement": (
-        "Average Jaccard similarity of technique ID sets across all "
-        "three lenses (narrative, tree, spec). 1.0 means perfect agreement"
+        "Average Jaccard similarity of exact projected-step mapping sets in "
+        "the attack tree and behavior spec. 1.0 means perfect agreement"
     ),
     # Plausibility group
     "Plausibility": (
@@ -7457,7 +7473,14 @@ def _collect_scorecard_outliers(
             css = "scorecard-badge-red" if score < 0.7 else "scorecard-badge-yellow"
             sev = "red" if score < 0.7 else "yellow"
             outliers.append(
-                (sev, sid, "Technique Agreement", "Technique Agreement", score, css)
+                (
+                    sev,
+                    sid,
+                    "Projected-step Mapping Agreement",
+                    "Mapping Agreement",
+                    score,
+                    css,
+                )
             )
         elif missing_narr or missing_tree or missing_spec:
             parts = []
@@ -7471,7 +7494,7 @@ def _collect_scorecard_outliers(
                 (
                     "yellow",
                     sid,
-                    "Technique Agreement",
+                    "Projected-step Mapping Agreement",
                     "Missing Techniques",
                     "; ".join(parts),
                     "scorecard-badge-yellow",
@@ -7836,7 +7859,7 @@ def build_scorecard_section(scorecard_data: dict[str, Any]) -> str:
             ta_rows = ""
             for sid, detail in ta_per_scenario.items():
                 score = detail.get("technique_agreement", 0)
-                missing_narr = ", ".join(detail.get("missing_from_narrative", []))
+                classifications = ", ".join(detail.get("scenario_classifications", []))
                 missing_tree = ", ".join(detail.get("missing_from_tree", []))
                 missing_spec = ", ".join(detail.get("missing_from_spec", []))
                 score_cls = (
@@ -7852,7 +7875,7 @@ def build_scorecard_section(scorecard_data: dict[str, Any]) -> str:
                     f"<tr>"
                     f"<td>{_esc(sid)}</td>"
                     f'<td><span class="scorecard-badge {score_cls}">{score:.2f}</span></td>'
-                    f"<td>{_esc(missing_narr) or '-'}</td>"
+                    f"<td>{_esc(classifications) or '-'}</td>"
                     f"<td>{_esc(missing_tree) or '-'}</td>"
                     f"<td>{_esc(missing_spec) or '-'}</td>"
                     f"</tr>"
@@ -7864,9 +7887,9 @@ def build_scorecard_section(scorecard_data: dict[str, Any]) -> str:
             <thead><tr>
               <th>Scenario</th>
               <th>Agreement</th>
-              <th data-tooltip="Technique IDs present in tree/spec but missing from narrative">Missing from Narrative</th>
-              <th data-tooltip="Technique IDs present in narrative/spec but missing from attack tree">Missing from Tree</th>
-              <th data-tooltip="Technique IDs present in narrative/tree but missing from behavior spec">Missing from Spec</th>
+              <th>Scenario Classifications</th>
+              <th data-tooltip="Exact projected-step mappings present in behavior spec but missing from attack tree">Missing from Tree</th>
+              <th data-tooltip="Exact projected-step mappings present in attack tree but missing from behavior spec">Missing from Spec</th>
             </tr></thead>
             <tbody>{ta_rows}</tbody>
           </table>
@@ -7875,7 +7898,7 @@ def build_scorecard_section(scorecard_data: dict[str, Any]) -> str:
         ta_tip = _SCORECARD_METRIC_TOOLTIPS.get("Technique Agreement", "")
         technique_agreement_html = f"""
     <div class="scorecard-group">
-      <div class="scorecard-group-title" data-tooltip="{_esc(ta_tip)}">Technique Agreement</div>
+      <div class="scorecard-group-title" data-tooltip="{_esc(ta_tip)}">Projected-step Mapping Agreement</div>
       <div class="scorecard-metrics">{ta_badges}</div>
       {ta_detail}
     </div>"""

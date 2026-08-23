@@ -495,6 +495,38 @@ class TaxonomyChain(BaseModel):
     )
 
 
+class TechniqueScopeEvidence(BaseModel):
+    """Explicitly separated ATLAS identity scopes used by admission.
+
+    Scenario classifications describe why the scenario was selected. Projected
+    step mappings are exact catalog annotations carried by canonical tree
+    leaves. Narrative references may be grounded in either scope.
+    """
+
+    scenario_classification_ids: list[str] = Field(default_factory=list)
+    projected_step_mapping_ids: list[str] = Field(default_factory=list)
+    narrative_reference_ids: list[str] = Field(default_factory=list)
+    legacy_derived: bool = Field(
+        default=False,
+        description=(
+            "True when a reader derived the scopes from a legacy envelope that "
+            "did not publish explicit technique-scope evidence."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _ids_are_stably_unique(self) -> TechniqueScopeEvidence:
+        for field_name in (
+            "scenario_classification_ids",
+            "projected_step_mapping_ids",
+            "narrative_reference_ids",
+        ):
+            values = getattr(self, field_name)
+            if len(values) != len(set(values)):
+                raise ValueError(f"{field_name} must be unique in published order")
+        return self
+
+
 class CapabilityProfileRef(BaseModel):
     """References to the capability profile that scoped this scenario."""
 
@@ -1196,6 +1228,15 @@ class ScenarioEnvelope(BaseModel):
             "Every generated scenario must embed exactly one projection "
             "block.  Generated content realizes but never selects, alters, "
             "omits, reorders, or fabricates projection semantics."
+        ),
+    )
+
+    technique_scope_evidence: TechniqueScopeEvidence | None = Field(
+        default=None,
+        description=(
+            "Explicit scenario-classification, projected-step-mapping, and "
+            "narrative-reference ATLAS scopes. Older envelopes may omit this "
+            "field and are read using legacy-derived evidence."
         ),
     )
 

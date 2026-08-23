@@ -1,11 +1,7 @@
-"""Tests for seed technique provenance validation (0lfx).
+"""Legacy seed provenance compatibility after ATLAS scope separation.
 
-Covers:
-- Positive case: seed technique present in tree -> no violation
-- Negative case: seed technique absent from tree -> violation flagged
-- Edge case: no seed metadata -> check skipped
-- Edge case: empty laaf_technique_ids -> check skipped
-- Edge case: partial match (1 of N seed techniques) -> passes
+Seed and LAAF provenance is retained as metadata but is never required to
+intersect exact projected-step mappings carried by attack-tree leaves.
 """
 
 from __future__ import annotations
@@ -246,8 +242,8 @@ class TestSeedTechniqueProvenance:
         ]
         assert provenance_violations == []
 
-    def test_seed_technique_absent_from_tree_flagged(self):
-        """Violation when no seed technique appears in the attack tree."""
+    def test_seed_technique_absent_from_tree_is_not_scope_drift(self):
+        """Legacy scenario classifications need not occur on tree leaves."""
         profile = _make_profile()
         # Tree has AML.T0054 only, seed expects AML.T0029
         tree_root = AttackTreeNode(
@@ -277,11 +273,7 @@ class TestSeedTechniqueProvenance:
             for v in envelope.validation.semantic.violations
             if v.rule == "seed_technique_provenance"
         ]
-        assert len(provenance_violations) == 1
-        v = provenance_violations[0]
-        assert v.severity == "major"
-        assert "AML.T0029" in v.message
-        assert "AML.T0054" in v.message
+        assert provenance_violations == []
 
     def test_no_seed_metadata_skips_check(self):
         """Without scenario_seed_metadata, the check is skipped."""
@@ -401,8 +393,8 @@ class TestSeedTechniqueProvenance:
         ]
         assert len(provenance_violations) == 0
 
-    def test_complete_dropout_multiple_seed_techniques(self):
-        """Complete dropout: none of multiple seed techniques appear in tree."""
+    def test_disjoint_multiple_seed_techniques_are_not_scope_drift(self):
+        """Multiple legacy classifications may be disjoint from leaf mappings."""
         profile = _make_profile()
         # Tree has only AML.T0054, seed expects AML.T0029 and AML.T0043
         tree_root = AttackTreeNode(
@@ -432,8 +424,4 @@ class TestSeedTechniqueProvenance:
             for v in envelope.validation.semantic.violations
             if v.rule == "seed_technique_provenance"
         ]
-        assert len(provenance_violations) == 1
-        v = provenance_violations[0]
-        assert v.severity == "major"
-        assert "AML.T0029" in v.message
-        assert "AML.T0043" in v.message
+        assert provenance_violations == []

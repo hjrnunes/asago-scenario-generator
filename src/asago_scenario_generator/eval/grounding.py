@@ -61,14 +61,23 @@ def _collect_tree_technique_ids(node: dict[str, Any]) -> list[str]:
     return ids
 
 
-def _get_seed_technique_ids(scenario: dict[str, Any]) -> list[str] | None:
-    """Extract the seed's atlas_technique_ids from the scenario's taxonomy chain.
-
-    Returns None if the field is absent, or the list of IDs if present.
-    """
-    faceting = scenario.get("faceting", {})
-    chain = faceting.get("taxonomy_chain", {})
-    return chain.get("atlas_technique_ids")
+def _get_technique_scopes(
+    scenario: dict[str, Any], tree_technique_ids: list[str]
+) -> tuple[list[str], list[str], bool]:
+    """Read explicit named scopes or derive them from a legacy envelope."""
+    evidence = scenario.get("technique_scope_evidence")
+    if isinstance(evidence, dict):
+        return (
+            list(dict.fromkeys(evidence.get("scenario_classification_ids") or [])),
+            list(dict.fromkeys(evidence.get("projected_step_mapping_ids") or [])),
+            bool(evidence.get("legacy_derived", False)),
+        )
+    chain = scenario.get("faceting", {}).get("taxonomy_chain", {})
+    return (
+        list(dict.fromkeys(chain.get("atlas_technique_ids") or [])),
+        list(dict.fromkeys(tree_technique_ids)),
+        True,
+    )
 
 
 def score_grounding(
@@ -81,7 +90,7 @@ def score_grounding(
     - threat_id validity: fraction of threat_ids that map to known OWASP threats
     - dangling reference count: number of invalid threat_ids
     - technique_id grounding: fraction of technique_ids on tree nodes that
-      match the seed's atlas_technique_ids (ungrounded = hallucinated by LLM)
+      occur in the exact projected-step mapping scope
 
     Args:
         scenarios: List of scenario dicts (parsed YAML).
@@ -102,6 +111,9 @@ def score_grounding(
     total_technique_refs = 0
     grounded_technique_refs = 0
     ungrounded_techniques: list[dict[str, str]] = []
+    scenario_classifications: set[str] = set()
+    projected_step_mappings: set[str] = set()
+    legacy_scope_count = 0
 
     for scenario in scenarios:
         scenario_id = scenario.get("scenario_id", "unknown")
@@ -124,11 +136,15 @@ def score_grounding(
 
         # --- technique_id grounding ---
         technique_ids = _collect_tree_technique_ids(root)
-        seed_technique_ids = _get_seed_technique_ids(scenario)
+        classifications, exact_mappings, legacy_derived = _get_technique_scopes(
+            scenario, technique_ids
+        )
+        scenario_classifications.update(classifications)
+        projected_step_mappings.update(exact_mappings)
+        legacy_scope_count += int(legacy_derived)
 
         if technique_ids:
-            # If the seed has atlas_technique_ids, validate against them
-            allowed = set(seed_technique_ids) if seed_technique_ids else set()
+            allowed = set(exact_mappings)
             for tech_id in technique_ids:
                 total_technique_refs += 1
                 if allowed and tech_id in allowed:
@@ -139,7 +155,7 @@ def score_grounding(
                         {
                             "scenario_id": scenario_id,
                             "technique_id": tech_id,
-                            "reason": "no_seed_technique_ids",
+                            "reason": "no_projected_step_mapping_ids",
                         }
                     )
                 else:
@@ -147,7 +163,7 @@ def score_grounding(
                         {
                             "scenario_id": scenario_id,
                             "technique_id": tech_id,
-                            "reason": "not_in_seed",
+                            "reason": "not_in_projected_step_mappings",
                         }
                     )
 
@@ -163,6 +179,9 @@ def score_grounding(
         "dangling_references": len(dangling),
         "technique_id_grounding": round(technique_grounding, 4),
         "ungrounded_technique_references": len(ungrounded_techniques),
+        "scenario_classifications": sorted(scenario_classifications),
+        "projected_step_mappings": sorted(projected_step_mappings),
+        "legacy_derived_technique_scope_count": legacy_scope_count,
     }
     if dangling:
         result["dangling_details"] = dangling
@@ -222,7 +241,7 @@ def score_technique_agreement(
     scenarios: list[dict[str, Any]],
     gherkin_files: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Compute cross-lens technique agreement between attack tree and spec.
+    """Compute projected-step mapping agreement between attack tree and spec.
 
     For each scenario, collects the set of ATLAS technique IDs referenced in:
     1. **Attack tree** -- ``technique_id`` fields on tree nodes
@@ -232,10 +251,9 @@ def score_technique_agreement(
     union).  A score of 1.0 means both lenses reference exactly the same
     techniques.
 
-    Narrative technique IDs are still extracted and reported in per-scenario
-    details for informational purposes, but they do not affect the score
-    (narrative prose is free-form and rarely contains ``[AML.T0054]``-style
-    annotations).
+    Scenario classifications and narrative references are reported separately
+    for context. They do not affect the score and are never treated as drift
+    from exact projected-step mappings.
 
     Args:
         scenarios: List of scenario dicts (parsed YAML).
@@ -262,6 +280,9 @@ def score_technique_agreement(
 
         gherkin_text = gherkin_files.get(scenario_id)
         spec_ids = _extract_spec_technique_ids(scenario, gherkin_text)
+        classifications, projected_mappings, legacy_derived = _get_technique_scopes(
+            scenario, list(tree_ids)
+        )
 
         # Jaccard similarity of tree and spec sets only
         union = tree_ids | spec_ids
@@ -277,9 +298,12 @@ def score_technique_agreement(
         # Build detail record for imperfect agreement
         detail: dict[str, Any] = {
             "technique_agreement": round(agreement, 4),
-            "narrative_techniques": sorted(narrative_ids),
-            "tree_techniques": sorted(tree_ids),
-            "spec_techniques": sorted(spec_ids),
+            "scenario_classifications": classifications,
+            "projected_step_mappings": projected_mappings,
+            "narrative_references": sorted(narrative_ids),
+            "tree_projected_step_mappings": sorted(tree_ids),
+            "spec_projected_step_mappings": sorted(spec_ids),
+            "legacy_derived": legacy_derived,
         }
 
         missing_from_tree = spec_ids - tree_ids

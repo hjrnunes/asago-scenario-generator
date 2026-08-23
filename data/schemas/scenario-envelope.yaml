@@ -103,6 +103,29 @@ fields:
       one projection block.  Generated content realizes but never selects,
       alters, omits, reorders, or fabricates projection semantics.
 
+  technique_scope_evidence:
+    type: object
+    required: false
+    description: >-
+      Explicitly separates qualified scenario ATLAS classifications from exact
+      projected-step ATLAS mappings and provider-authored narrative references.
+      Older envelopes may omit this block; readers derive and mark legacy
+      evidence without requiring the two identity scopes to intersect.
+    fields:
+      scenario_classification_ids:
+        type: list[str]
+        required: true
+      projected_step_mapping_ids:
+        type: list[str]
+        required: true
+      narrative_reference_ids:
+        type: list[str]
+        required: true
+      legacy_derived:
+        type: bool
+        required: false
+        default: false
+
   # ===================================================================
   # Layer 1: Narrative
   # ===================================================================

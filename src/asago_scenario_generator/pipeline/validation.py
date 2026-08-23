@@ -22,6 +22,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
+from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -1067,32 +1068,16 @@ def validate_scenario_structure(
 # Cross-artifact consistency helpers (bv5s)
 # ---------------------------------------------------------------------------
 
-# Regex for technique IDs: bracketed [AML.T0054] and bare AML.T0054 references.
-_NARRATIVE_TECHNIQUE_RE = re.compile(r"\[?(AML\.T\d{4}(?:\.\d{3})?)\]?")
-
 
 def _extract_narrative_technique_ids(
     narrative: Any,
 ) -> set[str]:
-    """Extract technique IDs mentioned in narrative steps and summary.
+    """Backward-compatible set view of canonical narrative references."""
+    from asago_scenario_generator.pipeline.technique_scopes import (
+        narrative_reference_ids,
+    )
 
-    Looks for both ``[AML.T0054]`` bracketed annotations and bare
-    ``AML.T0054`` references in step action/effect text and the summary.
-    """
-    ids: set[str] = set()
-    # Check summary
-    if hasattr(narrative, "summary") and narrative.summary:
-        for m in _NARRATIVE_TECHNIQUE_RE.finditer(narrative.summary):
-            ids.add(m.group(1))
-    # Check steps
-    if hasattr(narrative, "steps"):
-        for step in narrative.steps:
-            for field_name in ("action", "effect"):
-                text = getattr(step, field_name, "")
-                if text:
-                    for m in _NARRATIVE_TECHNIQUE_RE.finditer(text):
-                        ids.add(m.group(1))
-    return ids
+    return set(narrative_reference_ids(narrative))
 
 
 def _collect_tree_node_threat_ids(node: AttackTreeNode) -> set[str]:
@@ -1158,6 +1143,25 @@ def _extract_gherkin_zones_for_validation(gherkin_text: str) -> set[str]:
 # ---------------------------------------------------------------------------
 
 
+@cache
+def _valid_technique_ids() -> frozenset[str]:
+    """Return valid tree technique IDs from their authoritative sources."""
+    from asago_scenario_generator.data.atlas import ATLAS_TECHNIQUE_NAMES
+    from asago_scenario_generator.data.taxonomy_pins import (
+        load_atlas_technique_identifiers,
+    )
+
+    # LAAF has no bundled authoritative catalog yet.  Preserve its existing
+    # explicitly curated extension identifiers while ATLAS membership comes
+    # exclusively from the pinned release artifact.
+    laaf_ids = {
+        technique_id
+        for technique_id in ATLAS_TECHNIQUE_NAMES
+        if not technique_id.startswith("AML.")
+    }
+    return load_atlas_technique_identifiers() | laaf_ids
+
+
 def _validate_scenario_semantics_mutating(
     scenarios: list[ScenarioEnvelope],
     profile: CapabilityProfile,
@@ -1165,8 +1169,9 @@ def _validate_scenario_semantics_mutating(
     """Run semantic validation checks on each scenario envelope.
 
     Checks:
-      1. ``technique_exists``: every technique_id in the attack tree exists
-         in ``ATLAS_TECHNIQUE_NAMES``.
+      1. ``technique_exists``: every ATLAS technique_id in the attack tree
+         exists in the pinned ATLAS release, or is an explicitly curated
+         LAAF extension identifier.
       2. ``zone_in_profile``: every active zone referenced in the narrative's
          zone_sequence is in the profile's ``zones_active``. The canonical
          ``outside`` boundary marker is valid narrative context, not an active
@@ -1175,21 +1180,21 @@ def _validate_scenario_semantics_mutating(
       4. ``missing_scenario_threat_id``: at least one tree node carries the
          scenario's own threat_id from ``scenario_seed_metadata``.
       5. ``narrative_technique_orphan``: technique IDs mentioned in narrative
-         text but absent from the attack tree.
+         text but absent from both scenario classifications and exact
+         projected-step mappings.
       6. ``zone_omission_tree``: narrative zones missing from attack tree.
       7. ``zone_omission_gherkin``: narrative zones missing from Gherkin.
       8. Typed action IDs resolve to canonical profile resources, and
          tool_execution leaves carry tool_invocation actions.
-      9. ``seed_technique_provenance``: at least one ATLAS provenance
-         technique must appear in the attack tree. LAAF S/M identifiers are
-         provenance in a different namespace and are not tree technique IDs.
+      9. Technique scopes: scenario classifications match qualified pins (or
+         the legacy seed fallback), while non-null leaf techniques match every
+         projected step represented by that leaf.
      10. ``zone_coverage_dropout``: narrative zone absent from BOTH tree
          AND Gherkin — a hard consistency failure (cxy4).
 
     Populates ``scenario.validation.semantic`` with results.
     Scenarios are never removed -- violations are recorded as warnings.
     """
-    from asago_scenario_generator.data.atlas import ATLAS_TECHNIQUE_NAMES
     from asago_scenario_generator.models.capability_profile import (
         is_attacker_accessible_ingress,
     )
@@ -1198,8 +1203,15 @@ def _validate_scenario_semantics_mutating(
         SemanticViolation,
         ValidationBlock,
     )
+    from asago_scenario_generator.pipeline.technique_scopes import (
+        narrative_reference_ids,
+        projected_step_mapping_ids,
+        projected_step_mapping_ids_by_step,
+        resolved_technique_scope_evidence,
+        stable_unique,
+    )
 
-    valid_technique_ids = set(ATLAS_TECHNIQUE_NAMES.keys())
+    valid_technique_ids = _valid_technique_ids()
     valid_zones = {*profile.zones_active, "outside"}
 
     for scenario in scenarios:
@@ -1260,20 +1272,152 @@ def _validate_scenario_semantics_mutating(
                     )
                 )
 
-        # 5. Narrative technique orphan detection (bv5s).
-        narrative_technique_ids = _extract_narrative_technique_ids(scenario.narrative)
-        orphan_techniques = narrative_technique_ids - tree_technique_set
+        # 5. Technique-scope evidence and narrative grounding. Scenario
+        #    classifications and exact projected-step mappings are independent
+        #    authorities; a narrative reference may be grounded in either.
+        scope_evidence = resolved_technique_scope_evidence(scenario)
+        scenario_classifications = set(scope_evidence.scenario_classification_ids)
+        projected_mapping_ids = set(scope_evidence.projected_step_mapping_ids)
+        actual_narrative_ids = set(narrative_reference_ids(scenario.narrative))
+        grounded_narrative_ids = scenario_classifications | projected_mapping_ids
+        for technique_id in sorted(
+            (scenario_classifications | projected_mapping_ids) - tree_technique_set
+        ):
+            if technique_id not in valid_technique_ids:
+                violations.append(
+                    SemanticViolation(
+                        rule="technique_exists",
+                        message=(
+                            f"{technique_id} is unknown in published ATLAS "
+                            "technique-scope evidence"
+                        ),
+                        severity="major",
+                    )
+                )
+        orphan_techniques = actual_narrative_ids - grounded_narrative_ids
         for orphan_tid in sorted(orphan_techniques):
             violations.append(
                 SemanticViolation(
                     rule="narrative_technique_orphan",
                     message=(
                         f"Technique '{orphan_tid}' mentioned in narrative "
-                        f"but absent from attack tree nodes"
+                        "but absent from both scenario classifications and "
+                        "projected-step mappings"
                     ),
                     severity="minor",
                 )
             )
+
+        if scenario.technique_scope_evidence is not None:
+            faceted_classifications = stable_unique(
+                scenario.faceting.taxonomy_chain.atlas_technique_ids or ()
+            )
+            if faceted_classifications != scope_evidence.scenario_classification_ids:
+                violations.append(
+                    SemanticViolation(
+                        rule="scenario_classification_mismatch",
+                        message=(
+                            "Faceted scenario classifications "
+                            f"{faceted_classifications} do not equal published "
+                            "technique-scope classifications "
+                            f"{scope_evidence.scenario_classification_ids}."
+                        ),
+                        severity="major",
+                    )
+                )
+            expected_classifications: list[str] | None = None
+            candidate_filter = scenario.candidate_filter or {}
+            if candidate_filter.get("pinned_technique_ids"):
+                expected_classifications = stable_unique(
+                    candidate_filter["pinned_technique_ids"]
+                )
+            elif scenario.scenario_seed_metadata is not None:
+                expected_classifications = stable_unique(
+                    scenario.scenario_seed_metadata.get("atlas_technique_ids") or ()
+                )
+            if (
+                expected_classifications is not None
+                and expected_classifications
+                != scope_evidence.scenario_classification_ids
+            ):
+                violations.append(
+                    SemanticViolation(
+                        rule="scenario_classification_mismatch",
+                        message=(
+                            "Published scenario classifications "
+                            f"{scope_evidence.scenario_classification_ids} do not "
+                            "equal qualified pins or seed fallback "
+                            f"{expected_classifications}."
+                        ),
+                        severity="major",
+                    )
+                )
+            canonical_mapping_ids = projected_step_mapping_ids(scenario.projection)
+            if canonical_mapping_ids != scope_evidence.projected_step_mapping_ids:
+                violations.append(
+                    SemanticViolation(
+                        rule="projected_step_mapping_evidence_mismatch",
+                        message=(
+                            "Published projected-step mappings "
+                            f"{scope_evidence.projected_step_mapping_ids} do not "
+                            f"equal canonical mappings {canonical_mapping_ids}."
+                        ),
+                        severity="major",
+                    )
+                )
+            if actual_narrative_ids != set(scope_evidence.narrative_reference_ids):
+                violations.append(
+                    SemanticViolation(
+                        rule="narrative_reference_evidence_mismatch",
+                        message=(
+                            "Published narrative ATLAS references "
+                            f"{scope_evidence.narrative_reference_ids} do not equal "
+                            f"the authored narrative references {sorted(actual_narrative_ids)}."
+                        ),
+                        severity="major",
+                    )
+                )
+
+        # Legacy envelopes expose only derived aggregate scopes; without the
+        # explicit evidence contract they remain readable and are not held to
+        # a new per-leaf association they never published.
+        if scenario.technique_scope_evidence is not None:
+            exact_ids_by_step = projected_step_mapping_ids_by_step(scenario.projection)
+            for leaf in _collect_leaves(scenario.attack_tree.root):
+                if leaf.technique_id is None:
+                    continue
+                represented_steps = tuple(leaf.projected_step_ids)
+                if not represented_steps:
+                    violations.append(
+                        SemanticViolation(
+                            rule="leaf_technique_mapping_mismatch",
+                            message=(
+                                f"Leaf '{leaf.id}' carries technique "
+                                f"'{leaf.technique_id}' without a projected-step "
+                                "realization."
+                            ),
+                            severity="major",
+                        )
+                    )
+                    continue
+                incompatible_steps = [
+                    step_id
+                    for step_id in represented_steps
+                    if leaf.technique_id
+                    not in exact_ids_by_step.get(step_id, frozenset())
+                ]
+                if incompatible_steps:
+                    violations.append(
+                        SemanticViolation(
+                            rule="leaf_technique_mapping_mismatch",
+                            message=(
+                                f"Leaf '{leaf.id}' technique '{leaf.technique_id}' "
+                                "is not an exact ATLAS mapping of represented "
+                                f"projected steps {incompatible_steps}."
+                            ),
+                            severity="major",
+                        )
+                    )
 
         # 6. Zone omission checks (bv5s).
         narrative_zones = set(scenario.narrative.zone_sequence)
@@ -1429,35 +1573,6 @@ def _validate_scenario_semantics_mutating(
                         message=(
                             f"Leaf node '{leaf.id}' references unknown "
                             f"integration_id '{action.integration_id}'"
-                        ),
-                        severity="major",
-                    )
-                )
-
-        # 9. Seed technique provenance. Attack-tree technique IDs use the
-        #    ATLAS AML.* namespace. LAAF S*/M* IDs describe upstream
-        #    provenance and cannot be directly compared to those tree IDs.
-        #    Retain compatibility for legacy envelopes that incorrectly put
-        #    AML.* identifiers in laaf_technique_ids.
-        seed_techniques: set[str] = set()
-        if seed_metadata:
-            seed_techniques.update(seed_metadata.get("atlas_provenance_ids") or ())
-            if not seed_techniques:
-                seed_techniques.update(
-                    technique_id
-                    for technique_id in seed_metadata.get("laaf_technique_ids") or ()
-                    if str(technique_id).startswith("AML.")
-                )
-        if seed_techniques:
-            all_tree_techniques = _collect_technique_ids(scenario.attack_tree.root)
-            if not seed_techniques & all_tree_techniques:
-                violations.append(
-                    SemanticViolation(
-                        rule="seed_technique_provenance",
-                        message=(
-                            f"No seed techniques {sorted(seed_techniques)} "
-                            f"appear in the attack tree. "
-                            f"Tree contains {sorted(all_tree_techniques)}."
                         ),
                         severity="major",
                     )
@@ -1937,73 +2052,55 @@ def _is_consequence_leaf(node: AttackTreeNode) -> bool:
 def check_leaf_technique_provenance(
     scenarios: list[ScenarioEnvelope],
 ) -> LeafTechniqueResult:
-    """Check that at least one leaf carries a seed provenance technique.
+    """Check non-null leaf techniques against exact projected-step mappings.
 
-    For each scenario, extracts ``atlas_provenance_ids`` from the
-    scenario's ``scenario_seed_metadata`` and checks whether at least
-    one leaf node's ``technique_id`` appears in that provenance set.
-    Leaves without a ``technique_id`` (unannotated prerequisite steps
-    like "observe response") are excluded from the check entirely —
-    they are legitimate attack steps not tied to a specific ATLAS
-    technique.
-
-    Per ``decision-technique-provenance-partial``, partial provenance
-    (1 of N seed techniques) is accepted.
-
-    A scenario is flagged when:
-    - No leaf node carries any ``technique_id`` at all, or
-    - Leaf nodes have ``technique_id`` values but none match the seed's
-      ``atlas_provenance_ids``.
-
-    Returns a :class:`LeafTechniqueResult` with clean and flagged
-    scenarios.  The caller decides whether to log warnings or block.
+    Scenario classifications are intentionally irrelevant to this gate. A
+    legacy envelope without explicit technique-scope evidence remains readable
+    and is not subjected to a per-leaf association it never published.
     """
+    from asago_scenario_generator.pipeline.technique_scopes import (
+        projected_step_mapping_ids_by_step,
+    )
+
     result = LeafTechniqueResult()
 
     for scenario in scenarios:
-        # Extract atlas_provenance_ids from seed metadata.
-        provenance_ids: set[str] = set()
-        if scenario.scenario_seed_metadata:
-            raw = scenario.scenario_seed_metadata.get("atlas_provenance_ids") or []
-            provenance_ids = set(raw)
+        if scenario.technique_scope_evidence is None:
+            result.clean_scenarios.append(scenario)
+            continue
 
         leaves = _collect_leaves(scenario.attack_tree.root)
+        exact_ids_by_step = projected_step_mapping_ids_by_step(scenario.projection)
+        reasons: list[str] = []
+        for leaf in leaves:
+            if leaf.technique_id is None:
+                continue
+            if not leaf.projected_step_ids:
+                reasons.append(
+                    f"Leaf '{leaf.id}' carries '{leaf.technique_id}' without "
+                    "projected-step IDs."
+                )
+                continue
+            incompatible = [
+                step_id
+                for step_id in leaf.projected_step_ids
+                if leaf.technique_id not in exact_ids_by_step.get(step_id, frozenset())
+            ]
+            if incompatible:
+                reasons.append(
+                    f"Leaf '{leaf.id}' technique '{leaf.technique_id}' is not an "
+                    f"exact mapping of projected steps {incompatible}."
+                )
 
-        # Collect only leaves that carry a technique_id; unannotated
-        # leaves (prerequisite steps) are excluded from the denominator.
-        annotated_technique_ids = [
-            leaf.technique_id for leaf in leaves if leaf.technique_id
-        ]
-
-        # Check if at least one annotated leaf matches the provenance set.
-        has_provenance_match = any(
-            tid in provenance_ids for tid in annotated_technique_ids
-        )
-
-        if has_provenance_match:
+        if not reasons:
             result.clean_scenarios.append(scenario)
         else:
-            # Build a descriptive violation.
             root = scenario.attack_tree.root
-            if not annotated_technique_ids:
-                reason = (
-                    "No leaf nodes carry a technique_id; "
-                    "cannot verify provenance against seed "
-                    f"atlas_provenance_ids {sorted(provenance_ids)}."
-                )
-            else:
-                found_ids = sorted(set(annotated_technique_ids))
-                reason = (
-                    f"Leaf technique_ids {found_ids} do not include any "
-                    f"seed provenance technique from atlas_provenance_ids "
-                    f"{sorted(provenance_ids)}."
-                )
-
             violation = LeafTechniqueViolation(
                 node_id=root.id,
                 label=root.label,
                 zone=root.zone,
-                reason=reason,
+                reason=" ".join(reasons),
             )
             result.flagged_scenarios.append((scenario, [violation]))
 

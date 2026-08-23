@@ -85,6 +85,7 @@ class GateCode(str, Enum):
     traceability = "traceability"
     structural = "structural"
     semantic = "semantic"
+    canonical_compilation_failed = "canonical_compilation_failed"
     phantom = "phantom"
     tree_action_mismatch = "tree_action_mismatch"
     assertion_mismatch = "assertion_mismatch"

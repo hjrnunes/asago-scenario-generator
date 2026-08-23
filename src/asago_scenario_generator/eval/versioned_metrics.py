@@ -466,16 +466,18 @@ def evaluate_v3_scorecard(resolver: ManifestInventoryResolver) -> ScorecardV1:
         else:
             tree_behavior_problem_ids.append(scenario_id)
         pinned = set(choice.pinned_technique_ids) if choice is not None else set()
-        tree_techniques = {
-            str(leaf["technique_id"])
-            for leaf in _tree_leaves(raw.get("attack_tree", {}).get("root", {}))
-            if leaf.get("technique_id")
-        }
+        scope_evidence = raw.get("technique_scope_evidence") or {}
+        scenario_classifications = set(
+            scope_evidence.get("scenario_classification_ids")
+            or raw.get("faceting", {})
+            .get("taxonomy_chain", {})
+            .get("atlas_technique_ids", [])
+        )
         pinned_total += len(pinned)
-        pinned_found += len(pinned & tree_techniques)
-        if pinned - tree_techniques:
+        pinned_found += len(pinned & scenario_classifications)
+        if pinned != scenario_classifications:
             pinned_problem_ids.append(scenario_id)
-        if not pinned and not tree_techniques:
+        if not pinned and not scenario_classifications:
             vacuous_agreement_ids.append(scenario_id)
         for mapping in raw.get("projection", {}).get("projected_mappings", []):
             decision = mapping.get("mapping", {}).get("decision", "unknown")
@@ -506,7 +508,7 @@ def evaluate_v3_scorecard(resolver: ManifestInventoryResolver) -> ScorecardV1:
             pinned_total,
             evidence=[
                 "coverage-plan pinned_technique_ids",
-                "admitted attack-tree technique_id",
+                "admitted scenario classifications",
             ],
             affected_ids=pinned_problem_ids,
         ),

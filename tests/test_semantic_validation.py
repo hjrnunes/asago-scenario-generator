@@ -245,6 +245,16 @@ class TestSemanticValidation:
         assert envelope.validation.semantic.valid is True
         assert envelope.validation.semantic.violations == []
 
+    def test_all_committed_atlas_techniques_are_valid(self):
+        """Techniques added by the pinned ATLAS release pass validation."""
+        profile = _make_profile()
+        envelope = _make_envelope(technique_ids=["AML.T0065", "AML.T0068"])
+        validate_scenario_semantics([envelope], profile)
+
+        assert envelope.validation is not None
+        violations = envelope.validation.semantic.violations
+        assert [v for v in violations if v.rule == "technique_exists"] == []
+
     def test_unknown_technique_id_flagged(self):
         """An unknown technique ID is flagged as a semantic violation."""
         profile = _make_profile()

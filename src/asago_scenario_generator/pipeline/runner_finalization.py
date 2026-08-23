@@ -509,7 +509,11 @@ def run_target_finalization(
                     (
                         LifecycleViolation(
                             str(exc),
-                            code="candidate_revalidation_failed",
+                            code=getattr(
+                                exc,
+                                "stage_failure_code",
+                                "candidate_revalidation_failed",
+                            ),
                             retryable=False,
                         ),
                     ),

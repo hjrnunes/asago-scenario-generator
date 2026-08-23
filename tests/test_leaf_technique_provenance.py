@@ -1,14 +1,8 @@
-"""Tests for leaf technique provenance validation.
+"""Leaf mapping validation and legacy provenance-reader compatibility.
 
-Covers:
-- At least one provenance-matching leaf -> clean
-- Technique IDs present but none from provenance set -> flagged
-- All leaves unannotated (no technique_ids) -> flagged
-- Consequence leaf exemption still works (unannotated consequence
-  leaves do not block a scenario with a provenance match)
-- Mixed batch (some clean, some flagged)
-- Empty scenario list
-- _is_consequence_leaf heuristic matches expected patterns
+Legacy envelopes remain readable without classification/leaf intersection.
+Explicit per-leaf projected mapping regressions live in test_technique_scopes.
+The historical consequence classifier remains covered here.
 """
 
 from __future__ import annotations
@@ -416,14 +410,10 @@ class TestFlaggedScenarios:
         )
         result = check_leaf_technique_provenance([scenario])
 
-        assert result.flagged_count == 1
-        assert result.clean_count == 0
-        _, violations = result.flagged_scenarios[0]
-        assert len(violations) == 1
-        assert (
-            "AML.T0098" in violations[0].reason or "AML.T0099" in violations[0].reason
-        )
-        assert "atlas_provenance_ids" in violations[0].reason
+        # Legacy envelopes remain readable and do not reinstate the removed
+        # scenario-classification/leaf-intersection requirement.
+        assert result.flagged_count == 0
+        assert result.clean_count == 1
 
     def test_all_unannotated_leaves(self) -> None:
         """No leaves carry any technique_id at all -> flagged."""
@@ -453,11 +443,8 @@ class TestFlaggedScenarios:
         )
         result = check_leaf_technique_provenance([scenario])
 
-        assert result.flagged_count == 1
-        assert result.clean_count == 0
-        _, violations = result.flagged_scenarios[0]
-        assert len(violations) == 1
-        assert "No leaf nodes carry a technique_id" in violations[0].reason
+        assert result.flagged_count == 0
+        assert result.clean_count == 1
 
     def test_no_seed_metadata(self) -> None:
         """Scenario with no seed metadata is flagged (empty provenance)."""
@@ -487,8 +474,8 @@ class TestFlaggedScenarios:
         scenario.scenario_seed_metadata = None
         result = check_leaf_technique_provenance([scenario])
 
-        assert result.flagged_count == 1
-        assert result.clean_count == 0
+        assert result.flagged_count == 0
+        assert result.clean_count == 1
 
     def test_empty_provenance_set(self) -> None:
         """Scenario with empty atlas_provenance_ids is flagged."""
@@ -516,8 +503,8 @@ class TestFlaggedScenarios:
         scenario = _make_envelope(root, atlas_provenance_ids=[])
         result = check_leaf_technique_provenance([scenario])
 
-        assert result.flagged_count == 1
-        assert result.clean_count == 0
+        assert result.flagged_count == 0
+        assert result.clean_count == 1
 
     def test_violation_uses_root_node(self) -> None:
         """Violation references the root node (scenario-level issue)."""
@@ -544,11 +531,8 @@ class TestFlaggedScenarios:
         scenario = _make_envelope(root, atlas_provenance_ids=["AML.T0051"])
         result = check_leaf_technique_provenance([scenario])
 
-        assert result.flagged_count == 1
-        _, violations = result.flagged_scenarios[0]
-        assert violations[0].node_id == "n1"
-        assert violations[0].label == "Attack Goal"
-        assert violations[0].zone == "input"
+        assert result.flagged_count == 0
+        assert result.clean_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -648,8 +632,8 @@ class TestConsequenceExemption:
         scenario = _make_envelope(root, atlas_provenance_ids=["AML.T0051"])
         result = check_leaf_technique_provenance([scenario])
 
-        assert result.flagged_count == 1
-        assert result.clean_count == 0
+        assert result.flagged_count == 0
+        assert result.clean_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -718,16 +702,12 @@ class TestMixedBatch:
 
         result = check_leaf_technique_provenance([clean, flagged])
 
-        assert result.clean_count == 1
-        assert result.flagged_count == 1
-        assert (
-            result.clean_scenarios[0].scenario_id
-            == "scenario:v2:bb38b4af8c113eb1fc7205a1f3030844be1213755be8c6bb125154e814f6022a"
-        )
-        assert (
-            result.flagged_scenarios[0][0].scenario_id
-            == "scenario:v2:34e61bd22ffe221825d3fa7a207f099970199c631e0017bdc9eb616d3afec29d"
-        )
+        assert result.clean_count == 2
+        assert result.flagged_count == 0
+        assert {scenario.scenario_id for scenario in result.clean_scenarios} == {
+            "scenario:v2:bb38b4af8c113eb1fc7205a1f3030844be1213755be8c6bb125154e814f6022a",
+            "scenario:v2:34e61bd22ffe221825d3fa7a207f099970199c631e0017bdc9eb616d3afec29d",
+        }
 
 
 # ---------------------------------------------------------------------------
