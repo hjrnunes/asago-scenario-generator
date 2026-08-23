@@ -67,6 +67,8 @@ from asago_scenario_generator.pipeline.finalization_gates import (
 from asago_scenario_generator.pipeline.generate.assembly import (
     _build_projection_block,
     _build_projection_context,
+)
+from asago_scenario_generator.pipeline.generate.behavior_compiler import (
     render_gherkin_from_behavior_spec,
 )
 from asago_scenario_generator.pipeline.generate.gherkin import _derive_behavior_actions

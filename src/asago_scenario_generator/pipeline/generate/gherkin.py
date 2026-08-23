@@ -857,7 +857,7 @@ def _call3_response_to_behavior_spec(
         for a in response.assertions
     )
 
-    from asago_scenario_generator.pipeline.generate.assembly import (
+    from asago_scenario_generator.pipeline.generate.behavior_compiler import (
         render_gherkin_from_behavior_spec,
     )
 

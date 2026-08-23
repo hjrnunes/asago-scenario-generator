@@ -476,7 +476,7 @@ def make_behavior_spec(
             )
 
     # Deterministically render Gherkin from the structured behavior.
-    from asago_scenario_generator.pipeline.generate.assembly import (
+    from asago_scenario_generator.pipeline.generate.behavior_compiler import (
         render_gherkin_from_behavior_spec,
     )
 

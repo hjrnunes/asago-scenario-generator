@@ -49,6 +49,8 @@ from asago_scenario_generator.models.projection_envelope import (
 )
 from asago_scenario_generator.pipeline.generate.assembly import (
     _build_projection_context,
+)
+from asago_scenario_generator.pipeline.generate.behavior_compiler import (
     build_behavior_spec_from_tree,
     render_gherkin_from_behavior_spec,
 )

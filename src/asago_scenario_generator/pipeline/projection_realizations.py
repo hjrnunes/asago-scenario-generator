@@ -922,7 +922,6 @@ def _order_violation_for_pair(
     elements: list[tuple[str, int, int]],
     i: int,
     j: int,
-    order: dict[str, int],
     stage: ProjectionTraceabilityStage,
     artifact_name: str,
 ) -> ProjectionTraceabilityViolation | None:
@@ -979,7 +978,6 @@ def _check_order_preservation(
                 elements,
                 i,
                 j,
-                order,
                 stage,
                 artifact_name,
             )

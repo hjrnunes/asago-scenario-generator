@@ -14,6 +14,7 @@ import logging
 from typing import Any
 
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
+from asago_scenario_generator.models.scenario import ActorAccessProvenance
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _influence_source_line(access: Any, profile: CapabilityProfile) -> str:
+def _influence_source_line(
+    access: ActorAccessProvenance, profile: CapabilityProfile
+) -> str:
     """One-line rendering of the upstream influence source, or empty."""
     if not access.influence_source:
         return ""
@@ -35,14 +38,16 @@ def _influence_source_line(access: Any, profile: CapabilityProfile) -> str:
     return f"- influence_source: {source_name}\n"
 
 
-def _influence_mechanism_line(access: Any) -> str:
+def _influence_mechanism_line(access: ActorAccessProvenance) -> str:
     """One-line rendering of the influence mechanism, or empty."""
     if not access.influence_mechanism:
         return ""
     return f"- influence_mechanism: {access.influence_mechanism}\n"
 
 
-def _trust_boundary_line(access: Any, profile: CapabilityProfile) -> str:
+def _trust_boundary_line(
+    access: ActorAccessProvenance, profile: CapabilityProfile
+) -> str:
     """One-line rendering of the trust boundary name, or empty."""
     if not access.trust_boundary_id:
         return ""
@@ -52,7 +57,7 @@ def _trust_boundary_line(access: Any, profile: CapabilityProfile) -> str:
     return f"- trust_boundary_id: {tb_name}\n"
 
 
-def _insider_advantage_line(access: Any) -> str:
+def _insider_advantage_line(access: ActorAccessProvenance) -> str:
     """One-line rendering of the material insider advantage, or empty."""
     if not access.material_insider_advantage:
         return ""
@@ -60,7 +65,7 @@ def _insider_advantage_line(access: Any) -> str:
 
 
 def access_provenance_block_with_names(
-    access: Any,
+    access: ActorAccessProvenance | None,
     profile: CapabilityProfile,
     *,
     header: str = (
