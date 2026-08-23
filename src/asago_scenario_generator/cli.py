@@ -599,7 +599,8 @@ def eval_cmd(
     from asago_scenario_generator.log_config import setup_logging
 
     setup_logging(log_level=log_level, output_dir=None)
-    typer.echo(f"\nasago-scenario-generator v{_VERSION} — eval\n{'=' * 40}")
+    # The banner goes to stderr so stdout stays a single parseable scorecard.
+    typer.echo(f"\nasago-scenario-generator v{_VERSION} — eval\n{'=' * 40}", err=True)
 
     if not output_dir.exists():
         typer.echo(f"Error: directory not found: {output_dir}", err=True)
