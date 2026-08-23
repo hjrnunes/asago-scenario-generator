@@ -181,20 +181,11 @@ def _h_llm_to_t(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
-def _h_t_to_atlas_singular(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the cross-taxonomy mapping links T-threat X to ATLAS techniques A,B."""
-    m = re.search(r'links T-threat "([^"]+)" to ATLAS techniques "([^"]+)"', text)
+def _h_t_to_atlas(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Handle: the cross-taxonomy mapping links T-threat(s) X to ATLAS techniques A,B."""
+    m = re.search(r'links T-threats? "([^"]+)" to ATLAS techniques "([^"]+)"', text)
     if not m:
         return False, f"Could not parse T->ATLAS step: {text}"
-    _add_t_to_atlas(world, m.group(1), _split_csv(m.group(2)))
-    return True, ""
-
-
-def _h_t_to_atlas_plural(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the cross-taxonomy mapping links T-threats A,B to ATLAS techniques C,D."""
-    m = re.search(r'links T-threats "([^"]+)" to ATLAS techniques "([^"]+)"', text)
-    if not m:
-        return False, f"Could not parse T-threats->ATLAS step: {text}"
     for t_id in _split_csv(m.group(1)):
         _add_t_to_atlas(world, t_id, _split_csv(m.group(2)))
     return True, ""
@@ -206,22 +197,10 @@ def _h_no_atlas(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
-def _h_direct_singular(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the cross-taxonomy mapping links direct-path T-threat X to ATLAS techniques A,B."""
+def _h_direct(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Handle: the cross-taxonomy mapping links direct-path T-threat(s) X to ATLAS techniques A,B."""
     m = re.search(
-        r'links direct-path T-threat "([^"]+)" to ATLAS techniques "([^"]+)"',
-        text,
-    )
-    if not m:
-        return False, f"Could not parse direct-path step: {text}"
-    _add_direct(world, m.group(1), _split_csv(m.group(2)))
-    return True, ""
-
-
-def _h_direct_plural(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the cross-taxonomy mapping links direct-path T-threats A,B to ATLAS techniques C,D."""
-    m = re.search(
-        r'links direct-path T-threats "([^"]+)" to ATLAS techniques "([^"]+)"',
+        r'links direct-path T-threats? "([^"]+)" to ATLAS techniques "([^"]+)"',
         text,
     )
     if not m:
@@ -240,9 +219,9 @@ def _h_asi(world: World, text: str, examples: dict) -> tuple[bool, str]:
     )
     if not m:
         return False, f"Could not parse ASI step: {text}"
-    for index in (1, 3):
+    for t_index, asi_index in ((1, 2), (3, 4)):
         world.tsds_cross["t_to_asi"].append(
-            {"source": m.group(index), "target": m.group(index + 1)}
+            {"source": m.group(t_index), "target": m.group(asi_index)}
         )
     return True, ""
 
@@ -303,17 +282,10 @@ def _h_keeps_patterns(world: World, text: str, examples: dict) -> tuple[bool, st
 # ---------------------------------------------------------------------------
 
 
-def _h_derive(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the threat surface is derived."""
-    from asago_scenario_generator.data.loaders import load_risk_extraction
-    from asago_scenario_generator.models import CapabilityProfile
-    from asago_scenario_generator.models.capability_profile import (
-        ToolInventoryEntry,
-    )
-    from asago_scenario_generator.pipeline.threats import (
-        determine_threat_surface,
-    )
-
+def _materialize_inputs(
+    world: World,
+) -> tuple[Path, Path, Path, Path, Path | None]:
+    """Write the world's fixture state to its temp dir; return input paths."""
     fixture_dir = world.tsds_fixture_dir
     risk_path = fixture_dir / "risk-extraction.json"
     sssom_path = fixture_dir / "risk-atlas-llm.sssom.tsv"
@@ -354,6 +326,24 @@ def _h_derive(world: World, text: str, examples: dict) -> tuple[bool, str]:
             encoding="utf-8",
         )
 
+    return risk_path, sssom_path, cross_path, kc_path, attack_patterns_path
+
+
+def _h_derive(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Handle: the threat surface is derived."""
+    from asago_scenario_generator.data.loaders import load_risk_extraction
+    from asago_scenario_generator.models import CapabilityProfile
+    from asago_scenario_generator.models.capability_profile import (
+        ToolInventoryEntry,
+    )
+    from asago_scenario_generator.pipeline.threats import (
+        determine_threat_surface,
+    )
+
+    risk_path, sssom_path, cross_path, kc_path, attack_patterns_path = (
+        _materialize_inputs(world)
+    )
+
     kwargs = {}
     if any(
         code.startswith("KC5.") or code.startswith("KC6.")
@@ -387,29 +377,42 @@ def _h_derive(world: World, text: str, examples: dict) -> tuple[bool, str]:
 # ---------------------------------------------------------------------------
 
 
+def _single_entry(entries: list, risk_id: str, label: str):
+    """Return the sole entry for risk_id, raising when absent or ambiguous."""
+    matches = [e for e in entries if e.risk_card.risk_id == risk_id]
+    if len(matches) != 1:
+        raise AssertionError(
+            f"expected exactly one {label} entry for {risk_id}, found {len(matches)}"
+        )
+    return matches[0]
+
+
 def _actionable_entry(world: World, risk_id: str):
     if world.tsds_surface is None:
         raise AssertionError("the threat surface has not been derived")
-    matches = [e for e in world.tsds_surface.entries if e.risk_card.risk_id == risk_id]
-    if len(matches) != 1:
-        raise AssertionError(
-            f"expected exactly one actionable entry for {risk_id}, found {len(matches)}"
-        )
-    return matches[0]
+    return _single_entry(world.tsds_surface.entries, risk_id, "actionable")
 
 
 def _governance_entry(world: World, risk_id: str):
     if world.tsds_surface is None:
         raise AssertionError("the threat surface has not been derived")
-    matches = [
-        e for e in world.tsds_surface.governance_only if e.risk_card.risk_id == risk_id
-    ]
-    if len(matches) != 1:
-        raise AssertionError(
-            f"expected exactly one governance-only entry for {risk_id}, "
-            f"found {len(matches)}"
-        )
-    return matches[0]
+    return _single_entry(world.tsds_surface.governance_only, risk_id, "governance-only")
+
+
+def _sole_governance(world: World):
+    """Return the single governance-only entry, or None when absent or ambiguous."""
+    if world.tsds_surface is None or len(world.tsds_surface.governance_only) != 1:
+        return None
+    return world.tsds_surface.governance_only[0]
+
+
+def _ids_empty(entry, fields: tuple[tuple[str, str], ...]) -> str | None:
+    """Return an error message when any field is non-empty, else None."""
+    for field, label in fields:
+        value = getattr(entry, field)
+        if value:
+            return f"expected no {label}, got {value}"
+    return None
 
 
 def _check_ids(actual: list[str], expected: list[str], label: str) -> str | None:
@@ -515,46 +518,46 @@ def _h_governance_no_llm_t_patterns(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the governance-only entry lists no OWASP LLM IDs, no T-threats, and no attack-pattern IDs."""
-    if world.tsds_surface is None or len(world.tsds_surface.governance_only) != 1:
+    entry = _sole_governance(world)
+    if entry is None:
         return False, "expected exactly one governance-only entry"
-    entry = world.tsds_surface.governance_only[0]
-    for field, label in (
-        ("owasp_llm_ids", "OWASP LLM IDs"),
-        ("agentic_threat_ids", "T-threats"),
-        ("attack_pattern_ids", "attack-pattern IDs"),
-    ):
-        value = getattr(entry, field)
-        if value:
-            return False, f"expected no {label}, got {value}"
-    return True, ""
+    error = _ids_empty(
+        entry,
+        (
+            ("owasp_llm_ids", "OWASP LLM IDs"),
+            ("agentic_threat_ids", "T-threats"),
+            ("attack_pattern_ids", "attack-pattern IDs"),
+        ),
+    )
+    return (True, "") if error is None else (False, error)
 
 
 def _h_governance_no_t_patterns_atlas_asi(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the governance-only entry lists no T-threats, no attack-pattern IDs, no ATLAS techniques, and no ASI IDs."""
-    if world.tsds_surface is None or len(world.tsds_surface.governance_only) != 1:
+    entry = _sole_governance(world)
+    if entry is None:
         return False, "expected exactly one governance-only entry"
-    entry = world.tsds_surface.governance_only[0]
-    for field, label in (
-        ("agentic_threat_ids", "T-threats"),
-        ("attack_pattern_ids", "attack-pattern IDs"),
-        ("atlas_technique_ids", "ATLAS techniques"),
-        ("owasp_asi_ids", "ASI IDs"),
-    ):
-        value = getattr(entry, field)
-        if value:
-            return False, f"expected no {label}, got {value}"
-    return True, ""
+    error = _ids_empty(
+        entry,
+        (
+            ("agentic_threat_ids", "T-threats"),
+            ("attack_pattern_ids", "attack-pattern IDs"),
+            ("atlas_technique_ids", "ATLAS techniques"),
+            ("owasp_asi_ids", "ASI IDs"),
+        ),
+    )
+    return (True, "") if error is None else (False, error)
 
 
 def _h_governance_no_direct(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the governance-only entry lists no direct-path T-threat."""
-    if world.tsds_surface is None or len(world.tsds_surface.governance_only) != 1:
+    entry = _sole_governance(world)
+    if entry is None:
         return False, "expected exactly one governance-only entry"
-    entry = world.tsds_surface.governance_only[0]
     if entry.agentic_threat_ids:
         return (
             False,
@@ -633,24 +636,16 @@ def register(api: object) -> None:
         _h_llm_to_t,
     )
     api.register(
-        r'links T-threat "([^"]+)" to ATLAS techniques "([^"]+)"',
-        _h_t_to_atlas_singular,
-    )
-    api.register(
-        r'links T-threats "([^"]+)" to ATLAS techniques "([^"]+)"',
-        _h_t_to_atlas_plural,
+        r'links T-threats? "([^"]+)" to ATLAS techniques "([^"]+)"',
+        _h_t_to_atlas,
     )
     api.register(
         "the cross-taxonomy mapping links no ATLAS techniques from any T-threat",
         _h_no_atlas,
     )
     api.register(
-        r'links direct-path T-threat "([^"]+)" to ATLAS techniques "([^"]+)"',
-        _h_direct_singular,
-    )
-    api.register(
-        r'links direct-path T-threats "([^"]+)" to ATLAS techniques "([^"]+)"',
-        _h_direct_plural,
+        r'links direct-path T-threats? "([^"]+)" to ATLAS techniques "([^"]+)"',
+        _h_direct,
     )
     api.register(
         r'links T-threat "([^"]+)" to ASI entry "([^"]+)" and T-threat "([^"]+)" to ASI entry "([^"]+)"',

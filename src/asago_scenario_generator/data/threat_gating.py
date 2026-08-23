@@ -150,6 +150,21 @@ def _has_vector_store(profile: CapabilityProfile) -> bool:
     return any(m.type == MemoryType.vector_store for m in profile.memory_mechanisms)
 
 
+def _kc_requires_met(kc_req: dict, profile_kcs: set[str]) -> bool:
+    """Evaluate a pattern's kc_requires gate: {any: [...], all: [...]}.
+
+    Any-listed sub-codes need a single overlap; all-listed sub-codes must
+    all be present.  Absent lists are not gates.
+    """
+    any_kcs = kc_req.get("any")
+    if any_kcs and not profile_kcs.intersection(any_kcs):
+        return False
+    all_kcs = kc_req.get("all")
+    if all_kcs and not set(all_kcs).issubset(profile_kcs):
+        return False
+    return True
+
+
 def _evaluate_prerequisite_capabilities(
     prereqs: dict,
     profile: CapabilityProfile,
@@ -167,18 +182,10 @@ def _evaluate_prerequisite_capabilities(
     Returns:
         True if all prerequisites are satisfied, False otherwise.
     """
-    # kc_requires: {any: [...], all: [...]}
     kc_req = prereqs.get("kc_requires")
-    if kc_req is not None:
-        profile_kcs = set(profile.kc_subcodes)
-        any_kcs = kc_req.get("any")
-        if any_kcs and not profile_kcs.intersection(any_kcs):
-            return False
-        all_kcs = kc_req.get("all")
-        if all_kcs and not set(all_kcs).issubset(profile_kcs):
-            return False
-
-    return True
+    if kc_req is None:
+        return True
+    return _kc_requires_met(kc_req, set(profile.kc_subcodes))
 
 
 def _filter_attack_patterns(
@@ -221,6 +228,75 @@ def _filter_attack_patterns(
             )
 
     return surviving
+
+
+# ---------------------------------------------------------------------------
+# Per-threat evaluation
+# ---------------------------------------------------------------------------
+
+
+def _evaluate_threats(
+    threats: dict,
+    enabled: dict[str, str],
+    threat_to_patterns: dict[str, list[str]],
+    patterns: dict[str, dict],
+    profile: CapabilityProfile,
+) -> tuple[list[ThreatScopeEntry], list[str]]:
+    """Evaluate every known threat ID against the profile.
+
+    Returns the in-scope entries and the IDs skipped because no KC
+    sub-code enabled them.
+    """
+    in_scope: list[ThreatScopeEntry] = []
+    out_of_scope_ids: list[str] = []
+
+    for tid in _ALL_THREAT_IDS:
+        if tid not in threats:
+            continue
+
+        entry = _build_in_scope_entry(
+            tid, threats[tid], enabled, threat_to_patterns, patterns, profile
+        )
+        if entry is None:
+            out_of_scope_ids.append(tid)
+            continue
+        in_scope.append(entry)
+
+    return in_scope, out_of_scope_ids
+
+
+def _build_in_scope_entry(
+    tid: str,
+    threat: dict,
+    enabled: dict[str, str],
+    threat_to_patterns: dict[str, list[str]],
+    patterns: dict[str, dict],
+    profile: CapabilityProfile,
+) -> ThreatScopeEntry | None:
+    """Build the in-scope entry for one threat, or None when not enabled."""
+    reason = enabled.get(tid)
+    if reason is None:
+        return None
+
+    pattern_ids = threat_to_patterns.get(tid, [])
+    all_patterns = [patterns[pid] for pid in pattern_ids if pid in patterns]
+    filtered_ids = _filter_attack_patterns(all_patterns, profile)
+    dropped = set(pattern_ids) - set(filtered_ids)
+    logger.info(
+        "Threat %s (%s) IN SCOPE: %s — %d/%d attack patterns kept%s",
+        tid,
+        threat["name"],
+        reason,
+        len(filtered_ids),
+        len(pattern_ids),
+        f" (dropped: {sorted(dropped)})" if dropped else "",
+    )
+    return ThreatScopeEntry(
+        threat_id=tid,
+        threat_name=threat["name"],
+        attack_pattern_ids=filtered_ids,
+        gating_reason=reason,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -268,41 +344,9 @@ def determine_threat_scope(
         len(threat_to_patterns),
     )
 
-    in_scope: list[ThreatScopeEntry] = []
-    out_of_scope_ids: list[str] = []
-
-    for tid in _ALL_THREAT_IDS:
-        if tid not in threats:
-            continue
-
-        threat = threats[tid]
-        reason = enabled.get(tid)
-
-        if reason is None:
-            out_of_scope_ids.append(tid)
-            continue
-
-        pattern_ids = threat_to_patterns.get(tid, [])
-        all_patterns = [patterns[pid] for pid in pattern_ids if pid in patterns]
-        filtered_ids = _filter_attack_patterns(all_patterns, profile)
-        dropped = set(pattern_ids) - set(filtered_ids)
-        logger.info(
-            "Threat %s (%s) IN SCOPE: %s — %d/%d attack patterns kept%s",
-            tid,
-            threat["name"],
-            reason,
-            len(filtered_ids),
-            len(pattern_ids),
-            f" (dropped: {sorted(dropped)})" if dropped else "",
-        )
-        in_scope.append(
-            ThreatScopeEntry(
-                threat_id=tid,
-                threat_name=threat["name"],
-                attack_pattern_ids=filtered_ids,
-                gating_reason=reason,
-            )
-        )
+    in_scope, out_of_scope_ids = _evaluate_threats(
+        threats, enabled, threat_to_patterns, patterns, profile
+    )
 
     out_of_scope: list[OutOfScopeEntry] = []
     if out_of_scope_ids:

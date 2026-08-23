@@ -11,7 +11,6 @@ from __future__ import annotations
 import pytest
 
 from asago_scenario_generator.pipeline.threats import (
-    _build_direct_t_mappings,
     _build_t_to_atlas_index,
     _resolve_direct_threats,
 )
@@ -57,30 +56,6 @@ CROSS_TAXONOMY_WITH_DIRECT = {
         },
     ],
 }
-
-
-# ---------------------------------------------------------------------------
-# Tests: _build_direct_t_mappings
-# ---------------------------------------------------------------------------
-
-
-class TestBuildDirectTMappings:
-    def test_extracts_all_entries(self) -> None:
-        mappings = _build_direct_t_mappings(CROSS_TAXONOMY_WITH_DIRECT)
-        assert len(mappings) == 7
-
-    def test_returns_empty_when_no_t_direct(self) -> None:
-        mappings = _build_direct_t_mappings({"t_to_llm": []})
-        assert mappings == []
-
-    def test_returns_empty_for_empty_dict(self) -> None:
-        mappings = _build_direct_t_mappings({})
-        assert mappings == []
-
-    def test_preserves_source_ids(self) -> None:
-        mappings = _build_direct_t_mappings(CROSS_TAXONOMY_WITH_DIRECT)
-        ids = {m["source"] for m in mappings}
-        assert ids == {"T7", "T8", "T9", "T10", "T14", "T15", "T16"}
 
 
 # ---------------------------------------------------------------------------

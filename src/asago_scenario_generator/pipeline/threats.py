@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +24,10 @@ from pydantic import BaseModel, Field
 
 from asago_scenario_generator.data.loaders import load_cross_taxonomy_mappings
 from asago_scenario_generator.data.sssom import build_risk_to_llm_index, load_sssom
-from asago_scenario_generator.data.threat_gating import determine_threat_scope
+from asago_scenario_generator.data.threat_gating import (
+    ThreatScope,
+    determine_threat_scope,
+)
 from asago_scenario_generator.models import CapabilityProfile, RiskCard
 from asago_scenario_generator.models.scenario import RiskCardRef
 
@@ -127,38 +131,18 @@ def _build_t_to_asi_index(
     return dict(index)
 
 
-def _build_direct_t_mappings(
-    cross_taxonomy: dict[str, Any],
-) -> list[dict[str, Any]]:
-    """Extract the t_direct mappings from cross-taxonomy data.
-
-    Returns the raw list of direct mapping dicts, each containing
-    'source' (T-threat ID) and 'profile_match' (capability requirements).
-    """
-    return list(cross_taxonomy.get("t_direct", []))
-
-
 def _resolve_direct_threats(
     cross_taxonomy: dict[str, Any],
     in_scope_ids: set[str],
 ) -> set[str]:
-    """Resolve T-threats reachable via the direct path.
+    """Resolve in-scope T-threats reachable via the direct path.
 
-    Returns the set of T-threat IDs that:
-      1. Have a t_direct mapping in cross-taxonomy-mappings.yaml
-      2. Pass threat gating (are in in_scope_ids — already KC-filtered)
-
-    Profile matching is no longer needed here — ``determine_threat_scope``
-    already uses KC sub-codes to decide which threats are in scope.
-
-    Args:
-        cross_taxonomy: Parsed cross-taxonomy-mappings.yaml.
-        in_scope_ids: Set of threat IDs that passed gating.
-
-    Returns:
-        Set of T-threat IDs reachable via the direct path.
+    Returns the T-threat IDs that have a t_direct mapping in
+    cross-taxonomy-mappings.yaml and pass threat gating.
+    ``determine_threat_scope`` already performs the KC sub-code gating;
+    per-card ATLAS-overlap joins happen in :func:`_join_direct_overlap`.
     """
-    direct_mappings = _build_direct_t_mappings(cross_taxonomy)
+    direct_mappings = cross_taxonomy.get("t_direct", [])
     return {m["source"] for m in direct_mappings if m["source"] in in_scope_ids}
 
 
@@ -177,6 +161,140 @@ def _make_risk_card_ref(card: RiskCard) -> RiskCardRef:
         if value is not None:
             kwargs[field] = value
     return RiskCardRef(**kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Per-card resolution
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _SurfaceContext:
+    """Bundled taxonomy indices and gating state for per-card resolution."""
+
+    risk_to_llm: dict[str, list[str]]
+    llm_to_t: dict[str, list[str]]
+    t_to_atlas: dict[str, list[str]]
+    t_to_asi: dict[str, list[str]]
+    threat_attack_patterns: dict[str, list[str]]
+    in_scope_ids: set[str]
+    direct_t_ids: set[str]
+    has_kc6: bool
+    kc_subcodes: list[str]
+
+
+def _scoped_threats(threat_scope: ThreatScope) -> tuple[set[str], dict[str, list[str]]]:
+    """Split the scope into in-scope IDs and per-threat attack-pattern IDs."""
+    in_scope_ids = {e.threat_id for e in threat_scope.in_scope}
+    threat_attack_patterns = {
+        e.threat_id: e.attack_pattern_ids for e in threat_scope.in_scope
+    }
+    return in_scope_ids, threat_attack_patterns
+
+
+def _resolve_three_hop_threats(
+    ctx: _SurfaceContext, risk_id: str
+) -> tuple[list[str], list[str]]:
+    """Resolve a card's OWASP LLM IDs and its in-scope three-hop threats.
+
+    Both lists keep first-seen order: LLM IDs in SSSOM row order, and
+    T-threats in traversal order across the card's LLM IDs.
+    """
+    llm_ids = list(dict.fromkeys(ctx.risk_to_llm.get(risk_id, [])))
+    three_hop: list[str] = []
+    for llm_id in llm_ids:
+        for t_id in ctx.llm_to_t.get(llm_id, []):
+            if t_id in ctx.in_scope_ids and t_id not in three_hop:
+                three_hop.append(t_id)
+    return llm_ids, three_hop
+
+
+def _join_direct_overlap(ctx: _SurfaceContext, three_hop: list[str]) -> list[str]:
+    """Append direct-path threats that share an ATLAS technique with the card.
+
+    A direct-path threat joins the card only when it was not already
+    reached via the LLM hop and its ATLAS techniques overlap the
+    card's three-hop techniques.  This keeps ``agentic_threat_ids``
+    specific to each scenario instead of broadcasting every direct
+    threat to every card.
+    """
+    card_atlas: set[str] = set()
+    for t_id in three_hop:
+        card_atlas.update(ctx.t_to_atlas.get(t_id, []))
+    joined = list(three_hop)
+    for dt_id in sorted(ctx.direct_t_ids):
+        if dt_id in three_hop:
+            continue
+        if card_atlas & set(ctx.t_to_atlas.get(dt_id, [])):
+            joined.append(dt_id)
+    return joined
+
+
+def _collect_first_seen(
+    ids_by_owner: dict[str, list[str]], owners: list[str]
+) -> list[str]:
+    """De-duplicated first-seen union of IDs across owners."""
+    collected: list[str] = []
+    for owner in owners:
+        for id_ in ids_by_owner.get(owner, []):
+            if id_ not in collected:
+                collected.append(id_)
+    return collected
+
+
+def _apply_kc6_gate(
+    ctx: _SurfaceContext, risk_id: str, atlas_ids: list[str]
+) -> list[str]:
+    """Drop capability-gated ATLAS techniques when the profile lacks KC6."""
+    if ctx.has_kc6:
+        return atlas_ids
+    gated = sorted(_KC6_GATED_TECHNIQUES.intersection(atlas_ids))
+    if not gated:
+        return atlas_ids
+    logger.warning(
+        "ATLAS technique filter: removing KC6-gated techniques %s "
+        "for risk %s (kc_subcodes=%s)",
+        gated,
+        risk_id,
+        ctx.kc_subcodes,
+    )
+    return [aid for aid in atlas_ids if aid not in _KC6_GATED_TECHNIQUES]
+
+
+def _governance_entry(ref: RiskCardRef, llm_ids: list[str]) -> ThreatSurfaceEntry:
+    """An entry retained for governance visibility only."""
+    return ThreatSurfaceEntry(
+        risk_card=ref,
+        owasp_llm_ids=llm_ids,
+        agentic_threat_ids=[],
+        attack_pattern_ids=[],
+        governance_only=True,
+    )
+
+
+def _actionable_entry(
+    ctx: _SurfaceContext,
+    ref: RiskCardRef,
+    llm_ids: list[str],
+    threat_ids: list[str],
+    risk_id: str,
+) -> ThreatSurfaceEntry:
+    """A fully resolved entry with de-duplicated first-seen ID unions."""
+    return ThreatSurfaceEntry(
+        risk_card=ref,
+        owasp_llm_ids=llm_ids,
+        agentic_threat_ids=threat_ids,
+        atlas_technique_ids=_apply_kc6_gate(
+            ctx, risk_id, _collect_first_seen(ctx.t_to_atlas, threat_ids)
+        ),
+        attack_pattern_ids=_collect_first_seen(ctx.threat_attack_patterns, threat_ids),
+        owasp_asi_ids=_collect_first_seen(ctx.t_to_asi, threat_ids),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Main function
+# ---------------------------------------------------------------------------
 
 
 def determine_threat_surface(
@@ -229,120 +347,36 @@ def determine_threat_surface(
     threat_scope = determine_threat_scope(
         profile, threats_path, kc_mapping_path, attack_patterns_path
     )
-    in_scope_ids = {e.threat_id for e in threat_scope.in_scope}
-    # Build threat_id -> applicable attack pattern IDs
-    threat_attack_patterns: dict[str, list[str]] = {
-        e.threat_id: e.attack_pattern_ids for e in threat_scope.in_scope
-    }
+    in_scope_ids, threat_attack_patterns = _scoped_threats(threat_scope)
 
-    # --- Direct path: T-threats reachable without LLM hop ---
-    direct_t_ids = _resolve_direct_threats(cross_taxonomy, in_scope_ids)
-
-    # Track which direct-path threats were already reached via the LLM hop
-    # so we can detect truly unreachable threats
-    llm_reached_t_ids: set[str] = set()
+    ctx = _SurfaceContext(
+        risk_to_llm=risk_to_llm,
+        llm_to_t=llm_to_t,
+        t_to_atlas=t_to_atlas,
+        t_to_asi=t_to_asi,
+        threat_attack_patterns=threat_attack_patterns,
+        in_scope_ids=in_scope_ids,
+        direct_t_ids=_resolve_direct_threats(cross_taxonomy, in_scope_ids),
+        has_kc6=bool(_KC6_SUBCODES.intersection(profile.kc_subcodes)),
+        kc_subcodes=profile.kc_subcodes,
+    )
 
     entries: list[ThreatSurfaceEntry] = []
     governance_only: list[ThreatSurfaceEntry] = []
 
     for card in risk_cards:
         ref = _make_risk_card_ref(card)
-        llm_ids = list(dict.fromkeys(risk_to_llm.get(card.risk_id, [])))
+        llm_ids, three_hop = _resolve_three_hop_threats(ctx, card.risk_id)
 
         if not llm_ids:
-            governance_only.append(
-                ThreatSurfaceEntry(
-                    risk_card=ref,
-                    owasp_llm_ids=[],
-                    agentic_threat_ids=[],
-                    attack_pattern_ids=[],
-                    governance_only=True,
-                )
-            )
+            governance_only.append(_governance_entry(ref, []))
             continue
 
-        # Collect all T-threats reachable from these LLM IDs
-        all_t_ids: list[str] = []
-        for llm_id in llm_ids:
-            for t_id in llm_to_t.get(llm_id, []):
-                if t_id not in all_t_ids:
-                    all_t_ids.append(t_id)
-
-        # Filter to in-scope threats only
-        scoped_t_ids = [t for t in all_t_ids if t in in_scope_ids]
-        llm_reached_t_ids.update(scoped_t_ids)
-
-        # Append direct-path threats only when they share at least one
-        # ATLAS technique with the three-hop threats already on this card.
-        # This prevents broadcasting every direct threat to every risk card,
-        # keeping agentic_threat_ids specific to each scenario.
-        card_atlas: set[str] = set()
-        for t_id in scoped_t_ids:
-            card_atlas.update(t_to_atlas.get(t_id, []))
-        for dt_id in sorted(direct_t_ids):
-            if dt_id not in scoped_t_ids:
-                dt_atlas = set(t_to_atlas.get(dt_id, []))
-                if card_atlas & dt_atlas:
-                    scoped_t_ids.append(dt_id)
-
-        if not scoped_t_ids:
-            governance_only.append(
-                ThreatSurfaceEntry(
-                    risk_card=ref,
-                    owasp_llm_ids=llm_ids,
-                    agentic_threat_ids=[],
-                    attack_pattern_ids=[],
-                    governance_only=True,
-                )
-            )
+        threat_ids = _join_direct_overlap(ctx, three_hop)
+        if not threat_ids:
+            governance_only.append(_governance_entry(ref, llm_ids))
             continue
 
-        # Collect attack pattern IDs from in-scope threats
-        all_ap_ids: list[str] = []
-        for t_id in scoped_t_ids:
-            for ap_id in threat_attack_patterns.get(t_id, []):
-                if ap_id not in all_ap_ids:
-                    all_ap_ids.append(ap_id)
-
-        # Collect ATLAS technique IDs for all in-scope T-threats
-        all_atlas: list[str] = []
-        for t_id in scoped_t_ids:
-            for atlas_id in t_to_atlas.get(t_id, []):
-                if atlas_id not in all_atlas:
-                    all_atlas.append(atlas_id)
-
-        # Collect OWASP ASI Top 10 IDs for all in-scope T-threats
-        all_asi: list[str] = []
-        for t_id in scoped_t_ids:
-            for asi_id in t_to_asi.get(t_id, []):
-                if asi_id not in all_asi:
-                    all_asi.append(asi_id)
-
-        # Filter capability-gated ATLAS techniques
-        has_kc6 = bool(_KC6_SUBCODES.intersection(profile.kc_subcodes))
-        if not has_kc6:
-            gated = [aid for aid in all_atlas if aid in _KC6_GATED_TECHNIQUES]
-            if gated:
-                logger.warning(
-                    "ATLAS technique filter: removing KC6-gated techniques %s "
-                    "for risk %s (kc_subcodes=%s)",
-                    gated,
-                    card.risk_id,
-                    profile.kc_subcodes,
-                )
-                all_atlas = [
-                    aid for aid in all_atlas if aid not in _KC6_GATED_TECHNIQUES
-                ]
-
-        entries.append(
-            ThreatSurfaceEntry(
-                risk_card=ref,
-                owasp_llm_ids=llm_ids,
-                agentic_threat_ids=scoped_t_ids,
-                atlas_technique_ids=all_atlas,
-                attack_pattern_ids=all_ap_ids,
-                owasp_asi_ids=all_asi,
-            )
-        )
+        entries.append(_actionable_entry(ctx, ref, llm_ids, threat_ids, card.risk_id))
 
     return ThreatSurface(entries=entries, governance_only=governance_only)

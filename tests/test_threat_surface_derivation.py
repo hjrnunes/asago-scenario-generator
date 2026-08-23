@@ -368,6 +368,37 @@ class TestDirectPathJoin:
         assert entry.agentic_threat_ids == ["T2"]
         assert entry.atlas_technique_ids == ["AML.T0015", "AML.T0053"]
 
+    def test_direct_threat_already_reached_via_llm_hop_appears_once(
+        self, tmp_path: Path
+    ) -> None:
+        """A direct-path threat also reachable via the LLM hop stays de-duplicated."""
+        surface = _derive(
+            tmp_path,
+            profile=_make_profile("KCX-TSDS", "KC6.4"),
+            cards=[_make_card("atlas-prompt-injection")],
+            sssom_rows=[("atlas-prompt-injection", "llm06-fixture")],
+            t_to_llm=[
+                {"source": "T2", "target": "LLM06"},
+                {"source": "T7", "target": "LLM06"},
+            ],
+            t_to_atlas=[
+                {"source": "T2", "targets": ["AML.T0015", "AML.T0053"]},
+                {"source": "T7", "targets": ["AML.T0054", "AML.T0015"]},
+            ],
+            t_direct=[{"source": "T7", "source_name": "Misaligned Behaviors"}],
+            kc_to_threats={"KCX-TSDS": ["T2", "T7"], "KC6.4": []},
+        )
+
+        assert len(surface.entries) == 1
+        assert surface.governance_only == []
+        entry = surface.entries[0]
+        assert entry.agentic_threat_ids == ["T2", "T7"]
+        assert entry.atlas_technique_ids == [
+            "AML.T0015",
+            "AML.T0053",
+            "AML.T0054",
+        ]
+
 
 # ---------------------------------------------------------------------------
 # Taxonomy threat-surface derivation 05: union without duplicates
