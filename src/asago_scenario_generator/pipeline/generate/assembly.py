@@ -361,6 +361,94 @@ def _iter_leaves(node: AttackTreeNode) -> list[AttackTreeNode]:
     return leaves
 
 
+def _leaf_action_text(leaf: AttackTreeNode) -> str:
+    """Gherkin step text for a projected leaf.
+
+    The tree leaf's description wins over its label; an empty label falls
+    back to the leaf's node id.
+    """
+    if leaf.description:
+        return leaf.description
+    return leaf.label or leaf.id
+
+
+def _projected_leaves(tree: AttackTree, selected: set[str]) -> list[AttackTreeNode]:
+    """Return leaves whose projected steps are non-empty and fully selected."""
+    return [
+        leaf
+        for leaf in _iter_leaves(tree.root)
+        if leaf.projected_step_ids
+        and all(step_id in selected for step_id in leaf.projected_step_ids)
+    ]
+
+
+def _action_from_leaf(leaf: AttackTreeNode) -> BehaviorAction:
+    """Compile one structured action from a fully projected leaf.
+
+    The leaf's canonical realization records are carried verbatim: the
+    tree validator guarantees exactly one record per projected step ID.
+    """
+    return BehaviorAction(
+        action_id=f"ba-{leaf.id}",
+        projected_step_ids=leaf.projected_step_ids,
+        source_leaf_id=leaf.id,
+        gherkin_keyword="When",
+        text=_leaf_action_text(leaf),
+        realizations=leaf.realizations,
+    )
+
+
+def _postcondition_descriptions(
+    chain: Any,
+    step_id: str,
+    pc_ids: list[str],
+) -> list[str]:
+    """Resolve postcondition descriptions, falling back to the raw IDs."""
+    step_obj = next((s for s in chain.steps if s.step_id == step_id), None)
+    pc_by_id = {
+        pc.postcondition_id: pc.description
+        for pc in (step_obj.observable_postconditions if step_obj else [])
+    }
+    return [pc_by_id.get(pc_id, pc_id) for pc_id in pc_ids]
+
+
+def _assertions_from_block(block: ProjectionEnvelopeBlock) -> list[BehaviorAssertion]:
+    """Compile assertions from the block's security-relevant postconditions.
+
+    Assertion IDs are stable: ``assert-<step_id>-<postcondition_ids>`` with
+    postcondition IDs dash-joined, matching the deterministic Call 3 ID
+    scheme so the LLM-authored assertions can be cross-checked exactly.
+    """
+    chain = block.projection.source_chain
+    sec_pcs = block.security_relevant_postconditions()
+    assertions: list[BehaviorAssertion] = []
+    for step_id in block.projection.selected_step_ids:
+        pc_ids = sec_pcs.get(step_id, [])
+        if not pc_ids:
+            continue
+        pc_descs = _postcondition_descriptions(chain, step_id, pc_ids)
+        assertion_text = "; ".join(pc_descs) if pc_descs else f"Verify {step_id}"
+        assertions.append(
+            BehaviorAssertion(
+                assertion_id=f"assert-{step_id}-{'-'.join(pc_ids)}",
+                source_step_ids=(step_id,),
+                projected_postcondition_ids=tuple(pc_ids),
+                gherkin_keyword="Then",
+                text=assertion_text,
+            )
+        )
+    return assertions
+
+
+def _zone_map_for_tree(tree: AttackTree) -> dict[str, str]:
+    """Map compiled action IDs to leaf zones for Gherkin annotations."""
+    zone_map: dict[str, str] = {}
+    for leaf in _iter_leaves(tree.root):
+        if leaf.projected_step_ids and leaf.zone is not None:
+            zone_map[f"ba-{leaf.id}"] = leaf.zone
+    return zone_map
+
+
 def build_behavior_spec_from_tree(
     attack_tree: AttackTree,
     block: ProjectionEnvelopeBlock,
@@ -385,80 +473,12 @@ def build_behavior_spec_from_tree(
     Validation cross-checks the structured elements against the projection
     block and the rendered Gherkin.
     """
-    chain = block.projection.source_chain
     selected = set(block.projection.selected_step_ids)
-
-    actions: list[BehaviorAction] = []
-    step_by_id = {s.step_id: s for s in chain.steps}
-    for leaf in _iter_leaves(attack_tree.root):
-        if not leaf.projected_step_ids:
-            continue
-        if not all(sid in selected for sid in leaf.projected_step_ids):
-            continue
-        # Derive text from the tree leaf's label/description.
-        text = leaf.label or leaf.id
-        if leaf.description:
-            text = leaf.description
-        # Get canonical semantics from the first mapped projected step.
-        first_step = step_by_id.get(leaf.projected_step_ids[0])
-        actions.append(
-            BehaviorAction(
-                action_id=f"ba-{leaf.id}",
-                projected_step_ids=leaf.projected_step_ids,
-                source_leaf_id=leaf.id,
-                gherkin_keyword="When",
-                text=text,
-                canonical_action_kind=(
-                    first_step.action_kind if first_step else "observe"
-                ),
-                canonical_executor_role=(
-                    first_step.executor_role if first_step else "system"
-                ),
-                canonical_boundary_position=(
-                    first_step.boundary_position if first_step else "inside"
-                ),
-            )
-        )
-
-    # Build assertions from security-relevant postconditions.
-    assertions: list[BehaviorAssertion] = []
-    sec_pcs = block.security_relevant_postconditions()
-    for step_id in block.projection.selected_step_ids:
-        pc_ids = sec_pcs.get(step_id, [])
-        if not pc_ids:
-            continue
-        # Get postcondition descriptions for assertion text.
-        step_obj = next((s for s in chain.steps if s.step_id == step_id), None)
-        pc_descs: list[str] = []
-        for pc_id in pc_ids:
-            pc = next(
-                (
-                    p
-                    for p in (step_obj.observable_postconditions if step_obj else [])
-                    if p.postcondition_id == pc_id
-                ),
-                None,
-            )
-            if pc is not None:
-                pc_descs.append(pc.description)
-            else:
-                pc_descs.append(pc_id)
-        assertion_text = "; ".join(pc_descs) if pc_descs else f"Verify {step_id}"
-        assertions.append(
-            BehaviorAssertion(
-                assertion_id=f"assert-{step_id}-{'-'.join(pc_ids)}",
-                source_step_ids=(step_id,),
-                projected_postcondition_ids=tuple(pc_ids),
-                gherkin_keyword="Then",
-                text=assertion_text,
-            )
-        )
-
-    # Build zone map from tree leaves for Gherkin zone annotations.
-    zone_map: dict[str, str] = {}
-    for leaf in _iter_leaves(attack_tree.root):
-        if leaf.projected_step_ids and leaf.zone is not None:
-            zone_map[f"ba-{leaf.id}"] = leaf.zone
+    actions = [
+        _action_from_leaf(leaf) for leaf in _projected_leaves(attack_tree, selected)
+    ]
+    assertions = _assertions_from_block(block)
+    zone_map = _zone_map_for_tree(attack_tree)
 
     rendered = render_gherkin_from_behavior_spec(actions, assertions, zone_map=zone_map)
     return BehaviorSpec(

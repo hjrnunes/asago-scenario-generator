@@ -38,7 +38,13 @@ from asago_scenario_generator.models.scenario import (
     TaxonomyChain,
     TechniqueMaturity,
 )
-from asago_scenario_generator.pipeline.validation import enforce_parsimony
+from asago_scenario_generator.pipeline.validation import (
+    _find_parent,
+    _remove_child,
+    _sibling_labels,
+    _token_overlap_ratio,
+    enforce_parsimony,
+)
 from tests.helpers.projection_factory import make_behavior_spec, make_projection_block
 from tests.helpers.realization_helper import make_realizations
 
@@ -858,3 +864,111 @@ class TestAndGatePreference:
         unchanged, actual, budget = result.unprunable_scenarios[0]
         assert (actual, budget) == (5, 4)
         assert unchanged.attack_tree.root.model_dump() == root.model_dump()
+
+
+# ---------------------------------------------------------------------------#
+# Zero-coverage internals: pruning tree helpers (CRAP slice 4)
+# ---------------------------------------------------------------------------#
+
+
+class TestParsimonyTreeHelpers:
+    """Direct unit tests for _find_parent/_sibling_labels/_token_overlap_ratio/_remove_child."""
+
+    def _leaf(self, node_id: str, label: str) -> AttackTreeNode:
+        return AttackTreeNode(
+            id=node_id,
+            label=label,
+            gate=GateType.LEAF,
+            zone="input",
+            action=AiSystemAction(),
+        )
+
+    def _root_with_children(self) -> AttackTreeNode:
+        return AttackTreeNode(
+            id="n1",
+            label="Root",
+            gate=GateType.AND,
+            zone="input",
+            children=[
+                self._leaf("n1.1", "Exfiltrate data"),
+                self._leaf("n1.2", "Exfiltrate logs"),
+                self._leaf("n1.3", "Deny service"),
+            ],
+        )
+
+    def test_find_parent_locates_immediate_child(self) -> None:
+        root = self._root_with_children()
+
+        assert _find_parent(root, "n1.2") is root
+
+    def test_find_parent_descends_into_nested_gates(self) -> None:
+        root = AttackTreeNode(
+            id="n1",
+            label="Root",
+            gate=GateType.AND,
+            zone="input",
+            children=[
+                AttackTreeNode(
+                    id="n1.1",
+                    label="Phase",
+                    gate=GateType.OR,
+                    zone="input",
+                    children=[
+                        self._leaf("n1.1.1", "Sub step A"),
+                        self._leaf("n1.1.2", "Sub step B"),
+                    ],
+                ),
+                self._leaf("n1.2", "Sibling leaf"),
+            ],
+        )
+
+        parent = _find_parent(root, "n1.1.2")
+
+        assert parent is not None
+        assert parent.id == "n1.1"
+
+    def test_find_parent_returns_none_for_absent_node(self) -> None:
+        root = self._root_with_children()
+
+        assert _find_parent(root, "n1.missing") is None
+
+    def test_find_parent_returns_none_on_childless_root(self) -> None:
+        leaf = self._leaf("n1", "solo leaf")
+
+        assert _find_parent(leaf, "n1.anything") is None
+
+    def test_sibling_labels_excludes_the_node_itself(self) -> None:
+        root = self._root_with_children()
+
+        assert _sibling_labels(root, "n1.2") == ["Exfiltrate data", "Deny service"]
+
+    def test_sibling_labels_empty_without_children(self) -> None:
+        leaf = self._leaf("n1", "solo leaf")
+
+        assert _sibling_labels(leaf, "n1") == []
+
+    def test_token_overlap_ratio_is_shared_token_fraction(self) -> None:
+        assert (
+            _token_overlap_ratio("exfiltrate data", ["exfiltrate logs", "deny service"])
+            == 0.5
+        )
+
+    def test_token_overlap_ratio_zero_without_siblings(self) -> None:
+        assert _token_overlap_ratio("exfiltrate data", []) == 0.0
+
+    def test_token_overlap_ratio_zero_for_empty_label(self) -> None:
+        assert _token_overlap_ratio("", ["exfiltrate logs"]) == 0.0
+
+    def test_remove_child_removes_matching_child(self) -> None:
+        root = self._root_with_children()
+
+        _remove_child(root, "n1.2")
+
+        assert [child.id for child in root.children] == ["n1.1", "n1.3"]
+
+    def test_remove_child_is_noop_without_children(self) -> None:
+        leaf = self._leaf("n1", "solo leaf")
+
+        _remove_child(leaf, "n1.1")
+
+        assert leaf.children is None

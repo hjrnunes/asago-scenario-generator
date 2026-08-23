@@ -899,6 +899,60 @@ def _check_complete_coverage(
     return violations
 
 
+def _order_preservation_elements(
+    realizations: tuple[ArtifactRealizationMapping, ...],
+    order: dict[str, int],
+) -> list[tuple[str, int, int]]:
+    """Map each realization to (element_id, min_ordinal, max_ordinal).
+
+    Elements whose projected steps are all unknown to the projection are
+    skipped — the projection cannot attest to their order.
+    """
+    elements: list[tuple[str, int, int]] = []
+    for realization in realizations:
+        ords = [order[sid] for sid in realization.projected_step_ids if sid in order]
+        if not ords:
+            continue
+        elements.append((realization.element_id, min(ords), max(ords)))
+    return elements
+
+
+def _order_violation_for_pair(
+    realizations: tuple[ArtifactRealizationMapping, ...],
+    elements: list[tuple[str, int, int]],
+    i: int,
+    j: int,
+    order: dict[str, int],
+    stage: ProjectionTraceabilityStage,
+    artifact_name: str,
+) -> ProjectionTraceabilityViolation | None:
+    """Return a reorder violation for the element pair (i, j), or None.
+
+    Splitting/combining is allowed only while preserving total order:
+    a later element's minimum ordinal may not precede an earlier
+    element's maximum ordinal unless the two elements share a projected
+    step.
+    """
+    r_i = realizations[i]
+    r_j = realizations[j]
+    shared = set(r_i.projected_step_ids) & set(r_j.projected_step_ids)
+    _, _, i_max = elements[i]
+    j_id, j_min, _ = elements[j]
+    if j_min < i_max and not shared:
+        return ProjectionTraceabilityViolation(
+            code=ProjectionTraceabilityViolationCode.reordered_projected_step,
+            stage=stage,
+            detail=(
+                f"{artifact_name} element '{j_id}' (min ordinal "
+                f"{j_min}) precedes earlier element "
+                f"'{r_i.element_id}' (max ordinal {i_max}) "
+                f"without shared steps — total order violated"
+            ),
+            element_id=j_id,
+        )
+    return None
+
+
 def _check_order_preservation(
     realizations: tuple[ArtifactRealizationMapping, ...],
     order: dict[str, int],
@@ -913,42 +967,24 @@ def _check_order_preservation(
     Split/combine is allowed only while preserving total order.
     """
     violations: list[ProjectionTraceabilityViolation] = []
-    # Sort realizations by their position in the tuple (artifact element order).
-    # For each element, compute the min and max projected step ordinal.
-    elements: list[tuple[str, int, int]] = []
-    for r in realizations:
-        ords = [order[sid] for sid in r.projected_step_ids if sid in order]
-        if not ords:
-            continue
-        elements.append((r.element_id, min(ords), max(ords)))
+    elements = _order_preservation_elements(realizations, order)
 
     # Check that the element sequence is non-decreasing in min-ordinal.
     # A later element may not have a min-ordinal strictly less than an
     # earlier element's min-ordinal unless they share steps (split).
     for i in range(len(elements)):
         for j in range(i + 1, len(elements)):
-            _, _, i_max = elements[i]
-            j_id, j_min, _ = elements[j]
-            # If j's min is before i's max AND they don't share any steps,
-            # that's a reorder.  Sharing steps means split/combine, which
-            # is allowed.
-            r_i = realizations[i]
-            r_j = realizations[j]
-            shared = set(r_i.projected_step_ids) & set(r_j.projected_step_ids)
-            if j_min < i_max and not shared:
-                violations.append(
-                    ProjectionTraceabilityViolation(
-                        code=ProjectionTraceabilityViolationCode.reordered_projected_step,
-                        stage=stage,
-                        detail=(
-                            f"{artifact_name} element '{j_id}' (min ordinal "
-                            f"{j_min}) precedes earlier element "
-                            f"'{r_i.element_id}' (max ordinal {i_max}) "
-                            f"without shared steps — total order violated"
-                        ),
-                        element_id=j_id,
-                    )
-                )
+            violation = _order_violation_for_pair(
+                realizations,
+                elements,
+                i,
+                j,
+                order,
+                stage,
+                artifact_name,
+            )
+            if violation is not None:
+                violations.append(violation)
                 break  # one reorder per element is enough to flag
 
     return violations

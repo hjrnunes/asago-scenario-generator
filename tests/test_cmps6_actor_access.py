@@ -17,7 +17,9 @@ from asago_scenario_generator.models.capability_profile import (
     compute_trust_boundary_id,
     is_attacker_accessible_ingress,
 )
-from asago_scenario_generator.models.projection_envelope import ProjectionTraceabilityResult
+from asago_scenario_generator.models.projection_envelope import (
+    ProjectionTraceabilityResult,
+)
 from asago_scenario_generator.models.scenario import (
     ACTOR_TYPES,
     ActorAccessProvenance,
@@ -28,6 +30,9 @@ from asago_scenario_generator.pipeline.generate.actor import (
     build_call0_context,
     compute_compatible_actor_types,
     validate_actor_access_provenance,
+)
+from asago_scenario_generator.pipeline.generate.names import (
+    access_provenance_block_with_names,
 )
 from asago_scenario_generator.pipeline.generate.constants import (
     _ACTOR_ACCESS_MAX_RETRIES,
@@ -567,3 +572,90 @@ def test_actor_type_constants_remain_complete():
     assert _INSIDER_ACTOR_TYPES == {"malicious-insider", "negligent-insider"}
     assert set(ACTOR_TYPES) == set(ALL_ACTOR_TYPES)
     assert len(ALL_ACTOR_TYPES) == 9
+
+
+# ---------------------------------------------------------------------------#
+# Zero-coverage internals: access provenance prompt block (CRAP slice 4)
+# ---------------------------------------------------------------------------#
+
+
+class TestAccessProvenanceBlockWithNames:
+    """Rendering of the access provenance block with human-readable names."""
+
+    def test_none_access_renders_empty_block(self) -> None:
+        profile = _make_indirect_profile()[0]
+
+        assert access_provenance_block_with_names(None, profile) == ""
+
+    def test_full_record_renders_every_named_line(self) -> None:
+        profile, target_id, source_id, boundary_id = _make_indirect_profile()
+        access = ActorAccessProvenance(
+            initial_entry_point_id=target_id,
+            ingress_mode="indirect",
+            access_class="public",
+            influence_source=source_id,
+            influence_source_kind="entry_point",
+            influence_mechanism="poisoning",
+            trust_boundary_id=boundary_id,
+            material_insider_advantage="custodian of memory store",
+        )
+
+        block = access_provenance_block_with_names(access, profile)
+
+        assert "- initial_entry_point_id: RAG retrieval\n" in block
+        assert "- ingress_mode: indirect\n" in block
+        assert "- access_class: public\n" in block
+        assert "- influence_source: memory store feed\n" in block
+        assert "- influence_mechanism: poisoning\n" in block
+        assert "- trust_boundary_id: memory-to-input\n" in block
+        assert "- material_insider_advantage: custodian of memory store\n" in block
+
+    def test_absent_optional_fields_omit_their_lines(self) -> None:
+        profile, target_id, _source_id, _boundary_id = _make_indirect_profile()
+        access = ActorAccessProvenance(
+            initial_entry_point_id=target_id,
+            ingress_mode="direct",
+            access_class="public",
+        )
+
+        block = access_provenance_block_with_names(access, profile)
+
+        assert "- initial_entry_point_id: RAG retrieval\n" in block
+        assert "- influence_source:" not in block
+        assert "- influence_mechanism:" not in block
+        assert "- trust_boundary_id:" not in block
+        assert "- material_insider_advantage:" not in block
+
+    def test_unknown_influence_source_kind_falls_back_to_entry_point(self) -> None:
+        profile, target_id, source_id, _boundary_id = _make_indirect_profile()
+        access = ActorAccessProvenance(
+            initial_entry_point_id=target_id,
+            ingress_mode="indirect",
+            access_class="public",
+            influence_source=source_id,
+            influence_source_kind=None,
+            influence_mechanism="poisoning",
+            trust_boundary_id=_boundary_id,
+        )
+
+        block = access_provenance_block_with_names(access, profile)
+
+        assert "- influence_source: memory store feed\n" in block
+
+    def test_custom_header_is_respected(self) -> None:
+        profile, target_id, source_id, boundary_id = _make_indirect_profile()
+        access = ActorAccessProvenance(
+            initial_entry_point_id=target_id,
+            ingress_mode="indirect",
+            access_class="public",
+            influence_source=source_id,
+            influence_source_kind="entry_point",
+            influence_mechanism="poisoning",
+            trust_boundary_id=boundary_id,
+        )
+        header = "## Custom narrative header\n"
+
+        block = access_provenance_block_with_names(access, profile, header=header)
+
+        assert block.startswith(header)
+        assert "- initial_entry_point_id: RAG retrieval\n" in block
