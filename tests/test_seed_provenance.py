@@ -177,7 +177,9 @@ class TestSeedProvenanceFields:
         seeds = _run_expand([entry], patterns=_FAKE_PATTERNS, prov=_FAKE_PROV)
 
         seed = next(s for s in seeds if s.seed_id == "AP-T7-01")
-        assert seed.attack_pattern_name == "Constraint bypass via goal-priority conflict"
+        assert (
+            seed.attack_pattern_name == "Constraint bypass via goal-priority conflict"
+        )
         assert seed.attack_pattern_description == "Agent bypasses constraints"
 
     def test_atlas_provenance_filtered_by_zone3_gating(self):
@@ -300,7 +302,9 @@ class TestReportProvenanceBlock:
     def test_provenance_block_renders_from_seed_metadata(self):
         """Provenance block should render OWASP origin, LAAF, and ATLAS from
         the scenario's scenario_seed_metadata dict."""
-        from asago_scenario_generator.report.template import _build_provenance_block
+        from asago_scenario_generator.report.provenance import (
+            _build_provenance_block,
+        )
 
         scenario = {
             "scenario_seed_metadata": {
@@ -320,7 +324,9 @@ class TestReportProvenanceBlock:
 
     def test_provenance_block_empty_for_non_ap_seed(self):
         """Non-AP seeds should produce empty provenance block."""
-        from asago_scenario_generator.report.template import _build_provenance_block
+        from asago_scenario_generator.report.provenance import (
+            _build_provenance_block,
+        )
 
         scenario = {
             "scenario_seed_metadata": {
@@ -335,7 +341,9 @@ class TestReportProvenanceBlock:
 
     def test_provenance_block_empty_without_metadata(self):
         """Scenario without seed metadata should produce empty provenance block."""
-        from asago_scenario_generator.report.template import _build_provenance_block
+        from asago_scenario_generator.report.provenance import (
+            _build_provenance_block,
+        )
 
         html = _build_provenance_block({})
         assert html == ""
@@ -343,7 +351,9 @@ class TestReportProvenanceBlock:
     def test_provenance_block_excludes_gated_technique(self):
         """When atlas_provenance_ids omits a zone-3-gated technique,
         the rendered block should not contain it."""
-        from asago_scenario_generator.report.template import _build_provenance_block
+        from asago_scenario_generator.report.provenance import (
+            _build_provenance_block,
+        )
 
         scenario = {
             "scenario_seed_metadata": {

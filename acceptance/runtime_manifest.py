@@ -36,6 +36,7 @@ MODULES = (
     "nullable_usage",
     "taxonomy_risk",
     "taxonomy_threat_surface",
+    "taxonomy_report",
     "stpa",
 )
 

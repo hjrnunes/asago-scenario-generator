@@ -2542,6 +2542,76 @@ class TestCorpusApplicabilityCategoryCompleteness:
         with pytest.raises(ValueError, match="missing corpus_claim_applicability"):
             _reconcile_corpus_claims([{"validation": {"semantic": {"valid": True}}}])
 
+    def test_report_empty_falsy_blocks_fail_with_exact_messages(self):
+        """Report reconciliation pins exact messages for falsy-but-typed blocks."""
+        from asago_scenario_generator.report.generator import _reconcile_corpus_claims
+
+        with pytest.raises(ValueError, match="missing a validation block"):
+            _reconcile_corpus_claims([{"scenario_id": "s1", "validation": {}}])
+        with pytest.raises(ValueError, match="missing a semantic validation block"):
+            _reconcile_corpus_claims(
+                [{"scenario_id": "s1", "validation": {"semantic": {}}}]
+            )
+        with pytest.raises(ValueError, match="missing corpus_claim_applicability"):
+            _reconcile_corpus_claims(
+                [
+                    {
+                        "scenario_id": "s1",
+                        "validation": {"semantic": {"corpus_claim_applicability": []}},
+                    }
+                ]
+            )
+
+    def test_report_reason_only_conflict_fails(self):
+        """Report reconciliation fails when only the reason differs."""
+        from asago_scenario_generator.report.generator import _reconcile_corpus_claims
+
+        s1 = {
+            "validation": {
+                "semantic": {
+                    "valid": True,
+                    "violations": [],
+                    "corpus_claim_applicability": [
+                        {
+                            "category": "entry_points",
+                            "status": "not_applicable",
+                            "reason": "Partial.",
+                        },
+                        {
+                            "category": "tool_inventory",
+                            "status": "not_applicable",
+                            "reason": "Partial.",
+                        },
+                    ],
+                }
+            }
+        }
+        s2 = {
+            "validation": {
+                "semantic": {
+                    "valid": True,
+                    "violations": [],
+                    "corpus_claim_applicability": [
+                        {
+                            "category": "entry_points",
+                            "status": "not_applicable",
+                            "reason": "Revised.",
+                        },
+                        {
+                            "category": "tool_inventory",
+                            "status": "not_applicable",
+                            "reason": "Partial.",
+                        },
+                    ],
+                }
+            }
+        }
+        with pytest.raises(
+            ValueError,
+            match=r"conflicts between scenario 0 .* and scenario 1 \(",
+        ):
+            _reconcile_corpus_claims([s1, s2])
+
     # --- Schema-parity: strict reason/evidence blank semantics ---
 
     def test_pydantic_applicable_with_empty_string_reason_rejected(self):

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from asago_scenario_generator.report.data import ReportData, load_report_data
+from asago_scenario_generator.report.scorecard import build_scorecard_section
 from asago_scenario_generator.report.template import (
     build_attacker_diversity_section,
     build_capability_profile_section,
@@ -17,7 +18,6 @@ from asago_scenario_generator.report.template import (
     build_raw_data_section,
     build_run_summary_section,
     build_scenarios_section,
-    build_scorecard_section,
     build_threat_surface_section,
     build_threat_technique_section,
     build_use_case_section,
