@@ -1373,7 +1373,7 @@ class TestPipelineLifecycle:
         from asago_scenario_generator.llm.client import LLMResult
         from asago_scenario_generator.models.capability_profile import CapabilityProfile
         from asago_scenario_generator.pipeline.runner import run_pipeline
-        from asago_scenario_generator.pipeline.threats import ThreatSurface
+        from asago_scenario_generator.models import ThreatSurface
 
         profile = CapabilityProfile(
             zones_active=["input", "reasoning"],
@@ -1447,7 +1447,7 @@ class TestPipelineLifecycle:
         tmp_path: Path,
     ):
         from asago_scenario_generator.pipeline.runner import run_pipeline
-        from asago_scenario_generator.pipeline.threats import ThreatSurface
+        from asago_scenario_generator.models import ThreatSurface
 
         mock_profile.side_effect = RuntimeError("LLM connection failed")
         coherence = MagicMock()
@@ -1497,7 +1497,7 @@ class TestPipelineLifecycle:
         from asago_scenario_generator.llm.client import LLMResult
         from asago_scenario_generator.models.capability_profile import CapabilityProfile
         from asago_scenario_generator.pipeline.runner import run_pipeline
-        from asago_scenario_generator.pipeline.threats import ThreatSurface
+        from asago_scenario_generator.models import ThreatSurface
 
         profile = CapabilityProfile(
             zones_active=["input", "reasoning"],
@@ -1583,7 +1583,7 @@ class TestPipelineLifecycle:
         from asago_scenario_generator.llm.client import LLMResult
         from asago_scenario_generator.models.capability_profile import CapabilityProfile
         from asago_scenario_generator.pipeline.runner import run_pipeline
-        from asago_scenario_generator.pipeline.threats import ThreatSurface
+        from asago_scenario_generator.models import ThreatSurface
 
         profile = CapabilityProfile(
             zones_active=["input", "reasoning"],
@@ -2265,7 +2265,7 @@ class TestFaultInjection:
     ):
         """Fatal error during client construction writes failed manifest."""
         from asago_scenario_generator.pipeline.runner import run_pipeline
-        from asago_scenario_generator.pipeline.threats import ThreatSurface
+        from asago_scenario_generator.models import ThreatSurface
 
         coherence = MagicMock()
         coherence.has_warnings = False
@@ -2322,7 +2322,7 @@ class TestFaultInjection:
         from asago_scenario_generator.llm.client import LLMResult
         from asago_scenario_generator.models.capability_profile import CapabilityProfile
         from asago_scenario_generator.pipeline.runner import run_pipeline
-        from asago_scenario_generator.pipeline.threats import ThreatSurface
+        from asago_scenario_generator.models import ThreatSurface
 
         profile = CapabilityProfile(
             zones_active=["input", "reasoning"],

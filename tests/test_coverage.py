@@ -74,7 +74,7 @@ from asago_scenario_generator.pipeline.coverage import (
 )
 from asago_scenario_generator.pipeline.generate import compute_scenario_id
 from asago_scenario_generator.pipeline.seeds import ScenarioSeed
-from asago_scenario_generator.pipeline.threats import ThreatSurface, ThreatSurfaceEntry
+from asago_scenario_generator.models import ThreatSurface, ThreatSurfaceEntry
 from tests.helpers.projection_factory import (
     make_behavior_spec,
     make_projection_block,

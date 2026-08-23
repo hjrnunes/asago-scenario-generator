@@ -55,7 +55,7 @@ def minimal_profile():
 @pytest.fixture
 def minimal_threat_surface():
     """Return a minimal ThreatSurface with no entries."""
-    from asago_scenario_generator.pipeline.threats import ThreatSurface
+    from asago_scenario_generator.models import ThreatSurface
 
     return ThreatSurface(entries=[], governance_only=[])
 

@@ -79,7 +79,7 @@ def test_profile_flag_skips_inference(
 ) -> None:
     """Supplying a valid profile YAML should skip LLM inference entirely."""
     from asago_scenario_generator.pipeline.runner import run_pipeline
-    from asago_scenario_generator.pipeline.threats import ThreatSurface
+    from asago_scenario_generator.models import ThreatSurface
 
     coherence = MagicMock()
     coherence.has_warnings = False
@@ -179,7 +179,7 @@ def test_profile_written_to_output_dir(
 ) -> None:
     """The profile must be written to output_dir even when supplied via --profile."""
     from asago_scenario_generator.pipeline.runner import run_pipeline
-    from asago_scenario_generator.pipeline.threats import ThreatSurface
+    from asago_scenario_generator.models import ThreatSurface
 
     coherence = MagicMock()
     coherence.has_warnings = False

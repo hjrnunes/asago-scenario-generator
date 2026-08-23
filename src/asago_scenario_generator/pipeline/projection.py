@@ -1200,43 +1200,13 @@ def _count_compatible_combinations(
     return total
 
 
-def _coverage_first_combinations(
-    options: tuple[tuple[CanonicalResourceReference, ...], ...], limit: int
-) -> tuple[tuple[CanonicalResourceReference, ...], ...]:
-    """Cover each slot's alternatives before bounded Cartesian fill."""
-    seen: set[tuple[str, ...]] = set()
-    ordered: list[tuple[CanonicalResourceReference, ...]] = []
-
-    def add(items: tuple[CanonicalResourceReference, ...]) -> None:
-        key = tuple(_resource_key(item) for item in items)
-        if key not in seen and len(ordered) < limit:
-            seen.add(key)
-            ordered.append(items)
-
-    baseline = tuple(slot[0] for slot in options)
-    add(baseline)
-    for offset in range(1, max(len(slot) for slot in options)):
-        for slot_index, slot in enumerate(options):
-            if offset < len(slot):
-                variant = list(baseline)
-                variant[slot_index] = slot[offset]
-                add(tuple(variant))
-    if len(ordered) < limit:
-        for combination in product(*options):
-            add(combination)
-            if len(ordered) == limit:
-                break
-    return tuple(ordered)
-
-
 def _iter_coverage_first_combinations(
     options: tuple[tuple[CanonicalResourceReference, ...], ...],
 ) -> Iterable[tuple[CanonicalResourceReference, ...]]:
     """Lazily yield coverage-first combinations without materializing the product.
 
-    Identical ordering to :func:`_coverage_first_combinations` but yields
-    one combination at a time so the caller can stop early when the budget
-    is reached.  The full Cartesian product is never materialized.
+    Callers stop early when the budget is reached; the full Cartesian
+    product is never materialized.
 
     Ordering:
     1. The baseline (slot[0] for every slot).

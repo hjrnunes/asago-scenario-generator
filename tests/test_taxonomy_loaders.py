@@ -14,7 +14,7 @@ import pytest
 import yaml
 
 from asago_scenario_generator.data.loaders import (
-    _load_attack_goals_taxonomy_cached,
+    _load_document_cached,
     _load_threat_goal_affinity_cached,
     load_attack_goals_taxonomy,
     load_attack_patterns,
@@ -106,10 +106,10 @@ class TestLoadThreatGoalAffinity:
 @pytest.fixture(autouse=True)
 def _clear_lru_caches():
     """Clear LRU caches before each test to ensure isolation."""
-    _load_attack_goals_taxonomy_cached.cache_clear()
+    _load_document_cached.cache_clear()
     _load_threat_goal_affinity_cached.cache_clear()
     yield
-    _load_attack_goals_taxonomy_cached.cache_clear()
+    _load_document_cached.cache_clear()
     _load_threat_goal_affinity_cached.cache_clear()
 
 

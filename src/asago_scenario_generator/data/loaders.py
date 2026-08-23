@@ -10,7 +10,7 @@ import functools
 import json
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
@@ -95,6 +95,16 @@ _DEFAULT_KC_THREAT_MAPPING_PATH = (
 )
 
 
+@functools.lru_cache(maxsize=16)
+def _load_document_cached(
+    path_str: str | None, default_path: str, parser: Callable
+) -> Any:
+    """Internal cached document loader (string path for hashability)."""
+    document_path = Path(path_str) if path_str else Path(default_path)
+    with open(document_path) as f:
+        return parser(f)
+
+
 def load_kc_threat_mapping(
     path: str | Path | None = None,
 ) -> dict[str, Any]:
@@ -107,9 +117,11 @@ def load_kc_threat_mapping(
         The full parsed YAML as a dict with keys: metadata,
         kc_subcodes, kc_to_threats, threat_to_kc_subcodes, hitl.
     """
-    p = Path(path) if path is not None else _DEFAULT_KC_THREAT_MAPPING_PATH
-    with open(p) as f:
-        return yaml.safe_load(f)
+    return _load_document_cached(
+        str(path) if path else None,
+        str(_DEFAULT_KC_THREAT_MAPPING_PATH),
+        yaml.safe_load,
+    )
 
 
 def _parse_evidence(raw: dict) -> EvidenceSpan:
@@ -328,14 +340,6 @@ _ATTACK_GOALS_TAXONOMY_PATH = (
 )
 
 
-@functools.lru_cache(maxsize=4)
-def _load_attack_goals_taxonomy_cached(path_str: str | None) -> dict[str, Any]:
-    """Internal cached loader — takes a string path for hashability."""
-    taxonomy_path = Path(path_str) if path_str else _ATTACK_GOALS_TAXONOMY_PATH
-    with open(taxonomy_path) as f:
-        return json.load(f)
-
-
 def load_attack_goals_taxonomy(
     path: Path | None = None,
 ) -> dict[str, Any]:
@@ -344,7 +348,9 @@ def load_attack_goals_taxonomy(
     Returns the parsed taxonomy dict with 'version' and 'categories' keys.
     Results are cached per unique path.
     """
-    return _load_attack_goals_taxonomy_cached(str(path) if path else None)
+    return _load_document_cached(
+        str(path) if path else None, str(_ATTACK_GOALS_TAXONOMY_PATH), json.load
+    )
 
 
 # ---------------------------------------------------------------------------

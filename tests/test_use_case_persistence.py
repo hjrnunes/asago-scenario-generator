@@ -38,7 +38,7 @@ def test_use_case_written_to_output_dir(
 ) -> None:
     """run_pipeline should write use-case.txt with the exact use-case text."""
     from asago_scenario_generator.models.capability_profile import CapabilityProfile
-    from asago_scenario_generator.pipeline.threats import ThreatSurface
+    from asago_scenario_generator.models import ThreatSurface
 
     # Minimal stubs so the pipeline doesn't blow up.
     profile = CapabilityProfile(
