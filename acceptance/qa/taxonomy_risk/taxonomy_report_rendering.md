@@ -269,16 +269,24 @@ or temporary QA captures are newly tracked or staged.
   unless `--allow-non-authoritative` is passed; the suites use
   completed fixtures only.
 
-## Wiring question for the orchestrator
+## Module layout note (architect)
 
-`_build_seed_metadata_block` (the `Scenario Seed` section) and
-`_build_provenance_block` (the `SSSOM Provenance` section) are defined
-in `src/asago_scenario_generator/report/template.py` but are **not
-currently referenced** by the scenario card; only the provenance chain,
-Generation Inputs, and other tabs are wired. The Gherkin pins the
-implemented contract of the seed block per the attack plan. If the
-coder's fixture-based tests confirm no `Scenario Seed` section ever
-appears in a published report, QA cannot observe QA-TRPT-12/13
-end-to-end until the orchestrator decides whether wiring the block into
-the scenario card is in scope for this slice, and on which tab it should
-appear.
+After the provenance + scorecard extraction, the scenario-seed and
+provenance renderers no longer live in the monolithic
+`src/asago_scenario_generator/report/template.py`:
+
+- `_build_seed_metadata_block` (the `Scenario Seed` section),
+  `_build_provenance_block` (the `SSSOM Provenance` section), and
+  `_build_provenance_chain` now live in
+  `src/asago_scenario_generator/report/provenance.py`, together with
+  the taxonomy-derived display lookups those sections use.
+- The scorecard renderers (`build_scorecard_section` and its helpers)
+  now live in `src/asago_scenario_generator/report/scorecard.py`.
+- `report/template.py` imports the provenance-chain and seed-block
+  builders back into the scenario card; `report/generator.py` imports
+  `build_scorecard_section` from the scorecard module.
+
+The `Scenario Seed` block is wired into the scenario card's Provenance
+tab (alongside the provenance chain), and renders only when seed
+metadata is present and complete, so QA-TRPT-12/13 are observable
+end-to-end on published reports.

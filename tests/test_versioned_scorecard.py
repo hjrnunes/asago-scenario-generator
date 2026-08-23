@@ -39,7 +39,7 @@ from asago_scenario_generator.pipeline.persistence import (
     FinalizationInventoryV1,
     GateResultRecord,
 )
-from asago_scenario_generator.report.template import build_scorecard_section
+from asago_scenario_generator.report.scorecard import build_scorecard_section
 from tests.manifest_helpers import build_test_run_dir
 
 
