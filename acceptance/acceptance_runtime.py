@@ -133,6 +133,7 @@ _STEM_TAGS: dict[str, str] = {
     "registration-priority": "shadow_cleanup",
     "taxonomy_threat_surface_derivation": "taxonomy_threat_surface",
     "taxonomy_report_rendering": "taxonomy_report",
+    "taxonomy_report_sections_rendering": "taxonomy_report_sections",
 }
 
 # Stem-prefix to tag mapping (checked after exact stems).
