@@ -164,6 +164,41 @@ def _load_admitted_scenarios(
     ]
 
 
+def _scorecard_qualification_passed(scorecard: dict) -> bool:
+    """True when the eval scorecard records an authoritative qualification pass."""
+    return scorecard["qualification"]["status"] == "pass"
+
+
+def _authoritative_products_ready(eval_success: bool, report_success: bool) -> bool:
+    """True when both eval and report products succeeded before finalization."""
+    return eval_success and report_success
+
+
+def _ordinary_completion_succeeded(
+    *,
+    terminal_processing_succeeded: bool,
+    had_quarantine: bool,
+    eval_enabled: bool,
+    eval_success: bool,
+    report_success: bool,
+    qualification_passed: bool,
+) -> bool:
+    """True when the v3 run completed without quarantine or product failure."""
+    return (
+        terminal_processing_succeeded
+        and not had_quarantine
+        and eval_enabled
+        and eval_success
+        and report_success
+        and qualification_passed
+    )
+
+
+def _readable_evidence_file(path: Path) -> bool:
+    """True when the path is a real file the inventory can read."""
+    return path.exists() and path.is_file()
+
+
 def _complete_v3_run(
     *,
     run_dir: Path,
@@ -297,7 +332,7 @@ def _complete_v3_run(
             )
             write_eval_scorecard(scorecard, run_dir)
             eval_success = True
-            qualification_passed = scorecard["qualification"]["status"] == "pass"
+            qualification_passed = _scorecard_qualification_passed(scorecard)
         except Exception as exc:  # noqa: BLE001 - non-authoritative output
             (run_dir / "eval-scorecard.yaml").unlink(missing_ok=True)
             logger.warning("Eval scorecard generation failed: %s", exc)
@@ -350,7 +385,7 @@ def _complete_v3_run(
     # reconciled with orphan checking enabled. Evaluation is then recomputed
     # from that strict resolver, the scorecard hash is rebuilt, and the report
     # is regenerated from the final scorecard before final hashes/validation.
-    if eval_success and report_success:
+    if _authoritative_products_ready(eval_success, report_success):
         try:
             from asago_scenario_generator.eval.runner import run_evaluation
             from asago_scenario_generator.report.data import load_report_data
@@ -379,7 +414,7 @@ def _complete_v3_run(
                 threats_path=threats_path,
             )
             write_eval_scorecard(scorecard, run_dir)
-            qualification_passed = scorecard["qualification"]["status"] == "pass"
+            qualification_passed = _scorecard_qualification_passed(scorecard)
 
             report_manifest = RunManifest(
                 manifest_version=MANIFEST_VERSION,
@@ -409,13 +444,13 @@ def _complete_v3_run(
             (run_dir / "report.html").unlink(missing_ok=True)
             logger.warning("Authoritative eval/report finalization failed: %s", exc)
 
-    ordinary_completion_succeeded = (
-        terminal_processing_succeeded
-        and not had_quarantine
-        and eval_enabled
-        and eval_success
-        and report_success
-        and qualification_passed
+    ordinary_completion_succeeded = _ordinary_completion_succeeded(
+        terminal_processing_succeeded=terminal_processing_succeeded,
+        had_quarantine=had_quarantine,
+        eval_enabled=eval_enabled,
+        eval_success=eval_success,
+        report_success=report_success,
+        qualification_passed=qualification_passed,
     )
     final_status = select_final_run_status(
         ordinary_completion_succeeded, generation_notes
@@ -760,7 +795,7 @@ def _build_failed_evidence_inventory(
         candidate_id: str | None = None,
     ) -> None:
         full = run_dir / rel_path
-        if full.exists() and full.is_file():
+        if _readable_evidence_file(full):
             try:
                 inventory.append(
                     build_artifact_entry(
@@ -1041,3 +1076,8 @@ from asago_scenario_generator.pipeline.runner_run import (  # noqa: E402
     _log_rule_filter_summary as _log_rule_filter_summary,
     _run_pipeline_body as _run_pipeline_body,
 )
+
+
+# mutate4py-manifest-begin
+# {"version":1,"tested_at":"2026-08-24T10:18:00Z","module_hash":"2bebcf43b1b8e37f0a14d72c70e471749a5726933bf2e4fcf0c157b17be4ce5a","source_sha256":"ac370c0342bc6f180e2003f09d3a0d410f4c0a47348ece30baa8038abe9eb990","functions":[{"id":"func/_removal_decision_summary","name":"_removal_decision_summary","line":90,"end_line":92,"hash":"d667aee752da438147a4ec70db0a961fe233f2bd85b43f17d5093cf8955ea8d6"},{"id":"func/QualificationFactsV1.canonical_facts","name":"canonical_facts","line":120,"end_line":124,"hash":"e79433cdcf258ae6db4935554e1b3d4e3a7faf7ac00d4bd3add93c9b5d711334"},{"id":"func/_parse_qualification_facts","name":"_parse_qualification_facts","line":127,"end_line":133,"hash":"03ee223c05a0311e8801a378b3c2b2c71b1e99452d41287b46091bbbfe4fc732"},{"id":"func/_load_admitted_scenarios","name":"_load_admitted_scenarios","line":136,"end_line":164,"hash":"730b459ef988526f49fb7b63d6c106b2c717bed87d7f2af071c92051d462e9be"},{"id":"func/_scorecard_qualification_passed","name":"_scorecard_qualification_passed","line":167,"end_line":169,"hash":"9f4709e9478cce1a1455d62578da227705ff09f47854d2e2ac3b6670da3ee3b1"},{"id":"func/_authoritative_products_ready","name":"_authoritative_products_ready","line":172,"end_line":174,"hash":"7f1eb164932cbacbba712867f8071c667eaa60313cbc845dff3e6b47e16d861c"},{"id":"func/_ordinary_completion_succeeded","name":"_ordinary_completion_succeeded","line":177,"end_line":194,"hash":"b88e76347d673d088e57883fd9901eb4eacb3c29f3c250625207d8b73b8c290e"},{"id":"func/_readable_evidence_file","name":"_readable_evidence_file","line":197,"end_line":199,"hash":"4230982093fccad3d46ac9c3fb43f2a408b42e8b0a188ff7a4f8966fffa19f29"},{"id":"func/_complete_v3_run","name":"_complete_v3_run","line":202,"end_line":512,"hash":"bd8a80b2ea192c5597fe54d139c7163a464df1dcad50dc1aa283e14579296550"},{"id":"func/_hydrate_planning_inputs","name":"_hydrate_planning_inputs","line":515,"end_line":594,"hash":"ded65f730429dd21cafe19eb89129d550b85a080ba5fd57cc99bc67219024649"},{"id":"func/resume_pipeline","name":"resume_pipeline","line":597,"end_line":688,"hash":"3afaeaa3ef1f0d34e8460bc6f13b6bbb445dc9051a5ee24e5d440c389815e443"},{"id":"func/run_profile_only","name":"run_profile_only","line":691,"end_line":699,"hash":"655c624fc6fe51e431b1ef1532fcc6302d1a09c38946e58b22195f7b43c1d35f"},{"id":"func/_capture_input_hashes","name":"_capture_input_hashes","line":702,"end_line":775,"hash":"9f7fdce2ca6aed773742af83d95abbcd64143478c91451e54578166985d97807"},{"id":"func/_build_failed_evidence_inventory","name":"_build_failed_evidence_inventory","line":778,"end_line":900,"hash":"cb0ed2e0513ef1e1c77ad0881e730e4b82ae61d8a59e82002c29a4679bdb0934"},{"id":"func/run_pipeline","name":"run_pipeline","line":903,"end_line":981,"hash":"ca83a93d276a7c70cfbd538bfec6835ace3a39257461642e95c09af56c33c688"}]}
+# mutate4py-manifest-end

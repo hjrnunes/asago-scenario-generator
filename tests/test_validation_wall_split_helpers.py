@@ -51,6 +51,16 @@ from asago_scenario_generator.models.projection_envelope import (
 )
 from asago_scenario_generator.models.scenario import CallMetadata, CallName
 from asago_scenario_generator.pipeline import runner_run as runner_run_module
+from asago_scenario_generator.pipeline.runner_run import (
+    _expansion_record,
+    _immutable_roles_by_role,
+    _log_cap_summary,
+    _projection_event_for_fseed,
+    _record_filter_rejections,
+    _record_projection_events,
+    _support_published,
+    _support_validation_result,
+)
 from asago_scenario_generator.pipeline.finalization import GeneratedStage
 from asago_scenario_generator.pipeline.coverage_planning import GenerationMode
 from asago_scenario_generator.pipeline.persistence import (
@@ -59,6 +69,12 @@ from asago_scenario_generator.pipeline.persistence import (
     _check_gate_violations_match_terminal,
     _check_v3_completed_status,
     _check_v3_fallback_attempts,
+    canonical_sha256,
+)
+from asago_scenario_generator.pipeline.persistence_validation import (
+    _causal_stage_artifacts,
+    _has_accepted_tree_repair,
+    _require_input_bound_tree,
 )
 from asago_scenario_generator.pipeline.projection import (
     ProjectionBudget,
@@ -70,8 +86,14 @@ from asago_scenario_generator.pipeline.projection_semantics import (
     _check_leaf_sourced_tool_binding,
 )
 from asago_scenario_generator.pipeline.runner import (
+    PipelineResult,
+    QualificationFactsV1,
     _apply_zone_filter,
+    _authoritative_products_ready,
+    _ordinary_completion_succeeded,
+    _readable_evidence_file,
     _rule_rejection_reasons,
+    _scorecard_qualification_passed,
     _stage2_threat_surface,
     _strip_entry_point_zone_tags,
     _strip_inter_agent_kc_codes,
@@ -80,6 +102,13 @@ from asago_scenario_generator.pipeline.runner import (
     _validate_requested_zones,
     _validate_resume_manifest_identity,
     _validate_run_pipeline_options,
+)
+from asago_scenario_generator.pipeline.runner_resume import (
+    _resolve_resume_directory,
+    _resolved_resume_base_url,
+    _resolved_resume_model,
+    _validate_resume_endpoint_override,
+    _validate_resume_model_override,
 )
 from asago_scenario_generator.pipeline.runner_finalization import (
     _adopt_successful_stage_result,
@@ -1087,6 +1116,353 @@ class TestValidateResumeManifestIdentity:
         manifest = self._manifest(provenance=SimpleNamespace(run_id="other-run"))
         with pytest.raises(ManifestIntegrityError, match="provenance run_id mismatch"):
             _validate_resume_manifest_identity(Path(RUN_ID), manifest)
+
+
+class TestCausalStageArtifacts:
+    @staticmethod
+    def _tree(label: str) -> dict[str, str]:
+        return {"tree": label}
+
+    @classmethod
+    def _behavior_record(cls, **overrides: Any) -> SimpleNamespace:
+        visible_tree = cls._tree("visible")
+        fields: dict[str, Any] = dict(
+            sequence=1,
+            stage=GeneratedStage.behavior,
+            input=SimpleNamespace(
+                candidate="candidate-1",
+                visible_artifacts={GeneratedStage.tree.value: visible_tree},
+            ),
+            final_tree_snapshot_sha256=canonical_sha256(visible_tree),
+            result=None,
+            violations=[],
+            call=None,
+        )
+        fields.update(overrides)
+        return SimpleNamespace(**fields)
+
+    @staticmethod
+    def _repair(*, attempt_id: str = "attempt-1") -> SimpleNamespace:
+        generated_tree = {"tree": "generated"}
+        visible_tree = {"tree": "visible"}
+        return SimpleNamespace(
+            accepted=True,
+            candidate_attempt_id=attempt_id,
+            sequence=0,
+            before_digest=canonical_sha256(generated_tree),
+            after_digest=canonical_sha256(visible_tree),
+        )
+
+    def test_accepted_repair_links_digest_transition(self) -> None:
+        generated_tree = self._tree("generated")
+        visible_tree = self._tree("visible")
+        tree_record = SimpleNamespace(
+            sequence=0,
+            stage=GeneratedStage.tree,
+            input=SimpleNamespace(
+                candidate="candidate-1",
+                visible_artifacts={},
+            ),
+            final_tree_snapshot_sha256=None,
+            result=generated_tree,
+            violations=[],
+            call=SimpleNamespace(),
+        )
+        behavior_record = self._behavior_record()
+        frontier = _causal_stage_artifacts(
+            [tree_record, behavior_record],
+            candidate_attempt_id="attempt-1",
+            repairs=[self._repair()],
+        )
+        assert frontier[GeneratedStage.tree] == visible_tree
+
+    def test_unlinked_digest_transition_raises(self) -> None:
+        generated_tree = self._tree("generated")
+        tree_record = SimpleNamespace(
+            sequence=0,
+            stage=GeneratedStage.tree,
+            input=SimpleNamespace(
+                candidate="candidate-1",
+                visible_artifacts={},
+            ),
+            final_tree_snapshot_sha256=None,
+            result=generated_tree,
+            violations=[],
+            call=SimpleNamespace(),
+        )
+        with pytest.raises(ValueError, match="neither generated nor linked"):
+            _causal_stage_artifacts(
+                [tree_record, self._behavior_record()],
+                candidate_attempt_id="attempt-1",
+            )
+
+    def test_repair_for_other_attempt_does_not_link(self) -> None:
+        generated_tree = self._tree("generated")
+        repair = self._repair(attempt_id="attempt-other")
+        assert not _has_accepted_tree_repair(
+            [repair],
+            "attempt-1",
+            1,
+            canonical_sha256(generated_tree),
+            canonical_sha256(self._tree("visible")),
+        )
+
+    def test_missing_generated_tree_raises(self) -> None:
+        with pytest.raises(ValueError, match="has no causal generated tree"):
+            _causal_stage_artifacts(
+                [self._behavior_record()],
+                candidate_attempt_id="attempt-1",
+            )
+
+    def test_pinned_durable_candidate_mismatch_raises(self) -> None:
+        record = self._behavior_record(
+            input=SimpleNamespace(
+                candidate="candidate-other",
+                visible_artifacts={},
+            )
+        )
+        with pytest.raises(ValueError, match="differs from durable plan"):
+            _causal_stage_artifacts(
+                [record],
+                candidate_attempt_id="attempt-1",
+                durable_candidate={"candidate": "candidate-1"},
+            )
+
+    def test_visible_tree_hash_mismatch_raises(self) -> None:
+        visible_tree = self._tree("visible")
+        record = self._behavior_record(
+            final_tree_snapshot_sha256=canonical_sha256(self._tree("other"))
+        )
+        with pytest.raises(ValueError, match="not bound to its final-tree input"):
+            _require_input_bound_tree(record, visible_tree)
+
+
+class TestResolveResumeDirectory:
+    def test_rejects_missing_path(self, tmp_path: Path) -> None:
+        with pytest.raises(ManifestIntegrityError, match="existing run directory"):
+            _resolve_resume_directory(tmp_path / "missing")
+
+    def test_rejects_non_directory_path(self, tmp_path: Path) -> None:
+        file_path = tmp_path / "not-a-directory"
+        file_path.write_text(".")
+        with pytest.raises(ManifestIntegrityError, match="existing run directory"):
+            _resolve_resume_directory(file_path)
+
+    def test_accepts_existing_directory(self, tmp_path: Path) -> None:
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        assert _resolve_resume_directory(run_dir) == run_dir
+
+
+class TestResumeOverrides:
+    @staticmethod
+    def _persisted(
+        model: str = "persisted", base_url: str = "https://persisted"
+    ) -> SimpleNamespace:
+        return SimpleNamespace(model=model, base_url=base_url)
+
+    def test_model_override_mismatch_raises(self) -> None:
+        with pytest.raises(ManifestIntegrityError, match="model override conflicts"):
+            _validate_resume_model_override("override", self._persisted())
+
+    def test_matching_or_absent_model_override_passes(self) -> None:
+        _validate_resume_model_override("persisted", self._persisted())
+        _validate_resume_model_override(None, self._persisted())
+
+    def test_endpoint_override_mismatch_raises(self) -> None:
+        with pytest.raises(ManifestIntegrityError, match="endpoint override conflicts"):
+            _validate_resume_endpoint_override("https://override", self._persisted())
+
+    def test_matching_or_absent_endpoint_override_passes(self) -> None:
+        _validate_resume_endpoint_override("https://persisted", self._persisted())
+        _validate_resume_endpoint_override(None, self._persisted())
+
+    def test_resolved_model_prefers_override_then_persisted(self) -> None:
+        persisted = self._persisted()
+        assert _resolved_resume_model("override", persisted) == "override"
+        assert _resolved_resume_model(None, persisted) == "persisted"
+        assert _resolved_resume_model(None, None) is None
+
+    def test_resolved_base_url_prefers_override_then_persisted(self) -> None:
+        persisted = self._persisted()
+        assert (
+            _resolved_resume_base_url("https://override", persisted)
+            == "https://override"
+        )
+        assert _resolved_resume_base_url(None, persisted) == "https://persisted"
+        assert _resolved_resume_base_url(None, None) is None
+
+
+class TestRunnerCompletionPredicates:
+    @staticmethod
+    def _scorecard(status: str) -> dict:
+        return {"qualification": {"status": status}}
+
+    def test_scorecard_qualification_pass(self) -> None:
+        assert _scorecard_qualification_passed(self._scorecard("pass")) is True
+        assert _scorecard_qualification_passed(self._scorecard("rejected")) is False
+
+    def test_authoritative_products_ready_requires_both(self) -> None:
+        assert _authoritative_products_ready(True, True) is True
+        assert _authoritative_products_ready(True, False) is False
+        assert _authoritative_products_ready(False, True) is False
+
+    def test_ordinary_completion_succeeded_requires_all(self) -> None:
+        base = dict(
+            terminal_processing_succeeded=True,
+            had_quarantine=False,
+            eval_enabled=True,
+            eval_success=True,
+            report_success=True,
+            qualification_passed=True,
+        )
+        assert _ordinary_completion_succeeded(**base) is True
+        for key in (
+            "terminal_processing_succeeded",
+            "eval_enabled",
+            "eval_success",
+            "report_success",
+            "qualification_passed",
+        ):
+            assert _ordinary_completion_succeeded(**{**base, key: False}) is False
+        assert (
+            _ordinary_completion_succeeded(**{**base, "had_quarantine": True}) is False
+        )
+
+    def test_readable_evidence_file(self, tmp_path: Path) -> None:
+        regular = tmp_path / "artifact.yaml"
+        regular.write_text(".")
+        assert _readable_evidence_file(regular) is True
+        assert _readable_evidence_file(tmp_path) is False
+        assert _readable_evidence_file(tmp_path / "missing") is False
+
+
+class TestPipelineResultDefaults:
+    def test_run_inventory_counts_default_to_zero(self) -> None:
+        result = PipelineResult.model_construct()
+        assert result.admitted_count == 0
+        assert result.quarantined_count == 0
+        assert result.failed_count == 0
+
+    def test_qualification_facts_default_schema_version(self) -> None:
+        assert QualificationFactsV1(facts=()).schema_version == "1"
+
+
+class TestRunnerRunCompletionHelpers:
+    @staticmethod
+    def _fseed(
+        entry: str = "ep-1", candidate: str = "c-1", seed_id: str = "p-1"
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            entry_point_id=entry, candidate_id=candidate, seed_id=seed_id
+        )
+
+    @staticmethod
+    def _pc(entry: str = "ep-1") -> SimpleNamespace:
+        return SimpleNamespace(
+            canonical_ingress=SimpleNamespace(entry_point_id=entry),
+            candidate_id="c-1",
+            seed_id="p-1",
+        )
+
+    @staticmethod
+    def _ledger() -> SimpleNamespace:
+        return SimpleNamespace(calls=[])
+
+    def test_validate_run_pipeline_options_accepts_max_one(self) -> None:
+        resolved = _validate_run_pipeline_options("allow", 1, "coverage")
+        assert resolved is GenerationMode.COVERAGE
+
+    def test_immutable_roles_by_role_none_manifest_is_empty(self) -> None:
+        assert _immutable_roles_by_role(None, {"use-case"}) == {}
+
+    def test_support_published_none_false_and_matching_positive(self) -> None:
+        assert _support_published(None, set()) is False
+        manifest = SimpleNamespace(inventory=[SimpleNamespace(role="use-case")])
+        assert _support_published(manifest, {"use-case"}) is True
+        assert _support_published(manifest, {"use-case", "seed-index"}) is False
+
+    def test_support_validation_result_unpublished_is_false(self) -> None:
+        assert _support_validation_result(
+            Path("."), None, set(), RuntimeError("boom")
+        ) == (False, None)
+
+    def test_support_validation_result_valid_and_corrupt(self, tmp_path: Path) -> None:
+        empty_manifest = _manifest(tmp_path)
+        assert _support_validation_result(
+            tmp_path, empty_manifest, set(), RuntimeError("boom")
+        ) == (True, None)
+        manifest = _manifest(tmp_path, yaml_ids=("a",), feature_ids=("a",))
+        (tmp_path / "scenarios" / "a.yaml").unlink()
+        valid, message = _support_validation_result(
+            tmp_path, manifest, set(), RuntimeError("boom")
+        )
+        assert valid is False
+        assert "immutable support validation failed" in message
+
+    def test_expansion_record_empty_defaults_and_tail(self) -> None:
+        empty = _expansion_record([])
+        assert empty.input_count == 0
+        assert empty.output_count == 0
+        assert empty.collapsed_count == 0
+        last = SimpleNamespace(input_count=3, output_count=2, collapsed_count=1)
+        assert _expansion_record([last]) is last
+
+    def test_record_filter_rejections_skips_accepted_candidates(self) -> None:
+        ledger = self._ledger()
+        accepted = self._fseed(candidate="c-accepted")
+        _record_filter_rejections(
+            ledger,
+            [
+                SimpleNamespace(
+                    candidate_id="c-accepted", entry_point_id="ep-1", seed_id="p-1"
+                )
+            ],
+            [accepted],
+            [],
+        )
+        assert ledger.calls == []
+
+    def test_projection_event_no_candidates(self) -> None:
+        ledger = self._ledger()
+        fseed = self._fseed()
+        ledger.record = lambda **kw: ledger.calls.append(kw)
+        rejected, by_target = _projection_event_for_fseed(ledger, fseed, None)
+        assert rejected == 1
+        assert by_target == {"ep-1": ["c-1"]}
+
+    def test_projection_event_no_matching_candidates(self) -> None:
+        ledger = self._ledger()
+        ledger.record = lambda **kw: ledger.calls.append(kw)
+        fseed = self._fseed()
+        rejected, by_target = _projection_event_for_fseed(
+            ledger, fseed, [self._pc("ep-2")]
+        )
+        assert rejected == 1
+        assert by_target == {"ep-1": ["c-1"]}
+
+    def test_projection_event_matching_candidate_succeeds(self) -> None:
+        ledger = self._ledger()
+        ledger.record = lambda **kw: ledger.calls.append(kw)
+        fseed = self._fseed()
+        rejected, by_target = _projection_event_for_fseed(
+            ledger, fseed, [self._pc("ep-1")]
+        )
+        assert rejected == 0
+        assert by_target == {}
+
+    def test_record_projection_events_empty_seeds(self) -> None:
+        rejected, by_target = _record_projection_events(self._ledger(), [], {})
+        assert rejected == 0
+        assert by_target == {}
+
+    def test_log_cap_summary_zero_is_silent_and_one_logs(self, caplog: Any) -> None:
+        caplog.set_level("INFO")
+        _log_cap_summary(GenerationMode.EXHAUSTIVE, 0)
+        assert "capped" not in caplog.text
+        caplog.clear()
+        _log_cap_summary(GenerationMode.EXHAUSTIVE, 1)
+        assert "1 candidate" in caplog.text and "capped" in caplog.text
 
 
 # ---------------------------------------------------------------------------

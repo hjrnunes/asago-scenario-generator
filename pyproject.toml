@@ -40,6 +40,10 @@ exclude-newer = "7 days"
 # from Gherkin IR and is run explicitly (`pytest build/acceptance/generated/`) so
 # that a generation step is never mistaken for a unit-test regression.
 testpaths = ["tests"]
+# Resolve the package from the rootdir-relative src tree so pytest runs inside
+# isolated mutation-worker copies import the copy being mutated rather than an
+# editable-installed absolute path to the live workspace.
+pythonpath = ["src"]
 # Without this, collection walks scratch and worktree directories and picks
 # up stray `test_*.py` files that are not part of any suite.
 # This setting REPLACES pytest's defaults rather than extending them, so the
