@@ -5,8 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 from runtime_world import World
-from . import FEATURE_ID
-from . import _html, _card_region, _section_region, _stats, _resolve
+from ._helpers import _html, _card_region, _section_region, _stats, _resolve
 
 
 def _h_ts_signals_grid(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -387,6 +386,3 @@ def register(api: Any) -> None:
         _h_ts_no_scenarios_placeholder,
         source_order=8048,
     )
-
-
-__all__ = ["FEATURE_ID", "register"]

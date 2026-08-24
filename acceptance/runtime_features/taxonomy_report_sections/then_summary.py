@@ -5,8 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 from runtime_world import World
-from . import FEATURE_ID
-from . import _html, _section_region, _stats, _resolve
+from ._helpers import _html, _section_region, _stats, _resolve
 
 
 def _h_ts_run_summary_present(
@@ -163,6 +162,3 @@ def register(api: Any) -> None:
         _h_ts_rejection_rate_na,
         source_order=8057,
     )
-
-
-__all__ = ["FEATURE_ID", "register"]

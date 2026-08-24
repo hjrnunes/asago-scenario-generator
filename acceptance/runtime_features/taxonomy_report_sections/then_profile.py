@@ -5,8 +5,11 @@ from __future__ import annotations
 import re
 from typing import Any
 from runtime_world import World
-from . import FEATURE_ID
-from . import _html, _profile_region, _resolve
+from ._helpers import _html, _section_region, _resolve
+
+
+def _profile_region(world: World) -> str:
+    return _section_region(_html(world), "sec-profile")
 
 
 def _h_ts_section_with_badge(
@@ -238,6 +241,3 @@ def register(api: Any) -> None:
         _h_ts_no_entry_point_row,
         source_order=8009,
     )
-
-
-__all__ = ["FEATURE_ID", "register"]

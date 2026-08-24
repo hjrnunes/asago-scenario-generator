@@ -5,9 +5,14 @@ from __future__ import annotations
 import re
 from typing import Any
 from runtime_world import World
-from . import FEATURE_ID
-from . import _last_scenario, _resolve
+from ._helpers import _resolve
 from runtime_features.taxonomy_report import _split_csv, _new_scenario, _scn
+
+
+def _last_scenario(world: World) -> dict[str, Any]:
+    if not world.trpt_scenarios:
+        raise AssertionError("the fixture contains no scenarios yet")
+    return world.trpt_scenarios[-1]
 
 
 def _h_contains_many(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -632,6 +637,3 @@ def register(api: Any) -> None:
         _h_scn_complexity,
         source_order=7046,
     )
-
-
-__all__ = ["FEATURE_ID", "register"]

@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from typing import Any
 from runtime_world import World
-from . import FEATURE_ID
 
 
 def _h_coverage_complete(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -298,6 +297,3 @@ def register(api: Any) -> None:
         _h_pipeline_call_log,
         source_order=7060,
     )
-
-
-__all__ = ["FEATURE_ID", "register"]

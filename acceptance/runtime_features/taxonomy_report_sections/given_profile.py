@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from typing import Any
 from runtime_world import World
-from . import FEATURE_ID
 from runtime_features.taxonomy_report import _split_csv
 
 
@@ -200,6 +199,3 @@ def register(api: Any) -> None:
         _h_profile_kc,
         source_order=7008,
     )
-
-
-__all__ = ["FEATURE_ID", "register"]

@@ -5,8 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 from runtime_world import World
-from . import FEATURE_ID
-from . import _html, _card_region, _section_region, _visible, _resolve
+from ._helpers import _html, _card_region, _section_region, _visible, _resolve
 
 
 def _h_ts_yaml_panel(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -368,6 +367,3 @@ def register(api: Any) -> None:
         _h_ts_pipeline_semantic_status,
         source_order=8074,
     )
-
-
-__all__ = ["FEATURE_ID", "register"]

@@ -5,15 +5,23 @@ from __future__ import annotations
 import re
 from typing import Any
 from runtime_world import World
-from . import FEATURE_ID
-from . import (
-    _html,
-    _section_region,
-    _threats_region,
-    _visible,
-    _coverage_card_statuses,
-    _resolve,
-)
+from ._helpers import _html, _section_region, _visible, _resolve
+
+
+def _threats_region(world: World) -> str:
+    return _section_region(_html(world), "sec-threats")
+
+
+def _coverage_card_statuses(region: str) -> dict[str, str]:
+    """Return coverage-card title -> status label."""
+    return {
+        title: status
+        for title, status in re.findall(
+            r'<span class="coverage-card-title">([^<]+)</span>\s*'
+            r'<span class="coverage-status [\w-]+">([^<]+)</span>',
+            region,
+        )
+    }
 
 
 def _h_ts_entry_row_values(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -454,6 +462,3 @@ def register(api: Any) -> None:
         _h_ts_diversity_goal,
         source_order=8029,
     )
-
-
-__all__ = ["FEATURE_ID", "register"]
