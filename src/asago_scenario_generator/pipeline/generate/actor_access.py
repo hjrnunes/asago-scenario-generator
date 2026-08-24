@@ -101,6 +101,70 @@ class ActorAccessViolation:
     message: str
 
 
+def _projection_path_source(
+    projection_context: dict[str, Any],
+) -> tuple[str | None, str | None, str | None, str | None] | None:
+    """Return the single authoritative source-influence path fields.
+
+    Returns ``None`` when the projection declares no authoritative path;
+    raises when it declares more than one.
+    """
+    paths = projection_context.get("source_influence_paths", [])
+    if not paths:
+        return None
+    if len(paths) != 1:
+        raise ValueError(
+            "projection context must contain exactly one source-influence path"
+        )
+    path = paths[0]
+    return (
+        path.get("source_id"),
+        path.get("source_identity_kind"),
+        path.get("source_id"),
+        path.get("boundary_id"),
+    )
+
+
+def _resolve_source_name(
+    influence_source: str | None, profile: CapabilityProfile
+) -> str | None:
+    """Resolve one influence-source name to a canonical entry-point ID."""
+    from asago_scenario_generator.pipeline.generate.names import (
+        resolve_name_to_entry_point_id,
+    )
+
+    if not influence_source:
+        return influence_source
+    resolved = resolve_name_to_entry_point_id(influence_source, profile)
+    return resolved if resolved is not None else influence_source
+
+
+def _resolve_boundary_name(
+    trust_boundary_id: str | None, profile: CapabilityProfile
+) -> str | None:
+    """Resolve one trust-boundary name to a canonical profile ID."""
+    from asago_scenario_generator.pipeline.generate.names import (
+        resolve_name_to_trust_boundary_id,
+    )
+
+    if not trust_boundary_id:
+        return trust_boundary_id
+    resolved_tb = resolve_name_to_trust_boundary_id(trust_boundary_id, profile)
+    return resolved_tb if resolved_tb is not None else trust_boundary_id
+
+
+def _resolve_evidence_names(
+    influence_source: str | None,
+    trust_boundary_id: str | None,
+    profile: CapabilityProfile,
+) -> tuple[str | None, str | None]:
+    """Resolve LLM-evidence names to canonical profile identities."""
+    return (
+        _resolve_source_name(influence_source, profile),
+        _resolve_boundary_name(trust_boundary_id, profile),
+    )
+
+
 def build_actor_access_provenance(
     entry_point_id: str,
     ep_controllability: str | None,
@@ -143,36 +207,19 @@ def build_actor_access_provenance(
     influence_source_id: str | None = None
     trust_boundary_id = resp.trust_boundary_id
 
-    authoritative_paths = (
-        projection_context.get("source_influence_paths", [])
-        if projection_context is not None
-        else []
-    )
     if projection_context is not None:
-        if authoritative_paths:
-            if len(authoritative_paths) != 1:
-                raise ValueError(
-                    "projection context must contain exactly one source-influence path"
-                )
-            path = authoritative_paths[0]
-            influence_source = path.get("source_id")
-            influence_source_kind = path.get("source_identity_kind")
-            influence_source_id = path.get("source_id")
-            trust_boundary_id = path.get("boundary_id")
+        path_source = _projection_path_source(projection_context)
+        if path_source is not None:
+            (
+                influence_source,
+                influence_source_kind,
+                influence_source_id,
+                trust_boundary_id,
+            ) = path_source
     elif profile is not None:
-        from asago_scenario_generator.pipeline.generate.names import (
-            resolve_name_to_entry_point_id,
-            resolve_name_to_trust_boundary_id,
+        influence_source, trust_boundary_id = _resolve_evidence_names(
+            influence_source, trust_boundary_id, profile
         )
-
-        if influence_source:
-            resolved = resolve_name_to_entry_point_id(influence_source, profile)
-            if resolved is not None:
-                influence_source = resolved
-        if trust_boundary_id:
-            resolved_tb = resolve_name_to_trust_boundary_id(trust_boundary_id, profile)
-            if resolved_tb is not None:
-                trust_boundary_id = resolved_tb
 
     return ActorAccessProvenance(
         initial_entry_point_id=entry_point_id,
@@ -522,6 +569,94 @@ def _check_boundary_external_flow(
         )
 
 
+def _has_text(value: str | None) -> bool:
+    """Return True when a value carries non-whitespace content."""
+    return bool(value and value.strip())
+
+
+def _access_class_consistency_violations(
+    actor_type: str, access: ActorAccessProvenance
+) -> list[ActorAccessViolation]:
+    """Collect ingress-mode / access-class consistency violations (check 2)."""
+    violations: list[ActorAccessViolation] = []
+    if access.ingress_mode == "direct" and access.access_class == "supply_chain":
+        violations.append(
+            ActorAccessViolation(
+                rule="access_class_ingress_mode_incompatible",
+                message=(
+                    f"Actor '{actor_type}' has access_class "
+                    f"'supply_chain' but ingress_mode 'direct' — supply-chain "
+                    f"access requires indirect ingress (upstream influence)."
+                ),
+            )
+        )
+    if access.ingress_mode == "indirect" and access.access_class == "public":
+        violations.append(
+            ActorAccessViolation(
+                rule="access_class_ingress_mode_incompatible",
+                message=(
+                    f"Actor '{actor_type}' has access_class "
+                    f"'public' but ingress_mode 'indirect' — public access "
+                    f"cannot influence upstream data sources."
+                ),
+            )
+        )
+    return violations
+
+
+def _missing_evidence_fields(access: ActorAccessProvenance) -> list[str]:
+    """Collect the indirect-ingress evidence fields that are missing."""
+    missing = []
+    if not _has_text(access.influence_source):
+        missing.append("influence_source")
+    if not _has_text(access.influence_mechanism):
+        missing.append("influence_mechanism")
+    if not _has_text(access.trust_boundary_id):
+        missing.append("trust_boundary_id")
+    return missing
+
+
+def _incomplete_indirect_evidence_violations(
+    access: ActorAccessProvenance,
+) -> list[ActorAccessViolation]:
+    """Collect the indirect-ingress evidence completeness violation (check 3)."""
+    if access.ingress_mode != "indirect":
+        return []
+    missing = _missing_evidence_fields(access)
+    if not missing:
+        return []
+    return [
+        ActorAccessViolation(
+            rule="incomplete_indirect_evidence",
+            message=(
+                f"Indirect ingress requires structured evidence: missing {missing}."
+            ),
+        )
+    ]
+
+
+def _missing_insider_advantage_violation(
+    actor_profile: ActorProfile, access: ActorAccessProvenance
+) -> ActorAccessViolation | None:
+    """Return the insider-evidence violation when direct ingress lacks it."""
+    if (
+        access.ingress_mode == "direct"
+        and actor_profile.actor_type in _INSIDER_ACTOR_TYPES
+        and not _has_text(access.material_insider_advantage)
+    ):
+        return ActorAccessViolation(
+            rule="missing_insider_advantage",
+            message=(
+                f"Insider actor '{actor_profile.actor_type}' using "
+                f"direct ingress requires structured "
+                f"material_insider_advantage evidence regardless of "
+                f"access_class ('{access.access_class}') — enum choice "
+                f"is not evidence (cmps.6)."
+            ),
+        )
+    return None
+
+
 def _canonical_checks(
     violations: list[ActorAccessViolation],
     access: ActorAccessProvenance,
@@ -604,75 +739,22 @@ def validate_actor_access_provenance(
         )
         return violations
 
-    # 2. Ingress-mode / access-class consistency
-    if access.ingress_mode == "direct" and access.access_class == "supply_chain":
-        violations.append(
-            ActorAccessViolation(
-                rule="access_class_ingress_mode_incompatible",
-                message=(
-                    f"Actor '{actor_profile.actor_type}' has access_class "
-                    f"'supply_chain' but ingress_mode 'direct' — supply-chain "
-                    f"access requires indirect ingress (upstream influence)."
-                ),
-            )
-        )
-    if access.ingress_mode == "indirect" and access.access_class == "public":
-        violations.append(
-            ActorAccessViolation(
-                rule="access_class_ingress_mode_incompatible",
-                message=(
-                    f"Actor '{actor_profile.actor_type}' has access_class "
-                    f"'public' but ingress_mode 'indirect' — public access "
-                    f"cannot influence upstream data sources."
-                ),
-            )
-        )
-
-    # 3. Indirect ingress evidence completeness
-    if access.ingress_mode == "indirect":
-        missing = []
-        if not access.influence_source or not access.influence_source.strip():
-            missing.append("influence_source")
-        if not access.influence_mechanism or not access.influence_mechanism.strip():
-            missing.append("influence_mechanism")
-        if not access.trust_boundary_id or not access.trust_boundary_id.strip():
-            missing.append("trust_boundary_id")
-        if missing:
-            violations.append(
-                ActorAccessViolation(
-                    rule="incomplete_indirect_evidence",
-                    message=(
-                        f"Indirect ingress requires structured evidence: "
-                        f"missing {missing}."
-                    ),
-                )
-            )
-
-    # 4. Insider + direct ingress → material_insider_advantage (regardless
-    #    of access_class — enum choice is not evidence).
-    if (
-        access.ingress_mode == "direct"
-        and actor_profile.actor_type in _INSIDER_ACTOR_TYPES
-        and (
-            not access.material_insider_advantage
-            or not access.material_insider_advantage.strip()
-        )
-    ):
-        violations.append(
-            ActorAccessViolation(
-                rule="missing_insider_advantage",
-                message=(
-                    f"Insider actor '{actor_profile.actor_type}' using "
-                    f"direct ingress requires structured "
-                    f"material_insider_advantage evidence regardless of "
-                    f"access_class ('{access.access_class}') — enum choice "
-                    f"is not evidence (cmps.6)."
-                ),
-            )
-        )
+    # 2-4. Structural consistency and evidence checks (profile-free).
+    violations.extend(
+        _access_class_consistency_violations(actor_profile.actor_type, access)
+    )
+    violations.extend(_incomplete_indirect_evidence_violations(access))
+    insider_violation = _missing_insider_advantage_violation(actor_profile, access)
+    if insider_violation is not None:
+        violations.append(insider_violation)
 
     # 5–8. Canonical resolution (when profile is provided)
     if profile is not None:
         _canonical_checks(violations, access, actor_profile.actor_type, profile)
 
     return violations
+
+
+# mutate4py-manifest-begin
+# {"version":1,"tested_at":"2026-08-24T01:16:40Z","module_hash":"75b2a7c4040851812f5a694b81ebbd46bd6f531db3bfcde7e664925e5504f66e","source_sha256":"31b0ce58470a44002d198a8e1210e39675b55af8dd1d245a1a0210b0894f2163","functions":[{"id":"func/_projection_path_source","name":"_projection_path_source","line":104,"end_line":125,"hash":"dac49ca8219c1a7d4782f79ed90d29ddd7c0726692884990582c87b11df0aefb"},{"id":"func/_resolve_source_name","name":"_resolve_source_name","line":128,"end_line":139,"hash":"1475281d7be6040c078d970e3d56767124758dbeac8ae1ba540b4aa7def7b7c9"},{"id":"func/_resolve_boundary_name","name":"_resolve_boundary_name","line":142,"end_line":153,"hash":"dd2ff59564848749c48272395e720a9e4b15dc1b4e1b6108af705c4663f9e587"},{"id":"func/_resolve_evidence_names","name":"_resolve_evidence_names","line":156,"end_line":165,"hash":"e9b4f9da5ebd6b567492aa5d811aab7ce600269c02f4f2cd90002d7b1abc055b"},{"id":"func/build_actor_access_provenance","name":"build_actor_access_provenance","line":168,"end_line":234,"hash":"d128e5cf81396f5236e9736b8c76a47d05447b0979a69073f5f2c4475cd6e67f"},{"id":"func/_check_initial_ingress","name":"_check_initial_ingress","line":237,"end_line":304,"hash":"a23db75943ed3bb5b540ddef60ecd48b7c77fd905ca86cf50ef9335e3ee9a3fa"},{"id":"func/_influence_source_identity","name":"_influence_source_identity","line":307,"end_line":313,"hash":"48877f72940b50824af3565f4a4bd270c4598baa64a3dbdaa645a53e42fd589b"},{"id":"func/_resolve_integration_source","name":"_resolve_integration_source","line":316,"end_line":334,"hash":"f40d18f9418ba79119a18d7c4750b223888321f43d7d4318d3f92811bfb4bb8c"},{"id":"func/_self_relation_influence_source","name":"_self_relation_influence_source","line":337,"end_line":358,"hash":"f5f1ee810a96f01132a07f8520de1b0b32f1391ad31ede0be5a10dc606b69476"},{"id":"func/_check_source_accessibility","name":"_check_source_accessibility","line":361,"end_line":389,"hash":"cc1bdd2b14584beb7f6a6443d05c6570f76e25e7a35cdc71d3aa63f0a4e01795"},{"id":"func/_resolve_entry_point_source","name":"_resolve_entry_point_source","line":392,"end_line":417,"hash":"b851009ac420b496254a4accc4028180e679efaf1b8de53c134e889d9aa61e73"},{"id":"func/_check_influence_source","name":"_check_influence_source","line":420,"end_line":439,"hash":"ede9f3cdaddf1ce153ab35699b03c81a2528a47a2d78a17766caa64f57b40d1a"},{"id":"func/_check_trust_boundary","name":"_check_trust_boundary","line":442,"end_line":467,"hash":"1f2b319bc518c1cc8908a9861911fc2dbed229f9dcbe71857e78f5a71439966f"},{"id":"func/_check_boundary_zone_relations","name":"_check_boundary_zone_relations","line":470,"end_line":480,"hash":"7525f61d07bdf912e2008ee8592f1f3d5cdf760103e860e409a4c9df610aa033"},{"id":"func/_check_boundary_target_zone","name":"_check_boundary_target_zone","line":483,"end_line":504,"hash":"1375a8aa3dae9fe202ae86bf5e5fd395e05c7e47979f0784f299c467ba032f44"},{"id":"func/_check_boundary_source_zone","name":"_check_boundary_source_zone","line":507,"end_line":537,"hash":"8f70182b936037a90fefe7a1695138eeb2773bf778063171dc12e27ae7d287ca"},{"id":"func/_check_boundary_external_flow","name":"_check_boundary_external_flow","line":540,"end_line":569,"hash":"67f1aec40157cd0b76d5a2cca709d842806dbd8df8c9001e82e15863ebcf8eae"},{"id":"func/_has_text","name":"_has_text","line":572,"end_line":574,"hash":"52012844ccb450138e0bf30a888cefbbe6b5e3b704c1caa5053bf6524489e269"},{"id":"func/_access_class_consistency_violations","name":"_access_class_consistency_violations","line":577,"end_line":604,"hash":"baa3dc8cb31cd08b44d01d42b44990bdbdc7ff8d74b71e45ddb0f21cb59f2f99"},{"id":"func/_missing_evidence_fields","name":"_missing_evidence_fields","line":607,"end_line":616,"hash":"3dd2f5fd047f7947407be7d4dd771ad994f8d3fbbdb22ce2c3cc9eaf2efef771"},{"id":"func/_incomplete_indirect_evidence_violations","name":"_incomplete_indirect_evidence_violations","line":619,"end_line":635,"hash":"f40a0358516fc80aae37c75e49468579b6768c41f4f406c53836f22dc9488c17"},{"id":"func/_missing_insider_advantage_violation","name":"_missing_insider_advantage_violation","line":638,"end_line":657,"hash":"0430012f7016d32d6028541fc230567d0d36f0c03bd162c792941831f468444e"},{"id":"func/_canonical_checks","name":"_canonical_checks","line":660,"end_line":685,"hash":"10f0323e2b7b7606367e45f6b73fb15762792040fe380b2fc7eea6f91ea1b16d"},{"id":"func/validate_actor_access_provenance","name":"validate_actor_access_provenance","line":688,"end_line":755,"hash":"73bf5b81c1fe4cab5efb341d599d36850d122068ed7adf0a0191fd6c0812ccac"}]}
+# mutate4py-manifest-end

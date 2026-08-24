@@ -82,6 +82,22 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def _exact_actor_type_match(cleaned: str) -> str | None:
+    """Return the exact actor type for a normalized label, if any."""
+    for valid in ACTOR_TYPES:
+        if cleaned == valid or cleaned.replace(" ", "-") == valid:
+            return valid
+    return None
+
+
+def _substring_actor_type_match(cleaned: str) -> str | None:
+    """Return the actor type matching a normalized label as a substring."""
+    for valid in ACTOR_TYPES:
+        if valid in cleaned or cleaned in valid:
+            return valid
+    return None
+
+
 def _normalize_actor_type(raw: str) -> str:
     """Normalize LLM-generated actor_type to a valid ActorType value.
 
@@ -89,13 +105,13 @@ def _normalize_actor_type(raw: str) -> str:
     "Nation-State (Information Warfare Unit)" -> "nation-state".
     """
     cleaned = raw.strip().lower().split("(")[0].strip()
-    for valid in ACTOR_TYPES:
-        if cleaned == valid or cleaned.replace(" ", "-") == valid:
-            return valid
+    exact = _exact_actor_type_match(cleaned)
+    if exact is not None:
+        return exact
     # Substring match as last resort
-    for valid in ACTOR_TYPES:
-        if valid in cleaned or cleaned in valid:
-            return valid
+    substring = _substring_actor_type_match(cleaned)
+    if substring is not None:
+        return substring
     logger.warning(
         "Unrecognized actor_type '%s', defaulting to 'adversarial-user'", raw
     )
@@ -454,5 +470,5 @@ def _call_actor_profile(
 
 
 # mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-21T12:04:02Z","module_hash":"6f394168dc1d5cdedbab851be26db81a56d4a01c0d842974c69ba842904810a9","source_sha256":"f9cb699bc56b29697555d2d8604cd47b47a4d564ea5144a6bda94b63f419e4fc","functions":[{"id":"func/_normalize_actor_type","name":"_normalize_actor_type","line":112,"end_line":129,"hash":"b14a12241134138150c3a650d05ea0c25e6d6f174234ad165964d5672753684d"},{"id":"func/_normalize_capability_level","name":"_normalize_capability_level","line":132,"end_line":142,"hash":"a9c1580791267cf62ecc36250e99295564baf4b3ce757ae961cd748a69b2fa7e"},{"id":"func/_enforce_capability_floor","name":"_enforce_capability_floor","line":145,"end_line":167,"hash":"aab9a89c8d440c382d9bd5d3bedd8ba1888349f2850606a2b0a3b5775f24149b"},{"id":"func/_validate_actor_type","name":"_validate_actor_type","line":170,"end_line":201,"hash":"c95cc34d0eda29274412d741a9f8aa01a477baf6df5bab2b52d6c7a4f48a23c2"},{"id":"func/build_actor_access_provenance","name":"build_actor_access_provenance","line":217,"end_line":272,"hash":"02ca2d66c246ac8997b0811d3574988d4bafc9e76f6c240f1286ecfdec0d95dc"},{"id":"func/_canonical_checks","name":"_canonical_checks","line":275,"end_line":484,"hash":"d2b36eff3a1be48d8dc66cf0f61f69277fb93102a1fd6ca075144e915365847e"},{"id":"func/validate_actor_access_provenance","name":"validate_actor_access_provenance","line":487,"end_line":612,"hash":"c1a7a8e202aa760b400b0946a93a5d99808ff6fae33042d55d2a99790b5bfde8"},{"id":"func/_complete_actor_profile","name":"_complete_actor_profile","line":620,"end_line":634,"hash":"299c1231324c1a3eeed4ba30713c3e16467c61a7b362a0b179ce590cb212c6ce"},{"id":"func/_call_actor_profile","name":"_call_actor_profile","line":637,"end_line":754,"hash":"f9ba3ac1cef0e9c8020df5551ac781249ae3b04b52f6b6e81fc0bfce02cfffc6"}]}
+# {"version":1,"tested_at":"2026-08-24T01:05:23Z","module_hash":"b9e481594ec2e42f15562ff6d979eaa1b86efc42fa2aed3fa1a3d5e163a6dbf1","source_sha256":"3da16c6b28679ad8a50e4819c7bb4fcd89c5a3c41eb85cd48cb9920a118af1b1","functions":[{"id":"func/_exact_actor_type_match","name":"_exact_actor_type_match","line":85,"end_line":90,"hash":"6f3f5a3a343e5cd26f849c46c3472d6279ee8631e79082f06e4077b282c7e331"},{"id":"func/_substring_actor_type_match","name":"_substring_actor_type_match","line":93,"end_line":98,"hash":"99fd54ca75feead50395a1bb319d1f8c7025cab3f9bfc47f66f20cc0d1cd5ca6"},{"id":"func/_normalize_actor_type","name":"_normalize_actor_type","line":101,"end_line":118,"hash":"967ebc900d1b3c8f431916ad0c1700a2b94f031457ff6de66b33cca050a06f0e"},{"id":"func/_normalize_capability_level","name":"_normalize_capability_level","line":121,"end_line":131,"hash":"a9c1580791267cf62ecc36250e99295564baf4b3ce757ae961cd748a69b2fa7e"},{"id":"func/_enforce_capability_floor","name":"_enforce_capability_floor","line":134,"end_line":156,"hash":"aab9a89c8d440c382d9bd5d3bedd8ba1888349f2850606a2b0a3b5775f24149b"},{"id":"func/_validate_actor_type","name":"_validate_actor_type","line":159,"end_line":190,"hash":"c95cc34d0eda29274412d741a9f8aa01a477baf6df5bab2b52d6c7a4f48a23c2"},{"id":"func/_complete_actor_profile","name":"_complete_actor_profile","line":198,"end_line":224,"hash":"82b93c263534ee0af3da9cc672a5e0d90272f98ad6af4016ddc679dda92fcea9"},{"id":"func/_bump_capability_level","name":"_bump_capability_level","line":227,"end_line":252,"hash":"f454a3c4a1865c5415d4c1b3671efbf57f7a6158e5d83e135cf7dfe719ab938f"},{"id":"func/_compile_legacy_actor_profile","name":"_compile_legacy_actor_profile","line":255,"end_line":285,"hash":"1da52f04ae80eae59973f018c5809bbf0ed92167d7b1fb336803d55813f6c0f6"},{"id":"func/_semantic_draft_request_parts","name":"_semantic_draft_request_parts","line":288,"end_line":320,"hash":"985b19f0b86097d5165f07b9bae5cd02fc04e62ca1d7c7f1532c1680912a35b5"},{"id":"func/_attach_legacy_access_provenance","name":"_attach_legacy_access_provenance","line":323,"end_line":348,"hash":"f74e142314d2f35c73a4006cbc2b91f9790f9196d6e9d6188d0555ad41178c20"},{"id":"func/_call_actor_profile","name":"_call_actor_profile","line":351,"end_line":469,"hash":"09025f179e0d126ffb5010bbea03ffcb25b90a6edf83fd78ad93c6457c8454ab"}]}
 # mutate4py-manifest-end
