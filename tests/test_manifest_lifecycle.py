@@ -1034,10 +1034,13 @@ class TestProvenance:
             mock_run.side_effect = side_effect
             return mock_run
 
-        with patch("asago_scenario_generator.manifest.subprocess.run", make_mock("", "")):
+        with patch(
+            "asago_scenario_generator.manifest.subprocess.run", make_mock("", "")
+        ):
             clean_prov = capture_git_provenance(repo)
         with patch(
-            "asago_scenario_generator.manifest.subprocess.run", make_mock(" M f\n", "d\n")
+            "asago_scenario_generator.manifest.subprocess.run",
+            make_mock(" M f\n", "d\n"),
         ):
             dirty_prov = capture_git_provenance(repo)
 
@@ -1353,11 +1356,14 @@ class TestPipelineLifecycle:
     @patch("asago_scenario_generator.report.generator.generate_report")
     @patch("asago_scenario_generator.pipeline.runner.analyze_attacker_diversity")
     @patch("asago_scenario_generator.pipeline.runner.analyze_coverage_gaps")
-    @patch("asago_scenario_generator.pipeline.runner.expand_seeds", return_value=[])
-    @patch("asago_scenario_generator.pipeline.runner.determine_threat_surface")
-    @patch("asago_scenario_generator.pipeline.runner.validate_risk_card_coherence")
-    @patch("asago_scenario_generator.pipeline.runner.load_risk_extraction", return_value=[])
-    @patch("asago_scenario_generator.pipeline.runner.infer_capability_profile")
+    @patch("asago_scenario_generator.pipeline.runner_run.expand_seeds", return_value=[])
+    @patch("asago_scenario_generator.pipeline.runner_run.determine_threat_surface")
+    @patch("asago_scenario_generator.pipeline.runner_run.validate_risk_card_coherence")
+    @patch(
+        "asago_scenario_generator.pipeline.runner_run.load_risk_extraction",
+        return_value=[],
+    )
+    @patch("asago_scenario_generator.pipeline.runner_run.infer_capability_profile")
     def test_empty_run_completes_with_errors(
         self,
         mock_profile,
@@ -1429,11 +1435,14 @@ class TestPipelineLifecycle:
     @patch("asago_scenario_generator.report.generator.generate_report")
     @patch("asago_scenario_generator.pipeline.runner.analyze_attacker_diversity")
     @patch("asago_scenario_generator.pipeline.runner.analyze_coverage_gaps")
-    @patch("asago_scenario_generator.pipeline.runner.expand_seeds", return_value=[])
-    @patch("asago_scenario_generator.pipeline.runner.determine_threat_surface")
-    @patch("asago_scenario_generator.pipeline.runner.validate_risk_card_coherence")
-    @patch("asago_scenario_generator.pipeline.runner.load_risk_extraction", return_value=[])
-    @patch("asago_scenario_generator.pipeline.runner.infer_capability_profile")
+    @patch("asago_scenario_generator.pipeline.runner_run.expand_seeds", return_value=[])
+    @patch("asago_scenario_generator.pipeline.runner_run.determine_threat_surface")
+    @patch("asago_scenario_generator.pipeline.runner_run.validate_risk_card_coherence")
+    @patch(
+        "asago_scenario_generator.pipeline.runner_run.load_risk_extraction",
+        return_value=[],
+    )
+    @patch("asago_scenario_generator.pipeline.runner_run.infer_capability_profile")
     def test_fatal_error_writes_failed_manifest(
         self,
         mock_profile,
@@ -1477,11 +1486,14 @@ class TestPipelineLifecycle:
     @patch("asago_scenario_generator.report.generator.generate_report")
     @patch("asago_scenario_generator.pipeline.runner.analyze_attacker_diversity")
     @patch("asago_scenario_generator.pipeline.runner.analyze_coverage_gaps")
-    @patch("asago_scenario_generator.pipeline.runner.expand_seeds", return_value=[])
-    @patch("asago_scenario_generator.pipeline.runner.determine_threat_surface")
-    @patch("asago_scenario_generator.pipeline.runner.validate_risk_card_coherence")
-    @patch("asago_scenario_generator.pipeline.runner.load_risk_extraction", return_value=[])
-    @patch("asago_scenario_generator.pipeline.runner.infer_capability_profile")
+    @patch("asago_scenario_generator.pipeline.runner_run.expand_seeds", return_value=[])
+    @patch("asago_scenario_generator.pipeline.runner_run.determine_threat_surface")
+    @patch("asago_scenario_generator.pipeline.runner_run.validate_risk_card_coherence")
+    @patch(
+        "asago_scenario_generator.pipeline.runner_run.load_risk_extraction",
+        return_value=[],
+    )
+    @patch("asago_scenario_generator.pipeline.runner_run.infer_capability_profile")
     def test_two_runs_same_collection(
         self,
         mock_profile,
@@ -1563,11 +1575,14 @@ class TestPipelineLifecycle:
     @patch("asago_scenario_generator.report.generator.generate_report")
     @patch("asago_scenario_generator.pipeline.runner.analyze_attacker_diversity")
     @patch("asago_scenario_generator.pipeline.runner.analyze_coverage_gaps")
-    @patch("asago_scenario_generator.pipeline.runner.expand_seeds", return_value=[])
-    @patch("asago_scenario_generator.pipeline.runner.determine_threat_surface")
-    @patch("asago_scenario_generator.pipeline.runner.validate_risk_card_coherence")
-    @patch("asago_scenario_generator.pipeline.runner.load_risk_extraction", return_value=[])
-    @patch("asago_scenario_generator.pipeline.runner.infer_capability_profile")
+    @patch("asago_scenario_generator.pipeline.runner_run.expand_seeds", return_value=[])
+    @patch("asago_scenario_generator.pipeline.runner_run.determine_threat_surface")
+    @patch("asago_scenario_generator.pipeline.runner_run.validate_risk_card_coherence")
+    @patch(
+        "asago_scenario_generator.pipeline.runner_run.load_risk_extraction",
+        return_value=[],
+    )
+    @patch("asago_scenario_generator.pipeline.runner_run.infer_capability_profile")
     def test_no_eval_is_completed_with_errors(
         self,
         mock_profile,
@@ -2143,7 +2158,9 @@ class TestProvenanceStartSnapshot:
         assert hashes.risk_extraction_hash != compute_file_sha256(risk)
 
     def test_capture_provenance_uses_git_state_at_call_time(self, tmp_path: Path):
-        with patch("asago_scenario_generator.manifest.capture_git_provenance") as capture:
+        with patch(
+            "asago_scenario_generator.manifest.capture_git_provenance"
+        ) as capture:
             capture.return_value = GitProvenance(
                 commit="first",
                 dirty=False,
@@ -2175,7 +2192,7 @@ class TestFaultInjection:
         collection = tmp_path / "output"
         with (
             patch(
-                "asago_scenario_generator.pipeline.runner.LLMClient.__init__",
+                "asago_scenario_generator.pipeline.runner_run.LLMClient.__init__",
                 side_effect=RuntimeError("client failure"),
             ),
             pytest.raises(RuntimeError, match="client failure"),
@@ -2196,7 +2213,7 @@ class TestFaultInjection:
         collection = tmp_path / "output"
         with (
             patch(
-                "asago_scenario_generator.pipeline.runner.write_use_case",
+                "asago_scenario_generator.pipeline.runner_run.write_use_case",
                 side_effect=OSError("disk full"),
             ),
             pytest.raises(OSError, match="disk full"),
@@ -2246,11 +2263,14 @@ class TestFaultInjection:
     @patch("asago_scenario_generator.report.generator.generate_report")
     @patch("asago_scenario_generator.pipeline.runner.analyze_attacker_diversity")
     @patch("asago_scenario_generator.pipeline.runner.analyze_coverage_gaps")
-    @patch("asago_scenario_generator.pipeline.runner.expand_seeds", return_value=[])
-    @patch("asago_scenario_generator.pipeline.runner.determine_threat_surface")
-    @patch("asago_scenario_generator.pipeline.runner.validate_risk_card_coherence")
-    @patch("asago_scenario_generator.pipeline.runner.load_risk_extraction", return_value=[])
-    @patch("asago_scenario_generator.pipeline.runner.infer_capability_profile")
+    @patch("asago_scenario_generator.pipeline.runner_run.expand_seeds", return_value=[])
+    @patch("asago_scenario_generator.pipeline.runner_run.determine_threat_surface")
+    @patch("asago_scenario_generator.pipeline.runner_run.validate_risk_card_coherence")
+    @patch(
+        "asago_scenario_generator.pipeline.runner_run.load_risk_extraction",
+        return_value=[],
+    )
+    @patch("asago_scenario_generator.pipeline.runner_run.infer_capability_profile")
     def test_client_construction_failure_writes_failed_manifest(
         self,
         mock_profile,
@@ -2280,7 +2300,7 @@ class TestFaultInjection:
 
         with (
             patch(
-                "asago_scenario_generator.pipeline.runner.LLMClient",
+                "asago_scenario_generator.pipeline.runner_run.LLMClient",
                 side_effect=RuntimeError("bad config"),
             ),
             pytest.raises(RuntimeError, match="bad config"),
@@ -2301,11 +2321,14 @@ class TestFaultInjection:
     @patch("asago_scenario_generator.report.generator.generate_report")
     @patch("asago_scenario_generator.pipeline.runner.analyze_attacker_diversity")
     @patch("asago_scenario_generator.pipeline.runner.analyze_coverage_gaps")
-    @patch("asago_scenario_generator.pipeline.runner.expand_seeds", return_value=[])
-    @patch("asago_scenario_generator.pipeline.runner.determine_threat_surface")
-    @patch("asago_scenario_generator.pipeline.runner.validate_risk_card_coherence")
-    @patch("asago_scenario_generator.pipeline.runner.load_risk_extraction", return_value=[])
-    @patch("asago_scenario_generator.pipeline.runner.infer_capability_profile")
+    @patch("asago_scenario_generator.pipeline.runner_run.expand_seeds", return_value=[])
+    @patch("asago_scenario_generator.pipeline.runner_run.determine_threat_surface")
+    @patch("asago_scenario_generator.pipeline.runner_run.validate_risk_card_coherence")
+    @patch(
+        "asago_scenario_generator.pipeline.runner_run.load_risk_extraction",
+        return_value=[],
+    )
+    @patch("asago_scenario_generator.pipeline.runner_run.infer_capability_profile")
     def test_report_failure_is_completed_with_errors(
         self,
         mock_profile,
@@ -3279,7 +3302,9 @@ def test_record_stage_result_writes_to_calls_jsonl(tmp_path):
     import json
     from unittest.mock import MagicMock
     from pathlib import Path
-    from asago_scenario_generator.pipeline.persistence import FinalizationPersistenceAdapter
+    from asago_scenario_generator.pipeline.persistence import (
+        FinalizationPersistenceAdapter,
+    )
     from asago_scenario_generator.pipeline.finalization import (
         StageInvocation,
         GeneratedStage,

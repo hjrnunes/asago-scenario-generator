@@ -232,10 +232,55 @@ def _arrange(tmp_path: Path, *, entry_point_id: str, projected_candidates: list)
         "analyze_coverage_gaps": MagicMock(return_value=CoverageGaps()),
         "analyze_attacker_diversity": MagicMock(return_value=None),
     }
+    # Stage-1/2 wiring is resolved through pipeline.runner_run for the run
+    # path; completion-side names still resolve through pipeline.runner.
+    runner_home_names = {
+        "LLMClient",
+        "infer_capability_profile",
+        "load_attack_patterns",
+        "load_taxonomy_resolver",
+        "capture_capability_snapshot",
+        "analyze_coverage_gaps",
+        "analyze_attacker_diversity",
+    }
+    runner_resume_home_names = {"LLMClient"}
+    runner_run_home_names = {
+        "LLMClient",
+        "infer_capability_profile",
+        "load_risk_extraction",
+        "validate_risk_card_coherence",
+        "determine_threat_surface",
+        "expand_seeds",
+        "expand_candidates",
+        "apply_rule_based_filter",
+        "filter_candidates",
+        "load_attack_patterns",
+        "load_taxonomy_resolver",
+        "project_authoritative_candidates",
+        "capture_capability_snapshot",
+    }
     for name, replacement in patches.items():
-        stack.enter_context(
-            patch(f"asago_scenario_generator.pipeline.runner.{name}", replacement)
-        )
+        if name in runner_home_names:
+            stack.enter_context(
+                patch(
+                    f"asago_scenario_generator.pipeline.runner.{name}",
+                    replacement,
+                )
+            )
+        if name in runner_run_home_names:
+            stack.enter_context(
+                patch(
+                    f"asago_scenario_generator.pipeline.runner_run.{name}",
+                    replacement,
+                )
+            )
+        if name in runner_resume_home_names:
+            stack.enter_context(
+                patch(
+                    f"asago_scenario_generator.pipeline.runner_resume.{name}",
+                    replacement,
+                )
+            )
     from asago_scenario_generator.pipeline.coverage_planning import (
         deserialize_qualified_candidate,
     )
@@ -1188,7 +1233,29 @@ def test_production_primary_quarantine_then_fallback_admits(tmp_path: Path) -> N
     )
     stack.enter_context(
         patch(
+            "asago_scenario_generator.pipeline.runner_run.infer_capability_profile",
+            return_value=(
+                profile,
+                LLMResult(
+                    content="mock",
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    duration_ms=0,
+                    system_prompt="mock",
+                    user_prompt="mock",
+                ),
+            ),
+        )
+    )
+    stack.enter_context(
+        patch(
             "asago_scenario_generator.pipeline.runner.capture_capability_snapshot",
+            return_value=snapshot,
+        )
+    )
+    stack.enter_context(
+        patch(
+            "asago_scenario_generator.pipeline.runner_run.capture_capability_snapshot",
             return_value=snapshot,
         )
     )
@@ -1289,7 +1356,29 @@ def test_public_resume_terminalizes_unknown_actor_without_reissue(
     )
     stack.enter_context(
         patch(
+            "asago_scenario_generator.pipeline.runner_run.infer_capability_profile",
+            return_value=(
+                profile,
+                LLMResult(
+                    content="mock",
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    duration_ms=0,
+                    system_prompt="mock",
+                    user_prompt="mock",
+                ),
+            ),
+        )
+    )
+    stack.enter_context(
+        patch(
             "asago_scenario_generator.pipeline.runner.capture_capability_snapshot",
+            return_value=snapshot,
+        )
+    )
+    stack.enter_context(
+        patch(
+            "asago_scenario_generator.pipeline.runner_run.capture_capability_snapshot",
             return_value=snapshot,
         )
     )
@@ -1669,7 +1758,7 @@ def test_early_failed_v3_inventories_unpublished_support_without_orphans(
     if fault_boundary == "after_use_case":
         stack.enter_context(
             patch(
-                "asago_scenario_generator.pipeline.runner.infer_capability_profile",
+                "asago_scenario_generator.pipeline.runner_run.infer_capability_profile",
                 side_effect=RuntimeError(fault_boundary),
             )
         )
@@ -1678,7 +1767,7 @@ def test_early_failed_v3_inventories_unpublished_support_without_orphans(
     else:
         stack.enter_context(
             patch(
-                "asago_scenario_generator.pipeline.runner.write_started_manifest",
+                "asago_scenario_generator.pipeline.runner_run.write_started_manifest",
                 side_effect=RuntimeError(fault_boundary),
             )
         )
@@ -1909,6 +1998,14 @@ def _run_and_get_coverage_report(tmp_path: Path, *, confirmed: bool) -> dict:
                 fromlist=["patch"],
             ).patch("asago_scenario_generator.pipeline.runner.infer_capability_profile")
         )
+        infer_run_mock = stack.enter_context(
+            __import__(
+                "unittest.mock",
+                fromlist=["patch"],
+            ).patch(
+                "asago_scenario_generator.pipeline.runner_run.infer_capability_profile"
+            )
+        )
         from asago_scenario_generator.pipeline.projection import (
             capture_capability_snapshot,
         )
@@ -1916,6 +2013,12 @@ def _run_and_get_coverage_report(tmp_path: Path, *, confirmed: bool) -> dict:
         stack.enter_context(
             patch(
                 "asago_scenario_generator.pipeline.runner.capture_capability_snapshot",
+                return_value=capture_capability_snapshot(profile),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "asago_scenario_generator.pipeline.runner_run.capture_capability_snapshot",
                 return_value=capture_capability_snapshot(profile),
             )
         )
@@ -1930,6 +2033,7 @@ def _run_and_get_coverage_report(tmp_path: Path, *, confirmed: bool) -> dict:
             user_prompt="mock",
         )
         infer_mock.return_value = (profile, llm_result)
+        infer_run_mock.return_value = (profile, llm_result)
 
     with stack:
         result = run_pipeline(**args)

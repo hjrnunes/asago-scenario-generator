@@ -50,7 +50,7 @@ from asago_scenario_generator.models.projection_envelope import (
     ProjectionTraceabilityViolationCode,
 )
 from asago_scenario_generator.models.scenario import CallMetadata, CallName
-from asago_scenario_generator.pipeline import runner as runner_module
+from asago_scenario_generator.pipeline import runner_run as runner_run_module
 from asago_scenario_generator.pipeline.finalization import GeneratedStage
 from asago_scenario_generator.pipeline.coverage_planning import GenerationMode
 from asago_scenario_generator.pipeline.persistence import (
@@ -242,11 +242,13 @@ class TestRuleRejectionReasons:
         )
 
     def test_ignores_verdicts_for_other_candidates(self) -> None:
-        verdict = SimpleNamespace(candidate_id="other", rationale="x",
-                                  removal_decisions=[])
-        assert _rule_rejection_reasons(
-            SimpleNamespace(candidate_id="c1"), [verdict]
-        ) == "Rejected by deterministic rule filter"
+        verdict = SimpleNamespace(
+            candidate_id="other", rationale="x", removal_decisions=[]
+        )
+        assert (
+            _rule_rejection_reasons(SimpleNamespace(candidate_id="c1"), [verdict])
+            == "Rejected by deterministic rule filter"
+        )
 
     def test_joins_removal_decision_summaries(self) -> None:
         verdict = SimpleNamespace(
@@ -257,16 +259,19 @@ class TestRuleRejectionReasons:
                 SimpleNamespace(rule="r2", reason="y"),
             ],
         )
-        assert _rule_rejection_reasons(
-            SimpleNamespace(candidate_id="c1"), [verdict]
-        ) == "r1: x; r2: y"
+        assert (
+            _rule_rejection_reasons(SimpleNamespace(candidate_id="c1"), [verdict])
+            == "r1: x; r2: y"
+        )
 
     def test_falls_back_to_rationale_without_removals(self) -> None:
-        verdict = SimpleNamespace(candidate_id="c1", rationale="fallback",
-                                  removal_decisions=[])
-        assert _rule_rejection_reasons(
-            SimpleNamespace(candidate_id="c1"), [verdict]
-        ) == "fallback"
+        verdict = SimpleNamespace(
+            candidate_id="c1", rationale="fallback", removal_decisions=[]
+        )
+        assert (
+            _rule_rejection_reasons(SimpleNamespace(candidate_id="c1"), [verdict])
+            == "fallback"
+        )
 
 
 class TestStage2ThreatSurface:
@@ -277,11 +282,15 @@ class TestStage2ThreatSurface:
         has_warnings: bool,
         entries: list[Any],
     ) -> None:
+        # ``_stage2_threat_surface`` resolves its dependencies through the
+        # sibling orchestration module where it now lives.
         monkeypatch.setattr(
-            runner_module, "load_risk_extraction", lambda path: [{"risk_id": "r1"}]
+            runner_run_module,
+            "load_risk_extraction",
+            lambda path: [{"risk_id": "r1"}],
         )
         monkeypatch.setattr(
-            runner_module,
+            runner_run_module,
             "validate_risk_card_coherence",
             lambda use_case, cards: SimpleNamespace(
                 has_warnings=has_warnings,
@@ -289,7 +298,7 @@ class TestStage2ThreatSurface:
             ),
         )
         monkeypatch.setattr(
-            runner_module,
+            runner_run_module,
             "determine_threat_surface",
             lambda *args: SimpleNamespace(
                 entries=entries, governance_only=["governed"]
@@ -309,8 +318,13 @@ class TestStage2ThreatSurface:
         )
         notes: list[str] = []
         surface, actionable, governance, in_scope = _stage2_threat_surface(
-            "use case", Path("risk"), Path("sssom"), Path("ct"), None,
-            object(), notes,  # type: ignore[arg-type]
+            "use case",
+            Path("risk"),
+            Path("sssom"),
+            Path("ct"),
+            None,
+            object(),
+            notes,  # type: ignore[arg-type]
         )
         assert notes == [
             "Risk card r1 (R1) may describe a different system "
@@ -325,8 +339,13 @@ class TestStage2ThreatSurface:
         self._patch_stage2(monkeypatch, has_warnings=False, entries=[])
         notes: list[str] = []
         _, actionable, governance, in_scope = _stage2_threat_surface(
-            "use case", Path("risk"), Path("sssom"), Path("ct"), None,
-            object(), notes,  # type: ignore[arg-type]
+            "use case",
+            Path("risk"),
+            Path("sssom"),
+            Path("ct"),
+            None,
+            object(),
+            notes,  # type: ignore[arg-type]
         )
         assert notes == []
         assert actionable == 0
@@ -354,9 +373,10 @@ class TestSemanticGherkinText:
         assert _semantic_gherkin_text(SimpleNamespace(behavior_spec=None)) == ""
 
     def test_unrecognized_behavior_spec_returns_empty(self) -> None:
-        assert _semantic_gherkin_text(
-            SimpleNamespace(behavior_spec={"not": "a spec"})
-        ) == ""
+        assert (
+            _semantic_gherkin_text(SimpleNamespace(behavior_spec={"not": "a spec"}))
+            == ""
+        )
 
 
 class TestExpectedScopeClassifications:
@@ -544,8 +564,9 @@ class TestCheckCompletedScorecardCounts:
         scorecard_entry = _write_artifact(
             tmp_path, ArtifactRole.EVAL_SCORECARD, "eval-scorecard.yaml"
         )
-        manifest = _manifest(tmp_path, status=RunStatus.STARTED,
-                             extra_entries=(scorecard_entry,))
+        manifest = _manifest(
+            tmp_path, status=RunStatus.STARTED, extra_entries=(scorecard_entry,)
+        )
         resolver = SimpleNamespace(
             read_yaml=lambda entry: evaluate_v3_scorecard(_Resolver()).model_dump(  # type: ignore[arg-type,no-any-return]
                 mode="json"
@@ -565,7 +586,9 @@ class TestLoadV3ScorecardModels:
             manifest=SimpleNamespace(manifest_version="3"),
             entry_by_role=lambda role: None,
         )
-        with pytest.raises(ValueError, match="requires plan, finalization, and profile"):
+        with pytest.raises(
+            ValueError, match="requires plan, finalization, and profile"
+        ):
             _load_v3_scorecard_models(resolver)
 
 
@@ -658,18 +681,14 @@ class TestAdoptSuccessfulStageResult:
         record = self._record(
             result=make_behavior_spec(), violations=[SimpleNamespace()]
         )
-        _adopt_successful_stage_result(
-            record, "cand", evidence_by_id, latest, {}
-        )
+        _adopt_successful_stage_result(record, "cand", evidence_by_id, latest, {})
         assert latest == {}
 
     def test_missing_call_is_noop(self) -> None:
         latest: dict[GeneratedStage, Any] = {}
         evidence_by_id: dict[str, dict[GeneratedStage, Any]] = {}
         record = self._record(result=make_behavior_spec())
-        _adopt_successful_stage_result(
-            record, "cand", evidence_by_id, latest, {}
-        )
+        _adopt_successful_stage_result(record, "cand", evidence_by_id, latest, {})
         assert latest == {}
 
     def test_clean_record_adopts_artifact_and_evidence(self) -> None:
@@ -716,9 +735,7 @@ class TestAdoptSuccessfulStageResult:
 class TestReserveTargetIteration:
     @staticmethod
     def _allocator() -> _AuthoritativeCandidateAllocator:
-        return _AuthoritativeCandidateAllocator(
-            ProjectionBudget(), [], [], None
-        )
+        return _AuthoritativeCandidateAllocator(ProjectionBudget(), [], [], None)
 
     def test_stops_when_work_exhausted(self) -> None:
         allocator = self._allocator()
@@ -737,7 +754,11 @@ class TestReserveTargetIteration:
     def test_records_non_unique_candidate_without_pending(self) -> None:
         allocator = self._allocator()
         candidate = object()
-        allocator.derive_one = lambda group_index, target_iter: (candidate, False, False)
+        allocator.derive_one = lambda group_index, target_iter: (
+            candidate,
+            False,
+            False,
+        )
         assert allocator._reserve_target_iteration("t", 1, None) == (True, True)
         assert allocator.pending == []
         assert allocator.target_to_first_candidate["t"] == (1, candidate)
@@ -766,20 +787,22 @@ class TestSourceInfluenceTargetId:
     def test_uses_first_ingress_option(self) -> None:
         ref = EntryPointResourceReference(kind="entry_point", entry_point_id=_EP_ID)
         chain = self._chain()
-        assert (
-            _source_influence_target_id(self._link(), chain, ((ref,),), 0) == _EP_ID
-        )
+        assert _source_influence_target_id(self._link(), chain, ((ref,),), 0) == _EP_ID
 
     def test_uses_explicit_allowed_ids_without_options(self) -> None:
         allowed = ("int:v1:" + "b" * 32,)
-        chain = self._chain(SimpleNamespace(slot_id="slot", allowed_resource_ids=allowed))
+        chain = self._chain(
+            SimpleNamespace(slot_id="slot", allowed_resource_ids=allowed)
+        )
         assert (
             _source_influence_target_id(self._link("slot"), chain, (), 0) == allowed[0]
         )
 
     def test_empty_option_set_falls_back_to_allowed_ids(self) -> None:
         allowed = ("int:v1:" + "b" * 32,)
-        chain = self._chain(SimpleNamespace(slot_id="slot", allowed_resource_ids=allowed))
+        chain = self._chain(
+            SimpleNamespace(slot_id="slot", allowed_resource_ids=allowed)
+        )
         assert (
             _source_influence_target_id(self._link("slot"), chain, ((),), 0)
             == allowed[0]
@@ -847,8 +870,9 @@ class TestLeafBindingChecks:
         assert self._check_bindings(action=action, ref=ref, role="resource") == []
 
     def test_tool_binding_flags_mismatched_integration(self) -> None:
-        action = ToolInvocationAction(tool_id="tool:v1:" + "c" * 32,
-                                      integration_id=_INT_ID)
+        action = ToolInvocationAction(
+            tool_id="tool:v1:" + "c" * 32, integration_id=_INT_ID
+        )
         ref = IntegrationResourceReference(
             kind="integration", integration_id=_INT_ID_OTHER
         )
@@ -860,8 +884,9 @@ class TestLeafBindingChecks:
         )
 
     def test_tool_binding_accepts_matching_integration(self) -> None:
-        action = ToolInvocationAction(tool_id="tool:v1:" + "c" * 32,
-                                      integration_id=_INT_ID)
+        action = ToolInvocationAction(
+            tool_id="tool:v1:" + "c" * 32, integration_id=_INT_ID
+        )
         ref = IntegrationResourceReference(kind="integration", integration_id=_INT_ID)
         assert self._check_bindings(action=action, ref=ref, role="integration") == []
 
@@ -873,8 +898,9 @@ class TestLeafBindingChecks:
         assert self._check_bindings(action=action, ref=ref, role="integration") == []
 
     def test_tool_binding_ignores_non_integration_role(self) -> None:
-        action = ToolInvocationAction(tool_id="tool:v1:" + "c" * 32,
-                                      integration_id=_INT_ID)
+        action = ToolInvocationAction(
+            tool_id="tool:v1:" + "c" * 32, integration_id=_INT_ID
+        )
         ref = IntegrationResourceReference(
             kind="integration", integration_id=_INT_ID_OTHER
         )
@@ -1047,7 +1073,9 @@ class TestValidateResumeManifestIdentity:
             _validate_resume_manifest_identity(Path(RUN_ID), manifest)
 
     def test_directory_name_mismatch_raises(self) -> None:
-        with pytest.raises(ManifestIntegrityError, match="does not match run directory"):
+        with pytest.raises(
+            ManifestIntegrityError, match="does not match run directory"
+        ):
             _validate_resume_manifest_identity(Path("other-run"), self._manifest())
 
     def test_missing_provenance_raises(self) -> None:
@@ -1075,18 +1103,17 @@ class TestFeatureForScenario:
         first = SimpleNamespace(scenario_id="a")
         second = SimpleNamespace(scenario_id="b")
         resolver = self._resolver(first, second)
-        assert (
-            ManifestInventoryResolver.feature_for_scenario(resolver, "b")
-        ) is second
+        assert (ManifestInventoryResolver.feature_for_scenario(resolver, "b")) is second
 
     def test_returns_none_when_absent(self) -> None:
         resolver = self._resolver(SimpleNamespace(scenario_id="a"))
         assert ManifestInventoryResolver.feature_for_scenario(resolver, "z") is None
 
     def test_returns_none_for_empty_role(self) -> None:
-        assert ManifestInventoryResolver.feature_for_scenario(
-            self._resolver(), "a"
-        ) is None
+        assert (
+            ManifestInventoryResolver.feature_for_scenario(self._resolver(), "a")
+            is None
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1132,10 +1159,14 @@ class TestSeedMechanismFidelity:
         assert check_seed_mechanism_fidelity("a of and", "anything") is None
 
     def test_matching_keyword_passes(self) -> None:
-        assert check_seed_mechanism_fidelity("Inject Malicious Payload", "payload") is None
+        assert (
+            check_seed_mechanism_fidelity("Inject Malicious Payload", "payload") is None
+        )
 
     def test_missing_keyword_returns_warning(self) -> None:
-        warning = check_seed_mechanism_fidelity("Inject Malicious Payload", "benign text")
+        warning = check_seed_mechanism_fidelity(
+            "Inject Malicious Payload", "benign text"
+        )
         assert warning is not None
 
 
