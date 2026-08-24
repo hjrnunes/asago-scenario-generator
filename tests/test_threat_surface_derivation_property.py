@@ -117,28 +117,27 @@ def surface_fixtures(draw: st.DrawFn) -> SurfaceFixture:
     )
     t_to_atlas: dict[str, list[str]] = {}
     for threat in draw(
-        st.lists(
-            st.sampled_from(_THREAT_POOL), min_size=0, max_size=4, unique=True
-        )
+        st.lists(st.sampled_from(_THREAT_POOL), min_size=0, max_size=4, unique=True)
     ):
         atlas = draw(
-            st.lists(
-                st.sampled_from(_ATLAS_POOL), min_size=1, max_size=2, unique=True
-            )
+            st.lists(st.sampled_from(_ATLAS_POOL), min_size=1, max_size=2, unique=True)
         )
-        t_to_atlas[threat] = atlas
-    t_to_asi = draw(
-        st.lists(
-            st.tuples(st.sampled_from(_THREAT_POOL), st.sampled_from(_ASI_POOL)),
-            min_size=0,
-            max_size=3,
-            unique=True,
+        # Draw each per-threat ATLAS list in canonical order so overlapping
+        # source lists cannot disagree (T1=[X,Y] vs T2=[Y,X] is unsatisfiable
+        # for the "each source list is an ordered subsequence" property).
+        t_to_atlas[threat] = sorted(atlas)
+    t_to_asi = sorted(
+        draw(
+            st.lists(
+                st.tuples(st.sampled_from(_THREAT_POOL), st.sampled_from(_ASI_POOL)),
+                min_size=0,
+                max_size=3,
+                unique=True,
+            )
         )
     )
     t_direct = draw(
-        st.lists(
-            st.sampled_from(_THREAT_POOL), min_size=0, max_size=3, unique=True
-        )
+        st.lists(st.sampled_from(_THREAT_POOL), min_size=0, max_size=3, unique=True)
     )
 
     # Gating inputs: independent KC-code choices for mapping and profile.
@@ -147,9 +146,7 @@ def surface_fixtures(draw: st.DrawFn) -> SurfaceFixture:
     )
     kc_mapping = {
         code: draw(
-            st.lists(
-                st.sampled_from(_THREAT_POOL), min_size=0, max_size=2, unique=True
-            )
+            st.lists(st.sampled_from(_THREAT_POOL), min_size=0, max_size=2, unique=True)
         )
         for code in mapping_codes
     }
@@ -159,9 +156,7 @@ def surface_fixtures(draw: st.DrawFn) -> SurfaceFixture:
 
     patterns: dict[str, str] = {}
     for threat in draw(
-        st.lists(
-            st.sampled_from(_THREAT_POOL), min_size=0, max_size=2, unique=True
-        )
+        st.lists(st.sampled_from(_THREAT_POOL), min_size=0, max_size=2, unique=True)
     ):
         for n in range(draw(st.integers(min_value=1, max_value=2))):
             patterns[f"AP-{threat}-{n:02d}"] = threat
@@ -203,9 +198,7 @@ def _write_risk_cards(path: Path, fixture: SurfaceFixture) -> None:
         }
         for risk_id in fixture.risks
     ]
-    path.write_text(
-        json.dumps({"risks": risks}) + "\n", encoding="utf-8"
-    )
+    path.write_text(json.dumps({"risks": risks}) + "\n", encoding="utf-8")
 
 
 def _write_sssom(path: Path, fixture: SurfaceFixture) -> None:
@@ -336,9 +329,7 @@ def _first_seen_union(lists: list[list[str]]) -> list[str]:
 
 def _kc6_gate_off(fixture: SurfaceFixture) -> bool:
     """True when the KC6 ATLAS gate removes gated techniques."""
-    mapping_declares_kc6 = any(
-        code.startswith("KC6.") for code in fixture.kc_mapping
-    )
+    mapping_declares_kc6 = any(code.startswith("KC6.") for code in fixture.kc_mapping)
     profile_has_kc6 = any(code.startswith("KC6.") for code in fixture.profile_kcs)
     return not (mapping_declares_kc6 and profile_has_kc6)
 
@@ -515,7 +506,9 @@ def test_atlas_and_asi_lists_preserve_source_order(fixture: SurfaceFixture):
                 atlas_source = [
                     a for a in atlas_source if a not in _KC6_GATED_TECHNIQUES
                 ]
-            restricted = [a for a in entry.atlas_technique_ids if a in set(atlas_source)]
+            restricted = [
+                a for a in entry.atlas_technique_ids if a in set(atlas_source)
+            ]
             assert restricted == _first_seen_union([atlas_source])
             asi_source = asi_by_threat.get(threat, [])
             restricted_asi = [a for a in entry.owasp_asi_ids if a in set(asi_source)]
