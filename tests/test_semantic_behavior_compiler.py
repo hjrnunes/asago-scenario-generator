@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from asago_scenario_generator.models.scenario import BehaviorAction
 from asago_scenario_generator.pipeline.generate.behavior_semantics import (
     ActionHandle,
@@ -29,9 +31,7 @@ def _context() -> BehaviorCompilationContext:
                     source_leaf_id="n1.1",
                     gherkin_keyword="When",
                     text="canonical ingress display",
-                    realizations=make_realizations(
-                        ("step.1",), action_kind="deliver"
-                    ),
+                    realizations=make_realizations(("step.1",), action_kind="deliver"),
                 ),
                 parameters=(
                     BehaviorParameterSpec(
@@ -146,8 +146,8 @@ def test_behavior_draft_reports_unknown_duplicate_and_missing_handles() -> None:
 
 def test_behavior_draft_rejects_invalid_example_type_before_compilation() -> None:
     draft = _valid_draft()
-    bad_step = draft.scenarios[0].steps[0].model_copy(
-        update={"examples": {"payload": 42}}
+    bad_step = (
+        draft.scenarios[0].steps[0].model_copy(update={"examples": {"payload": 42}})
     )
     draft = draft.model_copy(
         update={
@@ -165,6 +165,292 @@ def test_behavior_draft_rejects_invalid_example_type_before_compilation() -> Non
     assert any(item.code == "invalid_example_type" for item in validation.violations)
 
 
+def test_behavior_draft_rejects_reordered_actions_without_coverage_noise() -> None:
+    draft = _valid_draft()
+    reordered = draft.model_copy(
+        update={
+            "scenarios": (
+                draft.scenarios[0].model_copy(
+                    update={
+                        "steps": (
+                            draft.scenarios[0].steps[1],
+                            draft.scenarios[0].steps[0],
+                            draft.scenarios[0].steps[2],
+                        )
+                    }
+                ),
+            )
+        }
+    )
+
+    validation = validate_behavior_draft(reordered, _context())
+
+    assert not validation.accepted
+    assert [(v.code, v.handles) for v in validation.violations] == [
+        ("illegal_order", ("a1", "a0")),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("kind", "handle"),
+    [("action", "p0"), ("assertion", "a0")],
+)
+def test_behavior_draft_rejects_handle_kind_mismatch(kind: str, handle: str) -> None:
+    draft = _valid_draft()
+    mismatched = (
+        draft.scenarios[0]
+        .steps[1]
+        .model_copy(
+            update={"kind": kind, "handle": handle, "text": "wrongly typed step"}
+        )
+    )
+    draft = draft.model_copy(
+        update={
+            "scenarios": (
+                draft.scenarios[0].model_copy(
+                    update={
+                        "steps": (
+                            draft.scenarios[0].steps[0],
+                            mismatched,
+                            draft.scenarios[0].steps[2],
+                        )
+                    }
+                ),
+            )
+        }
+    )
+
+    validation = validate_behavior_draft(draft, _context())
+
+    assert not validation.accepted
+    assert any(
+        v.code == "handle_kind_mismatch" and v.handles == (handle,)
+        for v in validation.violations
+    )
+
+
+def test_behavior_draft_rejects_unknown_example_parameter() -> None:
+    draft = _valid_draft()
+    bad_step = (
+        draft.scenarios[0]
+        .steps[0]
+        .model_copy(update={"examples": {"payload": "x", "bogus": "y"}})
+    )
+    draft = draft.model_copy(
+        update={
+            "scenarios": (
+                draft.scenarios[0].model_copy(
+                    update={"steps": (bad_step, *draft.scenarios[0].steps[1:])}
+                ),
+            )
+        }
+    )
+
+    validation = validate_behavior_draft(draft, _context())
+
+    assert not validation.accepted
+    assert any(
+        v.code == "unknown_example_parameter" and v.handles == ("a0",)
+        for v in validation.violations
+    )
+
+
+def test_behavior_draft_rejects_missing_required_example_parameter() -> None:
+    draft = _valid_draft()
+    bad_step = draft.scenarios[0].steps[0].model_copy(update={"examples": {}})
+    draft = draft.model_copy(
+        update={
+            "scenarios": (
+                draft.scenarios[0].model_copy(
+                    update={"steps": (bad_step, *draft.scenarios[0].steps[1:])}
+                ),
+            )
+        }
+    )
+
+    validation = validate_behavior_draft(draft, _context())
+
+    assert not validation.accepted
+    assert any(
+        v.code == "missing_example_parameter" and v.handles == ("a0",)
+        for v in validation.violations
+    )
+
+
+def _typed_context() -> BehaviorCompilationContext:
+    return BehaviorCompilationContext(
+        action_handles=(
+            ActionHandle(
+                handle="a0",
+                action=BehaviorAction(
+                    action_id="ba-n1.1",
+                    projected_step_ids=("step.1",),
+                    source_leaf_id="n1.1",
+                    gherkin_keyword="When",
+                    text="run the typed interaction",
+                    realizations=make_realizations(("step.1",), action_kind="deliver"),
+                ),
+                parameters=(
+                    BehaviorParameterSpec(
+                        name="count", value_type="integer", required=True
+                    ),
+                    BehaviorParameterSpec(
+                        name="ratio", value_type="number", required=True
+                    ),
+                    BehaviorParameterSpec(
+                        name="enabled", value_type="boolean", required=True
+                    ),
+                    BehaviorParameterSpec(
+                        name="label", value_type="string", required=True
+                    ),
+                ),
+            ),
+        ),
+        assertion_handles=(
+            AssertionHandle(
+                handle="p0",
+                assertion_id="assert-step.1-post.1",
+                source_step_id="step.1",
+                postcondition_id="post.1",
+                description="the typed outcome",
+            ),
+        ),
+    )
+
+
+def test_behavior_draft_accepts_and_renders_typed_example_values() -> None:
+    draft = BehaviorDraftV2(
+        scenarios=(
+            BehaviorScenarioDraft(
+                title="Typed interaction",
+                steps=(
+                    BehaviorDraftStep(
+                        kind="action",
+                        handle="a0",
+                        text="run the typed interaction",
+                        examples={
+                            "count": 3,
+                            "ratio": 1.5,
+                            "enabled": True,
+                            "label": "first",
+                        },
+                    ),
+                    BehaviorDraftStep(
+                        kind="assertion",
+                        handle="p0",
+                        text="observe the typed outcome",
+                    ),
+                ),
+            ),
+        )
+    )
+
+    validation = validate_behavior_draft(draft, _typed_context())
+
+    assert validation.accepted
+    behavior = compile_behavior_draft(draft, _typed_context())
+    assert "count=3" in behavior.actions[0].text
+    assert "ratio=1.5" in behavior.actions[0].text
+    assert "enabled=true" in behavior.actions[0].text
+    assert 'label="first"' in behavior.actions[0].text
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("count", True),
+        ("ratio", "1.5"),
+        ("enabled", "yes"),
+        ("label", 42),
+    ],
+)
+def test_behavior_draft_rejects_mistyped_example_values(
+    name: str, value: object
+) -> None:
+    valid = {"count": 3, "ratio": 1.5, "enabled": True, "label": "first"}
+    draft = BehaviorDraftV2(
+        scenarios=(
+            BehaviorScenarioDraft(
+                title="Typed interaction",
+                steps=(
+                    BehaviorDraftStep(
+                        kind="action",
+                        handle="a0",
+                        text="run the typed interaction",
+                        examples={**valid, name: value},
+                    ),
+                    BehaviorDraftStep(
+                        kind="assertion",
+                        handle="p0",
+                        text="observe the typed outcome",
+                    ),
+                ),
+            ),
+        )
+    )
+
+    validation = validate_behavior_draft(draft, _typed_context())
+
+    assert not validation.accepted
+    assert any(
+        v.code == "invalid_example_type" and v.handles == ("a0",)
+        for v in validation.violations
+    )
+
+
+def test_behavior_draft_rejects_assertion_without_single_canonical_owner() -> None:
+    context = BehaviorCompilationContext(
+        action_handles=(
+            ActionHandle(
+                handle="a0",
+                action=BehaviorAction(
+                    action_id="ba-n1.1",
+                    projected_step_ids=("step.1",),
+                    source_leaf_id="n1.1",
+                    gherkin_keyword="When",
+                    text="canonical ingress display",
+                    realizations=make_realizations(("step.1",), action_kind="deliver"),
+                ),
+            ),
+        ),
+        assertion_handles=(
+            AssertionHandle(
+                handle="p0",
+                assertion_id="assert-step.9-post.9",
+                source_step_id="step.9",
+                postcondition_id="post.9",
+                description="an outcome with no owning action",
+            ),
+        ),
+    )
+    draft = BehaviorDraftV2(
+        scenarios=(
+            BehaviorScenarioDraft(
+                title="Orphaned assertion",
+                steps=(
+                    BehaviorDraftStep(
+                        kind="action",
+                        handle="a0",
+                        text="enter through chat",
+                    ),
+                    BehaviorDraftStep(
+                        kind="assertion",
+                        handle="p0",
+                        text="observe the orphaned outcome",
+                    ),
+                ),
+            ),
+        )
+    )
+
+    validation = validate_behavior_draft(draft, context)
+
+    assert not validation.accepted
+    assert [(v.code, v.handles) for v in validation.violations] == [
+        ("invalid_assertion_owner", ("p0",)),
+    ]
+
+
 def test_behavior_compiler_preserves_authored_interactions_and_grouping() -> None:
     behavior = compile_behavior_draft(_valid_draft(), _context())
 
@@ -176,9 +462,16 @@ def test_behavior_compiler_preserves_authored_interactions_and_grouping() -> Non
     assert behavior.assertions[0].assertion_id == "assert-step.2-post.2"
     assert behavior.assertions[0].projected_postcondition_ids == ("post.2",)
     assert behavior.scenarios[0].title == "Injected payload changes the answer"
-    assert behavior.scenarios[0].step_ids == ("ba-n1.1", "ba-n1.2", "assert-step.2-post.2")
+    assert behavior.scenarios[0].step_ids == (
+        "ba-n1.1",
+        "ba-n1.2",
+        "assert-step.2-post.2",
+    )
     assert "Scenario: Injected payload changes the answer" in behavior.gherkin_text
-    assert "When the attacker submits a crafted checkout instruction" in behavior.gherkin_text
+    assert (
+        "When the attacker submits a crafted checkout instruction"
+        in behavior.gherkin_text
+    )
     assert "Then the response approves the unsafe checkout" in behavior.gherkin_text
 
 
@@ -223,8 +516,12 @@ def test_behavior_compiler_owns_zone_annotation() -> None:
         update={"action_handles": (context.action_handles[0], zoned_action)}
     )
     draft = _valid_draft()
-    zoned_step = draft.scenarios[0].steps[1].model_copy(
-        update={"text": "the model follows the injected instruction (reasoning)"}
+    zoned_step = (
+        draft.scenarios[0]
+        .steps[1]
+        .model_copy(
+            update={"text": "the model follows the injected instruction (reasoning)"}
+        )
     )
     draft = draft.model_copy(
         update={
@@ -269,10 +566,18 @@ def test_projected_provider_path_requests_and_compiles_behavior_draft() -> None:
             BehaviorScenarioDraft(
                 title="Exercise the projected attack",
                 steps=(
-                    BehaviorDraftStep(kind="action", handle="a0", text="enter through chat"),
-                    BehaviorDraftStep(kind="action", handle="a1", text="change model state"),
-                    BehaviorDraftStep(kind="action", handle="a2", text="produce the impact"),
-                    BehaviorDraftStep(kind="assertion", handle="p0", text="the impact is observable"),
+                    BehaviorDraftStep(
+                        kind="action", handle="a0", text="enter through chat"
+                    ),
+                    BehaviorDraftStep(
+                        kind="action", handle="a1", text="change model state"
+                    ),
+                    BehaviorDraftStep(
+                        kind="action", handle="a2", text="produce the impact"
+                    ),
+                    BehaviorDraftStep(
+                        kind="assertion", handle="p0", text="the impact is observable"
+                    ),
                 ),
             ),
         )
