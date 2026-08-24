@@ -1,0 +1,168 @@
+"""Then step handlers asserting the run summary and funnel."""
+
+from __future__ import annotations
+
+import re
+from typing import Any
+from runtime_world import World
+from . import FEATURE_ID
+from . import _html, _section_region, _stats, _resolve
+
+
+def _h_ts_run_summary_present(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the report contains a "Run Summary" section."""
+    return _resolve("<h2>Run Summary</h2>" in _html(world), "Run Summary missing")
+
+
+def _h_ts_run_summary_absent(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the report contains no "Run Summary" section."""
+    return _resolve("<h2>Run Summary</h2>" not in _html(world), "Run Summary rendered")
+
+
+def _h_ts_sidebar_no_link(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Handle: the sidebar shows no link to the "Run Summary" section."""
+    return _resolve(
+        '<a href="#sec-run-summary">' not in _html(world),
+        "Run Summary sidebar link rendered",
+    )
+
+
+def _h_ts_funnel_stats(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Handle: the funnel shows "N" <Label>, ... ."""
+    match = re.search(r"the funnel shows (.*)$", text)
+    if not match:
+        return False, f"Could not parse funnel assertion: {text}"
+    pairs = re.findall(r'"(\d+)" ([^,]+?)(?:,| and |$)', match.group(1))
+    expected = {label.strip(): int(count) for count, label in pairs}
+    region = _section_region(_html(world), "sec-run-summary")
+    stats = _stats(region)
+    ok = all(stats.get(label) == count for label, count in expected.items())
+    return _resolve(ok, f"funnel stats={stats}")
+
+
+def _h_ts_run_summary_stats(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the run summary shows "F" Failed, "R" Rejected, and the rejection rate "P"."""
+    match = re.search(
+        r'the run summary shows "(\d+)" Failed, "(\d+)" Rejected, and the '
+        r'rejection rate "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse run-summary stats: {text}"
+    failed, rejected, rate = match.groups()
+    region = _section_region(_html(world), "sec-run-summary")
+    stats = _stats(region)
+    ok = stats.get("Failed") == int(failed) and stats.get("Rejected") == int(rejected)
+    ok = ok and f">{rate}</span>" in region
+    return _resolve(ok, f"stats={stats} rate={rate}")
+
+
+def _h_ts_run_summary_duration(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the run summary shows the duration "D"."""
+    match = re.search(r'the run summary shows the duration "([^"]+)"', text)
+    if not match:
+        return False, f"Could not parse duration assertion: {text}"
+    return _resolve(
+        match.group(1) in _section_region(_html(world), "sec-run-summary"),
+        f"duration={match.group(1)!r}",
+    )
+
+
+def _h_ts_run_summary_config(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the run summary shows model "M", temperature "T", start "S", and end "E"."""
+    match = re.search(
+        r'the run summary shows model "([^"]+)", temperature "([^"]+)", '
+        r'start "([^"]+)", and end "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse run-summary config: {text}"
+    model, temperature, start, end = match.groups()
+    region = _section_region(_html(world), "sec-run-summary")
+    ok = f">{model}</div>" in region and f">{temperature}</div>" in region
+    ok = ok and start in region and end in region
+    return _resolve(ok, f"config model={model} temperature={temperature}")
+
+
+def _h_ts_rerun_summary_absent_values(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the run summary shows model "unknown", temperature "N/A", start "N/A", and end "N/A"."""
+    region = _section_region(_html(world), "sec-run-summary")
+    ok = ">unknown</div>" in region
+    ok = ok and region.count(">N/A</div>") >= 3
+    return _resolve(
+        ok, f"absent values region has {region.count('>N/A</div>')} N/A divs"
+    )
+
+
+def _h_ts_rejection_rate_na(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the run summary shows the rejection rate "N/A"."""
+    return _resolve(
+        ">N/A</span>" in _section_region(_html(world), "sec-run-summary"),
+        "rejection rate N/A missing",
+    )
+
+
+def register(api: Any) -> None:
+    # --- Run summary Then steps ---
+    api.register(
+        'the report contains a "Run Summary" section',
+        _h_ts_run_summary_present,
+        source_order=8049,
+    )
+    api.register(
+        'the report contains no "Run Summary" section',
+        _h_ts_run_summary_absent,
+        source_order=8050,
+    )
+    api.register(
+        'the sidebar shows no link to the "Run Summary" section',
+        _h_ts_sidebar_no_link,
+        source_order=8051,
+    )
+    api.register(
+        "the funnel shows .+",
+        _h_ts_funnel_stats,
+        source_order=8052,
+    )
+    api.register(
+        'the run summary shows "(\\d+)" Failed, "(\\d+)" Rejected, and the rejection rate "([^"]+)"',
+        _h_ts_run_summary_stats,
+        source_order=8053,
+    )
+    api.register(
+        'the run summary shows the duration "([^"]+)"',
+        _h_ts_run_summary_duration,
+        source_order=8054,
+    )
+    api.register(
+        'the run summary shows model "([^"]+)", temperature "([^"]+)", start "([^"]+)", and end "([^"]+)"',
+        _h_ts_run_summary_config,
+        source_order=8055,
+    )
+    api.register(
+        'the run summary shows model "unknown", temperature "N/A", start "N/A", and end "N/A"',
+        _h_ts_rerun_summary_absent_values,
+        source_order=8056,
+    )
+    api.register(
+        'the run summary shows the rejection rate "N/A"',
+        _h_ts_rejection_rate_na,
+        source_order=8057,
+    )
+
+
+__all__ = ["FEATURE_ID", "register"]
