@@ -132,425 +132,619 @@ def _check_step_semantic_compatibility(
     """
     violations: list[ProjectionTraceabilityViolation] = []
     tree = envelope.attack_tree
+    step_by_id, boundary_by_id = _step_semantic_context(block)
+    leaf_by_id = _semantic_leaf_by_id(tree)
+    binding_by_slot = _binding_by_slot(block)
 
+    if tree is not None:
+        _check_tree_leaf_semantics(
+            tree,
+            step_by_id,
+            boundary_by_id,
+            binding_by_slot,
+            violations,
+        )
+    _check_narrative_step_semantics(
+        envelope.narrative, step_by_id, binding_by_slot, violations
+    )
+    _check_behavior_action_semantics(
+        envelope, step_by_id, leaf_by_id, binding_by_slot, violations
+    )
+
+    return violations
+
+
+def _step_semantic_context(
+    block: ProjectionEnvelopeBlock,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return step_id and boundary_position lookup maps for the chain."""
     chain = block.projection.source_chain
-    step_by_id = {s.step_id: s for s in chain.steps}
-    boundary_by_id = {s.step_id: s.boundary_position for s in chain.steps}
-    _leaf_by_id: dict[str, Any] = {}
-    if tree is not None:
-        _leaf_by_id = {leaf.id: leaf for leaf in _iter_leaves(tree.root)}
-    binding_by_slot = {b.slot_id: b.resource_ref for b in block.projection.bindings}
+    return (
+        {s.step_id: s for s in chain.steps},
+        {s.step_id: s.boundary_position for s in chain.steps},
+    )
 
-    # --- Tree leaf semantic compatibility ---
-    if tree is not None:
-        for leaf in _iter_leaves(tree.root):
-            # External preconditions may map only outside-boundary steps.
-            # Internal and crossing external leaves must remain unmapped.
-            action = leaf.action
-            external_mapping_is_invalid = False
-            if action is not None and action.kind == "external_precondition":
-                external_mapping_is_invalid = any(
-                    boundary_by_id.get(sid) != "outside"
-                    for sid in leaf.projected_step_ids
+
+def _semantic_leaf_by_id(tree: Any) -> dict[str, Any]:
+    """Return leaf_id to leaf lookups for the tree, if any."""
+    if tree is None:
+        return {}
+    return {leaf.id: leaf for leaf in _iter_leaves(tree.root)}
+
+
+def _binding_by_slot(block: ProjectionEnvelopeBlock) -> dict[str, Any]:
+    """Return slot_id to resource reference lookups for the projection."""
+    return {b.slot_id: b.resource_ref for b in block.projection.bindings}
+
+
+def _check_tree_leaf_semantics(
+    tree: Any,
+    step_by_id: dict[str, Any],
+    boundary_by_id: dict[str, Any],
+    binding_by_slot: dict[str, Any],
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Run every tree-leaf semantic compatibility check."""
+    for leaf in _iter_leaves(tree.root):
+        _check_tree_leaf_external_precondition(leaf, boundary_by_id, violations)
+        if not leaf.projected_step_ids:
+            continue
+        for sid in leaf.projected_step_ids:
+            _check_tree_leaf_step_mapping(
+                leaf, sid, step_by_id, binding_by_slot, violations
+            )
+
+
+def _external_precondition_mapping_invalid(
+    leaf: Any,
+    boundary_by_id: dict[str, Any],
+) -> bool:
+    """True when an external precondition leaf maps non-outside steps or
+    carries realizations without step IDs."""
+    if any(boundary_by_id.get(sid) != "outside" for sid in leaf.projected_step_ids):
+        return True
+    return bool(leaf.realizations) and not leaf.projected_step_ids
+
+
+def _check_tree_leaf_external_precondition(
+    leaf: Any,
+    boundary_by_id: dict[str, Any],
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Flag external precondition leaves with invalid mappings."""
+    action = leaf.action
+    if action is None or action.kind != "external_precondition":
+        return
+    if _external_precondition_mapping_invalid(leaf, boundary_by_id):
+        violations.append(
+            ProjectionTraceabilityViolation(
+                code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
+                stage=ProjectionTraceabilityStage.attack_tree,
+                detail=(
+                    f"external precondition leaf '{leaf.id}' has "
+                    f"{len(leaf.projected_step_ids)} projected_step_ids "
+                    f"and {len(leaf.realizations)} realization records "
+                    f"— only outside-boundary external preconditions "
+                    f"may be mapped"
+                ),
+                element_id=leaf.id,
+                projected_step_id="",
+            )
+        )
+
+
+def _check_leaf_action_kind_compat(
+    leaf: Any,
+    action: Any,
+    step: Any,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Flag leaf action kinds incompatible with the projected action_kind."""
+    compatible_kinds = _STEP_TO_LEAF_ACTION_COMPAT.get(step.action_kind, set())
+    if action.kind not in compatible_kinds:
+        violations.append(
+            ProjectionTraceabilityViolation(
+                code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
+                stage=ProjectionTraceabilityStage.attack_tree,
+                detail=(
+                    f"tree leaf '{leaf.id}' action kind '{action.kind}' "
+                    f"is incompatible with projected step "
+                    f"'{step.step_id}' action_kind '{step.action_kind}' "
+                    f"(expected one of {sorted(compatible_kinds)})"
+                ),
+                element_id=leaf.id,
+                projected_step_id=step.step_id,
+            )
+        )
+
+
+def _boundary_zone_summary(valid_zones: Any) -> Any:
+    """Return the sorted non-null zone list, or the literal 'None' string."""
+    return sorted(v for v in valid_zones if v is not None) or "None"
+
+
+def _check_leaf_boundary_compat(
+    leaf: Any,
+    action: Any,
+    step: Any,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Flag zone/boundary incompatibilities for one leaf-step mapping."""
+    valid_zones = _BOUNDARY_COMPAT.get(step.boundary_position, set())
+    external_impact = isinstance(action, ImpactAction) and action.boundary == "external"
+    if external_impact:
+        # External impacts occur outside the assessed boundary,
+        # so the leaf zone is null by model contract and the
+        # generic zone check does not apply.  Every mapped
+        # projected step must itself be outside-boundary; a
+        # non-outside mapping is a boundary semantic violation
+        # — the step ID is preserved, never removed or remapped.
+        if step.boundary_position != "outside":
+            violations.append(
+                ProjectionTraceabilityViolation(
+                    code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
+                    stage=ProjectionTraceabilityStage.attack_tree,
+                    detail=(
+                        f"tree leaf '{leaf.id}' external impact "
+                        f"maps non-outside projected step "
+                        f"'{step.step_id}' (boundary_position "
+                        f"'{step.boundary_position}') — boundary "
+                        f"semantic violation"
+                    ),
+                    element_id=leaf.id,
+                    projected_step_id=step.step_id,
                 )
-            if (
-                action is not None
-                and action.kind == "external_precondition"
-                and (
-                    external_mapping_is_invalid
-                    or (leaf.realizations and not leaf.projected_step_ids)
-                )
-            ):
-                violations.append(
-                    ProjectionTraceabilityViolation(
-                        code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
-                        stage=ProjectionTraceabilityStage.attack_tree,
-                        detail=(
-                            f"external precondition leaf '{leaf.id}' has "
-                            f"{len(leaf.projected_step_ids)} projected_step_ids "
-                            f"and {len(leaf.realizations)} realization records "
-                            f"— only outside-boundary external preconditions "
-                            f"may be mapped"
-                        ),
-                        element_id=leaf.id,
-                        projected_step_id="",
-                    )
-                )
-            if not leaf.projected_step_ids:
-                continue
-            for sid in leaf.projected_step_ids:
-                step = step_by_id.get(sid)
-                if step is None:
-                    continue  # caught by unprojected step check
+            )
+    elif leaf.zone not in valid_zones:
+        violations.append(
+            ProjectionTraceabilityViolation(
+                code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
+                stage=ProjectionTraceabilityStage.attack_tree,
+                detail=(
+                    f"tree leaf '{leaf.id}' zone '{leaf.zone}' is "
+                    f"incompatible with projected step "
+                    f"'{step.step_id}' boundary_position "
+                    f"'{step.boundary_position}' (expected one of "
+                    f"{_boundary_zone_summary(valid_zones)})"
+                ),
+                element_id=leaf.id,
+                projected_step_id=step.step_id,
+            )
+        )
 
-                action = leaf.action
-                if action is None:
-                    continue
 
-                # --- Action kind compatibility ---
-                compatible_kinds = _STEP_TO_LEAF_ACTION_COMPAT.get(
-                    step.action_kind, set()
-                )
-                if action.kind not in compatible_kinds:
-                    violations.append(
-                        ProjectionTraceabilityViolation(
-                            code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
-                            stage=ProjectionTraceabilityStage.attack_tree,
-                            detail=(
-                                f"tree leaf '{leaf.id}' action kind '{action.kind}' "
-                                f"is incompatible with projected step "
-                                f"'{step.step_id}' action_kind '{step.action_kind}' "
-                                f"(expected one of {sorted(compatible_kinds)})"
-                            ),
-                            element_id=leaf.id,
-                            projected_step_id=step.step_id,
-                        )
-                    )
+def _check_leaf_executor_role_compat(
+    leaf: Any,
+    action: Any,
+    step: Any,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Flag leaf action kinds incompatible with the projected executor role."""
+    compatible_role_kinds = _EXECUTOR_ROLE_TO_LEAF_COMPAT.get(step.executor_role, set())
+    if action.kind not in compatible_role_kinds:
+        violations.append(
+            ProjectionTraceabilityViolation(
+                code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
+                stage=ProjectionTraceabilityStage.attack_tree,
+                detail=(
+                    f"tree leaf '{leaf.id}' action kind '{action.kind}' "
+                    f"is incompatible with projected step "
+                    f"'{step.step_id}' executor_role "
+                    f"'{step.executor_role}' "
+                    f"(expected one of {sorted(compatible_role_kinds)})"
+                ),
+                element_id=leaf.id,
+                projected_step_id=step.step_id,
+            )
+        )
 
-                # --- Boundary/zone compatibility ---
-                valid_zones = _BOUNDARY_COMPAT.get(step.boundary_position, set())
-                external_impact = (
-                    isinstance(action, ImpactAction) and action.boundary == "external"
-                )
-                if external_impact:
-                    # External impacts occur outside the assessed boundary,
-                    # so the leaf zone is null by model contract and the
-                    # generic zone check does not apply.  Every mapped
-                    # projected step must itself be outside-boundary; a
-                    # non-outside mapping is a boundary semantic violation
-                    # — the step ID is preserved, never removed or remapped.
-                    if step.boundary_position != "outside":
-                        violations.append(
-                            ProjectionTraceabilityViolation(
-                                code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
-                                stage=ProjectionTraceabilityStage.attack_tree,
-                                detail=(
-                                    f"tree leaf '{leaf.id}' external impact "
-                                    f"maps non-outside projected step "
-                                    f"'{step.step_id}' (boundary_position "
-                                    f"'{step.boundary_position}') — boundary "
-                                    f"semantic violation"
-                                ),
-                                element_id=leaf.id,
-                                projected_step_id=step.step_id,
-                            )
-                        )
-                elif leaf.zone not in valid_zones:
-                    violations.append(
-                        ProjectionTraceabilityViolation(
-                            code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
-                            stage=ProjectionTraceabilityStage.attack_tree,
-                            detail=(
-                                f"tree leaf '{leaf.id}' zone '{leaf.zone}' is "
-                                f"incompatible with projected step "
-                                f"'{step.step_id}' boundary_position "
-                                f"'{step.boundary_position}' (expected one of "
-                                f"{sorted(v for v in valid_zones if v is not None) or 'None'})"
-                            ),
-                            element_id=leaf.id,
-                            projected_step_id=step.step_id,
-                        )
-                    )
 
-                # --- Executor role compatibility (all roles, 422o.4 blocker #4) ---
-                compatible_role_kinds = _EXECUTOR_ROLE_TO_LEAF_COMPAT.get(
-                    step.executor_role, set()
-                )
-                if action.kind not in compatible_role_kinds:
-                    violations.append(
-                        ProjectionTraceabilityViolation(
-                            code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
-                            stage=ProjectionTraceabilityStage.attack_tree,
-                            detail=(
-                                f"tree leaf '{leaf.id}' action kind '{action.kind}' "
-                                f"is incompatible with projected step "
-                                f"'{step.step_id}' executor_role "
-                                f"'{step.executor_role}' "
-                                f"(expected one of {sorted(compatible_role_kinds)})"
-                            ),
-                            element_id=leaf.id,
-                            projected_step_id=step.step_id,
-                        )
-                    )
+def _check_leaf_produced_effect_compat(
+    leaf: Any,
+    action: Any,
+    step: Any,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Flag impact actions on steps that produce no effect.
 
-                # --- Produced effect compatibility (422o.4 blocker #4) ---
-                # Fix: impact + empty produced must fail, not pass.
-                # The previous guard `step_produced_kinds and ...` was falsy
-                # when produced was empty, silently accepting impact actions
-                # on steps that produce nothing.
-                step_produced_kinds = {p.kind for p in step.produced}
-                if step_produced_kinds and action.kind == "ai_system_action":
-                    if "effect" in step_produced_kinds and not step.attacker_controlled:
-                        pass  # already validated by executor role check
-                elif action.kind == "impact" and not any(
-                    p.kind == "effect" for p in step.produced
-                ):
-                    violations.append(
-                        ProjectionTraceabilityViolation(
-                            code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
-                            stage=ProjectionTraceabilityStage.attack_tree,
-                            detail=(
-                                f"tree leaf '{leaf.id}' has impact action but "
-                                f"projected step '{step.step_id}' produces no "
-                                f"effect (produced={sorted(step_produced_kinds)})"
-                            ),
-                            element_id=leaf.id,
-                            projected_step_id=step.step_id,
-                        )
-                    )
+    The original guard only inspected the ai_system_action escalation path
+    (a documented no-op pass); the only observable branch is the impact
+    branch, so it is evaluated directly.
+    """
+    if action.kind != "impact":
+        return
+    if not any(p.kind == "effect" for p in step.produced):
+        step_produced_kinds = {p.kind for p in step.produced}
+        violations.append(
+            ProjectionTraceabilityViolation(
+                code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
+                stage=ProjectionTraceabilityStage.attack_tree,
+                detail=(
+                    f"tree leaf '{leaf.id}' has impact action but "
+                    f"projected step '{step.step_id}' produces no "
+                    f"effect (produced={sorted(step_produced_kinds)})"
+                ),
+                element_id=leaf.id,
+                projected_step_id=step.step_id,
+            )
+        )
 
-                # --- Per-step resource binding validation (422o.4 blocker #4) ---
-                # A leaf's tool_id / integration_id must match the
-                # resource binding for the leaf's mapped projected step.
-                # A resource bound for another step must fail.
-                for link in step.resource_links:
-                    ref = binding_by_slot.get(link.slot_id)
-                    if ref is None:
-                        continue
-                    if isinstance(action, ToolInvocationAction) and link.role in (
-                        "tool_fixture",
-                        "tool",
-                    ):
-                        from asago_scenario_generator.models.attack_pattern import (
-                            ToolResourceReference,
-                        )
 
-                        if (
-                            isinstance(ref, ToolResourceReference)
-                            and action.tool_id != ref.tool_id
-                        ):
-                            violations.append(
-                                ProjectionTraceabilityViolation(
-                                    code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
-                                    stage=ProjectionTraceabilityStage.attack_tree,
-                                    detail=(
-                                        f"tree leaf '{leaf.id}' tool_id "
-                                        f"'{action.tool_id}' does not match "
-                                        f"resource binding for slot "
-                                        f"'{link.slot_id}' on projected "
-                                        f"step '{step.step_id}' "
-                                        f"(expected '{ref.tool_id}')"
-                                    ),
-                                    element_id=leaf.id,
-                                    projected_step_id=step.step_id,
-                                )
-                            )
-                    if isinstance(
-                        action, IntegrationInteractionAction
-                    ) and link.role in (
-                        "integration",
-                        "downstream",
-                    ):
-                        from asago_scenario_generator.models.attack_pattern import (
-                            IntegrationResourceReference,
-                        )
+def _check_leaf_tool_binding(
+    leaf: Any,
+    action: Any,
+    step: Any,
+    link: Any,
+    ref: Any,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Flag tool fixture bindings that disagree with the leaf tool_id."""
+    if not (
+        isinstance(action, ToolInvocationAction)
+        and link.role in ("tool_fixture", "tool")
+    ):
+        return
+    from asago_scenario_generator.models.attack_pattern import (
+        ToolResourceReference,
+    )
 
-                        if (
-                            isinstance(ref, IntegrationResourceReference)
-                            and action.integration_id != ref.integration_id
-                        ):
-                            violations.append(
-                                ProjectionTraceabilityViolation(
-                                    code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
-                                    stage=ProjectionTraceabilityStage.attack_tree,
-                                    detail=(
-                                        f"tree leaf '{leaf.id}' integration_id "
-                                        f"'{action.integration_id}' does not "
-                                        f"match resource binding for slot "
-                                        f"'{link.slot_id}' on projected "
-                                        f"step '{step.step_id}' "
-                                        f"(expected '{ref.integration_id}')"
-                                    ),
-                                    element_id=leaf.id,
-                                    projected_step_id=step.step_id,
-                                )
-                            )
-                    if (
-                        isinstance(action, ToolInvocationAction)
-                        and action.integration_id
-                        and link.role in ("integration", "downstream")
-                    ):
-                        from asago_scenario_generator.models.attack_pattern import (
-                            IntegrationResourceReference,
-                        )
+    if isinstance(ref, ToolResourceReference) and action.tool_id != ref.tool_id:
+        violations.append(
+            ProjectionTraceabilityViolation(
+                code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
+                stage=ProjectionTraceabilityStage.attack_tree,
+                detail=(
+                    f"tree leaf '{leaf.id}' tool_id "
+                    f"'{action.tool_id}' does not match "
+                    f"resource binding for slot "
+                    f"'{link.slot_id}' on projected "
+                    f"step '{step.step_id}' "
+                    f"(expected '{ref.tool_id}')"
+                ),
+                element_id=leaf.id,
+                projected_step_id=step.step_id,
+            )
+        )
 
-                        if (
-                            isinstance(ref, IntegrationResourceReference)
-                            and action.integration_id != ref.integration_id
-                        ):
-                            violations.append(
-                                ProjectionTraceabilityViolation(
-                                    code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
-                                    stage=ProjectionTraceabilityStage.attack_tree,
-                                    detail=(
-                                        f"tree leaf '{leaf.id}' integration_id "
-                                        f"'{action.integration_id}' does not "
-                                        f"match resource binding for slot "
-                                        f"'{link.slot_id}' on projected "
-                                        f"step '{step.step_id}' "
-                                        f"(expected '{ref.integration_id}')"
-                                    ),
-                                    element_id=leaf.id,
-                                    projected_step_id=step.step_id,
-                                )
-                            )
 
-                # --- Per-step realization record reconciliation (tree boundary) ---
-                # Compare each realization record on the tree leaf against the
-                # embedded canonical step.  Same check as narrative/behavior.
-                for realization in leaf.realizations:
-                    if realization.projected_step_id != sid:
-                        continue
-                    violations.extend(
-                        _compare_realization_to_step(
-                            realization,
-                            step,
-                            stage=ProjectionTraceabilityStage.attack_tree,
-                            element_id=leaf.id,
-                            binding_by_slot=binding_by_slot,
-                        )
-                    )
+def _resource_ref_integration_mismatch(ref: Any, integration_id: str) -> bool:
+    """True when a resource reference binds a different integration."""
+    from asago_scenario_generator.models.attack_pattern import (
+        IntegrationResourceReference,
+    )
 
-    # --- Narrative semantic compatibility ---
-    narrative = envelope.narrative
+    return (
+        isinstance(ref, IntegrationResourceReference)
+        and integration_id != ref.integration_id
+    )
+
+
+def _check_leaf_integration_binding(
+    leaf: Any,
+    action: Any,
+    step: Any,
+    link: Any,
+    ref: Any,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Flag integration bindings that disagree with the leaf integration_id."""
+    if not (
+        isinstance(action, IntegrationInteractionAction)
+        and link.role in ("integration", "downstream")
+    ):
+        return
+    if _resource_ref_integration_mismatch(ref, action.integration_id):
+        violations.append(
+            ProjectionTraceabilityViolation(
+                code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
+                stage=ProjectionTraceabilityStage.attack_tree,
+                detail=(
+                    f"tree leaf '{leaf.id}' integration_id "
+                    f"'{action.integration_id}' does not "
+                    f"match resource binding for slot "
+                    f"'{link.slot_id}' on projected "
+                    f"step '{step.step_id}' "
+                    f"(expected '{ref.integration_id}')"
+                ),
+                element_id=leaf.id,
+                projected_step_id=step.step_id,
+            )
+        )
+
+
+def _check_leaf_sourced_tool_binding(
+    leaf: Any,
+    action: Any,
+    step: Any,
+    link: Any,
+    ref: Any,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Flag tool invocation integrations that disagree with bindings."""
+    integration_role = link.role in ("integration", "downstream")
+    if not isinstance(action, ToolInvocationAction):
+        return
+    if not action.integration_id or not integration_role:
+        return
+    if _resource_ref_integration_mismatch(ref, action.integration_id):
+        violations.append(
+            ProjectionTraceabilityViolation(
+                code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
+                stage=ProjectionTraceabilityStage.attack_tree,
+                detail=(
+                    f"tree leaf '{leaf.id}' integration_id "
+                    f"'{action.integration_id}' does not "
+                    f"match resource binding for slot "
+                    f"'{link.slot_id}' on projected "
+                    f"step '{step.step_id}' "
+                    f"(expected '{ref.integration_id}')"
+                ),
+                element_id=leaf.id,
+                projected_step_id=step.step_id,
+            )
+        )
+
+
+def _check_leaf_resource_bindings(
+    leaf: Any,
+    action: Any,
+    step: Any,
+    binding_by_slot: dict[str, Any],
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Run every per-link resource binding check for a leaf-step mapping."""
+    for link in step.resource_links:
+        ref = binding_by_slot.get(link.slot_id)
+        if ref is None:
+            continue
+        _check_leaf_tool_binding(leaf, action, step, link, ref, violations)
+        _check_leaf_integration_binding(leaf, action, step, link, ref, violations)
+        _check_leaf_sourced_tool_binding(leaf, action, step, link, ref, violations)
+
+
+def _check_leaf_realizations(
+    leaf: Any,
+    sid: str,
+    step: Any,
+    binding_by_slot: dict[str, Any],
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Reconcile every tree-leaf realization record with the canonical step."""
+    for realization in leaf.realizations:
+        if realization.projected_step_id != sid:
+            continue
+        violations.extend(
+            _compare_realization_to_step(
+                realization,
+                step,
+                stage=ProjectionTraceabilityStage.attack_tree,
+                element_id=leaf.id,
+                binding_by_slot=binding_by_slot,
+            )
+        )
+
+
+def _check_tree_leaf_step_mapping(
+    leaf: Any,
+    sid: str,
+    step_by_id: dict[str, Any],
+    binding_by_slot: dict[str, Any],
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Run every semantic compatibility check for one leaf-step mapping."""
+    step = step_by_id.get(sid)
+    if step is None:
+        return  # caught by unprojected step check
+    action = leaf.action
+    if action is None:
+        return
+    _check_leaf_action_kind_compat(leaf, action, step, violations)
+    _check_leaf_boundary_compat(leaf, action, step, violations)
+    _check_leaf_executor_role_compat(leaf, action, step, violations)
+    _check_leaf_produced_effect_compat(leaf, action, step, violations)
+    _check_leaf_resource_bindings(leaf, action, step, binding_by_slot, violations)
+    _check_leaf_realizations(leaf, sid, step, binding_by_slot, violations)
+
+
+def _check_narrative_step_mapping(
+    n_step: Any,
+    sid: str,
+    step_by_id: dict[str, Any],
+    binding_by_slot: dict[str, Any],
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Run every semantic compatibility check for one narrative step."""
+    step = step_by_id.get(sid)
+    if step is None:
+        return
+    # Narrative stage boundary rules: outside-boundary steps use the
+    # literal zone 'outside'; inside/crossing steps use an active
+    # Schneider zone (never 'outside').
+    valid_zones = _NARRATIVE_BOUNDARY_ZONE_COMPAT.get(step.boundary_position, set())
+    if n_step.zone not in valid_zones:
+        violations.append(
+            ProjectionTraceabilityViolation(
+                code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
+                stage=ProjectionTraceabilityStage.narrative,
+                detail=(
+                    f"narrative step '{n_step.step_number}' zone "
+                    f"'{n_step.zone}' is incompatible with projected "
+                    f"step '{step.step_id}' boundary_position "
+                    f"'{step.boundary_position}'"
+                ),
+                element_id=str(n_step.step_number),
+                projected_step_id=step.step_id,
+            )
+        )
+    # --- Per-step realization record reconciliation (422o.4 blocker #3) ---
+    # Compare each realization record against the embedded canonical
+    # step.  All non-empty additional fields are checked; the
+    # production path always populates them.
+    for realization in n_step.realizations:
+        if realization.projected_step_id != sid:
+            continue
+        violations.extend(
+            _compare_realization_to_step(
+                realization,
+                step,
+                stage=ProjectionTraceabilityStage.narrative,
+                element_id=str(n_step.step_number),
+                binding_by_slot=binding_by_slot,
+            )
+        )
+
+
+def _check_narrative_step_semantics(
+    narrative: Any,
+    step_by_id: dict[str, Any],
+    binding_by_slot: dict[str, Any],
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Run narrative semantic compatibility for every mapped step."""
     for n_step in narrative.steps:
         if not n_step.projected_step_ids:
             continue
         for sid in n_step.projected_step_ids:
-            step = step_by_id.get(sid)
-            if step is None:
-                continue
-            # Narrative stage boundary rules: outside-boundary steps use the
-            # literal zone 'outside'; inside/crossing steps use an active
-            # Schneider zone (never 'outside').
-            valid_zones = _NARRATIVE_BOUNDARY_ZONE_COMPAT.get(
-                step.boundary_position, set()
+            _check_narrative_step_mapping(
+                n_step, sid, step_by_id, binding_by_slot, violations
             )
-            if n_step.zone not in valid_zones:
-                violations.append(
-                    ProjectionTraceabilityViolation(
-                        code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
-                        stage=ProjectionTraceabilityStage.narrative,
-                        detail=(
-                            f"narrative step '{n_step.step_number}' zone "
-                            f"'{n_step.zone}' is incompatible with projected "
-                            f"step '{step.step_id}' boundary_position "
-                            f"'{step.boundary_position}'"
-                        ),
-                        element_id=str(n_step.step_number),
-                        projected_step_id=step.step_id,
-                    )
-                )
-            # --- Per-step realization record reconciliation (422o.4 blocker #3) ---
-            # Compare each realization record against the embedded canonical
-            # step.  All non-empty additional fields are checked; the
-            # production path always populates them.
-            for realization in n_step.realizations:
-                if realization.projected_step_id != sid:
-                    continue
-                violations.extend(
-                    _compare_realization_to_step(
-                        realization,
-                        step,
-                        stage=ProjectionTraceabilityStage.narrative,
-                        element_id=str(n_step.step_number),
-                        binding_by_slot=binding_by_slot,
-                    )
-                )
 
-    # --- Behavior action semantic compatibility (422o.4 blocker #3) ---
-    # Validate behavior actions against exact requirements and postconditions,
-    # not only projected-step membership.  Check Gherkin keyword matches
-    # canonical action semantics, and compare realization records against
-    # the embedded canonical step.
+
+def _behavior_leaf_kind(leaf_by_id: dict[str, Any], source_leaf_id: str) -> Any:
+    """Return the finalized source leaf's action kind, if any."""
+    source_leaf = leaf_by_id.get(source_leaf_id)
+    if source_leaf is not None and source_leaf.action is not None:
+        return source_leaf.action.kind
+    return None
+
+
+def _behavior_leaf_keywords(leaf_kind: Any) -> set[str]:
+    """Return the Gherkin keyword set owned by a leaf action kind."""
+    if leaf_kind == "external_precondition":
+        return {"Given"}
+    if leaf_kind == "impact":
+        return {"Then"}
+    if leaf_kind is not None:
+        return {"When"}
+    return set()
+
+
+def _check_behavior_keyword_compat(
+    b_action: Any,
+    step: Any,
+    leaf_by_id: dict[str, Any],
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Flag Gherkin keywords outside the leaf- and step-owned sets."""
+    # Phase 3B actions are derived from the finalized leaf.  The
+    # leaf's typed action discriminator owns the eligible Gherkin
+    # keyword; projected action_kind still owns the canonical
+    # realization record checked below.
+    leaf_kind = _behavior_leaf_kind(leaf_by_id, b_action.source_leaf_id)
+    leaf_keywords = _behavior_leaf_keywords(leaf_kind)
+    # Legacy structured envelopes authored actions from projected
+    # action_kind.  Keep those readable while Phase 3B admission
+    # separately enforces the single deterministic leaf keyword.
+    valid_keywords = leaf_keywords | _STEP_ACTION_KIND_TO_GHERKIN.get(
+        step.action_kind, set()
+    )
+    if valid_keywords and b_action.gherkin_keyword not in valid_keywords:
+        violations.append(
+            ProjectionTraceabilityViolation(
+                code=ProjectionTraceabilityViolationCode.postcondition_assertion_mismatch,
+                stage=ProjectionTraceabilityStage.behavior_spec,
+                detail=(
+                    f"behavior action '{b_action.action_id}' "
+                    f"gherkin_keyword '{b_action.gherkin_keyword}' "
+                    f"is incompatible with finalized leaf "
+                    f"'{b_action.source_leaf_id}' action kind "
+                    f"'{leaf_kind}' "
+                    f"(expected one of {sorted(valid_keywords)})"
+                ),
+                element_id=b_action.action_id,
+                projected_step_id=step.step_id,
+            )
+        )
+
+
+def _check_behavior_source_leaf_compat(
+    b_action: Any,
+    sid: str,
+    leaf_by_id: dict[str, Any],
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Flag behavior actions whose source leaf maps a different step."""
+    if not b_action.source_leaf_id:
+        return
+    leaf = leaf_by_id.get(b_action.source_leaf_id)
+    if (
+        leaf is not None
+        and leaf.projected_step_ids
+        and sid not in leaf.projected_step_ids
+    ):
+        violations.append(
+            ProjectionTraceabilityViolation(
+                code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
+                stage=ProjectionTraceabilityStage.behavior_spec,
+                detail=(
+                    f"behavior action '{b_action.action_id}' "
+                    f"maps to step '{sid}' but its "
+                    f"source_leaf_id '{b_action.source_leaf_id}' "
+                    f"maps to {leaf.projected_step_ids}"
+                ),
+                element_id=b_action.action_id,
+                projected_step_id=sid,
+            )
+        )
+
+
+def _check_behavior_action_step(
+    b_action: Any,
+    sid: str,
+    step: Any,
+    leaf_by_id: dict[str, Any],
+    binding_by_slot: dict[str, Any],
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Run every behavior action semantic check for one mapped step."""
+    _check_behavior_keyword_compat(b_action, step, leaf_by_id, violations)
+    _check_behavior_source_leaf_compat(b_action, sid, leaf_by_id, violations)
+    # --- Per-step realization record reconciliation (422o.4 blocker #3) ---
+    for realization in b_action.realizations:
+        if realization.projected_step_id != sid:
+            continue
+        violations.extend(
+            _compare_realization_to_step(
+                realization,
+                step,
+                stage=ProjectionTraceabilityStage.behavior_spec,
+                element_id=b_action.action_id,
+                binding_by_slot=binding_by_slot,
+            )
+        )
+
+
+def _check_behavior_action_semantics(
+    envelope: ScenarioEnvelope,
+    step_by_id: dict[str, Any],
+    leaf_by_id: dict[str, Any],
+    binding_by_slot: dict[str, Any],
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Run behavior action semantic compatibility for every mapped step."""
     from asago_scenario_generator.models.scenario import BehaviorSpec
 
     behavior_spec = envelope.behavior_spec
-    if isinstance(behavior_spec, BehaviorSpec):
-        for b_action in behavior_spec.actions:
-            for sid in b_action.projected_step_ids:
-                step = step_by_id.get(sid)
-                if step is None:
-                    continue  # caught by unprojected step check
-                # Phase 3B actions are derived from the finalized leaf.  The
-                # leaf's typed action discriminator owns the eligible Gherkin
-                # keyword; projected action_kind still owns the canonical
-                # realization record checked below.
-                source_leaf = _leaf_by_id.get(b_action.source_leaf_id)
-                leaf_kind = (
-                    source_leaf.action.kind
-                    if source_leaf is not None and source_leaf.action is not None
-                    else None
-                )
-                leaf_keywords = (
-                    {"Given"}
-                    if leaf_kind == "external_precondition"
-                    else {"Then"}
-                    if leaf_kind == "impact"
-                    else {"When"}
-                    if leaf_kind is not None
-                    else set()
-                )
-                # Legacy structured envelopes authored actions from projected
-                # action_kind.  Keep those readable while Phase 3B admission
-                # separately enforces the single deterministic leaf keyword.
-                valid_keywords = leaf_keywords | _STEP_ACTION_KIND_TO_GHERKIN.get(
-                    step.action_kind, set()
-                )
-                if valid_keywords and b_action.gherkin_keyword not in valid_keywords:
-                    violations.append(
-                        ProjectionTraceabilityViolation(
-                            code=ProjectionTraceabilityViolationCode.postcondition_assertion_mismatch,
-                            stage=ProjectionTraceabilityStage.behavior_spec,
-                            detail=(
-                                f"behavior action '{b_action.action_id}' "
-                                f"gherkin_keyword '{b_action.gherkin_keyword}' "
-                                f"is incompatible with finalized leaf "
-                                f"'{b_action.source_leaf_id}' action kind "
-                                f"'{leaf_kind}' "
-                                f"(expected one of {sorted(valid_keywords)})"
-                            ),
-                            element_id=b_action.action_id,
-                            projected_step_id=step.step_id,
-                        )
-                    )
-                # Behavior action must reference a leaf that maps to the same step.
-                if b_action.source_leaf_id:
-                    leaf = _leaf_by_id.get(b_action.source_leaf_id)
-                    if (
-                        leaf is not None
-                        and leaf.projected_step_ids
-                        and sid not in leaf.projected_step_ids
-                    ):
-                        violations.append(
-                            ProjectionTraceabilityViolation(
-                                code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
-                                stage=ProjectionTraceabilityStage.behavior_spec,
-                                detail=(
-                                    f"behavior action '{b_action.action_id}' "
-                                    f"maps to step '{sid}' but its "
-                                    f"source_leaf_id '{b_action.source_leaf_id}' "
-                                    f"maps to {leaf.projected_step_ids}"
-                                ),
-                                element_id=b_action.action_id,
-                                projected_step_id=sid,
-                            )
-                        )
-                # --- Per-step realization record reconciliation (422o.4 blocker #3) ---
-                for realization in b_action.realizations:
-                    if realization.projected_step_id != sid:
-                        continue
-                    violations.extend(
-                        _compare_realization_to_step(
-                            realization,
-                            step,
-                            stage=ProjectionTraceabilityStage.behavior_spec,
-                            element_id=b_action.action_id,
-                            binding_by_slot=binding_by_slot,
-                        )
-                    )
-
-    return violations
+    if not isinstance(behavior_spec, BehaviorSpec):
+        return
+    for b_action in behavior_spec.actions:
+        for sid in b_action.projected_step_ids:
+            step = step_by_id.get(sid)
+            if step is None:
+                continue  # caught by unprojected step check
+            _check_behavior_action_step(
+                b_action, sid, step, leaf_by_id, binding_by_slot, violations
+            )
 
 
 def _check_behavior_realizations(

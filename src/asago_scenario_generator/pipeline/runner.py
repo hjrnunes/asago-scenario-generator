@@ -7,7 +7,7 @@ import logging
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -104,7 +104,6 @@ from asago_scenario_generator.pipeline.model_configuration import (
     resolve_effective_model_config,
 )
 from asago_scenario_generator.pipeline.projection import (
-    ProjectedCandidate,
     ProjectionReadinessError,
     ProjectionBudget,
     canonical_json_bytes,
@@ -611,19 +610,91 @@ def resume_pipeline(
     structured: bool = False,
 ) -> PipelineResult:
     """Resume exactly one interrupted manifest-v3 run in place."""
-    from asago_scenario_generator.log_config import setup_logging
     from asago_scenario_generator.pipeline.coverage_planning import CoveragePlan
     from asago_scenario_generator.pipeline.persistence import (
         read_coverage_plan,
-        read_finalization_inventory,
-        read_planning_checkpoint_bytes,
-        recover_finalization_journal,
         validate_planning_checkpoint,
     )
     from asago_scenario_generator.pipeline.runner_finalization import (
         run_target_finalization,
     )
 
+    supplied = _resolve_resume_directory(run_dir)
+    manifest = _load_resumable_manifest(supplied)
+    _validate_resume_manifest_identity(supplied, manifest)
+    support = ManifestInventoryResolver(supplied, manifest, check_orphans=False)
+    use_case, profile, threat_surface, planning = _load_resume_support_artifacts(
+        supplied, manifest, support
+    )
+    provenance = manifest.provenance
+    options, persisted_eval = _resume_command_options(provenance)
+    _validate_resume_provenance_inputs(manifest, use_case)
+    _validate_resume_eval_override(eval, persisted_eval)
+    current_hashes = _capture_input_hashes(use_case, *_resume_input_paths(options))
+    _validate_resume_input_hash_drift(current_hashes, provenance.input_hashes)
+
+    taxonomy_resolver = load_taxonomy_resolver()
+    qualification_facts = _resume_qualification_facts(
+        planning, provenance.input_hashes, options
+    )
+    capability_snapshot = capture_capability_snapshot(profile, qualification_facts)
+    trusted_catalog = list(load_attack_patterns().values())
+    durable_plan = read_coverage_plan(supplied)
+    validate_planning_checkpoint(planning, durable_plan)
+    _revalidate_resume_candidates(
+        durable_plan, taxonomy_resolver, capability_snapshot, trusted_catalog
+    )
+    coverage_universe = build_coverage_universe(profile)
+    selection_result, _target_queues, coverage_queues = _hydrate_planning_inputs(
+        planning, durable_plan, coverage_universe
+    )
+
+    _setup_resume_logging(log_level, supplied, structured)
+    persisted_model = provenance.model_config_provenance
+    _validate_resume_model_config(model, base_url, persisted_model)
+    client = _resume_llm_client(base_url, api_key, model, persisted_model)
+    finalization = run_target_finalization(
+        run_dir=supplied,
+        run_id=manifest.run_id,
+        plan=CoveragePlan(
+            schema_version="1",
+            completeness="not_applicable",
+            evidence_refs=[],
+            targets=[],
+        ),
+        profile=profile,
+        client=client,
+        use_case=use_case,
+        taxonomy_resolver=taxonomy_resolver,
+        capability_snapshot=capability_snapshot,
+        trusted_catalog=trusted_catalog,
+        presentation_fallback=persisted_presentation_fallback(options),
+    )
+    durable_plan = finalization.coverage_plan
+    return _complete_v3_run(
+        run_dir=supplied,
+        run_id=manifest.run_id,
+        timestamp_start=manifest.timestamp_start,
+        provenance=manifest.provenance,
+        profile=profile,
+        threat_surface=threat_surface,
+        finalization=finalization,
+        coverage_universe=coverage_universe,
+        stage_ledger=_resume_stage_ledger(planning),
+        selection_result=selection_result,
+        fallback_queues=coverage_queues,
+        projection_limitation_target_ids=set(planning.projection_limitation_target_ids),
+        threats_path=Path(options["threats_path"]),
+        eval_enabled=persisted_eval,
+        seeds=[],
+        filtered_seeds=None,
+        governance_count=len(threat_surface.governance_only),
+        generation_notes=[],
+    )
+
+
+def _resolve_resume_directory(run_dir: Path) -> Path:
+    """Resolve the run directory strictly, or reject the resume."""
     try:
         supplied = Path(run_dir).resolve(strict=True)
     except OSError as exc:
@@ -632,9 +703,19 @@ def resume_pipeline(
         ) from exc
     if not supplied.is_dir():
         raise ManifestIntegrityError("resume requires an existing run directory")
+    return supplied
+
+
+def _load_resumable_manifest(supplied: Path) -> Any:
+    """Load the manifest and require a v3 STARTED status."""
     manifest = load_manifest(supplied, requested_version=MANIFEST_VERSION)
     if manifest.status is not RunStatus.STARTED:
         raise ManifestIntegrityError("only a v3 STARTED run can be resumed")
+    return manifest
+
+
+def _validate_resume_manifest_identity(supplied: Path, manifest: Any) -> None:
+    """Require canonical run_id, matching directory name, and provenance."""
     try:
         validate_generation_run_id(manifest.run_id)
     except ValueError as exc:
@@ -643,32 +724,41 @@ def resume_pipeline(
         raise ManifestIntegrityError("manifest run_id does not match run directory")
     if manifest.provenance is None or manifest.provenance.run_id != manifest.run_id:
         raise ManifestIntegrityError("manifest provenance run_id mismatch")
-    support = ManifestInventoryResolver(supplied, manifest, check_orphans=False)
+
+
+def _load_resume_support_artifacts(
+    supplied: Path,
+    manifest: Any,
+    support: Any,
+) -> tuple[str, CapabilityProfile, ThreatSurface, Any]:
+    """Read and validate the immutable resume support inventory."""
+    from asago_scenario_generator.pipeline.persistence import (
+        read_finalization_inventory,
+        read_planning_checkpoint_bytes,
+        recover_finalization_journal,
+    )
+
     use_entry = support.entry_by_role(ArtifactRole.USE_CASE)
     profile_entry = support.entry_by_role(ArtifactRole.CAPABILITY_PROFILE)
     threat_entry = support.entry_by_role(ArtifactRole.THREAT_SURFACE)
     planning_entry = support.entry_by_role(ArtifactRole.PLANNING_CHECKPOINT)
     if not all((use_entry, profile_entry, threat_entry, planning_entry)):
         raise ManifestIntegrityError("started manifest support inventory is incomplete")
-    use_case = support.read_text(use_entry)  # type: ignore[arg-type]
-    profile = CapabilityProfile.model_validate(support.read_yaml(profile_entry))  # type: ignore[arg-type]
-    threat_surface = ThreatSurface.model_validate(support.read_yaml(threat_entry))  # type: ignore[arg-type]
-    planning = read_planning_checkpoint_bytes(support.read_bytes(planning_entry))  # type: ignore[arg-type]
+    use_case = support.read_text(use_entry)
+    profile = CapabilityProfile.model_validate(support.read_yaml(profile_entry))
+    threat_surface = ThreatSurface.model_validate(support.read_yaml(threat_entry))
+    planning = read_planning_checkpoint_bytes(support.read_bytes(planning_entry))
     recover_finalization_journal(supplied, expected_run_id=manifest.run_id)
     inventory = read_finalization_inventory(supplied)
     if inventory.run_id != manifest.run_id:
         raise ManifestIntegrityError("finalization inventory run_id mismatch")
+    return use_case, profile, threat_surface, planning
 
-    provenance = manifest.provenance
-    if provenance.config_digest != compute_config_digest(provenance.command.options):
-        raise ManifestIntegrityError("resume configuration provenance drift")
-    if provenance.prompt_template_hashes != hash_prompt_templates():
-        raise ManifestIntegrityError("resume prompt template provenance drift")
-    if provenance.input_hashes.use_case_hash != compute_bytes_sha256(
-        use_case.encode("utf-8")
-    ):
-        raise ManifestIntegrityError("resume use-case provenance drift")
 
+def _resume_command_options(
+    provenance: Any,
+) -> tuple[dict[str, Any], bool]:
+    """Extract and validate the persisted command options."""
     options = provenance.command.options
     required_paths = {
         "risk_extraction_path",
@@ -681,24 +771,55 @@ def resume_pipeline(
     persisted_eval = options.get("eval")
     if not isinstance(persisted_eval, bool):
         raise ManifestIntegrityError("resume eval provenance must be boolean")
-    persisted_presentation_fallback = options.get("presentation_fallback", "allow")
-    if persisted_presentation_fallback not in {"allow", "forbid"}:
+    _validate_resume_presentation_fallback(
+        options.get("presentation_fallback", "allow")
+    )
+    _validate_resume_generation_mode(
+        options.get("generation_mode", GenerationMode.COVERAGE.value)
+    )
+    return options, persisted_eval
+
+
+def _validate_resume_presentation_fallback(value: Any) -> None:
+    """Require a valid persisted presentation fallback mode."""
+    if value not in {"allow", "forbid"}:
         raise ManifestIntegrityError(
             "resume presentation fallback provenance is invalid"
         )
-    persisted_generation_mode = options.get(
-        "generation_mode", GenerationMode.COVERAGE.value
-    )
+
+
+def _validate_resume_generation_mode(value: Any) -> None:
+    """Require a valid persisted generation mode."""
     try:
-        GenerationMode(persisted_generation_mode)
+        GenerationMode(value)
     except ValueError as exc:
         raise ManifestIntegrityError(
             "resume generation mode provenance is invalid"
         ) from exc
+
+
+def _validate_resume_provenance_inputs(manifest: Any, use_case: str) -> None:
+    """Require config, prompt-template, and use-case provenance stability."""
+    provenance = manifest.provenance
+    if provenance.config_digest != compute_config_digest(provenance.command.options):
+        raise ManifestIntegrityError("resume configuration provenance drift")
+    if provenance.prompt_template_hashes != hash_prompt_templates():
+        raise ManifestIntegrityError("resume prompt template provenance drift")
+    if provenance.input_hashes.use_case_hash != compute_bytes_sha256(
+        use_case.encode("utf-8")
+    ):
+        raise ManifestIntegrityError("resume use-case provenance drift")
+
+
+def _validate_resume_eval_override(eval: bool | None, persisted_eval: bool) -> None:
+    """Reject eval overrides that contradict the persisted run option."""
     if eval is not None and eval is not persisted_eval:
         raise ManifestIntegrityError("resume eval override conflicts with provenance")
-    current_hashes = _capture_input_hashes(
-        use_case,
+
+
+def _resume_input_paths(options: dict[str, Any]) -> list[Path | None]:
+    """Return the six canonical input paths from persisted options."""
+    return [
         Path(options["risk_extraction_path"]),
         Path(options["sssom_path"]),
         Path(options["cross_taxonomy_path"]),
@@ -709,8 +830,13 @@ def resume_pipeline(
             if options.get("qualification_facts_path")
             else None
         ),
-    )
-    persisted_hashes = provenance.input_hashes
+    ]
+
+
+def _validate_resume_input_hash_drift(
+    current_hashes: Any, persisted_hashes: Any
+) -> None:
+    """Require every canonical input hash to match the persisted hashes."""
     for field in (
         "risk_extraction_hash",
         "sssom_hash",
@@ -728,37 +854,54 @@ def resume_pipeline(
         if getattr(current_hashes, field) != getattr(persisted_hashes, field):
             raise ManifestIntegrityError(f"resume input provenance drift: {field}")
 
-    taxonomy_resolver = load_taxonomy_resolver()
+
+def _validate_resume_facts_absent(planning: Any, persisted_hashes: Any) -> None:
+    """Reject a missing facts path when any fact provenance claims exist."""
+    if (
+        planning.qualification_facts_source is not None
+        or planning.qualification_facts_sha256 is not None
+        or persisted_hashes.qualification_facts_hash is not None
+    ):
+        raise ManifestIntegrityError(
+            "resume qualification facts provenance is inconsistent"
+        )
+
+
+def _parse_resume_facts(planning: Any, persisted_hashes: Any) -> tuple[Any, ...]:
+    """Verify and parse persisted qualification facts when present."""
+    source_bytes = planning.qualification_facts_source.encode("utf-8")
+    if compute_bytes_sha256(source_bytes) != persisted_hashes.qualification_facts_hash:
+        raise ManifestIntegrityError("resume qualification facts provenance drift")
+    try:
+        return _parse_qualification_facts(source_bytes).facts
+    except ValueError as exc:
+        raise ManifestIntegrityError(str(exc)) from exc
+
+
+def _resume_qualification_facts(
+    planning: Any,
+    persisted_hashes: Any,
+    options: dict[str, Any],
+) -> tuple[Any, ...]:
+    """Return parsed qualification facts consistent with persisted provenance."""
     facts_path = options.get("qualification_facts_path")
     if facts_path is None:
-        if (
-            planning.qualification_facts_source is not None
-            or planning.qualification_facts_sha256 is not None
-            or persisted_hashes.qualification_facts_hash is not None
-        ):
-            raise ManifestIntegrityError(
-                "resume qualification facts provenance is inconsistent"
-            )
-        qualification_facts: tuple[EvaluatedFactEvidence, ...] = ()
-    else:
-        if planning.qualification_facts_source is None:
-            raise ManifestIntegrityError(
-                "resume planning checkpoint lacks qualification facts source"
-            )
-        source_bytes = planning.qualification_facts_source.encode("utf-8")
-        if (
-            compute_bytes_sha256(source_bytes)
-            != persisted_hashes.qualification_facts_hash
-        ):
-            raise ManifestIntegrityError("resume qualification facts provenance drift")
-        try:
-            qualification_facts = _parse_qualification_facts(source_bytes).facts
-        except ValueError as exc:
-            raise ManifestIntegrityError(str(exc)) from exc
-    capability_snapshot = capture_capability_snapshot(profile, qualification_facts)
-    trusted_catalog = list(load_attack_patterns().values())
-    durable_plan = read_coverage_plan(supplied)
-    validate_planning_checkpoint(planning, durable_plan)
+        _validate_resume_facts_absent(planning, persisted_hashes)
+        return ()
+    if planning.qualification_facts_source is None:
+        raise ManifestIntegrityError(
+            "resume planning checkpoint lacks qualification facts source"
+        )
+    return _parse_resume_facts(planning, persisted_hashes)
+
+
+def _revalidate_resume_candidates(
+    durable_plan: Any,
+    taxonomy_resolver: Any,
+    capability_snapshot: Any,
+    trusted_catalog: list[dict[str, Any]],
+) -> None:
+    """Revalidate every durable plan choice against its qualified source."""
     from asago_scenario_generator.pipeline.coverage_planning import (
         revalidate_qualified_candidate,
     )
@@ -776,77 +919,100 @@ def resume_pipeline(
         raise ManifestIntegrityError(
             f"resume durable candidate provenance drift: {exc}"
         ) from exc
-    coverage_universe = build_coverage_universe(profile)
-    selection_result, _target_queues, coverage_queues = _hydrate_planning_inputs(
-        planning, durable_plan, coverage_universe
-    )
+
+
+def _setup_resume_logging(
+    log_level: str,
+    supplied: Path,
+    structured: bool,
+) -> None:
+    """Configure run-local logging for the resumed run."""
+    from asago_scenario_generator.log_config import setup_logging
 
     setup_logging(log_level=log_level, output_dir=supplied, structured=structured)
-    persisted_model = provenance.model_config_provenance
+
+
+def _validate_resume_model_config(
+    model: str | None,
+    base_url: str | None,
+    persisted_model: Any,
+) -> None:
+    """Require persisted model configuration and consistent overrides."""
     if persisted_model is None:
         raise ManifestIntegrityError(
             "resumable v3 run requires persisted model configuration"
         )
+    _validate_resume_model_override(model, persisted_model)
+    _validate_resume_endpoint_override(base_url, persisted_model)
+
+
+def _validate_resume_model_override(model: str | None, persisted_model: Any) -> None:
+    """Reject model overrides that contradict the persisted model."""
     if model is not None and model != persisted_model.model:
         raise ManifestIntegrityError("resume model override conflicts with provenance")
+
+
+def _validate_resume_endpoint_override(
+    base_url: str | None,
+    persisted_model: Any,
+) -> None:
+    """Reject endpoint overrides that contradict the persisted model."""
     if base_url is not None and base_url != persisted_model.base_url:
         raise ManifestIntegrityError(
             "resume endpoint override conflicts with provenance"
         )
-    client = LLMClient(
-        base_url=base_url or (persisted_model.base_url if persisted_model else None),
+
+
+def _resolved_resume_base_url(base_url: str | None, persisted_model: Any) -> str | None:
+    """Return the override base URL, or the persisted base URL."""
+    return base_url or (persisted_model.base_url if persisted_model else None)
+
+
+def _resolved_resume_model(model: str | None, persisted_model: Any) -> str | None:
+    """Return the override model, or the persisted model."""
+    return model or (persisted_model.model if persisted_model else None)
+
+
+def _persisted_temperature(persisted_model: Any) -> float | None:
+    """Return the persisted temperature, if any."""
+    return persisted_model.temperature if persisted_model else None
+
+
+def _persisted_max_completion_tokens(persisted_model: Any) -> int | None:
+    """Return the persisted max completion tokens, if any."""
+    return persisted_model.max_completion_tokens if persisted_model else None
+
+
+def _resume_llm_client(
+    base_url: str | None,
+    api_key: str | None,
+    model: str | None,
+    persisted_model: Any,
+) -> Any:
+    """Build the resume LLM client from persisted model configuration."""
+    return LLMClient(
+        base_url=_resolved_resume_base_url(base_url, persisted_model),
         api_key=api_key,
-        model=model or (persisted_model.model if persisted_model else None),
-        temperature=persisted_model.temperature if persisted_model else None,
-        max_completion_tokens=(
-            persisted_model.max_completion_tokens if persisted_model else None
-        ),
+        model=_resolved_resume_model(model, persisted_model),
+        temperature=_persisted_temperature(persisted_model),
+        max_completion_tokens=_persisted_max_completion_tokens(persisted_model),
     )
-    finalization = run_target_finalization(
-        run_dir=supplied,
-        run_id=manifest.run_id,
-        plan=CoveragePlan(
-            schema_version="1",
-            completeness="not_applicable",
-            evidence_refs=[],
-            targets=[],
-        ),
-        profile=profile,
-        client=client,
-        use_case=use_case,
-        taxonomy_resolver=taxonomy_resolver,
-        capability_snapshot=capability_snapshot,
-        trusted_catalog=trusted_catalog,
-        presentation_fallback=persisted_presentation_fallback,
-    )
-    durable_plan = finalization.coverage_plan
+
+
+def persisted_presentation_fallback(options: dict[str, Any]) -> str:
+    """Return the persisted presentation fallback mode."""
+    return options.get("presentation_fallback", "allow")
+
+
+def _resume_stage_ledger(planning: Any) -> Any:
+    """Rebuild the stage ledger from persisted stage events."""
     from asago_scenario_generator.pipeline.coverage_planning import StageEvent
 
-    stage_ledger = StageLedger(
+    return StageLedger(
         events=[
             StageEvent(**item.model_dump(mode="python"))
             for item in planning.stage_events
         ]
-    )
-    return _complete_v3_run(
-        run_dir=supplied,
-        run_id=manifest.run_id,
-        timestamp_start=manifest.timestamp_start,
-        provenance=manifest.provenance,
-        profile=profile,
-        threat_surface=threat_surface,
-        finalization=finalization,
-        coverage_universe=coverage_universe,
-        stage_ledger=stage_ledger,
-        selection_result=selection_result,
-        fallback_queues=coverage_queues,
-        projection_limitation_target_ids=set(planning.projection_limitation_target_ids),
-        threats_path=Path(options["threats_path"]),
-        eval_enabled=persisted_eval,
-        seeds=[],
-        filtered_seeds=None,
-        governance_count=len(threat_surface.governance_only),
-        generation_notes=[],
     )
 
 
@@ -1106,18 +1272,71 @@ def run_pipeline(
         log_level: Logging level for the console handler.
         structured: Whether the run-local file log uses JSON-lines format.
 
+    The v3 lifecycle persists the immutable plan and inventory, runs
+    entirely inside the guarded body: it builds the coverage universe
+    (``build_coverage_universe(...)``), qualifies candidates
+    (``build_qualified_candidates(...)``), plans generation
+    (``plan_generation(...)``), drives every target through
+    ``run_target_finalization(...)``, and returns the completed run with
+    ``return _complete_v3_run(...)`` — no legacy v2 generation or mutation
+    lifecycle remains.
+
     Returns:
         PipelineResult with all artifacts from the pipeline run.
     """
-    if presentation_fallback not in {"allow", "forbid"}:
-        raise ValueError("presentation_fallback must be 'allow' or 'forbid'")
-    if max_scenarios_per_pattern is not None and max_scenarios_per_pattern < 1:
-        raise ValueError("max_scenarios_per_pattern must be a positive integer")
-    try:
-        resolved_generation_mode = GenerationMode(generation_mode)
-    except ValueError as exc:
-        raise ValueError("generation_mode must be 'exhaustive' or 'coverage'") from exc
-    ct_path = cross_taxonomy_path or _DEFAULT_CROSS_TAXONOMY_PATH
+    return _run_pipeline_guarded(
+        use_case=use_case,
+        risk_extraction_path=risk_extraction_path,
+        sssom_path=sssom_path,
+        output_dir=output_dir,
+        cross_taxonomy_path=cross_taxonomy_path,
+        threats_path=threats_path,
+        profile_path=profile_path,
+        qualification_facts_path=qualification_facts_path,
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        model_profile=model_profile,
+        profiles_file=profiles_file,
+        presentation_fallback=presentation_fallback,
+        max_techniques=max_techniques,
+        max_scenarios_per_pattern=max_scenarios_per_pattern,
+        generation_mode=generation_mode,
+        zones=zones,
+        eval=eval,
+        log_level=log_level,
+        structured=structured,
+    )
+
+
+def _run_pipeline_guarded(
+    *,
+    use_case: str,
+    risk_extraction_path: Path,
+    sssom_path: Path,
+    output_dir: Path,
+    cross_taxonomy_path: Path | None,
+    threats_path: Path | None,
+    profile_path: Path | None,
+    qualification_facts_path: Path | None,
+    base_url: str | None,
+    api_key: str | None,
+    model: str | None,
+    model_profile: str | None,
+    profiles_file: Path,
+    presentation_fallback: str,
+    max_techniques: int,
+    max_scenarios_per_pattern: int | None,
+    generation_mode: str,
+    zones: str | None,
+    eval: bool,
+    log_level: str,
+    structured: bool,
+) -> PipelineResult:
+    """Run the guarded lifecycle with persistent failed-manifest recovery."""
+    resolved_generation_mode = _validate_run_pipeline_options(
+        presentation_fallback, max_scenarios_per_pattern, generation_mode
+    )
     generation_notes: list[str] = []
 
     # --- Per-invocation run identity (cmps.1 sortable format) ---
@@ -1138,40 +1357,1077 @@ def run_pipeline(
     provenance: Provenance | None = None
     partial_manifest: RunManifest | None = None
 
+    return _run_pipeline_body(
+        use_case=use_case,
+        risk_extraction_path=risk_extraction_path,
+        sssom_path=sssom_path,
+        run_dir=run_dir,
+        cross_taxonomy_path=_resolve_cross_taxonomy_path(cross_taxonomy_path),
+        threats_path=threats_path,
+        profile_path=profile_path,
+        qualification_facts_path=qualification_facts_path,
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        model_profile=model_profile,
+        profiles_file=profiles_file,
+        presentation_fallback=presentation_fallback,
+        max_techniques=max_techniques,
+        max_scenarios_per_pattern=max_scenarios_per_pattern,
+        resolved_generation_mode=resolved_generation_mode,
+        zones=zones,
+        eval=eval,
+        log_level=log_level,
+        structured=structured,
+        run_id=run_id,
+        timestamp_start=timestamp_start,
+        provenance=provenance,
+        partial_manifest=partial_manifest,
+        generation_notes=generation_notes,
+    )
+
+
+def _validate_run_pipeline_options(
+    presentation_fallback: str,
+    max_scenarios_per_pattern: int | None,
+    generation_mode: str,
+) -> GenerationMode:
+    """Validate CLI-level option contracts up front."""
+    if presentation_fallback not in {"allow", "forbid"}:
+        raise ValueError("presentation_fallback must be 'allow' or 'forbid'")
+    if max_scenarios_per_pattern is not None and max_scenarios_per_pattern < 1:
+        raise ValueError("max_scenarios_per_pattern must be a positive integer")
     try:
-        qualification_facts_bytes = (
-            qualification_facts_path.read_bytes()
+        return GenerationMode(generation_mode)
+    except ValueError as exc:
+        raise ValueError("generation_mode must be 'exhaustive' or 'coverage'") from exc
+
+
+def _resolve_cross_taxonomy_path(
+    cross_taxonomy_path: Path | None,
+) -> Path:
+    """Return the explicit cross-taxonomy path, or the bundled default."""
+    return cross_taxonomy_path or _DEFAULT_CROSS_TAXONOMY_PATH
+
+
+def _recover_and_reraise_failed_run(
+    run_dir: Path,
+    run_id: str,
+    timestamp_start: str,
+    provenance: Provenance | None,
+    partial_manifest: RunManifest | None,
+    exc: Exception,
+) -> None:
+    """Flush run-local handlers, write a best-effort failed manifest, and
+    re-raise the original pipeline failure."""
+    _run_failure_log_flush()
+    logging.getLogger("asago_scenario_generator").error("Pipeline failed: %s", exc)
+    try:
+        failed_manifest = _failed_manifest_for(
+            run_dir, run_id, timestamp_start, provenance, partial_manifest, exc
+        )
+        _mark_failed_manifest(failed_manifest, exc)
+        _write_failed_manifest_evidence(run_dir, run_id, failed_manifest, exc)
+        raise
+    except Exception:  # noqa: BLE001, S110 - best-effort write during error path
+        pass
+    raise
+
+
+def _run_failure_log_flush() -> None:
+    """Flush and remove run-local file handlers before writing failure
+    evidence."""
+    sf_logger = logging.getLogger("asago_scenario_generator")
+    for handler in sf_logger.handlers[:]:
+        if isinstance(handler, logging.FileHandler):
+            try:
+                handler.flush()
+                handler.close()
+            except Exception:  # noqa: BLE001, S110 - handler cleanup must not fail
+                pass
+            sf_logger.removeHandler(handler)
+
+
+def _failed_manifest_for(
+    run_dir: Path,
+    run_id: str,
+    timestamp_start: str,
+    provenance: Provenance | None,
+    partial_manifest: RunManifest | None,
+    exc: Exception,
+) -> RunManifest:
+    """Return the partial manifest, or a sentinel-based fallback manifest."""
+    if partial_manifest is not None:
+        return partial_manifest
+    try:
+        return load_manifest(run_dir)
+    except Exception:  # noqa: BLE001 - create fallback manifest if load fails
+        return RunManifest(
+            manifest_version=MANIFEST_VERSION,
+            status=RunStatus.STARTED,
+            run_id=run_id,
+            timestamp_start=timestamp_start,
+            package_version=importlib.metadata.version("asago-scenario-generator"),
+            provenance=Provenance(
+                run_id=run_id,
+                timestamp_start=timestamp_start,
+            )
+            if provenance is not None
+            else None,
+        )
+
+
+def _mark_failed_manifest(failed_manifest: RunManifest, exc: Exception) -> None:
+    """Record the failure status, end time, and error description."""
+    failed_manifest.status = RunStatus.FAILED
+    failed_manifest.timestamp_end = datetime.now(UTC).isoformat()
+    failure_code = getattr(exc, "failure_code", None)
+    failed_manifest.error = f"{failure_code}: {exc}" if failure_code else str(exc)
+    if failed_manifest.provenance:
+        failed_manifest.provenance.timestamp_end = failed_manifest.timestamp_end
+
+
+def _started_support_manifest(run_dir: Path) -> Any:
+    """Load the started manifest, tolerating very early failures."""
+    try:
+        return load_manifest(run_dir, requested_version=MANIFEST_VERSION)
+    except Exception:  # noqa: BLE001 - early failures may predate sentinel
+        return None
+
+
+def _immutable_roles_by_role(
+    started_manifest: Any, immutable_roles: set[Any]
+) -> dict[Any, Any]:
+    """Map immutable support artifact roles to their entries, if published."""
+    if started_manifest is None:
+        return {}
+    return {
+        item.role: item
+        for item in started_manifest.inventory
+        if item.role in immutable_roles
+    }
+
+
+def _support_published(started_manifest: Any, immutable_roles: set[Any]) -> bool:
+    """True when every immutable support role is published."""
+    if started_manifest is None:
+        return False
+    return set(_immutable_roles_by_role(started_manifest, immutable_roles)) == (
+        immutable_roles
+    )
+
+
+def _support_validation_result(
+    run_dir: Path,
+    started_manifest: Any,
+    immutable_roles: set[Any],
+    exc: Exception,
+) -> tuple[bool, str | None]:
+    """Validate immutable support resolution; returns (valid, error)."""
+    if not _support_published(started_manifest, immutable_roles):
+        return False, None
+    try:
+        ManifestInventoryResolver(run_dir, started_manifest, check_orphans=False)
+    except ManifestIntegrityError as support_exc:
+        return (
+            False,
+            f"{exc}; immutable support validation failed: {support_exc}",
+        )
+    return True, None
+
+
+def _write_failed_manifest_evidence(
+    run_dir: Path,
+    run_id: str,
+    failed_manifest: RunManifest,
+    exc: Exception,
+) -> None:
+    """Recover the journal and publish the failed manifest inventory."""
+    immutable_roles = {
+        ArtifactRole.USE_CASE,
+        ArtifactRole.CAPABILITY_PROFILE,
+        ArtifactRole.THREAT_SURFACE,
+        ArtifactRole.PLANNING_CHECKPOINT,
+    }
+    started_manifest = _started_support_manifest(run_dir)
+    original_by_role = _immutable_roles_by_role(started_manifest, immutable_roles)
+    support_valid, support_error = _support_validation_result(
+        run_dir, started_manifest, immutable_roles, exc
+    )
+    if support_error is not None:
+        failed_manifest.error = support_error
+    if support_valid:
+        from asago_scenario_generator.pipeline.persistence import (
+            recover_finalization_journal,
+        )
+
+        recover_finalization_journal(run_dir, expected_run_id=run_id)
+    evidence_inventory = _build_failed_evidence_inventory(run_dir, [])
+    failed_manifest.inventory = [
+        item for item in evidence_inventory if item.role not in original_by_role
+    ] + list(original_by_role.values())
+    write_failed_manifest(run_dir, failed_manifest)
+
+
+def _ingest_qualification_facts(
+    qualification_facts_path: Path | None,
+    generation_notes: list[str],
+) -> tuple[bytes | None, str | None, tuple[Any, ...]]:
+    """Read and parse explicit qualification facts, if any."""
+    qualification_facts_bytes = (
+        qualification_facts_path.read_bytes()
+        if qualification_facts_path is not None
+        else None
+    )
+    qualification_facts_source: str | None = None
+    qualification_facts: tuple[Any, ...] = ()
+    if qualification_facts_bytes is not None:
+        qualification_facts_source = qualification_facts_bytes.decode("utf-8")
+        qualification_facts = _parse_qualification_facts(
+            qualification_facts_bytes
+        ).facts
+    else:
+        generation_notes.append(
+            "qualification_facts_omitted: compatibility mode defers "
+            "unresolved fact conditions to authoritative projection"
+        )
+    return qualification_facts_bytes, qualification_facts_source, qualification_facts
+
+
+def _qualification_facts_mode_label(qualification_facts_path: Path | None) -> str:
+    """Return the qualification facts mode label for logging."""
+    return (
+        "explicit" if qualification_facts_path is not None else "omitted_compatibility"
+    )
+
+
+def _resolve_effective_threats_path(threats_path: Path | None) -> Path:
+    """Resolve the effective threats path against the bundled default."""
+    from asago_scenario_generator.pipeline.seeds import _DEFAULT_THREATS_PATH
+
+    return (threats_path or _DEFAULT_THREATS_PATH).resolve()
+
+
+def _parse_effective_zones(zones: str | None) -> list[str] | None:
+    """Parse and trim the zones option into a canonical list."""
+    if zones is None:
+        return None
+    return [z.strip() for z in zones.split(",") if z.strip()]
+
+
+def _model_control_sources(effective_model: Any) -> dict[str, str]:
+    """Return non-secret model control sources for the config digest."""
+    return {
+        key: value.value
+        for key, value in effective_model.sources.items()
+        if key != "api_key"
+    }
+
+
+def _sorted_header_names(effective_model: Any) -> list[str]:
+    """Return sorted extra-header names for the config digest."""
+    return sorted((effective_model.extra_headers or {}).keys())
+
+
+def _effective_pipeline_options(
+    *,
+    input_hashes: Any,
+    risk_extraction_path: Path,
+    sssom_path: Path,
+    ct_path: Path,
+    effective_threats_path: Path,
+    profile_path: Path | None,
+    client: Any,
+    max_techniques: int,
+    max_scenarios_per_pattern: int | None,
+    resolved_generation_mode: GenerationMode,
+    effective_zones: list[str] | None,
+    eval: bool,
+    model_profile: str | None,
+    profiles_file: Path,
+    effective_model: Any,
+    presentation_fallback: str,
+    qualification_facts_path: Path | None,
+) -> dict[str, Any]:
+    """Build the canonical effective-options dict for provenance."""
+    effective_options = {
+        "use_case_hash": input_hashes.use_case_hash,
+        "risk_extraction_path": str(risk_extraction_path.resolve()),
+        "sssom_path": str(sssom_path.resolve()),
+        "cross_taxonomy_path": str(ct_path.resolve()),
+        "threats_path": str(effective_threats_path),
+        "profile_path": str(profile_path.resolve()) if profile_path else None,
+        "model": client.model,
+        "base_url": client.base_url,
+        "temperature": client.temperature,
+        "max_completion_tokens": client.max_completion_tokens,
+        "max_techniques": max_techniques,
+        "max_scenarios_per_pattern": max_scenarios_per_pattern,
+        "generation_mode": resolved_generation_mode.value,
+        "zones": effective_zones,
+        "eval": eval,
+        "model_profile": model_profile,
+        "profiles_file": (
+            str(profiles_file.resolve()) if model_profile is not None else None
+        ),
+        "model_control_sources": _model_control_sources(effective_model),
+        "timeout": effective_model.timeout,
+        "top_p": effective_model.top_p,
+        "top_k": effective_model.top_k,
+        "use_guided_decoding": effective_model.use_guided_decoding,
+        "header_names": _sorted_header_names(effective_model),
+        "presentation_fallback": presentation_fallback,
+        "qualification_facts_mode": (
+            "explicit"
             if qualification_facts_path is not None
-            else None
+            else "omitted_compatibility"
+        ),
+    }
+    if qualification_facts_path is not None:
+        effective_options["qualification_facts_path"] = str(
+            qualification_facts_path.resolve()
+        )
+    return effective_options
+
+
+def _load_or_infer_profile(
+    profile_path: Path | None,
+    use_case: str,
+    client: Any,
+    run_dir: Path,
+) -> CapabilityProfile:
+    """Load a pre-built capability profile, or infer and log one."""
+    if profile_path is not None:
+        logger.info("[Stage 1] Loading capability profile from %s", profile_path)
+        profile_data = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
+        return CapabilityProfile(**profile_data)
+    logger.info("[Stage 1] Inferring capability profile...")
+    profile, profile_llm_result = infer_capability_profile(use_case, client)
+    _log_profile_inference_call(profile_llm_result, run_dir)
+    return profile
+
+
+def _log_profile_inference_call(profile_llm_result: Any, run_dir: Path) -> None:
+    """Log the profile inference LLM call to top-level calls.jsonl."""
+    raw_content = profile_llm_result.content
+    if hasattr(raw_content, "model_dump"):
+        raw_content = raw_content.model_dump(mode="json")
+    elif not isinstance(raw_content, str):
+        raw_content = str(raw_content)
+    write_pipeline_call_log(
+        [
+            {
+                "call": "capability_profile",
+                "system_prompt": profile_llm_result.system_prompt,
+                "user_prompt": profile_llm_result.user_prompt,
+                "response": raw_content,
+                "prompt_tokens": profile_llm_result.prompt_tokens,
+                "completion_tokens": profile_llm_result.completion_tokens,
+                "duration_ms": profile_llm_result.duration_ms,
+            }
+        ],
+        run_dir,
+    )
+
+
+def _zone_tag_pattern() -> Any:
+    """Compile the entry-point zone-tag suffix pattern."""
+    _zone_alts = "|".join(re.escape(z) for z in ZONE_NAMES)
+    return re.compile(
+        r"\s*\((" + _zone_alts + r")\)\s*$",
+    )
+
+
+def _validate_requested_zones(zones: str) -> list[str]:
+    """Validate requested zone names against the canonical set."""
+    requested = [z.strip() for z in zones.split(",")]
+    invalid = [z for z in requested if z not in ZONE_NAMES]
+    if invalid:
+        raise ValueError(
+            f"Unknown zone(s): {', '.join(invalid)}. Valid: {', '.join(ZONE_NAMES)}"
+        )
+    return requested
+
+
+def _strip_zone_kc_codes(kc_codes: list[str], filtered: list[str]) -> list[str]:
+    """Strip KC codes for excluded memory/inter-agent zones."""
+    return _strip_inter_agent_kc_codes(
+        _strip_memory_kc_codes(kc_codes, filtered), filtered
+    )
+
+
+def _strip_memory_kc_codes(kc_codes: list[str], filtered: list[str]) -> list[str]:
+    """Strip memory-zone KC codes when the memory zone is filtered out."""
+    if "memory" not in filtered:
+        return [
+            kc
+            for kc in kc_codes
+            if kc not in {"KC4.3", "KC4.4", "KC4.5", "KC4.6", "KCX-PMEM"}
+        ]
+    return kc_codes
+
+
+def _strip_inter_agent_kc_codes(kc_codes: list[str], filtered: list[str]) -> list[str]:
+    """Strip inter-agent KC codes when the inter-agent zone is filtered out."""
+    if "inter_agent" not in filtered:
+        return [kc for kc in kc_codes if kc not in {"KC2.3", "KCX-MAGENT"}]
+    return kc_codes
+
+
+def _zone_kc_filter(profile: CapabilityProfile, filtered: list[str]) -> dict[str, Any]:
+    """Return kc_subcodes updates when zone filtering strips codes."""
+    kc_codes = _strip_zone_kc_codes(list(profile.kc_subcodes), filtered)
+    if kc_codes != list(profile.kc_subcodes):
+        return {"kc_subcodes": kc_codes}
+    return {}
+
+
+def _strip_entry_point_zone_tags(
+    profile: CapabilityProfile,
+    filtered: list[str],
+) -> dict[str, Any]:
+    """Strip excluded-zone tags from entry points and re-deduplicate."""
+    zone_tag_re = _zone_tag_pattern()
+    cleaned_entry_points = []
+    entry_points_changed = False
+    for ep in profile.entry_points:
+        m = zone_tag_re.search(ep.name)
+        if m and m.group(1) not in filtered:
+            cleaned_name = ep.name[: m.start()].rstrip()
+            logger.warning(
+                "Stripped zone tag from entry point: '%s' -> '%s'",
+                ep.name,
+                cleaned_name,
+            )
+            cleaned_entry_points.append(ep.model_copy(update={"name": cleaned_name}))
+            entry_points_changed = True
+        else:
+            cleaned_entry_points.append(ep)
+    if entry_points_changed:
+        from asago_scenario_generator.models.capability_profile import (
+            deduplicate_entry_points,
+        )
+
+        return {"entry_points": deduplicate_entry_points(cleaned_entry_points)}
+    return {}
+
+
+def _apply_zone_filter(
+    profile: CapabilityProfile, zones: str | None
+) -> CapabilityProfile:
+    """Apply the zones option filter to the capability profile."""
+    if zones is None:
+        return profile
+    requested = _validate_requested_zones(zones)
+    filtered = [z for z in requested if z in profile.zones_active]
+    updates: dict[str, Any] = {"zones_active": filtered}
+    updates.update(_zone_kc_filter(profile, filtered))
+    updates.update(_strip_entry_point_zone_tags(profile, filtered))
+    profile = profile.model_copy(update=updates)
+    logger.info("  Zone filter applied: %s", filtered)
+    return profile
+
+
+def _stage2_threat_surface(
+    use_case: str,
+    risk_extraction_path: Path,
+    sssom_path: Path,
+    ct_path: Path,
+    threats_path: Path | None,
+    profile: CapabilityProfile,
+    generation_notes: list[str],
+) -> tuple[Any, int, int, set[str]]:
+    """Run Stage 2 and collect threat-surface accounting."""
+    risk_cards = load_risk_extraction(risk_extraction_path)
+    coherence_report = validate_risk_card_coherence(use_case, risk_cards)
+    if coherence_report.has_warnings:
+        for card_result in coherence_report.flagged_cards:
+            generation_notes.append(
+                f"Risk card {card_result.risk_id} ({card_result.risk_name}) "
+                f"may describe a different system (0 keyword overlap with use case)."
+            )
+    threat_surface = determine_threat_surface(
+        profile,
+        risk_cards,
+        sssom_path,
+        ct_path,
+        threats_path,
+    )
+    in_scope_threats = set()
+    for entry in threat_surface.entries:
+        in_scope_threats.update(entry.agentic_threat_ids)
+    return (
+        threat_surface,
+        len(threat_surface.entries),
+        len(threat_surface.governance_only),
+        in_scope_threats,
+    )
+
+
+def _expansion_record(stage_records: list[Any]) -> Any:
+    """Return the expansion stage record, real or empty."""
+    if stage_records:
+        return stage_records[-1]
+    return StageRecord(
+        stage="expansion", input_count=0, output_count=0, collapsed_count=0
+    )
+
+
+def _run_candidate_filter(
+    rule_passed: list[Any],
+    seeds: list[Any],
+    client: Any,
+    use_case: str,
+    profile: CapabilityProfile,
+    run_dir: Path,
+) -> tuple[list[Any], list[dict[str, Any]], list[Any], list[Any]]:
+    """Run the LLM candidate filter with protocol-failure evidence."""
+    try:
+        filter_result = filter_candidates(
+            rule_passed,
+            seeds,
+            client,
+            use_case,
+            profile,
+            advisory_on_failure=True,
+        )
+        if len(filter_result) == 4:
+            (
+                filtered_seeds,
+                filter_call_logs,
+                filter_rejected_verdicts,
+                filter_quarantines,
+            ) = filter_result
+        else:
+            # Keep runner compatibility with integrations that provide
+            # the historical three-item filter result.
+            (
+                filtered_seeds,
+                filter_call_logs,
+                filter_rejected_verdicts,
+            ) = filter_result
+            filter_quarantines = []
+    except FilterProtocolError as exc:
+        # Persist call/protocol evidence before failing the run.
+        write_pipeline_call_log(exc.call_log_entries, run_dir)
+        raise
+    return (
+        filtered_seeds,
+        filter_call_logs,
+        filter_rejected_verdicts,
+        filter_quarantines,
+    )
+
+
+def _record_filter_unavailability_note(
+    filter_call_logs: list[dict[str, Any]],
+    generation_notes: list[str],
+) -> None:
+    """Record a generation note when the candidate filter was unavailable."""
+    if any(
+        item.get("warning") == "candidate_filter_unavailable"
+        for item in filter_call_logs
+    ):
+        generation_notes.append(
+            "candidate_filter_unavailable: all rule-eligible candidates "
+            "continued to mandatory semantic generation"
+        )
+
+
+def _log_filter_quarantines(filter_quarantines: list[Any]) -> None:
+    """Log candidate filter quarantines, if any."""
+    if filter_quarantines:
+        logger.warning(
+            "  Candidate filter quarantined %d seed(s): %s",
+            len(filter_quarantines),
+            ", ".join(item.seed_id for item in filter_quarantines),
+        )
+
+
+def _selected_authoritative_patterns(
+    attack_pattern_records: list[dict[str, Any]],
+    filtered_seeds: list[Any],
+    taxonomy_resolver: Any,
+) -> list[Any]:
+    """Validate just the patterns selected by the candidate filter."""
+    selected_pattern_ids = {item.seed_id for item in filtered_seeds}
+    return [
+        validate_attack_pattern(item, taxonomy_resolver)
+        for item in attack_pattern_records
+        if item.get("id") in selected_pattern_ids
+    ]
+
+
+def _run_projection_readiness_gate(
+    selected_patterns: list[Any],
+    capability_snapshot: Any,
+    qualification_facts_path: Path | None,
+) -> None:
+    """Ensure projection readiness, deferring unresolved legacy facts."""
+    try:
+        ensure_projection_readiness(selected_patterns, capability_snapshot)
+    except ProjectionReadinessError as exc:
+        # Legacy inferred runs have no authoritative fact source to
+        # validate. Preserve their existing projection behavior while
+        # keeping the gate fail-closed for explicit fact inputs and all
+        # missing architecture resources.
+        if (
+            qualification_facts_path is not None
+            or exc.report.missing_resource_categories
+        ):
+            raise
+        logger.warning(
+            "Projection readiness has unresolved facts without an explicit "
+            "qualification-facts source; deferring to projection conditions."
+        )
+
+
+def _projected_by_pattern_lookup(projection_batch: Any) -> dict[str, list[Any]]:
+    """Group projected candidates by pattern id."""
+    projected_by_pattern: dict[str, list[Any]] = {}
+    for pc in projection_batch.candidates:
+        projected_by_pattern.setdefault(pc.pattern_id, []).append(pc)
+    return projected_by_pattern
+
+
+def _project_authoritative_run(
+    profile: CapabilityProfile,
+    qualification_facts: tuple[Any, ...],
+    qualification_facts_path: Path | None,
+    filtered_seeds: list[Any],
+) -> tuple[list[dict[str, Any]], Any, Any, Any, Any]:
+    """Run the authoritative projection phase and build lookups."""
+    attack_pattern_records = list(load_attack_patterns().values())
+    taxonomy_resolver = load_taxonomy_resolver()
+    capability_snapshot = capture_capability_snapshot(profile, qualification_facts)
+    selected_patterns = _selected_authoritative_patterns(
+        attack_pattern_records, filtered_seeds, taxonomy_resolver
+    )
+    _run_projection_readiness_gate(
+        selected_patterns, capability_snapshot, qualification_facts_path
+    )
+    coverage_universe = build_coverage_universe(profile)
+    projection_batch = project_authoritative_candidates(
+        attack_pattern_records,
+        taxonomy_resolver,
+        capability_snapshot,
+        coverage_target_ids=coverage_universe.feasible_target_ids,
+    )
+    return (
+        attack_pattern_records,
+        taxonomy_resolver,
+        capability_snapshot,
+        coverage_universe,
+        projection_batch,
+    )
+
+
+def _removal_decision_summaries(matching_verdicts: list[Any]) -> list[str]:
+    """Flatten removal decision summaries for matching verdicts."""
+    return [
+        _removal_decision_summary(d)
+        for v in matching_verdicts
+        for d in v.removal_decisions
+    ]
+
+
+def _rule_rejection_reasons(c: Any, rule_verdicts: list[Any]) -> str:
+    """Return the deterministic rule rejection reasons for a candidate."""
+    matching_verdicts = [v for v in rule_verdicts if v.candidate_id == c.candidate_id]
+    if not matching_verdicts:
+        return "Rejected by deterministic rule filter"
+    removals = _removal_decision_summaries(matching_verdicts)
+    return "; ".join(removals) or matching_verdicts[0].rationale
+
+
+def _record_rule_rejections(
+    stage_ledger: Any,
+    rule_rejected: list[Any],
+    rule_verdicts: list[Any],
+) -> None:
+    """Record rule-rejection stage events with typed rationales."""
+    for c in rule_rejected:
+        stage_ledger.record(
+            entry_point_id=c.entry_point_id,
+            candidate_id=c.candidate_id,
+            stage=STAGE_RULES,
+            reason="deterministic_rule_rejection",
+            detail=f"pattern={c.seed_id}: {_rule_rejection_reasons(c, rule_verdicts)}",
+        )
+
+
+def _filter_rejection_rationale(verdict: Any) -> str:
+    """Return the typed filter verdict rationale, or a default."""
+    return (
+        verdict.rationale
+        if verdict is not None
+        else "Candidate rejected by LLM filter."
+    )
+
+
+def _verdict_payload(verdict: Any) -> Any:
+    """Return the typed filter verdict payload, if any."""
+    return verdict.model_dump(mode="json") if verdict is not None else None
+
+
+def _accepted_filter_ids(filtered_seeds: list[Any]) -> set[str]:
+    """Return candidate ids accepted by the LLM filter."""
+    return {f.candidate_id for f in filtered_seeds}
+
+
+def _filter_rejection_by_id(filter_rejected_verdicts: list[Any]) -> dict[str, Any]:
+    """Index rejected filter verdicts by candidate id."""
+    return {v.candidate_id: v for v in filter_rejected_verdicts}
+
+
+def _record_filter_rejections(
+    stage_ledger: Any,
+    rule_passed: list[Any],
+    filtered_seeds: list[Any],
+    filter_rejected_verdicts: list[Any],
+) -> None:
+    """Record LLM filter-rejection stage events with typed rationales."""
+    accepted_filter_ids = _accepted_filter_ids(filtered_seeds)
+    rejection_by_id = _filter_rejection_by_id(filter_rejected_verdicts)
+    for c in rule_passed:
+        if c.candidate_id not in accepted_filter_ids:
+            verdict = rejection_by_id.get(c.candidate_id)
+            stage_ledger.record(
+                entry_point_id=c.entry_point_id,
+                candidate_id=c.candidate_id,
+                stage=STAGE_FILTER,
+                reason="filter_rejection",
+                detail=f"pattern={c.seed_id}: {_filter_rejection_rationale(verdict)}",
+                payload=_verdict_payload(verdict),
+            )
+
+
+def _matching_projected_candidates(pc_list: list[Any], fseed: Any) -> list[Any]:
+    """Return candidates whose canonical ingress matches the seed."""
+    return [
+        pc
+        for pc in pc_list
+        if pc.canonical_ingress.entry_point_id == fseed.entry_point_id
+    ]
+
+
+def _record_no_projection(stage_ledger: Any, fseed: Any) -> None:
+    """Record a no_projection stage event for the filtered seed."""
+    stage_ledger.record(
+        entry_point_id=fseed.entry_point_id,
+        candidate_id=fseed.candidate_id,
+        stage=STAGE_PROJECTION,
+        reason="no_projection",
+        detail=f"No projected candidate for pattern '{fseed.seed_id}'.",
+    )
+
+
+def _record_no_ingress_match(stage_ledger: Any, fseed: Any) -> None:
+    """Record a no_exact_ingress_match stage event for the filtered seed."""
+    stage_ledger.record(
+        entry_point_id=fseed.entry_point_id,
+        candidate_id=fseed.candidate_id,
+        stage=STAGE_PROJECTION,
+        reason="no_exact_ingress_match",
+        detail=(
+            f"No projected candidate for pattern '{fseed.seed_id}' "
+            f"with ingress entry_point_id '{fseed.entry_point_id}'."
+        ),
+    )
+
+
+def _record_projected_match(stage_ledger: Any, fseed: Any, pc: Any) -> None:
+    """Record a projected stage event for a matching candidate."""
+    stage_ledger.record(
+        entry_point_id=fseed.entry_point_id,
+        candidate_id=pc.candidate_id,
+        stage=STAGE_PROJECTION,
+        reason="projected",
+        detail=f"Projected candidate for pattern '{fseed.seed_id}'.",
+    )
+
+
+def _projection_event_for_fseed(
+    stage_ledger: Any,
+    fseed: Any,
+    pc_list: list[Any] | None,
+) -> tuple[int, dict[str, list[str]]]:
+    """Record projection events for one filtered seed.
+
+    Returns ``(rejected_count_delta, rejected_by_target_delta)``.
+    """
+    if not pc_list:
+        _record_no_projection(stage_ledger, fseed)
+        return 1, {fseed.entry_point_id: [fseed.candidate_id]}
+    matching_pcs = _matching_projected_candidates(pc_list, fseed)
+    if not matching_pcs:
+        _record_no_ingress_match(stage_ledger, fseed)
+        return 1, {fseed.entry_point_id: [fseed.candidate_id]}
+    for pc in matching_pcs:
+        _record_projected_match(stage_ledger, fseed, pc)
+    return 0, {}
+
+
+def _record_projection_events(
+    stage_ledger: Any,
+    filtered_seeds: list[Any],
+    projected_by_pattern: dict[str, list[Any]],
+) -> tuple[int, dict[str, list[str]]]:
+    """Record projection acceptance/rejection events for filtered seeds."""
+    projection_rejected_count = 0
+    projection_rejected_by_target: dict[str, list[str]] = {}
+    for fseed in filtered_seeds:
+        rejected_count, rejected_by = _projection_event_for_fseed(
+            stage_ledger, fseed, projected_by_pattern.get(fseed.seed_id)
+        )
+        projection_rejected_count += rejected_count
+        if rejected_by:
+            projection_rejected_by_target.setdefault(fseed.entry_point_id, []).extend(
+                rejected_by[fseed.entry_point_id]
+            )
+    return projection_rejected_count, projection_rejected_by_target
+
+
+def _log_projection_rejections(projection_rejected_count: int) -> None:
+    """Log the projection-stage rejection count, when nonzero."""
+    if projection_rejected_count:
+        logger.info(
+            "  %d filtered seed(s) rejected at projection stage "
+            "(no exact ingress match).",
+            projection_rejected_count,
+        )
+
+
+def _record_projection_limitation_events(
+    stage_ledger: Any,
+    projection_batch: Any,
+) -> None:
+    """Record budget, infeasibility, and limitation projection events."""
+    budget_max = ProjectionBudget().max_candidates
+    for ep_id in projection_batch.unreserved_coverage_targets:
+        stage_ledger.record(
+            entry_point_id=ep_id,
+            candidate_id="",
+            stage=STAGE_PROJECTION,
+            reason="budget_exhausted",
+            detail=(
+                f"Coverage target omitted by projection budget allocation "
+                f"(budget={budget_max}, target_id={ep_id})."
+            ),
+        )
+    for ep_id in projection_batch.infeasible_coverage_targets:
+        stage_ledger.record(
+            entry_point_id=ep_id,
+            candidate_id="",
+            stage=STAGE_PROJECTION,
+            reason="no_compatible_projection",
+            detail=(
+                f"Coverage target has no compatible projection (target_id={ep_id})."
+            ),
+        )
+    for issue in projection_batch.infeasibilities:
+        stage_ledger.record(
+            entry_point_id="",
+            candidate_id="",
+            stage=STAGE_PROJECTION,
+            reason=issue.code,
+            detail=f"pattern={issue.pattern_id}: {issue.detail}",
+            payload=issue.model_dump(mode="json"),
+        )
+    for limitation in projection_batch.limitations:
+        stage_ledger.record(
+            entry_point_id="",
+            candidate_id="",
+            stage=STAGE_PROJECTION,
+            reason="variant_truncation",
+            detail=(
+                f"pattern={limitation.pattern_id}: "
+                f"{limitation.emitted_bindings}/"
+                f"{limitation.total_compatible_bindings} bindings emitted"
+            ),
+            payload=limitation.model_dump(mode="json"),
+        )
+
+
+def _record_selection_events(
+    stage_ledger: Any,
+    selection_result: Any,
+    resolved_generation_mode: GenerationMode,
+) -> None:
+    """Record selection and selection-limitation stage events."""
+    for qc in selection_result.selected:
+        stage_ledger.record(
+            entry_point_id=qc.entry_point_id,
+            candidate_id=qc.candidate_id,
+            stage=STAGE_SELECTION,
+            reason="selected",
+            detail=f"Selected for generation (rank {qc.rank}).",
+        )
+    for ep_id in selection_result.selection_limitation_target_ids:
+        limitation_detail = (
+            "Per-pattern cap excluded all qualified candidates for this ingress target."
+            if resolved_generation_mode is GenerationMode.EXHAUSTIVE
+            else "Per-pattern cap could not be respected for this target; "
+            "coverage preserved but cap violated."
+        )
+        stage_ledger.record(
+            entry_point_id=ep_id,
+            candidate_id=selection_result.primary_candidate_ids.get(ep_id, ""),
+            stage=STAGE_SELECTION,
+            reason="selection_limitation",
+            detail=limitation_detail,
+        )
+
+
+def _log_cap_summary(
+    resolved_generation_mode: GenerationMode,
+    candidates_capped: int,
+) -> None:
+    """Log per-pattern cap accounting, when nonzero."""
+    if candidates_capped > 0:
+        logger.info(
+            "  %s generation planning: %d candidates capped by the per-pattern limit.",
+            resolved_generation_mode.value.capitalize(),
+            candidates_capped,
+        )
+
+
+def _log_uncovered_targets(selection_result: Any) -> None:
+    """Log feasible targets with no selected candidate, if any."""
+    if selection_result.uncovered_target_ids:
+        logger.info(
+            "  %d feasible target(s) with no candidate: %s",
+            len(selection_result.uncovered_target_ids),
+            selection_result.uncovered_target_ids,
+        )
+
+
+def _build_planning_checkpoint(
+    *,
+    qualification_facts_source: str | None,
+    input_hashes: Any,
+    stage_ledger: Any,
+    projection_limitation_target_ids: set[str],
+    selection_result: Any,
+    fallback_queues: dict[str, Any],
+) -> Any:
+    """Build the durable v3 planning checkpoint."""
+    from asago_scenario_generator.pipeline.persistence import (
+        PlanningCheckpointV1,
+    )
+
+    return PlanningCheckpointV1(
+        qualification_facts_source=qualification_facts_source,
+        qualification_facts_sha256=input_hashes.qualification_facts_hash,
+        stage_events=[event.to_dict() for event in stage_ledger.events],
+        projection_limitation_target_ids=sorted(projection_limitation_target_ids),
+        selected_candidate_ids=[
+            candidate.candidate_id for candidate in selection_result.selected
+        ],
+        capped_count=selection_result.capped_count,
+        uncovered_target_ids=sorted(selection_result.uncovered_target_ids),
+        per_pattern_counts=dict(sorted(selection_result.per_pattern_counts.items())),
+        primary_candidate_ids=dict(
+            sorted(selection_result.primary_candidate_ids.items())
+        ),
+        attempted_candidate_ids=sorted(selection_result.attempted_candidate_ids),
+        selection_limitation_target_ids=sorted(
+            selection_result.selection_limitation_target_ids
+        ),
+        fallback_candidate_ids={
+            target_id: queue.candidate_ids()
+            for target_id, queue in sorted(fallback_queues.items())
+        },
+    )
+
+
+def _resume_support_inventory(run_dir: Path) -> list[Any]:
+    """Build the immutable resume support inventory entries."""
+    return [
+        build_artifact_entry(role, run_dir, path)
+        for role, path in (
+            (ArtifactRole.USE_CASE, "use-case.txt"),
+            (ArtifactRole.CAPABILITY_PROFILE, "capability-profile.yaml"),
+            (ArtifactRole.THREAT_SURFACE, "threat-surface.yaml"),
+            (ArtifactRole.PLANNING_CHECKPOINT, "planning-checkpoint.json"),
+        )
+    ]
+
+
+def _log_rule_filter_summary(
+    rule_rejected_count: int,
+    unique_pre_rule_identities: int,
+    filter_submitted: int,
+) -> None:
+    """Log the rule pre-filter summary, when candidates were rejected."""
+    if rule_rejected_count:
+        logger.info(
+            "  Rule pre-filter: %d/%d candidates rejected, %d passed to LLM",
+            rule_rejected_count,
+            unique_pre_rule_identities,
+            filter_submitted,
+        )
+
+
+def _run_pipeline_body(
+    *,
+    use_case: str,
+    risk_extraction_path: Path,
+    sssom_path: Path,
+    run_dir: Path,
+    cross_taxonomy_path: Path,
+    threats_path: Path | None,
+    profile_path: Path | None,
+    qualification_facts_path: Path | None,
+    base_url: str | None,
+    api_key: str | None,
+    model: str | None,
+    model_profile: str | None,
+    profiles_file: Path,
+    presentation_fallback: str,
+    max_techniques: int,
+    max_scenarios_per_pattern: int | None,
+    resolved_generation_mode: GenerationMode,
+    zones: str | None,
+    eval: bool,
+    log_level: str,
+    structured: bool,
+    run_id: str,
+    timestamp_start: str,
+    provenance: Provenance | None,
+    partial_manifest: RunManifest | None,
+    generation_notes: list[str],
+) -> PipelineResult:
+    """Run the full guarded pipeline body (stages 1-4)."""
+    from asago_scenario_generator.log_config import setup_logging
+
+    try:
+        from asago_scenario_generator.pipeline.persistence import (
+            make_finalization_persistence_adapter,
+            write_planning_checkpoint,
+        )
+        from asago_scenario_generator.pipeline.runner_finalization import (
+            run_target_finalization,
+            strict_v3_coverage_plan,
+        )
+
+        qualification_facts_bytes, qualification_facts_source, qualification_facts = (
+            _ingest_qualification_facts(qualification_facts_path, generation_notes)
         )
         # --- Capture input hashes at run start (before inputs can change) ---
         input_hashes = _capture_input_hashes(
             use_case,
             risk_extraction_path,
             sssom_path,
-            ct_path,
+            cross_taxonomy_path,
             threats_path,
             profile_path,
             qualification_facts_path,
             qualification_facts_bytes=qualification_facts_bytes,
         )
-        qualification_facts_source: str | None = None
-        qualification_facts: tuple[EvaluatedFactEvidence, ...] = ()
-        if qualification_facts_bytes is not None:
-            qualification_facts_source = qualification_facts_bytes.decode("utf-8")
-            qualification_facts = _parse_qualification_facts(
-                qualification_facts_bytes
-            ).facts
-        else:
-            generation_notes.append(
-                "qualification_facts_omitted: compatibility mode defers "
-                "unresolved fact conditions to authoritative projection"
-            )
         logger.info(
             "Qualification facts mode: %s",
-            "explicit"
-            if qualification_facts_path is not None
-            else "omitted_compatibility",
+            _qualification_facts_mode_label(qualification_facts_path),
         )
 
         # --- Client construction (after sentinel) ---
@@ -1199,54 +2455,27 @@ def run_pipeline(
         # All default/explicit paths are resolved consistently; zones are
         # parsed and trimmed into a canonical list so whitespace-equivalent
         # inputs produce identical digests.
-        from asago_scenario_generator.pipeline.seeds import _DEFAULT_THREATS_PATH
-
-        effective_threats_path = (threats_path or _DEFAULT_THREATS_PATH).resolve()
-        effective_zones: list[str] | None = None
-        if zones is not None:
-            effective_zones = [z.strip() for z in zones.split(",") if z.strip()]
-
-        effective_options = {
-            "use_case_hash": input_hashes.use_case_hash,
-            "risk_extraction_path": str(risk_extraction_path.resolve()),
-            "sssom_path": str(sssom_path.resolve()),
-            "cross_taxonomy_path": str(ct_path.resolve()),
-            "threats_path": str(effective_threats_path),
-            "profile_path": str(profile_path.resolve()) if profile_path else None,
-            "model": client.model,
-            "base_url": client.base_url,
-            "temperature": client.temperature,
-            "max_completion_tokens": client.max_completion_tokens,
-            "max_techniques": max_techniques,
-            "max_scenarios_per_pattern": max_scenarios_per_pattern,
-            "generation_mode": resolved_generation_mode.value,
-            "zones": effective_zones,
-            "eval": eval,
-            "model_profile": model_profile,
-            "profiles_file": (
-                str(profiles_file.resolve()) if model_profile is not None else None
-            ),
-            "model_control_sources": {
-                key: value.value
-                for key, value in effective_model.sources.items()
-                if key != "api_key"
-            },
-            "timeout": effective_model.timeout,
-            "top_p": effective_model.top_p,
-            "top_k": effective_model.top_k,
-            "use_guided_decoding": effective_model.use_guided_decoding,
-            "header_names": sorted((effective_model.extra_headers or {}).keys()),
-            "presentation_fallback": presentation_fallback,
-            "qualification_facts_mode": (
-                "explicit"
-                if qualification_facts_path is not None
-                else "omitted_compatibility"
-            ),
-        }
-        if qualification_facts_path is not None:
-            effective_options["qualification_facts_path"] = str(
-                qualification_facts_path.resolve()
-            )
+        effective_threats_path = _resolve_effective_threats_path(threats_path)
+        effective_zones = _parse_effective_zones(zones)
+        effective_options = _effective_pipeline_options(
+            input_hashes=input_hashes,
+            risk_extraction_path=risk_extraction_path,
+            sssom_path=sssom_path,
+            ct_path=cross_taxonomy_path,
+            effective_threats_path=effective_threats_path,
+            profile_path=profile_path,
+            client=client,
+            max_techniques=max_techniques,
+            max_scenarios_per_pattern=max_scenarios_per_pattern,
+            resolved_generation_mode=resolved_generation_mode,
+            effective_zones=effective_zones,
+            eval=eval,
+            model_profile=model_profile,
+            profiles_file=profiles_file,
+            effective_model=effective_model,
+            presentation_fallback=presentation_fallback,
+            qualification_facts_path=qualification_facts_path,
+        )
         config_digest = compute_config_digest(effective_options)
         provenance = capture_provenance(
             run_id=run_id,
@@ -1271,97 +2500,14 @@ def run_pipeline(
         )
 
         # --- Run-local logging (fresh, never appends across runs) ---
-        from asago_scenario_generator.log_config import setup_logging
-
         setup_logging(log_level=log_level, output_dir=run_dir, structured=structured)
         logger.info("Run ID: %s", run_id)
         logger.info("Run directory: %s", run_dir)
 
         # --- Persist use-case description ---
         write_use_case(run_dir, use_case)
-        if profile_path is not None:
-            logger.info("[Stage 1] Loading capability profile from %s", profile_path)
-            profile_data = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
-            profile = CapabilityProfile(**profile_data)
-        else:
-            logger.info("[Stage 1] Inferring capability profile...")
-            profile, profile_llm_result = infer_capability_profile(use_case, client)
-            # Log the profile inference LLM call to top-level calls.jsonl.
-            raw_content = profile_llm_result.content
-            if hasattr(raw_content, "model_dump"):
-                raw_content = raw_content.model_dump(mode="json")
-            elif not isinstance(raw_content, str):
-                raw_content = str(raw_content)
-            write_pipeline_call_log(
-                [
-                    {
-                        "call": "capability_profile",
-                        "system_prompt": profile_llm_result.system_prompt,
-                        "user_prompt": profile_llm_result.user_prompt,
-                        "response": raw_content,
-                        "prompt_tokens": profile_llm_result.prompt_tokens,
-                        "completion_tokens": profile_llm_result.completion_tokens,
-                        "duration_ms": profile_llm_result.duration_ms,
-                    }
-                ],
-                run_dir,
-            )
-        if zones is not None:
-            requested = [z.strip() for z in zones.split(",")]
-            invalid = [z for z in requested if z not in ZONE_NAMES]
-            if invalid:
-                raise ValueError(
-                    f"Unknown zone(s): {', '.join(invalid)}. Valid: {', '.join(ZONE_NAMES)}"
-                )
-            filtered = [z for z in requested if z in profile.zones_active]
-            updates: dict = {"zones_active": filtered}
-            # When zones are filtered, strip KC codes that would activate
-            # computed flags for the excluded zones so the boolean flags
-            # (has_persistent_memory, multi_agent) naturally become False.
-            kc_codes = list(profile.kc_subcodes)
-            if "memory" not in filtered:
-                kc_codes = [
-                    kc
-                    for kc in kc_codes
-                    if kc not in {"KC4.3", "KC4.4", "KC4.5", "KC4.6", "KCX-PMEM"}
-                ]
-            if "inter_agent" not in filtered:
-                kc_codes = [kc for kc in kc_codes if kc not in {"KC2.3", "KCX-MAGENT"}]
-            if kc_codes != list(profile.kc_subcodes):
-                updates["kc_subcodes"] = kc_codes
-            # Strip zone tags from entry points whose zone is excluded.
-            _zone_alts = "|".join(re.escape(z) for z in ZONE_NAMES)
-            _zone_tag_re = re.compile(
-                r"\s*\((" + _zone_alts + r")\)\s*$",
-            )
-            cleaned_entry_points = []
-            entry_points_changed = False
-            for ep in profile.entry_points:
-                m = _zone_tag_re.search(ep.name)
-                if m and m.group(1) not in filtered:
-                    cleaned_name = ep.name[: m.start()].rstrip()
-                    logger.warning(
-                        "Stripped zone tag from entry point: '%s' -> '%s'",
-                        ep.name,
-                        cleaned_name,
-                    )
-                    cleaned_entry_points.append(
-                        ep.model_copy(update={"name": cleaned_name})
-                    )
-                    entry_points_changed = True
-                else:
-                    cleaned_entry_points.append(ep)
-            if entry_points_changed:
-                # Re-run canonical dedup after zone-tag stripping — removing
-                # zone tags may cause two formerly-distinct entry points to
-                # become semantic duplicates or collide.
-                from asago_scenario_generator.models.capability_profile import (
-                    deduplicate_entry_points,
-                )
-
-                updates["entry_points"] = deduplicate_entry_points(cleaned_entry_points)
-            profile = profile.model_copy(update=updates)
-            logger.info("  Zone filter applied: %s", filtered)
+        profile = _load_or_infer_profile(profile_path, use_case, client, run_dir)
+        profile = _apply_zone_filter(profile, zones)
 
         logger.info("  Zones active: %s", profile.zones_active)
         logger.info("  Entry points: %d", len(profile.entry_points))
@@ -1373,30 +2519,20 @@ def run_pipeline(
 
         # --- Stage 2: Threat Surface Determination ---
         logger.info("[Stage 2] Determining threat surface...")
-        risk_cards = load_risk_extraction(risk_extraction_path)
-
-        # Validate causal chain coherence before proceeding.
-        coherence_report = validate_risk_card_coherence(use_case, risk_cards)
-        if coherence_report.has_warnings:
-            for card_result in coherence_report.flagged_cards:
-                generation_notes.append(
-                    f"Risk card {card_result.risk_id} ({card_result.risk_name}) "
-                    f"may describe a different system (0 keyword overlap with use case)."
-                )
-
-        threat_surface = determine_threat_surface(
-            profile,
-            risk_cards,
+        (
+            threat_surface,
+            actionable_count,
+            governance_count,
+            in_scope_threats,
+        ) = _stage2_threat_surface(
+            use_case,
+            risk_extraction_path,
             sssom_path,
-            ct_path,
+            cross_taxonomy_path,
             threats_path,
+            profile,
+            generation_notes,
         )
-
-        actionable_count = len(threat_surface.entries)
-        governance_count = len(threat_surface.governance_only)
-        in_scope_threats = set()
-        for entry in threat_surface.entries:
-            in_scope_threats.update(entry.agentic_threat_ids)
 
         # --- I/O boundary: threat surface ---
         ts_path = write_threat_surface(threat_surface, run_dir)
@@ -1421,13 +2557,7 @@ def run_pipeline(
             max_techniques=max_techniques,
             stage_records=stage_records,
         )
-        expansion_record = (
-            stage_records[-1]
-            if stage_records
-            else StageRecord(
-                stage="expansion", input_count=0, output_count=0, collapsed_count=0
-            )
-        )
+        expansion_record = _expansion_record(stage_records)
         unique_pre_rule_identities = expansion_record.output_count
 
         # Phase 1: Deterministic rule-based pre-filter.
@@ -1437,62 +2567,24 @@ def run_pipeline(
         )
         rule_rejected_count = len(rule_rejected)
         filter_submitted = len(rule_passed)
-
-        if rule_rejected_count:
-            logger.info(
-                "  Rule pre-filter: %d/%d candidates rejected, %d passed to LLM",
-                rule_rejected_count,
-                unique_pre_rule_identities,
-                filter_submitted,
-            )
+        _log_rule_filter_summary(
+            rule_rejected_count, unique_pre_rule_identities, filter_submitted
+        )
 
         # Phase 2: LLM filter on survivors only.
-        try:
-            filter_result = filter_candidates(
-                rule_passed,
-                seeds,
-                client,
-                use_case,
-                profile,
-                advisory_on_failure=True,
-            )
-            if len(filter_result) == 4:
-                (
-                    filtered_seeds,
-                    filter_call_logs,
-                    filter_rejected_verdicts,
-                    filter_quarantines,
-                ) = filter_result
-            else:
-                # Keep runner compatibility with integrations that provide
-                # the historical three-item filter result.
-                (
-                    filtered_seeds,
-                    filter_call_logs,
-                    filter_rejected_verdicts,
-                ) = filter_result
-                filter_quarantines = []
-        except FilterProtocolError as exc:
-            # Persist call/protocol evidence before failing the run.
-            write_pipeline_call_log(exc.call_log_entries, run_dir)
-            raise
+        (
+            filtered_seeds,
+            filter_call_logs,
+            filter_rejected_verdicts,
+            filter_quarantines,
+        ) = _run_candidate_filter(
+            rule_passed, seeds, client, use_case, profile, run_dir
+        )
         # Log candidate filter LLM calls to top-level calls.jsonl.
         write_pipeline_call_log(filter_call_logs, run_dir)
-        if any(
-            item.get("warning") == "candidate_filter_unavailable"
-            for item in filter_call_logs
-        ):
-            generation_notes.append(
-                "candidate_filter_unavailable: all rule-eligible candidates "
-                "continued to mandatory semantic generation"
-            )
+        _record_filter_unavailability_note(filter_call_logs, generation_notes)
         write_filter_quarantine_evidence(filter_quarantines, run_dir)
-        if filter_quarantines:
-            logger.warning(
-                "  Candidate filter quarantined %d seed(s): %s",
-                len(filter_quarantines),
-                ", ".join(item.seed_id for item in filter_quarantines),
-            )
+        _log_filter_quarantines(filter_quarantines)
         filter_accepted = len(filtered_seeds)
         logger.info(
             "  %d candidates -> %d rule-rejected, %d LLM-filtered -> %d accepted",
@@ -1512,47 +2604,17 @@ def run_pipeline(
         # so that coverage-aware budget allocation can reserve one feasible
         # candidate per coverage target before binding variants.
         logger.info("[Stage 3.6] Projecting authoritative candidates...")
-        attack_pattern_records = list(load_attack_patterns().values())
-        taxonomy_resolver = load_taxonomy_resolver()
-        capability_snapshot = capture_capability_snapshot(profile, qualification_facts)
-        selected_pattern_ids = {item.seed_id for item in filtered_seeds}
-        selected_patterns = [
-            validate_attack_pattern(item, taxonomy_resolver)
-            for item in attack_pattern_records
-            if item.get("id") in selected_pattern_ids
-        ]
-        try:
-            ensure_projection_readiness(selected_patterns, capability_snapshot)
-        except ProjectionReadinessError as exc:
-            # Legacy inferred runs have no authoritative fact source to
-            # validate. Preserve their existing projection behavior while
-            # keeping the gate fail-closed for explicit fact inputs and all
-            # missing architecture resources.
-            if (
-                qualification_facts_path is not None
-                or exc.report.missing_resource_categories
-            ):
-                raise
-            logger.warning(
-                "Projection readiness has unresolved facts without an explicit "
-                "qualification-facts source; deferring to projection conditions."
-            )
-
-        # Build coverage universe before projection (cmps.4 blocker 5).
-        coverage_universe = build_coverage_universe(profile)
-
-        # Coverage-aware projection: pass feasible target IDs so projection
-        # reserves one candidate per target before variant expansion.
-        projection_batch = project_authoritative_candidates(
+        (
             attack_pattern_records,
             taxonomy_resolver,
             capability_snapshot,
-            coverage_target_ids=coverage_universe.feasible_target_ids,
+            coverage_universe,
+            projection_batch,
+        ) = _project_authoritative_run(
+            profile, qualification_facts, qualification_facts_path, filtered_seeds
         )
         # Build lookup: pattern_id → list[ProjectedCandidate]
-        projected_by_pattern: dict[str, list[ProjectedCandidate]] = {}
-        for pc in projection_batch.candidates:
-            projected_by_pattern.setdefault(pc.pattern_id, []).append(pc)
+        projected_by_pattern = _projected_by_pattern_lookup(projection_batch)
         logger.info(
             "  Projected %d candidates (%d infeasible, %d limited)",
             len(projection_batch.candidates),
@@ -1567,116 +2629,19 @@ def run_pipeline(
         stage_ledger = StageLedger()
 
         # Record rule-rejection events from the rule filter stage.
-        for c in rule_rejected:
-            # cmps.4 blocker 4: Record actual rule-rejection details and
-            # identities/rationales.  RejectionRecord verdicts from the
-            # rule filter are matched by candidate_id for per-candidate
-            # removal-decision provenance.
-            matching_verdicts = [
-                v for v in rule_verdicts if v.candidate_id == c.candidate_id
-            ]
-            if matching_verdicts:
-                removals = [
-                    _removal_decision_summary(d)
-                    for v in matching_verdicts
-                    for d in v.removal_decisions
-                ]
-                rule_reasons = "; ".join(removals) or matching_verdicts[0].rationale
-            else:
-                rule_reasons = "Rejected by deterministic rule filter"
-            stage_ledger.record(
-                entry_point_id=c.entry_point_id,
-                candidate_id=c.candidate_id,
-                stage=STAGE_RULES,
-                reason="deterministic_rule_rejection",
-                detail=f"pattern={c.seed_id}: {rule_reasons}",
-            )
-
+        _record_rule_rejections(stage_ledger, rule_rejected, rule_verdicts)
         # Record filter-rejection events (rule-passed but LLM-rejected).
-        # cmps.4 blocker 4: Use the actual typed FilterVerdict rationale,
-        # not generic text.  The rejected verdicts survive from the filter
-        # protocol result, indexed by candidate_id.
-        accepted_filter_ids = {f.candidate_id for f in filtered_seeds}
-        filter_rejection_by_id = {v.candidate_id: v for v in filter_rejected_verdicts}
-        for c in rule_passed:
-            if c.candidate_id not in accepted_filter_ids:
-                verdict = filter_rejection_by_id.get(c.candidate_id)
-                rationale = (
-                    verdict.rationale
-                    if verdict is not None
-                    else "Candidate rejected by LLM filter."
-                )
-                stage_ledger.record(
-                    entry_point_id=c.entry_point_id,
-                    candidate_id=c.candidate_id,
-                    stage=STAGE_FILTER,
-                    reason="filter_rejection",
-                    detail=f"pattern={c.seed_id}: {rationale}",
-                    payload=(
-                        verdict.model_dump(mode="json") if verdict is not None else None
-                    ),
-                )
-
+        _record_filter_rejections(
+            stage_ledger, rule_passed, filtered_seeds, filter_rejected_verdicts
+        )
         # --- cmps.4 blocker 1: Qualified candidates over ProjectedCandidate ---
-        # Fan out all valid projected matches (distinct bindings for same
-        # pattern+ingress are alternatives, not fatal ambiguity).  Dedupe
-        # by projected candidate_id.  Preserve accepted filter verdict and
-        # provenance as first-class typed evidence.
-        projection_rejected_count = 0
-        projection_rejected_by_target: dict[str, list[str]] = {}
-        for fseed in filtered_seeds:
-            pc_list = projected_by_pattern.get(fseed.seed_id)
-            if not pc_list:
-                projection_rejected_count += 1
-                projection_rejected_by_target.setdefault(
-                    fseed.entry_point_id, []
-                ).append(fseed.candidate_id)
-                stage_ledger.record(
-                    entry_point_id=fseed.entry_point_id,
-                    candidate_id=fseed.candidate_id,
-                    stage=STAGE_PROJECTION,
-                    reason="no_projection",
-                    detail=f"No projected candidate for pattern '{fseed.seed_id}'.",
-                )
-                continue
-            matching_pcs = [
-                pc
-                for pc in pc_list
-                if pc.canonical_ingress.entry_point_id == fseed.entry_point_id
-            ]
-            if not matching_pcs:
-                projection_rejected_count += 1
-                projection_rejected_by_target.setdefault(
-                    fseed.entry_point_id, []
-                ).append(fseed.candidate_id)
-                stage_ledger.record(
-                    entry_point_id=fseed.entry_point_id,
-                    candidate_id=fseed.candidate_id,
-                    stage=STAGE_PROJECTION,
-                    reason="no_exact_ingress_match",
-                    detail=(
-                        f"No projected candidate for pattern '{fseed.seed_id}' "
-                        f"with ingress entry_point_id '{fseed.entry_point_id}'."
-                    ),
-                )
-                continue
-            # Multiple matches with distinct bindings are valid alternatives.
-            # Record projection acceptance for each matching candidate.
-            for pc in matching_pcs:
-                stage_ledger.record(
-                    entry_point_id=fseed.entry_point_id,
-                    candidate_id=pc.candidate_id,
-                    stage=STAGE_PROJECTION,
-                    reason="projected",
-                    detail=f"Projected candidate for pattern '{fseed.seed_id}'.",
-                )
-
-        if projection_rejected_count:
-            logger.info(
-                "  %d filtered seed(s) rejected at projection stage "
-                "(no exact ingress match).",
-                projection_rejected_count,
-            )
+        (
+            projection_rejected_count,
+            projection_rejected_by_target,
+        ) = _record_projection_events(
+            stage_ledger, filtered_seeds, projected_by_pattern
+        )
+        _log_projection_rejections(projection_rejected_count)
 
         # Build qualified candidates: fan out all valid projected matches,
         # dedupe by projected candidate_id, preserve filter provenance.
@@ -1700,62 +2665,9 @@ def run_pipeline(
         projection_limitation_target_ids: set[str] = set(
             projection_batch.unreserved_coverage_targets
         )
-
         # Record projection-limitation events for targets omitted by budget
-        # allocation (cmps.4 blocker 3).  Includes the budget and exact target
-        # IDs — not backward set-membership inference.
-        budget_max = ProjectionBudget().max_candidates
-        for ep_id in projection_batch.unreserved_coverage_targets:
-            stage_ledger.record(
-                entry_point_id=ep_id,
-                candidate_id="",
-                stage=STAGE_PROJECTION,
-                reason="budget_exhausted",
-                detail=(
-                    f"Coverage target omitted by projection budget allocation "
-                    f"(budget={budget_max}, target_id={ep_id})."
-                ),
-            )
-
-        # Record infeasible coverage targets (no compatible projection at all)
-        # as structural projection gaps (cmps.4 blocker 3).
-        for ep_id in projection_batch.infeasible_coverage_targets:
-            stage_ledger.record(
-                entry_point_id=ep_id,
-                candidate_id="",
-                stage=STAGE_PROJECTION,
-                reason="no_compatible_projection",
-                detail=(
-                    f"Coverage target has no compatible projection (target_id={ep_id})."
-                ),
-            )
-
-        # Preserve projection issues as stage events with complete typed
-        # payload (cmps.4 blocker 3: persist complete ProjectionIssue/
-        # ProjectionLimitation payloads — step_id, slot_id, evidence/results
-        # — not reduced strings/counts).
-        for issue in projection_batch.infeasibilities:
-            stage_ledger.record(
-                entry_point_id="",
-                candidate_id="",
-                stage=STAGE_PROJECTION,
-                reason=issue.code,
-                detail=f"pattern={issue.pattern_id}: {issue.detail}",
-                payload=issue.model_dump(mode="json"),
-            )
-        for limitation in projection_batch.limitations:
-            stage_ledger.record(
-                entry_point_id="",
-                candidate_id="",
-                stage=STAGE_PROJECTION,
-                reason="variant_truncation",
-                detail=(
-                    f"pattern={limitation.pattern_id}: "
-                    f"{limitation.emitted_bindings}/"
-                    f"{limitation.total_compatible_bindings} bindings emitted"
-                ),
-                payload=limitation.model_dump(mode="json"),
-            )
+        # allocation (cmps.4 blocker 3), with budget and exact target IDs.
+        _record_projection_limitation_events(stage_ledger, projection_batch)
 
         planning_result = plan_generation(
             qualified_candidates,
@@ -1770,48 +2682,11 @@ def run_pipeline(
         candidates_capped = selection_result.capped_count
 
         # Record selection events for selected candidates.
-        for qc in selection_result.selected:
-            stage_ledger.record(
-                entry_point_id=qc.entry_point_id,
-                candidate_id=qc.candidate_id,
-                stage=STAGE_SELECTION,
-                reason="selected",
-                detail=f"Selected for generation (rank {qc.rank}).",
-            )
-
-        # Record selection-limitation events for targets where a per-pattern
-        # cap could not be respected (cmps.4 blocker 2/4: these are real
-        # selection limitations where qualified candidates were deliberately
-        # not chosen for cap reasons — not synthetic events for empty queues).
-        for ep_id in selection_result.selection_limitation_target_ids:
-            limitation_detail = (
-                "Per-pattern cap excluded all qualified candidates for this "
-                "ingress target."
-                if resolved_generation_mode is GenerationMode.EXHAUSTIVE
-                else "Per-pattern cap could not be respected for this target; "
-                "coverage preserved but cap violated."
-            )
-            stage_ledger.record(
-                entry_point_id=ep_id,
-                candidate_id=selection_result.primary_candidate_ids.get(ep_id, ""),
-                stage=STAGE_SELECTION,
-                reason="selection_limitation",
-                detail=limitation_detail,
-            )
-
-        if candidates_capped > 0:
-            logger.info(
-                "  %s generation planning: %d candidates capped by "
-                "the per-pattern limit.",
-                resolved_generation_mode.value.capitalize(),
-                candidates_capped,
-            )
-        if selection_result.uncovered_target_ids:
-            logger.info(
-                "  %d feasible target(s) with no candidate: %s",
-                len(selection_result.uncovered_target_ids),
-                selection_result.uncovered_target_ids,
-            )
+        _record_selection_events(
+            stage_ledger, selection_result, resolved_generation_mode
+        )
+        _log_cap_summary(resolved_generation_mode, candidates_capped)
+        _log_uncovered_targets(selection_result)
         logger.info(
             "  Selected %d candidate(s) from %d qualified (%d projection-rejected).",
             selected_count,
@@ -1823,55 +2698,20 @@ def run_pipeline(
         # Persist the immutable plan and empty inventory before entering any
         # candidate callback.  Everything below this return is intentionally
         # retained as the v2 implementation for Phase 6 removal only.
-        from asago_scenario_generator.pipeline.persistence import (
-            PlanningCheckpointV1,
-            make_finalization_persistence_adapter,
-            write_planning_checkpoint,
-        )
-        from asago_scenario_generator.pipeline.runner_finalization import (
-            run_target_finalization,
-            strict_v3_coverage_plan,
-        )
-
         initial_plan = planning_result.plan
-        planning_checkpoint = PlanningCheckpointV1(
+        planning_checkpoint = _build_planning_checkpoint(
             qualification_facts_source=qualification_facts_source,
-            qualification_facts_sha256=input_hashes.qualification_facts_hash,
-            stage_events=[event.to_dict() for event in stage_ledger.events],
-            projection_limitation_target_ids=sorted(projection_limitation_target_ids),
-            selected_candidate_ids=[
-                candidate.candidate_id for candidate in selection_result.selected
-            ],
-            capped_count=selection_result.capped_count,
-            uncovered_target_ids=sorted(selection_result.uncovered_target_ids),
-            per_pattern_counts=dict(
-                sorted(selection_result.per_pattern_counts.items())
-            ),
-            primary_candidate_ids=dict(
-                sorted(selection_result.primary_candidate_ids.items())
-            ),
-            attempted_candidate_ids=sorted(selection_result.attempted_candidate_ids),
-            selection_limitation_target_ids=sorted(
-                selection_result.selection_limitation_target_ids
-            ),
-            fallback_candidate_ids={
-                target_id: queue.candidate_ids()
-                for target_id, queue in sorted(fallback_queues.items())
-            },
+            input_hashes=input_hashes,
+            stage_ledger=stage_ledger,
+            projection_limitation_target_ids=projection_limitation_target_ids,
+            selection_result=selection_result,
+            fallback_queues=fallback_queues,
         )
         write_planning_checkpoint(run_dir, planning_checkpoint)
         # Atomically replace the sentinel with a hash-bound inventory of
         # immutable resume support before publishing mutable lifecycle state.
         # This keeps a crash immediately after plan persistence resumable.
-        partial_manifest.inventory = [
-            build_artifact_entry(role, run_dir, path)
-            for role, path in (
-                (ArtifactRole.USE_CASE, "use-case.txt"),
-                (ArtifactRole.CAPABILITY_PROFILE, "capability-profile.yaml"),
-                (ArtifactRole.THREAT_SURFACE, "threat-surface.yaml"),
-                (ArtifactRole.PLANNING_CHECKPOINT, "planning-checkpoint.json"),
-            )
-        ]
+        partial_manifest.inventory = _resume_support_inventory(run_dir)
         write_started_manifest(run_dir, partial_manifest)
         make_finalization_persistence_adapter(
             run_dir,
@@ -1913,101 +2753,6 @@ def run_pipeline(
         )
 
     except Exception as exc:
-        # Best-effort failed manifest with accumulated evidence, then re-raise.
-        # Flush/close/remove run-local file handlers BEFORE hashing failed
-        # evidence so pipeline.log is stable and we don't log through a
-        # closed handler afterward.
-        sf_logger = logging.getLogger("asago_scenario_generator")
-        for handler in sf_logger.handlers[:]:
-            if isinstance(handler, logging.FileHandler):
-                try:
-                    handler.flush()
-                    handler.close()
-                except Exception:  # noqa: BLE001, S110 - handler cleanup must not fail
-                    pass
-                sf_logger.removeHandler(handler)
-        # Log to stderr only (run-local handler removed).
-        logging.getLogger("asago_scenario_generator").error("Pipeline failed: %s", exc)
-        try:
-            # If partial_manifest was never constructed (very early failure),
-            # load the sentinel from disk as a base.
-            if partial_manifest is not None:
-                failed_manifest = partial_manifest
-            else:
-                try:
-                    failed_manifest = load_manifest(run_dir)
-                except Exception:  # noqa: BLE001 - create fallback manifest if load fails
-                    failed_manifest = RunManifest(
-                        manifest_version=MANIFEST_VERSION,
-                        status=RunStatus.STARTED,
-                        run_id=run_id,
-                        timestamp_start=timestamp_start,
-                        package_version=importlib.metadata.version(
-                            "asago-scenario-generator"
-                        ),
-                        provenance=Provenance(
-                            run_id=run_id,
-                            timestamp_start=timestamp_start,
-                        )
-                        if provenance is not None
-                        else None,
-                    )
-            failed_manifest.status = RunStatus.FAILED
-            failed_manifest.timestamp_end = datetime.now(UTC).isoformat()
-            failure_code = getattr(exc, "failure_code", None)
-            failed_manifest.error = (
-                f"{failure_code}: {exc}" if failure_code else str(exc)
-            )
-            if failed_manifest.provenance:
-                failed_manifest.provenance.timestamp_end = failed_manifest.timestamp_end
-            # Finish any interrupted two-document publication before the
-            # failed manifest inventories forensic state.  V3 has one
-            # lifecycle authority, so legacy mirrors remain empty.
-            from asago_scenario_generator.pipeline.persistence import (
-                recover_finalization_journal,
-            )
-
-            immutable_roles = {
-                ArtifactRole.USE_CASE,
-                ArtifactRole.CAPABILITY_PROFILE,
-                ArtifactRole.THREAT_SURFACE,
-                ArtifactRole.PLANNING_CHECKPOINT,
-            }
-            try:
-                started_manifest = load_manifest(
-                    run_dir, requested_version=MANIFEST_VERSION
-                )
-            except Exception:  # noqa: BLE001 - early failures may predate sentinel
-                started_manifest = None
-            original_by_role = (
-                {
-                    item.role: item
-                    for item in started_manifest.inventory
-                    if item.role in immutable_roles
-                }
-                if started_manifest is not None
-                else {}
-            )
-            support_published = set(original_by_role) == immutable_roles
-            support_valid = False
-            if support_published and started_manifest is not None:
-                try:
-                    ManifestInventoryResolver(
-                        run_dir, started_manifest, check_orphans=False
-                    )
-                    support_valid = True
-                except ManifestIntegrityError as support_exc:
-                    failed_manifest.error = (
-                        f"{exc}; immutable support validation failed: {support_exc}"
-                    )
-            if support_valid:
-                recover_finalization_journal(run_dir, expected_run_id=run_id)
-            evidence_inventory = _build_failed_evidence_inventory(run_dir, [])
-            failed_manifest.inventory = [
-                item for item in evidence_inventory if item.role not in original_by_role
-            ] + list(original_by_role.values())
-            write_failed_manifest(run_dir, failed_manifest)
-            raise
-        except Exception:  # noqa: BLE001, S110 - best-effort write during error path
-            pass
-        raise
+        _recover_and_reraise_failed_run(
+            run_dir, run_id, timestamp_start, provenance, partial_manifest, exc
+        )

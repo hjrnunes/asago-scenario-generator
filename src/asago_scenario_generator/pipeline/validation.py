@@ -35,6 +35,18 @@ from asago_scenario_generator.models.attack_tree import (
     _repair_node,
 )
 from asago_scenario_generator.pipeline.tree_utils import collect_tree_zones
+from asago_scenario_generator.models.scenario import (
+    SemanticValidation,
+    SemanticViolation,
+    ValidationBlock,
+)
+from asago_scenario_generator.pipeline.technique_scopes import (
+    narrative_reference_ids,
+    projected_step_mapping_ids,
+    projected_step_mapping_ids_by_step,
+    resolved_technique_scope_evidence,
+    stable_unique,
+)
 
 if TYPE_CHECKING:
     from asago_scenario_generator.models.capability_profile import CapabilityProfile
@@ -1195,598 +1207,864 @@ def _validate_scenario_semantics_mutating(
     Populates ``scenario.validation.semantic`` with results.
     Scenarios are never removed -- violations are recorded as warnings.
     """
-    from asago_scenario_generator.models.capability_profile import (
-        is_attacker_accessible_ingress,
-    )
-    from asago_scenario_generator.models.scenario import (
-        SemanticValidation,
-        SemanticViolation,
-        ValidationBlock,
-    )
-    from asago_scenario_generator.pipeline.technique_scopes import (
-        narrative_reference_ids,
-        projected_step_mapping_ids,
-        projected_step_mapping_ids_by_step,
-        resolved_technique_scope_evidence,
-        stable_unique,
-    )
-
     valid_technique_ids = _valid_technique_ids()
     valid_zones = {*profile.zones_active, "outside"}
-
     for scenario in scenarios:
-        violations: list[SemanticViolation] = []
+        _validate_scenario_semantics_in_place(
+            scenario, profile, valid_technique_ids, valid_zones
+        )
 
-        # 1. Check technique_ids in attack tree.
-        tree_technique_ids = scenario.attack_tree.collect_technique_ids()
-        tree_technique_set = set(tree_technique_ids)
-        for tid in tree_technique_ids:
-            if tid not in valid_technique_ids:
-                violations.append(
-                    SemanticViolation(
-                        rule="technique_exists",
-                        message=f"{tid} not in pinned technique set",
-                        severity="major",
-                    )
-                )
 
-        # 2. Check zones against profile.
-        for zone in scenario.narrative.zone_sequence:
-            if zone not in valid_zones:
-                violations.append(
-                    SemanticViolation(
-                        rule="zone_in_profile",
-                        message=(
-                            f"Zone '{zone}' in narrative zone_sequence "
-                            f"is not in profile's zones_active: {sorted(valid_zones)}"
-                        ),
-                        severity="minor",
-                    )
-                )
+def _persist_semantic_validation(
+    scenario: ScenarioEnvelope,
+    semantic: SemanticValidation,
+) -> None:
+    """Write semantic results into the scenario validation block."""
+    if scenario.validation is None:
+        scenario.validation = ValidationBlock(semantic=semantic)
+    else:
+        scenario.validation.semantic = semantic
+    scenario.validation_passed = (
+        scenario.validation.phantom.valid
+        and scenario.validation.structural.valid
+        and scenario.validation.semantic.valid
+    )
 
-        # 3. Check threat_id range on tree nodes.
-        seed_metadata = scenario.scenario_seed_metadata
-        if seed_metadata and "threat_id" in seed_metadata:
-            expected_threat = seed_metadata["threat_id"]
-            _check_tree_threat_ids(
-                scenario.attack_tree.root,
-                expected_threat,
-                violations,
-            )
 
-            # 4. Check that at least one node carries the scenario's own
-            #    threat_id (missing_scenario_threat_id — bv5s).
-            all_tree_threat_ids = _collect_tree_node_threat_ids(
-                scenario.attack_tree.root
-            )
-            if expected_threat not in all_tree_threat_ids:
-                violations.append(
-                    SemanticViolation(
-                        rule="missing_scenario_threat_id",
-                        message=(
-                            f"No tree node carries the scenario's threat_id "
-                            f"'{expected_threat}'; tree threat_ids are "
-                            f"{sorted(all_tree_threat_ids)}"
-                        ),
-                        severity="major",
-                    )
-                )
+def _validate_scenario_semantics_in_place(
+    scenario: ScenarioEnvelope,
+    profile: CapabilityProfile,
+    valid_technique_ids: frozenset[str],
+    valid_zones: set[str],
+) -> None:
+    """Run every semantic check for one scenario and persist the result."""
+    violations: list[SemanticViolation] = []
+    tree_technique_set = _semantic_tree_technique_set(scenario)
+    _check_semantic_tree_techniques(scenario, valid_technique_ids, violations)
+    _check_semantic_narrative_zones(scenario, valid_zones, violations)
+    _check_semantic_threat_ids(scenario, violations)
+    _check_semantic_technique_scope_evidence(
+        scenario, tree_technique_set, valid_technique_ids, violations
+    )
+    _check_semantic_leaf_technique_mappings(scenario, violations)
+    _check_semantic_zone_omissions(scenario, violations)
+    _check_semantic_typed_actions(scenario, profile, violations)
+    _check_semantic_goal_category_alignment(scenario, profile, violations)
+    _check_semantic_actor_access_provenance(scenario, profile, violations)
+    corpus_claims = check_corpus_claims_applicability(scenario, profile)
+    semantic = SemanticValidation(
+        valid=len(violations) == 0,
+        violations=violations,
+        corpus_claim_applicability=corpus_claims,
+    )
+    _persist_semantic_validation(scenario, semantic)
 
-        # 5. Technique-scope evidence and narrative grounding. Scenario
-        #    classifications and exact projected-step mappings are independent
-        #    authorities; a narrative reference may be grounded in either.
-        scope_evidence = resolved_technique_scope_evidence(scenario)
-        scenario_classifications = set(scope_evidence.scenario_classification_ids)
-        projected_mapping_ids = set(scope_evidence.projected_step_mapping_ids)
-        actual_narrative_ids = set(narrative_reference_ids(scenario.narrative))
-        grounded_narrative_ids = scenario_classifications | projected_mapping_ids
-        for technique_id in sorted(
-            (scenario_classifications | projected_mapping_ids) - tree_technique_set
-        ):
-            if technique_id not in valid_technique_ids:
-                violations.append(
-                    SemanticViolation(
-                        rule="technique_exists",
-                        message=(
-                            f"{technique_id} is unknown in published ATLAS "
-                            "technique-scope evidence"
-                        ),
-                        severity="major",
-                    )
-                )
-        orphan_techniques = actual_narrative_ids - grounded_narrative_ids
-        for orphan_tid in sorted(orphan_techniques):
+
+def _semantic_tree_technique_set(scenario: ScenarioEnvelope) -> set[str]:
+    """Return the scenario's attack-tree technique IDs as a set."""
+    return set(scenario.attack_tree.collect_technique_ids())
+
+
+def _check_semantic_tree_techniques(
+    scenario: ScenarioEnvelope,
+    valid_technique_ids: frozenset[str],
+    violations: list[SemanticViolation],
+) -> None:
+    """Record attack-tree technique IDs absent from the pinned set."""
+    for tid in scenario.attack_tree.collect_technique_ids():
+        if tid not in valid_technique_ids:
             violations.append(
                 SemanticViolation(
-                    rule="narrative_technique_orphan",
+                    rule="technique_exists",
+                    message=f"{tid} not in pinned technique set",
+                    severity="major",
+                )
+            )
+
+
+def _check_semantic_narrative_zones(
+    scenario: ScenarioEnvelope,
+    valid_zones: set[str],
+    violations: list[SemanticViolation],
+) -> None:
+    """Record narrative zones absent from the profile's active zones."""
+    for zone in scenario.narrative.zone_sequence:
+        if zone not in valid_zones:
+            violations.append(
+                SemanticViolation(
+                    rule="zone_in_profile",
                     message=(
-                        f"Technique '{orphan_tid}' mentioned in narrative "
-                        "but absent from both scenario classifications and "
-                        "projected-step mappings"
+                        f"Zone '{zone}' in narrative zone_sequence "
+                        f"is not in profile's zones_active: {sorted(valid_zones)}"
                     ),
                     severity="minor",
                 )
             )
 
-        if scenario.technique_scope_evidence is not None:
-            faceted_classifications = stable_unique(
-                scenario.faceting.taxonomy_chain.atlas_technique_ids or ()
-            )
-            if faceted_classifications != scope_evidence.scenario_classification_ids:
-                violations.append(
-                    SemanticViolation(
-                        rule="scenario_classification_mismatch",
-                        message=(
-                            "Faceted scenario classifications "
-                            f"{faceted_classifications} do not equal published "
-                            "technique-scope classifications "
-                            f"{scope_evidence.scenario_classification_ids}."
-                        ),
-                        severity="major",
-                    )
-                )
-            expected_classifications: list[str] | None = None
-            candidate_filter = scenario.candidate_filter or {}
-            if candidate_filter.get("pinned_technique_ids"):
-                expected_classifications = stable_unique(
-                    candidate_filter["pinned_technique_ids"]
-                )
-            elif scenario.scenario_seed_metadata is not None:
-                expected_classifications = stable_unique(
-                    scenario.scenario_seed_metadata.get("atlas_technique_ids") or ()
-                )
-            if (
-                expected_classifications is not None
-                and expected_classifications
-                != scope_evidence.scenario_classification_ids
-            ):
-                violations.append(
-                    SemanticViolation(
-                        rule="scenario_classification_mismatch",
-                        message=(
-                            "Published scenario classifications "
-                            f"{scope_evidence.scenario_classification_ids} do not "
-                            "equal qualified pins or seed fallback "
-                            f"{expected_classifications}."
-                        ),
-                        severity="major",
-                    )
-                )
-            canonical_mapping_ids = projected_step_mapping_ids(scenario.projection)
-            if canonical_mapping_ids != scope_evidence.projected_step_mapping_ids:
-                violations.append(
-                    SemanticViolation(
-                        rule="projected_step_mapping_evidence_mismatch",
-                        message=(
-                            "Published projected-step mappings "
-                            f"{scope_evidence.projected_step_mapping_ids} do not "
-                            f"equal canonical mappings {canonical_mapping_ids}."
-                        ),
-                        severity="major",
-                    )
-                )
-            if actual_narrative_ids != set(scope_evidence.narrative_reference_ids):
-                violations.append(
-                    SemanticViolation(
-                        rule="narrative_reference_evidence_mismatch",
-                        message=(
-                            "Published narrative ATLAS references "
-                            f"{scope_evidence.narrative_reference_ids} do not equal "
-                            f"the authored narrative references {sorted(actual_narrative_ids)}."
-                        ),
-                        severity="major",
-                    )
-                )
 
-        # Legacy envelopes expose only derived aggregate scopes; without the
-        # explicit evidence contract they remain readable and are not held to
-        # a new per-leaf association they never published.
-        if scenario.technique_scope_evidence is not None:
-            exact_ids_by_step = projected_step_mapping_ids_by_step(scenario.projection)
-            for leaf in _collect_leaves(scenario.attack_tree.root):
-                if leaf.technique_id is None:
-                    continue
-                represented_steps = tuple(leaf.projected_step_ids)
-                if not represented_steps:
-                    violations.append(
-                        SemanticViolation(
-                            rule="leaf_technique_mapping_mismatch",
-                            message=(
-                                f"Leaf '{leaf.id}' carries technique "
-                                f"'{leaf.technique_id}' without a projected-step "
-                                "realization."
-                            ),
-                            severity="major",
-                        )
-                    )
-                    continue
-                incompatible_steps = [
-                    step_id
-                    for step_id in represented_steps
-                    if leaf.technique_id
-                    not in exact_ids_by_step.get(step_id, frozenset())
-                ]
-                if incompatible_steps:
-                    violations.append(
-                        SemanticViolation(
-                            rule="leaf_technique_mapping_mismatch",
-                            message=(
-                                f"Leaf '{leaf.id}' technique '{leaf.technique_id}' "
-                                "is not an exact ATLAS mapping of represented "
-                                f"projected steps {incompatible_steps}."
-                            ),
-                            severity="major",
-                        )
-                    )
-
-        # 6. Zone omission checks (bv5s).
-        narrative_zones = set(scenario.narrative.zone_sequence)
-        # ``outside`` represents activity before crossing the assessed system
-        # boundary. Tree leaves for those external preconditions intentionally
-        # have zone=None, and Gherkin annotations cover active system zones.
-        artifact_coverage_zones = narrative_zones - {"outside"}
-
-        # 6a. Zone omission — tree.
-        tree_zones = _collect_tree_node_zones(scenario.attack_tree.root)
-        omitted_tree_zones = sorted(artifact_coverage_zones - tree_zones)
-        zone_seq = scenario.narrative.zone_sequence
-        terminal_zone = zone_seq[-1] if zone_seq else None
-        compound_omission = len(omitted_tree_zones) >= 2
-        for zone in omitted_tree_zones:
-            is_terminal = zone == terminal_zone
-            severity = "major" if is_terminal or compound_omission else "minor"
+def _check_semantic_threat_ids(
+    scenario: ScenarioEnvelope,
+    violations: list[SemanticViolation],
+) -> None:
+    """Record out-of-range tree threat_ids and a missing scenario threat_id."""
+    seed_metadata = scenario.scenario_seed_metadata
+    if seed_metadata and "threat_id" in seed_metadata:
+        expected_threat = seed_metadata["threat_id"]
+        _check_tree_threat_ids(
+            scenario.attack_tree.root,
+            expected_threat,
+            violations,
+        )
+        all_tree_threat_ids = _collect_tree_node_threat_ids(scenario.attack_tree.root)
+        if expected_threat not in all_tree_threat_ids:
             violations.append(
                 SemanticViolation(
-                    rule="zone_omission_tree",
+                    rule="missing_scenario_threat_id",
                     message=(
-                        f"Zone '{zone}' in narrative zone_sequence "
-                        f"but absent from attack tree nodes"
-                    ),
-                    severity=severity,
-                )
-            )
-
-        # 6b. Zone omission — Gherkin.
-        gherkin_text = ""
-        from asago_scenario_generator.models.scenario import BehaviorSpec as _BS2
-
-        if scenario.behavior_spec and isinstance(scenario.behavior_spec, _BS2):
-            gherkin_text = scenario.behavior_spec.gherkin_text
-        elif scenario.behavior_spec and isinstance(scenario.behavior_spec, str):
-            gherkin_text = scenario.behavior_spec
-        gherkin_zones: set[str] = set()
-        if gherkin_text:
-            gherkin_zones = _extract_gherkin_zones_for_validation(gherkin_text)
-            for zone in sorted(artifact_coverage_zones - gherkin_zones):
-                violations.append(
-                    SemanticViolation(
-                        rule="zone_omission_gherkin",
-                        message=(
-                            f"Zone '{zone}' in narrative zone_sequence "
-                            f"but absent from Gherkin behavior_spec"
-                        ),
-                        severity="minor",
-                    )
-                )
-
-        # 10. Zone coverage dropout — a zone present in narrative but absent
-        #     from BOTH tree AND Gherkin is a hard consistency failure (cxy4).
-        dropped_zones = artifact_coverage_zones - (tree_zones | gherkin_zones)
-        for zone in sorted(dropped_zones):
-            violations.append(
-                SemanticViolation(
-                    rule="zone_coverage_dropout",
-                    message=(
-                        f"Zone '{zone}' in narrative zone_sequence is absent "
-                        f"from BOTH attack tree nodes AND Gherkin behavior_spec"
+                        f"No tree node carries the scenario's threat_id "
+                        f"'{expected_threat}'; tree threat_ids are "
+                        f"{sorted(all_tree_threat_ids)}"
                     ),
                     severity="major",
                 )
             )
 
-        # 8. Typed action and canonical resource checks. Unknown emitted IDs
-        #    fail even when the profile inventory is only inferred_partial.
-        leaves = _collect_leaves(scenario.attack_tree.root)
-        for leaf in leaves:
-            action = leaf.action
-            if leaf.zone == "tool_execution" and (
-                action is None
-                or action.kind not in {"tool_invocation", "integration_interaction"}
-            ):
-                violations.append(
-                    SemanticViolation(
-                        rule="untyped-tool-execution",
-                        message=(
-                            f"Leaf node '{leaf.id}' is in tool_execution zone "
-                            "but does not have a tool_invocation or "
-                            "integration_interaction action"
-                        ),
-                        severity="major",
-                    )
-                )
-            if action is None:
-                continue
-            if action.kind == "initial_ingress":
-                resolved_ep = profile.resolve_entry_point(action.entry_point_id)
-                if resolved_ep is None:
-                    violations.append(
-                        SemanticViolation(
-                            rule="unknown_entry_point_id",
-                            message=(
-                                f"Leaf node '{leaf.id}' references unknown "
-                                f"entry_point_id '{action.entry_point_id}'"
-                            ),
-                            severity="major",
-                        )
-                    )
-                elif not is_attacker_accessible_ingress(
-                    resolved_ep,
-                    set(profile.zones_active) if profile.zones_active else set(),
-                ):
-                    violations.append(
-                        SemanticViolation(
-                            rule="inaccessible_ingress_entry_point",
-                            message=(
-                                f"Leaf node '{leaf.id}' references entry "
-                                f"point '{resolved_ep.name}' "
-                                f"(entry_point_id '{action.entry_point_id}') "
-                                f"which is not an attacker-accessible ingress "
-                                f"route (output-only, system-controlled, or "
-                                f"inactive ingress zone)."
-                            ),
-                            severity="major",
-                        )
-                    )
-            elif action.kind == "tool_invocation":
-                if profile.resolve_tool(action.tool_id) is None:
-                    violations.append(
-                        SemanticViolation(
-                            rule="phantom_tool",
-                            message=(
-                                f"Leaf node '{leaf.id}' references unknown "
-                                f"tool_id '{action.tool_id}'"
-                            ),
-                            severity="major",
-                        )
-                    )
-                if (
-                    action.integration_id is not None
-                    and profile.resolve_integration(action.integration_id) is None
-                ):
-                    violations.append(
-                        SemanticViolation(
-                            rule="unknown_integration_id",
-                            message=(
-                                f"Leaf node '{leaf.id}' references unknown "
-                                f"integration_id '{action.integration_id}'"
-                            ),
-                            severity="major",
-                        )
-                    )
-            elif (
-                action.kind == "integration_interaction"
-                and profile.resolve_integration(action.integration_id) is None
-            ):
-                violations.append(
-                    SemanticViolation(
-                        rule="unknown_integration_id",
-                        message=(
-                            f"Leaf node '{leaf.id}' references unknown "
-                            f"integration_id '{action.integration_id}'"
-                        ),
-                        severity="major",
-                    )
-                )
 
-        # 11. Goal-category alignment — flag mismatches between goal_category
-        #     and the actor type or attack mechanism (kum3).
-        _goal_cat = (
-            scenario.actor_profile.goal_category if scenario.actor_profile else None
-        )
-        if _goal_cat and isinstance(_goal_cat, str):
-            _actor_type = (
-                scenario.actor_profile.actor_type if scenario.actor_profile else None
-            )
-
-            # 11a. Supply-chain goal on non-supply-chain actor.
-            _NON_SUPPLY_CHAIN_ACTORS = {
-                "negligent-insider",
-                "adversarial-user",
-                "cybercriminal",
-            }
-            if _goal_cat.startswith("IN-7") and _actor_type in _NON_SUPPLY_CHAIN_ACTORS:
-                violations.append(
-                    SemanticViolation(
-                        rule="goal_actor_mismatch",
-                        message=(
-                            f"Supply-chain goal '{_goal_cat}' assigned to "
-                            f"actor_type '{_actor_type}' which is not a "
-                            f"supply-chain actor"
-                        ),
-                        severity="moderate",
-                    )
-                )
-
-            # 11b. Data exfiltration goal on financial fraud attack.
-            if _goal_cat.startswith("PR-1"):
-                _financial_keywords = [
-                    "refund",
-                    "payment",
-                    "billing",
-                    "transaction",
-                ]
-                leaves = _collect_leaves(scenario.attack_tree.root)
-                _has_financial_tool_leaf = False
-                for leaf in leaves:
-                    if leaf.action is None or leaf.action.kind != "tool_invocation":
-                        continue
-                    resolved_tool = profile.resolve_tool(leaf.action.tool_id)
-                    if resolved_tool is not None and any(
-                        kw in resolved_tool.name.lower() for kw in _financial_keywords
-                    ):
-                        _has_financial_tool_leaf = True
-                        break
-                if _has_financial_tool_leaf:
-                    violations.append(
-                        SemanticViolation(
-                            rule="goal_mechanism_mismatch",
-                            message=(
-                                f"Data exfiltration goal '{_goal_cat}' "
-                                f"assigned but attack tree contains "
-                                f"financial tool leaves (refund/payment/"
-                                f"billing/transaction)"
-                            ),
-                            severity="minor",
-                        )
-                    )
-
-            # 11c. Safety bypass goal on social engineering attack.
-            if _goal_cat.startswith("AB-1"):
-                _se_keywords = [
-                    "phishing",
-                    "credential",
-                    "social engineering",
-                    "impersonat",
-                ]
-                _narrative_text = " ".join(
-                    [scenario.narrative.title, scenario.narrative.summary]
-                    + [f"{s.action} {s.effect}" for s in scenario.narrative.steps]
-                ).lower()
-                _has_social_engineering = any(
-                    kw in _narrative_text for kw in _se_keywords
-                )
-                if _has_social_engineering:
-                    violations.append(
-                        SemanticViolation(
-                            rule="goal_mechanism_mismatch",
-                            message=(
-                                f"Safety bypass goal '{_goal_cat}' assigned "
-                                f"but narrative describes a social "
-                                f"engineering attack"
-                            ),
-                            severity="minor",
-                        )
-                    )
-
-        # 12. Actor / access provenance validation (cmps.6).
-        #     Uses the shared pure validator from generate.actor to avoid
-        #     duplicating rule maps.  Adds tree-wide ID invariants that the
-        #     pure validator cannot check (it has no tree context).
-        _actor_type_12 = (
-            scenario.actor_profile.actor_type if scenario.actor_profile else None
-        )
-        _access_12 = scenario.actor_profile.access if scenario.actor_profile else None
-        _ingress_actions_12 = [
-            (leaf.id, leaf.action)
-            for leaf in leaves
-            if leaf.action is not None and leaf.action.kind == "initial_ingress"
-        ]
-
-        if _actor_type_12 and _access_12 is None and _ingress_actions_12:
+def _check_semantic_unknown_scope_techniques(
+    scope_evidence: Any,
+    tree_technique_set: set[str],
+    valid_technique_ids: frozenset[str],
+    violations: list[SemanticViolation],
+) -> None:
+    """Record unknown ATLAS IDs in published technique-scope evidence."""
+    scenario_classifications = set(scope_evidence.scenario_classification_ids)
+    projected_mapping_ids = set(scope_evidence.projected_step_mapping_ids)
+    for technique_id in sorted(
+        (scenario_classifications | projected_mapping_ids) - tree_technique_set
+    ):
+        if technique_id not in valid_technique_ids:
             violations.append(
                 SemanticViolation(
-                    rule="missing_access_provenance",
+                    rule="technique_exists",
                     message=(
-                        f"Actor '{_actor_type_12}' has no typed access "
-                        f"provenance (cmps.6)."
+                        f"{technique_id} is unknown in published ATLAS "
+                        "technique-scope evidence"
                     ),
-                    severity="moderate",
+                    severity="major",
                 )
             )
 
-        if _actor_type_12 and _access_12 is not None:
-            # 12a–12e: delegate to the shared pure access-policy validator.
-            from asago_scenario_generator.pipeline.generate.actor import (
-                validate_actor_access_provenance as _vap,
+
+def _check_semantic_narrative_orphans(
+    scope_evidence: Any,
+    scenario: ScenarioEnvelope,
+    violations: list[SemanticViolation],
+) -> None:
+    """Record narrative ATLAS references with no scope grounding."""
+    actual_narrative_ids = set(narrative_reference_ids(scenario.narrative))
+    grounded_narrative_ids = set(scope_evidence.scenario_classification_ids) | set(
+        scope_evidence.projected_step_mapping_ids
+    )
+    for orphan_tid in sorted(actual_narrative_ids - grounded_narrative_ids):
+        violations.append(
+            SemanticViolation(
+                rule="narrative_technique_orphan",
+                message=(
+                    f"Technique '{orphan_tid}' mentioned in narrative "
+                    "but absent from both scenario classifications and "
+                    "projected-step mappings"
+                ),
+                severity="minor",
             )
-
-            for _v in _vap(scenario.actor_profile, profile):
-                violations.append(
-                    SemanticViolation(
-                        rule=_v.rule,
-                        message=_v.message,
-                        severity="major",
-                    )
-                )
-
-            # 12f. Actor access initial_entry_point_id must match the
-            #      scenario envelope.  Run even if tree has no ingress.
-            _canonical_ep_id = scenario.initial_entry_point_id
-            if _access_12.initial_entry_point_id != _canonical_ep_id:
-                violations.append(
-                    SemanticViolation(
-                        rule="initial_entry_point_id_mismatch",
-                        message=(
-                            f"Actor access initial_entry_point_id "
-                            f"'{_access_12.initial_entry_point_id}' does not "
-                            f"match scenario envelope "
-                            f"initial_entry_point_id '{_canonical_ep_id}'."
-                        ),
-                        severity="major",
-                    )
-                )
-
-        # 12g. Tree-wide initial_entry_point_id invariant: every
-        #      initial_ingress action must use exactly the same canonical
-        #      ID as the top-level scenario envelope.  Run regardless of
-        #      actor access presence (the tree invariant is independent).
-        _canonical_ep_id = scenario.initial_entry_point_id
-        for _leaf_id, _ingress_act in _ingress_actions_12:
-            if _ingress_act.entry_point_id != _canonical_ep_id:
-                violations.append(
-                    SemanticViolation(
-                        rule="initial_entry_point_id_mismatch",
-                        message=(
-                            f"Attack tree initial_ingress action "
-                            f"'{_leaf_id}' uses entry_point_id "
-                            f"'{_ingress_act.entry_point_id}' which "
-                            f"diverges from canonical "
-                            f"'{_canonical_ep_id}'."
-                        ),
-                        severity="major",
-                    )
-                )
-
-        # 12h. Narrative access realization validation (cmps.6).
-        #      Delegate to the shared pure validator from generate.narrative
-        #      so semantic validation catches persistent realization
-        #      mismatches after Call-1 retry exhaustion.  This ensures
-        #      persistently invalid narrative realization is quarantined,
-        #      not silently admitted.
-        if _actor_type_12 and _access_12 is not None:
-            from asago_scenario_generator.pipeline.generate.narrative import (
-                validate_narrative_access_realization as _vnr,
-            )
-
-            for _v in _vnr(scenario.narrative, scenario.actor_profile):
-                violations.append(
-                    SemanticViolation(
-                        rule=_v.rule,
-                        message=_v.message,
-                        severity="major",
-                    )
-                )
-
-        # 13. Corpus-wide closed-world claim applicability (cmps.9 review)
-        corpus_claims = check_corpus_claims_applicability(scenario, profile)
-
-        semantic = SemanticValidation(
-            valid=len(violations) == 0,
-            violations=violations,
-            corpus_claim_applicability=corpus_claims,
         )
 
-        if scenario.validation is None:
-            scenario.validation = ValidationBlock(semantic=semantic)
-        else:
-            scenario.validation.semantic = semantic
 
-        # Update validation_passed.
-        scenario.validation_passed = (
-            scenario.validation.phantom.valid
-            and scenario.validation.structural.valid
-            and scenario.validation.semantic.valid
+def _expected_scope_classifications(
+    scenario: ScenarioEnvelope,
+) -> list[str] | None:
+    """Return qualified-pin or seed-fallback classifications."""
+    candidate_filter = scenario.candidate_filter or {}
+    if candidate_filter.get("pinned_technique_ids"):
+        return stable_unique(candidate_filter["pinned_technique_ids"])
+    if scenario.scenario_seed_metadata is not None:
+        return stable_unique(
+            scenario.scenario_seed_metadata.get("atlas_technique_ids") or ()
         )
+    return None
+
+
+def _check_semantic_classification_evidence(
+    scenario: ScenarioEnvelope,
+    scope_evidence: Any,
+    violations: list[SemanticViolation],
+) -> None:
+    """Reconcile faceted and expected classifications with published scope."""
+    faceted_classifications = stable_unique(
+        scenario.faceting.taxonomy_chain.atlas_technique_ids or ()
+    )
+    if faceted_classifications != scope_evidence.scenario_classification_ids:
+        violations.append(
+            SemanticViolation(
+                rule="scenario_classification_mismatch",
+                message=(
+                    "Faceted scenario classifications "
+                    f"{faceted_classifications} do not equal published "
+                    "technique-scope classifications "
+                    f"{scope_evidence.scenario_classification_ids}."
+                ),
+                severity="major",
+            )
+        )
+    expected_classifications = _expected_scope_classifications(scenario)
+    if (
+        expected_classifications is not None
+        and expected_classifications != scope_evidence.scenario_classification_ids
+    ):
+        violations.append(
+            SemanticViolation(
+                rule="scenario_classification_mismatch",
+                message=(
+                    "Published scenario classifications "
+                    f"{scope_evidence.scenario_classification_ids} do not "
+                    "equal qualified pins or seed fallback "
+                    f"{expected_classifications}."
+                ),
+                severity="major",
+            )
+        )
+
+
+def _check_semantic_projection_evidence(
+    scenario: ScenarioEnvelope,
+    scope_evidence: Any,
+    violations: list[SemanticViolation],
+) -> None:
+    """Reconcile canonical projection mappings with published scope."""
+    canonical_mapping_ids = projected_step_mapping_ids(scenario.projection)
+    if canonical_mapping_ids != scope_evidence.projected_step_mapping_ids:
+        violations.append(
+            SemanticViolation(
+                rule="projected_step_mapping_evidence_mismatch",
+                message=(
+                    "Published projected-step mappings "
+                    f"{scope_evidence.projected_step_mapping_ids} do not "
+                    f"equal canonical mappings {canonical_mapping_ids}."
+                ),
+                severity="major",
+            )
+        )
+    actual_narrative_ids = set(narrative_reference_ids(scenario.narrative))
+    if actual_narrative_ids != set(scope_evidence.narrative_reference_ids):
+        violations.append(
+            SemanticViolation(
+                rule="narrative_reference_evidence_mismatch",
+                message=(
+                    "Published narrative ATLAS references "
+                    f"{scope_evidence.narrative_reference_ids} do not equal "
+                    f"the authored narrative references "
+                    f"{sorted(actual_narrative_ids)}."
+                ),
+                severity="major",
+            )
+        )
+
+
+def _check_semantic_technique_scope_evidence(
+    scenario: ScenarioEnvelope,
+    tree_technique_set: set[str],
+    valid_technique_ids: frozenset[str],
+    violations: list[SemanticViolation],
+) -> None:
+    """Reconcile technique-scope evidence with tree, narrative, and pins."""
+    scope_evidence = resolved_technique_scope_evidence(scenario)
+    _check_semantic_unknown_scope_techniques(
+        scope_evidence, tree_technique_set, valid_technique_ids, violations
+    )
+    _check_semantic_narrative_orphans(scope_evidence, scenario, violations)
+    if scenario.technique_scope_evidence is not None:
+        _check_semantic_classification_evidence(scenario, scope_evidence, violations)
+        _check_semantic_projection_evidence(scenario, scope_evidence, violations)
+
+
+def _incompatible_mapping_steps(
+    technique_id: str,
+    represented_steps: tuple[str, ...],
+    exact_ids_by_step: dict[str, frozenset[str]],
+) -> list[str]:
+    """Return represented steps whose exact ATLAS mapping excludes the leaf
+    technique."""
+    return [
+        step_id
+        for step_id in represented_steps
+        if technique_id not in exact_ids_by_step.get(step_id, frozenset())
+    ]
+
+
+def _check_semantic_leaf_technique_mapping(
+    leaf: Any,
+    exact_ids_by_step: dict[str, frozenset[str]],
+    violations: list[SemanticViolation],
+) -> None:
+    """Reconcile one leaf technique with its represented projected steps."""
+    if leaf.technique_id is None:
+        return
+    represented_steps = tuple(leaf.projected_step_ids)
+    if not represented_steps:
+        violations.append(
+            SemanticViolation(
+                rule="leaf_technique_mapping_mismatch",
+                message=(
+                    f"Leaf '{leaf.id}' carries technique "
+                    f"'{leaf.technique_id}' without a projected-step "
+                    "realization."
+                ),
+                severity="major",
+            )
+        )
+        return
+    incompatible_steps = _incompatible_mapping_steps(
+        leaf.technique_id, represented_steps, exact_ids_by_step
+    )
+    if incompatible_steps:
+        violations.append(
+            SemanticViolation(
+                rule="leaf_technique_mapping_mismatch",
+                message=(
+                    f"Leaf '{leaf.id}' technique '{leaf.technique_id}' "
+                    "is not an exact ATLAS mapping of represented "
+                    f"projected steps {incompatible_steps}."
+                ),
+                severity="major",
+            )
+        )
+
+
+def _check_semantic_leaf_technique_mappings(
+    scenario: ScenarioEnvelope,
+    violations: list[SemanticViolation],
+) -> None:
+    """Reconcile every leaf technique with exact projected-step mappings."""
+    if scenario.technique_scope_evidence is None:
+        return
+    exact_ids_by_step = projected_step_mapping_ids_by_step(scenario.projection)
+    for leaf in _collect_leaves(scenario.attack_tree.root):
+        _check_semantic_leaf_technique_mapping(leaf, exact_ids_by_step, violations)
+
+
+def _check_semantic_tree_zone_omissions(
+    artifact_coverage_zones: set[str],
+    tree_zones: set[str],
+    zone_seq: list[str],
+    violations: list[SemanticViolation],
+) -> None:
+    """Record narrative zones absent from attack-tree nodes."""
+    omitted_tree_zones = sorted(artifact_coverage_zones - tree_zones)
+    terminal_zone = zone_seq[-1] if zone_seq else None
+    compound_omission = len(omitted_tree_zones) >= 2
+    for zone in omitted_tree_zones:
+        is_terminal = zone == terminal_zone
+        severity = "major" if is_terminal or compound_omission else "minor"
+        violations.append(
+            SemanticViolation(
+                rule="zone_omission_tree",
+                message=(
+                    f"Zone '{zone}' in narrative zone_sequence "
+                    f"but absent from attack tree nodes"
+                ),
+                severity=severity,
+            )
+        )
+
+
+def _semantic_gherkin_text(scenario: ScenarioEnvelope) -> str:
+    """Return the scenario's Gherkin behavior text, if any."""
+    from asago_scenario_generator.models.scenario import (
+        BehaviorSpec as _BS2,
+    )
+
+    behavior_spec = scenario.behavior_spec
+    if behavior_spec and isinstance(behavior_spec, _BS2):
+        return behavior_spec.gherkin_text
+    if behavior_spec and isinstance(behavior_spec, str):
+        return behavior_spec
+    return ""
+
+
+def _check_semantic_gherkin_zone_omissions(
+    artifact_coverage_zones: set[str],
+    gherkin_zones: set[str],
+    violations: list[SemanticViolation],
+) -> None:
+    """Record narrative zones absent from Gherkin behavior spec."""
+    for zone in sorted(artifact_coverage_zones - gherkin_zones):
+        violations.append(
+            SemanticViolation(
+                rule="zone_omission_gherkin",
+                message=(
+                    f"Zone '{zone}' in narrative zone_sequence "
+                    f"but absent from Gherkin behavior_spec"
+                ),
+                severity="minor",
+            )
+        )
+
+
+def _check_semantic_zone_coverage_dropout(
+    artifact_coverage_zones: set[str],
+    tree_zones: set[str],
+    gherkin_zones: set[str],
+    violations: list[SemanticViolation],
+) -> None:
+    """Record narrative zones absent from BOTH tree and Gherkin."""
+    dropped_zones = artifact_coverage_zones - (tree_zones | gherkin_zones)
+    for zone in sorted(dropped_zones):
+        violations.append(
+            SemanticViolation(
+                rule="zone_coverage_dropout",
+                message=(
+                    f"Zone '{zone}' in narrative zone_sequence is absent "
+                    f"from BOTH attack tree nodes AND Gherkin behavior_spec"
+                ),
+                severity="major",
+            )
+        )
+
+
+def _check_semantic_zone_omissions(
+    scenario: ScenarioEnvelope,
+    violations: list[SemanticViolation],
+) -> None:
+    """Run tree/Gherkin zone omission and coverage-dropout checks."""
+    artifact_coverage_zones = set(scenario.narrative.zone_sequence) - {"outside"}
+    tree_zones = _collect_tree_node_zones(scenario.attack_tree.root)
+    _check_semantic_tree_zone_omissions(
+        artifact_coverage_zones,
+        tree_zones,
+        scenario.narrative.zone_sequence,
+        violations,
+    )
+    gherkin_text = _semantic_gherkin_text(scenario)
+    if gherkin_text:
+        gherkin_zones = _extract_gherkin_zones_for_validation(gherkin_text)
+        _check_semantic_gherkin_zone_omissions(
+            artifact_coverage_zones, gherkin_zones, violations
+        )
+    else:
+        gherkin_zones = set()
+    _check_semantic_zone_coverage_dropout(
+        artifact_coverage_zones, tree_zones, gherkin_zones, violations
+    )
+
+
+def _tool_execution_leaf_untyped(action: Any, zone: str | None) -> bool:
+    """True when a tool_execution leaf lacks a typed invocation action."""
+    return zone == "tool_execution" and (
+        action is None
+        or action.kind not in {"tool_invocation", "integration_interaction"}
+    )
+
+
+def _check_semantic_ingress_action(
+    leaf: Any,
+    action: Any,
+    profile: CapabilityProfile,
+    is_attacker_accessible_ingress: Any,
+    violations: list[SemanticViolation],
+) -> None:
+    """Resolve an initial_ingress action against the profile."""
+    resolved_ep = profile.resolve_entry_point(action.entry_point_id)
+    if resolved_ep is None:
+        violations.append(
+            SemanticViolation(
+                rule="unknown_entry_point_id",
+                message=(
+                    f"Leaf node '{leaf.id}' references unknown "
+                    f"entry_point_id '{action.entry_point_id}'"
+                ),
+                severity="major",
+            )
+        )
+    elif not is_attacker_accessible_ingress(
+        resolved_ep,
+        set(profile.zones_active) if profile.zones_active else set(),
+    ):
+        violations.append(
+            SemanticViolation(
+                rule="inaccessible_ingress_entry_point",
+                message=(
+                    f"Leaf node '{leaf.id}' references entry "
+                    f"point '{resolved_ep.name}' "
+                    f"(entry_point_id '{action.entry_point_id}') "
+                    f"which is not an attacker-accessible ingress "
+                    f"route (output-only, system-controlled, or "
+                    f"inactive ingress zone)."
+                ),
+                severity="major",
+            )
+        )
+
+
+def _check_semantic_tool_action(
+    leaf: Any,
+    action: Any,
+    profile: CapabilityProfile,
+    violations: list[SemanticViolation],
+) -> None:
+    """Resolve a tool_invocation action against the profile."""
+    if profile.resolve_tool(action.tool_id) is None:
+        violations.append(
+            SemanticViolation(
+                rule="phantom_tool",
+                message=(
+                    f"Leaf node '{leaf.id}' references unknown "
+                    f"tool_id '{action.tool_id}'"
+                ),
+                severity="major",
+            )
+        )
+    if (
+        action.integration_id is not None
+        and profile.resolve_integration(action.integration_id) is None
+    ):
+        violations.append(
+            SemanticViolation(
+                rule="unknown_integration_id",
+                message=(
+                    f"Leaf node '{leaf.id}' references unknown "
+                    f"integration_id '{action.integration_id}'"
+                ),
+                severity="major",
+            )
+        )
+
+
+def _check_semantic_integration_action(
+    leaf: Any,
+    action: Any,
+    profile: CapabilityProfile,
+    violations: list[SemanticViolation],
+) -> None:
+    """Resolve an integration_interaction action against the profile."""
+    if (
+        action.kind == "integration_interaction"
+        and profile.resolve_integration(action.integration_id) is None
+    ):
+        violations.append(
+            SemanticViolation(
+                rule="unknown_integration_id",
+                message=(
+                    f"Leaf node '{leaf.id}' references unknown "
+                    f"integration_id '{action.integration_id}'"
+                ),
+                severity="major",
+            )
+        )
+
+
+def _check_semantic_leaf_action(
+    leaf: Any,
+    profile: CapabilityProfile,
+    is_attacker_accessible_ingress: Any,
+    violations: list[SemanticViolation],
+) -> None:
+    """Resolve one leaf's typed action against the canonical profile."""
+    action = leaf.action
+    if _tool_execution_leaf_untyped(action, leaf.zone):
+        violations.append(
+            SemanticViolation(
+                rule="untyped-tool-execution",
+                message=(
+                    f"Leaf node '{leaf.id}' is in tool_execution zone "
+                    "but does not have a tool_invocation or "
+                    "integration_interaction action"
+                ),
+                severity="major",
+            )
+        )
+    if action is None:
+        return
+    if action.kind == "initial_ingress":
+        _check_semantic_ingress_action(
+            leaf, action, profile, is_attacker_accessible_ingress, violations
+        )
+    elif action.kind == "tool_invocation":
+        _check_semantic_tool_action(leaf, action, profile, violations)
+    else:
+        _check_semantic_integration_action(leaf, action, profile, violations)
+
+
+def _check_semantic_typed_actions(
+    scenario: ScenarioEnvelope,
+    profile: CapabilityProfile,
+    violations: list[SemanticViolation],
+) -> None:
+    """Resolve every leaf typed action against the canonical profile."""
+    from asago_scenario_generator.models.capability_profile import (
+        is_attacker_accessible_ingress,
+    )
+
+    for leaf in _collect_leaves(scenario.attack_tree.root):
+        _check_semantic_leaf_action(
+            leaf, profile, is_attacker_accessible_ingress, violations
+        )
+
+
+def _leaf_action_is_tool_invocation(action: Any) -> bool:
+    """True when a leaf carries a tool_invocation action."""
+    return action is not None and action.kind == "tool_invocation"
+
+
+def _tool_name_mentions(resolved_tool: Any, keywords: list[str]) -> bool:
+    """True when a resolved tool name mentions any keyword."""
+    return resolved_tool is not None and any(
+        kw in resolved_tool.name.lower() for kw in keywords
+    )
+
+
+def _scenario_has_financial_tool_leaf(
+    scenario: ScenarioEnvelope,
+    profile: CapabilityProfile,
+) -> bool:
+    """True when any tree leaf invokes a financial tool."""
+    _financial_keywords = ["refund", "payment", "billing", "transaction"]
+    for leaf in _collect_leaves(scenario.attack_tree.root):
+        if not _leaf_action_is_tool_invocation(leaf.action):
+            continue
+        resolved_tool = profile.resolve_tool(leaf.action.tool_id)
+        if _tool_name_mentions(resolved_tool, _financial_keywords):
+            return True
+    return False
+
+
+def _check_semantic_exfiltration_goal(
+    goal_category: str,
+    scenario: ScenarioEnvelope,
+    profile: CapabilityProfile,
+    violations: list[SemanticViolation],
+) -> None:
+    """Flag a data exfiltration goal with financial tool leaves."""
+    if goal_category.startswith("PR-1") and _scenario_has_financial_tool_leaf(
+        scenario, profile
+    ):
+        violations.append(
+            SemanticViolation(
+                rule="goal_mechanism_mismatch",
+                message=(
+                    f"Data exfiltration goal '{goal_category}' "
+                    f"assigned but attack tree contains "
+                    f"financial tool leaves (refund/payment/"
+                    f"billing/transaction)"
+                ),
+                severity="minor",
+            )
+        )
+
+
+def _scenario_describes_social_engineering(
+    scenario: ScenarioEnvelope,
+) -> bool:
+    """True when the narrative describes a social engineering attack."""
+    _se_keywords = [
+        "phishing",
+        "credential",
+        "social engineering",
+        "impersonat",
+    ]
+    _narrative_text = " ".join(
+        [scenario.narrative.title, scenario.narrative.summary]
+        + [f"{s.action} {s.effect}" for s in scenario.narrative.steps]
+    ).lower()
+    return any(kw in _narrative_text for kw in _se_keywords)
+
+
+def _check_semantic_safety_bypass_goal(
+    goal_category: str,
+    scenario: ScenarioEnvelope,
+    violations: list[SemanticViolation],
+) -> None:
+    """Flag a safety bypass goal with social engineering narrative."""
+    if goal_category.startswith("AB-1") and _scenario_describes_social_engineering(
+        scenario
+    ):
+        violations.append(
+            SemanticViolation(
+                rule="goal_mechanism_mismatch",
+                message=(
+                    f"Safety bypass goal '{goal_category}' assigned "
+                    f"but narrative describes a social "
+                    f"engineering attack"
+                ),
+                severity="minor",
+            )
+        )
+
+
+def _check_semantic_supply_chain_goal(
+    goal_category: str,
+    actor_type: Any,
+    violations: list[SemanticViolation],
+) -> None:
+    """Flag a supply-chain goal on a non-supply-chain actor."""
+    _NON_SUPPLY_CHAIN_ACTORS = {
+        "negligent-insider",
+        "adversarial-user",
+        "cybercriminal",
+    }
+    if goal_category.startswith("IN-7") and actor_type in _NON_SUPPLY_CHAIN_ACTORS:
+        violations.append(
+            SemanticViolation(
+                rule="goal_actor_mismatch",
+                message=(
+                    f"Supply-chain goal '{goal_category}' assigned to "
+                    f"actor_type '{actor_type}' which is not a "
+                    f"supply-chain actor"
+                ),
+                severity="moderate",
+            )
+        )
+
+
+def _check_semantic_goal_category_alignment(
+    scenario: ScenarioEnvelope,
+    profile: CapabilityProfile,
+    violations: list[SemanticViolation],
+) -> None:
+    """Flag mismatches between goal_category and actor/mechanism."""
+    goal_category = (
+        scenario.actor_profile.goal_category if scenario.actor_profile else None
+    )
+    if goal_category and isinstance(goal_category, str):
+        actor_type = (
+            scenario.actor_profile.actor_type if scenario.actor_profile else None
+        )
+        _check_semantic_supply_chain_goal(goal_category, actor_type, violations)
+        _check_semantic_exfiltration_goal(goal_category, scenario, profile, violations)
+        _check_semantic_safety_bypass_goal(goal_category, scenario, violations)
+
+
+def _scenario_ingress_actions(
+    scenario: ScenarioEnvelope,
+) -> list[tuple[str, Any]]:
+    """Return (leaf_id, action) pairs for initial_ingress leaves."""
+    return [
+        (leaf.id, leaf.action)
+        for leaf in _collect_leaves(scenario.attack_tree.root)
+        if leaf.action is not None and leaf.action.kind == "initial_ingress"
+    ]
+
+
+def _scenario_actor_type(scenario: ScenarioEnvelope) -> Any:
+    """Return the scenario actor type, if any."""
+    return scenario.actor_profile.actor_type if scenario.actor_profile else None
+
+
+def _scenario_actor_access(scenario: ScenarioEnvelope) -> Any:
+    """Return the scenario actor access provenance, if any."""
+    return scenario.actor_profile.access if scenario.actor_profile else None
+
+
+def _missing_access_provenance(
+    actor_type: Any,
+    access: Any,
+    ingress_actions: list[tuple[str, Any]],
+) -> bool:
+    """True when an actor has ingress leaves without typed access."""
+    return actor_type and access is None and ingress_actions
+
+
+def _check_semantic_actor_access_policy(
+    scenario: ScenarioEnvelope,
+    profile: CapabilityProfile,
+    violations: list[SemanticViolation],
+) -> None:
+    """Run shared actor access-policy and narrative realization validation."""
+    from asago_scenario_generator.pipeline.generate.actor import (
+        validate_actor_access_provenance as _vap,
+    )
+    from asago_scenario_generator.pipeline.generate.narrative import (
+        validate_narrative_access_realization as _vnr,
+    )
+
+    for _v in _vap(scenario.actor_profile, profile):
+        violations.append(
+            SemanticViolation(
+                rule=_v.rule,
+                message=_v.message,
+                severity="major",
+            )
+        )
+    access = _scenario_actor_access(scenario)
+    canonical_ep_id = scenario.initial_entry_point_id
+    if access.initial_entry_point_id != canonical_ep_id:
+        violations.append(
+            SemanticViolation(
+                rule="initial_entry_point_id_mismatch",
+                message=(
+                    f"Actor access initial_entry_point_id "
+                    f"'{access.initial_entry_point_id}' does not "
+                    f"match scenario envelope "
+                    f"initial_entry_point_id '{canonical_ep_id}'."
+                ),
+                severity="major",
+            )
+        )
+    for _v in _vnr(scenario.narrative, scenario.actor_profile):
+        violations.append(
+            SemanticViolation(
+                rule=_v.rule,
+                message=_v.message,
+                severity="major",
+            )
+        )
+
+
+def _check_semantic_tree_ingress_identity(
+    scenario: ScenarioEnvelope,
+    ingress_actions: list[tuple[str, Any]],
+    violations: list[SemanticViolation],
+) -> None:
+    """Require every tree initial_ingress action to match the envelope entry
+    point."""
+    canonical_ep_id = scenario.initial_entry_point_id
+    for leaf_id, ingress_act in ingress_actions:
+        if ingress_act.entry_point_id != canonical_ep_id:
+            violations.append(
+                SemanticViolation(
+                    rule="initial_entry_point_id_mismatch",
+                    message=(
+                        f"Attack tree initial_ingress action "
+                        f"'{leaf_id}' uses entry_point_id "
+                        f"'{ingress_act.entry_point_id}' which "
+                        f"diverges from canonical "
+                        f"'{canonical_ep_id}'."
+                    ),
+                    severity="major",
+                )
+            )
+
+
+def _check_semantic_actor_access_provenance(
+    scenario: ScenarioEnvelope,
+    profile: CapabilityProfile,
+    violations: list[SemanticViolation],
+) -> None:
+    """Run actor/access provenance and tree-wide ingress identity checks."""
+    actor_type = _scenario_actor_type(scenario)
+    access = _scenario_actor_access(scenario)
+    ingress_actions = _scenario_ingress_actions(scenario)
+    if _missing_access_provenance(actor_type, access, ingress_actions):
+        violations.append(
+            SemanticViolation(
+                rule="missing_access_provenance",
+                message=(
+                    f"Actor '{actor_type}' has no typed access provenance (cmps.6)."
+                ),
+                severity="moderate",
+            )
+        )
+    if actor_type and access is not None:
+        _check_semantic_actor_access_policy(scenario, profile, violations)
+    _check_semantic_tree_ingress_identity(scenario, ingress_actions, violations)
 
 
 def check_scenario_semantics(
