@@ -32,10 +32,11 @@ from asago_scenario_generator.pipeline.finalization_parsimony import _leaves, _n
 from asago_scenario_generator.pipeline.generate.actor_access import (
     validate_actor_access_provenance,
 )
-from asago_scenario_generator.pipeline.generate.narrative import (
+from asago_scenario_generator.pipeline.generate.narrative_access import (
     validate_narrative_access_realization,
     validate_narrative_step_bounds,
 )
+from asago_scenario_generator.pipeline.projection_block import _build_projection_block
 from asago_scenario_generator.pipeline.projection_contracts import ProjectedCandidate
 from asago_scenario_generator.pipeline.projection_realizations import (
     _check_narrative_realizations,
@@ -65,10 +66,6 @@ def _block(
     # This is the same authoritative derivation used by ordinary envelope
     # assembly.  Passing behavior=None deliberately limits the sidecars to
     # the artifacts that exist before Call 3.
-    from asago_scenario_generator.pipeline.generate.assembly import (
-        _build_projection_block,
-    )
-
     return _build_projection_block(
         candidate, narrative, tree, None, capability_snapshot
     )

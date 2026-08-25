@@ -22,6 +22,10 @@ _FORBIDDEN_IO_NEAR_PREFIXES = (
     "asago_scenario_generator.report",
     "asago_scenario_generator.cli",
     "asago_scenario_generator.stpa",
+    "asago_scenario_generator.pipeline.generate.actor",
+    "asago_scenario_generator.pipeline.generate.narrative",
+    "asago_scenario_generator.pipeline.generate.assembly",
+    "asago_scenario_generator.pipeline.validation",
 )
 _VALIDATION_LEAVES = (
     "validation_common.py",

@@ -46,7 +46,11 @@ consult the mutable live catalog.
 Scenario validation is split by responsibility (`validation_common`,
 structure, phantom, insider, provenance, parsimony, goal, and semantic
 leaves) behind the historical `pipeline.validation` façade. Those leaves
-do not import the façade or IO-near modules.
+do not import the façade or IO-near modules. Narrative access-realization
+and step-bound checks live in `pipeline.generate.narrative_access`;
+projection-envelope sidecars are built by `pipeline.projection_block`.
+Validation, pre-behavior gates, and assembly consume those leaves instead
+of the IO-near `generate.narrative` and `generate.assembly` façades.
 
 The taxonomy/risk workflow uses a semantic-author/compiler seam. The model
 authors actor intent, narrative causality, attack-tree AND topology, and

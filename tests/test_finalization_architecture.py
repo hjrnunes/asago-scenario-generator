@@ -186,3 +186,17 @@ class TestPersistenceCanonicalEncoderDependsInward:
         imports = _imported_modules(PIPELINE_DIR / "persistence_validation.py")
         assert "asago_scenario_generator.pipeline.persistence" not in imports
         assert "asago_scenario_generator.pipeline.projection" not in imports
+
+
+class TestPrebehaviorDependsInward:
+    """Pre-behavior gates consume contract leaves, not generate façades."""
+
+    def test_prebehavior_does_not_import_generate_facades(self) -> None:
+        """Ownership and realization gates stay off the IO-near façades."""
+        imports = _imported_modules(PIPELINE_DIR / "finalization_prebehavior.py")
+        assert "asago_scenario_generator.pipeline.generate.narrative" not in imports
+        assert "asago_scenario_generator.pipeline.generate.assembly" not in imports
+        assert (
+            "asago_scenario_generator.pipeline.generate.narrative_access" in imports
+        )
+        assert "asago_scenario_generator.pipeline.projection_block" in imports
