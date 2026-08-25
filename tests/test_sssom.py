@@ -36,6 +36,55 @@ def _mapping(
     )
 
 
+class TestLoadSssomAndCurieSplitting:
+    def test_split_curie(self) -> None:
+        from asago_scenario_generator.data.sssom import _split_curie
+
+        assert _split_curie("ibm-risk-atlas:atlas-hallucination") == (
+            "ibm-risk-atlas",
+            "atlas-hallucination",
+        )
+        assert _split_curie("atlas-hallucination") == ("", "atlas-hallucination")
+        assert _split_curie("prefix:a:b") == ("prefix", "a:b")
+
+    def test_load_sssom_explicit_source_columns(self, tmp_path) -> None:
+        from asago_scenario_generator.data.sssom import load_sssom
+
+        path = tmp_path / "explicit.sssom.tsv"
+        path.write_text(
+            "# comment line\n"
+            "subject_id\tsubject_source\tpredicate_id\tobject_id\t"
+            "object_source\tmapping_justification\n"
+            "AP-T1-01\tasago-scenario-generator\tskos:relatedMatch\t"
+            "AML.T0053\tmitre-atlas\tsemapv:ManualMappingCuration\n"
+            "\n"
+        )
+        mappings = load_sssom(path)
+        assert len(mappings) == 1
+        assert mappings[0].subject_id == "AP-T1-01"
+        assert mappings[0].subject_source == "asago-scenario-generator"
+        assert mappings[0].object_source == "mitre-atlas"
+
+    def test_load_sssom_curie_only_format(self, tmp_path) -> None:
+        from asago_scenario_generator.data.sssom import load_sssom
+
+        path = tmp_path / "curie.sssom.tsv"
+        path.write_text(
+            "subject_id\tpredicate_id\tobject_id\tmapping_justification\n"
+            "ibm-risk-atlas:atlas-hallucination\tskos:exactMatch\t"
+            "owasp-llm-top10-2025:llm012025-excessive-agency\t"
+            "semapv:ManualMappingCuration\n"
+            "plain-id\tskos:exactMatch\tother:thing\tsemapv:ManualMappingCuration\n"
+        )
+        mappings = load_sssom(path)
+        assert mappings[0].subject_source == "ibm-risk-atlas"
+        assert mappings[0].subject_id == "atlas-hallucination"
+        assert mappings[0].object_source == "owasp-llm-top10-2025"
+        assert mappings[0].object_id == "llm012025-excessive-agency"
+        assert mappings[1].subject_source == ""
+        assert mappings[1].subject_id == "plain-id"
+
+
 # ---------------------------------------------------------------------------
 # Tests: predicate filtering in build_risk_to_llm_index
 # ---------------------------------------------------------------------------
@@ -119,7 +168,9 @@ class TestBuildRiskToLlmIndexPredicateFiltering:
     def test_nomatch_logs_debug_message(self, caplog: pytest.LogCaptureFixture) -> None:
         """Skipped noMatch rows should emit a debug log line."""
         mappings = [_mapping(predicate_id="noMatch")]
-        with caplog.at_level(logging.DEBUG, logger="asago_scenario_generator.data.sssom"):
+        with caplog.at_level(
+            logging.DEBUG, logger="asago_scenario_generator.data.sssom"
+        ):
             build_risk_to_llm_index(mappings)
         assert any("noMatch" in record.message for record in caplog.records)
 
