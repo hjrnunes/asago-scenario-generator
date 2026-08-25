@@ -65,10 +65,10 @@ from typing import Any
 import yaml
 from jsonschema import Draft202012Validator
 
-from asago_scenario_generator.data.canonical import (
-    _canonical_json,
-    _nfc,
-    _normalize,
+from asago_scenario_generator.data.canonical import _canonical_json, _normalize
+from asago_scenario_generator.data.catalog_lineage_snapshot import (
+    compute_source_catalog_digest as _compute_source_catalog_digest,
+    verify_catalog_lineage_source_snapshot as _verify_source_snapshot,
 )
 
 _DEFAULT_LINEAGE_PATH = (
@@ -90,8 +90,33 @@ _DEFAULT_ATLAS_PATH = (
     / "ATLAS-2026.05.yaml"
 )
 _LINEAGE_DOMAIN = "asago-scenario-generator:catalog-lineage:v1"
-_SOURCE_CATALOG_DOMAIN = "asago-scenario-generator:attack-pattern-catalog:v1"
 SOURCE_CATALOG_CANONICALIZATION = "asago-scenario-generator:attack-pattern-records:v1"
+_SNAPSHOT_COMPATIBILITY_NAMES = frozenset(
+    {
+        "_evidence_tier",
+        "_normalize_dict",
+        "_normalize_list",
+        "_normalize_record",
+        "_normalize_scalar",
+        "_records_for_file",
+        "_source_catalog_files",
+        "_verify_entry_facts_match",
+        "_verify_pin_canonicalization",
+        "_verify_pinned_manifest",
+        "_verify_source_ids_match",
+        "_verify_supplied_entries",
+    }
+)
+
+
+def __getattr__(name: str) -> Any:
+    """Resolve private snapshot helpers kept for legacy import compatibility."""
+    if name in _SNAPSHOT_COMPATIBILITY_NAMES:
+        from asago_scenario_generator.data import catalog_lineage_snapshot
+
+        return getattr(catalog_lineage_snapshot, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 _FINAL_DISPOSITIONS = frozenset(
     {"retain", "narrow", "split", "supersede", "retire", "defer"}
@@ -125,6 +150,17 @@ def load_catalog_lineage_schema(path: str | Path | None = None) -> dict[str, Any
     return schema
 
 
+def _lineage_release_stripped(artifact: Mapping[str, Any]) -> dict[str, Any]:
+    """The artifact with ``release.semantic_digest`` removed, validated."""
+    release = artifact.get("release")
+    if not isinstance(release, dict) or "semantic_digest" not in release:
+        raise ValueError("catalog lineage artifact lacks release.semantic_digest")
+    return {
+        **artifact,
+        "release": {k: v for k, v in release.items() if k != "semantic_digest"},
+    }
+
+
 def compute_catalog_lineage_digest(artifact: dict[str, Any]) -> str:
     """Deterministic semantic digest over normalized artifact content.
 
@@ -134,38 +170,14 @@ def compute_catalog_lineage_digest(artifact: dict[str, Any]) -> str:
     """
     if not isinstance(artifact, dict):
         raise TypeError("catalog lineage artifact must be a mapping")
-    release = artifact.get("release")
-    if not isinstance(release, dict) or "semantic_digest" not in release:
-        raise ValueError("catalog lineage artifact lacks release.semantic_digest")
-    stripped = {
-        **artifact,
-        "release": {k: v for k, v in release.items() if k != "semantic_digest"},
-    }
     payload = (
         _LINEAGE_DOMAIN.encode()
         + b"\0"
-        + _canonical_json(_normalize(stripped)).encode("utf-8")
+        + _canonical_json(_normalize(_lineage_release_stripped(artifact))).encode(
+            "utf-8"
+        )
     )
     return hashlib.sha256(payload).hexdigest()
-
-
-def _normalize_record(value: Any) -> Any:
-    """Canonicalize a loader record for the source-catalog pin.
-
-    Unlike the lineage digest normalization, array order is preserved:
-    kill-chain step order is semantic.  Object key order is normalized away
-    by the canonical-JSON sort; strings are NFC-normalized; non-JSON scalar
-    values (for example YAML dates) are stringified deterministically.
-    """
-    if isinstance(value, dict):
-        return {str(k): _normalize_record(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_normalize_record(item) for item in value]
-    if isinstance(value, str):
-        return _nfc(value)
-    if value is None or isinstance(value, bool | int | float):
-        return value
-    return str(value)
 
 
 def compute_source_catalog_digest(
@@ -173,48 +185,8 @@ def compute_source_catalog_digest(
     owners: Mapping[str, str],
     manifest: list[str],
 ) -> str:
-    """Deterministic content pin over the production source catalog records.
-
-    ``patterns`` is the production catalog from
-    :func:`asago_scenario_generator.data.loaders.load_attack_patterns`; ``owners``
-    maps every catalog id to its declaring attack-patterns file;
-    ``manifest`` is the expected ordered file list.  Each record is framed
-    with its id under its declaring file so reassignment, deletion, or any
-    same-count content edit (description, evidence source, kill-chain
-    action or technique) changes the digest.
-    """
-    unowned = sorted(set(patterns) - set(owners))
-    if unowned:
-        raise ValueError(f"source catalog ids without a declaring file: {unowned}")
-    undeclared = sorted(set(owners.values()) - set(manifest))
-    if undeclared:
-        raise ValueError(f"owners reference files outside the manifest: {undeclared}")
-    files = []
-    for filename in manifest:
-        records = sorted(
-            (
-                pid,
-                _canonical_json(_normalize_record(patterns[pid])),
-            )
-            for pid, owner in owners.items()
-            if owner == filename
-        )
-        files.append(
-            {
-                "file": filename,
-                "records": [[pid, blob] for pid, blob in records],
-            }
-        )
-    framed = {
-        "canonicalization": SOURCE_CATALOG_CANONICALIZATION,
-        "files": files,
-    }
-    payload = (
-        _SOURCE_CATALOG_DOMAIN.encode()
-        + b"\0"
-        + _canonical_json(framed).encode("utf-8")
-    )
-    return hashlib.sha256(payload).hexdigest()
+    """Deterministic content pin over the production source catalog records."""
+    return _compute_source_catalog_digest(patterns, owners, manifest)
 
 
 def load_atlas_case_step_index(
@@ -226,22 +198,42 @@ def load_atlas_case_step_index(
     Case studies remain provenance, never mapping authority; this index
     exists so citations of them can be checked for semantic consistency.
     """
-    atlas_path = Path(path) if path is not None else _DEFAULT_ATLAS_PATH
+    atlas_path = _atlas_source_path(path)
     with open(atlas_path) as f:
         data = yaml.safe_load(f)
     index: dict[str, dict[str, frozenset[str]]] = {}
     for case_id, bundle in (data.get("relationships") or {}).items():
-        if not isinstance(case_id, str) or not case_id.startswith("AML.CS"):
-            continue
-        steps: dict[str, set[str]] = {}
-        for employs in (bundle or {}).get("employs") or []:
-            step_id = employs.get("step-id")
-            target = employs.get("target")
-            if isinstance(step_id, str) and isinstance(target, str):
-                steps.setdefault(step_id, set()).add(target)
-        if steps:
-            index[case_id] = {sid: frozenset(t) for sid, t in steps.items()}
+        _case_step_employments(case_id, bundle, index)
     return index
+
+
+def _atlas_source_path(path: str | Path | None) -> Path:
+    """The explicitly supplied ATLAS path, or the pinned default."""
+    return Path(path) if path is not None else _DEFAULT_ATLAS_PATH
+
+
+def _case_step_employments(
+    case_id: Any,
+    bundle: Any,
+    index: dict[str, dict[str, frozenset[str]]],
+) -> None:
+    """Record one case's step employments unless it is not an ATLAS case."""
+    if not isinstance(case_id, str) or not case_id.startswith("AML.CS"):
+        return
+    steps = _step_employments(bundle)
+    if steps:
+        index[case_id] = {sid: frozenset(t) for sid, t in steps.items()}
+
+
+def _step_employments(bundle: Any) -> dict[str, set[str]]:
+    """Collect step-id -> employed technique targets from one case bundle."""
+    steps: dict[str, set[str]] = {}
+    for employs in (bundle or {}).get("employs") or []:
+        step_id = employs.get("step-id")
+        target = employs.get("target")
+        if isinstance(step_id, str) and isinstance(target, str):
+            steps.setdefault(step_id, set()).add(target)
+    return steps
 
 
 def _parse_step_expr(expr: str) -> list[str]:
@@ -259,6 +251,95 @@ def _parse_step_expr(expr: str) -> list[str]:
             (number,) = _STEP_NUMBER_RE.findall(part)
             steps.append(f"S{int(number):02d}")
     return steps
+
+
+def _unhedged_assignment_error(
+    record_id: str,
+    mapping_id: str,
+    label: str,
+    case_id: str,
+    steps: list[str],
+    case_steps: Mapping[str, Mapping[str, frozenset[str]]],
+) -> str | None:
+    if any(mapping_id in case_steps[case_id][s] for s in steps):
+        return None
+    employed = sorted({t for s in steps for t in case_steps[case_id][s]})
+    return (
+        f"{record_id} mapping {mapping_id}: unhedged citation "
+        f"{label} asserts source assignment, but the pinned "
+        f"relationships there employ {employed}, not "
+        f"{mapping_id}; correct the citation or explicitly mark "
+        "the deliberate divergence as analogue/adapted/retag"
+    )
+
+
+def _citation_errors_for_match(
+    record_id: str,
+    mapping_id: str,
+    match: re.Match[str],
+    case_steps: Mapping[str, Mapping[str, frozenset[str]]],
+    hedged: bool,
+) -> list[str]:
+    """Validate one ``AML.CSxxxx Snn`` citation match against the pin."""
+    case_id, step_expr = f"AML.{match.group(1)}", match.group(2)
+    label = f"{case_id} {step_expr}"
+    if case_id not in case_steps:
+        return [_citation_missing_case(record_id, mapping_id, case_id)]
+    try:
+        steps = _parse_step_expr(step_expr)
+    except ValueError as exc:
+        return [f"{record_id} mapping {mapping_id}: {exc}"]
+    unknown = _unknown_cited_steps(steps, case_steps[case_id])
+    if unknown:
+        return [_citation_unknown_steps(record_id, mapping_id, label, case_id, unknown)]
+    if hedged:
+        return []
+    return _assignment_errors(record_id, mapping_id, label, case_id, steps, case_steps)
+
+
+def _unknown_cited_steps(
+    steps: list[str], cited_steps: Mapping[str, frozenset[str]]
+) -> list[str]:
+    """Cited steps absent from the cited case in the pinned ATLAS."""
+    return [s for s in steps if s not in cited_steps]
+
+
+def _assignment_errors(
+    record_id: str,
+    mapping_id: str,
+    label: str,
+    case_id: str,
+    steps: list[str],
+    case_steps: Mapping[str, Mapping[str, frozenset[str]]],
+) -> list[str]:
+    """The unhedged-assignment error, if the pinned evidence contradicts it."""
+    error = _unhedged_assignment_error(
+        record_id, mapping_id, label, case_id, steps, case_steps
+    )
+    return [error] if error is not None else []
+
+
+def _citation_missing_case(record_id: str, mapping_id: str, case_id: str) -> str:
+    """Report a citation whose case is absent from the pinned ATLAS."""
+    return (
+        f"{record_id} mapping {mapping_id}: cited case {case_id} "
+        "is absent from the pinned ATLAS relationships"
+    )
+
+
+def _citation_unknown_steps(
+    record_id: str,
+    mapping_id: str,
+    label: str,
+    case_id: str,
+    unknown: list[str],
+) -> str:
+    """Report a citation referencing steps absent from the cited case."""
+    return (
+        f"{record_id} mapping {mapping_id}: citation {label} "
+        f"references steps {unknown} absent from {case_id} in the "
+        "pinned ATLAS relationships"
+    )
 
 
 def _mapping_citation_errors(
@@ -284,38 +365,11 @@ def _mapping_citation_errors(
             continue
         hedged = any(token in segment.lower() for token in _HEDGE_TOKENS)
         for match in citations:
-            case_id, step_expr = f"AML.{match.group(1)}", match.group(2)
-            label = f"{case_id} {step_expr}"
-            if case_id not in case_steps:
-                errors.append(
-                    f"{record_id} mapping {mapping_id}: cited case {case_id} "
-                    "is absent from the pinned ATLAS relationships"
+            errors.extend(
+                _citation_errors_for_match(
+                    record_id, mapping_id, match, case_steps, hedged
                 )
-                continue
-            try:
-                steps = _parse_step_expr(step_expr)
-            except ValueError as exc:
-                errors.append(f"{record_id} mapping {mapping_id}: {exc}")
-                continue
-            unknown = [s for s in steps if s not in case_steps[case_id]]
-            if unknown:
-                errors.append(
-                    f"{record_id} mapping {mapping_id}: citation {label} "
-                    f"references steps {unknown} absent from {case_id} in the "
-                    "pinned ATLAS relationships"
-                )
-                continue
-            if hedged:
-                continue
-            if not any(mapping_id in case_steps[case_id][s] for s in steps):
-                employed = sorted({t for s in steps for t in case_steps[case_id][s]})
-                errors.append(
-                    f"{record_id} mapping {mapping_id}: unhedged citation "
-                    f"{label} asserts source assignment, but the pinned "
-                    f"relationships there employ {employed}, not "
-                    f"{mapping_id}; correct the citation or explicitly mark "
-                    "the deliberate divergence as analogue/adapted/retag"
-                )
+            )
     return errors
 
 
@@ -329,18 +383,6 @@ def _mapping_ids(resulting: dict[str, Any]) -> list[str]:
     ids = [m["id"] for m in resulting["atlas_chain_mappings"]]
     ids.extend(m["id"] for m in resulting["atlas_step_mappings"])
     return ids
-
-
-def _evidence_tier(pattern: Mapping[str, Any]) -> str:
-    """Mutually exclusive evidence tier for a loader record."""
-    evidence = pattern.get("evidence") or []
-    if any(e.get("type") == "direct_demonstration" for e in evidence):
-        return "direct_demonstration"
-    if evidence:
-        return "enrichment"
-    if pattern.get("kill_chain"):
-        return "kill_chain_only"
-    return "none"
 
 
 def _check_source_entry_coherence(entry: Mapping[str, Any]) -> None:
@@ -367,6 +409,317 @@ def _check_source_entry_coherence(entry: Mapping[str, Any]) -> None:
         )
 
 
+def _taxonomy_pin_mismatch(context: Mapping[str, Any], expected: Any) -> bool:
+    return (
+        context["atlas"]["release"] != expected.atlas.release
+        or context["atlas"]["digest"] != expected.atlas.digest
+        or context["mapping_set_digest"] != expected.mapping_set_digest
+        or expected.laaf is not None
+    )
+
+
+def _taxonomy_pins_valid(artifact: Mapping[str, Any], resolver: Any) -> None:
+    """The artifact taxonomy pins must match the production resolver."""
+    context = artifact["taxonomy_context"]
+    expected = resolver.taxonomy_context
+    if context["laaf"] is not None:
+        raise ValueError("catalog lineage taxonomy_context.laaf must be null for v1")
+    if _taxonomy_pin_mismatch(context, expected):
+        raise ValueError(
+            "catalog lineage taxonomy pins do not match the production resolver"
+        )
+
+
+def _source_catalog_pin_valid(pin: Mapping[str, Any], sources: list[Any]) -> None:
+    """The source-catalog pin must be internally coherent and cover all entries."""
+    if pin["canonicalization"] != SOURCE_CATALOG_CANONICALIZATION:
+        raise ValueError(
+            "catalog lineage source catalog canonicalization "
+            f"{pin['canonicalization']!r} is not {SOURCE_CATALOG_CANONICALIZATION!r}"
+        )
+    if pin["record_count"] != len(sources):
+        raise ValueError(
+            f"catalog lineage source catalog record_count {pin['record_count']} "
+            f"does not match the {len(sources)} source entries"
+        )
+    _source_manifest_valid(pin, sources)
+
+
+def _source_manifest_valid(pin: Mapping[str, Any], sources: list[Any]) -> None:
+    """The pin's file manifest must be sorted and cover every entry."""
+    manifest = pin["file_manifest"]
+    if manifest != sorted(manifest):
+        raise ValueError("catalog lineage source catalog manifest is not sorted")
+    declared_files = set(manifest)
+    for entry in sources:
+        if entry["source_file"] not in declared_files:
+            raise ValueError(
+                f"catalog lineage entry {entry['source_pattern_id']} "
+                f"source_file={entry['source_file']!r} is not in the source "
+                "catalog manifest"
+            )
+
+
+def _disposition_vocabulary_valid(artifact: Mapping[str, Any]) -> None:
+    """The disposition vocabulary keys are exactly the closed disposition enum."""
+    if set(artifact["disposition_vocabulary"]) != _FINAL_DISPOSITIONS:
+        raise ValueError(
+            "disposition_vocabulary keys diverge from the closed vocabulary"
+        )
+
+
+def _source_ids_unique(sources: list[Any]) -> list[str]:
+    source_ids = [entry["source_pattern_id"] for entry in sources]
+    if len(set(source_ids)) != len(source_ids):
+        raise ValueError("duplicate source_pattern_id in catalog lineage sources")
+    return source_ids
+
+
+def _overlap_group_membership(
+    group: Mapping[str, Any],
+    by_id: Mapping[str, Any],
+    member_to_group: dict[str, str],
+) -> None:
+    for member in group["members"]:
+        if member not in by_id:
+            raise ValueError(
+                f"overlap group {group['group_id']} member {member} is not a source"
+            )
+        if member in member_to_group:
+            raise ValueError(f"overlap member {member} appears in more than one group")
+        member_to_group[member] = group["group_id"]
+
+
+def _overlap_entry_references(
+    entry: Mapping[str, Any],
+    group_ids: set[str],
+    member_to_group: Mapping[str, str],
+) -> None:
+    referenced = entry["overlap_group"]
+    pid = entry["source_pattern_id"]
+    if referenced is None:
+        if pid in member_to_group:
+            raise ValueError(
+                f"overlap group {member_to_group[pid]} lists {pid} but the "
+                "source entry references no group"
+            )
+        return
+    if referenced not in group_ids:
+        raise ValueError(f"source {pid} references unknown overlap group {referenced}")
+    if member_to_group.get(pid) != referenced:
+        raise ValueError(
+            f"source {pid} references overlap group {referenced} but is "
+            "not listed as a member"
+        )
+
+
+def _overlap_groups_valid(
+    groups: list[Any], sources: list[Any], by_id: Mapping[str, Any]
+) -> None:
+    """Overlap groups: unique ids, one resolution, members are sources."""
+    group_ids = [g["group_id"] for g in groups]
+    if len(set(group_ids)) != len(group_ids):
+        raise ValueError("duplicate overlap group_id in catalog lineage")
+    member_to_group: dict[str, str] = {}
+    for group in groups:
+        _overlap_group_membership(group, by_id, member_to_group)
+    group_ids_set = set(group_ids)
+    for entry in sources:
+        _overlap_entry_references(entry, group_ids_set, member_to_group)
+
+
+def _disposition_violation(entry: Mapping[str, Any]) -> list[Any] | None:
+    """Disposition/resulting invariants for one source entry."""
+    pid = entry["source_pattern_id"]
+    disposition = entry["disposition"]
+    resulting = entry["resulting_patterns"]
+    if disposition in ("retire", "defer"):
+        return _retirement_violation(pid, disposition, resulting)
+    if disposition in ("retain", "narrow", "supersede"):
+        return _retention_violations(pid, disposition, resulting)
+    return resulting
+
+
+def _retirement_violation(pid: str, disposition: str, resulting: list[Any]) -> None:
+    """Retired/deferred sources must carry no resulting patterns."""
+    if resulting:
+        raise ValueError(f"{disposition} source {pid} carries resulting patterns")
+    return None
+
+
+def _retention_violations(
+    pid: str, disposition: str, resulting: list[Any]
+) -> list[Any]:
+    """Retained/narrowed results must continue their source id."""
+    expected_ids = {pid} if disposition != "supersede" else None
+    for record in resulting:
+        rid = record["pattern_id"]
+        if expected_ids is not None and rid != pid:
+            raise ValueError(
+                f"{disposition} source {pid} resulting id {rid} must "
+                "continue its source id"
+            )
+    return resulting
+
+
+def _proposed_atlas_ids_valid(
+    resolver: Any, rid: str, record: Mapping[str, Any]
+) -> None:
+    for atlas_id in _mapping_ids(record):
+        if not resolver.contains("ATLAS", atlas_id):
+            raise ValueError(f"resulting id {rid} proposes unknown ATLAS id {atlas_id}")
+
+
+def _resulting_record_valid(
+    pid: str,
+    entry: Mapping[str, Any],
+    rid: str,
+    record: Mapping[str, Any],
+    catalog_ids: set[str],
+    resolver: Any,
+    case_steps: Mapping[str, Mapping[str, frozenset[str]]],
+    citation_errors: list[str],
+) -> None:
+    """One resulting record: collision-freedom, ownership, ATLAS ids, citations."""
+    if rid in catalog_ids and rid != pid:
+        raise ValueError(
+            f"resulting id {rid} from source {pid} collides with an existing catalog id"
+        )
+    if record["source_file"] not in _SOURCE_FILES:
+        raise ValueError(f"resulting id {rid} has an unknown source_file")
+    if record["source_file"] != entry["source_file"]:
+        raise ValueError(
+            f"resulting id {rid} from source {pid} is owned by "
+            f"{record['source_file']!r}, not the source file "
+            f"{entry['source_file']!r}"
+        )
+    _proposed_atlas_ids_valid(resolver, rid, record)
+    citation_errors.extend(_resulting_citation_errors(record, rid, case_steps))
+
+
+def _resulting_citation_errors(
+    record: Mapping[str, Any],
+    rid: str,
+    case_steps: Mapping[str, Mapping[str, frozenset[str]]],
+) -> list[str]:
+    """Citation errors across both mapping kinds of one resulting record."""
+    errors: list[str] = []
+    for mapping in record["atlas_chain_mappings"] + record["atlas_step_mappings"]:
+        errors.extend(
+            _mapping_citation_errors(
+                rid, mapping["id"], mapping["evidence"], case_steps
+            )
+        )
+    return errors
+
+
+def _resulting_records_valid(
+    sources: list[Any],
+    catalog_ids: set[str],
+    resolver: Any,
+    case_steps: Mapping[str, Mapping[str, frozenset[str]]],
+) -> tuple[list[str], list[str]]:
+    """Resulting records: uniqueness, collision-freedom, and citation checks."""
+    resulting_ids: list[str] = []
+    citation_errors: list[str] = []
+    for entry in sources:
+        pid = entry["source_pattern_id"]
+        resulting = _disposition_violation(entry)
+        if resulting is None:
+            continue
+        for record in resulting:
+            rid = record["pattern_id"]
+            _resulting_record_valid(
+                pid,
+                entry,
+                rid,
+                record,
+                catalog_ids,
+                resolver,
+                case_steps,
+                citation_errors,
+            )
+            resulting_ids.append(rid)
+    return resulting_ids, citation_errors
+
+
+def _lowest_unused_family_id(fam: str, used: set[int]) -> tuple[str, int]:
+    nn = 1
+    while nn in used:
+        nn += 1
+    return f"AP-T{fam}-{nn:02d}", nn
+
+
+def _split_results_valid(entry: Mapping[str, Any]) -> None:
+    pid = entry["source_pattern_id"]
+    results = entry["resulting_patterns"]
+    if results[0]["pattern_id"] != pid:
+        raise ValueError(
+            f"split source {pid} first resulting id "
+            f"{results[0]['pattern_id']!r} must continue the source id "
+            "in causal mechanism order"
+        )
+
+
+def _split_naming_valid(sources: list[Any], catalog_ids: set[str]) -> None:
+    """Split-derived ids follow the deterministic lowest-unused-NN strategy."""
+    family_used: dict[str, set[int]] = {}
+    for cid in catalog_ids:
+        fam, nn = _split_pattern_id(cid)
+        family_used.setdefault(fam, set()).add(nn)
+    for entry in sorted(sources, key=lambda e: e["source_pattern_id"]):
+        if entry["disposition"] == "split":
+            _split_entry_naming(entry, family_used)
+
+
+def _split_entry_naming(
+    entry: Mapping[str, Any], family_used: dict[str, set[int]]
+) -> None:
+    """One split entry's derived ids follow the lowest-unused-NN strategy."""
+    pid = entry["source_pattern_id"]
+    fam, _ = _split_pattern_id(pid)
+    _split_results_valid(entry)
+    used = family_used[fam]
+    for record in entry["resulting_patterns"][1:]:
+        expected, nn = _lowest_unused_family_id(fam, used)
+        if record["pattern_id"] != expected:
+            raise ValueError(
+                f"split source {pid} derived id {record['pattern_id']!r} "
+                f"must be the lowest unused family id {expected!r}"
+            )
+        used.add(nn)
+
+
+def _release_digest_valid(artifact: Mapping[str, Any]) -> None:
+    """The release digest must recompute deterministically."""
+    recorded = artifact["release"]["semantic_digest"]
+    recomputed = compute_catalog_lineage_digest(artifact)
+    if recorded != recomputed:
+        raise ValueError(
+            f"catalog lineage digest mismatch: recorded {recorded} != recomputed {recomputed}"
+        )
+
+
+def _lineage_schema(schema: dict[str, Any] | None) -> dict[str, Any]:
+    """The supplied lineage schema, or the pinned default."""
+    return schema if schema is not None else load_catalog_lineage_schema()
+
+
+def _resulting_ids_unique(resulting_ids: list[str]) -> None:
+    """No two source entries may derive the same resulting pattern id."""
+    if len(set(resulting_ids)) != len(resulting_ids):
+        raise ValueError("duplicate resulting pattern id across catalog lineage")
+
+
+def _citation_errors_block(citation_errors: list[str]) -> None:
+    """Raise when any mapping citation is inconsistent with the pin."""
+    if citation_errors:
+        raise ValueError(
+            "catalog lineage case-step citation inconsistencies:\n  - "
+            + "\n  - ".join(citation_errors)
+        )
+
+
 def validate_catalog_lineage(
     artifact: dict[str, Any],
     *,
@@ -388,208 +741,46 @@ def validate_catalog_lineage(
     Returns the artifact on success; raises ``ValueError`` (or
     ``jsonschema.ValidationError``) on any breach.
     """
-    schema = schema if schema is not None else load_catalog_lineage_schema()
-    Draft202012Validator(schema).validate(artifact)
+    Draft202012Validator(_lineage_schema(schema)).validate(artifact)
 
-    # Taxonomy pins must match the production resolver exactly.
-    context = artifact["taxonomy_context"]
-    expected = resolver.taxonomy_context
-    if context["laaf"] is not None:
-        raise ValueError("catalog lineage taxonomy_context.laaf must be null for v1")
-    if (
-        context["atlas"]["release"] != expected.atlas.release
-        or context["atlas"]["digest"] != expected.atlas.digest
-        or context["mapping_set_digest"] != expected.mapping_set_digest
-        or expected.laaf is not None
-    ):
-        raise ValueError(
-            "catalog lineage taxonomy pins do not match the production resolver"
-        )
+    _taxonomy_pins_valid(artifact, resolver)
 
     # The source-catalog pin is checked for internal coherence only; the
     # recompute-and-compare audit against the historical catalog is the
     # explicit snapshot verifier (creation-time/source-audit use).
-    pin = artifact["source_catalog_context"]
-    if pin["canonicalization"] != SOURCE_CATALOG_CANONICALIZATION:
-        raise ValueError(
-            "catalog lineage source catalog canonicalization "
-            f"{pin['canonicalization']!r} is not {SOURCE_CATALOG_CANONICALIZATION!r}"
-        )
     sources = artifact["sources"]
-    if pin["record_count"] != len(sources):
-        raise ValueError(
-            f"catalog lineage source catalog record_count {pin['record_count']} "
-            f"does not match the {len(sources)} source entries"
-        )
-    manifest = pin["file_manifest"]
-    if manifest != sorted(manifest):
-        raise ValueError("catalog lineage source catalog manifest is not sorted")
-    declared_files = set(manifest)
-    for entry in sources:
-        if entry["source_file"] not in declared_files:
-            raise ValueError(
-                f"catalog lineage entry {entry['source_pattern_id']} "
-                f"source_file={entry['source_file']!r} is not in the source "
-                "catalog manifest"
-            )
+    _source_catalog_pin_valid(artifact["source_catalog_context"], sources)
 
-    # The disposition vocabulary keys are exactly the closed disposition enum.
-    if set(artifact["disposition_vocabulary"]) != _FINAL_DISPOSITIONS:
-        raise ValueError(
-            "disposition_vocabulary keys diverge from the closed vocabulary"
-        )
-
-    source_ids = [entry["source_pattern_id"] for entry in sources]
-    if len(set(source_ids)) != len(source_ids):
-        raise ValueError("duplicate source_pattern_id in catalog lineage sources")
+    _disposition_vocabulary_valid(artifact)
+    source_ids = _source_ids_unique(sources)
 
     # Source-entry facts must be internally coherent (self-attesting).
     by_id = {entry["source_pattern_id"]: entry for entry in sources}
     for entry in sources:
         _check_source_entry_coherence(entry)
 
-    # Overlap groups: unique ids, one resolution, members are sources, and
-    # membership is consistent with the per-entry overlap_group references.
-    groups = artifact["overlap_groups"]
-    group_ids = [g["group_id"] for g in groups]
-    if len(set(group_ids)) != len(group_ids):
-        raise ValueError("duplicate overlap group_id in catalog lineage")
-    member_to_group: dict[str, str] = {}
-    for group in groups:
-        for member in group["members"]:
-            if member not in by_id:
-                raise ValueError(
-                    f"overlap group {group['group_id']} member {member} is not a source"
-                )
-            if member in member_to_group:
-                raise ValueError(
-                    f"overlap member {member} appears in more than one group"
-                )
-            member_to_group[member] = group["group_id"]
-    for entry in sources:
-        referenced = entry["overlap_group"]
-        pid = entry["source_pattern_id"]
-        if referenced is None:
-            if pid in member_to_group:
-                raise ValueError(
-                    f"overlap group {member_to_group[pid]} lists {pid} but the "
-                    "source entry references no group"
-                )
-            continue
-        if referenced not in set(group_ids):
-            raise ValueError(
-                f"source {pid} references unknown overlap group {referenced}"
-            )
-        if member_to_group.get(pid) != referenced:
-            raise ValueError(
-                f"source {pid} references overlap group {referenced} but is "
-                "not listed as a member"
-            )
+    _overlap_groups_valid(artifact["overlap_groups"], sources, by_id)
 
     # Resulting records: uniqueness, collision-freedom against the 71
     # historical source ids, disposition rules, resolver membership for
     # every proposed exact ATLAS id, and pinned case-step citation
     # consistency for every mapping.
     catalog_ids = set(source_ids)
-    resulting_ids: list[str] = []
-    citation_errors: list[str] = []
-    for entry in sources:
-        pid = entry["source_pattern_id"]
-        disposition = entry["disposition"]
-        resulting = entry["resulting_patterns"]
-        if disposition in ("retire", "defer"):
-            if resulting:
-                raise ValueError(
-                    f"{disposition} source {pid} carries resulting patterns"
-                )
-            continue
-        if disposition in ("retain", "narrow", "supersede"):
-            expected_ids = {pid} if disposition != "supersede" else None
-            for record in resulting:
-                rid = record["pattern_id"]
-                if expected_ids is not None and rid != pid:
-                    raise ValueError(
-                        f"{disposition} source {pid} resulting id {rid} must "
-                        "continue its source id"
-                    )
-        for record in resulting:
-            rid = record["pattern_id"]
-            if rid in catalog_ids and rid != pid:
-                raise ValueError(
-                    f"resulting id {rid} from source {pid} collides with an "
-                    "existing catalog id"
-                )
-            if record["source_file"] not in _SOURCE_FILES:
-                raise ValueError(f"resulting id {rid} has an unknown source_file")
-            if record["source_file"] != entry["source_file"]:
-                raise ValueError(
-                    f"resulting id {rid} from source {pid} is owned by "
-                    f"{record['source_file']!r}, not the source file "
-                    f"{entry['source_file']!r}"
-                )
-            for atlas_id in _mapping_ids(record):
-                if not resolver.contains("ATLAS", atlas_id):
-                    raise ValueError(
-                        f"resulting id {rid} proposes unknown ATLAS id {atlas_id}"
-                    )
-            for mapping in (
-                record["atlas_chain_mappings"] + record["atlas_step_mappings"]
-            ):
-                citation_errors.extend(
-                    _mapping_citation_errors(
-                        rid, mapping["id"], mapping["evidence"], case_steps
-                    )
-                )
-            resulting_ids.append(rid)
-    if len(set(resulting_ids)) != len(resulting_ids):
-        raise ValueError("duplicate resulting pattern id across catalog lineage")
-    if citation_errors:
-        raise ValueError(
-            "catalog lineage case-step citation inconsistencies:\n  - "
-            + "\n  - ".join(citation_errors)
-        )
+    resulting_ids, citation_errors = _resulting_records_valid(
+        sources, catalog_ids, resolver, case_steps
+    )
+    _resulting_ids_unique(resulting_ids)
+    _citation_errors_block(citation_errors)
 
     # Split-derived ids must follow the deterministic naming strategy: split
     # sources are processed in ascending source id order; the first resulting
     # record (causal mechanism order) continues the source id; each subsequent
     # record takes the lowest unused NN in the source threat family across the
     # merged catalog plus ids already allocated to earlier splits.
-    family_used: dict[str, set[int]] = {}
-    for cid in catalog_ids:
-        fam, nn = _split_pattern_id(cid)
-        family_used.setdefault(fam, set()).add(nn)
-    for entry in sorted(sources, key=lambda e: e["source_pattern_id"]):
-        if entry["disposition"] != "split":
-            continue
-        pid = entry["source_pattern_id"]
-        fam, _ = _split_pattern_id(pid)
-        results = entry["resulting_patterns"]
-        if results[0]["pattern_id"] != pid:
-            raise ValueError(
-                f"split source {pid} first resulting id "
-                f"{results[0]['pattern_id']!r} must continue the source id "
-                "in causal mechanism order"
-            )
-        used = family_used[fam]
-        for record in results[1:]:
-            nn = 1
-            while nn in used:
-                nn += 1
-            expected = f"AP-T{fam}-{nn:02d}"
-            if record["pattern_id"] != expected:
-                raise ValueError(
-                    f"split source {pid} derived id {record['pattern_id']!r} "
-                    f"must be the lowest unused family id {expected!r}"
-                )
-            used.add(nn)
+    _split_naming_valid(sources, catalog_ids)
 
     # Release digest must recompute deterministically.
-    recorded = artifact["release"]["semantic_digest"]
-    recomputed = compute_catalog_lineage_digest(artifact)
-    if recorded != recomputed:
-        raise ValueError(
-            f"catalog lineage digest mismatch: recorded {recorded} != recomputed {recomputed}"
-        )
+    _release_digest_valid(artifact)
     return artifact
 
 
@@ -620,76 +811,12 @@ def verify_catalog_lineage_source_snapshot(
     Returns the artifact on success; raises ``ValueError`` (or
     ``jsonschema.ValidationError``) on any breach.
     """
-    schema = schema if schema is not None else load_catalog_lineage_schema()
-    Draft202012Validator(schema).validate(artifact)
-
-    pin = artifact["source_catalog_context"]
-    if pin["canonicalization"] != SOURCE_CATALOG_CANONICALIZATION:
-        raise ValueError(
-            "catalog lineage source catalog canonicalization "
-            f"{pin['canonicalization']!r} is not {SOURCE_CATALOG_CANONICALIZATION!r}"
-        )
-    manifest = pin["file_manifest"]
-    actual_files = sorted({owners[pid] for pid in patterns})
-    if sorted(manifest) != actual_files:
-        raise ValueError(
-            f"catalog lineage source catalog manifest {sorted(manifest)} does "
-            f"not match the supplied declaring files {actual_files}"
-        )
-    if pin["record_count"] != len(patterns):
-        raise ValueError(
-            f"catalog lineage source catalog record_count {pin['record_count']} "
-            f"does not match the supplied catalog size {len(patterns)}"
-        )
-    recomputed_pin = compute_source_catalog_digest(patterns, owners, manifest)
-    if pin["digest"] != recomputed_pin:
-        raise ValueError(
-            "catalog lineage source catalog digest mismatch: recorded "
-            f"{pin['digest']} != recomputed {recomputed_pin} (supplied records "
-            "must come from the pinned source_git_revision "
-            f"{pin['source_git_revision']})"
-        )
-
-    sources = artifact["sources"]
-    source_ids = [entry["source_pattern_id"] for entry in sources]
-    if len(set(source_ids)) != len(source_ids):
-        raise ValueError("duplicate source_pattern_id in catalog lineage sources")
-    if set(source_ids) != set(patterns):
-        missing = sorted(set(patterns) - set(source_ids))
-        extra = sorted(set(source_ids) - set(patterns))
-        raise ValueError(
-            f"catalog lineage sources diverge from the supplied catalog; "
-            f"missing={missing} extra={extra}"
-        )
-
-    # Source-entry facts must match the supplied historical loader records.
-    by_id = {entry["source_pattern_id"]: entry for entry in sources}
-    for pid, pattern in patterns.items():
-        entry = by_id[pid]
-        mismatches = {
-            "threat_id": (entry["threat_id"], pattern["threat_id"]),
-            "evidence_tier": (entry["evidence_tier"], _evidence_tier(pattern)),
-            "evidence_count": (
-                entry["evidence_count"],
-                len(pattern.get("evidence") or []),
-            ),
-            "legacy_kill_chain_steps": (
-                entry["legacy_kill_chain_steps"],
-                len(pattern.get("kill_chain") or []),
-            ),
-        }
-        for field, (claimed, actual) in mismatches.items():
-            if claimed != actual:
-                raise ValueError(
-                    f"catalog lineage entry {pid} {field}={claimed!r} "
-                    f"does not match the supplied catalog value {actual!r}"
-                )
-        if entry["source_file"] != owners[pid]:
-            raise ValueError(
-                f"catalog lineage entry {pid} source_file={entry['source_file']!r} "
-                f"does not match the declaring file {owners[pid]!r}"
-            )
-    return artifact
+    return _verify_source_snapshot(
+        artifact,
+        patterns=patterns,
+        owners=owners,
+        schema=_lineage_schema(schema),
+    )
 
 
 _SOURCE_FILES = frozenset(
