@@ -19,6 +19,7 @@ from asago_scenario_generator.models.attack_pattern import (
     ExecutionRequirement,
     LegacyAttackPatternRecord,
     ProjectionSnapshot,
+    _canonical_json,
     compute_chain_semantic_digest,
     compute_projection_digest,
     evaluate_condition,
@@ -762,6 +763,73 @@ def test_condition_ast_stays_discriminated_and_bounded() -> None:
         nested = {"op": "not", "schema_version": "1", "operand": nested}
     with pytest.raises(ValidationError, match="structural limits"):
         adapter.validate_python(nested)
+
+
+def test_duplicate_condition_operands_rejected() -> None:
+    """Composite operands must be pairwise distinct."""
+    adapter = TypeAdapter(Condition)
+    with pytest.raises(ValidationError, match="duplicate condition operands"):
+        adapter.validate_python(
+            {
+                "op": "all",
+                "schema_version": "1",
+                "operands": [equality(), equality()],
+            }
+        )
+    adapter.validate_python(
+        {
+            "op": "all",
+            "schema_version": "1",
+            "operands": [equality(), equality_variant()],
+        }
+    )
+
+
+def equality_variant() -> dict[str, Any]:
+    return {
+        "op": "equality",
+        "schema_version": "1",
+        "fact": {**fact(), "fact_id": "enabled", "value_type": "boolean"},
+        "value": True,
+    }
+
+
+def test_membership_condition_value_branches() -> None:
+    """Membership values match the fact type and stay unique."""
+    adapter = TypeAdapter(Condition)
+    valid = adapter.validate_python(
+        {
+            "op": "membership",
+            "schema_version": "1",
+            "fact": fact(),
+            "values": ["active", "draining"],
+        }
+    )
+    assert valid.op == "membership"
+    with pytest.raises(ValidationError, match="membership values must be unique"):
+        adapter.validate_python(
+            {
+                "op": "membership",
+                "schema_version": "1",
+                "fact": fact(),
+                "values": ["active", "active"],
+            }
+        )
+    with pytest.raises(ValidationError, match="exactly match"):
+        adapter.validate_python(
+            {
+                "op": "membership",
+                "schema_version": "1",
+                "fact": fact(),
+                "values": [1, 2],
+            }
+        )
+
+
+def test_normalize_accepts_model_instances() -> None:
+    """Canonicalization handles model instances and their python dumps alike."""
+    chain = CanonicalAttackChain.model_validate(chain_data())
+    assert _canonical_json(chain) == _canonical_json(chain.model_dump(mode="python"))
 
 
 @pytest.mark.parametrize(
