@@ -26,6 +26,37 @@ logger = logging.getLogger(__name__)
 
 _VALID_TECHNIQUE_ID_RE = re.compile(r"^(?:AML\.T\d{4}(?:\.\d{3})?|[SML]\d+)$")
 
+# Pattern: optional leading whitespace, a YAML key (``- `` list prefix
+# allowed), then ``: ``, then a value that contains another ``:``.
+# We only act when the value is *not* already wrapped in quotes.
+_KEY_VALUE_RE = re.compile(
+    r"^(?P<prefix>\s*(?:-\s+)?)(?P<key>[A-Za-z_][\w.]*):\s+(?P<value>.+)$"
+)
+
+
+def _is_quoted_yaml_value(value: str) -> bool:
+    """Whether a value is already wrapped in single or double quotes."""
+    if value.startswith('"'):
+        return value.endswith('"')
+    if value.startswith("'"):
+        return value.endswith("'")
+    return False
+
+
+def _sanitize_yaml_line(line: str) -> str:
+    """Quote one YAML line whose unquoted value contains a colon."""
+    m = _KEY_VALUE_RE.match(line)
+    if not m:
+        return line
+    value = m.group("value")
+    # Only act if the value contains another colon AND is not already
+    # quoted (single or double).
+    if ":" not in value or _is_quoted_yaml_value(value):
+        return line
+    # Escape existing double quotes inside the value, then wrap.
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'{m.group("prefix")}{m.group("key")}: "{escaped}"'
+
 
 def _sanitize_yaml_colons(raw_yaml: str) -> str:
     """Quote YAML values that contain unquoted colons.
@@ -41,30 +72,7 @@ def _sanitize_yaml_colons(raw_yaml: str) -> str:
     Lines that are pure mapping keys (value is empty or only whitespace, i.e.
     the value starts on the next indented line) are left untouched.
     """
-    # Pattern: optional leading whitespace, a YAML key (``- `` list prefix
-    # allowed), then ``: ``, then a value that contains another ``:``.
-    # We only act when the value is *not* already wrapped in quotes.
-    _KEY_VALUE_RE = re.compile(
-        r"^(?P<prefix>\s*(?:-\s+)?)(?P<key>[A-Za-z_][\w.]*):\s+(?P<value>.+)$"
-    )
-
-    sanitized_lines: list[str] = []
-    for line in raw_yaml.split("\n"):
-        m = _KEY_VALUE_RE.match(line)
-        if m:
-            value = m.group("value")
-            # Only act if the value contains another colon AND is not already
-            # quoted (single or double).
-            if (
-                ":" in value
-                and not (value.startswith('"') and value.endswith('"'))
-                and not (value.startswith("'") and value.endswith("'"))
-            ):
-                # Escape existing double quotes inside the value, then wrap.
-                escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-                line = f'{m.group("prefix")}{m.group("key")}: "{escaped}"'
-        sanitized_lines.append(line)
-    return "\n".join(sanitized_lines)
+    return "\n".join(_sanitize_yaml_line(line) for line in raw_yaml.split("\n"))
 
 
 def _resolve_projected_step_ids(
@@ -207,6 +215,37 @@ def normalize_attack_tree_transport(
     return normalized
 
 
+def _strip_yaml_fences(raw: str) -> str:
+    """Remove markdown code fences from raw YAML text."""
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.split("\n")
+        lines = lines[1:]  # drop opening fence
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        cleaned = "\n".join(lines)
+    return cleaned
+
+
+def _load_tree_yaml(cleaned: str, seed_id: str) -> Any:
+    """Parse YAML, retrying once after colon sanitization."""
+    try:
+        return yaml.safe_load(cleaned)
+    except yaml.YAMLError:
+        logger.warning(
+            "YAML parse failed for seed %s; attempting colon sanitization",
+            seed_id,
+        )
+        sanitized = _sanitize_yaml_colons(cleaned)
+        try:
+            return yaml.safe_load(sanitized)
+        except yaml.YAMLError as exc:
+            raise yaml.YAMLError(
+                f"Failed to parse attack tree YAML for seed {seed_id} "
+                f"even after colon sanitization: {exc}"
+            ) from exc
+
+
 def _parse_attack_tree_yaml(
     raw: str,
     seed: ScenarioSeed,
@@ -219,29 +258,8 @@ def _parse_attack_tree_yaml(
     unquoted colons in LLM-generated values), the raw text is sanitized
     and parsing is retried once.
     """
-    cleaned = raw.strip()
-    if cleaned.startswith("```"):
-        lines = cleaned.split("\n")
-        lines = lines[1:]  # drop opening fence
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        cleaned = "\n".join(lines)
-
-    try:
-        data = yaml.safe_load(cleaned)
-    except yaml.YAMLError:
-        logger.warning(
-            "YAML parse failed for seed %s; attempting colon sanitization",
-            seed.seed_id,
-        )
-        sanitized = _sanitize_yaml_colons(cleaned)
-        try:
-            data = yaml.safe_load(sanitized)
-        except yaml.YAMLError as exc:
-            raise yaml.YAMLError(
-                f"Failed to parse attack tree YAML for seed {seed.seed_id} "
-                f"even after colon sanitization: {exc}"
-            ) from exc
+    cleaned = _strip_yaml_fences(raw)
+    data = _load_tree_yaml(cleaned, seed.seed_id)
 
     if isinstance(data, dict) and "attack_tree" in data:
         data = data["attack_tree"]

@@ -97,22 +97,41 @@ def enforce_narrative_projection_zones(
     return narrative
 
 
+def _mapped_boundary_positions(
+    step: NarrativeStep,
+    boundary_by_id: dict[str, str | None],
+) -> set[str] | None:
+    """Boundary positions of a step's mapped projected steps, or None."""
+    boundaries: set[str] = set()
+    for sid in step.projected_step_ids:
+        if sid in boundary_by_id:
+            boundaries.add(boundary_by_id[sid])
+    return boundaries if boundaries else None
+
+
+def _mixed_boundary_violation(step: NarrativeStep, boundaries: set[str]) -> str | None:
+    """Violation when mapped projected steps mix boundary positions."""
+    if len(boundaries) > 1:
+        return (
+            f"projection-zone: narrative step {step.step_number} maps "
+            f"projected steps with mixed boundary positions "
+            f"({sorted(boundaries)})"
+        )
+    return None
+
+
 def _projection_zone_violations(
     step: NarrativeStep,
     boundary_by_id: dict[str, str | None],
     active: set[str],
 ) -> list[str]:
     """Stage-specific zone violations for one narrative step's mapping."""
-    mapped_ids = [sid for sid in step.projected_step_ids if sid in boundary_by_id]
-    if not mapped_ids:
+    boundaries = _mapped_boundary_positions(step, boundary_by_id)
+    if boundaries is None:
         return []
-    boundaries = {boundary_by_id[sid] for sid in mapped_ids}
-    if len(boundaries) > 1:
-        return [
-            f"projection-zone: narrative step {step.step_number} maps "
-            f"projected steps with mixed boundary positions "
-            f"({sorted(boundaries)})"
-        ]
+    mixed = _mixed_boundary_violation(step, boundaries)
+    if mixed is not None:
+        return [mixed]
     violation = _narrative_zone_rule_violation(step, next(iter(boundaries)), active)
     return [violation] if violation is not None else []
 
@@ -144,6 +163,33 @@ def _narrative_zone_rule_violation(
     return None
 
 
+def _narrative_step_zone_violation(
+    step: NarrativeStep, allowed: set[str]
+) -> str | None:
+    """Violation for a narrative step in a disallowed zone, or None."""
+    if step.zone not in allowed:
+        return (
+            f"disallowed-zone: narrative step {step.step_number} "
+            f"has zone '{step.zone}' which is not in "
+            f"zones_active={sorted(allowed)}."
+        )
+    return None
+
+
+def _narrative_sequence_zone_violations(
+    zone_sequence: Iterable[str], allowed: set[str]
+) -> list[str]:
+    """Violations for disallowed zones in the narrative zone sequence."""
+    violations: list[str] = []
+    for z in zone_sequence:
+        if z not in allowed:
+            violations.append(
+                f"disallowed-zone: zone_sequence contains '{z}' "
+                f"which is not in zones_active={sorted(allowed)}."
+            )
+    return violations
+
+
 def _enforce_zones_narrative(
     narrative: NarrativeLayer,
     zones_active: list[str] | None = None,
@@ -165,19 +211,13 @@ def _enforce_zones_narrative(
     violations: list[str] = []
 
     for step in narrative.steps:
-        if step.zone not in allowed:
-            violations.append(
-                f"disallowed-zone: narrative step {step.step_number} "
-                f"has zone '{step.zone}' which is not in "
-                f"zones_active={sorted(allowed)}."
-            )
+        violation = _narrative_step_zone_violation(step, allowed)
+        if violation is not None:
+            violations.append(violation)
 
-    for z in narrative.zone_sequence:
-        if z not in allowed:
-            violations.append(
-                f"disallowed-zone: zone_sequence contains '{z}' "
-                f"which is not in zones_active={sorted(allowed)}."
-            )
+    violations.extend(
+        _narrative_sequence_zone_violations(narrative.zone_sequence, allowed)
+    )
 
     if violations:
         raise ValueError(
