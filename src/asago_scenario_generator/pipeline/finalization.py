@@ -58,7 +58,6 @@ from asago_scenario_generator.pipeline.finalization_contracts import (  # noqa: 
     _CandidateCursor,
     _OpaqueCandidateSnapshot,
     _PreparedStage,
-    _capture_verified_candidate,
     _candidate_identity_violation,
     _canonical_candidate_id,
     _primary_choice_ref,
@@ -682,9 +681,22 @@ class TargetFinalizationMachine:
         self, validation: CandidateValidation
     ) -> VerifiedCandidateSnapshot:
         """Capture and verify the candidate evidence snapshot."""
-        verified_candidate = _capture_verified_candidate(validation.candidate)
+        verified_candidate = self._capture_verified_candidate(validation.candidate)
         verified_candidate.verify_digest()
         return verified_candidate
+
+    @staticmethod
+    def _capture_verified_candidate(candidate: Any) -> VerifiedCandidateSnapshot:
+        """Capture semantic Pydantic candidates; retain Phase 2 compatibility."""
+        from pydantic import BaseModel
+
+        if isinstance(candidate, BaseModel):
+            from asago_scenario_generator.pipeline.finalization_gates import (
+                ProjectionSemanticSnapshot,
+            )
+
+            return ProjectionSemanticSnapshot.capture(candidate)
+        return _OpaqueCandidateSnapshot.capture(candidate)
 
     def _snapshot_failure_result(
         self, ref_id: str, exc: Exception

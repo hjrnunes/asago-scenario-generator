@@ -36,7 +36,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 
-from asago_scenario_generator.models.attack_pattern import (
+from asago_scenario_generator.models.attack_pattern_contracts import (
     StateChangingToolFixtureRequirement,
     UpstreamSourceInfluenceRequirement,
 )
@@ -64,7 +64,7 @@ from asago_scenario_generator.models.complexity import (
     earliest_responsible_stage,
 )
 from asago_scenario_generator.models.scenario import ActorAccessProvenance
-from asago_scenario_generator.pipeline.projection import ProjectedCandidate
+from asago_scenario_generator.pipeline.projection_contracts import ProjectedCandidate
 
 # ---------------------------------------------------------------------------
 # Rule table v1 thresholds

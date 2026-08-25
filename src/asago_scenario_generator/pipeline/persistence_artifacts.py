@@ -7,7 +7,9 @@ from pathlib import PurePosixPath
 from pydantic import Field, field_validator, model_validator
 
 from asago_scenario_generator.manifest import ArtifactRole
-from asago_scenario_generator.pipeline.finalization import CandidateTerminalStatus
+from asago_scenario_generator.pipeline.finalization_contracts import (
+    CandidateTerminalStatus,
+)
 from asago_scenario_generator.pipeline.finalization_gates import (
     CONDITIONALLY_APPLICABLE_EVIDENCE_IDS,
     DIAGNOSTIC_BACKED_EVIDENCE_IDS,

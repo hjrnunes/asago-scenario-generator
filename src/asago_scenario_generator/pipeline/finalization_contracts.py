@@ -9,9 +9,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Literal, Protocol, runtime_checkable
 
-from asago_scenario_generator.pipeline.coverage_planning import (
-    CoveragePlanEntry,
-)
 from asago_scenario_generator.pipeline.generation_contracts import (
     CausalRetryControl,
 )
@@ -164,6 +161,15 @@ class VerifiedCandidateSnapshot(Protocol):
     def verify_digest(self) -> None: ...
 
 
+@runtime_checkable
+class TargetChoiceEntry(Protocol):
+    """Coverage-plan choice queue consumed by target finalization."""
+
+    ordered_choices: Sequence[dict[str, Any]]
+    fallback_available: Sequence[dict[str, Any]]
+    primary_candidate_id: str | None
+
+
 @dataclass(frozen=True, slots=True)
 class CandidateFinalizationContext:
     """Verified baseline plus the live candidate visible to generation stages."""
@@ -195,20 +201,6 @@ class _OpaqueCandidateSnapshot:
     def verify_digest(self) -> None:
         if hashlib.sha256(repr(self._candidate).encode()).hexdigest() != self.digest:
             raise ValueError("verified candidate snapshot drifted")
-
-
-def _capture_verified_candidate(candidate: Any) -> VerifiedCandidateSnapshot:
-    """Capture semantic Pydantic candidates; retain Phase 2 test compatibility."""
-    from pydantic import BaseModel
-
-    if isinstance(candidate, BaseModel):
-        # Late import avoids the finalization-gates -> finalization import cycle.
-        from asago_scenario_generator.pipeline.finalization_gates import (
-            ProjectionSemanticSnapshot,
-        )
-
-        return ProjectionSemanticSnapshot.capture(candidate)
-    return _OpaqueCandidateSnapshot.capture(candidate)
 
 
 @dataclass(frozen=True, slots=True)
@@ -330,7 +322,7 @@ def earliest_generated_owner(
     return next((stage for stage in GENERATION_ORDER if stage in owners), None)
 
 
-def ordered_target_choice_refs(entry: CoveragePlanEntry) -> tuple[dict[str, Any], ...]:
+def ordered_target_choice_refs(entry: TargetChoiceEntry) -> tuple[dict[str, Any], ...]:
     """Primary first, then persisted fallback availability, bounded and unique."""
     all_refs = [*entry.ordered_choices, *entry.fallback_available]
     primary = _primary_choice_ref(all_refs, entry.primary_candidate_id)

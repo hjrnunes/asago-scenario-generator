@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from asago_scenario_generator.pipeline.finalization import (
+from asago_scenario_generator.pipeline.finalization_contracts import (
     CandidateTerminalStatus,
 )
 from asago_scenario_generator.pipeline.finalization_admission import (

@@ -29,6 +29,11 @@ from asago_scenario_generator.pipeline.coverage_planning import (
     revalidate_qualified_candidate,
 )
 from asago_scenario_generator.pipeline.finalization import (
+    TargetFinalizationMachine,
+    make_assertions_only_behavior_callback,
+    retry_directive_for,
+)
+from asago_scenario_generator.pipeline.finalization_contracts import (
     COMPLETION_LENGTH_RETRY_SUFFIXES,
     COMPLETION_LENGTH_RETRY_CONTROLS,
     MAX_OWNER_RETRIES,
@@ -41,9 +46,6 @@ from asago_scenario_generator.pipeline.finalization import (
     GeneratedStageResult,
     LifecycleState,
     LifecycleViolation,
-    TargetFinalizationMachine,
-    make_assertions_only_behavior_callback,
-    retry_directive_for,
 )
 from asago_scenario_generator.pipeline.finalization_admission import (
     make_postbehavior_admission,

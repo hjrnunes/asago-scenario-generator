@@ -21,7 +21,7 @@ from asago_scenario_generator.models.projection_envelope import (
     ProjectionTraceabilityViolationCode,
 )
 from asago_scenario_generator.models.scenario import ValidationBlock
-from asago_scenario_generator.pipeline.finalization import (
+from asago_scenario_generator.pipeline.finalization_contracts import (
     AdmissionDecision,
     GeneratedArtifacts,
     GeneratedStage,
@@ -45,7 +45,7 @@ from asago_scenario_generator.pipeline.generate.gherkin import (
     _collect_leaf_nodes_dfs,
     _leaf_step_kind,
 )
-from asago_scenario_generator.pipeline.projection import (
+from asago_scenario_generator.pipeline.projection_qualification import (
     compute_authoritative_catalog_pin,
 )
 from asago_scenario_generator.pipeline.projection_validation import (

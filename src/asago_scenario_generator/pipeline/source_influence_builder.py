@@ -56,7 +56,9 @@ from asago_scenario_generator.pipeline.source_influence import (
 if TYPE_CHECKING:
     from asago_scenario_generator.models.attack_tree import AttackTree
     from asago_scenario_generator.models.scenario import NarrativeLayer
-    from asago_scenario_generator.pipeline.projection import CapabilityFactSnapshot
+    from asago_scenario_generator.pipeline.projection_contracts import (
+        CapabilityFactSnapshot,
+    )
     from asago_scenario_generator.pipeline.seeds import ScenarioSeed
 
 __all__ = [
