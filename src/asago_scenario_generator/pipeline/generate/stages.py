@@ -127,6 +127,39 @@ def _optional_list(values: Any) -> list[Any] | None:
     return list(values) or None
 
 
+def _resolved_int_control(
+    requested: Any, client: LLMClient, attribute: str
+) -> int | None:
+    """Resolve one optional integer control against the client default."""
+    value = requested if requested is not None else getattr(client, attribute, None)
+    return value if isinstance(value, int) else None
+
+
+def _resolved_temperature(requested: Any, client: LLMClient) -> float | None:
+    """Resolve the optional temperature control against the client default."""
+    value = requested if requested is not None else getattr(client, "temperature", None)
+    return value if isinstance(value, (int, float)) else None
+
+
+def _response_schema_label(response_format: Any) -> str | None:
+    """Provider-facing response-schema label, or None for unstructured calls."""
+    if response_format is None:
+        return None
+    return (
+        "compact-v1" if response_format.__name__.startswith("Compact") else "standard"
+    )
+
+
+def _merged_controls(base: dict[str, Any], result: LLMResult) -> dict[str, Any]:
+    """Merge provider-returned controls, mirroring them onto the result."""
+    if result.request_controls:
+        merged = {**base, **result.request_controls}
+        result.request_controls = merged
+        return merged
+    result.request_controls = base
+    return base
+
+
 class _AttemptRecordingClient:
     """Transparent client proxy retaining truthful one-attempt evidence."""
 
@@ -161,29 +194,19 @@ class _AttemptRecordingClient:
         self.system_prompt = system_prompt
         self.user_prompt = user_prompt
         self._unstructured_response = response_format is None
-        max_tokens = kwargs.get("max_completion_tokens")
-        if max_tokens is None:
-            max_tokens = getattr(self._client, "max_completion_tokens", None)
-        request_temperature = kwargs.get("temperature")
-        if request_temperature is None:
-            request_temperature = getattr(self._client, "temperature", None)
-        if not isinstance(max_tokens, int):
-            max_tokens = None
-        if not isinstance(request_temperature, (int, float)):
-            request_temperature = None
-        transport_token_cap = getattr(self._client, "max_completion_tokens", None)
-        if not isinstance(transport_token_cap, int):
-            transport_token_cap = None
+        max_tokens = _resolved_int_control(
+            kwargs.get("max_completion_tokens"),
+            self._client,
+            "max_completion_tokens",
+        )
+        request_temperature = _resolved_temperature(
+            kwargs.get("temperature"), self._client
+        )
+        transport_token_cap = _resolved_int_control(
+            None, self._client, "max_completion_tokens"
+        )
         self.request_controls = {
-            "response_schema": (
-                (
-                    "compact-v1"
-                    if response_format.__name__.startswith("Compact")
-                    else "standard"
-                )
-                if response_format is not None
-                else None
-            ),
+            "response_schema": _response_schema_label(response_format),
             "max_completion_tokens": max_tokens,
             "transport_token_cap": transport_token_cap,
             "temperature": request_temperature,
@@ -194,14 +217,7 @@ class _AttemptRecordingClient:
             response_format=response_format,
             **kwargs,
         )
-        if result.request_controls:
-            self.request_controls = {
-                **self.request_controls,
-                **result.request_controls,
-            }
-            result.request_controls = self.request_controls
-        else:
-            result.request_controls = self.request_controls
+        self.request_controls = _merged_controls(self.request_controls, result)
         self.result = result
         return self.result
 
@@ -479,6 +495,290 @@ def _behavior_handle_map(
     }
 
 
+def _retry_prior_titles(
+    request: GenerationRequest, retry: RetryDirective | None
+) -> tuple[str, ...]:
+    """Retry-owned prior titles when supplied, else the request inventory."""
+    if retry is not None and retry.prior_titles is not None:
+        return retry.prior_titles
+    return request.prior_titles
+
+
+def _operation_token_cap(retry: RetryDirective | None, default: int) -> int:
+    """Retry-authorized completion cap when supplied, else the stage cap."""
+    retry_max_tokens = (
+        retry.provider_retry_value("max_completion_tokens") if retry else None
+    )
+    if isinstance(retry_max_tokens, int):
+        return int(retry_max_tokens)
+    return default
+
+
+def _compact_schema_requested(retry: RetryDirective | None) -> bool:
+    """True when the retry directive authorizes the compact response schema."""
+    if retry is None:
+        return False
+    return retry.provider_retry_value("response_schema") is not None
+
+
+def _invalid_draft_evidence(
+    exc: Exception,
+    *,
+    call_name: CallName,
+    compiler_name: str,
+    recorder: _AttemptRecordingClient,
+    handle_map: dict[str, str],
+    semantic_error_type: type[Exception],
+) -> StageGenerationEvidence | None:
+    """Semantic-evidence record for a semantic draft error, or None."""
+    if not isinstance(exc, semantic_error_type):
+        return None
+    return _semantic_attempt_evidence(
+        call_name=call_name,
+        compiler_name=compiler_name,
+        recorder=recorder,
+        handle_map=handle_map,
+        result_kind="invalid_draft",
+        violations=_draft_violations(exc),
+        failure_detail=str(exc),
+    )
+
+
+def _compiler_failure_evidence(
+    exc: Exception,
+    *,
+    call_name: CallName,
+    compiler_name: str,
+    recorder: _AttemptRecordingClient,
+    handle_map: dict[str, str],
+    draft_types: tuple[type, ...],
+) -> StageGenerationEvidence | None:
+    """Semantic-evidence record for a canonical-compilation failure, or None."""
+    if recorder.result is None or not isinstance(recorder.result.content, draft_types):
+        return None
+    return _semantic_attempt_evidence(
+        call_name=call_name,
+        compiler_name=compiler_name,
+        recorder=recorder,
+        handle_map=handle_map,
+        result_kind="compiler_failure",
+        failure_detail=f"{type(exc).__name__}: {exc}",
+    )
+
+
+def _protocol_failure_evidence(
+    exc: Exception,
+    *,
+    call_name: CallName,
+    compiler_name: str,
+    recorder: _AttemptRecordingClient,
+    handle_map: dict[str, str],
+) -> StageGenerationEvidence | None:
+    """Semantic-evidence record for a provider-protocol violation, or None."""
+    if not recorder.invoked:
+        return None
+    from pydantic import ValidationError
+
+    if not isinstance(exc, ValidationError):
+        return None
+    return _semantic_attempt_evidence(
+        call_name=call_name,
+        compiler_name=compiler_name,
+        recorder=recorder,
+        handle_map=handle_map,
+        result_kind="protocol_failure",
+        violations=(DraftViolation("provider_protocol", str(exc)),),
+        failure_detail=f"{type(exc).__name__}: {exc}",
+    )
+
+
+def _classify_stage_exception(
+    exc: Exception,
+    *,
+    call_name: CallName,
+    compiler_name: str,
+    recorder: _AttemptRecordingClient,
+    handle_map: dict[str, str],
+    semantic_error_type: type[Exception],
+    draft_types: tuple[type, ...],
+) -> tuple[str | None, bool | None, StageGenerationEvidence | None]:
+    """Map one stage exception to (code, retryable, semantic evidence)."""
+    evidence = _invalid_draft_evidence(
+        exc,
+        call_name=call_name,
+        compiler_name=compiler_name,
+        recorder=recorder,
+        handle_map=handle_map,
+        semantic_error_type=semantic_error_type,
+    )
+    if evidence is not None:
+        return StageAttemptFailure.SEMANTIC_DRAFT_INVALID_CODE, True, evidence
+    evidence = _compiler_failure_evidence(
+        exc,
+        call_name=call_name,
+        compiler_name=compiler_name,
+        recorder=recorder,
+        handle_map=handle_map,
+        draft_types=draft_types,
+    )
+    if evidence is not None:
+        return StageAttemptFailure.CANONICAL_COMPILATION_CODE, False, evidence
+    evidence = _protocol_failure_evidence(
+        exc,
+        call_name=call_name,
+        compiler_name=compiler_name,
+        recorder=recorder,
+        handle_map=handle_map,
+    )
+    if evidence is not None:
+        return StageAttemptFailure.SEMANTIC_DRAFT_PROTOCOL_CODE, True, evidence
+    return None, None, None
+
+
+def _actor_accepted_evidence(
+    recorder: _AttemptRecordingClient,
+    actor: ActorProfile,
+    draft: Any,
+) -> StageGenerationEvidence | None:
+    """Accepted-draft evidence for an actor response, or None."""
+    if not isinstance(draft, (ActorDraftV2, ActorDraftV3)):
+        return None
+    return _semantic_attempt_evidence(
+        call_name=CallName.actor_profile,
+        compiler_name="compile_actor_draft:v3",
+        recorder=recorder,
+        handle_map=_actor_handle_map(draft, actor),
+        result_kind="accepted",
+    )
+
+
+def _narrative_accepted_evidence(
+    recorder: _AttemptRecordingClient,
+    handle_map: dict[str, str],
+    draft: Any,
+) -> StageGenerationEvidence | None:
+    """Accepted-draft evidence for a narrative response, or None."""
+    if not isinstance(draft, (NarrativeDraftV2, NarrativeDraftV3)):
+        return None
+    warnings = (
+        ("presentation_fallback: narrative title was synthesized",)
+        if draft.title is None
+        else ()
+    )
+    return _semantic_attempt_evidence(
+        call_name=CallName.narrative,
+        compiler_name="compile_narrative_draft:v3",
+        recorder=recorder,
+        handle_map=handle_map,
+        result_kind="accepted",
+        warnings=warnings,
+    )
+
+
+def _tree_handles_for_result(
+    prepared: PreparedGeneration,
+    narrative: NarrativeLayer,
+    recorder: _AttemptRecordingClient,
+) -> dict[str, str]:
+    """Tree handle map when the recorder holds a compiled draft, else empty."""
+    from asago_scenario_generator.pipeline.generate.tree_semantics import (
+        AttackTreeDraftV2,
+        AttackTreeDraftV3,
+    )
+
+    if recorder.result is not None and isinstance(
+        recorder.result.content, (AttackTreeDraftV2, AttackTreeDraftV3)
+    ):
+        return _tree_handle_map(prepared, narrative)
+    return {}
+
+
+def _tree_accepted_evidence(
+    prepared: PreparedGeneration,
+    narrative: NarrativeLayer,
+    recorder: _AttemptRecordingClient,
+    result: LLMResult,
+) -> StageGenerationEvidence | None:
+    """Accepted-draft evidence for a tree response, or None."""
+    from asago_scenario_generator.pipeline.generate.tree_semantics import (
+        AttackTreeDraftV2,
+        AttackTreeDraftV3,
+    )
+
+    if not isinstance(result.content, (AttackTreeDraftV2, AttackTreeDraftV3)):
+        return None
+    return _semantic_attempt_evidence(
+        call_name=CallName.attack_tree,
+        compiler_name="compile_attack_tree_draft:v2",
+        recorder=recorder,
+        handle_map=_tree_handle_map(prepared, narrative),
+        result_kind="accepted",
+    )
+
+
+def _behavior_handles_for_result(
+    prepared: PreparedGeneration,
+    tree: AttackTree,
+    recorder: _AttemptRecordingClient,
+) -> dict[str, str]:
+    """Behavior handle map when the recorder holds a compiled draft, else empty."""
+    from asago_scenario_generator.pipeline.generate.behavior_semantics import (
+        BehaviorDraftV2,
+    )
+
+    if recorder.result is not None and isinstance(
+        recorder.result.content, BehaviorDraftV2
+    ):
+        return _behavior_handle_map(prepared, tree)
+    return {}
+
+
+def _behavior_accepted_evidence(
+    prepared: PreparedGeneration,
+    tree: AttackTree,
+    recorder: _AttemptRecordingClient,
+    result: LLMResult,
+) -> StageGenerationEvidence | None:
+    """Accepted-draft evidence for a behavior response, or None."""
+    from asago_scenario_generator.pipeline.generate.behavior_semantics import (
+        BehaviorDraftV2,
+    )
+
+    if not isinstance(result.content, BehaviorDraftV2):
+        return None
+    return _semantic_attempt_evidence(
+        call_name=CallName.behavior_spec,
+        compiler_name="compile_behavior_draft:v2",
+        recorder=recorder,
+        handle_map=_behavior_handle_map(prepared, tree),
+        result_kind="accepted",
+    )
+
+
+def _resolved_candidate_id(request: GenerationRequest) -> str:
+    """The request candidate id validated against the projected identity."""
+    candidate_id = request.candidate_id or request.projected_candidate.candidate_id
+    if candidate_id != request.projected_candidate.candidate_id:
+        raise ValueError(
+            f"candidate_id '{candidate_id}' does not match projected candidate "
+            f"identity '{request.projected_candidate.candidate_id}'"
+        )
+    return candidate_id
+
+
+def _normalize_excluded_actor_types(
+    request: GenerationRequest,
+) -> GenerationRequest:
+    """Append the mandatory adversarial-only actor exclusion when applicable."""
+    excluded = list(request.excluded_actor_types)
+    if (
+        request.seed.threat_id in _ADVERSARIAL_ONLY_THREATS
+        and "negligent-insider" not in excluded
+    ):
+        excluded.append("negligent-insider")
+    return replace(request, excluded_actor_types=tuple(excluded))
+
+
 def prepare_generation(request: GenerationRequest) -> PreparedGeneration:
     """Validate identity inputs and build the shared projection context."""
     from asago_scenario_generator.pipeline.generate.assembly import (
@@ -491,24 +791,13 @@ def prepare_generation(request: GenerationRequest) -> PreparedGeneration:
         validate_tree_projection_realizability,
     )
 
-    candidate_id = request.candidate_id or request.projected_candidate.candidate_id
-    if candidate_id != request.projected_candidate.candidate_id:
-        raise ValueError(
-            f"candidate_id '{candidate_id}' does not match projected candidate "
-            f"identity '{request.projected_candidate.candidate_id}'"
-        )
+    candidate_id = _resolved_candidate_id(request)
     _validate_run_id(request.run_id)
     _validate_candidate_id(candidate_id)
     if request.attempt < 1:
         raise ValueError(f"attempt must be >= 1, got {request.attempt}")
 
-    excluded = list(request.excluded_actor_types)
-    if (
-        request.seed.threat_id in _ADVERSARIAL_ONLY_THREATS
-        and "negligent-insider" not in excluded
-    ):
-        excluded.append("negligent-insider")
-    normalized = replace(request, excluded_actor_types=tuple(excluded))
+    normalized = _normalize_excluded_actor_types(request)
     projection_context = _build_projection_context(request.projected_candidate)
     validate_tree_projection_realizability(projection_context, request.profile)
     return PreparedGeneration(
@@ -529,9 +818,7 @@ def generate_actor_stage(
     request = prepared.request
     recorder = _attempt_recorder(request.client, retry)
     semantic_feedback, length_feedback = _split_retry(retry)
-    compact_schema = (
-        retry.provider_retry_value("response_schema") is not None if retry else False
-    )
+    compact_schema = _compact_schema_requested(retry)
     max_completion_tokens = _bounded_completion_cap(
         request.client, _SEMANTIC_STAGE_COMPLETION_CAPS[CallName.actor_profile]
     )
@@ -558,50 +845,15 @@ def generate_actor_stage(
     except StageAttemptFailure:
         raise
     except Exception as exc:
-        semantic_evidence = None
-        if isinstance(exc, ActorSemanticDraftError):
-            code = StageAttemptFailure.SEMANTIC_DRAFT_INVALID_CODE
-            retryable = True
-            semantic_evidence = _semantic_attempt_evidence(
-                call_name=CallName.actor_profile,
-                compiler_name="compile_actor_draft:v3",
-                recorder=recorder,
-                handle_map={},
-                result_kind="invalid_draft",
-                violations=_draft_violations(exc),
-                failure_detail=str(exc),
-            )
-        elif recorder.result is not None and isinstance(
-            recorder.result.content, (ActorDraftV2, ActorDraftV3)
-        ):
-            code = StageAttemptFailure.CANONICAL_COMPILATION_CODE
-            retryable = False
-            semantic_evidence = _semantic_attempt_evidence(
-                call_name=CallName.actor_profile,
-                compiler_name="compile_actor_draft:v3",
-                recorder=recorder,
-                handle_map={},
-                result_kind="compiler_failure",
-                failure_detail=f"{type(exc).__name__}: {exc}",
-            )
-        else:
-            code = None
-            retryable = None
-            if recorder.invoked:
-                from pydantic import ValidationError
-
-                if isinstance(exc, ValidationError):
-                    code = StageAttemptFailure.SEMANTIC_DRAFT_PROTOCOL_CODE
-                    retryable = True
-                    semantic_evidence = _semantic_attempt_evidence(
-                        call_name=CallName.actor_profile,
-                        compiler_name="compile_actor_draft:v3",
-                        recorder=recorder,
-                        handle_map={},
-                        result_kind="protocol_failure",
-                        violations=(DraftViolation("provider_protocol", str(exc)),),
-                        failure_detail=f"{type(exc).__name__}: {exc}",
-                    )
+        code, retryable, semantic_evidence = _classify_stage_exception(
+            exc,
+            call_name=CallName.actor_profile,
+            compiler_name="compile_actor_draft:v3",
+            recorder=recorder,
+            handle_map={},
+            semantic_error_type=ActorSemanticDraftError,
+            draft_types=(ActorDraftV2, ActorDraftV3),
+        )
         failure = _terminalize_length_retry(
             recorder.failure(
                 CallName.actor_profile,
@@ -619,15 +871,7 @@ def generate_actor_stage(
             recorder=recorder,
             handle_map={},
         ) from exc
-    semantic_evidence = None
-    if isinstance(result.content, (ActorDraftV2, ActorDraftV3)):
-        semantic_evidence = _semantic_attempt_evidence(
-            call_name=CallName.actor_profile,
-            compiler_name="compile_actor_draft:v3",
-            recorder=recorder,
-            handle_map=_actor_handle_map(result.content, actor),
-            result_kind="accepted",
-        )
+    semantic_evidence = _actor_accepted_evidence(recorder, actor, result.content)
     return ActorStageResult(
         artifact=actor,
         evidence=_evidence(CallName.actor_profile, result, semantic_evidence),
@@ -644,20 +888,11 @@ def generate_narrative_stage(
     import asago_scenario_generator.pipeline.generate as generate
 
     request = prepared.request
-    titles = (
-        retry.prior_titles
-        if retry and retry.prior_titles is not None
-        else request.prior_titles
-    )
+    titles = _retry_prior_titles(request, retry)
     recorder = _attempt_recorder(request.client, retry)
     semantic_feedback, length_feedback = _split_retry(retry)
-    retry_max_tokens = (
-        retry.provider_retry_value("max_completion_tokens") if retry else None
-    )
-    operation_cap = (
-        int(retry_max_tokens)
-        if isinstance(retry_max_tokens, int)
-        else _SEMANTIC_STAGE_COMPLETION_CAPS[CallName.narrative]
+    operation_cap = _operation_token_cap(
+        retry, _SEMANTIC_STAGE_COMPLETION_CAPS[CallName.narrative]
     )
     max_completion_tokens = _bounded_completion_cap(request.client, operation_cap)
     try:
@@ -686,51 +921,16 @@ def generate_narrative_stage(
     except StageAttemptFailure:
         raise
     except Exception as exc:
-        semantic_evidence = None
         handle_map = _narrative_handle_map(prepared.projection_context)
-        if isinstance(exc, NarrativeSemanticDraftError):
-            code = StageAttemptFailure.SEMANTIC_DRAFT_INVALID_CODE
-            retryable = True
-            semantic_evidence = _semantic_attempt_evidence(
-                call_name=CallName.narrative,
-                compiler_name="compile_narrative_draft:v3",
-                recorder=recorder,
-                handle_map=handle_map,
-                result_kind="invalid_draft",
-                violations=_draft_violations(exc),
-                failure_detail=str(exc),
-            )
-        elif recorder.result is not None and isinstance(
-            recorder.result.content, (NarrativeDraftV2, NarrativeDraftV3)
-        ):
-            code = StageAttemptFailure.CANONICAL_COMPILATION_CODE
-            retryable = False
-            semantic_evidence = _semantic_attempt_evidence(
-                call_name=CallName.narrative,
-                compiler_name="compile_narrative_draft:v3",
-                recorder=recorder,
-                handle_map=handle_map,
-                result_kind="compiler_failure",
-                failure_detail=f"{type(exc).__name__}: {exc}",
-            )
-        else:
-            code = None
-            retryable = None
-            if recorder.invoked:
-                from pydantic import ValidationError
-
-                if isinstance(exc, ValidationError):
-                    code = StageAttemptFailure.SEMANTIC_DRAFT_PROTOCOL_CODE
-                    retryable = True
-                    semantic_evidence = _semantic_attempt_evidence(
-                        call_name=CallName.narrative,
-                        compiler_name="compile_narrative_draft:v3",
-                        recorder=recorder,
-                        handle_map=handle_map,
-                        result_kind="protocol_failure",
-                        violations=(DraftViolation("provider_protocol", str(exc)),),
-                        failure_detail=f"{type(exc).__name__}: {exc}",
-                    )
+        code, retryable, semantic_evidence = _classify_stage_exception(
+            exc,
+            call_name=CallName.narrative,
+            compiler_name="compile_narrative_draft:v3",
+            recorder=recorder,
+            handle_map=handle_map,
+            semantic_error_type=NarrativeSemanticDraftError,
+            draft_types=(NarrativeDraftV2, NarrativeDraftV3),
+        )
         failure = _terminalize_length_retry(
             recorder.failure(
                 CallName.narrative,
@@ -748,21 +948,11 @@ def generate_narrative_stage(
             recorder=recorder,
             handle_map=handle_map,
         ) from exc
-    semantic_evidence = None
-    if isinstance(result.content, (NarrativeDraftV2, NarrativeDraftV3)):
-        warnings = (
-            ("presentation_fallback: narrative title was synthesized",)
-            if result.content.title is None
-            else ()
-        )
-        semantic_evidence = _semantic_attempt_evidence(
-            call_name=CallName.narrative,
-            compiler_name="compile_narrative_draft:v3",
-            recorder=recorder,
-            handle_map=_narrative_handle_map(prepared.projection_context),
-            result_kind="accepted",
-            warnings=warnings,
-        )
+    semantic_evidence = _narrative_accepted_evidence(
+        recorder,
+        _narrative_handle_map(prepared.projection_context),
+        result.content,
+    )
     return NarrativeStageResult(
         artifact=narrative,
         evidence=_evidence(CallName.narrative, result, semantic_evidence),
@@ -803,19 +993,7 @@ def generate_tree_stage(
             projection_context=prepared.projection_context,
         )
     except StageAttemptFailure as exc:
-        from asago_scenario_generator.pipeline.generate.tree_semantics import (
-            AttackTreeDraftV2,
-            AttackTreeDraftV3,
-        )
-
-        handles = (
-            _tree_handle_map(prepared, narrative)
-            if recorder.result is not None
-            and isinstance(
-                recorder.result.content, (AttackTreeDraftV2, AttackTreeDraftV3)
-            )
-            else {}
-        )
+        handles = _tree_handles_for_result(prepared, narrative, recorder)
         raise _terminalize_length_retry(
             _attach_failure_evidence(
                 exc,
@@ -829,20 +1007,7 @@ def generate_tree_stage(
     except Exception as exc:
         failure = recorder.failure(CallName.attack_tree, exc)
         raise _terminalize_length_retry(failure, retry) from exc
-    semantic_evidence = None
-    from asago_scenario_generator.pipeline.generate.tree_semantics import (
-        AttackTreeDraftV2,
-        AttackTreeDraftV3,
-    )
-
-    if isinstance(result.content, (AttackTreeDraftV2, AttackTreeDraftV3)):
-        semantic_evidence = _semantic_attempt_evidence(
-            call_name=CallName.attack_tree,
-            compiler_name="compile_attack_tree_draft:v2",
-            recorder=recorder,
-            handle_map=_tree_handle_map(prepared, narrative),
-            result_kind="accepted",
-        )
+    semantic_evidence = _tree_accepted_evidence(prepared, narrative, recorder, result)
     return TreeStageResult(
         artifact=tree,
         evidence=_evidence(CallName.attack_tree, result, semantic_evidence),
@@ -865,9 +1030,7 @@ def generate_behavior_stage(
     request = prepared.request
     recorder = _attempt_recorder(request.client, retry)
     semantic_feedback, length_feedback = _split_retry(retry)
-    compact_schema = (
-        retry.provider_retry_value("response_schema") is not None if retry else False
-    )
+    compact_schema = _compact_schema_requested(retry)
     max_completion_tokens = _bounded_completion_cap(
         request.client, _SEMANTIC_STAGE_COMPLETION_CAPS[CallName.behavior_spec]
     )
@@ -897,17 +1060,8 @@ def generate_behavior_stage(
             handle_map={},
         )
     except Exception as exc:
-        from asago_scenario_generator.pipeline.generate.behavior_semantics import (
-            BehaviorDraftV2,
-        )
-
         failure = recorder.failure(CallName.behavior_spec, exc)
-        handles = (
-            _behavior_handle_map(prepared, tree)
-            if recorder.result is not None
-            and isinstance(recorder.result.content, BehaviorDraftV2)
-            else {}
-        )
+        handles = _behavior_handles_for_result(prepared, tree, recorder)
         failure = _attach_failure_evidence(
             failure,
             call_name=CallName.behavior_spec,
@@ -916,19 +1070,7 @@ def generate_behavior_stage(
             handle_map=handles,
         )
         raise _terminalize_length_retry(failure, retry) from exc
-    semantic_evidence = None
-    from asago_scenario_generator.pipeline.generate.behavior_semantics import (
-        BehaviorDraftV2,
-    )
-
-    if isinstance(result.content, BehaviorDraftV2):
-        semantic_evidence = _semantic_attempt_evidence(
-            call_name=CallName.behavior_spec,
-            compiler_name="compile_behavior_draft:v2",
-            recorder=recorder,
-            handle_map=_behavior_handle_map(prepared, tree),
-            result_kind="accepted",
-        )
+    semantic_evidence = _behavior_accepted_evidence(prepared, tree, recorder, result)
     return BehaviorStageResult(
         artifact=behavior,
         evidence=_evidence(CallName.behavior_spec, result, semantic_evidence),
