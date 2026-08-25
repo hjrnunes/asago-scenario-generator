@@ -39,8 +39,10 @@ from asago_scenario_generator.models.scenario import (
     TechniqueMaturity,
 )
 from asago_scenario_generator.pipeline.validation import (
+    _collapse_if_single_child,
     _find_parent,
     _remove_child,
+    _safe_pruning_parent,
     _sibling_labels,
     _token_overlap_ratio,
     enforce_parsimony,
@@ -972,3 +974,116 @@ class TestParsimonyTreeHelpers:
         _remove_child(leaf, "n1.1")
 
         assert leaf.children is None
+
+
+class TestSafePruningParent:
+    """Direct unit tests for _safe_pruning_parent."""
+
+    def _leaf(self, node_id: str, label: str) -> AttackTreeNode:
+        return AttackTreeNode(
+            id=node_id,
+            label=label,
+            gate=GateType.LEAF,
+            zone="input",
+            action=AiSystemAction(),
+        )
+
+    def test_absent_leaf_has_no_parent(self) -> None:
+        root = self._leaf("n1", "solo leaf")
+
+        assert _safe_pruning_parent(root, self._leaf("n2", "absent")) is None
+
+    def test_single_child_parent_is_unsafe(self) -> None:
+        leaf = self._leaf("n1.1", "Only child")
+        # The model forbids 1-child gates at construction time; the guard
+        # protects the post-removal window, so build the shape unvalidated.
+        root = _AttackTreeNode.model_construct(
+            id="n1",
+            label="Root",
+            gate=GateType.AND,
+            zone="input",
+            children=[leaf],
+        )
+
+        assert _safe_pruning_parent(root, leaf) is None
+
+    def test_multi_child_parent_yields_sibling_labels(self) -> None:
+        root = AttackTreeNode(
+            id="n1",
+            label="Root",
+            gate=GateType.AND,
+            zone="input",
+            children=[
+                self._leaf("n1.1", "Exfiltrate data"),
+                self._leaf("n1.2", "Deny service"),
+            ],
+        )
+        leaf = root.children[0]
+
+        parent, siblings = _safe_pruning_parent(root, leaf)
+
+        assert parent is root
+        assert siblings == ["Deny service"]
+
+
+class TestCollapseIfSingleChild:
+    """Direct unit tests for _collapse_if_single_child."""
+
+    def _leaf(self, node_id: str, label: str) -> AttackTreeNode:
+        return AttackTreeNode(
+            id=node_id,
+            label=label,
+            gate=GateType.LEAF,
+            zone="input",
+            action=AiSystemAction(),
+        )
+
+    def test_single_child_gate_is_collapsed_and_registered(self) -> None:
+        child = self._leaf("n1.1.1", "Surviving step")
+        parent = AttackTreeNode(
+            id="n1.1",
+            label="Phase",
+            gate=GateType.AND,
+            zone="input",
+            children=[child, self._leaf("n1.1.2", "Pruned step")],
+        )
+        root = AttackTreeNode(
+            id="n1",
+            label="Root",
+            gate=GateType.OR,
+            zone="input",
+            children=[parent, self._leaf("n1.2", "Other step")],
+        )
+        scenario = _make_envelope(root)
+        # Emulate the post-prune window: the parent has lost one child.
+        _remove_child(parent, "n1.1.2")
+
+        repaired = _collapse_if_single_child(parent, root, scenario)
+
+        assert scenario.attack_tree.root is repaired
+        # The surviving step is promoted under the parent's preserved id.
+        assert [c.id for c in repaired.children] == ["n1.1", "n1.2"]
+        assert _find_parent(repaired, "n1.1") is repaired
+
+    def test_multi_child_gate_returns_root_unchanged(self) -> None:
+        leaf = self._leaf("n1.1.1", "Surviving step")
+        parent = AttackTreeNode(
+            id="n1.1",
+            label="Phase",
+            gate=GateType.AND,
+            zone="input",
+            children=[leaf, self._leaf("n1.1.2", "Sibling step")],
+        )
+        root = AttackTreeNode(
+            id="n1",
+            label="Root",
+            gate=GateType.OR,
+            zone="input",
+            children=[parent, self._leaf("n1.2", "Other step")],
+        )
+        scenario = _make_envelope(root)
+
+        repaired = _collapse_if_single_child(parent, root, scenario)
+
+        assert repaired is root
+        assert scenario.attack_tree.root is root

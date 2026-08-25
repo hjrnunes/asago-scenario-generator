@@ -177,14 +177,9 @@ class GateResult:
 
     def __post_init__(self) -> None:
         if self.evidence_id in DIAGNOSTIC_BACKED_EVIDENCE_IDS:
-            if self.violations:
-                raise ValueError("diagnostic-backed category forbids hard violations")
-            if self.outcome is None or self.outcome != (not self.diagnostics):
-                raise ValueError(
-                    "diagnostic-backed category outcome must match diagnostics"
-                )
-        elif self.outcome is not None:
-            raise ValueError("ordinary gate outcome is derived from hard violations")
+            _check_diagnostic_backed(self)
+        else:
+            _check_ordinary_gate(self)
 
     @property
     def valid(self) -> bool:
@@ -194,6 +189,20 @@ class GateResult:
     def passed(self) -> bool:
         """Compatibility spelling for callers that describe gates as pass/fail."""
         return self.valid
+
+
+def _check_diagnostic_backed(gate: GateResult) -> None:
+    """Diagnostic-backed categories forbid hard violations and derive outcome."""
+    if gate.violations:
+        raise ValueError("diagnostic-backed category forbids hard violations")
+    if gate.outcome is None or gate.outcome != (not gate.diagnostics):
+        raise ValueError("diagnostic-backed category outcome must match diagnostics")
+
+
+def _check_ordinary_gate(gate: GateResult) -> None:
+    """Ordinary gate outcomes are derived from hard violations."""
+    if gate.outcome is not None:
+        raise ValueError("ordinary gate outcome is derived from hard violations")
 
 
 M = TypeVar("M", bound=BaseModel)
@@ -311,26 +320,62 @@ def check_tree_parsimony(tree: AttackTree, *, budget: int | None = None) -> Gate
     )
 
 
+def _leaf_node_prunable(node: AttackTreeNode) -> bool:
+    """A leaf is redundant only when it carries no typed action."""
+    return node.action is None
+
+
+def _and_gate_unannotated(node: AttackTreeNode) -> bool:
+    """True when the AND gate carries no identity annotations."""
+    return (
+        node.zone is None
+        and node.threat_id is None
+        and node.technique_id is None
+        and node.tactic is None
+    )
+
+
+def _and_gate_unsupported(node: AttackTreeNode) -> bool:
+    """True when the AND gate carries no structural metadata."""
+    return (
+        node.maestro_layer is None
+        and node.control_point is None
+        and node.structural_exposure is None
+    )
+
+
+def _and_gate_unrealized(node: AttackTreeNode) -> bool:
+    """True when the AND gate carries no realization content."""
+    return not node.projected_step_ids and not node.realizations
+
+
+def _children_all_prunable(node: AttackTreeNode) -> bool:
+    """True when every child of the AND gate is itself prunable."""
+    return all(_prunable(child) for child in node.children)
+
+
+def _and_gate_prunable(node: AttackTreeNode) -> bool:
+    """True when a structural AND gate is a pure redundant connector."""
+    if node.gate is not GateType.AND:
+        return False
+    if not node.children:
+        return False
+    if not _and_gate_unannotated(node):
+        return False
+    if not _and_gate_unsupported(node):
+        return False
+    if not _and_gate_unrealized(node):
+        return False
+    return _children_all_prunable(node)
+
+
 def _prunable(node: AttackTreeNode) -> bool:
     if node.gate is GateType.LEAF:
         # Every valid Phase 3A leaf carries a typed action.  Unmapped does not
         # mean redundant: deleting a typed external precondition weakens the
         # concrete attack and may lower its required complexity.
-        return node.action is None
-    return (
-        node.gate is GateType.AND
-        and bool(node.children)
-        and node.zone is None
-        and node.threat_id is None
-        and node.technique_id is None
-        and node.tactic is None
-        and node.maestro_layer is None
-        and node.control_point is None
-        and node.structural_exposure is None
-        and not node.projected_step_ids
-        and not node.realizations
-        and all(_prunable(child) for child in node.children)
-    )
+        return _leaf_node_prunable(node)
+    return _and_gate_prunable(node)
 
 
 def _node_ids(node: AttackTreeNode) -> list[str]:
@@ -338,6 +383,21 @@ def _node_ids(node: AttackTreeNode) -> list[str]:
         node.id,
         *(node_id for child in node.children or () for node_id in _node_ids(child)),
     ]
+
+
+def _branch_removable(
+    parsed: AttackTreeNode, remaining_children: int, needed: list[int]
+) -> bool:
+    """True when removing this branch is safe and still required."""
+    return bool(needed[0]) and remaining_children > 2 and _prunable(parsed)
+
+
+def _record_removed_branch(
+    parsed: AttackTreeNode, needed: list[int], removed: list[str]
+) -> None:
+    """Record one removed branch and its leaf-count credit."""
+    removed.extend(_node_ids(parsed))
+    needed[0] = max(0, needed[0] - len(_leaves(parsed)))
 
 
 def _prune_dict(node: dict[str, Any], needed: list[int], removed: list[str]) -> None:
@@ -352,12 +412,9 @@ def _prune_dict(node: dict[str, Any], needed: list[int], removed: list[str]) -> 
     removed_branches = 0
     for child in children:
         parsed = AttackTreeNode.model_validate(child)
-        descendant_leaves = _leaves(parsed)
         remaining_children = len(children) - removed_branches
-        may_remove = remaining_children > 2
-        if needed[0] and may_remove and _prunable(parsed):
-            removed.extend(_node_ids(parsed))
-            needed[0] = max(0, needed[0] - len(descendant_leaves))
+        if _branch_removable(parsed, remaining_children, needed):
+            _record_removed_branch(parsed, needed, removed)
             removed_branches += 1
             continue
         _prune_dict(child, needed, removed)
@@ -374,6 +431,42 @@ def _protected_leaf_payloads(tree: AttackTree) -> dict[str, dict[str, Any]]:
     }
 
 
+def _validate_pruned_tree(
+    working: dict[str, Any],
+    original: FinalTreeSemanticSnapshot,
+    needed: list[int],
+) -> AttackTree:
+    """Validate the pruned dict; fall back to the original tree on failure."""
+    try:
+        return AttackTree.model_validate(working)
+    except ValueError:
+        needed[0] = max(1, needed[0])
+        return original.tree
+
+
+def _protected_payloads_match(tree: AttackTree, resulting: AttackTree) -> bool:
+    """True when pruning preserved every protected leaf payload."""
+    return _protected_leaf_payloads(resulting) == _protected_leaf_payloads(tree)
+
+
+def _projected_step_ids(tree: AttackTree) -> tuple[str, ...]:
+    """Sorted projected step ids across all leaves."""
+    return tuple(
+        sorted({sid for leaf in _leaves(tree.root) for sid in leaf.projected_step_ids})
+    )
+
+
+def _parsimony_detail(
+    removed: list[str], leaves: list[AttackTreeNode], budget: int, accepted: bool
+) -> str:
+    """Human-readable repair outcome for the record."""
+    if not removed and len(leaves) <= budget:
+        return "already within budget"
+    if accepted:
+        return "safe redundant branches removed"
+    return "protected leaves prevent meeting budget"
+
+
 def finalize_tree_parsimony(
     tree: AttackTree, *, budget: int | None = None
 ) -> TreeParsimonyResult:
@@ -386,19 +479,13 @@ def finalize_tree_parsimony(
     removed: list[str] = []
     if needed[0]:
         _prune_dict(working["root"], needed, removed)
-    try:
-        resulting = AttackTree.model_validate(working)
-    except ValueError:
-        resulting = original.tree
-        needed[0] = max(1, needed[0])
-    if _protected_leaf_payloads(resulting) != _protected_leaf_payloads(tree):
+    resulting = _validate_pruned_tree(working, original, needed)
+    if not _protected_payloads_match(tree, resulting):
         resulting = original.tree
         needed[0] = max(1, needed[0])
         removed.clear()
     after = FinalTreeSemanticSnapshot.capture(resulting)
-    projected = tuple(
-        sorted({sid for leaf in leaves for sid in leaf.projected_step_ids})
-    )
+    projected = _projected_step_ids(tree)
     parsimony = check_tree_parsimony(resulting, budget=budget)
     accepted = not parsimony.violations
     record = RepairRecord(
@@ -407,13 +494,7 @@ def finalize_tree_parsimony(
         tuple(removed),
         projected,
         accepted,
-        (
-            "already within budget"
-            if not removed and len(leaves) <= budget
-            else "safe redundant branches removed"
-            if accepted
-            else "protected leaves prevent meeting budget"
-        ),
+        _parsimony_detail(removed, leaves, budget, accepted),
     )
     return TreeParsimonyResult(resulting, parsimony.violations, record)
 
@@ -436,18 +517,15 @@ def _block(
     )
 
 
-def run_prebehavior_gates(
-    candidate: ProjectedCandidate,
-    actor: ActorProfile,
-    narrative: NarrativeLayer,
-    tree: AttackTree,
-    capability_snapshot: Any,
-    profile: Any | None = None,
-    *,
-    include_complexity: bool = True,
-) -> GateResult:
-    """Run hard gates in candidate, actor, narrative, then tree owner order."""
-    del profile  # The verified capability snapshot is the sole profile authority.
+def _selected_step_ids(candidate: ProjectedCandidate) -> set[str]:
+    """Selected canonical step ids of a projected candidate."""
+    return set(candidate.projection.selected_step_ids)
+
+
+def _qualify_projection_snapshot(
+    candidate: ProjectedCandidate, capability_snapshot: Any
+) -> GateResult | None:
+    """Qualify the candidate projection against the pinned snapshot."""
     try:
         capability_snapshot.assert_integrity()
         validate_projection_snapshot(
@@ -464,68 +542,89 @@ def run_prebehavior_gates(
                 ),
             ),
         )
-    selected_step_ids = set(candidate.projection.selected_step_ids)
+    return None
+
+
+def _conflicting_owner(
+    owners: dict[str, str], postcondition: Any, step: Any
+) -> str | None:
+    """The existing conflicting owner of a postcondition, if any."""
+    existing_owner = owners.get(postcondition.postcondition_id)
+    if existing_owner is not None and existing_owner != step.step_id:
+        return existing_owner
+    return None
+
+
+def _ambiguous_postcondition_violation(
+    candidate: ProjectedCandidate,
+) -> GateViolation | None:
+    """Violation when a postcondition is owned by two different steps."""
+    selected_step_ids = _selected_step_ids(candidate)
     postcondition_owners: dict[str, str] = {}
     for step in candidate.projection.source_chain.steps:
         if step.step_id not in selected_step_ids:
             continue
         for postcondition in step.observable_postconditions:
-            existing_owner = postcondition_owners.get(postcondition.postcondition_id)
-            if existing_owner is not None and existing_owner != step.step_id:
-                return GateResult(
-                    AdmissionEvidenceId.structural_validity,
-                    (
-                        GateViolation(
-                            GateCode.candidate_identity,
-                            f"postcondition '{postcondition.postcondition_id}' has "
-                            f"ambiguous owners '{existing_owner}' and "
-                            f"'{step.step_id}'",
-                            None,
-                        ),
-                    ),
+            existing_owner = _conflicting_owner(
+                postcondition_owners, postcondition, step
+            )
+            if existing_owner is not None:
+                return GateViolation(
+                    GateCode.candidate_identity,
+                    f"postcondition '{postcondition.postcondition_id}' has "
+                    f"ambiguous owners '{existing_owner}' and "
+                    f"'{step.step_id}'",
+                    None,
                 )
             postcondition_owners[postcondition.postcondition_id] = step.step_id
+    return None
+
+
+def _narrative_duplicate_violation(narrative: NarrativeLayer) -> GateViolation | None:
+    """Violation when a narrative step duplicates a projected step."""
     for step in narrative.steps:
         if len(step.projected_step_ids) != len(set(step.projected_step_ids)):
-            return GateResult(
-                AdmissionEvidenceId.structural_validity,
-                (
-                    GateViolation(
-                        GateCode.narrative_realization,
-                        f"narrative step '{step.step_number}' duplicates a projected step",
-                        GeneratedStage.narrative,
-                    ),
-                ),
+            return GateViolation(
+                GateCode.narrative_realization,
+                f"narrative step '{step.step_number}' duplicates a projected step",
+                GeneratedStage.narrative,
             )
+    return None
+
+
+def _realization_id_order(node: AttackTreeNode) -> tuple[str, ...]:
+    """Projected step ids in realization order."""
+    return tuple(realization.projected_step_id for realization in node.realizations)
+
+
+def _tree_realization_violation(tree: AttackTree) -> GateViolation | None:
+    """Violation when a tree node duplicates or reorders projected steps."""
     for node in _nodes(tree.root):
         if len(node.projected_step_ids) != len(set(node.projected_step_ids)):
-            return GateResult(
-                AdmissionEvidenceId.structural_validity,
-                (
-                    GateViolation(
-                        GateCode.tree_realization,
-                        f"tree node '{node.id}' duplicates a projected step",
-                        GeneratedStage.tree,
-                    ),
-                ),
+            return GateViolation(
+                GateCode.tree_realization,
+                f"tree node '{node.id}' duplicates a projected step",
+                GeneratedStage.tree,
             )
-        realization_ids = tuple(
-            realization.projected_step_id for realization in node.realizations
-        )
-        if realization_ids != tuple(node.projected_step_ids):
-            return GateResult(
-                AdmissionEvidenceId.structural_validity,
-                (
-                    GateViolation(
-                        GateCode.tree_realization,
-                        f"tree node '{node.id}' realization order does not match "
-                        "projected_step_ids",
-                        GeneratedStage.tree,
-                    ),
-                ),
+        if _realization_id_order(node) != tuple(node.projected_step_ids):
+            return GateViolation(
+                GateCode.tree_realization,
+                f"tree node '{node.id}' realization order does not match "
+                "projected_step_ids",
+                GeneratedStage.tree,
             )
+    return None
+
+
+def _build_prebehavior_block(
+    candidate: ProjectedCandidate,
+    narrative: NarrativeLayer,
+    tree: AttackTree,
+    capability_snapshot: Any,
+) -> ProjectionEnvelopeBlock | GateResult:
+    """Build the pre-behavior projection block, or a qualification failure."""
     try:
-        block = _block(candidate, narrative, tree, capability_snapshot)
+        return _block(candidate, narrative, tree, capability_snapshot)
     except (TypeError, ValueError, AttributeError) as exc:
         return GateResult(
             AdmissionEvidenceId.structural_validity,
@@ -537,8 +636,44 @@ def run_prebehavior_gates(
                 ),
             ),
         )
-    profile = capability_snapshot.profile
-    envelope = type(
+
+
+def _structural_gate(violation: GateViolation) -> GateResult:
+    """Wrap one early structural violation into a gate result."""
+    return GateResult(AdmissionEvidenceId.structural_validity, (violation,))
+
+
+def _structural_prechecks(
+    candidate: ProjectedCandidate,
+    narrative: NarrativeLayer,
+    tree: AttackTree,
+    capability_snapshot: Any,
+) -> ProjectionEnvelopeBlock | GateResult:
+    """Early hard structural gates; the projection block when all pass."""
+    gate = _qualify_projection_snapshot(candidate, capability_snapshot)
+    if gate is not None:
+        return gate
+    violation = _ambiguous_postcondition_violation(candidate)
+    if violation is not None:
+        return _structural_gate(violation)
+    violation = _narrative_duplicate_violation(narrative)
+    if violation is not None:
+        return _structural_gate(violation)
+    violation = _tree_realization_violation(tree)
+    if violation is not None:
+        return _structural_gate(violation)
+    return _build_prebehavior_block(candidate, narrative, tree, capability_snapshot)
+
+
+def _prebehavior_envelope(
+    candidate: ProjectedCandidate,
+    block: ProjectionEnvelopeBlock,
+    actor: ActorProfile,
+    narrative: NarrativeLayer,
+    tree: AttackTree,
+) -> Any:
+    """Thin envelope consumed by the realization checkers."""
+    return type(
         "PrebehaviorEnvelope",
         (),
         {
@@ -550,8 +685,13 @@ def run_prebehavior_gates(
             "behavior_spec": None,
         },
     )()
+
+
+def _actor_access_gate_violations(
+    actor: ActorProfile, candidate: ProjectedCandidate, profile: Any
+) -> list[GateViolation]:
+    """Actor access-provenance gates."""
     violations: list[GateViolation] = []
-    diagnostics: list[GateViolation] = []
     for item in validate_actor_access_provenance(actor, profile):
         violations.append(
             GateViolation(GateCode.actor_access, item.message, GeneratedStage.actor)
@@ -568,12 +708,28 @@ def run_prebehavior_gates(
                 GeneratedStage.actor,
             )
         )
+    return violations
+
+
+def _narrative_access_gate_violations(
+    narrative: NarrativeLayer, actor: ActorProfile
+) -> list[GateViolation]:
+    """Narrative access-realization gates."""
+    violations: list[GateViolation] = []
     for item in validate_narrative_access_realization(narrative, actor):
         violations.append(
             GateViolation(
                 GateCode.narrative_access, item.message, GeneratedStage.narrative
             )
         )
+    return violations
+
+
+def _narrative_realization_gate_violations(
+    narrative: NarrativeLayer, candidate: ProjectedCandidate
+) -> list[GateViolation]:
+    """Narrative realization-coverage and step-bound gates."""
+    violations: list[GateViolation] = []
     narrative_ids = tuple(
         sid for step in narrative.steps for sid in step.projected_step_ids
     )
@@ -588,17 +744,47 @@ def run_prebehavior_gates(
     # Call 1 output-shape gates (completion-length mitigation): the narrative
     # must cover every selected canonical step and stay within
     # selected_step_count + 2 steps, capped at 16.
+    selected_step_ids = _selected_step_ids(candidate)
     for code, detail in validate_narrative_step_bounds(narrative, selected_step_ids):
         violations.append(
             GateViolation(GateCode(code), detail, GeneratedStage.narrative)
         )
-    all_leaves = _leaves(tree.root)
-    tree_ids = tuple(sid for leaf in all_leaves for sid in leaf.projected_step_ids)
-    security_leaves = [
+    return violations
+
+
+def _ownership_gate_violations(
+    candidate: ProjectedCandidate,
+    actor: ActorProfile,
+    narrative: NarrativeLayer,
+    profile: Any,
+) -> list[GateViolation]:
+    """Actor, narrative-access, and narrative-realization gates."""
+    violations: list[GateViolation] = []
+    violations.extend(_actor_access_gate_violations(actor, candidate, profile))
+    violations.extend(_narrative_access_gate_violations(narrative, actor))
+    violations.extend(_narrative_realization_gate_violations(narrative, candidate))
+    return violations
+
+
+def _tree_projected_ids(tree: AttackTree) -> tuple[str, ...]:
+    """Projected step ids across all leaves."""
+    return tuple(sid for leaf in _leaves(tree.root) for sid in leaf.projected_step_ids)
+
+
+def _security_bearing_leaves(all_leaves: list[AttackTreeNode]) -> list[AttackTreeNode]:
+    """Leaves carrying an action other than an external precondition."""
+    return [
         leaf
         for leaf in all_leaves
         if not isinstance(leaf.action, ExternalPreconditionAction)
     ]
+
+
+def _tree_realization_gate_violations(tree: AttackTree) -> list[GateViolation]:
+    """Tree security-action and realization gates."""
+    violations: list[GateViolation] = []
+    all_leaves = _leaves(tree.root)
+    security_leaves = _security_bearing_leaves(all_leaves)
     if not security_leaves:
         violations.append(
             GateViolation(
@@ -607,7 +793,7 @@ def run_prebehavior_gates(
                 GeneratedStage.tree,
             )
         )
-    if not tree_ids:
+    if not _tree_projected_ids(tree):
         violations.append(
             GateViolation(
                 GateCode.empty_realization,
@@ -615,6 +801,31 @@ def run_prebehavior_gates(
                 GeneratedStage.tree,
             )
         )
+    return violations
+
+
+def _traceability_violation_code(item: Any, owner: GeneratedStage) -> GateCode:
+    """Gate code for one traceability violation item."""
+    if item.code is ProjectionTraceabilityViolationCode.or_tree_prohibited:
+        return GateCode.or_tree
+    if item.code in {
+        ProjectionTraceabilityViolationCode.omitted_projected_step,
+        ProjectionTraceabilityViolationCode.reordered_projected_step,
+        ProjectionTraceabilityViolationCode.duplicated_projected_step,
+        ProjectionTraceabilityViolationCode.incomplete_coverage,
+        ProjectionTraceabilityViolationCode.unprojected_security_action,
+    }:
+        if owner is GeneratedStage.narrative:
+            return GateCode.narrative_realization
+        return GateCode.tree_realization
+    return GateCode.canonical_identity
+
+
+def _traceability_gate_violations(
+    envelope: Any, block: ProjectionEnvelopeBlock
+) -> list[GateViolation]:
+    """Realization-checker violations mapped to narrative/tree gate codes."""
+    violations: list[GateViolation] = []
     checks = (
         _check_or_tree_prohibition(envelope, block),
         _check_narrative_realizations(envelope, block),
@@ -628,26 +839,37 @@ def run_prebehavior_gates(
                 if "narrative" in item.stage.value
                 else GeneratedStage.tree
             )
-            if item.code is ProjectionTraceabilityViolationCode.or_tree_prohibited:
-                code = GateCode.or_tree
-            elif item.code in {
-                ProjectionTraceabilityViolationCode.omitted_projected_step,
-                ProjectionTraceabilityViolationCode.reordered_projected_step,
-                ProjectionTraceabilityViolationCode.duplicated_projected_step,
-                ProjectionTraceabilityViolationCode.incomplete_coverage,
-                ProjectionTraceabilityViolationCode.unprojected_security_action,
-            }:
-                code = (
-                    GateCode.narrative_realization
-                    if owner is GeneratedStage.narrative
-                    else GateCode.tree_realization
-                )
-            else:
-                code = GateCode.canonical_identity
+            code = _traceability_violation_code(item, owner)
             violations.append(GateViolation(code, item.detail, owner))
-    narrative_zones = {step.zone for step in narrative.steps}
-    tree_zones = {leaf.zone for leaf in _leaves(tree.root) if leaf.zone}
-    if narrative_zones != tree_zones:
+    return violations
+
+
+def _realization_gate_violations(
+    tree: AttackTree, envelope: Any, block: ProjectionEnvelopeBlock
+) -> list[GateViolation]:
+    """Tree and traceability realization gates."""
+    violations: list[GateViolation] = []
+    violations.extend(_tree_realization_gate_violations(tree))
+    violations.extend(_traceability_gate_violations(envelope, block))
+    return violations
+
+
+def _narrative_zone_set(narrative: NarrativeLayer) -> set[str]:
+    """Zones referenced by narrative steps."""
+    return {step.zone for step in narrative.steps}
+
+
+def _tree_zone_set(tree: AttackTree) -> set[str]:
+    """Zones referenced by tree leaves."""
+    return {leaf.zone for leaf in _leaves(tree.root) if leaf.zone}
+
+
+def _diagnostic_gates(
+    narrative: NarrativeLayer, tree: AttackTree
+) -> list[GateViolation]:
+    """Soft diagnostics: zone sets and narrative/tree count correspondence."""
+    diagnostics: list[GateViolation] = []
+    if _narrative_zone_set(narrative) != _tree_zone_set(tree):
         diagnostics.append(
             GateViolation(
                 GateCode.zone_difference,
@@ -667,38 +889,250 @@ def run_prebehavior_gates(
                     GeneratedStage.tree,
                 )
             )
-    if include_complexity:
-        assessment = assess_final_complexity(
-            assess_candidate_complexity(candidate), all_leaves, actor.access
+    return diagnostics
+
+
+def _complexity_gate_violation(
+    candidate: ProjectedCandidate,
+    tree: AttackTree,
+    actor: ActorProfile,
+    include_complexity: bool,
+) -> GateViolation | None:
+    """Capability-complexity admission violation, when requested."""
+    if not include_complexity:
+        return None
+    all_leaves = _leaves(tree.root)
+    assessment = assess_final_complexity(
+        assess_candidate_complexity(candidate), all_leaves, actor.access
+    )
+    decision = evaluate_capability_admission(
+        actor.capability_level, assessment, phase="final"
+    )
+    if not decision.admitted:
+        routing = decision.violation.routing
+        owner = (
+            GeneratedStage.actor
+            if routing.stage == "call0_actor_generation"
+            else GeneratedStage.tree
         )
-        decision = evaluate_capability_admission(
-            actor.capability_level, assessment, phase="final"
-        )
-        if not decision.admitted:
-            routing = decision.violation.routing
-            owner = (
-                GeneratedStage.actor
-                if routing.stage == "call0_actor_generation"
-                else GeneratedStage.tree
-            )
-            violations.append(
-                GateViolation(GateCode.capability_complexity, routing.feedback, owner)
-            )
-    # Stable dedup followed by canonical candidate → actor → narrative → tree
-    # ownership order.  This makes aggregate retry routing explicit.
-    owner_order = {
-        None: 0,
-        GeneratedStage.actor: 1,
-        GeneratedStage.narrative: 2,
-        GeneratedStage.tree: 3,
-        GeneratedStage.behavior: 4,
-    }
+        return GateViolation(GateCode.capability_complexity, routing.feedback, owner)
+    return None
+
+
+_OWNER_ORDER = {
+    None: 0,
+    GeneratedStage.actor: 1,
+    GeneratedStage.narrative: 2,
+    GeneratedStage.tree: 3,
+    GeneratedStage.behavior: 4,
+}
+
+
+def _finalize_gate_result(
+    violations: list[GateViolation], diagnostics: list[GateViolation]
+) -> GateResult:
+    """Stable dedup followed by canonical owner order for retry routing."""
     unique = tuple(
-        sorted(dict.fromkeys(violations), key=lambda item: owner_order[item.owner])
+        sorted(dict.fromkeys(violations), key=lambda item: _OWNER_ORDER[item.owner])
     )
     return GateResult(
         AdmissionEvidenceId.structural_validity, unique, tuple(diagnostics)
     )
+
+
+def run_prebehavior_gates(
+    candidate: ProjectedCandidate,
+    actor: ActorProfile,
+    narrative: NarrativeLayer,
+    tree: AttackTree,
+    capability_snapshot: Any,
+    profile: Any | None = None,
+    *,
+    include_complexity: bool = True,
+) -> GateResult:
+    """Run hard gates in candidate, actor, narrative, then tree owner order."""
+    del profile  # The verified capability snapshot is the sole profile authority.
+    block = _structural_prechecks(candidate, narrative, tree, capability_snapshot)
+    if isinstance(block, GateResult):
+        return block
+    envelope = _prebehavior_envelope(candidate, block, actor, narrative, tree)
+    profile = capability_snapshot.profile
+    violations = _ownership_gate_violations(candidate, actor, narrative, profile)
+    violations.extend(_realization_gate_violations(tree, envelope, block))
+    diagnostics = _diagnostic_gates(narrative, tree)
+    complexity_violation = _complexity_gate_violation(
+        candidate, tree, actor, include_complexity
+    )
+    if complexity_violation is not None:
+        violations.append(complexity_violation)
+    return _finalize_gate_result(violations, diagnostics)
+
+
+def _context_guard_failure(
+    context: CandidateFinalizationContext,
+) -> PrebehaviorFinalizationResult | None:
+    """Failure when the context is not a verified candidate context."""
+    if not isinstance(context, CandidateFinalizationContext) or not isinstance(
+        context.verified_snapshot, ProjectionSemanticSnapshot
+    ):
+        return PrebehaviorFinalizationResult(
+            None,
+            (
+                GateViolation(
+                    GateCode.candidate_identity,
+                    "verified candidate context is required",
+                    None,
+                ).lifecycle(),
+            ),
+        )
+    return None
+
+
+def _revalidated_projection(
+    context: CandidateFinalizationContext,
+) -> ProjectedCandidate | PrebehaviorFinalizationResult:
+    """Revalidate the candidate against its authoritative snapshot."""
+    try:
+        projection = context.verified_snapshot
+        projection.verify_digest()
+        current = ProjectedCandidate.model_validate(
+            context.candidate.model_dump(mode="json")
+        )
+        if canonical_json_bytes(current) != projection.canonical_bytes:
+            raise ValueError(
+                "candidate changed after authoritative revalidation snapshot"
+            )
+    except (TypeError, ValueError, AttributeError) as exc:
+        return PrebehaviorFinalizationResult(
+            None,
+            (GateViolation(GateCode.candidate_identity, str(exc), None).lifecycle(),),
+        )
+    return projection
+
+
+def _capture_one_snapshot(
+    snapshot_type: type, artifact: Any, owner: GeneratedStage
+) -> Any | PrebehaviorFinalizationResult:
+    """Capture one semantic snapshot, or a snapshot-integrity failure."""
+    try:
+        snapshot = snapshot_type.capture(artifact)
+        snapshot.verify_digest()
+    except (TypeError, ValueError, AttributeError) as exc:
+        return PrebehaviorFinalizationResult(
+            None,
+            (GateViolation(GateCode.snapshot_integrity, str(exc), owner).lifecycle(),),
+        )
+    return snapshot
+
+
+def _captured_artifacts(
+    artifacts: GeneratedArtifacts,
+) -> tuple[Any, Any, Any] | PrebehaviorFinalizationResult:
+    """Capture and verify actor, narrative, and tree semantic snapshots."""
+    captured: list[Any] = []
+    for snapshot_type, artifact, owner in (
+        (ActorSemanticSnapshot, artifacts.actor, GeneratedStage.actor),
+        (NarrativeSemanticSnapshot, artifacts.narrative, GeneratedStage.narrative),
+        (FinalTreeSemanticSnapshot, artifacts.tree, GeneratedStage.tree),
+    ):
+        snapshot = _capture_one_snapshot(snapshot_type, artifact, owner)
+        if isinstance(snapshot, PrebehaviorFinalizationResult):
+            return snapshot
+        captured.append(snapshot)
+    actor, narrative, tree = captured
+    return actor, narrative, tree
+
+
+def _preflight(
+    context: CandidateFinalizationContext, artifacts: GeneratedArtifacts
+) -> tuple[Any, Any, Any, Any] | PrebehaviorFinalizationResult:
+    """Verified (projection, actor, narrative, tree), or a failure result."""
+    failure = _context_guard_failure(context)
+    if failure is not None:
+        return failure
+    projection = _revalidated_projection(context)
+    if isinstance(projection, PrebehaviorFinalizationResult):
+        return projection
+    captured = _captured_artifacts(artifacts)
+    if isinstance(captured, PrebehaviorFinalizationResult):
+        return captured
+    actor, narrative, tree = captured
+    return projection, actor, narrative, tree
+
+
+def _gate_failure_result(gates: GateResult) -> PrebehaviorFinalizationResult | None:
+    """Lifecycle-violation failure when a gate result has violations."""
+    if gates.violations:
+        return PrebehaviorFinalizationResult(
+            None, tuple(v.lifecycle() for v in gates.violations)
+        )
+    return None
+
+
+def _complexity_floor_violation(
+    candidate: ProjectedCandidate,
+    before_tree: AttackTree,
+    after_tree: AttackTree,
+    actor: ActorProfile,
+) -> PrebehaviorFinalizationResult | None:
+    """Violation when parsimony repair lowers required attack complexity."""
+    before = assess_final_complexity(
+        assess_candidate_complexity(candidate), _leaves(before_tree.root), actor.access
+    )
+    after = assess_final_complexity(
+        assess_candidate_complexity(candidate), _leaves(after_tree.root), actor.access
+    )
+    if (
+        before.final is not None
+        and after.final is not None
+        and capability_level_rank(after.final.required_level)
+        < capability_level_rank(before.final.required_level)
+    ):
+        return PrebehaviorFinalizationResult(
+            None,
+            (
+                GateViolation(
+                    GateCode.parsimony,
+                    "parsimony repair lowered required attack complexity",
+                    GeneratedStage.tree,
+                ).lifecycle(),
+            ),
+        )
+    return None
+
+
+def _parsimony_repair(
+    tree: AttackTree, candidate: ProjectedCandidate, actor: ActorProfile
+) -> tuple[Any | None, PrebehaviorFinalizationResult | None]:
+    """Apply parsimony repair, then verify the complexity floor holds."""
+    repair = finalize_tree_parsimony(tree)
+    if repair.violations:
+        return None, PrebehaviorFinalizationResult(
+            None, tuple(v.lifecycle() for v in repair.violations)
+        )
+    failure = _complexity_floor_violation(candidate, tree, repair.tree, actor)
+    if failure is not None:
+        return None, failure
+    return repair, None
+
+
+def _final_tree_snapshot(
+    repair: Any,
+) -> tuple[Any | None, PrebehaviorFinalizationResult | None]:
+    """Final repaired-tree snapshot, or a snapshot-integrity failure."""
+    try:
+        snapshot = FinalTreeSemanticSnapshot.capture(repair.tree)
+        snapshot.verify_digest()
+    except (TypeError, ValueError, AttributeError) as exc:
+        return None, PrebehaviorFinalizationResult(
+            None,
+            (
+                GateViolation(
+                    GateCode.snapshot_integrity, str(exc), GeneratedStage.tree
+                ).lifecycle(),
+            ),
+        )
+    return snapshot, None
 
 
 class PrebehaviorFinalizerPort:
@@ -708,108 +1142,16 @@ class PrebehaviorFinalizerPort:
         self.capability_snapshot = capability_snapshot
         self.profile = profile or capability_snapshot.profile
 
-    def __call__(
-        self, context: CandidateFinalizationContext, artifacts: GeneratedArtifacts
-    ) -> PrebehaviorFinalizationResult:
-        if not isinstance(context, CandidateFinalizationContext) or not isinstance(
-            context.verified_snapshot, ProjectionSemanticSnapshot
-        ):
-            return PrebehaviorFinalizationResult(
-                None,
-                (
-                    GateViolation(
-                        GateCode.candidate_identity,
-                        "verified candidate context is required",
-                        None,
-                    ).lifecycle(),
-                ),
-            )
-        try:
-            projection = context.verified_snapshot
-            projection.verify_digest()
-            current = ProjectedCandidate.model_validate(
-                context.candidate.model_dump(mode="json")
-            )
-            if canonical_json_bytes(current) != projection.canonical_bytes:
-                raise ValueError(
-                    "candidate changed after authoritative revalidation snapshot"
-                )
-        except (TypeError, ValueError, AttributeError) as exc:
-            return PrebehaviorFinalizationResult(
-                None,
-                (
-                    GateViolation(
-                        GateCode.candidate_identity, str(exc), None
-                    ).lifecycle(),
-                ),
-            )
-        snapshots: list[tuple[Any, Any, GeneratedStage]] = [
-            (ActorSemanticSnapshot, artifacts.actor, GeneratedStage.actor),
-            (NarrativeSemanticSnapshot, artifacts.narrative, GeneratedStage.narrative),
-            (FinalTreeSemanticSnapshot, artifacts.tree, GeneratedStage.tree),
-        ]
-        captured: list[Any] = []
-        for snapshot_type, artifact, owner in snapshots:
-            try:
-                snapshot = snapshot_type.capture(artifact)
-                snapshot.verify_digest()
-                captured.append(snapshot)
-            except (TypeError, ValueError, AttributeError) as exc:
-                return PrebehaviorFinalizationResult(
-                    None,
-                    (
-                        GateViolation(
-                            GateCode.snapshot_integrity, str(exc), owner
-                        ).lifecycle(),
-                    ),
-                )
-        actor, narrative, tree = captured
-        try:
-            gates = run_prebehavior_gates(
-                projection.candidate,
-                actor.actor,
-                narrative.narrative,
-                tree.tree,
-                self.capability_snapshot,
-                self.profile,
-            )
-            if gates.violations:
-                return PrebehaviorFinalizationResult(
-                    None, tuple(v.lifecycle() for v in gates.violations)
-                )
-            repair = finalize_tree_parsimony(tree.tree)
-            if repair.violations:
-                return PrebehaviorFinalizationResult(
-                    None, tuple(v.lifecycle() for v in repair.violations)
-                )
-            before_complexity = assess_final_complexity(
-                assess_candidate_complexity(projection.candidate),
-                _leaves(tree.tree.root),
-                actor.actor.access,
-            )
-            after_complexity = assess_final_complexity(
-                assess_candidate_complexity(projection.candidate),
-                _leaves(repair.tree.root),
-                actor.actor.access,
-            )
-            if (
-                before_complexity.final is not None
-                and after_complexity.final is not None
-                and capability_level_rank(after_complexity.final.required_level)
-                < capability_level_rank(before_complexity.final.required_level)
-            ):
-                return PrebehaviorFinalizationResult(
-                    None,
-                    (
-                        GateViolation(
-                            GateCode.parsimony,
-                            "parsimony repair lowered required attack complexity",
-                            GeneratedStage.tree,
-                        ).lifecycle(),
-                    ),
-                )
-            # Repair can affect all tree realization gates, so run the full pure set.
-            rerun = run_prebehavior_gates(
+    def _rerun_and_snapshot(
+        self,
+        projection: ProjectionSemanticSnapshot,
+        actor: Any,
+        narrative: Any,
+        repair: Any,
+    ) -> tuple[Any | None, PrebehaviorFinalizationResult | None]:
+        """Rerun gates on the repaired tree, then capture the final snapshot."""
+        failure = _gate_failure_result(
+            run_prebehavior_gates(
                 projection.candidate,
                 actor.actor,
                 narrative.narrative,
@@ -817,12 +1159,42 @@ class PrebehaviorFinalizerPort:
                 self.capability_snapshot,
                 self.profile,
             )
-            if rerun.violations:
-                return PrebehaviorFinalizationResult(
-                    None, tuple(v.lifecycle() for v in rerun.violations)
+        )
+        if failure is not None:
+            return None, failure
+        return _final_tree_snapshot(repair)
+
+    def _finalize_verified(
+        self,
+        projection: ProjectionSemanticSnapshot,
+        actor: Any,
+        narrative: Any,
+        tree: Any,
+    ) -> PrebehaviorFinalizationResult:
+        """Run the gate, parsimony, and revalidation sequence."""
+        try:
+            failure = _gate_failure_result(
+                run_prebehavior_gates(
+                    projection.candidate,
+                    actor.actor,
+                    narrative.narrative,
+                    tree.tree,
+                    self.capability_snapshot,
+                    self.profile,
                 )
-            snapshot = FinalTreeSemanticSnapshot.capture(repair.tree)
-            snapshot.verify_digest()
+            )
+            if failure is not None:
+                return failure
+            repair, failure = _parsimony_repair(
+                tree.tree, projection.candidate, actor.actor
+            )
+            if failure is not None:
+                return failure
+            snapshot, failure = self._rerun_and_snapshot(
+                projection, actor, narrative, repair
+            )
+            if failure is not None:
+                return failure
             return PrebehaviorFinalizationResult(
                 snapshot,
                 candidate_snapshot=projection,
@@ -839,6 +1211,15 @@ class PrebehaviorFinalizerPort:
                     ).lifecycle(),
                 ),
             )
+
+    def __call__(
+        self, context: CandidateFinalizationContext, artifacts: GeneratedArtifacts
+    ) -> PrebehaviorFinalizationResult:
+        preflight = _preflight(context, artifacts)
+        if isinstance(preflight, PrebehaviorFinalizationResult):
+            return preflight
+        projection, actor, narrative, tree = preflight
+        return self._finalize_verified(projection, actor, narrative, tree)
 
 
 def make_prebehavior_finalizer(
