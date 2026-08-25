@@ -14,7 +14,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from itertools import combinations
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -196,99 +196,156 @@ class CandidateFunnel(BaseModel):
     @model_validator(mode="after")
     def _validate_funnel(self) -> CandidateFunnel:
         """Validate nonnegative counts and exact reconciliation equations."""
-        for field_name in type(self).model_fields:
-            val = getattr(self, field_name)
-            if val < 0:
-                raise ValueError(
-                    f"CandidateFunnel field '{field_name}' must be "
-                    f"nonnegative, got {val}"
-                )
-        if self.expanded_instances < self.unique_pre_rule_identities:
-            raise ValueError(
-                f"expanded_instances ({self.expanded_instances}) must be >= "
-                f"unique_pre_rule_identities ({self.unique_pre_rule_identities})"
-            )
-        expected_submitted = (
-            self.unique_pre_rule_identities
-            - self.rule_rejected
-            - self.post_rule_collapsed
-        )
-        if self.filter_submitted != expected_submitted:
-            raise ValueError(
-                f"filter_submitted ({self.filter_submitted}) must equal "
-                f"unique_pre_rule_identities - rule_rejected - "
-                f"post_rule_collapsed = {expected_submitted}"
-            )
-        if self.filter_accepted > self.filter_submitted:
-            raise ValueError(
-                f"filter_accepted ({self.filter_accepted}) must be <= "
-                f"filter_submitted ({self.filter_submitted})"
-            )
-        # cmps.4: With fan-out, one filtered seed can map to multiple
-        # projected candidates with distinct bindings, so selected may
-        # exceed filter_accepted.  The invariant is selected <= qualified
-        # (selection cannot admit more than were qualified).  Enforced
-        # unconditionally — qualified defaults to 0, so selected > 0
-        # with qualified = 0 is a violation (cmps.4 blocker 5).
-        if self.selected > self.qualified:
-            raise ValueError(
-                f"selected ({self.selected}) must be <= qualified ({self.qualified})"
-            )
-        # Projection rejections are a subset of filter_accepted.
-        if self.projection_rejected > self.filter_accepted:
-            raise ValueError(
-                f"projection_rejected ({self.projection_rejected}) must be <= "
-                f"filter_accepted ({self.filter_accepted})"
-            )
-        # Main lifecycle: selected candidates each get one attempt.
-        if self.main_attempted != self.selected:
-            raise ValueError(
-                f"main_attempted ({self.main_attempted}) must equal "
-                f"selected ({self.selected})"
-            )
-        # Each main attempt is either admitted or failed.
-        if self.main_attempted != self.main_admitted + self.generation_failed:
-            raise ValueError(
-                f"main_attempted ({self.main_attempted}) must equal "
-                f"main_admitted ({self.main_admitted}) + "
-                f"generation_failed ({self.generation_failed})"
-            )
-        # Remediation lifecycle: each attempt is admitted or failed.
-        if self.remediation_attempted != (
-            self.remediation_admitted + self.remediation_failed
-        ):
-            raise ValueError(
-                f"remediation_attempted ({self.remediation_attempted}) must equal "
-                f"remediation_admitted ({self.remediation_admitted}) + "
-                f"remediation_failed ({self.remediation_failed})"
-            )
-        # Aggregate attempted = main + remediation.
-        if self.attempted != self.main_attempted + self.remediation_attempted:
-            raise ValueError(
-                f"attempted ({self.attempted}) must equal "
-                f"main_attempted ({self.main_attempted}) + "
-                f"remediation_attempted ({self.remediation_attempted})"
-            )
-        # Aggregate admitted = main + remediation.
-        if self.admitted != self.main_admitted + self.remediation_admitted:
-            raise ValueError(
-                f"admitted ({self.admitted}) must equal "
-                f"main_admitted ({self.main_admitted}) + "
-                f"remediation_admitted ({self.remediation_admitted})"
-            )
-        # Quarantine is a subset of admitted.
-        if self.quarantined > self.admitted:
-            raise ValueError(
-                f"quarantined ({self.quarantined}) must be <= "
-                f"admitted ({self.admitted})"
-            )
-        # Every admitted scenario has exactly one persisted artifact pair.
-        if self.persisted_artifacts != self.admitted:
-            raise ValueError(
-                f"persisted_artifacts ({self.persisted_artifacts}) must equal "
-                f"admitted ({self.admitted})"
-            )
+        _funnel_counts_nonnegative(self)
+        _funnel_expansion_ordered(self)
+        _funnel_submission_reconciled(self)
+        _funnel_accepted_subset(self)
+        _funnel_selection_within_qualified(self)
+        _funnel_projection_subset(self)
+        _funnel_main_lifecycle(self)
+        _funnel_main_attempts_reconciled(self)
+        _funnel_remediation_reconciled(self)
+        _funnel_attempted_reconciled(self)
+        _funnel_admitted_reconciled(self)
+        _funnel_quarantine_subset(self)
+        _funnel_artifacts_reconciled(self)
         return self
+
+
+def _funnel_counts_nonnegative(funnel: CandidateFunnel) -> None:
+    """Every funnel count must be nonnegative."""
+    for field_name in type(funnel).model_fields:
+        val = getattr(funnel, field_name)
+        if val < 0:
+            raise ValueError(
+                f"CandidateFunnel field '{field_name}' must be nonnegative, got {val}"
+            )
+
+
+def _funnel_expansion_ordered(funnel: CandidateFunnel) -> None:
+    """Expansion instances cannot be fewer than unique identities."""
+    if funnel.expanded_instances < funnel.unique_pre_rule_identities:
+        raise ValueError(
+            f"expanded_instances ({funnel.expanded_instances}) must be >= "
+            f"unique_pre_rule_identities ({funnel.unique_pre_rule_identities})"
+        )
+
+
+def _funnel_submission_reconciled(funnel: CandidateFunnel) -> None:
+    """filter_submitted must equal pre-rule unique minus rejections."""
+    expected_submitted = (
+        funnel.unique_pre_rule_identities
+        - funnel.rule_rejected
+        - funnel.post_rule_collapsed
+    )
+    if funnel.filter_submitted != expected_submitted:
+        raise ValueError(
+            f"filter_submitted ({funnel.filter_submitted}) must equal "
+            f"unique_pre_rule_identities - rule_rejected - "
+            f"post_rule_collapsed = {expected_submitted}"
+        )
+
+
+def _funnel_accepted_subset(funnel: CandidateFunnel) -> None:
+    """The filter cannot accept more candidates than it submitted."""
+    if funnel.filter_accepted > funnel.filter_submitted:
+        raise ValueError(
+            f"filter_accepted ({funnel.filter_accepted}) must be <= "
+            f"filter_submitted ({funnel.filter_submitted})"
+        )
+
+
+def _funnel_selection_within_qualified(funnel: CandidateFunnel) -> None:
+    """cmps.4: selection cannot admit more than were qualified.
+
+    With fan-out, one filtered seed can map to multiple projected
+    candidates with distinct bindings, so selected may exceed
+    filter_accepted.  The invariant is selected <= qualified.
+    Enforced unconditionally — qualified defaults to 0, so selected > 0
+    with qualified = 0 is a violation (cmps.4 blocker 5).
+    """
+    if funnel.selected > funnel.qualified:
+        raise ValueError(
+            f"selected ({funnel.selected}) must be <= qualified ({funnel.qualified})"
+        )
+
+
+def _funnel_projection_subset(funnel: CandidateFunnel) -> None:
+    """Projection rejections are a subset of filter_accepted."""
+    if funnel.projection_rejected > funnel.filter_accepted:
+        raise ValueError(
+            f"projection_rejected ({funnel.projection_rejected}) must be <= "
+            f"filter_accepted ({funnel.filter_accepted})"
+        )
+
+
+def _funnel_main_lifecycle(funnel: CandidateFunnel) -> None:
+    """Selected candidates each get one main attempt."""
+    if funnel.main_attempted != funnel.selected:
+        raise ValueError(
+            f"main_attempted ({funnel.main_attempted}) must equal "
+            f"selected ({funnel.selected})"
+        )
+
+
+def _funnel_main_attempts_reconciled(funnel: CandidateFunnel) -> None:
+    """Each main attempt is either admitted or failed."""
+    if funnel.main_attempted != funnel.main_admitted + funnel.generation_failed:
+        raise ValueError(
+            f"main_attempted ({funnel.main_attempted}) must equal "
+            f"main_admitted ({funnel.main_admitted}) + "
+            f"generation_failed ({funnel.generation_failed})"
+        )
+
+
+def _funnel_remediation_reconciled(funnel: CandidateFunnel) -> None:
+    """Each remediation attempt is admitted or failed."""
+    if funnel.remediation_attempted != (
+        funnel.remediation_admitted + funnel.remediation_failed
+    ):
+        raise ValueError(
+            f"remediation_attempted ({funnel.remediation_attempted}) must equal "
+            f"remediation_admitted ({funnel.remediation_admitted}) + "
+            f"remediation_failed ({funnel.remediation_failed})"
+        )
+
+
+def _funnel_attempted_reconciled(funnel: CandidateFunnel) -> None:
+    """Aggregate attempted = main + remediation."""
+    if funnel.attempted != funnel.main_attempted + funnel.remediation_attempted:
+        raise ValueError(
+            f"attempted ({funnel.attempted}) must equal "
+            f"main_attempted ({funnel.main_attempted}) + "
+            f"remediation_attempted ({funnel.remediation_attempted})"
+        )
+
+
+def _funnel_admitted_reconciled(funnel: CandidateFunnel) -> None:
+    """Aggregate admitted = main + remediation."""
+    if funnel.admitted != funnel.main_admitted + funnel.remediation_admitted:
+        raise ValueError(
+            f"admitted ({funnel.admitted}) must equal "
+            f"main_admitted ({funnel.main_admitted}) + "
+            f"remediation_admitted ({funnel.remediation_admitted})"
+        )
+
+
+def _funnel_quarantine_subset(funnel: CandidateFunnel) -> None:
+    """Quarantine is a subset of admitted."""
+    if funnel.quarantined > funnel.admitted:
+        raise ValueError(
+            f"quarantined ({funnel.quarantined}) must be <= "
+            f"admitted ({funnel.admitted})"
+        )
+
+
+def _funnel_artifacts_reconciled(funnel: CandidateFunnel) -> None:
+    """Every admitted scenario has exactly one persisted artifact pair."""
+    if funnel.persisted_artifacts != funnel.admitted:
+        raise ValueError(
+            f"persisted_artifacts ({funnel.persisted_artifacts}) must equal "
+            f"admitted ({funnel.admitted})"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -541,17 +598,27 @@ def build_filter_map_response_model(
     """Build a schema with exactly one required field per local handle."""
 
     handles = tuple(expected_handles)
-    if not handles or len(set(handles)) != len(handles):
-        raise ValueError("filter response handles must be non-empty and unique")
-    if any(
-        not handle.startswith("c") or not handle[1:].isdigit() for handle in handles
-    ):
-        raise ValueError("filter response handles must use cN ordinals")
+    _handles_unique_nonempty(handles)
+    _handles_cn_ordinals(handles)
     return create_model(
         f"FilterMapDraftV3For{len(handles)}Candidates",
         __base__=FilterMapDraftV3,
         **{handle: (FilterMapDecisionDraftV3, ...) for handle in handles},
     )
+
+
+def _handles_unique_nonempty(handles: tuple[str, ...]) -> None:
+    """Filter response handles must be non-empty and unique."""
+    if not handles or len(set(handles)) != len(handles):
+        raise ValueError("filter response handles must be non-empty and unique")
+
+
+def _handles_cn_ordinals(handles: tuple[str, ...]) -> None:
+    """Filter response handles must use cN ordinals."""
+    if any(
+        not handle.startswith("c") or not handle[1:].isdigit() for handle in handles
+    ):
+        raise ValueError("filter response handles must use cN ordinals")
 
 
 def reconcile_filter_map(
@@ -576,11 +643,20 @@ def reconcile_filter_ordinals(
 ) -> dict[str, FilterDecisionDraftV2]:
     """Resolve an ordinal draft only after exact-set reconciliation."""
     received = [item.candidate for item in draft.decisions]
+    _handles_duplicate_free(received)
+    _handle_set_mismatch(set(expected_handles), set(received))
+    return {item.candidate: item for item in draft.decisions}
+
+
+def _handles_duplicate_free(received: list[str]) -> None:
+    """Ordinal drafts may not repeat a candidate handle."""
     duplicate = sorted(handle for handle in set(received) if received.count(handle) > 1)
     if duplicate:
         raise ValueError(f"duplicate candidate handles: {', '.join(duplicate)}")
-    expected = set(expected_handles)
-    actual = set(received)
+
+
+def _handle_set_mismatch(expected: set[str], actual: set[str]) -> None:
+    """Raise when received handles differ from the expected set."""
     unknown = sorted(actual - expected)
     missing = sorted(expected - actual)
     if unknown or missing:
@@ -589,7 +665,6 @@ def reconcile_filter_ordinals(
             f"unknown={','.join(unknown) or 'none'}; "
             f"missing={','.join(missing) or 'none'}"
         )
-    return {item.candidate: item for item in draft.decisions}
 
 
 class RejectionRecord(BaseModel):
@@ -780,64 +855,10 @@ def expand_candidates(
         logger.warning("Profile has no entry points — returning empty candidate list")
         return []
 
-    # Pre-filter: reject seeds whose required_capabilities are not met
-    eligible_seeds: list[ScenarioSeed] = []
-    for seed in seeds:
-        if seed.required_capabilities:
-            skip = False
-            for cap in seed.required_capabilities:
-                if cap == "multi_agent" and not profile.multi_agent:
-                    logger.warning(
-                        "Skipping seed %s: requires %s but profile does not support it",
-                        seed.seed_id,
-                        cap,
-                    )
-                    skip = True
-                    break
-                if cap == "persistent_memory" and not profile.has_persistent_memory:
-                    logger.warning(
-                        "Skipping seed %s: requires %s but profile does not support it",
-                        seed.seed_id,
-                        cap,
-                    )
-                    skip = True
-                    break
-                if (
-                    cap == "tool_execution"
-                    and "tool_execution" not in profile.zones_active
-                ):
-                    logger.warning(
-                        "Skipping seed %s: requires %s but profile does not support it",
-                        seed.seed_id,
-                        cap,
-                    )
-                    skip = True
-                    break
-            if skip:
-                continue
-        eligible_seeds.append(seed)
+    eligible_seeds = _capability_eligible_seeds(seeds, profile)
+    _log_seed_eligibility(eligible_seeds, seeds)
 
-    if len(eligible_seeds) < len(seeds):
-        logger.info(
-            "Seed capability filter: %d/%d seeds eligible (rejected %d)",
-            len(eligible_seeds),
-            len(seeds),
-            len(seeds) - len(eligible_seeds),
-        )
-
-    candidates: list[CandidateTriple] = []
-
-    # Filter to attacker-accessible ingress entry points using the
-    # centralized predicate (cmps.9 third review correction 2).
-    # This excludes output-only, system-controlled, and entries whose
-    # canonical ingress zone is inactive.
-    active_zones = set(profile.zones_active) if profile.zones_active else set()
-    ingress_points = [
-        ep
-        for ep in profile.entry_points
-        if is_attacker_accessible_ingress(ep, active_zones)
-    ]
-
+    ingress_points = _attacker_ingress_points(profile)
     if not ingress_points:
         logger.warning(
             "Profile has %d entry points but none are input/bidirectional — "
@@ -846,6 +867,91 @@ def expand_candidates(
         )
         return []
 
+    candidates: list[CandidateTriple] = []
+    for seed in eligible_seeds:
+        candidates.extend(_expand_one_seed(seed, ingress_points, max_techniques))
+
+    _log_expansion_summary(eligible_seeds, ingress_points, max_techniques, candidates)
+
+    _check_candidate_collisions(candidates)
+
+    # Canonicalize and deduplicate immediately after expansion.
+    raw_count = len(candidates)
+    candidates = canonicalize_and_dedup(candidates, stage="expansion")
+    _expansion_stage_record(stage_records, raw_count, candidates)
+    return candidates
+
+
+def _seed_capability_supported(
+    seed: ScenarioSeed, cap: str, profile: CapabilityProfile
+) -> bool:
+    """Whether one required capability is supported; warns when not."""
+    if not _capability_available(cap, profile):
+        logger.warning(
+            "Skipping seed %s: requires %s but profile does not support it",
+            seed.seed_id,
+            cap,
+        )
+        return False
+    return True
+
+
+def _capability_available(cap: str, profile: CapabilityProfile) -> bool:
+    """Profile support for one named capability (unknown caps pass)."""
+    if cap == "multi_agent":
+        return profile.multi_agent
+    if cap == "persistent_memory":
+        return profile.has_persistent_memory
+    if cap == "tool_execution":
+        return "tool_execution" in profile.zones_active
+    return True
+
+
+def _capability_eligible_seeds(
+    seeds: list[ScenarioSeed], profile: CapabilityProfile
+) -> list[ScenarioSeed]:
+    """Pre-filter: reject seeds whose required_capabilities are not met."""
+    eligible_seeds: list[ScenarioSeed] = []
+    for seed in seeds:
+        if seed.required_capabilities:
+            skip = False
+            for cap in seed.required_capabilities:
+                if not _seed_capability_supported(seed, cap, profile):
+                    skip = True
+                    break
+            if skip:
+                continue
+        eligible_seeds.append(seed)
+    return eligible_seeds
+
+
+def _log_seed_eligibility(
+    eligible_seeds: list[ScenarioSeed], seeds: list[ScenarioSeed]
+) -> None:
+    """Log the capability-filter outcome when any seed was rejected."""
+    if len(eligible_seeds) < len(seeds):
+        logger.info(
+            "Seed capability filter: %d/%d seeds eligible (rejected %d)",
+            len(eligible_seeds),
+            len(seeds),
+            len(seeds) - len(eligible_seeds),
+        )
+
+
+def _attacker_ingress_points(
+    profile: CapabilityProfile,
+) -> list[Any]:
+    """Attacker-accessible ingress entry points (cmps.9 correction 2).
+
+    Excludes output-only, system-controlled, and entries whose canonical
+    ingress zone is inactive.
+    """
+    active_zones = set(profile.zones_active) if profile.zones_active else set()
+    ingress_points = [
+        ep
+        for ep in profile.entry_points
+        if is_attacker_accessible_ingress(ep, active_zones)
+    ]
     excluded_count = len(profile.entry_points) - len(ingress_points)
     if excluded_count > 0:
         logger.info(
@@ -855,87 +961,125 @@ def expand_candidates(
             len(profile.entry_points),
             excluded_count,
         )
+    return ingress_points
 
-    for seed in eligible_seeds:
-        # Use ATLAS technique IDs when available; fall back to LAAF IDs
-        # for seeds that have only LAAF provenance (e.g. T7 misalignment
-        # patterns where ATLAS techniques are semantically incorrect).
-        technique_pool = seed.atlas_technique_ids or seed.laaf_technique_ids
-        if not technique_pool:
-            logger.warning(
-                "Seed %s has no technique IDs (ATLAS or LAAF) — skipping",
-                seed.seed_id,
-            )
-            continue
 
-        for entry_point in ingress_points:
-            ep_id = entry_point.entry_point_id
-            for combo_size in range(1, max_techniques + 1):
-                for tech_combo in combinations(technique_pool, combo_size):
-                    candidates.append(
-                        CandidateTriple(
-                            seed_id=seed.seed_id,
-                            threat_id=seed.threat_id,
-                            threat_name=seed.threat_name,
-                            attack_pattern_name=seed.attack_pattern_name,
-                            attack_pattern_description=seed.attack_pattern_description,
-                            entry_point=entry_point.name,
-                            controllability=entry_point.controllability,
-                            direction=entry_point.direction,
-                            ingress_zone=entry_point.ingress_zone,
-                            entry_point_id=ep_id,
-                            candidate_id=compute_candidate_id(
-                                seed.seed_id,
-                                ep_id,
-                                tech_combo,
-                            ),
-                            atlas_technique_ids=tech_combo,
-                            atlas_technique_names=tuple(
-                                ATLAS_TECHNIQUE_NAMES.get(t, t) for t in tech_combo
-                            ),
-                            atlas_technique_descriptions=tuple(
-                                ATLAS_TECHNIQUE_DESCRIPTIONS.get(t, "")
-                                for t in tech_combo
-                            ),
-                            risk_card_ref=seed.risk_card_ref,
-                            owasp_llm_ids=seed.owasp_llm_ids,
-                            origins=(
-                                CandidateOrigin(
-                                    source_candidate_id=compute_candidate_id(
-                                        seed.seed_id,
-                                        ep_id,
-                                        tech_combo,
-                                    ),
-                                    original_technique_ids=tech_combo,
-                                    transform_stage="expansion",
-                                ),
-                            ),
-                        )
-                    )
-
-    # Log expansion summary
-    if eligible_seeds:
-        tech_counts = [
-            len(s.atlas_technique_ids or s.laaf_technique_ids)
-            for s in eligible_seeds
-            if s.atlas_technique_ids or s.laaf_technique_ids
-        ]
-        avg_techniques = sum(tech_counts) / len(tech_counts) if tech_counts else 0.0
-        logger.info(
-            "%d seeds x %d ingress entry points x avg %.1f techniques "
-            "(max_techniques=%d) = %d candidates",
-            len(eligible_seeds),
-            len(ingress_points),
-            avg_techniques,
-            max_techniques,
-            len(candidates),
+def _seed_technique_pool(seed: ScenarioSeed) -> tuple[str, ...] | None:
+    """ATLAS technique IDs, falling back to LAAF IDs; None when empty."""
+    pool = seed.atlas_technique_ids or seed.laaf_technique_ids
+    if not pool:
+        logger.warning(
+            "Seed %s has no technique IDs (ATLAS or LAAF) — skipping",
+            seed.seed_id,
         )
+        return None
+    return pool
 
-    _check_candidate_collisions(candidates)
 
-    # Canonicalize and deduplicate immediately after expansion.
-    raw_count = len(candidates)
-    candidates = canonicalize_and_dedup(candidates, stage="expansion")
+def _candidate_triple_for(
+    seed: ScenarioSeed,
+    entry_point: Any,
+    ep_id: str,
+    tech_combo: tuple[str, ...],
+) -> CandidateTriple:
+    """One (seed, entry point, technique combo) candidate."""
+    return CandidateTriple(
+        seed_id=seed.seed_id,
+        threat_id=seed.threat_id,
+        threat_name=seed.threat_name,
+        attack_pattern_name=seed.attack_pattern_name,
+        attack_pattern_description=seed.attack_pattern_description,
+        entry_point=entry_point.name,
+        controllability=entry_point.controllability,
+        direction=entry_point.direction,
+        ingress_zone=entry_point.ingress_zone,
+        entry_point_id=ep_id,
+        candidate_id=compute_candidate_id(
+            seed.seed_id,
+            ep_id,
+            tech_combo,
+        ),
+        atlas_technique_ids=tech_combo,
+        atlas_technique_names=tuple(
+            ATLAS_TECHNIQUE_NAMES.get(t, t) for t in tech_combo
+        ),
+        atlas_technique_descriptions=tuple(
+            ATLAS_TECHNIQUE_DESCRIPTIONS.get(t, "") for t in tech_combo
+        ),
+        risk_card_ref=seed.risk_card_ref,
+        owasp_llm_ids=seed.owasp_llm_ids,
+        origins=(
+            CandidateOrigin(
+                source_candidate_id=compute_candidate_id(
+                    seed.seed_id,
+                    ep_id,
+                    tech_combo,
+                ),
+                original_technique_ids=tech_combo,
+                transform_stage="expansion",
+            ),
+        ),
+    )
+
+
+def _expand_one_seed(
+    seed: ScenarioSeed,
+    ingress_points: list[Any],
+    max_techniques: int,
+) -> list[CandidateTriple]:
+    """Cross-product one seed with all ingress points and technique combos."""
+    technique_pool = _seed_technique_pool(seed)
+    if technique_pool is None:
+        return []
+
+    candidates: list[CandidateTriple] = []
+    for entry_point in ingress_points:
+        ep_id = entry_point.entry_point_id
+        for combo_size in range(1, max_techniques + 1):
+            for tech_combo in combinations(technique_pool, combo_size):
+                candidates.append(
+                    _candidate_triple_for(seed, entry_point, ep_id, tech_combo)
+                )
+    return candidates
+
+
+def _average_technique_count(eligible_seeds: list[ScenarioSeed]) -> float:
+    """Mean technique-pool size over seeds that have any technique IDs."""
+    tech_counts = [
+        len(s.atlas_technique_ids or s.laaf_technique_ids)
+        for s in eligible_seeds
+        if s.atlas_technique_ids or s.laaf_technique_ids
+    ]
+    return sum(tech_counts) / len(tech_counts) if tech_counts else 0.0
+
+
+def _log_expansion_summary(
+    eligible_seeds: list[ScenarioSeed],
+    ingress_points: list[Any],
+    max_techniques: int,
+    candidates: list[CandidateTriple],
+) -> None:
+    """Log the expansion outcome when any seed was processed."""
+    if not eligible_seeds:
+        return
+    avg_techniques = _average_technique_count(eligible_seeds)
+    logger.info(
+        "%d seeds x %d ingress entry points x avg %.1f techniques "
+        "(max_techniques=%d) = %d candidates",
+        len(eligible_seeds),
+        len(ingress_points),
+        avg_techniques,
+        max_techniques,
+        len(candidates),
+    )
+
+
+def _expansion_stage_record(
+    stage_records: list[StageRecord] | None,
+    raw_count: int,
+    candidates: list[CandidateTriple],
+) -> None:
+    """Record the expansion stage counts when a ledger is supplied."""
     if stage_records is not None:
         stage_records.append(
             StageRecord(
@@ -945,7 +1089,6 @@ def expand_candidates(
                 collapsed_count=raw_count - len(candidates),
             )
         )
-    return candidates
 
 
 def _check_candidate_collisions(candidates: list[CandidateTriple]) -> None:
@@ -1011,14 +1154,31 @@ def _canonicalize_techniques(
     if not ids:
         return (), (), ()
 
-    # Pad names/descriptions to match ids length (defensive).
+    padded_names, padded_descs = _padded_metadata(ids, names, descriptions)
+    id_to_name, id_to_desc = _technique_metadata_map(ids, padded_names, padded_descs)
+    return _aligned_metadata(id_to_name, id_to_desc)
+
+
+def _padded_metadata(
+    ids: tuple[str, ...],
+    names: tuple[str, ...],
+    descriptions: tuple[str, ...],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Pad names/descriptions to match ids length (defensive)."""
     padded_names = tuple(names) + ("",) * max(0, len(ids) - len(names))
     padded_descs = tuple(descriptions) + ("",) * max(0, len(ids) - len(descriptions))
+    return padded_names, padded_descs
 
-    # Build per-ID metadata, detecting conflicts.
+
+def _technique_metadata_map(
+    ids: tuple[str, ...],
+    names: tuple[str, ...],
+    descriptions: tuple[str, ...],
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Build per-ID metadata, detecting conflicting values for one ID."""
     id_to_name: dict[str, str] = {}
     id_to_desc: dict[str, str] = {}
-    for tid, name, desc in zip(ids, padded_names, padded_descs, strict=False):
+    for tid, name, desc in zip(ids, names, descriptions, strict=False):
         if tid in id_to_name:
             if id_to_name[tid] != name:
                 raise ValueError(
@@ -1033,7 +1193,13 @@ def _canonicalize_techniques(
         else:
             id_to_name[tid] = name
             id_to_desc[tid] = desc
+    return id_to_name, id_to_desc
 
+
+def _aligned_metadata(
+    id_to_name: dict[str, str], id_to_desc: dict[str, str]
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    """Sort by ID and align names/descriptions to that order."""
     sorted_ids = tuple(sorted(id_to_name))
     sorted_names = tuple(id_to_name[tid] for tid in sorted_ids)
     sorted_descs = tuple(id_to_desc[tid] for tid in sorted_ids)
@@ -1078,32 +1244,47 @@ def _canonicalize_and_dedup_origins(
 ) -> list[CandidateOrigin]:
     """Canonicalize, deduplicate, and sort origins deterministically."""
     canonicalized = [_canonicalize_origin(o) for o in all_origins]
+    return _dedup_canonical_origins(canonicalized)
+
+
+def _origin_key(origin: CandidateOrigin) -> tuple:
+    """Dedup identity for one canonicalized origin."""
+    return (
+        origin.source_candidate_id,
+        origin.transform_stage,
+        origin.original_technique_ids,
+        origin.removed_technique_ids,
+        origin.applied_rule,
+        origin.removal_reasons,
+        tuple((d.technique_id, d.rule, d.reason) for d in origin.removal_decisions),
+    )
+
+
+def _origin_sort_key(origin: CandidateOrigin) -> tuple:
+    """Deterministic sort key for one canonicalized origin."""
+    return (
+        origin.source_candidate_id,
+        origin.transform_stage,
+        origin.original_technique_ids,
+        origin.removed_technique_ids,
+        origin.applied_rule or "",
+        origin.removal_reasons,
+        tuple((d.technique_id, d.rule, d.reason) for d in origin.removal_decisions),
+    )
+
+
+def _dedup_canonical_origins(
+    canonicalized: list[CandidateOrigin],
+) -> list[CandidateOrigin]:
+    """First-seen dedup by origin key, then deterministic sort."""
     seen: set[tuple] = set()
     unique: list[CandidateOrigin] = []
     for origin in canonicalized:
-        key = (
-            origin.source_candidate_id,
-            origin.transform_stage,
-            origin.original_technique_ids,
-            origin.removed_technique_ids,
-            origin.applied_rule,
-            origin.removal_reasons,
-            tuple((d.technique_id, d.rule, d.reason) for d in origin.removal_decisions),
-        )
+        key = _origin_key(origin)
         if key not in seen:
             seen.add(key)
             unique.append(origin)
-    unique.sort(
-        key=lambda o: (
-            o.source_candidate_id,
-            o.transform_stage,
-            o.original_technique_ids,
-            o.removed_technique_ids,
-            o.applied_rule or "",
-            o.removal_reasons,
-            tuple((d.technique_id, d.rule, d.reason) for d in o.removal_decisions),
-        )
-    )
+    unique.sort(key=_origin_sort_key)
     return unique
 
 
@@ -1114,30 +1295,46 @@ def _check_converged_technique_metadata(
     every converged candidate and reject conflicts."""
     ref_map: dict[str, tuple[str, str]] | None = None
     for c in group:
-        c_map: dict[str, tuple[str, str]] = {}
-        for tid, name, desc in zip(
-            c.atlas_technique_ids,
-            c.atlas_technique_names,
-            c.atlas_technique_descriptions,
-            strict=False,
-        ):
-            c_map[tid] = (name, desc)
+        c_map = _candidate_technique_map(c)
         if ref_map is None:
             ref_map = c_map
             continue
-        # Compare keys (technique IDs) — must be the same set.
-        if set(ref_map) != set(c_map):
+        _technique_map_conflicts(ref_map, c_map)
+
+
+def _candidate_technique_map(
+    c: CandidateTriple,
+) -> dict[str, tuple[str, str]]:
+    """Per-ID (name, description) metadata of one candidate."""
+    c_map: dict[str, tuple[str, str]] = {}
+    for tid, name, desc in zip(
+        c.atlas_technique_ids,
+        c.atlas_technique_names,
+        c.atlas_technique_descriptions,
+        strict=False,
+    ):
+        c_map[tid] = (name, desc)
+    return c_map
+
+
+def _technique_map_conflicts(
+    ref_map: dict[str, tuple[str, str]],
+    c_map: dict[str, tuple[str, str]],
+) -> None:
+    """Reject differing ID sets or per-ID metadata across converged maps."""
+    # Compare keys (technique IDs) — must be the same set.
+    if set(ref_map) != set(c_map):
+        raise ValueError(
+            f"Conflicting technique ID sets for converged candidate: "
+            f"{sorted(ref_map)} vs {sorted(c_map)}"
+        )
+    # Compare per-ID metadata.
+    for tid in ref_map:
+        if ref_map[tid] != c_map[tid]:
             raise ValueError(
-                f"Conflicting technique ID sets for converged candidate: "
-                f"{sorted(ref_map)} vs {sorted(c_map)}"
+                f"Conflicting technique metadata for ID '{tid}': "
+                f"{ref_map[tid]!r} vs {c_map[tid]!r}"
             )
-        # Compare per-ID metadata.
-        for tid in ref_map:
-            if ref_map[tid] != c_map[tid]:
-                raise ValueError(
-                    f"Conflicting technique metadata for ID '{tid}': "
-                    f"{ref_map[tid]!r} vs {c_map[tid]!r}"
-                )
 
 
 def canonicalize_and_dedup(
@@ -1173,106 +1370,18 @@ def canonicalize_and_dedup(
         list
     )
     for c in candidates:
-        key = (
-            c.seed_id,
-            c.entry_point_id,
-            tuple(sorted(set(c.atlas_technique_ids))),
-        )
-        groups[key].append(c)
+        groups[_canonical_group_key(c)].append(c)
 
     result: list[CandidateTriple] = []
     collapsed_count = 0
     for key, group in groups.items():
         if len(group) == 1:
-            # Canonicalize technique IDs/names/descriptions for singletons
-            # too, so output is deterministic regardless of input ordering.
-            c = group[0]
-            c_ids, c_names, c_descs = _canonicalize_techniques(
-                c.atlas_technique_ids,
-                c.atlas_technique_names,
-                c.atlas_technique_descriptions,
-            )
-            # Canonicalize origins for singletons too, so reversed
-            # technique/decision order serializes identically.
-            canonical_origins = _canonicalize_and_dedup_origins(list(c.origins))
-            needs_rebuild = c_ids != c.atlas_technique_ids
-            if canonical_origins != list(c.origins):
-                needs_rebuild = True
-            if needs_rebuild:
-                c = CandidateTriple.model_validate(
-                    c.model_dump(mode="python")
-                    | {
-                        "atlas_technique_ids": c_ids,
-                        "atlas_technique_names": c_names,
-                        "atlas_technique_descriptions": c_descs,
-                        "origins": tuple(canonical_origins),
-                    }
-                )
-            result.append(c)
+            result.append(_singleton_candidate(group[0]))
             continue
 
         # Multiple candidates converged — merge origins.
         collapsed_count += len(group) - 1
-        # Compare technique metadata across all converged candidates
-        # before choosing a template.
-        _check_converged_technique_metadata(group)
-        all_origins: list[CandidateOrigin] = []
-        for c in group:
-            all_origins.extend(c.origins)
-        unique_origins = _canonicalize_and_dedup_origins(all_origins)
-
-        # Reject conflicting non-provenance metadata across converged
-        # candidates.  All candidates with the same canonical identity
-        # must agree on metadata fields.
-        template = group[0]
-        _non_prov_fields = (
-            "seed_id",
-            "threat_id",
-            "threat_name",
-            "attack_pattern_name",
-            "attack_pattern_description",
-            "entry_point",
-            "entry_point_id",
-            "direction",
-            "risk_card_ref",
-            "owasp_llm_ids",
-            "controllability",
-        )
-        for c in group[1:]:
-            for field_name in _non_prov_fields:
-                tval = getattr(template, field_name)
-                cval = getattr(c, field_name)
-                if tval != cval:
-                    raise ValueError(
-                        f"Conflicting non-provenance metadata for "
-                        f"converged candidate '{template.candidate_id}': "
-                        f"field '{field_name}' differs "
-                        f"({tval!r} vs {cval!r})"
-                    )
-
-        merged = CandidateTriple.model_validate(
-            template.model_dump(mode="python")
-            | {
-                "origins": tuple(unique_origins),
-            }
-        )
-        # Canonicalize technique IDs/names/descriptions: sort by ID and
-        # align names/descriptions so equivalent inputs serialize identically.
-        c_ids, c_names, c_descs = _canonicalize_techniques(
-            merged.atlas_technique_ids,
-            merged.atlas_technique_names,
-            merged.atlas_technique_descriptions,
-        )
-        if c_ids != merged.atlas_technique_ids:
-            merged = CandidateTriple.model_validate(
-                merged.model_dump(mode="python")
-                | {
-                    "atlas_technique_ids": c_ids,
-                    "atlas_technique_names": c_names,
-                    "atlas_technique_descriptions": c_descs,
-                }
-            )
-        result.append(merged)
+        result.append(_converged_candidate(group))
 
     if collapsed_count:
         logger.info(
@@ -1284,6 +1393,120 @@ def canonicalize_and_dedup(
         )
 
     return result
+
+
+def _canonical_group_key(
+    c: CandidateTriple,
+) -> tuple[str, str, tuple[str, ...]]:
+    """Canonical dedup identity of one candidate."""
+    return (
+        c.seed_id,
+        c.entry_point_id,
+        tuple(sorted(set(c.atlas_technique_ids))),
+    )
+
+
+def _singleton_candidate(c: CandidateTriple) -> CandidateTriple:
+    """Canonicalize a non-collapsed candidate deterministically.
+
+    Canonicalize technique IDs/names/descriptions and origins so
+    reversed technique/decision order serializes identically.
+    """
+    c_ids, c_names, c_descs = _canonicalize_techniques(
+        c.atlas_technique_ids,
+        c.atlas_technique_names,
+        c.atlas_technique_descriptions,
+    )
+    canonical_origins = _canonicalize_and_dedup_origins(list(c.origins))
+    needs_rebuild = c_ids != c.atlas_technique_ids
+    if canonical_origins != list(c.origins):
+        needs_rebuild = True
+    if needs_rebuild:
+        c = CandidateTriple.model_validate(
+            c.model_dump(mode="python")
+            | {
+                "atlas_technique_ids": c_ids,
+                "atlas_technique_names": c_names,
+                "atlas_technique_descriptions": c_descs,
+                "origins": tuple(canonical_origins),
+            }
+        )
+    return c
+
+
+def _converged_candidate(group: list[CandidateTriple]) -> CandidateTriple:
+    """Merge one collapsed group: origins plus conflict-free metadata."""
+    # Compare technique metadata across all converged candidates
+    # before choosing a template.
+    _check_converged_technique_metadata(group)
+    all_origins: list[CandidateOrigin] = []
+    for c in group:
+        all_origins.extend(c.origins)
+    unique_origins = _canonicalize_and_dedup_origins(all_origins)
+
+    template = group[0]
+    _non_provenance_conflicts(template, group[1:], _CONVERGED_NON_PROV_FIELDS)
+    merged = CandidateTriple.model_validate(
+        template.model_dump(mode="python")
+        | {
+            "origins": tuple(unique_origins),
+        }
+    )
+    # Canonicalize technique IDs/names/descriptions: sort by ID and
+    # align names/descriptions so equivalent inputs serialize identically.
+    c_ids, c_names, c_descs = _canonicalize_techniques(
+        merged.atlas_technique_ids,
+        merged.atlas_technique_names,
+        merged.atlas_technique_descriptions,
+    )
+    if c_ids != merged.atlas_technique_ids:
+        merged = CandidateTriple.model_validate(
+            merged.model_dump(mode="python")
+            | {
+                "atlas_technique_ids": c_ids,
+                "atlas_technique_names": c_names,
+                "atlas_technique_descriptions": c_descs,
+            }
+        )
+    return merged
+
+
+_CONVERGED_NON_PROV_FIELDS = (
+    "seed_id",
+    "threat_id",
+    "threat_name",
+    "attack_pattern_name",
+    "attack_pattern_description",
+    "entry_point",
+    "entry_point_id",
+    "direction",
+    "risk_card_ref",
+    "owasp_llm_ids",
+    "controllability",
+)
+
+
+def _non_provenance_conflicts(
+    template: BaseModel,
+    others: Sequence[BaseModel],
+    fields: Sequence[str],
+) -> None:
+    """Reject conflicting non-provenance metadata across converged records.
+
+    All records with the same canonical identity must agree on metadata
+    fields.
+    """
+    for c in others:
+        for field_name in fields:
+            tval = getattr(template, field_name)
+            cval = getattr(c, field_name)
+            if tval != cval:
+                raise ValueError(
+                    f"Conflicting non-provenance metadata for "
+                    f"converged candidate '{template.candidate_id}': "
+                    f"field '{field_name}' differs "
+                    f"({tval!r} vs {cval!r})"
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -1331,26 +1554,40 @@ def _reconcile_filter_response(
     response_ids = [v.candidate_id for v in batch_response.verdicts]
     response_id_set = set(response_ids)
 
-    # Duplicate IDs
-    if len(response_ids) != len(response_id_set):
-        from collections import Counter
-
-        duplicates = sorted(
-            cid for cid, count in Counter(response_ids).items() if count > 1
-        )
+    duplicates = _duplicate_response_ids(response_ids)
+    if duplicates:
         return False, f"Duplicate candidate IDs in response: {duplicates}"
 
-    # Unknown IDs
-    unknown = sorted(response_id_set - submitted_candidate_ids)
+    unknown = _unknown_response_ids(response_id_set, submitted_candidate_ids)
     if unknown:
         return False, f"Unknown candidate IDs in response: {unknown}"
 
-    # Omitted IDs
-    omitted = sorted(submitted_candidate_ids - response_id_set)
+    omitted = _omitted_response_ids(response_id_set, submitted_candidate_ids)
     if omitted:
         return False, f"Missing candidate IDs in response: {omitted}"
 
     return True, None
+
+
+def _duplicate_response_ids(response_ids: list[str]) -> list[str]:
+    """Candidate IDs repeated within a response, sorted."""
+    from collections import Counter
+
+    return sorted(cid for cid, count in Counter(response_ids).items() if count > 1)
+
+
+def _unknown_response_ids(
+    response_id_set: set[str], submitted_candidate_ids: set[str]
+) -> list[str]:
+    """Response IDs that were never submitted, sorted."""
+    return sorted(response_id_set - submitted_candidate_ids)
+
+
+def _omitted_response_ids(
+    response_id_set: set[str], submitted_candidate_ids: set[str]
+) -> list[str]:
+    """Submitted IDs missing from the response, sorted."""
+    return sorted(submitted_candidate_ids - response_id_set)
 
 
 def _build_call_log_entry(
@@ -1376,6 +1613,752 @@ def _build_call_log_entry(
         "duration_ms": llm_result.duration_ms,
         "request_controls": llm_result.request_controls,
     }
+
+
+def _duplicate_submitted_ids(
+    seed_candidates: list[CandidateTriple], seed_id: str
+) -> None:
+    """Reject duplicate candidate IDs in the submitted input."""
+    raw_ids = [c.candidate_id for c in seed_candidates]
+    if len(set(raw_ids)) != len(seed_candidates):
+        from collections import Counter
+
+        id_counts = Counter(raw_ids)
+        dupes = sorted(cid for cid, count in id_counts.items() if count > 1)
+        raise FilterProtocolError(
+            f"Duplicate candidate IDs in submitted input for seed {seed_id}: {dupes}",
+            call_log_entries=[],
+        )
+
+
+def _submitted_snapshot(
+    seed_candidates: list[CandidateTriple],
+) -> list[CandidateTriple]:
+    """Deep-validated copy of the submitted candidates."""
+    return [
+        CandidateTriple.model_validate(c.model_dump(mode="python"))
+        for c in seed_candidates
+    ]
+
+
+def _prompt_candidates(
+    handle_lookup: dict[str, CandidateTriple],
+) -> list[dict]:
+    """Request-local candidate payloads for the batch filter prompt."""
+    return [
+        {
+            "handle": handle,
+            "entry_point": candidate.entry_point,
+            "controllability": candidate.controllability,
+            "direction": candidate.direction,
+            "atlas_technique_ids": candidate.atlas_technique_ids,
+            "atlas_technique_names": candidate.atlas_technique_names,
+            "atlas_technique_descriptions": (candidate.atlas_technique_descriptions),
+        }
+        for handle, candidate in handle_lookup.items()
+    ]
+
+
+def _render_filter_user_prompt(
+    first: CandidateTriple,
+    seed_id: str,
+    prompt_candidates: list[dict],
+) -> str:
+    """Render the seed-level batch filter user prompt."""
+    return render_prompt(
+        "filter_user.j2",
+        seed_id=seed_id,
+        attack_pattern_name=first.attack_pattern_name,
+        attack_pattern_description=first.attack_pattern_description,
+        threat_id=first.threat_id,
+        threat_name=first.threat_name,
+        owasp_llm_ids=first.owasp_llm_ids,
+        risk_card_ref=first.risk_card_ref,
+        candidates=prompt_candidates,
+    )
+
+
+def _verdicts_from_decisions(
+    decisions: dict[str, FilterMapDecisionDraftV3 | FilterDecisionDraftV2],
+    handle_lookup: dict[str, CandidateTriple],
+    seed_id: str,
+) -> BatchFilterResponse:
+    """Translate request-local decisions into canonical verdicts."""
+    return BatchFilterResponse(
+        seed_id=seed_id,
+        verdicts=[
+            FilterVerdict(
+                candidate_id=handle_lookup[handle].candidate_id,
+                verdict="accept" if decision.relevant else "reject",
+                rationale=decision.rationale,
+            )
+            for handle, decision in decisions.items()
+        ],
+    )
+
+
+def _map_handle_draft_to_batch(
+    draft: FilterMapDraftV3,
+    handle_lookup: dict[str, CandidateTriple],
+    seed_id: str,
+) -> BatchFilterResponse:
+    """Exact-key V3 draft to canonical batch response."""
+    decisions = reconcile_filter_map(draft, tuple(handle_lookup))
+    return _verdicts_from_decisions(decisions, handle_lookup, seed_id)
+
+
+def _ordinal_draft_to_batch(
+    draft: BatchFilterDraftV2,
+    handle_lookup: dict[str, CandidateTriple],
+    seed_id: str,
+) -> BatchFilterResponse:
+    """Ordinal V2 draft to canonical batch response after reconciliation."""
+    decisions = reconcile_filter_ordinals(draft, tuple(handle_lookup))
+    return _verdicts_from_decisions(decisions, handle_lookup, seed_id)
+
+
+def _ordinal_draft_to_batch_or_response(
+    raw_content: dict,
+    handle_lookup: dict[str, CandidateTriple],
+    seed_id: str,
+) -> BatchFilterResponse:
+    """A raw dict as an ordinal draft, falling back to a typed response."""
+    try:
+        ordinal = BatchFilterDraftV2.model_validate(raw_content)
+    except ValidationError:
+        return BatchFilterResponse.model_validate(raw_content)
+    return _ordinal_draft_to_batch(ordinal, handle_lookup, seed_id)
+
+
+def _batch_from_dict(
+    raw_content: dict,
+    response_model: type[FilterMapDraftV3],
+    handle_lookup: dict[str, CandidateTriple],
+    seed_id: str,
+) -> BatchFilterResponse:
+    """A raw dict as the V3 map, falling back to V2 ordinal/typed shapes."""
+    try:
+        mapped = response_model.model_validate(raw_content)
+    except ValidationError:
+        return _ordinal_draft_to_batch_or_response(raw_content, handle_lookup, seed_id)
+    return _map_handle_draft_to_batch(mapped, handle_lookup, seed_id)
+
+
+def _typed_content_batch(
+    raw_content: Any,
+    handle_lookup: dict[str, CandidateTriple],
+    seed_id: str,
+) -> BatchFilterResponse | None:
+    """Typed wire-protocol content translated to a batch response."""
+    if isinstance(raw_content, FilterMapDraftV3):
+        return _map_handle_draft_to_batch(raw_content, handle_lookup, seed_id)
+    if isinstance(raw_content, BatchFilterDraftV2):
+        return _ordinal_draft_to_batch(raw_content, handle_lookup, seed_id)
+    if isinstance(raw_content, BatchFilterResponse):
+        return raw_content
+    return None
+
+
+def _parse_filter_content(
+    raw_content: Any,
+    response_model: type[FilterMapDraftV3],
+    handle_lookup: dict[str, CandidateTriple],
+    seed_id: str,
+) -> BatchFilterResponse:
+    """Translate LLM content to a batch response across wire formats."""
+    typed = _typed_content_batch(raw_content, handle_lookup, seed_id)
+    if typed is not None:
+        return typed
+    if isinstance(raw_content, dict):
+        return _batch_from_dict(raw_content, response_model, handle_lookup, seed_id)
+    if isinstance(raw_content, str):
+        return _map_handle_draft_to_batch(
+            response_model.model_validate(json.loads(raw_content)),
+            handle_lookup,
+            seed_id,
+        )
+    # Wrong content type — try to coerce via model_validate.
+    return BatchFilterResponse.model_validate(raw_content)
+
+
+def _exception_call_log(
+    seed_id: str,
+    attempt: int,
+    system_prompt: str,
+    user_prompt: str,
+    error: str,
+) -> dict:
+    """Synthetic call log entry for an infrastructure/parse exception."""
+    return {
+        "call": "candidate_filter",
+        "seed_id": seed_id,
+        "attempt": attempt,
+        "system_prompt": system_prompt,
+        "user_prompt": user_prompt,
+        "response": None,
+        "error": error,
+        "prompt_tokens": None,
+        "completion_tokens": None,
+        "duration_ms": None,
+    }
+
+
+def _filter_llm_call(
+    client: LLMClient,
+    system_prompt: str,
+    user_prompt: str,
+    response_model: type[FilterMapDraftV3],
+    attempt: int,
+) -> tuple[LLMResult | None, str | None]:
+    """One filter completion call; (result, None) or (None, error)."""
+    try:
+        llm_result = client.complete(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_format=response_model,
+            max_completion_tokens=_filter_completion_cap(client),
+        )
+    except Exception as exc:  # noqa: BLE001 - infrastructure/parse exception, records synthetic call log
+        return None, f"Exception during complete(): {exc}"
+    return llm_result, None
+
+
+def _validate_filter_content(
+    llm_result: LLMResult,
+    response_model: type[FilterMapDraftV3],
+    handle_lookup: dict[str, CandidateTriple],
+    seed_id: str,
+) -> tuple[BatchFilterResponse | None, str | None]:
+    """Parse one response into a batch, or (None, error)."""
+    try:
+        raw_content = llm_result.content
+        if raw_content is None:
+            raise ValueError("LLM returned None content (refusal or empty)")
+        return (
+            _parse_filter_content(raw_content, response_model, handle_lookup, seed_id),
+            None,
+        )
+    except (
+        ValidationError,
+        ValueError,
+        TypeError,
+        json.JSONDecodeError,
+    ) as exc:
+        return None, f"Failed to parse LLM content as BatchFilterResponse: {exc}"
+
+
+def _reconcile_batch(
+    batch_response: BatchFilterResponse,
+    seed_id: str,
+    submitted_ids: set[str],
+) -> tuple[bool, str | None]:
+    """Reconcile one batch; unexpected exceptions become failures."""
+    try:
+        return _reconcile_filter_response(batch_response, seed_id, submitted_ids)
+    except Exception as exc:  # noqa: BLE001 - reconciliation exception, records error
+        return False, f"Reconciliation exception: {exc}"
+
+
+def _filter_attempt_loop(
+    client: LLMClient,
+    system_prompt: str,
+    user_prompt: str,
+    response_model: type[FilterMapDraftV3],
+    handle_lookup: dict[str, CandidateTriple],
+    seed_id: str,
+    submitted_ids: set[str],
+    seed_call_logs: list[dict],
+) -> tuple[BatchFilterResponse | None, str | None]:
+    """Run up to two filter attempts; returns (batch_response, error)."""
+    batch_response: BatchFilterResponse | None = None
+    reconciliation_error: str | None = None
+    for attempt in (1, 2):
+        batch_response, reconciliation_error = _attempt_filter_call(
+            client,
+            system_prompt,
+            user_prompt,
+            response_model,
+            handle_lookup,
+            seed_id,
+            submitted_ids,
+            attempt,
+            seed_call_logs,
+        )
+        if reconciliation_error is None:
+            break
+        if attempt == 1:
+            logger.warning(
+                "Filter call failed for seed %s (attempt 1): %s — retrying",
+                seed_id,
+                reconciliation_error,
+            )
+            continue
+    return batch_response, reconciliation_error
+
+
+def _protocol_failure_raise(
+    seed_id: str,
+    reconciliation_error: str | None,
+    batch_response: BatchFilterResponse | None,
+    submitted_ids: set[str],
+    seed_call_logs: list[dict],
+) -> None:
+    """Raise when no attempt produced a reconciled batch response."""
+    if reconciliation_error is not None or batch_response is None:
+        raise FilterProtocolError(
+            f"Filter protocol failure for seed {seed_id} after retry: "
+            f"{reconciliation_error}",
+            call_log_entries=seed_call_logs,
+            reconciliation=_reconciliation_evidence(
+                seed_id,
+                submitted_ids,
+                batch_response,
+                reconciliation_error,
+            ),
+        )
+
+
+def _attempt_filter_call(
+    client: LLMClient,
+    system_prompt: str,
+    user_prompt: str,
+    response_model: type[FilterMapDraftV3],
+    handle_lookup: dict[str, CandidateTriple],
+    seed_id: str,
+    submitted_ids: set[str],
+    attempt: int,
+    seed_call_logs: list[dict],
+) -> tuple[BatchFilterResponse | None, str | None]:
+    """One complete filter attempt; appends call logs to ``seed_call_logs``.
+
+    Returns ``(batch_response, None)`` on success or ``(None, error)``.
+    """
+    llm_result, llm_error = _filter_llm_call(
+        client, system_prompt, user_prompt, response_model, attempt
+    )
+    if llm_error is not None:
+        # Infrastructure/parse exception — record a synthetic call log
+        # entry since we have no LLMResult.
+        seed_call_logs.append(
+            _exception_call_log(seed_id, attempt, system_prompt, user_prompt, llm_error)
+        )
+        return None, llm_error
+
+    seed_call_logs.append(_build_call_log_entry(seed_id, llm_result, attempt))
+
+    # Validate the ordinal wire protocol and translate it to the
+    # established canonical verdict model only after exact-set
+    # reconciliation. Historical typed responses remain accepted
+    # for local test adapters; production requests V3 exclusively.
+    batch_response, parse_error = _validate_filter_content(
+        llm_result, response_model, handle_lookup, seed_id
+    )
+    if parse_error is not None:
+        return None, parse_error
+
+    ok, err = _reconcile_batch(batch_response, seed_id, submitted_ids)
+    if not ok:
+        # Keep the parsed batch for quarantine evidence even when the
+        # response did not reconcile.
+        return batch_response, err
+    return batch_response, None
+
+
+def _split_verdicts(
+    batch_response: BatchFilterResponse,
+) -> tuple[list[FilterVerdict], list[FilterVerdict]]:
+    """Accepted and rejected verdicts of one batch response."""
+    accepted_verdicts: list[FilterVerdict] = []
+    rejected_verdicts: list[FilterVerdict] = []
+    for v in batch_response.verdicts:
+        if v.verdict == "accept":
+            accepted_verdicts.append(v)
+        else:
+            rejected_verdicts.append(v)
+    return accepted_verdicts, rejected_verdicts
+
+
+def _rejection_records_for(
+    rejected_verdicts: list[FilterVerdict],
+    candidate_lookup: dict[str, CandidateTriple],
+) -> list[RejectionRecord]:
+    """Enriched rejection records resolved from the candidate lookup."""
+    rejection_records: list[RejectionRecord] = []
+    for v in rejected_verdicts:
+        cand = candidate_lookup.get(v.candidate_id)
+        if cand is not None:
+            rejection_records.append(
+                RejectionRecord(
+                    candidate_id=v.candidate_id,
+                    entry_point=cand.entry_point,
+                    atlas_technique_ids=cand.atlas_technique_ids,
+                    rationale=v.rationale,
+                )
+            )
+    return rejection_records
+
+
+def _filtered_seed_from(
+    verdict: FilterVerdict,
+    cand: CandidateTriple,
+    original_seed: ScenarioSeed,
+    rejection_records: list[RejectionRecord],
+) -> FilteredSeed:
+    """One accepted verdict as a filtered seed under the original seed."""
+    return FilteredSeed(
+        **original_seed.model_dump(),
+        pinned_entry_point=cand.entry_point,
+        pinned_technique_ids=cand.atlas_technique_ids,
+        pinned_technique_names=cand.atlas_technique_names,
+        entry_point_id=cand.entry_point_id,
+        candidate_id=cand.candidate_id,
+        origins=list(cand.origins),
+        rejection_rationales=rejection_records,
+        accepted_rationale=verdict.rationale,
+    )
+
+
+def _filtered_seed_results(
+    accepted_verdicts: list[FilterVerdict],
+    candidate_lookup: dict[str, CandidateTriple],
+    original_seed: ScenarioSeed,
+    rejection_records: list[RejectionRecord],
+) -> list[FilteredSeed]:
+    """Filtered seeds for all accepted verdicts resolvable in the lookup."""
+    seed_results: list[FilteredSeed] = []
+    for verdict in accepted_verdicts:
+        cand = candidate_lookup.get(verdict.candidate_id)
+        if cand is None:
+            # Should not happen after reconciliation, but guard anyway.
+            logger.error(
+                "Candidate %s not in lookup after reconciliation — skipping",
+                verdict.candidate_id,
+            )
+            continue
+        seed_results.append(
+            _filtered_seed_from(verdict, cand, original_seed, rejection_records)
+        )
+    return seed_results
+
+
+def _rule_eligible_filtered_seeds(
+    original_seed: ScenarioSeed,
+    candidates: list[CandidateTriple],
+) -> list[FilteredSeed]:
+    """Preserve every rule-eligible candidate after advisory filter failure."""
+    return [
+        FilteredSeed(
+            **original_seed.model_dump(),
+            pinned_entry_point=candidate.entry_point,
+            pinned_technique_ids=candidate.atlas_technique_ids,
+            pinned_technique_names=candidate.atlas_technique_names,
+            entry_point_id=candidate.entry_point_id,
+            candidate_id=candidate.candidate_id,
+            origins=list(candidate.origins),
+            rejection_rationales=[],
+            accepted_rationale=(
+                "Candidate filter unavailable; rule-eligible candidate retained."
+            ),
+        )
+        for candidate in candidates
+    ]
+
+
+def _handle_filter_protocol_failure(
+    seed_id: str,
+    exc: FilterProtocolError,
+    advisory_on_failure: bool,
+    groups: dict[str, list[CandidateTriple]],
+    seed_lookup: dict[str, ScenarioSeed],
+) -> tuple[list[FilteredSeed], int, list[dict], FilterProtocolError | None]:
+    """Advisory admission, or deferral, for one failed seed.
+
+    Returns (extra_results, extra_accepted, extra_logs, error_to_record).
+    """
+    if not advisory_on_failure:
+        return [], 0, [], exc
+    original_seed = seed_lookup[seed_id]
+    results = _rule_eligible_filtered_seeds(original_seed, groups[seed_id])
+    extra_logs = list(exc.call_log_entries)
+    extra_logs.append(
+        {
+            "call": "candidate_filter",
+            "seed_id": seed_id,
+            "warning": "candidate_filter_unavailable",
+            "response": None,
+        }
+    )
+    return results, len(groups[seed_id]), extra_logs, None
+
+
+def _escalate_protocol_errors(
+    protocol_errors: list[FilterProtocolError],
+    call_log_entries: list[dict],
+    quarantine_on_failure: bool,
+) -> tuple[list[dict], list[FilterSeedQuarantine]]:
+    """Quarantine irreconcilable seeds, or raise when quarantine is off.
+
+    Returns (all_call_logs, quarantined_seeds).
+    """
+    # Collect all call logs (including from successful seeds) so the
+    # runner can persist them before failing the run.
+    all_logs = list(call_log_entries)
+    for err in protocol_errors:
+        all_logs.extend(err.call_log_entries)
+    quarantined_seeds: list[FilterSeedQuarantine] = []
+    for error in protocol_errors:
+        if error.reconciliation is not None and quarantine_on_failure:
+            quarantined_seeds.append(
+                FilterSeedQuarantine(
+                    seed_id=error.reconciliation.seed_id,
+                    reconciliation=error.reconciliation,
+                )
+            )
+    if not quarantine_on_failure:
+        first_err = protocol_errors[0]
+        raise FilterProtocolError(str(first_err), call_log_entries=all_logs)
+    return all_logs, quarantined_seeds
+
+
+def _empty_filter_result(
+    quarantine_on_failure: bool,
+) -> _FilterResult | _QuarantineFilterResult:
+    """The no-candidates result for the current failure mode."""
+    if quarantine_on_failure:
+        return [], [], [], []
+    return [], [], []
+
+
+def _filter_mode_guard(quarantine_on_failure: bool, advisory_on_failure: bool) -> None:
+    """Quarantine and advisory modes are mutually exclusive."""
+    if quarantine_on_failure and advisory_on_failure:
+        raise ValueError(
+            "quarantine_on_failure and advisory_on_failure are mutually exclusive"
+        )
+
+
+def _seed_lookup_from(seeds: list[ScenarioSeed]) -> dict[str, ScenarioSeed]:
+    """Seed lookup for constructing FilteredSeed with full fields."""
+    return {s.seed_id: s for s in seeds}
+
+
+def _group_candidates(
+    candidates: list[CandidateTriple],
+) -> dict[str, list[CandidateTriple]]:
+    """Candidates grouped by seed_id."""
+    groups: dict[str, list[CandidateTriple]] = defaultdict(list)
+    for c in candidates:
+        groups[c.seed_id].append(c)
+    return groups
+
+
+def _final_filter_result(
+    results: list[FilteredSeed],
+    call_log_entries: list[dict],
+    all_rejected_verdicts: list[FilterVerdict],
+    quarantined_seeds: list[FilterSeedQuarantine],
+    quarantine_on_failure: bool,
+) -> _FilterResult | _QuarantineFilterResult:
+    """The typed result tuple for the current failure mode."""
+    if quarantine_on_failure:
+        return results, call_log_entries, all_rejected_verdicts, quarantined_seeds
+    return results, call_log_entries, all_rejected_verdicts
+
+
+def _submission_context(
+    submitted_snapshot: list[CandidateTriple],
+) -> tuple[
+    CandidateTriple,
+    set[str],
+    dict[str, CandidateTriple],
+    dict[str, CandidateTriple],
+]:
+    """Derive (first, submitted_ids, handle_lookup, candidate_lookup)."""
+    first = submitted_snapshot[0]
+    submitted_ids: set[str] = {c.candidate_id for c in submitted_snapshot}
+    handle_lookup = {
+        f"c{index}": candidate for index, candidate in enumerate(submitted_snapshot)
+    }
+    candidate_lookup: dict[str, CandidateTriple] = {
+        c.candidate_id: c for c in submitted_snapshot
+    }
+    return first, submitted_ids, handle_lookup, candidate_lookup
+
+
+def _post_reconciliation_results(
+    batch_response: BatchFilterResponse,
+    candidate_lookup: dict[str, CandidateTriple],
+    seed_lookup: dict[str, ScenarioSeed],
+    seed_id: str,
+    seed_candidates: list[CandidateTriple],
+    seed_call_logs: list[dict],
+) -> tuple[list[FilteredSeed], int, int, list[dict], list[FilterVerdict]]:
+    """Resolve accepted/rejected verdicts into filtered seeds and counts."""
+    accepted_verdicts, rejected_verdicts = _split_verdicts(batch_response)
+
+    # Build enriched rejection records from candidate lookup.
+    rejection_records = _rejection_records_for(rejected_verdicts, candidate_lookup)
+
+    original_seed = seed_lookup.get(seed_id)
+    if original_seed is None:
+        logger.warning(
+            "Seed %s not found in seed lookup — skipping %d accepted verdicts",
+            seed_id,
+            len(accepted_verdicts),
+        )
+        return (
+            [],
+            0,
+            len(seed_candidates),
+            seed_call_logs,
+            rejected_verdicts,
+        )
+
+    seed_results = _filtered_seed_results(
+        accepted_verdicts, candidate_lookup, original_seed, rejection_records
+    )
+    seed_accepted = len(accepted_verdicts)
+    seed_total = len(seed_candidates)
+    logger.info(
+        "Seed %s: %d/%d candidates accepted",
+        seed_id,
+        seed_accepted,
+        seed_total,
+    )
+    return (
+        seed_results,
+        seed_accepted,
+        seed_total - seed_accepted,
+        seed_call_logs,
+        rejected_verdicts,
+    )
+
+
+def _iter_filter_futures(
+    executor: ThreadPoolExecutor,
+    groups: dict[str, list[CandidateTriple]],
+    seed_lookup: dict[str, ScenarioSeed],
+    advisory_on_failure: bool,
+    client: LLMClient,
+    system_prompt: str,
+) -> Any:
+    """Yield per-seed outcome deltas as futures complete.
+
+    Each delta is (results, n_accepted, n_rejected, logs, rejected_verdicts,
+    error_or_None).  Protocol and infrastructure failures are converted
+    through :func:`_handle_filter_protocol_failure`.
+    """
+    futures = {
+        executor.submit(
+            _filter_one_seed, sid, cands, client, system_prompt, seed_lookup
+        ): sid
+        for sid, cands in groups.items()
+    }
+    for future in as_completed(futures):
+        seed_id = futures[future]
+        try:
+            (
+                seed_results,
+                n_acc,
+                n_rej,
+                seed_logs,
+                seed_rejected,
+            ) = future.result()
+            yield seed_results, n_acc, n_rej, seed_logs, seed_rejected, None
+        except FilterProtocolError as exc:
+            logger.error("Filter protocol failure for seed %s: %s", seed_id, exc)
+            admitted, n_acc, extra_logs, error = _handle_filter_protocol_failure(
+                seed_id, exc, advisory_on_failure, groups, seed_lookup
+            )
+            yield admitted, n_acc, 0, extra_logs, [], error
+        except Exception as exc:
+            # Any unexpected exception from _filter_one_seed is an
+            # infrastructure/protocol failure, not an ordinary rejection.
+            # Convert to FilterProtocolError so the run fails cleanly
+            # with evidence rather than silently dropping a seed.
+            logger.exception("Filter infrastructure failure for seed %s", seed_id)
+            failure = FilterProtocolError(
+                f"Filter infrastructure failure for seed {seed_id}: {exc}",
+                call_log_entries=[],
+            )
+            admitted, n_acc, extra_logs, error = _handle_filter_protocol_failure(
+                seed_id, failure, advisory_on_failure, groups, seed_lookup
+            )
+            yield admitted, n_acc, 0, extra_logs, [], error
+
+
+def _filter_one_seed(
+    seed_id: str,
+    seed_candidates: list[CandidateTriple],
+    client: LLMClient,
+    system_prompt: str,
+    seed_lookup: dict[str, ScenarioSeed],
+) -> tuple[
+    list[FilteredSeed],
+    int,
+    int,
+    list[dict],
+    list[FilterVerdict],
+]:
+    """Filter candidates for a single seed.
+
+    Returns (accepted, n_accepted, n_rejected, call_log_entries,
+    rejected_verdicts).
+    Raises FilterProtocolError on irreconcilable response.
+    """
+    _duplicate_submitted_ids(seed_candidates, seed_id)
+
+    # Deep-validated submission snapshot: reconstruct each candidate
+    # through model_validate so forged model_copy(update=...) objects
+    # are rejected and nested mutable collections are not shared with
+    # the originals.  The prompt and candidate lookup are both derived
+    # from this snapshot so application-resolved metadata cannot change
+    # after submission.
+    submitted_snapshot = _submitted_snapshot(seed_candidates)
+    first, submitted_ids, handle_lookup, candidate_lookup = _submission_context(
+        submitted_snapshot
+    )
+
+    prompt_candidates = _prompt_candidates(handle_lookup)
+    user_prompt = _render_filter_user_prompt(first, seed_id, prompt_candidates)
+    response_model = build_filter_map_response_model(tuple(handle_lookup))
+
+    seed_call_logs: list[dict] = []
+    batch_response, reconciliation_error = _filter_attempt_loop(
+        client,
+        system_prompt,
+        user_prompt,
+        response_model,
+        handle_lookup,
+        seed_id,
+        submitted_ids,
+        seed_call_logs,
+    )
+    _protocol_failure_raise(
+        seed_id,
+        reconciliation_error,
+        batch_response,
+        submitted_ids,
+        seed_call_logs,
+    )
+
+    # Reconciliation passed — resolve metadata from candidate lookup.
+    # Wrap post-reconciliation work so unexpected exceptions carry
+    # accumulated seed_call_logs rather than empty evidence.
+    try:
+        return _post_reconciliation_results(
+            batch_response,
+            candidate_lookup,
+            seed_lookup,
+            seed_id,
+            seed_candidates,
+            seed_call_logs,
+        )
+    except Exception as exc:
+        raise FilterProtocolError(
+            f"Unexpected post-reconciliation failure for seed {seed_id}: {exc}",
+            call_log_entries=seed_call_logs,
+        ) from exc
 
 
 def filter_candidates(
@@ -1426,19 +2409,14 @@ def filter_candidates(
     """
     if not candidates:
         logger.info("Filter: no candidates to filter")
-        return ([], [], [], []) if quarantine_on_failure else ([], [], [])
-    if quarantine_on_failure and advisory_on_failure:
-        raise ValueError(
-            "quarantine_on_failure and advisory_on_failure are mutually exclusive"
-        )
+        return _empty_filter_result(quarantine_on_failure)
+    _filter_mode_guard(quarantine_on_failure, advisory_on_failure)
 
     # Build seed lookup for constructing FilteredSeed with full fields
-    seed_lookup: dict[str, ScenarioSeed] = {s.seed_id: s for s in seeds}
+    seed_lookup = _seed_lookup_from(seeds)
 
     # Group candidates by seed_id
-    groups: dict[str, list[CandidateTriple]] = defaultdict(list)
-    for c in candidates:
-        groups[c.seed_id].append(c)
+    groups = _group_candidates(candidates)
 
     # Render system prompt once (shared across all seeds)
     system_prompt = render_prompt(
@@ -1446,347 +2424,6 @@ def filter_candidates(
         use_case=use_case,
         profile=profile,
     )
-
-    def _filter_one_seed(
-        seed_id: str,
-        seed_candidates: list[CandidateTriple],
-    ) -> tuple[
-        list[FilteredSeed],
-        int,
-        int,
-        list[dict],
-        list[FilterVerdict],
-    ]:
-        """Filter candidates for a single seed.
-
-        Returns (accepted, n_accepted, n_rejected, call_log_entries,
-        rejected_verdicts).
-        Raises FilterProtocolError on irreconcilable response.
-        """
-        # Reject duplicate candidate IDs in the submitted input — this
-        # indicates a bug in candidate expansion or rule-based pruning.
-        raw_ids = [c.candidate_id for c in seed_candidates]
-        if len(set(raw_ids)) != len(seed_candidates):
-            from collections import Counter
-
-            id_counts = Counter(raw_ids)
-            dupes = sorted(cid for cid, count in id_counts.items() if count > 1)
-            raise FilterProtocolError(
-                f"Duplicate candidate IDs in submitted input for seed "
-                f"{seed_id}: {dupes}",
-                call_log_entries=[],
-            )
-
-        # Deep-validated submission snapshot: reconstruct each candidate
-        # through model_validate so forged model_copy(update=...) objects
-        # are rejected and nested mutable collections are not shared with
-        # the originals.  The prompt and candidate lookup are both derived
-        # from this snapshot so application-resolved metadata cannot change
-        # after submission.
-        submitted_snapshot: list[CandidateTriple] = [
-            CandidateTriple.model_validate(c.model_dump(mode="python"))
-            for c in seed_candidates
-        ]
-
-        first = submitted_snapshot[0]
-        submitted_ids: set[str] = {c.candidate_id for c in submitted_snapshot}
-
-        handle_lookup = {
-            f"c{index}": candidate for index, candidate in enumerate(submitted_snapshot)
-        }
-
-        # Build candidate_id → CandidateTriple lookup from the snapshot.
-        candidate_lookup: dict[str, CandidateTriple] = {
-            c.candidate_id: c for c in submitted_snapshot
-        }
-
-        prompt_candidates = [
-            {
-                "handle": handle,
-                "entry_point": candidate.entry_point,
-                "controllability": candidate.controllability,
-                "direction": candidate.direction,
-                "atlas_technique_ids": candidate.atlas_technique_ids,
-                "atlas_technique_names": candidate.atlas_technique_names,
-                "atlas_technique_descriptions": (
-                    candidate.atlas_technique_descriptions
-                ),
-            }
-            for handle, candidate in handle_lookup.items()
-        ]
-        user_prompt = render_prompt(
-            "filter_user.j2",
-            seed_id=seed_id,
-            attack_pattern_name=first.attack_pattern_name,
-            attack_pattern_description=first.attack_pattern_description,
-            threat_id=first.threat_id,
-            threat_name=first.threat_name,
-            owasp_llm_ids=first.owasp_llm_ids,
-            risk_card_ref=first.risk_card_ref,
-            candidates=prompt_candidates,
-        )
-        response_model = build_filter_map_response_model(tuple(handle_lookup))
-
-        def map_to_batch(draft: FilterMapDraftV3) -> BatchFilterResponse:
-            decisions = reconcile_filter_map(draft, tuple(handle_lookup))
-            return BatchFilterResponse(
-                seed_id=seed_id,
-                verdicts=[
-                    FilterVerdict(
-                        candidate_id=handle_lookup[handle].candidate_id,
-                        verdict="accept" if decision.relevant else "reject",
-                        rationale=decision.rationale,
-                    )
-                    for handle, decision in decisions.items()
-                ],
-            )
-
-        seed_call_logs: list[dict] = []
-        batch_response: BatchFilterResponse | None = None
-        reconciliation_error: str | None = None
-
-        for attempt in (1, 2):
-            try:
-                llm_result = client.complete(
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    response_format=response_model,
-                    max_completion_tokens=_filter_completion_cap(client),
-                )
-            except Exception as exc:  # noqa: BLE001 - infrastructure/parse exception, records synthetic call log
-                # Infrastructure/parse exception — record a synthetic
-                # call log entry since we have no LLMResult.
-                seed_call_logs.append(
-                    {
-                        "call": "candidate_filter",
-                        "seed_id": seed_id,
-                        "attempt": attempt,
-                        "system_prompt": system_prompt,
-                        "user_prompt": user_prompt,
-                        "response": None,
-                        "error": f"Exception during complete(): {exc}",
-                        "prompt_tokens": None,
-                        "completion_tokens": None,
-                        "duration_ms": None,
-                    }
-                )
-                reconciliation_error = f"Exception during complete(): {exc}"
-                if attempt == 1:
-                    logger.warning(
-                        "Filter call failed for seed %s (attempt 1): %s — retrying",
-                        seed_id,
-                        exc,
-                    )
-                    continue
-                break
-
-            seed_call_logs.append(_build_call_log_entry(seed_id, llm_result, attempt))
-
-            # Validate the ordinal wire protocol and translate it to the
-            # established canonical verdict model only after exact-set
-            # reconciliation. Historical typed responses remain accepted
-            # for local test adapters; production requests V3 exclusively.
-            try:
-                raw_content = llm_result.content
-                if raw_content is None:
-                    raise ValueError("LLM returned None content (refusal or empty)")
-                if isinstance(raw_content, FilterMapDraftV3):
-                    batch_response = map_to_batch(raw_content)
-                elif isinstance(raw_content, BatchFilterDraftV2):
-                    ordinal_decisions = reconcile_filter_ordinals(
-                        raw_content, tuple(handle_lookup)
-                    )
-                    batch_response = BatchFilterResponse(
-                        seed_id=seed_id,
-                        verdicts=[
-                            FilterVerdict(
-                                candidate_id=handle_lookup[handle].candidate_id,
-                                verdict="accept" if decision.relevant else "reject",
-                                rationale=decision.rationale,
-                            )
-                            for handle, decision in ordinal_decisions.items()
-                        ],
-                    )
-                elif isinstance(raw_content, BatchFilterResponse):
-                    batch_response = raw_content
-                elif isinstance(raw_content, dict):
-                    try:
-                        mapped = response_model.model_validate(raw_content)
-                    except ValidationError:
-                        try:
-                            ordinal = BatchFilterDraftV2.model_validate(raw_content)
-                        except ValidationError:
-                            batch_response = BatchFilterResponse.model_validate(
-                                raw_content
-                            )
-                        else:
-                            ordinal_decisions = reconcile_filter_ordinals(
-                                ordinal, tuple(handle_lookup)
-                            )
-                            batch_response = BatchFilterResponse(
-                                seed_id=seed_id,
-                                verdicts=[
-                                    FilterVerdict(
-                                        candidate_id=handle_lookup[handle].candidate_id,
-                                        verdict=(
-                                            "accept" if decision.relevant else "reject"
-                                        ),
-                                        rationale=decision.rationale,
-                                    )
-                                    for handle, decision in ordinal_decisions.items()
-                                ],
-                            )
-                    else:
-                        batch_response = map_to_batch(mapped)
-                elif isinstance(raw_content, str):
-                    batch_response = map_to_batch(
-                        response_model.model_validate(json.loads(raw_content))
-                    )
-                else:
-                    # Wrong content type — try to coerce via model_validate.
-                    batch_response = BatchFilterResponse.model_validate(raw_content)
-            except (
-                ValidationError,
-                ValueError,
-                TypeError,
-                json.JSONDecodeError,
-            ) as exc:
-                batch_response = None
-                reconciliation_error = (
-                    f"Failed to parse LLM content as BatchFilterResponse: {exc}"
-                )
-                if attempt == 1:
-                    logger.warning(
-                        "Filter content validation failed for seed %s "
-                        "(attempt 1): %s — retrying",
-                        seed_id,
-                        reconciliation_error,
-                    )
-                    continue
-                break
-
-            try:
-                ok, err = _reconcile_filter_response(
-                    batch_response,
-                    seed_id,
-                    submitted_ids,
-                )
-            except Exception as exc:  # noqa: BLE001 - reconciliation exception, records error
-                ok = False
-                err = f"Reconciliation exception: {exc}"
-
-            if ok:
-                reconciliation_error = None
-                break
-            reconciliation_error = err
-            if attempt == 1:
-                logger.warning(
-                    "Filter reconciliation failed for seed %s (attempt 1): "
-                    "%s — retrying",
-                    seed_id,
-                    err,
-                )
-                # Discard malformed batch and retry.
-                continue
-
-        if reconciliation_error is not None or batch_response is None:
-            raise FilterProtocolError(
-                f"Filter protocol failure for seed {seed_id} after retry: "
-                f"{reconciliation_error}",
-                call_log_entries=seed_call_logs,
-                reconciliation=_reconciliation_evidence(
-                    seed_id,
-                    submitted_ids,
-                    batch_response,
-                    reconciliation_error,
-                ),
-            )
-
-        # Reconciliation passed — resolve metadata from candidate lookup.
-        # Wrap post-reconciliation work so unexpected exceptions carry
-        # accumulated seed_call_logs rather than empty evidence.
-        try:
-            accepted_verdicts: list[FilterVerdict] = []
-            rejected_verdicts: list[FilterVerdict] = []
-            for v in batch_response.verdicts:
-                if v.verdict == "accept":
-                    accepted_verdicts.append(v)
-                else:
-                    rejected_verdicts.append(v)
-
-            # Build enriched rejection records from candidate lookup.
-            rejection_records: list[RejectionRecord] = []
-            for v in rejected_verdicts:
-                cand = candidate_lookup.get(v.candidate_id)
-                if cand is not None:
-                    rejection_records.append(
-                        RejectionRecord(
-                            candidate_id=v.candidate_id,
-                            entry_point=cand.entry_point,
-                            atlas_technique_ids=cand.atlas_technique_ids,
-                            rationale=v.rationale,
-                        )
-                    )
-
-            original_seed = seed_lookup.get(seed_id)
-            if original_seed is None:
-                logger.warning(
-                    "Seed %s not found in seed lookup — skipping %d accepted verdicts",
-                    seed_id,
-                    len(accepted_verdicts),
-                )
-                return (
-                    [],
-                    0,
-                    len(seed_candidates),
-                    seed_call_logs,
-                    rejected_verdicts,
-                )
-
-            seed_results: list[FilteredSeed] = []
-            for verdict in accepted_verdicts:
-                cand = candidate_lookup.get(verdict.candidate_id)
-                if cand is None:
-                    # Should not happen after reconciliation, but guard anyway.
-                    logger.error(
-                        "Candidate %s not in lookup after reconciliation — skipping",
-                        verdict.candidate_id,
-                    )
-                    continue
-                seed_results.append(
-                    FilteredSeed(
-                        **original_seed.model_dump(),
-                        pinned_entry_point=cand.entry_point,
-                        pinned_technique_ids=cand.atlas_technique_ids,
-                        pinned_technique_names=cand.atlas_technique_names,
-                        entry_point_id=cand.entry_point_id,
-                        candidate_id=cand.candidate_id,
-                        origins=list(cand.origins),
-                        rejection_rationales=rejection_records,
-                        accepted_rationale=verdict.rationale,
-                    )
-                )
-
-            seed_accepted = len(accepted_verdicts)
-            seed_total = len(seed_candidates)
-            logger.info(
-                "Seed %s: %d/%d candidates accepted",
-                seed_id,
-                seed_accepted,
-                seed_total,
-            )
-            return (
-                seed_results,
-                seed_accepted,
-                seed_total - seed_accepted,
-                seed_call_logs,
-                rejected_verdicts,
-            )
-        except Exception as exc:
-            raise FilterProtocolError(
-                f"Unexpected post-reconciliation failure for seed {seed_id}: {exc}",
-                call_log_entries=seed_call_logs,
-            ) from exc
 
     total_accepted = 0
     total_rejected = 0
@@ -1796,106 +2433,23 @@ def filter_candidates(
     protocol_errors: list[FilterProtocolError] = []
     quarantined_seeds: list[FilterSeedQuarantine] = []
 
-    def _admit_rule_eligible(seed_id: str) -> list[FilteredSeed]:
-        """Preserve every rule-eligible candidate after advisory filter failure."""
-        original_seed = seed_lookup[seed_id]
-        return [
-            FilteredSeed(
-                **original_seed.model_dump(),
-                pinned_entry_point=candidate.entry_point,
-                pinned_technique_ids=candidate.atlas_technique_ids,
-                pinned_technique_names=candidate.atlas_technique_names,
-                entry_point_id=candidate.entry_point_id,
-                candidate_id=candidate.candidate_id,
-                origins=list(candidate.origins),
-                rejection_rationales=[],
-                accepted_rationale=(
-                    "Candidate filter unavailable; rule-eligible candidate retained."
-                ),
-            )
-            for candidate in groups[seed_id]
-        ]
-
     max_workers = min(8, len(groups))
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(_filter_one_seed, sid, cands): sid
-            for sid, cands in groups.items()
-        }
-        for future in as_completed(futures):
-            seed_id = futures[future]
-            try:
-                (
-                    seed_results,
-                    n_acc,
-                    n_rej,
-                    seed_logs,
-                    seed_rejected,
-                ) = future.result()
-                results.extend(seed_results)
-                total_accepted += n_acc
-                total_rejected += n_rej
-                call_log_entries.extend(seed_logs)
-                all_rejected_verdicts.extend(seed_rejected)
-            except FilterProtocolError as exc:
-                logger.error("Filter protocol failure for seed %s: %s", seed_id, exc)
-                if advisory_on_failure:
-                    results.extend(_admit_rule_eligible(seed_id))
-                    total_accepted += len(groups[seed_id])
-                    call_log_entries.extend(exc.call_log_entries)
-                    call_log_entries.append(
-                        {
-                            "call": "candidate_filter",
-                            "seed_id": seed_id,
-                            "warning": "candidate_filter_unavailable",
-                            "response": None,
-                        }
-                    )
-                else:
-                    protocol_errors.append(exc)
-            except Exception as exc:
-                # Any unexpected exception from _filter_one_seed is an
-                # infrastructure/protocol failure, not an ordinary rejection.
-                # Convert to FilterProtocolError so the run fails cleanly
-                # with evidence rather than silently dropping a seed.
-                # Preserve any call logs the exception already carries.
-                logger.exception("Filter infrastructure failure for seed %s", seed_id)
-                failure = FilterProtocolError(
-                    f"Filter infrastructure failure for seed {seed_id}: {exc}",
-                    call_log_entries=[],
-                )
-                if advisory_on_failure:
-                    results.extend(_admit_rule_eligible(seed_id))
-                    total_accepted += len(groups[seed_id])
-                    call_log_entries.append(
-                        {
-                            "call": "candidate_filter",
-                            "seed_id": seed_id,
-                            "warning": "candidate_filter_unavailable",
-                            "response": None,
-                        }
-                    )
-                else:
-                    protocol_errors.append(failure)
+        for delta in _iter_filter_futures(
+            executor, groups, seed_lookup, advisory_on_failure, client, system_prompt
+        ):
+            results.extend(delta[0])
+            total_accepted += delta[1]
+            total_rejected += delta[2]
+            call_log_entries.extend(delta[3])
+            all_rejected_verdicts.extend(delta[4])
+            if delta[5] is not None:
+                protocol_errors.append(delta[5])
 
     if protocol_errors:
-        # Collect all call logs (including from successful seeds) so the
-        # runner can persist them before failing the run.
-        all_logs = list(call_log_entries)
-        for err in protocol_errors:
-            all_logs.extend(err.call_log_entries)
-        call_log_entries = all_logs
-        for error in protocol_errors:
-            if error.reconciliation is not None and quarantine_on_failure:
-                quarantined_seeds.append(
-                    FilterSeedQuarantine(
-                        seed_id=error.reconciliation.seed_id,
-                        reconciliation=error.reconciliation,
-                    )
-                )
-        if not quarantine_on_failure:
-            first_err = protocol_errors[0]
-            raise FilterProtocolError(str(first_err), call_log_entries=all_logs)
+        call_log_entries, quarantined_seeds = _escalate_protocol_errors(
+            protocol_errors, call_log_entries, quarantine_on_failure
+        )
 
     logger.info(
         "Filter: %d/%d candidates survived (%d rejected)",
@@ -1904,9 +2458,13 @@ def filter_candidates(
         total_rejected,
     )
 
-    if quarantine_on_failure:
-        return results, call_log_entries, all_rejected_verdicts, quarantined_seeds
-    return results, call_log_entries, all_rejected_verdicts
+    return _final_filter_result(
+        results,
+        call_log_entries,
+        all_rejected_verdicts,
+        quarantined_seeds,
+        quarantine_on_failure,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2094,6 +2652,36 @@ def _rule_preparatory_technique(
     return False, None
 
 
+# Layer mismatch table: (target_layer, incompatible ep_types, reason).
+_LAYER_MISMATCH_REASONS: tuple[tuple[str, tuple[str, ...], str], ...] = (
+    (
+        "tool_schema",
+        ("direct",),
+        "tool schema injection targets tool metadata trust boundaries, "
+        "not direct user chat interfaces.",
+    ),
+    (
+        "training",
+        ("direct", "indirect"),
+        "training pipeline attacks target the model development process, "
+        "not runtime inputs.",
+    ),
+    (
+        "embedding",
+        ("direct",),
+        "embedding manipulation targets vector stores, not direct user input channels.",
+    ),
+)
+
+
+def _layer_rejection(target_layer: str, ep_type: str) -> str | None:
+    """The incompatibility reason for a layer/ep-type pair, if any."""
+    for layer, incompatible_ep_types, reason in _LAYER_MISMATCH_REASONS:
+        if target_layer == layer and ep_type in incompatible_ep_types:
+            return reason
+    return None
+
+
 def _rule_technique_targets_wrong_layer(
     technique_id: str,
     entry_point_name: str,
@@ -2107,32 +2695,13 @@ def _rule_technique_targets_wrong_layer(
     target_layer = props.get("target_layer")
     if target_layer is None:
         return False, None
-
-    # Tool schema injection via direct user chat interface.
-    if target_layer == "tool_schema" and ep_type == "direct":
-        return True, (
-            f"Rejected: {technique_id} ({_get_technique_name(technique_id)}) "
-            f"is incompatible with entry point type {ep_type} -- "
-            f"tool schema injection targets tool metadata trust boundaries, "
-            f"not direct user chat interfaces."
-        )
-    # Training-layer techniques via runtime entry points.
-    if target_layer == "training" and ep_type in ("direct", "indirect"):
-        return True, (
-            f"Rejected: {technique_id} ({_get_technique_name(technique_id)}) "
-            f"is incompatible with entry point type {ep_type} -- "
-            f"training pipeline attacks target the model development process, "
-            f"not runtime inputs."
-        )
-    # Embedding manipulation via direct user input.
-    if target_layer == "embedding" and ep_type == "direct":
-        return True, (
-            f"Rejected: {technique_id} ({_get_technique_name(technique_id)}) "
-            f"is incompatible with entry point type {ep_type} -- "
-            f"embedding manipulation targets vector stores, not direct "
-            f"user input channels."
-        )
-    return False, None
+    reason = _layer_rejection(target_layer, ep_type)
+    if reason is None:
+        return False, None
+    return True, (
+        f"Rejected: {technique_id} ({_get_technique_name(technique_id)}) "
+        f"is incompatible with entry point type {ep_type} -- {reason}"
+    )
 
 
 # Ordered list of all per-technique rules.  Evaluated top-to-bottom; first rejection wins.
@@ -2191,7 +2760,7 @@ def _rule_threat_requires_zone(
 
     # AND semantics: all required_zones must be active
     required = prereqs.get("required_zones", [])
-    missing = [z for z in required if z not in active]
+    missing = _missing_required_zones(required, active)
     if missing:
         return True, (
             f"Rejected: threat {threat_id} requires zone(s) "
@@ -2200,13 +2769,23 @@ def _rule_threat_requires_zone(
 
     # OR semantics: at least one of required_zones_any must be active
     any_of = prereqs.get("required_zones_any", [])
-    if any_of and not active.intersection(any_of):
+    if _zone_any_unsatisfied(any_of, active):
         return True, (
             f"Rejected: threat {threat_id} requires at least one of "
             f"zone(s) {any_of} but profile only has {sorted(active)}."
         )
 
     return False, None
+
+
+def _missing_required_zones(required: list[str], active: set[str]) -> list[str]:
+    """Required zones that are not active, in declared order."""
+    return [z for z in required if z not in active]
+
+
+def _zone_any_unsatisfied(any_of: list[str], active: set[str]) -> bool:
+    """True when OR-semantics zones exist but none is active."""
+    return bool(any_of) and not active.intersection(any_of)
 
 
 def _rule_threat_requires_capability(
@@ -2222,20 +2801,7 @@ def _rule_threat_requires_capability(
     if not required_caps:
         return False, None
 
-    _CAP_GETTERS: dict[str, str] = {
-        "has_persistent_memory": "has_persistent_memory",
-        "multi_agent": "multi_agent",
-        "hitl": "hitl",
-    }
-
-    missing = []
-    for cap in required_caps:
-        attr = _CAP_GETTERS.get(cap)
-        if attr is None:
-            continue
-        if not getattr(profile, attr, False):
-            missing.append(cap)
-
+    missing = _missing_required_caps(required_caps, profile)
     if missing:
         return True, (
             f"Rejected: threat {threat_id} requires capability(ies) "
@@ -2243,6 +2809,27 @@ def _rule_threat_requires_capability(
         )
 
     return False, None
+
+
+_CAP_GETTERS: dict[str, str] = {
+    "has_persistent_memory": "has_persistent_memory",
+    "multi_agent": "multi_agent",
+    "hitl": "hitl",
+}
+
+
+def _missing_required_caps(
+    required_caps: list[str], profile: CapabilityProfile
+) -> list[str]:
+    """Required capabilities the profile lacks, in declared order."""
+    missing = []
+    for cap in required_caps:
+        attr = _CAP_GETTERS.get(cap)
+        if attr is None:
+            continue
+        if not getattr(profile, attr, False):
+            missing.append(cap)
+    return missing
 
 
 # --- Rule-based filter orchestration ---
@@ -2300,154 +2887,94 @@ def apply_rule_based_filter(
     rejection_verdicts: list[RejectionRecord] = []
 
     for candidate in candidates:
-        # --- Seed-level compatibility checks (reject entire candidate) ---
-        threat_reject, threat_rationale = _rule_seed_profile_compatibility(
-            candidate.seed_id,
-            profile,
+        rejected, records, passed = _rule_filter_one_candidate(candidate, profile)
+        rule_rejected.extend(rejected)
+        rejection_verdicts.extend(records)
+        rule_passed.extend(passed)
+
+    _log_rule_rejections(rule_rejected, rule_passed)
+
+    # Canonicalize and deduplicate immediately after rule pruning —
+    # pruning techniques may cause two formerly-distinct candidates to
+    # converge to the same canonical identity.
+    raw_passed_count = len(rule_passed)
+    rule_passed = canonicalize_and_dedup(rule_passed, stage="rule_pruning")
+    _rule_pruning_stage_record(stage_records, raw_passed_count, rule_passed)
+
+    return rule_passed, rule_rejected, rejection_verdicts
+
+
+def _rule_filter_one_candidate(
+    candidate: CandidateTriple,
+    profile: CapabilityProfile,
+) -> tuple[list[CandidateTriple], list[RejectionRecord], list[CandidateTriple]]:
+    """Process one candidate into (rejected, rejection_records, passed)."""
+    threat_reject, threat_rationale = _threat_rejection(candidate, profile)
+    if threat_reject:
+        return [candidate], [_threat_rejection_record(candidate, threat_rationale)], []
+
+    ep_type = classify_entry_point(
+        candidate.entry_point,
+        candidate.direction or "bidirectional",
+        candidate.controllability,
+    )
+    (
+        compatible_ids,
+        compatible_names,
+        compatible_descs,
+        combo_rationales,
+        removed_tids,
+        removed_rules,
+        removed_reasons,
+    ) = _technique_compatibilities(candidate, ep_type, profile)
+
+    if not compatible_ids:
+        # All techniques rejected -- reject the entire candidate.
+        return (
+            [candidate],
+            [
+                _full_rejection_record(
+                    candidate,
+                    combo_rationales,
+                    removed_tids,
+                    removed_rules,
+                    removed_reasons,
+                )
+            ],
+            [],
         )
 
-        # --- Threat-level prerequisite checks (reject entire candidate) ---
-        if not threat_reject:
-            threat_reject, threat_rationale = _rule_threat_requires_zone(
-                candidate.threat_id,
-                profile,
-            )
-        if not threat_reject:
-            threat_reject, threat_rationale = _rule_threat_requires_capability(
-                candidate.threat_id,
-                profile,
-            )
-        if threat_reject:
-            rule_rejected.append(candidate)
-            rejection_verdicts.append(
-                RejectionRecord(
-                    candidate_id=candidate.candidate_id,
-                    entry_point=candidate.entry_point,
-                    atlas_technique_ids=candidate.atlas_technique_ids,
-                    rationale=threat_rationale or "Threat prerequisite not met.",
-                )
-            )
-            continue
+    if len(compatible_ids) < len(candidate.atlas_technique_ids):
+        # Partial pruning: some techniques removed from combo.
+        candidate = _pruned_candidate(
+            candidate,
+            compatible_ids,
+            compatible_names,
+            compatible_descs,
+            removed_tids,
+            removed_rules,
+            removed_reasons,
+        )
 
-        # Use the candidate's own direction and controllability, not a
-        # name-keyed profile lookup — same-name EPs with different
-        # canonical identities must not overwrite each other.
-        direction = candidate.direction or "bidirectional"
-        ctrl = candidate.controllability
-        ep_type = classify_entry_point(candidate.entry_point, direction, ctrl)
+    return [], [], [candidate]
 
-        # Check each technique in the combo.
-        compatible_ids: list[str] = []
-        compatible_names: list[str] = []
-        compatible_descs: list[str] = []
-        combo_rationales: list[str] = []
-        removed_tids: list[str] = []
-        removed_reasons: list[str] = []
-        removed_rules: list[str] = []
 
-        for tid, tname, tdesc in zip(
-            candidate.atlas_technique_ids,
-            candidate.atlas_technique_names,
-            candidate.atlas_technique_descriptions,
-        ):
-            reject, rationale, rule_name = _run_rules_on_technique(
-                tid,
-                candidate.entry_point,
-                ep_type,
-                profile,
-            )
-            if reject:
-                combo_rationales.append(rationale)  # type: ignore[arg-type]
-                removed_tids.append(tid)
-                removed_reasons.append(rationale)  # type: ignore[arg-type]
-                removed_rules.append(rule_name)  # type: ignore[arg-type]
-            else:
-                compatible_ids.append(tid)
-                compatible_names.append(tname)
-                compatible_descs.append(tdesc)
+def _threat_rejection_record(
+    candidate: CandidateTriple, threat_rationale: str | None
+) -> RejectionRecord:
+    """A whole-candidate rejection from seed/threat prerequisites."""
+    return RejectionRecord(
+        candidate_id=candidate.candidate_id,
+        entry_point=candidate.entry_point,
+        atlas_technique_ids=candidate.atlas_technique_ids,
+        rationale=threat_rationale or "Threat prerequisite not met.",
+    )
 
-        if not compatible_ids:
-            # All techniques rejected -- reject the entire candidate.
-            rule_rejected.append(candidate)
-            # Build per-removal decisions for fully rejected combos so
-            # every removed technique carries its own rule/reason.
-            full_rejection_decisions = tuple(
-                RemovalDecision(
-                    technique_id=tid,
-                    rule=rule_name or "unknown",
-                    reason=reason,
-                )
-                for tid, rule_name, reason in zip(
-                    removed_tids, removed_rules, removed_reasons
-                )
-            )
-            rejection_verdicts.append(
-                RejectionRecord(
-                    candidate_id=candidate.candidate_id,
-                    entry_point=candidate.entry_point,
-                    atlas_technique_ids=candidate.atlas_technique_ids,
-                    rationale=combo_rationales[0]
-                    if combo_rationales
-                    else "Rule-rejected.",
-                    removal_decisions=full_rejection_decisions,
-                )
-            )
-            continue
 
-        if len(compatible_ids) < len(candidate.atlas_technique_ids):
-            # Partial pruning: some techniques removed from combo.
-            pruned = set(candidate.atlas_technique_ids) - set(compatible_ids)
-            logger.info(
-                "Rule pre-filter: pruned %s from combo for %s",
-                pruned,
-                candidate.entry_point,
-            )
-            original_candidate_id = candidate.candidate_id
-            original_technique_ids = candidate.atlas_technique_ids
-            new_candidate_id = compute_candidate_id(
-                candidate.seed_id,
-                candidate.entry_point_id,
-                compatible_ids,
-            )
-            # Build per-removal decision records — one per removed technique.
-            removal_decisions = tuple(
-                RemovalDecision(
-                    technique_id=tid,
-                    rule=rule_name or "unknown",
-                    reason=reason,
-                )
-                for tid, rule_name, reason in zip(
-                    removed_tids, removed_rules, removed_reasons
-                )
-            )
-            applied_rule = removed_rules[0] if removed_rules else None
-            pruning_origin = CandidateOrigin(
-                source_candidate_id=original_candidate_id,
-                original_technique_ids=original_technique_ids,
-                applied_rule=applied_rule,
-                removed_technique_ids=tuple(removed_tids),
-                removal_reasons=tuple(removed_reasons),
-                removal_decisions=removal_decisions,
-                transform_stage="rule_pruning",
-            )
-            # Reconstruct the pruned candidate through model_validate so
-            # canonical IDs are re-validated and nested collections are
-            # not shared with the original.  Using model_validate instead
-            # of model_copy(update=...) ensures the new candidate_id is
-            # checked against the canonical recomputation.
-            candidate = CandidateTriple.model_validate(
-                candidate.model_dump(mode="python")
-                | {
-                    "atlas_technique_ids": tuple(compatible_ids),
-                    "atlas_technique_names": tuple(compatible_names),
-                    "atlas_technique_descriptions": tuple(compatible_descs),
-                    "candidate_id": new_candidate_id,
-                    "origins": candidate.origins + (pruning_origin,),
-                }
-            )
-
-        rule_passed.append(candidate)
-
+def _log_rule_rejections(
+    rule_rejected: list[CandidateTriple], rule_passed: list[CandidateTriple]
+) -> None:
+    """Log the rule-pruning outcome when any candidate was rejected."""
     if rule_rejected:
         logger.info(
             "Rule pre-filter: %d/%d candidates rejected, %d passed to LLM filter",
@@ -2456,11 +2983,13 @@ def apply_rule_based_filter(
             len(rule_passed),
         )
 
-    # Canonicalize and deduplicate immediately after rule pruning —
-    # pruning techniques may cause two formerly-distinct candidates to
-    # converge to the same canonical identity.
-    raw_passed_count = len(rule_passed)
-    rule_passed = canonicalize_and_dedup(rule_passed, stage="rule_pruning")
+
+def _rule_pruning_stage_record(
+    stage_records: list[StageRecord] | None,
+    raw_passed_count: int,
+    rule_passed: list[CandidateTriple],
+) -> None:
+    """Record the rule-pruning stage counts when a ledger is supplied."""
     if stage_records is not None:
         stage_records.append(
             StageRecord(
@@ -2471,12 +3000,167 @@ def apply_rule_based_filter(
             )
         )
 
-    return rule_passed, rule_rejected, rejection_verdicts
-
 
 # ---------------------------------------------------------------------------
 # Post-filter: cap scenarios per attack pattern
 # ---------------------------------------------------------------------------
+
+
+def _threat_rejection(
+    candidate: CandidateTriple,
+    profile: CapabilityProfile,
+) -> tuple[bool, str | None]:
+    """Seed-level and threat-level prerequisite rejections."""
+    threat_reject, threat_rationale = _rule_seed_profile_compatibility(
+        candidate.seed_id,
+        profile,
+    )
+    if not threat_reject:
+        threat_reject, threat_rationale = _rule_threat_requires_zone(
+            candidate.threat_id,
+            profile,
+        )
+    if not threat_reject:
+        threat_reject, threat_rationale = _rule_threat_requires_capability(
+            candidate.threat_id,
+            profile,
+        )
+    return threat_reject, threat_rationale
+
+
+def _technique_compatibilities(
+    candidate: CandidateTriple,
+    ep_type: str,
+    profile: CapabilityProfile,
+) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
+    """Split one combo into compatible and removed techniques.
+
+    Returns (compatible_ids, compatible_names, compatible_descs,
+    combo_rationales, removed_tids, removed_rules, removed_reasons).
+    """
+    compatible_ids: list[str] = []
+    compatible_names: list[str] = []
+    compatible_descs: list[str] = []
+    combo_rationales: list[str] = []
+    removed_tids: list[str] = []
+    removed_reasons: list[str] = []
+    removed_rules: list[str] = []
+
+    for tid, tname, tdesc in zip(
+        candidate.atlas_technique_ids,
+        candidate.atlas_technique_names,
+        candidate.atlas_technique_descriptions,
+    ):
+        reject, rationale, rule_name = _run_rules_on_technique(
+            tid,
+            candidate.entry_point,
+            ep_type,
+            profile,
+        )
+        if reject:
+            combo_rationales.append(rationale)  # type: ignore[arg-type]
+            removed_tids.append(tid)
+            removed_reasons.append(rationale)  # type: ignore[arg-type]
+            removed_rules.append(rule_name)  # type: ignore[arg-type]
+        else:
+            compatible_ids.append(tid)
+            compatible_names.append(tname)
+            compatible_descs.append(tdesc)
+
+    return (
+        compatible_ids,
+        compatible_names,
+        compatible_descs,
+        combo_rationales,
+        removed_tids,
+        removed_rules,
+        removed_reasons,
+    )
+
+
+def _removal_decisions_for(
+    removed_tids: list[str],
+    removed_rules: list[str],
+    removed_reasons: list[str],
+) -> tuple[RemovalDecision, ...]:
+    """Per-removal decision records, one per removed technique."""
+    return tuple(
+        RemovalDecision(
+            technique_id=tid,
+            rule=rule_name or "unknown",
+            reason=reason,
+        )
+        for tid, rule_name, reason in zip(removed_tids, removed_rules, removed_reasons)
+    )
+
+
+def _full_rejection_record(
+    candidate: CandidateTriple,
+    combo_rationales: list[str],
+    removed_tids: list[str],
+    removed_rules: list[str],
+    removed_reasons: list[str],
+) -> RejectionRecord:
+    """A fully rejected combo, with per-technique removal decisions."""
+    return RejectionRecord(
+        candidate_id=candidate.candidate_id,
+        entry_point=candidate.entry_point,
+        atlas_technique_ids=candidate.atlas_technique_ids,
+        rationale=combo_rationales[0] if combo_rationales else "Rule-rejected.",
+        removal_decisions=_removal_decisions_for(
+            removed_tids, removed_rules, removed_reasons
+        ),
+    )
+
+
+def _pruned_candidate(
+    candidate: CandidateTriple,
+    compatible_ids: list[str],
+    compatible_names: list[str],
+    compatible_descs: list[str],
+    removed_tids: list[str],
+    removed_rules: list[str],
+    removed_reasons: list[str],
+) -> CandidateTriple:
+    """Rebuild a partially pruned candidate with a new id and origin."""
+    pruned = set(candidate.atlas_technique_ids) - set(compatible_ids)
+    logger.info(
+        "Rule pre-filter: pruned %s from combo for %s",
+        pruned,
+        candidate.entry_point,
+    )
+    new_candidate_id = compute_candidate_id(
+        candidate.seed_id,
+        candidate.entry_point_id,
+        compatible_ids,
+    )
+    applied_rule = removed_rules[0] if removed_rules else None
+    pruning_origin = CandidateOrigin(
+        source_candidate_id=candidate.candidate_id,
+        original_technique_ids=candidate.atlas_technique_ids,
+        applied_rule=applied_rule,
+        removed_technique_ids=tuple(removed_tids),
+        removal_reasons=tuple(removed_reasons),
+        removal_decisions=_removal_decisions_for(
+            removed_tids, removed_rules, removed_reasons
+        ),
+        transform_stage="rule_pruning",
+    )
+    # Reconstruct the pruned candidate through model_validate so
+    # canonical IDs are re-validated and nested collections are
+    # not shared with the original.  Using model_validate instead
+    # of model_copy(update=...) ensures the new candidate_id is
+    # checked against the canonical recomputation.
+    return CandidateTriple.model_validate(
+        candidate.model_dump(mode="python")
+        | {
+            "atlas_technique_ids": tuple(compatible_ids),
+            "atlas_technique_names": tuple(compatible_names),
+            "atlas_technique_descriptions": tuple(compatible_descs),
+            "candidate_id": new_candidate_id,
+            "origins": candidate.origins + (pruning_origin,),
+        }
+    )
 
 
 def cap_scenarios_per_pattern(
@@ -2525,36 +3209,7 @@ def cap_scenarios_per_pattern(
             result.extend(group)
             continue
 
-        # Greedy marginal-coverage selection.
-        covered_techniques: set[str] = set()
-        seen_entry_points: set[str] = set()
-        selected: list[FilteredSeed] = []
-        remaining_indices: list[int] = list(range(len(group)))
-
-        while len(selected) < max_per_pattern and remaining_indices:
-            best_idx: int | None = None
-            best_score: tuple[int, int, int] = (-1, -1, -1)
-
-            for idx in remaining_indices:
-                fs = group[idx]
-                new_techniques = sum(
-                    1 for t in fs.pinned_technique_ids if t not in covered_techniques
-                )
-                new_entry_point = 1 if fs.entry_point_id not in seen_entry_points else 0
-                marginal = new_techniques + new_entry_point
-                combo_size = len(fs.pinned_technique_ids)
-                # Score tuple: (marginal coverage, combo size, -index for stable ordering)
-                score = (marginal, combo_size, -idx)
-                if score > best_score:
-                    best_score = score
-                    best_idx = idx
-
-            assert best_idx is not None  # remaining_indices is non-empty
-            chosen = group[best_idx]
-            selected.append(chosen)
-            covered_techniques.update(chosen.pinned_technique_ids)
-            seen_entry_points.add(chosen.entry_point_id)
-            remaining_indices.remove(best_idx)
+        selected = _greedy_coverage_selection(group, max_per_pattern)
 
         logger.warning(
             "Capped %s from %d to %d scenarios (--max-scenarios-per-pattern)",
@@ -2582,6 +3237,54 @@ def cap_scenarios_per_pattern(
     return result
 
 
+def _greedy_coverage_selection(
+    group: list[FilteredSeed], max_per_pattern: int
+) -> list[FilteredSeed]:
+    """Greedy marginal-coverage selection over one over-cap group."""
+    covered_techniques: set[str] = set()
+    seen_entry_points: set[str] = set()
+    selected: list[FilteredSeed] = []
+    remaining_indices: list[int] = list(range(len(group)))
+
+    while len(selected) < max_per_pattern and remaining_indices:
+        best_idx: int | None = None
+        best_score: tuple[int, int, int] = (-1, -1, -1)
+
+        for idx in remaining_indices:
+            score = _marginal_score(
+                group[idx], covered_techniques, seen_entry_points, idx
+            )
+            if score > best_score:
+                best_score = score
+                best_idx = idx
+
+        assert best_idx is not None  # remaining_indices is non-empty
+        chosen = group[best_idx]
+        selected.append(chosen)
+        covered_techniques.update(chosen.pinned_technique_ids)
+        seen_entry_points.add(chosen.entry_point_id)
+        remaining_indices.remove(best_idx)
+
+    return selected
+
+
+def _marginal_score(
+    fs: FilteredSeed,
+    covered_techniques: set[str],
+    seen_entry_points: set[str],
+    idx: int,
+) -> tuple[int, int, int]:
+    """(marginal coverage, combo size, -index) score tuple."""
+    new_techniques = sum(
+        1 for t in fs.pinned_technique_ids if t not in covered_techniques
+    )
+    new_entry_point = 1 if fs.entry_point_id not in seen_entry_points else 0
+    marginal = new_techniques + new_entry_point
+    combo_size = len(fs.pinned_technique_ids)
+    # Score tuple: (marginal coverage, combo size, -index for stable ordering)
+    return (marginal, combo_size, -idx)
+
+
 def _dedup_filtered_seeds(
     filtered_seeds: list[FilteredSeed],
 ) -> list[FilteredSeed]:
@@ -2597,48 +3300,46 @@ def _dedup_filtered_seeds(
         list
     )
     for fs in filtered_seeds:
-        key = (
-            fs.seed_id,
-            fs.entry_point_id,
-            tuple(sorted(set(fs.pinned_technique_ids))),
-        )
-        groups[key].append(fs)
+        groups[_filtered_seed_key(fs)].append(fs)
 
     result: list[FilteredSeed] = []
     for group in groups.values():
         if len(group) == 1:
             result.append(group[0])
             continue
-        # Merge origins from all duplicates, canonicalize and dedup.
-        all_origins: list[CandidateOrigin] = []
-        for fs in group:
-            all_origins.extend(fs.origins)
-        unique_origins = _canonicalize_and_dedup_origins(all_origins)
-        # Reject conflicting non-provenance metadata.
-        template = group[0]
-        _non_prov_fields = (
-            "seed_id",
-            "threat_id",
-            "threat_name",
-            "attack_pattern_name",
-            "attack_pattern_description",
-            "entry_point_id",
-            "risk_card_ref",
-            "owasp_llm_ids",
-            "agentic_threat_ids",
-        )
-        for fs in group[1:]:
-            for field_name in _non_prov_fields:
-                tval = getattr(template, field_name)
-                cval = getattr(fs, field_name)
-                if tval != cval:
-                    raise ValueError(
-                        f"Conflicting non-provenance metadata for "
-                        f"converged filtered seed '{template.candidate_id}': "
-                        f"field '{field_name}' differs "
-                        f"({tval!r} vs {cval!r})"
-                    )
-        merged = template.model_copy(update={"origins": unique_origins})
-        result.append(merged)
+        result.append(_merged_filtered_seed(group))
 
     return result
+
+
+def _filtered_seed_key(fs: FilteredSeed) -> tuple[str, str, tuple[str, ...]]:
+    """Canonical dedup identity of one filtered seed."""
+    return (
+        fs.seed_id,
+        fs.entry_point_id,
+        tuple(sorted(set(fs.pinned_technique_ids))),
+    )
+
+
+def _merged_filtered_seed(group: list[FilteredSeed]) -> FilteredSeed:
+    """Merge duplicate filtered seeds: canonical origins, conflict-free."""
+    all_origins: list[CandidateOrigin] = []
+    for fs in group:
+        all_origins.extend(fs.origins)
+    unique_origins = _canonicalize_and_dedup_origins(all_origins)
+    template = group[0]
+    _non_provenance_conflicts(template, group[1:], _FILTERED_NON_PROV_FIELDS)
+    return template.model_copy(update={"origins": unique_origins})
+
+
+_FILTERED_NON_PROV_FIELDS = (
+    "seed_id",
+    "threat_id",
+    "threat_name",
+    "attack_pattern_name",
+    "attack_pattern_description",
+    "entry_point_id",
+    "risk_card_ref",
+    "owasp_llm_ids",
+    "agentic_threat_ids",
+)

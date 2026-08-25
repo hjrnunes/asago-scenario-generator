@@ -12,6 +12,7 @@ Covers:
 from __future__ import annotations
 
 import math
+from unittest.mock import MagicMock
 
 import pytest
 from pydantic import ValidationError
@@ -27,6 +28,7 @@ from asago_scenario_generator.pipeline.candidates import (
     DIRECT_ONLY_TECHNIQUES,
     BatchFilterResponse,
     CandidateTriple,
+    FilterProtocolError,
     FilteredSeed,
     FilterVerdict,
     _rule_direct_vs_indirect,
@@ -472,7 +474,8 @@ _expand_candidates = (
     ).expand_candidates
     if hasattr(
         __import__(
-            "asago_scenario_generator.pipeline.candidates", fromlist=["expand_candidates"]
+            "asago_scenario_generator.pipeline.candidates",
+            fromlist=["expand_candidates"],
         ),
         "expand_candidates",
     )
@@ -2247,3 +2250,173 @@ class TestApplyRuleBasedFilterThreatPrereqs:
         assert len(passed) == 2
         assert len(rejected) == 1
         assert rejected[0].threat_id == "T12"
+
+
+# ---------------------------------------------------------------------------
+# Decomposition helper tests (CRAP <= 6)
+# ---------------------------------------------------------------------------
+
+
+class TestExpansionAndFilterHelpers:
+    """Direct coverage for decomposed candidates.py helpers."""
+
+    def test_capability_available_branches(self):
+        from asago_scenario_generator.pipeline.candidates import (
+            _capability_available,
+        )
+
+        profile = _make_profile()
+        assert _capability_available("multi_agent", profile) is False
+        multi = CapabilityProfile(
+            zones_active=["input", "reasoning"],
+            entry_points=["user prompts (input)"],
+            confidence=ConfidenceLevel.high,
+            kc_subcodes=["KCX-MAGENT"],
+        )
+        assert _capability_available("multi_agent", multi) is True
+        assert _capability_available("persistent_memory", profile) is False
+        persistent = CapabilityProfile(
+            zones_active=["input", "reasoning"],
+            entry_points=["user prompts (input)"],
+            confidence=ConfidenceLevel.high,
+            kc_subcodes=["KCX-PMEM"],
+        )
+        assert _capability_available("persistent_memory", persistent) is True
+        assert _capability_available("tool_execution", profile) is False
+        tooled = CapabilityProfile(
+            zones_active=["input", "reasoning", "tool_execution"],
+            entry_points=["user prompts (input)"],
+            confidence=ConfidenceLevel.high,
+            kc_subcodes=["KC5.1"],
+            tool_inventory=[
+                ToolInventoryEntry(name="test_tool", description="A test tool")
+            ],
+        )
+        assert _capability_available("tool_execution", tooled) is True
+        # Unknown capabilities are treated as satisfied.
+        assert _capability_available("hitl", profile) is True
+
+    def test_capability_eligible_seeds_filters(self):
+        from asago_scenario_generator.pipeline.candidates import (
+            _capability_eligible_seeds,
+        )
+
+        base = _make_seed()
+        needy = base.model_copy(
+            update={"required_capabilities": ["multi_agent", "persistent_memory"]}
+        )
+        profile = _make_profile()
+        assert _capability_eligible_seeds([base, needy], profile) == [base]
+        capable = CapabilityProfile(
+            zones_active=["input", "reasoning"],
+            entry_points=["user prompts (input)"],
+            confidence=ConfidenceLevel.high,
+            kc_subcodes=["KCX-MAGENT", "KCX-PMEM"],
+        )
+        assert _capability_eligible_seeds([base, needy], capable) == [base, needy]
+        tool_only = base.model_copy(
+            update={"required_capabilities": ["tool_execution"]}
+        )
+        tooled = CapabilityProfile(
+            zones_active=["input", "reasoning", "tool_execution"],
+            entry_points=["user prompts (input)"],
+            confidence=ConfidenceLevel.high,
+            kc_subcodes=["KC5.1"],
+            tool_inventory=[
+                ToolInventoryEntry(name="test_tool", description="A test tool")
+            ],
+        )
+        assert _capability_eligible_seeds([tool_only], tooled) == [tool_only]
+        assert _capability_eligible_seeds([tool_only], profile) == []
+        # Seeds without requirements always pass.
+        assert _capability_eligible_seeds([base], profile) == [base]
+
+    def test_filter_modes_mutually_exclusive(self):
+        from asago_scenario_generator.pipeline.candidates import (
+            filter_candidates,
+        )
+
+        client = MagicMock()
+        client.complete.return_value = _llm_result_dummy()
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            filter_candidates(
+                [_make_seed()],
+                [_make_seed()],
+                client,
+                "test",
+                _make_profile(),
+                quarantine_on_failure=True,
+                advisory_on_failure=True,
+            )
+
+    def test_reconcile_batch_exception_branch(self):
+        from asago_scenario_generator.pipeline.candidates import (
+            _reconcile_batch,
+        )
+
+        class BrokenResponse:
+            seed_id = "AP-T7-01"
+
+            @property
+            def verdicts(self):
+                raise AttributeError("boom")
+
+        ok, err = _reconcile_batch(BrokenResponse(), "AP-T7-01", {"c1"})
+        assert ok is False
+        assert "Reconciliation exception" in err
+
+    def test_post_reconciliation_results_seed_not_found(self):
+        from asago_scenario_generator.pipeline.candidates import (
+            _post_reconciliation_results,
+        )
+
+        cand = _make_candidate()
+        verdict = FilterVerdict(
+            candidate_id=cand.candidate_id,
+            verdict="accept",
+            rationale="ok",
+        )
+        batch = BatchFilterResponse(seed_id="AP-T7-01", verdicts=[verdict])
+        lookup = {cand.candidate_id: cand}
+        results, n_acc, n_rej, logs, rejected = _post_reconciliation_results(
+            batch, lookup, {}, "AP-T7-01", [cand], []
+        )
+        assert results == []
+        assert n_acc == 0
+        assert n_rej == 1
+        assert rejected == []
+
+    def test_filter_infrastructure_failure_is_recorded(self):
+        """A non-protocol exception inside _filter_one_seed is escalated."""
+        from asago_scenario_generator.pipeline.candidates import (
+            filter_candidates,
+        )
+
+        cand = _make_candidate()
+        forged = cand.model_copy(update={"entry_point_id": "forged"})
+        client = MagicMock()
+        client.complete.return_value = _llm_result_dummy()
+        with pytest.raises(FilterProtocolError, match="Filter infrastructure failure"):
+            filter_candidates([forged], [_make_seed()], client, "test", _make_profile())
+
+
+def _llm_result_dummy():
+    from asago_scenario_generator.llm.client import LLMResult
+
+    return LLMResult(
+        content=BatchFilterResponse(
+            seed_id="AP-T7-01",
+            verdicts=[
+                FilterVerdict(
+                    candidate_id="cand:v2:00000000000000000000000000000000",
+                    verdict="accept",
+                    rationale="ok",
+                )
+            ],
+        ),
+        system_prompt="s",
+        user_prompt="u",
+        prompt_tokens=1,
+        completion_tokens=1,
+        duration_ms=1,
+    )
