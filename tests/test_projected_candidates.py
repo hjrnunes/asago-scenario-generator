@@ -275,6 +275,85 @@ def test_snapshot_is_content_addressed_order_independent_and_qualifies_resources
         first.fact(_evidence().fact)
 
 
+def test_snapshot_capture_rejects_conflicts_and_copies_profile() -> None:
+    profile = _profile()
+    snapshot = capture_capability_snapshot(profile, (_evidence(),))
+
+    snapshot.profile.kc_subcodes.append("KC2.1")
+    assert "KC2.1" not in profile.kc_subcodes
+
+    with pytest.raises(
+        ValueError, match="conflicting authoritative readings for one fact"
+    ):
+        capture_capability_snapshot(
+            profile, (_evidence("active"), _evidence("inactive"))
+        )
+
+
+def test_projection_contract_boundary_values_are_explicit() -> None:
+    from asago_scenario_generator.pipeline.projection import (
+        CandidateComplexityInputs,
+        PreconditionEvaluationResult,
+        ProjectionLimitation,
+    )
+
+    assert ProjectionBudget(max_candidates=1, max_derivation_work=1)
+    with pytest.raises(ValidationError):
+        ProjectionBudget(max_candidates=0)
+    with pytest.raises(ValidationError):
+        ProjectionBudget(max_derivation_work=0)
+    with pytest.raises(ValidationError):
+        PreconditionEvaluationResult(
+            step_id="step",
+            condition_id="condition",
+            result="true",
+            evidence=(),
+        )
+    assert PreconditionEvaluationResult(
+        step_id="step",
+        condition_id="condition",
+        result="true",
+        evidence=(_evidence(),),
+    )
+
+    assert ProjectionLimitation(
+        code="candidate_budget_exhausted",
+        pattern_id="pattern",
+        total_compatible_bindings=0,
+        emitted_bindings=0,
+    )
+    with pytest.raises(ValidationError):
+        ProjectionLimitation(
+            code="candidate_budget_exhausted",
+            pattern_id="pattern",
+            total_compatible_bindings=-1,
+        )
+    with pytest.raises(ValidationError):
+        ProjectionLimitation(
+            code="candidate_budget_exhausted",
+            pattern_id="pattern",
+            emitted_bindings=-1,
+        )
+
+    base = {
+        "selected_step_count": 1,
+        "attacker_controlled_step_count": 1,
+        "boundary_crossing_step_count": 0,
+        "selected_conditional_step_count": 0,
+        "concrete_binding_count": 1,
+        "execution_requirement_count": 1,
+    }
+    assert CandidateComplexityInputs(**base)
+    for field in (
+        "selected_step_count",
+        "attacker_controlled_step_count",
+        "concrete_binding_count",
+        "execution_requirement_count",
+    ):
+        with pytest.raises(ValidationError):
+            CandidateComplexityInputs(**{**base, field: 0})
+
+
 def test_content_identity_normalizes_canonically_equivalent_unicode() -> None:
     composed = _pattern()
     decomposed = _pattern()
@@ -2044,6 +2123,34 @@ class TestReferenceResolutionHelpers:
             attacker_influence_required=False,
         )
 
+    def test_entry_point_eligibility_only_requires_accessibility_for_ingress(self):
+        from asago_scenario_generator.models.attack_pattern import (
+            EntryPointResourceReference,
+            ResourceSlot,
+        )
+        from asago_scenario_generator.pipeline.projection_contracts import (
+            _entry_point_eligible_for_slot,
+        )
+
+        base = _profile()
+        output = base.entry_points[0].model_copy(update={"direction": "output"})
+        profile = base.model_copy(update={"entry_points": [output]})
+        snapshot = self._snapshot(profile)
+        reference = EntryPointResourceReference(
+            kind="entry_point", entry_point_id=output.entry_point_id
+        )
+
+        for purpose in ("initial_ingress", "supporting"):
+            slot = ResourceSlot.model_validate(
+                {"slot_id": purpose, "kind": "entry_point", "purpose": purpose}
+            )
+            assert not _entry_point_eligible_for_slot(reference, slot, snapshot)
+
+        target = ResourceSlot.model_validate(
+            {"slot_id": "target", "kind": "entry_point", "purpose": "target"}
+        )
+        assert _entry_point_eligible_for_slot(reference, target, snapshot)
+
     def test_references_for_kind_entry_point(self):
         from asago_scenario_generator.pipeline.projection import (
             _references_for_kind,
@@ -2312,6 +2419,46 @@ class TestReferenceResolutionHelpers:
             {"slot_id": "s7", "kind": "tool", "purpose": "supporting"}
         )
         assert _slot_reference_compatible(tools[0], tool_slot, snapshot)
+
+    def test_snapshot_resource_matching_fails_closed_at_each_filter(self):
+        from asago_scenario_generator.models.attack_pattern import (
+            EntryPointResourceReference,
+            ResourceSlot,
+            ToolResourceReference,
+        )
+
+        snapshot = self._snapshot()
+        entry_point = snapshot.profile.entry_points[0]
+        reference = EntryPointResourceReference(
+            kind="entry_point", entry_point_id=entry_point.entry_point_id
+        )
+        target_slot = ResourceSlot.model_validate(
+            {"slot_id": "target", "kind": "entry_point", "purpose": "target"}
+        )
+
+        assert not snapshot.resource_matches_slot(
+            ToolResourceReference(kind="tool", tool_id="tool:v1:" + "0" * 32),
+            target_slot,
+        )
+        assert not snapshot.resource_matches_slot(
+            EntryPointResourceReference(
+                kind="entry_point", entry_point_id="ep:v1:" + "f" * 32
+            ),
+            target_slot,
+        )
+        assert not snapshot.resource_matches_slot(
+            reference,
+            target_slot.model_copy(
+                update={"allowed_resource_ids": ["ep:v1:" + "f" * 32]}
+            ),
+        )
+        assert not snapshot.resource_matches_slot(
+            reference,
+            target_slot.model_copy(
+                update={"allowed_entry_point_directions": ["output"]}
+            ),
+        )
+        assert snapshot.resource_matches_slot(reference, target_slot)
 
     def test_references_for_slot_applies_all_filters(self):
         from asago_scenario_generator.models.attack_pattern import ResourceSlot
@@ -2814,6 +2961,34 @@ class TestValidateCandidateHelpers:
         )
         with pytest.raises(ValueError, match="binding is incompatible"):
             _validate_bindings_against_snapshot(forged, snapshot)
+
+    def test_validate_bindings_marks_initial_ingress(self, monkeypatch):
+        from types import SimpleNamespace
+
+        import asago_scenario_generator.pipeline.projection as projection
+
+        expected = object()
+        initial_flags = []
+
+        def references_for_slot(slot, snapshot, *, initial_ingress):
+            initial_flags.append(initial_ingress)
+            return (expected,)
+
+        monkeypatch.setattr(projection, "_references_for_slot", references_for_slot)
+        slot = SimpleNamespace(slot_id="ingress")
+        candidate = SimpleNamespace(
+            projection=SimpleNamespace(
+                bindings=(SimpleNamespace(slot_id="ingress", resource_ref=expected),),
+                source_chain=SimpleNamespace(
+                    resource_slots=(slot,),
+                    initial_ingress_slot_id="ingress",
+                ),
+            )
+        )
+
+        projection._validate_bindings_against_snapshot(candidate, object())
+
+        assert initial_flags == [True]
 
     def test_validate_derived_requirements_ok_and_mismatch(self):
         from asago_scenario_generator.pipeline.projection import (

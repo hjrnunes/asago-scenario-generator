@@ -22,6 +22,7 @@ from asago_scenario_generator.pipeline.projection_contracts import (
     ProjectedCandidate,
     _candidate_v2_id,
     _projected_mappings,
+    _selected_steps_for_projection as _selected_steps_from_chain,
     compute_execution_requirements_digest,
 )
 from asago_scenario_generator.pipeline.projection_relations import (
@@ -96,14 +97,6 @@ def _ingress_for_combination(
     ingress = snapshot.profile.resolve_entry_point(ingress_ref.entry_point_id)
     assert ingress is not None
     return ingress_ref, ingress.effective_controllability
-
-
-def _selected_steps_from_chain(
-    chain: CanonicalAttackChain, selected_step_ids: tuple[str, ...]
-) -> list[Any]:
-    """Return the chain steps selected for this candidate projection."""
-    selected = set(selected_step_ids)
-    return [step for step in chain.steps if step.step_id in selected]
 
 
 def _count_selected_steps(

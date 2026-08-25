@@ -165,57 +165,37 @@ def _resource_checker_for(
     return None
 
 
-def _entry_point_contained(
-    reference: EntryPointResourceReference, profile: CapabilityProfile
+def _resolved_resource_contained(
+    profile: CapabilityProfile,
+    resolver: Callable[[str], Any],
+    identifier: str,
 ) -> bool:
-    return profile.resolve_entry_point(reference.entry_point_id) is not None
+    """Return whether a profile resolver contains the requested identifier."""
+    return resolver(identifier) is not None
 
 
-def _tool_contained(
-    reference: ToolResourceReference, profile: CapabilityProfile
-) -> bool:
-    return profile.resolve_tool(reference.tool_id) is not None
-
-
-def _integration_contained(
-    reference: IntegrationResourceReference, profile: CapabilityProfile
-) -> bool:
-    return profile.resolve_integration(reference.integration_id) is not None
-
-
-def _trust_boundary_contained(
-    reference: TrustBoundaryResourceReference, profile: CapabilityProfile
-) -> bool:
-    return profile.resolve_trust_boundary(reference.trust_boundary_id) is not None
-
-
-def _output_surface_contained(
-    reference: OutputSurfaceResourceReference, profile: CapabilityProfile
-) -> bool:
-    return profile.resolve_output_surface(reference.entry_point_id) is not None
-
-
-def _agent_internal_contained(
-    reference: AgentInternalResourceReference, profile: CapabilityProfile
-) -> bool:
-    return "reasoning" in profile.zones_active
-
-
-_RESOURCE_CONTAINED_CHECKERS: tuple[tuple[type, Callable], ...] = (
-    (EntryPointResourceReference, _entry_point_contained),
-    (ToolResourceReference, _tool_contained),
-    (IntegrationResourceReference, _integration_contained),
-    (TrustBoundaryResourceReference, _trust_boundary_contained),
-    (OutputSurfaceResourceReference, _output_surface_contained),
-    (AgentInternalResourceReference, _agent_internal_contained),
+_RESOLVED_RESOURCE_FIELDS: tuple[tuple[type, str, str], ...] = (
+    (EntryPointResourceReference, "resolve_entry_point", "entry_point_id"),
+    (ToolResourceReference, "resolve_tool", "tool_id"),
+    (IntegrationResourceReference, "resolve_integration", "integration_id"),
+    (TrustBoundaryResourceReference, "resolve_trust_boundary", "trust_boundary_id"),
+    (OutputSurfaceResourceReference, "resolve_output_surface", "entry_point_id"),
 )
 
 
 def _resource_contained(
     reference: CanonicalResourceReference, profile: CapabilityProfile
 ) -> bool:
-    checker = _resource_checker_for(reference, _RESOURCE_CONTAINED_CHECKERS)
-    return False if checker is None else checker(reference, profile)
+    for ref_type, resolver_name, identifier_name in _RESOLVED_RESOURCE_FIELDS:
+        if isinstance(reference, ref_type):
+            return _resolved_resource_contained(
+                profile,
+                getattr(profile, resolver_name),
+                getattr(reference, identifier_name),
+            )
+    return isinstance(reference, AgentInternalResourceReference) and (
+        "reasoning" in profile.zones_active
+    )
 
 
 def _restriction_blocks(value: str, allowed_values: tuple[str, ...]) -> bool:

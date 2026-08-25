@@ -338,6 +338,26 @@ def test_behavior_port_rejects_invalid_invocations() -> None:
                 artifacts=GeneratedArtifacts(narrative=object()),
             ),
         )
+    for artifacts, final_tree_digest in (
+        (GeneratedArtifacts(narrative=object(), tree=object()), None),
+        (GeneratedArtifacts(narrative=object()), "verified-digest"),
+    ):
+        with patch(
+            "asago_scenario_generator.pipeline.generate.stages.generate_behavior_stage"
+        ) as call3:
+            with pytest.raises(ValueError, match="verified final-tree"):
+                port(
+                    candidate,
+                    StageInvocation(
+                        candidate_id=prepared.candidate_id,
+                        stage=GeneratedStage.behavior,
+                        invocation_index=0,
+                        owner_retry_index=0,
+                        artifacts=artifacts,
+                        final_tree_digest=final_tree_digest,
+                    ),
+                )
+            call3.assert_not_called()
 
 
 def test_stage_attempt_failure_normalizes_completion_length_evidence() -> None:
