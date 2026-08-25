@@ -140,6 +140,55 @@ class NarrativeProjectedStep:
             )
 
 
+def _unique_step_handles(ordered_step_handles: Sequence[str]) -> None:
+    """Raise unless the ordered handles are non-empty and unique."""
+    if not ordered_step_handles:
+        raise ValueError("narrative context requires at least one projected step")
+    if len(set(ordered_step_handles)) != len(ordered_step_handles):
+        raise ValueError("narrative context has duplicate projected-step handles")
+
+
+def _matching_projected_inventory(
+    ordered_step_handles: Sequence[str],
+    projected_steps: dict[str, NarrativeProjectedStep],
+) -> None:
+    """Raise unless ordered handles exactly match the projected inventory."""
+    if set(ordered_step_handles) != set(projected_steps):
+        raise ValueError(
+            "ordered narrative handles must exactly match projected-step inventory"
+        )
+
+
+def _unique_canonical_ids(
+    ordered_step_handles: Sequence[str],
+    projected_steps: dict[str, NarrativeProjectedStep],
+) -> None:
+    """Raise when two handles resolve to the same canonical step ID."""
+    canonical_ids = [
+        projected_steps[handle].projected_step_id for handle in ordered_step_handles
+    ]
+    if len(set(canonical_ids)) != len(canonical_ids):
+        raise ValueError("narrative context has duplicate canonical step IDs")
+
+
+def _append_region_if_new(region: str, seen_regions: list[str]) -> None:
+    """Record a region in first-occurrence order, rejecting revisit."""
+    if not seen_regions or seen_regions[-1] != region:
+        if region in seen_regions:
+            raise ValueError("narrative compatibility regions must be contiguous")
+        seen_regions.append(region)
+
+
+def _contiguous_regions(
+    ordered_step_handles: Sequence[str],
+    projected_steps: dict[str, NarrativeProjectedStep],
+) -> None:
+    """Raise unless each region forms one contiguous handle run."""
+    seen_regions: list[str] = []
+    for handle in ordered_step_handles:
+        _append_region_if_new(projected_steps[handle].region, seen_regions)
+
+
 @dataclass(frozen=True)
 class NarrativeDraftContext:
     """Canonical inventory used to compile one narrative semantic draft."""
@@ -152,29 +201,10 @@ class NarrativeDraftContext:
     presentation_fallback_allowed: bool = True
 
     def __post_init__(self) -> None:
-        if not self.ordered_step_handles:
-            raise ValueError("narrative context requires at least one projected step")
-        if len(set(self.ordered_step_handles)) != len(self.ordered_step_handles):
-            raise ValueError("narrative context has duplicate projected-step handles")
-        if set(self.ordered_step_handles) != set(self.projected_steps):
-            raise ValueError(
-                "ordered narrative handles must exactly match projected-step inventory"
-            )
-        canonical_ids = [
-            self.projected_steps[handle].projected_step_id
-            for handle in self.ordered_step_handles
-        ]
-        if len(set(canonical_ids)) != len(canonical_ids):
-            raise ValueError("narrative context has duplicate canonical step IDs")
-        seen_regions: list[str] = []
-        for handle in self.ordered_step_handles:
-            region = self.projected_steps[handle].region
-            if not seen_regions or seen_regions[-1] != region:
-                if region in seen_regions:
-                    raise ValueError(
-                        "narrative compatibility regions must be contiguous"
-                    )
-                seen_regions.append(region)
+        _unique_step_handles(self.ordered_step_handles)
+        _matching_projected_inventory(self.ordered_step_handles, self.projected_steps)
+        _unique_canonical_ids(self.ordered_step_handles, self.projected_steps)
+        _contiguous_regions(self.ordered_step_handles, self.projected_steps)
 
     @property
     def ordered_region_handles(self) -> tuple[str, ...]:
@@ -290,15 +320,10 @@ def _draft_region_mapping(
     return dict(regions)
 
 
-def _ordered_draft_beats(
-    context: NarrativeDraftContext, draft: NarrativeDraftV2 | NarrativeDraftV3
-) -> tuple[list[NarrativeCausalBeatV2], list[NarrativeDraftViolation]]:
-    if isinstance(draft, NarrativeDraftV2):
-        return list(draft.beats), []
-
-    regions = _draft_region_mapping(draft)
-    expected = set(context.ordered_region_handles)
-    actual = set(regions)
+def _region_set_violations(
+    actual: set[str], expected: set[str]
+) -> list[NarrativeDraftViolation]:
+    """Unknown/missing region handle violations."""
     violations: list[NarrativeDraftViolation] = []
     if unknown := sorted(actual - expected):
         violations.append(
@@ -312,18 +337,32 @@ def _ordered_draft_beats(
                 "missing_region_handle", f"missing narrative region(s): {missing}"
             )
         )
-    beats: list[NarrativeCausalBeatV2] = []
+    return violations
+
+
+def _cross_region_handles(
+    region_beats: list[NarrativeCausalBeatV2], allowed: set[str]
+) -> list[str]:
+    """Handles used inside one region that belong to another region."""
+    return sorted(
+        {
+            handle
+            for beat in region_beats
+            for handle in beat.step_handles
+            if handle not in allowed
+        }
+    )
+
+
+def _cross_region_step_violations(
+    regions: dict[str, list[NarrativeCausalBeatV2]],
+    context: NarrativeDraftContext,
+) -> list[NarrativeDraftViolation]:
+    """Beats referencing handles owned by another region."""
+    violations: list[NarrativeDraftViolation] = []
     for region in context.ordered_region_handles:
         allowed = set(context.handles_for_region(region))
-        region_beats = regions.get(region, [])
-        invalid = sorted(
-            {
-                handle
-                for beat in region_beats
-                for handle in beat.step_handles
-                if handle not in allowed
-            }
-        )
+        invalid = _cross_region_handles(regions.get(region, []), allowed)
         if invalid:
             violations.append(
                 NarrativeDraftViolation(
@@ -332,16 +371,30 @@ def _ordered_draft_beats(
                     f"region: {invalid}",
                 )
             )
-        beats.extend(region_beats)
+    return violations
+
+
+def _ordered_draft_beats(
+    context: NarrativeDraftContext, draft: NarrativeDraftV2 | NarrativeDraftV3
+) -> tuple[list[NarrativeCausalBeatV2], list[NarrativeDraftViolation]]:
+    if isinstance(draft, NarrativeDraftV2):
+        return list(draft.beats), []
+
+    regions = _draft_region_mapping(draft)
+    expected = set(context.ordered_region_handles)
+    violations = _region_set_violations(set(regions), expected)
+    violations.extend(_cross_region_step_violations(regions, context))
+    beats: list[NarrativeCausalBeatV2] = []
+    for region in context.ordered_region_handles:
+        beats.extend(regions.get(region, []))
     return beats, violations
 
 
-def _validate_narrative_draft(
-    context: NarrativeDraftContext, draft: NarrativeDraftV2 | NarrativeDraftV3
+def _step_handle_coverage_violations(
+    flattened: list[str], expected: set[str]
 ) -> list[NarrativeDraftViolation]:
-    beats, violations = _ordered_draft_beats(context, draft)
-    flattened = [handle for beat in beats for handle in beat.step_handles]
-    expected = set(context.ordered_step_handles)
+    """Unknown, missing, and duplicated step handle violations."""
+    violations: list[NarrativeDraftViolation] = []
     unknown = sorted(set(flattened) - expected)
     missing = sorted(expected - set(flattened))
     duplicate = sorted(
@@ -366,23 +419,32 @@ def _validate_narrative_draft(
                 f"duplicate projected-step handle(s): {duplicate}",
             )
         )
+    return violations
 
-    known_handles = [handle for handle in flattened if handle in expected]
-    positions = {
-        handle: index for index, handle in enumerate(context.ordered_step_handles)
-    }
+
+def _step_order_violations(
+    known_handles: list[str], positions: dict[str, int]
+) -> list[NarrativeDraftViolation]:
+    """Canonical partial-order violations among known handles."""
     if any(
         positions[current] >= positions[following]
         for current, following in zip(known_handles, known_handles[1:])
         if current != following
     ):
-        violations.append(
+        return [
             NarrativeDraftViolation(
                 "illegal_step_order",
                 "projected-step handles violate the canonical partial order",
             )
-        )
+        ]
+    return []
 
+
+def _beat_zone_violations(
+    beats: list[NarrativeCausalBeatV2], context: NarrativeDraftContext
+) -> list[NarrativeDraftViolation]:
+    """Beats that combine incompatible canonical zones."""
+    violations: list[NarrativeDraftViolation] = []
     for index, beat in enumerate(beats, start=1):
         zones = {
             context.projected_steps[handle].zone
@@ -397,6 +459,15 @@ def _validate_narrative_draft(
                     f"{sorted(zones)}",
                 )
             )
+    return violations
+
+
+def _beat_boundary_violations(
+    beats: list[NarrativeCausalBeatV2], context: NarrativeDraftContext
+) -> list[NarrativeDraftViolation]:
+    """Beats that combine incompatible boundary positions."""
+    violations: list[NarrativeDraftViolation] = []
+    for index, beat in enumerate(beats, start=1):
         boundaries = {
             context.projected_steps[handle].realization.boundary_position
             for handle in beat.step_handles
@@ -410,14 +481,58 @@ def _validate_narrative_draft(
                     f"boundary positions: {sorted(boundaries)}",
                 )
             )
+    return violations
+
+
+def _missing_title_violation(
+    context: NarrativeDraftContext, draft: NarrativeDraftV2 | NarrativeDraftV3
+) -> list[NarrativeDraftViolation]:
+    """Title-required-when-fallback-forbidden violation."""
     if draft.title is None and not context.presentation_fallback_allowed:
-        violations.append(
+        return [
             NarrativeDraftViolation(
                 "missing_title",
                 "narrative title is required when fallback is forbidden",
             )
-        )
+        ]
+    return []
+
+
+def _validate_narrative_draft(
+    context: NarrativeDraftContext, draft: NarrativeDraftV2 | NarrativeDraftV3
+) -> list[NarrativeDraftViolation]:
+    beats, violations = _ordered_draft_beats(context, draft)
+    flattened = [handle for beat in beats for handle in beat.step_handles]
+    expected = set(context.ordered_step_handles)
+    violations.extend(_step_handle_coverage_violations(flattened, expected))
+
+    known_handles = [handle for handle in flattened if handle in expected]
+    positions = {
+        handle: index for index, handle in enumerate(context.ordered_step_handles)
+    }
+    violations.extend(_step_order_violations(known_handles, positions))
+    violations.extend(_beat_zone_violations(beats, context))
+    violations.extend(_beat_boundary_violations(beats, context))
+    violations.extend(_missing_title_violation(context, draft))
     return violations
+
+
+def _narrative_step_from_beat(
+    context: NarrativeDraftContext, beat: NarrativeCausalBeatV2, number: int
+) -> NarrativeStep:
+    """One canonical narrative step compiled from a causal beat."""
+    projected = [context.projected_steps[handle] for handle in beat.step_handles]
+    effect = beat.consequence
+    if beat.transition:
+        effect = f"{effect} {beat.transition}"
+    return NarrativeStep(
+        step_number=number,
+        zone=projected[0].zone,
+        action=beat.action,
+        effect=effect,
+        projected_step_ids=tuple(item.projected_step_id for item in projected),
+        realizations=tuple(item.realization for item in projected),
+    )
 
 
 def compile_narrative_draft(
@@ -429,22 +544,10 @@ def compile_narrative_draft(
         raise NarrativeSemanticDraftError(violations)
 
     beats, _ = _ordered_draft_beats(context, draft)
-    steps: list[NarrativeStep] = []
-    for number, beat in enumerate(beats, start=1):
-        projected = [context.projected_steps[handle] for handle in beat.step_handles]
-        effect = beat.consequence
-        if beat.transition:
-            effect = f"{effect} {beat.transition}"
-        steps.append(
-            NarrativeStep(
-                step_number=number,
-                zone=projected[0].zone,
-                action=beat.action,
-                effect=effect,
-                projected_step_ids=tuple(item.projected_step_id for item in projected),
-                realizations=tuple(item.realization for item in projected),
-            )
-        )
+    steps = [
+        _narrative_step_from_beat(context, beat, number)
+        for number, beat in enumerate(beats, start=1)
+    ]
     return NarrativeLayer(
         title=draft.title or context.title_fallback,
         summary=draft.summary,
@@ -456,6 +559,50 @@ def compile_narrative_draft(
             if context.access_realization is not None
             else None
         ),
+    )
+
+
+def _narrative_projected_steps(
+    handles: tuple[str, ...], semantics: Any
+) -> dict[str, NarrativeProjectedStep]:
+    """Allocate one projected-step record per handle from semantics."""
+    projected_steps: dict[str, NarrativeProjectedStep] = {}
+    for handle, semantic in zip(handles, semantics.steps):
+        projected_steps[handle] = NarrativeProjectedStep(
+            projected_step_id=semantic.projected_step_id,
+            order=semantic.order,
+            zone=semantic.zone,
+            realization=semantic.realization,
+            region=semantic.narrative_region,
+        )
+    return projected_steps
+
+
+def _resolved_entry_point(
+    pinned_entry_point: str | None, ingress_id: Any, profile: CapabilityProfile
+) -> str:
+    """Displayable entry point: pin wins, else resolved ingress name."""
+    entry_point = pinned_entry_point
+    if not entry_point and isinstance(ingress_id, str):
+        resolved = profile.resolve_entry_point(ingress_id)
+        entry_point = resolved.name if resolved is not None else ingress_id
+    return entry_point
+
+
+def _narrative_access_realization(
+    actor_profile: ActorProfile | None,
+) -> NarrativeAccessRealization | None:
+    """Typed access realization mirrored from actor provenance, or None."""
+    if actor_profile is None or actor_profile.access is None:
+        return None
+    access = actor_profile.access
+    return NarrativeAccessRealization(
+        initial_entry_point_id=access.initial_entry_point_id,
+        influence_source=access.influence_source,
+        influence_source_kind=access.influence_source_kind,
+        influence_source_id=access.influence_source_id,
+        trust_boundary_id=access.trust_boundary_id,
+        responsible_step_number=1,
     )
 
 
@@ -474,41 +621,19 @@ def _build_narrative_draft_context(
         raise ValueError("projection has no selected steps for narrative generation")
     semantics = derive_canonical_projection_semantics(projection_context, profile)
     handles = tuple(f"s{index}" for index in range(len(selected_ids)))
-    projected_steps: dict[str, NarrativeProjectedStep] = {}
-    for handle, semantic in zip(handles, semantics.steps):
-        projected_steps[handle] = NarrativeProjectedStep(
-            projected_step_id=semantic.projected_step_id,
-            order=semantic.order,
-            zone=semantic.zone,
-            realization=semantic.realization,
-            region=semantic.narrative_region,
-        )
+    projected_steps = _narrative_projected_steps(handles, semantics)
 
     ingress_id = projection_context.get("canonical_ingress", {}).get("entry_point_id")
-    entry_point = pinned_entry_point
-    if not entry_point and isinstance(ingress_id, str):
-        resolved = profile.resolve_entry_point(ingress_id)
-        entry_point = resolved.name if resolved is not None else ingress_id
+    entry_point = _resolved_entry_point(pinned_entry_point, ingress_id, profile)
     if not entry_point:
         raise ValueError("projection lacks a displayable canonical entry point")
 
-    access_realization = None
-    if actor_profile is not None and actor_profile.access is not None:
-        access = actor_profile.access
-        access_realization = NarrativeAccessRealization(
-            initial_entry_point_id=access.initial_entry_point_id,
-            influence_source=access.influence_source,
-            influence_source_kind=access.influence_source_kind,
-            influence_source_id=access.influence_source_id,
-            trust_boundary_id=access.trust_boundary_id,
-            responsible_step_number=1,
-        )
     return NarrativeDraftContext(
         title_fallback=seed.attack_pattern_name,
         entry_point=entry_point,
         ordered_step_handles=handles,
         projected_steps=projected_steps,
-        access_realization=access_realization,
+        access_realization=_narrative_access_realization(actor_profile),
         presentation_fallback_allowed=presentation_fallback_allowed,
     )
 
@@ -676,6 +801,15 @@ def _sanitize_non_latin(text: str) -> str:
     return cleaned.strip()
 
 
+def _sanitize_step(step: NarrativeStep) -> NarrativeStep:
+    """Sanitized copy of one step, or the same instance when unchanged."""
+    action = _sanitize_non_latin(step.action)
+    effect = _sanitize_non_latin(step.effect)
+    if action != step.action or effect != step.effect:
+        return step.model_copy(update={"action": action, "effect": effect})
+    return step
+
+
 def _sanitize_narrative(narrative: NarrativeLayer) -> NarrativeLayer:
     """Apply non-Latin sanitization to narrative text fields.
 
@@ -686,25 +820,16 @@ def _sanitize_narrative(narrative: NarrativeLayer) -> NarrativeLayer:
     (projected_step_ids, canonical_action_kind, etc.) — only prose text
     fields are sanitized (422o.4 blocker #4: no semantic repair).
     """
-    changed = False
     title = _sanitize_non_latin(narrative.title)
     summary = _sanitize_non_latin(narrative.summary)
-
-    if title != narrative.title or summary != narrative.summary:
-        changed = True
+    changed = title != narrative.title or summary != narrative.summary
 
     new_steps = []
     for step in narrative.steps:
-        action = _sanitize_non_latin(step.action)
-        effect = _sanitize_non_latin(step.effect)
-        if action != step.action or effect != step.effect:
+        sanitized = _sanitize_step(step)
+        if sanitized is not step:
             changed = True
-            # Use model_copy to preserve all projection metadata fields.
-            new_steps.append(
-                step.model_copy(update={"action": action, "effect": effect})
-            )
-        else:
-            new_steps.append(step)
+        new_steps.append(sanitized)
 
     if changed:
         logger.warning(
@@ -834,16 +959,11 @@ def _canonical_realizations_for_step(
     return tuple(realizations)
 
 
-def _map_call1_to_narrative(
-    resp: Call1Response,
-    projection_context: dict[str, Any] | None = None,
-) -> NarrativeLayer:
-    selected_steps_by_id = (
-        _selected_projection_steps_by_id(projection_context)
-        if projection_context is not None
-        else None
-    )
-    steps = [
+def _narrative_steps_from_response(
+    resp: Call1Response, selected_steps_by_id: dict[str, dict[str, Any]] | None
+) -> list[NarrativeStep]:
+    """One narrative step per response step, with canonical realizations."""
+    return [
         NarrativeStep(
             step_number=s.step_number,
             zone=s.zone,
@@ -859,19 +979,38 @@ def _map_call1_to_narrative(
         )
         for s in resp.steps
     ]
+
+
+def _verify_full_projection_coverage(
+    steps: list[NarrativeStep], projection_context: dict[str, Any]
+) -> None:
+    """Raise when any selected projected step is omitted from the response."""
+    selected_step_ids = set(projection_context.get("selected_step_ids", ()))
+    covered_step_ids = {
+        projected_step_id
+        for step in steps
+        for projected_step_id in step.projected_step_ids
+    }
+    missing = sorted(selected_step_ids - covered_step_ids)
+    if missing:
+        raise ValueError(
+            "omitted projected step ID(s) from narrative response: "
+            + ", ".join(missing)
+        )
+
+
+def _map_call1_to_narrative(
+    resp: Call1Response,
+    projection_context: dict[str, Any] | None = None,
+) -> NarrativeLayer:
+    selected_steps_by_id = (
+        _selected_projection_steps_by_id(projection_context)
+        if projection_context is not None
+        else None
+    )
+    steps = _narrative_steps_from_response(resp, selected_steps_by_id)
     if projection_context is not None:
-        selected_step_ids = set(projection_context.get("selected_step_ids", ()))
-        covered_step_ids = {
-            projected_step_id
-            for step in steps
-            for projected_step_id in step.projected_step_ids
-        }
-        missing = sorted(selected_step_ids - covered_step_ids)
-        if missing:
-            raise ValueError(
-                "omitted projected step ID(s) from narrative response: "
-                + ", ".join(missing)
-            )
+        _verify_full_projection_coverage(steps, projection_context)
     # Derive zone_sequence from step zones rather than using the LLM's
     # zone_sequence field, which tends to collapse return traversals.
     zone_sequence = _derive_zone_sequence(resp.steps)
@@ -898,6 +1037,157 @@ class NarrativeRealizationViolation:
     message: str
 
 
+def _missing_access_realization_violation() -> NarrativeRealizationViolation:
+    """Narrative without typed access provenance (cmps.6)."""
+    return NarrativeRealizationViolation(
+        rule="missing_access_realization",
+        message=(
+            "Narrative lacks typed access_realization — required "
+            "when actor access provenance is present (cmps.6)."
+        ),
+    )
+
+
+def _entry_point_mismatch_violation(
+    realization: NarrativeAccessRealization, access: Any
+) -> list[NarrativeRealizationViolation]:
+    """initial_entry_point_id mismatches."""
+    if realization.initial_entry_point_id != access.initial_entry_point_id:
+        return [
+            NarrativeRealizationViolation(
+                rule="realization_entry_point_mismatch",
+                message=(
+                    f"Narrative access_realization initial_entry_point_id "
+                    f"'{realization.initial_entry_point_id}' does not match "
+                    f"actor access provenance "
+                    f"'{access.initial_entry_point_id}'."
+                ),
+            )
+        ]
+    return []
+
+
+def _source_id_mismatch(
+    realization: NarrativeAccessRealization, access: Any
+) -> list[NarrativeRealizationViolation]:
+    """Legacy source identity mismatch against actor provenance."""
+    realization_source_id = (
+        realization.influence_source_id or realization.influence_source
+    )
+    access_source_id = access.influence_source_id or access.influence_source
+    if (realization_source_id or None) != (access_source_id or None):
+        return [
+            NarrativeRealizationViolation(
+                rule="realization_influence_source_mismatch",
+                message=(
+                    f"Narrative access_realization influence_source "
+                    f"'{realization_source_id}' does not match actor "
+                    f"access provenance '{access_source_id}'."
+                ),
+            )
+        ]
+    return []
+
+
+def _source_kind_mismatch(
+    realization: NarrativeAccessRealization, access: Any
+) -> list[NarrativeRealizationViolation]:
+    """Source-kind mismatch against actor provenance."""
+    if (realization.influence_source_kind or None) != (
+        access.influence_source_kind or None
+    ):
+        return [
+            NarrativeRealizationViolation(
+                rule="realization_influence_source_mismatch",
+                message=(
+                    "Narrative access_realization source kind does not match "
+                    "actor access provenance."
+                ),
+            )
+        ]
+    return []
+
+
+def _influence_source_violations(
+    realization: NarrativeAccessRealization, access: Any
+) -> list[NarrativeRealizationViolation]:
+    """Source identity and kind mismatches."""
+    return _source_id_mismatch(realization, access) + _source_kind_mismatch(
+        realization, access
+    )
+
+
+def _trust_boundary_violation(
+    realization: NarrativeAccessRealization, access: Any
+) -> list[NarrativeRealizationViolation]:
+    """trust_boundary_id mismatch."""
+    if (realization.trust_boundary_id or None) != (access.trust_boundary_id or None):
+        return [
+            NarrativeRealizationViolation(
+                rule="realization_trust_boundary_mismatch",
+                message=(
+                    f"Narrative access_realization trust_boundary_id "
+                    f"'{realization.trust_boundary_id}' does not match actor "
+                    f"access provenance '{access.trust_boundary_id}'."
+                ),
+            )
+        ]
+    return []
+
+
+def _step_not_found_violation(
+    realization: NarrativeAccessRealization, step_numbers: set[int]
+) -> list[NarrativeRealizationViolation]:
+    """responsible_step_number without a matching narrative step."""
+    if realization.responsible_step_number not in step_numbers:
+        return [
+            NarrativeRealizationViolation(
+                rule="realization_step_not_found",
+                message=(
+                    f"Narrative access_realization responsible_step_number "
+                    f"{realization.responsible_step_number} does not refer "
+                    f"to any narrative step (valid: {sorted(step_numbers)})."
+                ),
+            )
+        ]
+    return []
+
+
+def _direct_access_violations(
+    realization: NarrativeAccessRealization, access: Any
+) -> list[NarrativeRealizationViolation]:
+    """Direct ingress must omit indirect-only references."""
+    if access.ingress_mode != "direct":
+        return []
+    violations: list[NarrativeRealizationViolation] = []
+    if (
+        realization.influence_source is not None
+        or realization.influence_source_id is not None
+    ):
+        violations.append(
+            NarrativeRealizationViolation(
+                rule="direct_realization_has_indirect_ref",
+                message=(
+                    "Narrative access_realization has influence_source "
+                    "but actor access provenance is direct ingress — "
+                    "direct access must omit indirect-only references."
+                ),
+            )
+        )
+    if realization.trust_boundary_id is not None:
+        violations.append(
+            NarrativeRealizationViolation(
+                rule="direct_realization_has_indirect_ref",
+                message=(
+                    "Narrative access_realization has trust_boundary_id "
+                    "but actor access provenance is direct ingress — "
+                    "direct access must omit indirect-only references."
+                ),
+            )
+        )
+    return violations
+
+
 def validate_narrative_access_realization(
     narrative: NarrativeLayer,
     actor_profile: ActorProfile | None,
@@ -919,129 +1209,213 @@ def validate_narrative_access_realization(
     6. Direct access must omit indirect-only references (influence_source,
        trust_boundary_id must be None when ingress_mode is direct).
     """
-    violations: list[NarrativeRealizationViolation] = []
-
     access = actor_profile.access if actor_profile else None
     if access is None:
-        return violations  # Actor access missing is flagged separately.
+        return []  # Actor access missing is flagged separately.
 
     realization = narrative.access_realization
     if realization is None:
-        violations.append(
-            NarrativeRealizationViolation(
-                rule="missing_access_realization",
-                message=(
-                    "Narrative lacks typed access_realization — required "
-                    "when actor access provenance is present (cmps.6)."
-                ),
-            )
-        )
-        return violations
+        return [_missing_access_realization_violation()]
 
-    # 2. initial_entry_point_id must match.
-    if realization.initial_entry_point_id != access.initial_entry_point_id:
-        violations.append(
-            NarrativeRealizationViolation(
-                rule="realization_entry_point_mismatch",
-                message=(
-                    f"Narrative access_realization initial_entry_point_id "
-                    f"'{realization.initial_entry_point_id}' does not match "
-                    f"actor access provenance "
-                    f"'{access.initial_entry_point_id}'."
-                ),
-            )
-        )
-
-    # 3. The legacy source field and the typed source identity must match.
-    realization_source_id = (
-        realization.influence_source_id or realization.influence_source
-    )
-    access_source_id = access.influence_source_id or access.influence_source
-    if (realization_source_id or None) != (access_source_id or None):
-        violations.append(
-            NarrativeRealizationViolation(
-                rule="realization_influence_source_mismatch",
-                message=(
-                    f"Narrative access_realization influence_source "
-                    f"'{realization_source_id}' does not match actor "
-                    f"access provenance '{access_source_id}'."
-                ),
-            )
-        )
-    if (realization.influence_source_kind or None) != (
-        access.influence_source_kind or None
-    ):
-        violations.append(
-            NarrativeRealizationViolation(
-                rule="realization_influence_source_mismatch",
-                message=(
-                    "Narrative access_realization source kind does not match "
-                    "actor access provenance."
-                ),
-            )
-        )
-
-    # 4. trust_boundary_id must match (or both None).
-    if (realization.trust_boundary_id or None) != (access.trust_boundary_id or None):
-        violations.append(
-            NarrativeRealizationViolation(
-                rule="realization_trust_boundary_mismatch",
-                message=(
-                    f"Narrative access_realization trust_boundary_id "
-                    f"'{realization.trust_boundary_id}' does not match actor "
-                    f"access provenance '{access.trust_boundary_id}'."
-                ),
-            )
-        )
-
-    # 5. responsible_step_number must refer to an existing step.
+    violations: list[NarrativeRealizationViolation] = []
+    violations.extend(_entry_point_mismatch_violation(realization, access))
+    violations.extend(_influence_source_violations(realization, access))
+    violations.extend(_trust_boundary_violation(realization, access))
     step_numbers = {s.step_number for s in narrative.steps}
-    if realization.responsible_step_number not in step_numbers:
-        violations.append(
-            NarrativeRealizationViolation(
-                rule="realization_step_not_found",
-                message=(
-                    f"Narrative access_realization responsible_step_number "
-                    f"{realization.responsible_step_number} does not refer "
-                    f"to any narrative step (valid: {sorted(step_numbers)})."
-                ),
-            )
-        )
-
-    # 6. Direct access must omit indirect-only references.
-    if access.ingress_mode == "direct":
-        if (
-            realization.influence_source is not None
-            or realization.influence_source_id is not None
-        ):
-            violations.append(
-                NarrativeRealizationViolation(
-                    rule="direct_realization_has_indirect_ref",
-                    message=(
-                        "Narrative access_realization has influence_source "
-                        "but actor access provenance is direct ingress — "
-                        "direct access must omit indirect-only references."
-                    ),
-                )
-            )
-        if realization.trust_boundary_id is not None:
-            violations.append(
-                NarrativeRealizationViolation(
-                    rule="direct_realization_has_indirect_ref",
-                    message=(
-                        "Narrative access_realization has trust_boundary_id "
-                        "but actor access provenance is direct ingress — "
-                        "direct access must omit indirect-only references."
-                    ),
-                )
-            )
-
+    violations.extend(_step_not_found_violation(realization, step_numbers))
+    violations.extend(_direct_access_violations(realization, access))
     return violations
 
 
 # ---------------------------------------------------------------------------
 # Context builder and LLM call
 # ---------------------------------------------------------------------------
+
+
+def _prior_titles_section(prior_titles: list[str] | None) -> str:
+    """Previously-generated-titles guidance, or empty."""
+    if prior_titles:
+        title_list = "\n".join(f"  {i}. {t}" for i, t in enumerate(prior_titles, 1))
+        return (
+            "\n## Previously Generated Titles (avoid duplication)\n"
+            "The following titles have already been used in this generation "
+            "run. Your title MUST be substantially different — do not reuse "
+            'the same structure, key phrases, or "[Mechanism] for [Goal]" '
+            "pattern:\n"
+            f"{title_list}\n"
+        )
+    return ""
+
+
+def _entry_point_diversity_section(
+    pinned_entry_point: str | None,
+    preferred_entry_point: str | None,
+    excluded_entry_points: list[str] | None,
+    prior_titles: list[str] | None,
+) -> str:
+    """Entry-point and title diversity guidance for the Call 1 prompt."""
+    diversity_section = ""
+    if pinned_entry_point:
+        # Hard constraint from candidate filter — overrides soft hints
+        diversity_section = (
+            "\n## Entry Point Guidance\n"
+            f"- You MUST use this entry point: {pinned_entry_point}. "
+            "This is a hard constraint, not a suggestion.\n"
+        )
+    elif preferred_entry_point or excluded_entry_points:
+        diversity_lines = ["\n## Entry Point Guidance"]
+        if preferred_entry_point:
+            diversity_lines.append(
+                f"- Preferred entry point: {preferred_entry_point} "
+                "(use this unless it would be unnatural for the attack)"
+            )
+        if excluded_entry_points:
+            diversity_lines.append(
+                f"- Avoid these overused entry points: {excluded_entry_points}"
+            )
+        diversity_section = "\n".join(diversity_lines) + "\n"
+
+    # Build title diversity section when prior titles exist
+    diversity_section += _prior_titles_section(prior_titles)
+    return diversity_section
+
+
+def _excluded_pattern_section(excluded_patterns: list[str] | None) -> str:
+    """Attack-pattern diversity guidance for the Call 1 prompt."""
+    if excluded_patterns:
+        return (
+            "\n## Attack Pattern Diversity\n"
+            "Avoid these attack patterns which are already well-represented "
+            "in this batch:\n"
+            f"- Overused patterns: {', '.join(excluded_patterns)}\n"
+            "Find a DIFFERENT attack approach. Use a different vulnerability "
+            "mechanism, a different propagation path, or a different impact "
+            "chain. Creativity and variety are essential.\n"
+        )
+    return ""
+
+
+def _actor_grounding_section(actor_profile: ActorProfile | None) -> str:
+    """Actor-profile grounding block for the narrative prompt."""
+    if actor_profile is None:
+        return ""
+    resources_str = ", ".join(actor_profile.resources)
+    return (
+        "\n## Actor Profile (ground the narrative in this actor)\n"
+        "The narrative's attacker must match this actor's capability level, "
+        "resources, and motivations.\n"
+        f"- Actor type: {actor_profile.actor_type}\n"
+        f"- Capability level: {actor_profile.capability_level}\n"
+        f"- Beliefs about the target:\n"
+        + "".join(f"  - {b}\n" for b in actor_profile.beliefs)
+        + "- Desires:\n"
+        + "".join(f"  - {d}\n" for d in actor_profile.desires)
+        + "- Intentions:\n"
+        + "".join(f"  - {i}\n" for i in actor_profile.intentions)
+        + f"- Resources: {resources_str}\n"
+    )
+
+
+def _goal_guidance_section(actor_profile: ActorProfile | None) -> str:
+    """Attack-goal SHOULD block for the narrative prompt."""
+    if actor_profile is None or not actor_profile.goal_category:
+        return ""
+    return (
+        "\n## Attack Goal Guidance (SHOULD)\n"
+        f"**Category:** {actor_profile.goal_category_parent}\n"
+        f"**Specific Goal:** {actor_profile.goal_category}: "
+        f"{actor_profile.goal_category_name}\n\n"
+        "The narrative's terminal attack outcome SHOULD align with this goal "
+        "when it is compatible with the seed attack pattern's mechanism. "
+        "If satisfying this goal would require abandoning the seed's core "
+        "attack mechanism, prioritise seed fidelity — the goal is a guiding "
+        "preference, not a hard override. The seed's 'Seed Attack Objective "
+        "Fidelity (INVARIANT)' constraint always takes precedence.\n"
+    )
+
+
+def _novice_diversity_priority(
+    diversity_section: str, actor_profile: ActorProfile | None
+) -> str:
+    """Append the novice capability-level priority note when applicable."""
+    if (
+        diversity_section
+        and actor_profile is not None
+        and actor_profile.capability_level == "novice"
+    ):
+        return diversity_section + (
+            "\n\n**Capability-level priority:** The actor is a NOVICE. "
+            "Diversity constraints are secondary to capability-level constraints. "
+            "Do NOT generate a complex attack just because simpler patterns have "
+            "been excluded. Instead, use a DIFFERENT simple pattern or a different "
+            "angle on the same simple technique."
+        )
+    return diversity_section
+
+
+def _technique_framing_for_narrative(
+    pinned_technique_ids: list[str] | None, seed: ScenarioSeed
+) -> str:
+    """Technique framing: hard pin when pinned, else seed guidance."""
+    if pinned_technique_ids:
+        return (
+            "You MUST use these ATLAS technique(s) in the narrative. "
+            "Reference them in narrative step actions and annotate with the ID "
+            "in square brackets, e.g. [AML.T0054]. This is a hard constraint.\n"
+        )
+    if seed.atlas_technique_ids:
+        return (
+            "Reference these techniques in narrative step actions where applicable. "
+            "Annotate technique usage with the ID in square brackets, "
+            "e.g. [AML.T0054].\n"
+        )
+    return ""
+
+
+def _prompt_text(feedback: str | None) -> str:
+    """Feedback or fallback text for the prompt template."""
+    return feedback or ""
+
+
+def _structural_section(
+    excluded_structural_patterns: list[str] | None,
+) -> str:
+    """Structural-pattern diversity guidance, or empty."""
+    if excluded_structural_patterns:
+        return _format_structural_exclusions(excluded_structural_patterns)
+    return ""
+
+
+def _access_provenance_block(
+    actor_profile: ActorProfile | None, profile: CapabilityProfile
+) -> str:
+    """Structured cmps.6 access provenance block, or empty."""
+    if actor_profile is not None and actor_profile.access is not None:
+        from asago_scenario_generator.pipeline.generate.names import (
+            access_provenance_block_with_names,
+        )
+
+        return access_provenance_block_with_names(
+            actor_profile.access,
+            profile,
+            header=(
+                "\n## Actor Access Provenance (AUTHORITATIVE — cmps.6)\n"
+                "This structured block is authoritative over any advisory "
+                "kill-chain wording. The narrative must be consistent with "
+                "this evidence.\n"
+            ),
+        )
+    return ""
+
+
+def _technique_id_list(tech_ids: list[str] | None) -> list[str]:
+    """Technique ids for the ontology context, or empty."""
+    return list(tech_ids) if tech_ids else []
+
+
+def _tool_inventory_list(tool_inventory: list[str]) -> list[str]:
+    """Tool inventory for the prompt template, or empty."""
+    return tool_inventory or []
 
 
 def build_call1_context(
@@ -1070,143 +1444,34 @@ def build_call1_context(
         Dict mapping template variable names to their values.
     """
     # Build entry point diversity guidance section
-    diversity_section = ""
-    if pinned_entry_point:
-        # Hard constraint from candidate filter — overrides soft hints
-        diversity_section = (
-            "\n## Entry Point Guidance\n"
-            f"- You MUST use this entry point: {pinned_entry_point}. "
-            "This is a hard constraint, not a suggestion.\n"
-        )
-    elif preferred_entry_point or excluded_entry_points:
-        diversity_lines = ["\n## Entry Point Guidance"]
-        if preferred_entry_point:
-            diversity_lines.append(
-                f"- Preferred entry point: {preferred_entry_point} "
-                "(use this unless it would be unnatural for the attack)"
-            )
-        if excluded_entry_points:
-            diversity_lines.append(
-                f"- Avoid these overused entry points: {excluded_entry_points}"
-            )
-        diversity_section = "\n".join(diversity_lines) + "\n"
-
-    # Build title diversity section when prior titles exist
-    if prior_titles:
-        title_list = "\n".join(f"  {i}. {t}" for i, t in enumerate(prior_titles, 1))
-        diversity_section += (
-            "\n## Previously Generated Titles (avoid duplication)\n"
-            "The following titles have already been used in this generation "
-            "run. Your title MUST be substantially different — do not reuse "
-            'the same structure, key phrases, or "[Mechanism] for [Goal]" '
-            "pattern:\n"
-            f"{title_list}\n"
-        )
+    diversity_section = _entry_point_diversity_section(
+        pinned_entry_point, preferred_entry_point, excluded_entry_points, prior_titles
+    )
 
     # Build attack pattern diversity section
-    pattern_section = ""
-    if excluded_patterns:
-        pattern_section = (
-            "\n## Attack Pattern Diversity\n"
-            "Avoid these attack patterns which are already well-represented "
-            "in this batch:\n"
-            f"- Overused patterns: {', '.join(excluded_patterns)}\n"
-            "Find a DIFFERENT attack approach. Use a different vulnerability "
-            "mechanism, a different propagation path, or a different impact "
-            "chain. Creativity and variety are essential.\n"
-        )
+    pattern_section = _excluded_pattern_section(excluded_patterns)
 
     # Build structural pattern diversity section
-    structural_section = ""
-    if excluded_structural_patterns:
-        structural_section = _format_structural_exclusions(excluded_structural_patterns)
+    structural_section = _structural_section(excluded_structural_patterns)
 
     # Build actor profile section for narrative grounding
-    actor_section = ""
-    if actor_profile is not None:
-        resources_str = ", ".join(actor_profile.resources)
-        actor_section = (
-            "\n## Actor Profile (ground the narrative in this actor)\n"
-            "The narrative's attacker must match this actor's capability level, "
-            "resources, and motivations.\n"
-            f"- Actor type: {actor_profile.actor_type}\n"
-            f"- Capability level: {actor_profile.capability_level}\n"
-            f"- Beliefs about the target:\n"
-            + "".join(f"  - {b}\n" for b in actor_profile.beliefs)
-            + "- Desires:\n"
-            + "".join(f"  - {d}\n" for d in actor_profile.desires)
-            + "- Intentions:\n"
-            + "".join(f"  - {i}\n" for i in actor_profile.intentions)
-            + f"- Resources: {resources_str}\n"
-        )
+    actor_section = _actor_grounding_section(actor_profile)
 
     # Build structured access provenance block (cmps.6) — using names (Phase 3)
-    access_provenance_block = ""
-    if actor_profile is not None and actor_profile.access is not None:
-        from asago_scenario_generator.pipeline.generate.names import (
-            access_provenance_block_with_names,
-        )
-
-        access_provenance_block = access_provenance_block_with_names(
-            actor_profile.access,
-            profile,
-            header=(
-                "\n## Actor Access Provenance (AUTHORITATIVE — cmps.6)\n"
-                "This structured block is authoritative over any advisory "
-                "kill-chain wording. The narrative must be consistent with "
-                "this evidence.\n"
-            ),
-        )
+    access_provenance_block = _access_provenance_block(actor_profile, profile)
 
     # Build goal category section for narrative grounding
-    goal_section = ""
-    if actor_profile is not None and actor_profile.goal_category:
-        goal_section = (
-            "\n## Attack Goal Guidance (SHOULD)\n"
-            f"**Category:** {actor_profile.goal_category_parent}\n"
-            f"**Specific Goal:** {actor_profile.goal_category}: "
-            f"{actor_profile.goal_category_name}\n\n"
-            "The narrative's terminal attack outcome SHOULD align with this goal "
-            "when it is compatible with the seed attack pattern's mechanism. "
-            "If satisfying this goal would require abandoning the seed's core "
-            "attack mechanism, prioritise seed fidelity — the goal is a guiding "
-            "preference, not a hard override. The seed's 'Seed Attack Objective "
-            "Fidelity (INVARIANT)' constraint always takes precedence.\n"
-        )
+    goal_section = _goal_guidance_section(actor_profile)
 
     # Resolve creativity-vs-simplicity conflict for novice actors
-    if (
-        diversity_section
-        and actor_profile is not None
-        and actor_profile.capability_level == "novice"
-    ):
-        diversity_section += (
-            "\n\n**Capability-level priority:** The actor is a NOVICE. "
-            "Diversity constraints are secondary to capability-level constraints. "
-            "Do NOT generate a complex attack just because simpler patterns have "
-            "been excluded. Instead, use a DIFFERENT simple pattern or a different "
-            "angle on the same simple technique."
-        )
+    diversity_section = _novice_diversity_priority(diversity_section, actor_profile)
 
     # Build technique context — pin to specific techniques if set
     tech_ids_for_narrative = (
         pinned_technique_ids if pinned_technique_ids else seed.atlas_technique_ids
     )
     technique_context_1 = _build_technique_context_block(tech_ids_for_narrative)
-    if pinned_technique_ids:
-        technique_framing_1 = (
-            "You MUST use these ATLAS technique(s) in the narrative. "
-            "Reference them in narrative step actions and annotate with the ID "
-            "in square brackets, e.g. [AML.T0054]. This is a hard constraint.\n"
-        )
-    else:
-        technique_framing_1 = (
-            "Reference these techniques in narrative step actions where applicable. "
-            "Annotate technique usage with the ID in square brackets, "
-            "e.g. [AML.T0054].\n"
-            if seed.atlas_technique_ids
-            else ""
-        )
+    technique_framing_1 = _technique_framing_for_narrative(pinned_technique_ids, seed)
 
     owasp_llm_formatted = _format_taxonomy_ids(seed.owasp_llm_ids, _OWASP_LLM_NAMES)
 
@@ -1227,10 +1492,10 @@ def build_call1_context(
 
     # Build focused ontology context block for this seed
     ontology_context = _build_ontology_context(
-        entry_point_name=pinned_entry_point or "",
+        entry_point_name=_prompt_text(pinned_entry_point),
         entry_point_direction=pinned_entry_point_direction,
         zones=profile.zones_active,
-        technique_ids=list(tech_ids_for_narrative) if tech_ids_for_narrative else [],
+        technique_ids=_technique_id_list(tech_ids_for_narrative),
         entry_point_controllability=pinned_entry_point_controllability,
     )
 
@@ -1265,13 +1530,58 @@ def build_call1_context(
         "pinned_entry_point_direction": pinned_entry_point_direction,
         "kc_definitions": kc_definitions,
         "ontology_context": ontology_context,
-        "tool_inventory": profile.tool_inventory or [],
+        "tool_inventory": _tool_inventory_list(profile.tool_inventory),
         "kill_chain": seed.kill_chain,
-        "access_feedback": access_feedback or "",
-        "realization_feedback": realization_feedback or "",
+        "access_feedback": _prompt_text(access_feedback),
+        "realization_feedback": _prompt_text(realization_feedback),
         "projection_context": humanized_projection,
         "projection_alignment_rows": alignment_rows,
     }
+
+
+def _responsible_step_for(
+    current: NarrativeAccessRealization | None, step_numbers: set[int]
+) -> int:
+    """Canonical responsible step: the current one when valid, else the first."""
+    if current is not None and current.responsible_step_number in step_numbers:
+        return current.responsible_step_number
+    return min(step_numbers)
+
+
+def _access_realization_from_path(
+    canonical_ingress: str, responsible_step: int, path: dict[str, Any] | None
+) -> NarrativeAccessRealization:
+    """Typed realization derived from the projected source-influence path."""
+    if path is None:
+        return NarrativeAccessRealization(
+            initial_entry_point_id=canonical_ingress,
+            responsible_step_number=responsible_step,
+        )
+    return NarrativeAccessRealization(
+        initial_entry_point_id=canonical_ingress,
+        responsible_step_number=responsible_step,
+        influence_source=path["source_id"],
+        influence_source_kind=path["source_identity_kind"],
+        influence_source_id=path["source_id"],
+        trust_boundary_id=path["boundary_id"],
+    )
+
+
+def _apply_path_fields(
+    current: NarrativeAccessRealization, path: dict[str, Any] | None
+) -> None:
+    """Overwrite the typed relation fields from the projected path."""
+    current.influence_source = path["source_id"] if path else None
+    current.influence_source_kind = path["source_identity_kind"] if path else None
+    current.influence_source_id = path["source_id"] if path else None
+    current.trust_boundary_id = path["boundary_id"] if path else None
+
+
+def _single_source_path(paths: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The lone projected source-influence path, or None."""
+    if len(paths) > 1:
+        raise ValueError("projection context contains multiple source-influence paths")
+    return paths[0] if paths else None
 
 
 def _apply_projection_access_realization(
@@ -1282,28 +1592,133 @@ def _apply_projection_access_realization(
     if projection_context is None:
         return
     canonical_ingress = projection_context["canonical_ingress"]["entry_point_id"]
-    paths = projection_context.get("source_influence_paths", [])
-    if len(paths) > 1:
-        raise ValueError("projection context contains multiple source-influence paths")
+    path = _single_source_path(projection_context.get("source_influence_paths", []))
     current = narrative.access_realization
     step_numbers = {step.step_number for step in narrative.steps}
-    responsible_step = (
-        current.responsible_step_number
-        if current is not None and current.responsible_step_number in step_numbers
-        else min(step_numbers)
-    )
-    path = paths[0] if paths else None
+    responsible_step = _responsible_step_for(current, step_numbers)
     if current is None:
-        current = NarrativeAccessRealization(
-            initial_entry_point_id=canonical_ingress,
-            responsible_step_number=responsible_step,
+        current = _access_realization_from_path(
+            canonical_ingress, responsible_step, path
         )
         narrative.access_realization = current
     current.initial_entry_point_id = canonical_ingress
-    current.influence_source = path["source_id"] if path else None
-    current.influence_source_kind = path["source_identity_kind"] if path else None
-    current.influence_source_id = path["source_id"] if path else None
-    current.trust_boundary_id = path["boundary_id"] if path else None
+    _apply_path_fields(current, path)
+
+
+def _normalize_echoed_step_ids(content: Any, canonical_ids: list[str]) -> None:
+    """Normalize one response's echoed transport shapes to canonical IDs."""
+    for step in content.steps:
+        step.projected_step_ids = normalize_projected_step_ids(
+            step.projected_step_ids, canonical_ids
+        )
+
+
+def _normalize_legacy_step_ids(
+    result: LLMResult, projection_context: dict[str, Any] | None
+) -> None:
+    """Normalize echoed legacy transport step-ID shapes to canonical IDs."""
+    if projection_context is not None:
+        _normalize_echoed_step_ids(
+            result.content, projection_context.get("selected_step_ids", [])
+        )
+
+
+def _compile_legacy_narrative(
+    result: LLMResult, projection_context: dict[str, Any] | None
+) -> NarrativeLayer:
+    """Compile a scripted historical response into a narrative layer."""
+    # Scripted fixtures using the historical response remain supported
+    # while live projected requests advertise only NarrativeDraftV3.
+    # Normalize echoed step-ID transport shapes to canonical IDs before
+    # deriving deterministic realizations.
+    _normalize_legacy_step_ids(result, projection_context)
+    return _map_call1_to_narrative(result.content, projection_context)
+
+
+def _enforce_narrative_zones(
+    narrative: NarrativeLayer,
+    profile: CapabilityProfile,
+    projection_context: dict[str, Any] | None,
+) -> NarrativeLayer:
+    """Enforce zone boundaries against the projection or the bare profile."""
+    if projection_context is not None:
+        # Stage-specific boundary validation: literal 'outside' is allowed
+        # only for steps mapping only outside-boundary projected steps;
+        # inside/crossing steps must use active Schneider zones.
+        boundary_by_id = projected_boundary_by_id(
+            projection_context.get("selected_steps", [])
+        )
+        return enforce_narrative_projection_zones(
+            narrative, profile.zones_active, boundary_by_id
+        )
+    return _enforce_zones_narrative(narrative, profile.zones_active)
+
+
+def _resolve_initial_entry_point_name(
+    realization: Any, profile: CapabilityProfile
+) -> None:
+    """Resolve a human-readable entry-point name to its canonical ID."""
+    from asago_scenario_generator.pipeline.generate.names import (
+        resolve_name_to_entry_point_id,
+    )
+
+    resolved = resolve_name_to_entry_point_id(
+        realization.initial_entry_point_id, profile
+    )
+    if resolved is not None:
+        realization.initial_entry_point_id = resolved
+
+
+def _resolve_influence_source_name(
+    realization: Any, profile: CapabilityProfile
+) -> None:
+    """Resolve a human-readable influence-source name to its canonical ID."""
+    from asago_scenario_generator.pipeline.generate.names import (
+        resolve_name_to_entry_point_id,
+    )
+
+    if realization.influence_source is None:
+        return
+    resolved = resolve_name_to_entry_point_id(realization.influence_source, profile)
+    if resolved is not None:
+        realization.influence_source = resolved
+
+
+def _resolve_trust_boundary_name(realization: Any, profile: CapabilityProfile) -> None:
+    """Resolve a human-readable trust-boundary name to its canonical ID."""
+    from asago_scenario_generator.pipeline.generate.names import (
+        resolve_name_to_trust_boundary_id,
+    )
+
+    if realization.trust_boundary_id is None:
+        return
+    resolved = resolve_name_to_trust_boundary_id(realization.trust_boundary_id, profile)
+    if resolved is not None:
+        realization.trust_boundary_id = resolved
+
+
+def _resolve_narrative_access_names(
+    narrative: NarrativeLayer, profile: CapabilityProfile
+) -> None:
+    """Resolve human-readable names to canonical hex IDs (Phase 3)."""
+    if narrative.access_realization is None:
+        return
+    realization = narrative.access_realization
+    _resolve_initial_entry_point_name(realization, profile)
+    _resolve_influence_source_name(realization, profile)
+    _resolve_trust_boundary_name(realization, profile)
+
+
+def _narrative_from_draft_or_legacy(
+    draft_context: NarrativeDraftContext | None,
+    result: LLMResult,
+    projection_context: dict[str, Any] | None,
+) -> NarrativeLayer:
+    """Compile a draft response, or the legacy response shape."""
+    if isinstance(result.content, (NarrativeDraftV2, NarrativeDraftV3)):
+        assert draft_context is not None
+        return compile_narrative_draft(draft_context, result.content)
+    return _compile_legacy_narrative(result, projection_context)
 
 
 def _call_narrative(
@@ -1394,61 +1809,19 @@ def _call_narrative(
         response_format=response_model,
         max_completion_tokens=max_completion_tokens,
     )
-    if isinstance(result.content, (NarrativeDraftV2, NarrativeDraftV3)):
-        assert draft_context is not None
-        narrative = compile_narrative_draft(draft_context, result.content)
-    else:
-        # Scripted fixtures using the historical response remain supported
-        # while live projected requests advertise only NarrativeDraftV3.
-        # Normalize echoed step-ID transport shapes to canonical IDs before
-        # deriving deterministic realizations.
-        if projection_context is not None:
-            canonical_ids = projection_context.get("selected_step_ids", [])
-            for step in result.content.steps:
-                step.projected_step_ids = normalize_projected_step_ids(
-                    step.projected_step_ids, canonical_ids
-                )
-        narrative = _map_call1_to_narrative(result.content, projection_context)
+    narrative = _narrative_from_draft_or_legacy(
+        draft_context, result, projection_context
+    )
     # Normalize echoed step-ID transport shapes to canonical IDs before
     # deriving deterministic realizations. Unknown, ambiguous, or duplicate
     # legacy echoes raise a stable ValueError, so no defective narrative is
     # finalized.
     _apply_projection_access_realization(narrative, projection_context)
     narrative = _sanitize_narrative(narrative)
-    if projection_context is not None:
-        # Stage-specific boundary validation: literal 'outside' is allowed
-        # only for steps mapping only outside-boundary projected steps;
-        # inside/crossing steps must use active Schneider zones.
-        boundary_by_id = projected_boundary_by_id(
-            projection_context.get("selected_steps", [])
-        )
-        narrative = enforce_narrative_projection_zones(
-            narrative, profile.zones_active, boundary_by_id
-        )
-    else:
-        narrative = _enforce_zones_narrative(narrative, profile.zones_active)
+    narrative = _enforce_narrative_zones(narrative, profile, projection_context)
 
     # Phase 3: resolve human-readable names to canonical hex IDs in
     # the narrative's access_realization.
-    if narrative.access_realization is not None:
-        from asago_scenario_generator.pipeline.generate.names import (
-            resolve_name_to_entry_point_id,
-            resolve_name_to_trust_boundary_id,
-        )
-
-        ar = narrative.access_realization
-        resolved_ep = resolve_name_to_entry_point_id(ar.initial_entry_point_id, profile)
-        if resolved_ep is not None:
-            ar.initial_entry_point_id = resolved_ep
-        if ar.influence_source is not None:
-            resolved_src = resolve_name_to_entry_point_id(ar.influence_source, profile)
-            if resolved_src is not None:
-                ar.influence_source = resolved_src
-        if ar.trust_boundary_id is not None:
-            resolved_tb = resolve_name_to_trust_boundary_id(
-                ar.trust_boundary_id, profile
-            )
-            if resolved_tb is not None:
-                ar.trust_boundary_id = resolved_tb
+    _resolve_narrative_access_names(narrative, profile)
 
     return narrative, result
