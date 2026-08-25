@@ -14,7 +14,6 @@ import json
 import unicodedata
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from itertools import product
 from typing import Annotated, Any, Callable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -29,35 +28,23 @@ from asago_scenario_generator.models.attack_pattern import (
     CanonicalResourceReference,
     Condition,
     ConditionEvaluationResult,
-    DirectInputControlRequirement,
     EntryPointResourceReference,
     EvaluatedFactEvidence,
     ExecutionRequirement,
     IntegrationResourceReference,
     MappingDecision,
     NotCondition,
-    ObservationRequirement,
     OutputSurfaceResourceReference,
     ProjectionSnapshot,
-    ResourceBinding,
-    ResourceSlot,
-    SecurityOutcomeAssertionRequirement,
-    SourceInfluencePath,
-    StateChangingToolFixtureRequirement,
     StepOmission,
     TaxonomyResolver,
     ToolResourceReference,
     TrustBoundaryResourceReference,
-    UpstreamSourceInfluenceRequirement,
-    compute_projection_digest,
     evaluate_condition,
     validate_attack_pattern,
     validate_projection_snapshot,
 )
-from asago_scenario_generator.models.capability_profile import (
-    CapabilityProfile,
-    is_attacker_accessible_ingress,
-)
+from asago_scenario_generator.models.capability_profile import CapabilityProfile
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
@@ -310,13 +297,15 @@ def _resource_contained(
     return False if checker is None else checker(reference, profile)
 
 
-def _assert_snapshot_facts_uniquely_sorted(
-    facts: tuple[EvaluatedFactEvidence, ...],
-) -> None:
-    """Require snapshot facts to be uniquely sorted by fact reference."""
-    keys = [_fact_key(item.fact) for item in facts]
-    if keys != sorted(keys) or len(keys) != len(set(keys)):
-        raise ValueError("snapshot facts must be uniquely sorted by reference")
+from asago_scenario_generator.pipeline.projection_snapshot import (  # noqa: E402, F401
+    CapabilityFactSnapshot,
+    _assert_snapshot_facts_uniquely_sorted,
+    _compute_snapshot_digest,
+    _snapshot_resource_payload,
+    _sorted_by,
+    _sorted_canonical,
+    capture_capability_snapshot,
+)
 
 
 def _normalize_semantic_order(value: Any, field_name: str | None = None) -> Any:
@@ -331,119 +320,6 @@ def _normalize_semantic_order(value: Any, field_name: str | None = None) -> Any:
             items.sort(key=_canonical_json)
         return items
     return value
-
-
-class CapabilityFactSnapshot(ProjectionModel):
-    """One immutable, content-addressed pre-LLM profile/fact reading."""
-
-    profile: CapabilityProfile
-    facts: tuple[EvaluatedFactEvidence, ...]
-    snapshot_digest: Digest
-
-    @property
-    def capability_fact_snapshot_digest(self) -> str:
-        """Implement the merged :class:`CapabilitySnapshotResolver` pin."""
-        self.assert_integrity()
-        return self.snapshot_digest
-
-    def assert_integrity(self) -> None:
-        """Fail closed if a nested mutable profile was changed after capture."""
-        if self.snapshot_digest != _compute_snapshot_digest(self.profile, self.facts):
-            raise ValueError("capability/fact snapshot changed after capture")
-
-    def fact(
-        self, reference: AuthoritativeFactReference
-    ) -> EvaluatedFactEvidence | None:
-        self.assert_integrity()
-        return {_fact_key(item.fact): item for item in self.facts}.get(
-            _fact_key(reference)
-        )
-
-    def contains_resource(self, reference: CanonicalResourceReference) -> bool:
-        self.assert_integrity()
-        return _resource_contained(reference, self.profile)
-
-    def resource_matches_slot(
-        self, reference: CanonicalResourceReference, slot: ResourceSlot
-    ) -> bool:
-        self.assert_integrity()
-        return reference in _references_for_slot(
-            slot,
-            self,
-            initial_ingress=slot.purpose == "initial_ingress",
-        )
-
-    @model_validator(mode="after")
-    def coherent_digest(self) -> CapabilityFactSnapshot:
-        _assert_snapshot_facts_uniquely_sorted(self.facts)
-        if self.snapshot_digest != _compute_snapshot_digest(self.profile, self.facts):
-            raise ValueError("snapshot_digest does not match capability/fact content")
-        return self
-
-
-def _snapshot_resource_payload(profile: CapabilityProfile) -> dict[str, Any]:
-    return {
-        "zones_active": sorted(set(profile.zones_active)),
-        "kc_subcodes": sorted(set(profile.kc_subcodes)),
-        "entry_points": _sorted_by(profile.entry_points, "entry_point_id"),
-        "tools": _sorted_by(profile.tool_inventory or (), "tool_id"),
-        "tool_types": _sorted_canonical(profile.tool_types or ()),
-        "integrations": _sorted_by(
-            profile.external_integrations or (), "integration_id"
-        ),
-        "trust_boundaries": _sorted_by(
-            profile.trust_boundaries or (), "trust_boundary_id"
-        ),
-    }
-
-
-def _sorted_by(items: Iterable[Any], key_field: str) -> list[dict[str, Any]]:
-    """Dump items to JSON and order them by a stable top-level field."""
-    return sorted(
-        (item.model_dump(mode="json") for item in items),
-        key=lambda item: item[key_field],
-    )
-
-
-def _sorted_canonical(items: Iterable[Any]) -> list[dict[str, Any]]:
-    """Dump items to JSON and order them by canonical JSON bytes."""
-    return sorted(
-        (item.model_dump(mode="json") for item in items),
-        key=lambda item: _canonical_json(item),
-    )
-
-
-def _compute_snapshot_digest(
-    profile: CapabilityProfile, facts: tuple[EvaluatedFactEvidence, ...]
-) -> str:
-    return _digest(
-        "asago-scenario-generator:capability-fact-snapshot:v1",
-        {
-            "profile": _snapshot_resource_payload(profile),
-            "facts": [item.model_dump(mode="json") for item in facts],
-        },
-    )
-
-
-def capture_capability_snapshot(
-    profile: CapabilityProfile,
-    facts: Iterable[EvaluatedFactEvidence] = (),
-) -> CapabilityFactSnapshot:
-    """Capture a deterministic resolver snapshot before any LLM stage."""
-    by_reference: dict[str, EvaluatedFactEvidence] = {}
-    for item in facts:
-        key = _fact_key(item.fact)
-        previous = by_reference.get(key)
-        if previous is not None and previous != item:
-            raise ValueError("conflicting authoritative readings for one fact")
-        by_reference[key] = item
-    ordered = tuple(by_reference[key] for key in sorted(by_reference))
-    captured_profile = profile.model_copy(deep=True)
-    return CapabilityFactSnapshot(
-        profile=captured_profile,
-        facts=ordered,
-        snapshot_digest=_compute_snapshot_digest(captured_profile, ordered),
-    )
 
 
 class ProjectionBudget(ProjectionModel):
@@ -769,336 +645,6 @@ def _resource_id(reference: CanonicalResourceReference) -> str:
     return extractor(reference)
 
 
-_SOURCE_RELATION_GUIDANCE = (
-    "Review the explicit ingress_zone or trust-boundary declaration."
-)
-
-
-def _source_relation_issue(
-    pattern_id: str,
-    detail: str,
-    *,
-    source_id: str | None = None,
-    boundary_id: str | None = None,
-    target_ingress_id: str | None = None,
-    canonical_ingress_id: str | None = None,
-    expected_target_zone: str | None = None,
-    actual_boundary_zones: str | None = None,
-    expected_source_kind: str | None = None,
-    actual_binding_kind: str | None = None,
-) -> ProjectionIssue:
-    """Build the consistent typed failure for an invalid source relation."""
-    return ProjectionIssue(
-        code="source_influence_relation_infeasible",
-        pattern_id=pattern_id,
-        detail=detail,
-        source_id=source_id,
-        boundary_id=boundary_id,
-        target_ingress_id=target_ingress_id,
-        canonical_ingress_id=canonical_ingress_id,
-        expected_target_zone=expected_target_zone,
-        actual_boundary_zones=actual_boundary_zones,
-        expected_source_kind=expected_source_kind,
-        actual_binding_kind=actual_binding_kind,
-        guidance=_SOURCE_RELATION_GUIDANCE,
-    )
-
-
-def _source_influence_links(
-    chain: CanonicalAttackChain, selected_ids: set[str]
-) -> tuple[Any, ...]:
-    """Collect the selected steps' source-influence links in chain order."""
-    return tuple(
-        link
-        for step in chain.steps
-        if step.step_id in selected_ids
-        for link in step.resource_links
-        if link.role == "source_influence"
-    )
-
-
-def _source_ingress_relation_guard(
-    pattern_id: str,
-    ingress: Any,
-    ingress_ref: EntryPointResourceReference,
-    links: tuple[Any, ...],
-) -> tuple[tuple[SourceInfluencePath, ...], ProjectionIssue | None] | None:
-    """Early-return guards for direct ingress and missing/ambiguous paths.
-
-    Returns ``None`` when preflight continues to relation resolution.
-    """
-    # Preserve the legacy structural use of source-influence links on a
-    # directly controlled ingress.  Relation preflight applies to indirect
-    # ingress, where source provenance is the activation contract.
-    if ingress.effective_controllability == "direct":
-        return (), None
-    if not links:
-        return (), _source_relation_issue(
-            pattern_id,
-            "indirect canonical ingress has no selected source-influence path",
-            target_ingress_id=ingress_ref.entry_point_id,
-            canonical_ingress_id=ingress_ref.entry_point_id,
-            expected_target_zone=ingress.effective_ingress_zone,
-        )
-    if len(links) != 1:
-        return (), _source_relation_issue(
-            pattern_id,
-            (
-                "candidate requires exactly one selected source-to-boundary-"
-                f"to-ingress path, found {len(links)}"
-            ),
-            target_ingress_id=ingress_ref.entry_point_id,
-            canonical_ingress_id=ingress_ref.entry_point_id,
-            expected_target_zone=ingress.effective_ingress_zone,
-        )
-    return None
-
-
-def _source_relation_refs(
-    bindings_by_slot: dict[str, CanonicalResourceReference], link: Any
-) -> tuple[Any, Any, Any]:
-    """Resolve the source, boundary, and target bindings for one link."""
-    return (
-        bindings_by_slot.get(link.slot_id),
-        bindings_by_slot.get(str(link.trust_boundary_slot_id)),
-        bindings_by_slot.get(str(link.target_ingress_slot_id)),
-    )
-
-
-def _resource_id_or_none(reference: Any) -> str | None:
-    """Resolve the stable resource id, mapping absence to None."""
-    if reference is None:
-        return None
-    return _resource_id(reference)
-
-
-def _source_influence_expected_kind(chain: CanonicalAttackChain, link: Any) -> str:
-    """Resolve the declared source identity kind, falling back to the slot."""
-    expected_kind = link.source_identity_kind
-    if expected_kind is None:
-        source_slot = next(
-            slot for slot in chain.resource_slots if slot.slot_id == link.slot_id
-        )
-        expected_kind = source_slot.kind
-    return expected_kind
-
-
-def _source_relation_boundary(
-    snapshot: CapabilityFactSnapshot, boundary_ref: Any
-) -> Any | None:
-    """Resolve the trust boundary only when the binding is typed."""
-    if isinstance(boundary_ref, TrustBoundaryResourceReference):
-        return snapshot.profile.resolve_trust_boundary(boundary_ref.trust_boundary_id)
-    return None
-
-
-def _boundary_zones_or_none(boundary: Any) -> str | None:
-    """Format the boundary zone span, mapping absence to None."""
-    if boundary is None:
-        return None
-    return f"{boundary.from_zone}->{boundary.to_zone}"
-
-
-def _source_identity_kind_detail(
-    actual_kind: str | None, expected_kind: str
-) -> str | None:
-    """Detail when the concrete binding kind does not match the link."""
-    if actual_kind != expected_kind:
-        return "source identity kind does not match the concrete binding"
-    return None
-
-
-def _source_binding_kind_detail(source_ref: Any) -> str | None:
-    """Detail when the source binding is neither entry point nor integration."""
-    if not isinstance(
-        source_ref, (EntryPointResourceReference, IntegrationResourceReference)
-    ):
-        return "source binding is not an entry point or integration"
-    return None
-
-
-def _source_entry_point_detail(
-    source_ref: Any,
-    ingress_ref: EntryPointResourceReference,
-    snapshot: CapabilityFactSnapshot,
-) -> str | None:
-    """Detail when the entry-point source is not influenceable or not distinct."""
-    if not isinstance(source_ref, EntryPointResourceReference):
-        return None
-    source = snapshot.profile.resolve_entry_point(source_ref.entry_point_id)
-    if source is None or not is_attacker_accessible_ingress(
-        source, snapshot.profile.zones_active
-    ):
-        return "entry-point source is not attacker-influenceable"
-    if source_ref.entry_point_id == ingress_ref.entry_point_id:
-        return "source entry point must be distinct from target ingress"
-    return None
-
-
-def _source_boundary_detail(
-    boundary: Any,
-    expected_zone: str,
-    target_id: str | None,
-    ingress_id: str,
-) -> str | None:
-    """Detail when the boundary or target does not support the relation."""
-    if boundary is None:
-        return "source-influence boundary is absent from reviewed declarations"
-    if boundary.confidence.value == "hypothesized":
-        return "source-influence boundary is not a reviewed declaration"
-    if boundary.to_zone != expected_zone:
-        return "trust-boundary destination zone does not match target ingress"
-    if target_id != ingress_id:
-        return "source-influence target is not the canonical ingress binding"
-    return None
-
-
-def _source_relation_issue_detail(
-    source_ref: Any,
-    actual_kind: str | None,
-    expected_kind: str,
-    ingress_ref: EntryPointResourceReference,
-    snapshot: CapabilityFactSnapshot,
-    boundary: Any,
-    target_id: str | None,
-    ingress_id: str,
-) -> str | None:
-    """Combine the identity and boundary cascades, boundary cascade last."""
-    detail = _source_identity_kind_detail(actual_kind, expected_kind)
-    if detail is None:
-        detail = _source_binding_kind_detail(source_ref)
-    if detail is None:
-        detail = _source_entry_point_detail(source_ref, ingress_ref, snapshot)
-    boundary_detail = _source_boundary_detail(
-        boundary,
-        snapshot.profile.resolve_entry_point(
-            ingress_ref.entry_point_id
-        ).effective_ingress_zone,
-        target_id,
-        ingress_id,
-    )
-    if boundary_detail is not None:
-        return boundary_detail
-    return detail
-
-
-def _source_relation_resolution(
-    pattern_id: str,
-    ingress: Any,
-    ingress_ref: EntryPointResourceReference,
-    link: Any,
-    chain: CanonicalAttackChain,
-    bindings_by_slot: dict[str, CanonicalResourceReference],
-    snapshot: CapabilityFactSnapshot,
-) -> tuple[tuple[SourceInfluencePath, ...], ProjectionIssue | None]:
-    """Resolve the single source-influence path or return the typed issue."""
-    source_ref, boundary_ref, target_ref = _source_relation_refs(bindings_by_slot, link)
-    source_id = _resource_id_or_none(source_ref)
-    boundary_id = _resource_id_or_none(boundary_ref)
-    target_id = _resource_id_or_none(target_ref)
-    expected_kind = _source_influence_expected_kind(chain, link)
-    actual_kind = source_ref.kind if source_ref is not None else None
-    boundary = _source_relation_boundary(snapshot, boundary_ref)
-    actual_boundary_zones = _boundary_zones_or_none(boundary)
-    issue_detail = _source_relation_issue_detail(
-        source_ref,
-        actual_kind,
-        expected_kind,
-        ingress_ref,
-        snapshot,
-        boundary,
-        target_id,
-        ingress_ref.entry_point_id,
-    )
-    if issue_detail is not None:
-        return (), _source_relation_issue(
-            pattern_id,
-            detail=issue_detail,
-            source_id=source_id,
-            boundary_id=boundary_id,
-            target_ingress_id=target_id,
-            canonical_ingress_id=ingress_ref.entry_point_id,
-            expected_target_zone=ingress.effective_ingress_zone,
-            actual_boundary_zones=actual_boundary_zones,
-            expected_source_kind=expected_kind,
-            actual_binding_kind=actual_kind,
-        )
-    assert boundary is not None
-    assert target_id is not None
-    path = SourceInfluencePath(
-        source_identity_kind=expected_kind,
-        source_id=source_id,
-        boundary_id=boundary_id,
-        target_ingress_id=target_id,
-        expected_target_zone=ingress.effective_ingress_zone,
-        boundary_zones=actual_boundary_zones,
-    )
-    return (path,), None
-
-
-def _source_influence_relation(
-    pattern_id: str,
-    chain: CanonicalAttackChain,
-    selected: tuple[str, ...],
-    bindings: tuple[ResourceBinding, ...],
-    snapshot: CapabilityFactSnapshot,
-) -> tuple[tuple[SourceInfluencePath, ...], ProjectionIssue | None]:
-    """Resolve exactly one source relation from immutable projection bindings."""
-    bindings_by_slot = {item.slot_id: item.resource_ref for item in bindings}
-    links = _source_influence_links(chain, set(selected))
-    ingress_ref = bindings_by_slot[chain.initial_ingress_slot_id]
-    if not isinstance(ingress_ref, EntryPointResourceReference):
-        return (), _source_relation_issue(
-            pattern_id,
-            "canonical ingress is not an entry-point binding",
-            canonical_ingress_id=_resource_id(ingress_ref),
-        )
-    ingress = snapshot.profile.resolve_entry_point(ingress_ref.entry_point_id)
-    assert ingress is not None
-
-    guard = _source_ingress_relation_guard(pattern_id, ingress, ingress_ref, links)
-    if guard is not None:
-        return guard
-    return _source_relation_resolution(
-        pattern_id,
-        ingress,
-        ingress_ref,
-        links[0],
-        chain,
-        bindings_by_slot,
-        snapshot,
-    )
-
-
-def _validate_source_influence_paths(
-    candidate: ProjectedCandidate,
-    snapshot: CapabilityFactSnapshot,
-) -> None:
-    """Re-derive the authoritative relation at the persistence boundary.
-
-    Projection generation and serialized-candidate validation must share the
-    same relation rule.  Digest and candidate-identity checks prove that a
-    payload is self-consistent, but they do not prove that its derived path
-    matches the immutable bindings and profile.
-    """
-    expected_paths, issue = _source_influence_relation(
-        candidate.pattern_id,
-        candidate.projection.source_chain,
-        candidate.projection.selected_step_ids,
-        candidate.projection.bindings,
-        snapshot,
-    )
-    if issue is not None:
-        raise ValueError(
-            f"candidate source-influence relation is infeasible: {issue.detail}"
-        )
-    if candidate.projection.source_influence_paths != expected_paths:
-        raise ValueError(
-            "candidate source-influence paths do not match authoritative "
-            "bindings and profile"
-        )
-
-
 class ProjectionBatch(ProjectionModel):
     """Complete deterministic result, including typed non-candidate outcomes."""
 
@@ -1330,788 +876,114 @@ def _evaluate_preconditions(
     snapshot: CapabilityFactSnapshot,
 ) -> tuple[PreconditionEvaluationResult, ...]:
     selected = set(selected_step_ids)
-    results: list[PreconditionEvaluationResult] = []
-    for step in pattern.canonical_chain.steps:
-        if step.step_id not in selected:
-            continue
-        for precondition in step.preconditions:
-            evidence = tuple(
-                snapshot.fact(reference)
-                or EvaluatedFactEvidence(fact=reference, status="unknown", value=None)
-                for reference in _condition_facts(precondition.condition)
-            )
-            results.append(
-                PreconditionEvaluationResult(
-                    step_id=step.step_id,
-                    condition_id=precondition.condition_id,
-                    result=evaluate_condition(precondition.condition, evidence),
-                    evidence=evidence,
-                )
-            )
-    return tuple(results)
-
-
-def _entry_point_reference_allowed(
-    item: Any,
-    active_zones: set[str],
-    *,
-    initial_ingress: bool,
-    attacker_influence_required: bool,
-) -> bool:
-    """Filter entry points by the slot's attacker-accessibility requirement."""
-    if initial_ingress or attacker_influence_required:
-        return is_attacker_accessible_ingress(item, active_zones)
-    return True
-
-
-def _entry_point_references(
-    profile: CapabilityProfile,
-    *,
-    initial_ingress: bool,
-    attacker_influence_required: bool,
-) -> list[CanonicalResourceReference]:
-    """Build entry-point references, applying accessibility filtering."""
-    active_zones = set(profile.zones_active)
-    return [
-        EntryPointResourceReference(
-            kind="entry_point", entry_point_id=item.entry_point_id
-        )
-        for item in profile.entry_points
-        if _entry_point_reference_allowed(
-            item,
-            active_zones,
-            initial_ingress=initial_ingress,
-            attacker_influence_required=attacker_influence_required,
-        )
-    ]
-
-
-def _tool_references(
-    profile: CapabilityProfile,
-) -> list[CanonicalResourceReference]:
-    """Build tool references from the inventory."""
-    return [
-        ToolResourceReference(kind="tool", tool_id=item.tool_id)
-        for item in profile.tool_inventory or ()
-    ]
-
-
-def _integration_references(
-    profile: CapabilityProfile,
-) -> list[CanonicalResourceReference]:
-    """Build integration references from the inventory."""
-    return [
-        IntegrationResourceReference(
-            kind="integration", integration_id=item.integration_id
-        )
-        for item in profile.external_integrations or ()
-    ]
-
-
-def _output_surface_references(
-    profile: CapabilityProfile,
-) -> list[CanonicalResourceReference]:
-    """Build output-surface references from the entry points."""
-    return [
-        OutputSurfaceResourceReference(
-            kind="output_surface", entry_point_id=item.entry_point_id
-        )
-        for item in profile.entry_points
-        if item.direction in ("output", "bidirectional")
-    ]
-
-
-def _agent_internal_references(
-    profile: CapabilityProfile,
-) -> list[CanonicalResourceReference]:
-    """Build the intrinsic agent working-state reference, if present."""
-    # Agent working state is an intrinsic singleton of every validated
-    # profile (which must include the reasoning zone), not an adapter
-    # inventory item.  Keep its reference typed and identity-free.
-    if "reasoning" in profile.zones_active:
-        return [AgentInternalResourceReference(kind="agent_internal")]
-    return []
-
-
-def _trust_boundary_references(
-    profile: CapabilityProfile,
-) -> list[CanonicalResourceReference]:
-    """Build trust-boundary references from the inventory."""
-    return [
-        TrustBoundaryResourceReference(
-            kind="trust_boundary", trust_boundary_id=item.trust_boundary_id
-        )
-        for item in profile.trust_boundaries or ()
-    ]
-
-
-_REFERENCE_BUILDERS: dict[str, Any] = {
-    "entry_point": _entry_point_references,
-    "tool": _tool_references,
-    "integration": _integration_references,
-    "output_surface": _output_surface_references,
-    "agent_internal": _agent_internal_references,
-}
-
-
-def _references_for_kind(
-    kind: str,
-    snapshot: CapabilityFactSnapshot,
-    *,
-    initial_ingress: bool,
-    attacker_influence_required: bool,
-) -> tuple[CanonicalResourceReference, ...]:
-    profile = snapshot.profile
-    builder = _REFERENCE_BUILDERS.get(kind, _trust_boundary_references)
-    if kind == "entry_point":
-        refs = builder(
-            profile,
-            initial_ingress=initial_ingress,
-            attacker_influence_required=attacker_influence_required,
-        )
-    else:
-        refs = builder(profile)
-    return tuple(sorted(refs, key=_resource_key))
-
-
-def _restriction_blocks(value: str, allowed_values: tuple[str, ...]) -> bool:
-    """True when a slot restriction excludes the concrete value."""
-    if not allowed_values:
-        return False
-    return value not in allowed_values
-
-
-def _resource_id_allowed(
-    reference: CanonicalResourceReference, allowed_resource_ids: set[str]
-) -> bool:
-    """True when the reference id passes the slot's id allow-list."""
-    if not allowed_resource_ids:
-        return True
-    return _resource_id(reference) in allowed_resource_ids
-
-
-def _integration_matches_slot(
-    reference: IntegrationResourceReference,
-    slot: ResourceSlot,
-    snapshot: CapabilityFactSnapshot,
-) -> bool:
-    """True when the integration satisfies the slot's typed constraints."""
-    integration = snapshot.profile.resolve_integration(reference.integration_id)
-    if integration is None:  # pragma: no cover - built from this snapshot
-        return False
-    return not _restriction_blocks(
-        integration.integration_type.value, slot.allowed_integration_types
-    )
-
-
-def _entry_point_matches_slot(
-    reference: EntryPointResourceReference,
-    slot: ResourceSlot,
-    snapshot: CapabilityFactSnapshot,
-) -> bool:
-    """True when the entry point satisfies the slot's typed constraints."""
-    entry_point = snapshot.profile.resolve_entry_point(reference.entry_point_id)
-    if entry_point is None:  # pragma: no cover - built from this snapshot
-        return False
-    if _restriction_blocks(
-        entry_point.entry_point_type, slot.allowed_entry_point_types
-    ):
-        return False
-    if _restriction_blocks(entry_point.direction, slot.allowed_entry_point_directions):
-        return False
-    if _restriction_blocks(
-        entry_point.controllability, slot.allowed_entry_point_controllability
-    ):
-        return False
-    if _restriction_blocks(
-        entry_point.effective_ingress_zone, slot.allowed_entry_point_ingress_zones
-    ):
-        return False
-    return True
-
-
-def _trust_boundary_matches_slot(
-    reference: TrustBoundaryResourceReference,
-    slot: ResourceSlot,
-    snapshot: CapabilityFactSnapshot,
-) -> bool:
-    """True when the trust boundary satisfies the slot's typed constraints."""
-    boundary = snapshot.profile.resolve_trust_boundary(reference.trust_boundary_id)
-    if boundary is None:  # pragma: no cover - built from this snapshot
-        return False
-    if _restriction_blocks(boundary.from_zone, slot.allowed_trust_boundary_from_zones):
-        return False
-    if _restriction_blocks(boundary.to_zone, slot.allowed_trust_boundary_to_zones):
-        return False
-    return True
-
-
-def _slot_reference_compatible(
-    reference: CanonicalResourceReference,
-    slot: ResourceSlot,
-    snapshot: CapabilityFactSnapshot,
-) -> bool:
-    """True when the reference satisfies the slot's typed constraints."""
-    if isinstance(reference, IntegrationResourceReference):
-        return _integration_matches_slot(reference, slot, snapshot)
-    if isinstance(reference, EntryPointResourceReference):
-        return _entry_point_matches_slot(reference, slot, snapshot)
-    if isinstance(reference, TrustBoundaryResourceReference):
-        return _trust_boundary_matches_slot(reference, slot, snapshot)
-    return True
-
-
-def _references_for_slot(
-    slot: ResourceSlot,
-    snapshot: CapabilityFactSnapshot,
-    *,
-    initial_ingress: bool,
-) -> tuple[CanonicalResourceReference, ...]:
-    """Resolve one slot using only its typed, adapter-neutral constraints."""
-    allowed_resource_ids = set(slot.allowed_resource_ids)
-    references = _references_for_kind(
-        slot.kind,
-        snapshot,
-        initial_ingress=initial_ingress,
-        attacker_influence_required=(
-            slot.kind == "entry_point" and slot.purpose == "supporting"
-        ),
-    )
     return tuple(
-        reference
-        for reference in references
-        if _resource_id_allowed(reference, allowed_resource_ids)
-        and _slot_reference_compatible(reference, slot, snapshot)
-    )
-
-
-def _combination_satisfies_distinctness(
-    slots: tuple[ResourceSlot, ...],
-    resources: tuple[CanonicalResourceReference, ...],
-) -> bool:
-    resources_by_slot = {
-        slot.slot_id: resource for slot, resource in zip(slots, resources, strict=True)
-    }
-    return all(
-        resources_by_slot[slot.slot_id] != resources_by_slot[other_slot_id]
-        for slot in slots
-        for other_slot_id in slot.distinct_from_slot_ids
-    )
-
-
-def _iter_compatible_combinations(
-    slots: tuple[ResourceSlot, ...],
-    options: tuple[tuple[CanonicalResourceReference, ...], ...],
-) -> Iterable[tuple[CanonicalResourceReference, ...]]:
-    for resources in _iter_coverage_first_combinations(options):
-        if _combination_satisfies_distinctness(slots, resources):
-            yield resources
-
-
-def _count_compatible_combinations(
-    slots: tuple[ResourceSlot, ...],
-    options: tuple[tuple[CanonicalResourceReference, ...], ...],
-) -> int:
-    """Count valid bindings without expanding unrelated Cartesian dimensions."""
-    edges = _distinctness_edges(slots)
-    constrained = _constrained_indexes(edges)
-    total = _unconstrained_product(options, constrained)
-    for component in _constrained_components(constrained, edges):
-        total *= _count_component_assignments(component, edges, options)
-    return total
-
-
-def _distinctness_edges(
-    slots: tuple[ResourceSlot, ...],
-) -> set[frozenset[int]]:
-    """Index slot pairs that must receive pairwise-distinct resources."""
-    index_by_slot = {slot.slot_id: index for index, slot in enumerate(slots)}
-    return {
-        frozenset((index, index_by_slot[other_slot_id]))
-        for index, slot in enumerate(slots)
-        for other_slot_id in slot.distinct_from_slot_ids
-    }
-
-
-def _constrained_indexes(edges: set[frozenset[int]]) -> set[int]:
-    """Return the slot indexes participating in any distinctness constraint."""
-    return set().union(*edges) if edges else set()
-
-
-def _unconstrained_product(
-    options: tuple[tuple[CanonicalResourceReference, ...], ...],
-    constrained: set[int],
-) -> int:
-    """Multiply option counts for slots untouched by distinctness edges."""
-    total = 1
-    for index, slot_options in enumerate(options):
-        if index not in constrained:
-            total *= len(slot_options)
-    return total
-
-
-def _constrained_components(
-    constrained: set[int], edges: set[frozenset[int]]
-) -> list[set[int]]:
-    """Partition constrained indexes into connected edge components."""
-    remaining = set(constrained)
-    components: list[set[int]] = []
-    while remaining:
-        component = {remaining.pop()}
-        frontier = list(component)
-        while frontier:
-            current = frontier.pop()
-            neighbors = {
-                next(iter(edge - {current}))
-                for edge in edges
-                if current in edge and len(edge) == 2
-            }
-            new = neighbors & remaining
-            remaining -= new
-            component |= new
-            frontier.extend(new)
-        components.append(component)
-    return components
-
-
-def _assignment_conflicts(
-    index: int,
-    resource: CanonicalResourceReference,
-    assigned: dict[int, CanonicalResourceReference],
-    edges: set[frozenset[int]],
-) -> bool:
-    """True when assigning ``resource`` violates a distinctness edge."""
-    return any(
-        frozenset((index, other_index)) in edges and resource == other_resource
-        for other_index, other_resource in assigned.items()
-    )
-
-
-def _count_component_assignments(
-    component: set[int],
-    edges: set[frozenset[int]],
-    options: tuple[tuple[CanonicalResourceReference, ...], ...],
-) -> int:
-    """Count valid assignments within one connected constrained component."""
-    ordered = sorted(component)
-
-    def count_at(offset: int, assigned: dict[int, CanonicalResourceReference]) -> int:
-        if offset == len(ordered):
-            return 1
-        index = ordered[offset]
-        count = 0
-        for resource in options[index]:
-            if _assignment_conflicts(index, resource, assigned, edges):
-                continue
-            assigned[index] = resource
-            count += count_at(offset + 1, assigned)
-            del assigned[index]
-        return count
-
-    return count_at(0, {})
-
-
-def _iter_coverage_first_combinations(
-    options: tuple[tuple[CanonicalResourceReference, ...], ...],
-) -> Iterable[tuple[CanonicalResourceReference, ...]]:
-    """Lazily yield coverage-first combinations without materializing the product.
-
-    Callers stop early when the budget is reached; the full Cartesian
-    product is never materialized.
-
-    Ordering:
-    1. The baseline (slot[0] for every slot).
-    2. Per-slot variant offsets (cover each slot's alternatives).
-    3. Remaining Cartesian fill in ``product`` order.
-    """
-    seen: set[tuple[str, ...]] = set()
-    baseline = _combination_baseline(options)
-    seen.add(_combination_key(baseline))
-    yield baseline
-    yield from _variant_combinations(baseline, options, seen)
-    yield from _cartesian_fill(options, seen)
-
-
-def _combination_key(
-    items: tuple[CanonicalResourceReference, ...],
-) -> tuple[str, ...]:
-    """Map a resource combination to its canonical deduplication key."""
-    return tuple(_resource_key(item) for item in items)
-
-
-def _combination_baseline(
-    options: tuple[tuple[CanonicalResourceReference, ...], ...],
-) -> tuple[CanonicalResourceReference, ...]:
-    """The first candidate combination: slot[0] for every slot."""
-    return tuple(slot[0] for slot in options)
-
-
-def _max_option_length(
-    options: tuple[tuple[CanonicalResourceReference, ...], ...],
-) -> int:
-    """The longest per-slot option list (one when options is empty)."""
-    return max(len(slot) for slot in options) if options else 1
-
-
-def _variant_combinations(
-    baseline: tuple[CanonicalResourceReference, ...],
-    options: tuple[tuple[CanonicalResourceReference, ...], ...],
-    seen: set[tuple[str, ...]],
-) -> Iterable[tuple[CanonicalResourceReference, ...]]:
-    """Yield per-slot variant offsets before any Cartesian fill."""
-    max_len = _max_option_length(options)
-    for offset in range(1, max_len):
-        yield from _offset_variants(baseline, options, offset, seen)
-
-
-def _offset_variants(
-    baseline: tuple[CanonicalResourceReference, ...],
-    options: tuple[tuple[CanonicalResourceReference, ...], ...],
-    offset: int,
-    seen: set[tuple[str, ...]],
-) -> Iterable[tuple[CanonicalResourceReference, ...]]:
-    """Yield variants replacing one slot at a fixed alternative offset."""
-    for slot_index, slot in enumerate(options):
-        if offset >= len(slot):
-            continue
-        variant = list(baseline)
-        variant[slot_index] = slot[offset]
-        variant_t = tuple(variant)
-        key = _combination_key(variant_t)
-        if key in seen:
-            continue
-        seen.add(key)
-        yield variant_t
-
-
-def _cartesian_fill(
-    options: tuple[tuple[CanonicalResourceReference, ...], ...],
-    seen: set[tuple[str, ...]],
-) -> Iterable[tuple[CanonicalResourceReference, ...]]:
-    """Yield remaining product combinations, skipping duplicates lazily."""
-    for combination in product(*options):
-        key = _combination_key(combination)
-        if key in seen:
-            continue
-        seen.add(key)
-        yield combination
-
-
-def _derive_execution_requirements_core(
-    pattern_id: str,
-    chain: CanonicalAttackChain,
-    projection: ProjectionSnapshot,
-    ingress_controllability: Literal["direct", "indirect"],
-) -> tuple[tuple[ExecutionRequirement, ...] | None, ProjectionIssue | None]:
-    """Derive execution requirements from explicit canonical linkage only.
-
-    Pure function over the embedded source chain, projection bindings, and
-    the resolved ingress controllability.  No external snapshot is needed.
-    No inference from action kind, name, prose, cardinality, taxonomy mapping,
-    or catalog partition.  Every requirement is traced to an explicit
-    ``resource_links`` or ``observable_outcome_links`` entry on a selected
-    step.  Security-outcome assertions are derived only from postconditions
-    that have an explicit observable outcome link, not from the
-    ``security_relevant`` flag alone.
-    """
-    slots_by_id = {slot.slot_id: slot for slot in chain.resource_slots}
-    selected_steps = _selected_steps_for_projection(chain, projection.selected_step_ids)
-    requirements: list[ExecutionRequirement] = []
-
-    for step in selected_steps:
-        for link in step.resource_links:
-            slot = slots_by_id[link.slot_id]
-            derived, issue = _link_role_requirement(
-                pattern_id, step, link, slot, ingress_controllability
-            )
-            if issue is not None:
-                return None, issue
-            requirements.extend(derived)
-
-        # Build a set of postcondition IDs that have explicit outcome links.
-        linked_pc_ids = _linked_postcondition_ids(step)
-        requirements.extend(_observation_requirements(step))
-
-        # Security-outcome assertions are derived ONLY from security-relevant
-        # postconditions that have an explicit observable outcome link.
-        # A security-relevant postcondition without an outcome link does not
-        # produce a requirement: the security outcome cannot be asserted
-        # without an explicit observation binding.
-        requirements.extend(_security_outcome_requirements(step, linked_pc_ids))
-
-    sorted_reqs = tuple(sorted(requirements, key=lambda item: item.requirement_id))
-    return _require_unique_requirement_ids_or_issue(sorted_reqs, pattern_id)
-
-
-def _source_identity_kind_for_link(link: Any, slot: ResourceSlot) -> str:
-    """Resolve the declared source identity kind, falling back to the slot."""
-    if link.source_identity_kind is not None:
-        return link.source_identity_kind
-    if slot.kind == "entry_point":
-        return "entry_point"
-    return "integration"
-
-
-def _link_role_requirement(
-    pattern_id: str,
-    step: Any,
-    link: Any,
-    slot: ResourceSlot,
-    ingress_controllability: Literal["direct", "indirect"],
-) -> tuple[list[ExecutionRequirement], ProjectionIssue | None]:
-    """Derive the requirement for one resource link by its role."""
-    if link.role == "ingress":
-        if ingress_controllability != "direct":
-            return None, ProjectionIssue(
-                code="unsupported_requirement_derivation",
-                pattern_id=pattern_id,
-                detail=(
-                    "indirect ingress requires explicit upstream-source "
-                    "and trust-boundary linkage"
-                ),
-            )
-        return [
-            DirectInputControlRequirement(
-                schema_version="1",
-                requirement_id=_requirement_id("req.direct-input", link.slot_id),
-                kind="direct_input_control",
-                entry_point_slot_id=link.slot_id,
-            )
-        ], None
-    if link.role == "tool_fixture":
-        return [
-            StateChangingToolFixtureRequirement(
-                schema_version="1",
-                requirement_id=_requirement_id(
-                    "req.tool-fixture", step.step_id, link.slot_id
-                ),
-                kind="state_changing_tool_fixture",
-                tool_slot_id=link.slot_id,
-            )
-        ], None
-    if link.role == "source_influence":
-        return [
-            UpstreamSourceInfluenceRequirement(
-                schema_version="1",
-                requirement_id=_requirement_id(
-                    "req.source-influence",
-                    step.step_id,
-                    link.slot_id,
-                    str(link.trust_boundary_slot_id),
-                    str(link.target_ingress_slot_id),
-                ),
-                kind="upstream_source_influence",
-                source_slot_id=link.slot_id,
-                source_identity_kind=_source_identity_kind_for_link(link, slot),
-                trust_boundary_slot_id=link.trust_boundary_slot_id,
-                target_ingress_slot_id=link.target_ingress_slot_id,
-            )
-        ], None
-    return [], None
-
-
-def _linked_postcondition_ids(step: Any) -> set[str]:
-    """Collect postcondition IDs with explicit observable outcome links."""
-    return {ol.postcondition_id for ol in step.observable_outcome_links}
-
-
-def _observation_requirements(step: Any) -> list[ExecutionRequirement]:
-    """Derive observation requirements from the step's outcome links."""
-    return [
-        ObservationRequirement(
-            schema_version="1",
-            requirement_id=_requirement_id(
-                "req.observation",
-                step.step_id,
-                outcome_link.postcondition_id,
-            ),
-            kind="observation",
-            observation=outcome_link.observation,
-            binding_slot_id=outcome_link.binding_slot_id,
-        )
-        for outcome_link in step.observable_outcome_links
-    ]
-
-
-def _security_outcome_requirements(
-    step: Any, linked_pc_ids: set[str]
-) -> list[ExecutionRequirement]:
-    """Derive security-outcome assertions from linked postconditions only."""
-    return [
-        SecurityOutcomeAssertionRequirement(
-            schema_version="1",
-            requirement_id=_requirement_id(
-                "req.security-outcome",
-                step.step_id,
-                postcondition.postcondition_id,
-            ),
-            kind="security_outcome_assertion",
-            source_step_id=step.step_id,
-            postcondition_id=postcondition.postcondition_id,
-        )
-        for postcondition in step.observable_postconditions
-        if postcondition.security_relevant
-        and postcondition.postcondition_id in linked_pc_ids
-    ]
-
-
-def _require_unique_requirement_ids_or_issue(
-    sorted_reqs: tuple[ExecutionRequirement, ...],
-    pattern_id: str,
-) -> tuple[tuple[ExecutionRequirement, ...] | None, ProjectionIssue | None]:
-    """Fail closed when derived requirement IDs collide."""
-    req_ids = [item.requirement_id for item in sorted_reqs]
-    if len(req_ids) != len(set(req_ids)):
-        duplicates = sorted({rid for rid in req_ids if req_ids.count(rid) > 1})
-        return None, ProjectionIssue(
-            code="unsupported_requirement_derivation",
-            pattern_id=pattern_id,
-            detail=(
-                f"derived requirement IDs collide: {duplicates}; "
-                "requirement IDs must be unique"
-            ),
-        )
-    return sorted_reqs, None
-
-
-def _fail_closed_if_no_requirements(
-    pattern_id: str,
-    requirements: tuple[ExecutionRequirement, ...] | None,
-    issue: ProjectionIssue | None,
-) -> tuple[tuple[ExecutionRequirement, ...] | None, ProjectionIssue | None]:
-    """Absent explicit linkage must fail closed, not produce an empty candidate."""
-    if issue is not None:
-        return requirements, issue
-    if requirements is None or len(requirements) == 0:
-        return None, ProjectionIssue(
-            code="unsupported_requirement_derivation",
-            pattern_id=pattern_id,
-            detail=(
-                "no explicit resource links or observable outcome links on any "
-                "selected step; absent linkage fails closed"
-            ),
-        )
-    return requirements, issue
-
-
-def _derive_execution_requirements(
-    pattern_id: str,
-    chain: CanonicalAttackChain,
-    projection: ProjectionSnapshot,
-    snapshot: CapabilityFactSnapshot,
-) -> tuple[tuple[ExecutionRequirement, ...] | None, ProjectionIssue | None]:
-    """Derive execution requirements, resolving ingress controllability from snapshot.
-
-    Backward-compatible wrapper around :func:`_derive_execution_requirements_core`
-    that resolves the ingress controllability from the capability fact snapshot.
-    """
-    controllability = _resolve_ingress_controllability(chain, projection, snapshot)
-    # No ingress link found — resolve to indirect (will fail closed).
-    return _derive_execution_requirements_core(
-        pattern_id, chain, projection, controllability
-    )
-
-
-def _selected_ingress_links(
-    chain: CanonicalAttackChain, projection: ProjectionSnapshot
-) -> list[Any]:
-    """Collect the selected steps' ingress resource links in chain order."""
-    selected = set(projection.selected_step_ids)
-    return [
-        link
-        for step in chain.steps
+        result
+        for step in pattern.canonical_chain.steps
         if step.step_id in selected
-        for link in step.resource_links
-        if link.role == "ingress"
-    ]
-
-
-def _ingress_controllability_for_link(
-    bindings: dict[str, CanonicalResourceReference],
-    link: Any,
-    snapshot: CapabilityFactSnapshot,
-) -> str:
-    """Resolve the effective ingress controllability for one ingress link."""
-    ingress_ref = bindings[link.slot_id]
-    if not isinstance(ingress_ref, EntryPointResourceReference):
-        raise TypeError(  # pragma: no cover - contract guard
-            "ingress binding is not an entry point"
-        )
-    ingress = snapshot.profile.resolve_entry_point(ingress_ref.entry_point_id)
-    if ingress is None:
-        raise ValueError("canonical ingress is absent from snapshot")
-    return ingress.effective_controllability
-
-
-def _resolve_ingress_controllability(
-    chain: CanonicalAttackChain,
-    projection: ProjectionSnapshot,
-    snapshot: CapabilityFactSnapshot,
-) -> Literal["direct", "indirect"]:
-    """Resolve ingress controllability from the first selected ingress link."""
-    bindings = {item.slot_id: item.resource_ref for item in projection.bindings}
-    for link in _selected_ingress_links(chain, projection):
-        return _ingress_controllability_for_link(bindings, link, snapshot)
-    return "indirect"
-
-
-def _projected_mappings(
-    chain: CanonicalAttackChain, selected_step_ids: tuple[str, ...]
-) -> tuple[ProjectedMapping, ...]:
-    mappings = list(_chain_atlas_mappings(chain))
-    selected = set(selected_step_ids)
-    for step in chain.steps:
-        if step.step_id in selected:
-            mappings.extend(_step_atlas_mappings(step))
-    return tuple(mappings)
-
-
-def _chain_atlas_mappings(
-    chain: CanonicalAttackChain,
-) -> Iterable[ProjectedMapping]:
-    """Project the chain-level ATLAS mappings of the authoritative chain."""
-    return (
-        ProjectedMapping(scope="chain", mapping=mapping)
-        for mapping in chain.mappings
-        if mapping.taxonomy == "ATLAS"
+        for result in _evaluate_step_preconditions(step, snapshot)
     )
 
 
-def _step_atlas_mappings(step: Any) -> Iterable[ProjectedMapping]:
-    """Project the ATLAS mappings declared on one selected step."""
-    return (
-        ProjectedMapping(scope="step", step_id=step.step_id, mapping=mapping)
-        for mapping in step.mappings
-        if mapping.taxonomy == "ATLAS"
+def _evaluate_step_preconditions(
+    step: Any, snapshot: CapabilityFactSnapshot
+) -> tuple[PreconditionEvaluationResult, ...]:
+    """Evaluate every precondition declared by one selected step."""
+    return tuple(
+        _evaluate_precondition(step, precondition, snapshot)
+        for precondition in step.preconditions
     )
 
 
-def _candidate_v2_id(pattern_id: str, projection: ProjectionSnapshot) -> str:
-    chain = projection.source_chain
-    bindings = sorted(
-        (item.model_dump(mode="json") for item in projection.bindings),
-        key=lambda item: (item["slot_id"], _canonical_json(item["resource_ref"])),
+def _evaluate_precondition(
+    step: Any, precondition: Any, snapshot: CapabilityFactSnapshot
+) -> PreconditionEvaluationResult:
+    """Evaluate one precondition against the immutable fact snapshot."""
+    evidence = tuple(
+        snapshot.fact(reference)
+        or EvaluatedFactEvidence(fact=reference, status="unknown", value=None)
+        for reference in _condition_facts(precondition.condition)
     )
-    ingress = next(
-        item["resource_ref"]
-        for item in bindings
-        if item["slot_id"] == chain.initial_ingress_slot_id
+    return PreconditionEvaluationResult(
+        step_id=step.step_id,
+        condition_id=precondition.condition_id,
+        result=evaluate_condition(precondition.condition, evidence),
+        evidence=evidence,
     )
-    identity = {
-        "pattern_id": pattern_id,
-        "chain_id": chain.chain_id,
-        "chain_semantic_revision": chain.semantic_revision,
-        "chain_semantic_digest": chain.semantic_digest,
-        "projection_digest": projection.projection_digest,
-        "taxonomy_context": chain.taxonomy_context.model_dump(mode="json"),
-        "canonical_ingress": ingress,
-        "bindings": bindings,
-    }
-    return f"cand:v2:{_digest('asago-scenario-generator:candidate:v2', identity)[:32]}"
 
 
-def _content_pin(domain: str, value: Any) -> str:
-    return _digest(domain, value)
+from asago_scenario_generator.pipeline.projection_resources import (  # noqa: E402, F401
+    _assignment_conflicts,
+    _cartesian_fill,
+    _combination_baseline,
+    _combination_key,
+    _combination_satisfies_distinctness,
+    _constrained_components,
+    _constrained_indexes,
+    _count_compatible_combinations,
+    _count_component_assignments,
+    _distinctness_edges,
+    _entry_point_matches_slot,
+    _entry_point_reference_allowed,
+    _entry_point_references,
+    _integration_matches_slot,
+    _integration_references,
+    _iter_compatible_combinations,
+    _iter_coverage_first_combinations,
+    _max_option_length,
+    _offset_variants,
+    _output_surface_references,
+    _references_for_kind,
+    _references_for_slot,
+    _resource_id_allowed,
+    _restriction_blocks,
+    _slot_reference_compatible,
+    _tool_references,
+    _trust_boundary_matches_slot,
+    _trust_boundary_references,
+    _unconstrained_product,
+    _variant_combinations,
+    _agent_internal_references,
+)
+
+
+from asago_scenario_generator.pipeline.projection_requirements import (  # noqa: E402, F401
+    _candidate_v2_id,
+    _chain_atlas_mappings,
+    _content_pin,
+    _derive_execution_requirements,
+    _derive_execution_requirements_core,
+    _fail_closed_if_no_requirements,
+    _ingress_controllability_for_link,
+    _link_role_requirement,
+    _linked_postcondition_ids,
+    _observation_requirements,
+    _projected_mappings,
+    _resolve_ingress_controllability,
+    _security_outcome_requirements,
+    _selected_ingress_links,
+    _source_identity_kind_for_link,
+    _step_atlas_mappings,
+    _require_unique_requirement_ids_or_issue,
+)
+
+from asago_scenario_generator.pipeline.projection_relations import (  # noqa: E402, F401
+    _boundary_zones_or_none,
+    _resource_id_or_none,
+    _source_binding_kind_detail,
+    _source_boundary_detail,
+    _source_entry_point_detail,
+    _source_identity_kind_detail,
+    _source_influence_expected_kind,
+    _source_influence_links,
+    _source_ingress_relation_guard,
+    _source_relation_boundary,
+    _source_relation_issue,
+    _source_relation_issue_detail,
+    _source_relation_refs,
+    _source_relation_resolution,
+    _source_influence_relation,
+    _validate_source_influence_paths,
+)
 
 
 def validate_projected_candidate(
@@ -2288,32 +1160,6 @@ def _pattern_pin(pattern: AttackPattern) -> str:
     )
 
 
-def compute_authoritative_catalog_pin(
-    records: Sequence[dict[str, Any]], taxonomy_resolver: TaxonomyResolver
-) -> Digest:
-    """Compute the canonical pin for a complete trusted authoritative catalog.
-
-    This is deliberately separate from bounded projection: validation of a
-    persisted candidate must not depend on whether its binding variant would
-    be rediscovered under an arbitrary projection budget.
-    """
-    qualified: dict[str, str] = {}
-    for raw in records:
-        pattern = validate_attack_pattern(raw, taxonomy_resolver)
-        pattern = AttackPattern.model_validate(
-            _normalize_semantic_order(pattern.model_dump(mode="json"))
-        )
-        pattern_pin = _pattern_pin(pattern)
-        previous = qualified.get(pattern.id)
-        if previous is not None and previous != pattern_pin:
-            raise ValueError("conflicting authoritative records share one pattern id")
-        qualified[pattern.id] = pattern_pin
-    return _content_pin(
-        "asago-scenario-generator:authoritative-catalog:v1",
-        [qualified[pattern_id] for pattern_id in sorted(qualified)],
-    )
-
-
 @dataclass
 class _PatternProjectionState:
     """Lazy per-pattern projection state for bounded candidate generation.
@@ -2406,173 +1252,14 @@ class _PatternProjectionState:
         return not self.iterator_exhausted
 
 
-def _bindings_for_combination(
-    chain: CanonicalAttackChain,
-    resources: tuple[CanonicalResourceReference, ...],
-) -> tuple[ResourceBinding, ...]:
-    """Pair every chain resource slot with its chosen resource reference."""
-    return tuple(
-        ResourceBinding(slot_id=slot.slot_id, resource_ref=resource)
-        for slot, resource in zip(chain.resource_slots, resources, strict=True)
-    )
-
-
-def _projection_payloads(items: Iterable[Any]) -> list[dict[str, Any]]:
-    """Dump projection sub-models to JSON payloads."""
-    return [item.model_dump(mode="json") for item in items]
-
-
-def _projection_data_for_combination(
-    chain: CanonicalAttackChain,
-    selected: tuple[str, ...],
-    condition_results: tuple[ConditionEvaluationResult, ...],
-    omissions: tuple[StepOmission, ...],
-    bindings: tuple[ResourceBinding, ...],
-    catalog_pin: str,
-    pattern_pin: str,
-    snapshot: CapabilityFactSnapshot,
-    source_influence_paths: tuple[SourceInfluencePath, ...],
-) -> dict[str, Any]:
-    """Assemble and digest-address projection data for one combination."""
-    projection_data = {
-        "schema_version": "1",
-        "source_chain": chain.model_dump(mode="json"),
-        "selected_step_ids": selected,
-        "condition_results": _projection_payloads(condition_results),
-        "omissions": _projection_payloads(omissions),
-        "bindings": _projection_payloads(bindings),
-        "catalog_pin": catalog_pin,
-        "pattern_pin": pattern_pin,
-        "capability_fact_snapshot_digest": snapshot.snapshot_digest,
-        "projection_digest": "0" * 64,
-        "source_influence_paths": _projection_payloads(source_influence_paths),
-    }
-    projection_data["projection_digest"] = compute_projection_digest(projection_data)
-    return projection_data
-
-
-def _ingress_for_combination(
-    bindings: tuple[ResourceBinding, ...],
-    chain: CanonicalAttackChain,
-    snapshot: CapabilityFactSnapshot,
-) -> tuple[EntryPointResourceReference, Literal["direct", "indirect"]]:
-    """Resolve the binding and controllability of the initial ingress slot."""
-    ingress_ref = next(
-        item.resource_ref
-        for item in bindings
-        if item.slot_id == chain.initial_ingress_slot_id
-    )
-    assert isinstance(ingress_ref, EntryPointResourceReference)
-    ingress = snapshot.profile.resolve_entry_point(ingress_ref.entry_point_id)
-    assert ingress is not None
-    return ingress_ref, ingress.effective_controllability
-
-
-def _selected_steps_from_chain(
-    chain: CanonicalAttackChain, selected_step_ids: tuple[str, ...]
-) -> list[Any]:
-    """Return the chain steps selected for this candidate projection."""
-    selected = set(selected_step_ids)
-    return [step for step in chain.steps if step.step_id in selected]
-
-
-def _count_selected_steps(
-    selected_steps: list[Any], predicate: Callable[[Any], bool]
-) -> int:
-    """Count selected steps satisfying a boolean predicate."""
-    return sum(predicate(step) for step in selected_steps)
-
-
-def _candidate_complexity_inputs(
-    selected_steps: list[Any],
-    bindings: tuple[ResourceBinding, ...],
-    requirements: tuple[ExecutionRequirement, ...],
-) -> CandidateComplexityInputs:
-    """Derive the complexity inputs recorded on each projected candidate."""
-    return CandidateComplexityInputs(
-        selected_step_count=len(selected_steps),
-        attacker_controlled_step_count=_count_selected_steps(
-            selected_steps, lambda step: step.attacker_controlled
-        ),
-        boundary_crossing_step_count=_count_selected_steps(
-            selected_steps, lambda step: step.boundary_position == "crossing"
-        ),
-        selected_conditional_step_count=_count_selected_steps(
-            selected_steps, lambda step: step.requirement == "conditional"
-        ),
-        concrete_binding_count=len(bindings),
-        execution_requirement_count=len(requirements),
-    )
-
-
-def _build_candidate_from_combination(
-    pattern_id: str,
-    chain: CanonicalAttackChain,
-    selected: tuple[str, ...],
-    condition_results: tuple[ConditionEvaluationResult, ...],
-    omissions: tuple[StepOmission, ...],
-    resources: tuple[CanonicalResourceReference, ...],
-    catalog_pin: str,
-    pattern_pin: str,
-    precondition_results: tuple[PreconditionEvaluationResult, ...],
-    snapshot: CapabilityFactSnapshot,
-) -> tuple[ProjectedCandidate | None, Any | None]:
-    """Build a single ProjectedCandidate from one resource combination.
-
-    Returns ``(candidate, issue)``.  When the combination fails execution
-    requirements derivation (a structural rejection, not a budget limit),
-    ``candidate`` is None and ``issue`` carries the typed ProjectionIssue.
-    """
-    bindings = _bindings_for_combination(chain, resources)
-    source_influence_paths, relation_issue = _source_influence_relation(
-        pattern_id, chain, selected, bindings, snapshot
-    )
-    if relation_issue is not None:
-        return None, relation_issue
-    projection_data = _projection_data_for_combination(
-        chain,
-        selected,
-        condition_results,
-        omissions,
-        bindings,
-        catalog_pin,
-        pattern_pin,
-        snapshot,
-        source_influence_paths,
-    )
-    projection = validate_projection_snapshot(projection_data, snapshot)
-    requirements, issue = _derive_execution_requirements(
-        pattern_id, chain, projection, snapshot
-    )
-    requirements, issue = _fail_closed_if_no_requirements(
-        pattern_id, requirements, issue
-    )
-    if issue is not None:
-        return None, issue
-    requirements_digest = compute_execution_requirements_digest(requirements)
-    ingress_ref, ingress_controllability = _ingress_for_combination(
-        bindings, chain, snapshot
-    )
-    selected_steps = _selected_steps_from_chain(chain, selected)
-    candidate = ProjectedCandidate(
-        candidate_id=_candidate_v2_id(pattern_id, projection),
-        pattern_id=pattern_id,
-        chain_id=chain.chain_id,
-        chain_semantic_revision=chain.semantic_revision,
-        chain_semantic_digest=chain.semantic_digest,
-        projection=projection,
-        canonical_ingress=ingress_ref,
-        ingress_controllability=ingress_controllability,
-        projected_mappings=_projected_mappings(chain, selected),
-        precondition_results=precondition_results,
-        execution_requirements=requirements,
-        requirement_derivation_version="1",
-        execution_requirements_digest=requirements_digest,
-        complexity_inputs=_candidate_complexity_inputs(
-            selected_steps, bindings, requirements
-        ),
-    )
-    return candidate, None
+from asago_scenario_generator.pipeline.projection_candidates import (  # noqa: E402, F401
+    _bindings_for_combination,
+    _build_candidate_from_combination,
+    _candidate_complexity_inputs,
+    _ingress_for_combination,
+    _projection_data_for_combination,
+    _selected_steps_from_chain,
+)
 
 
 def project_authoritative_candidates(
@@ -2677,4 +1364,5 @@ from asago_scenario_generator.pipeline.projection_authoritative import (  # noqa
     _target_ingress_reference as _target_ingress_reference,
     _dedupe_projection_issues as _dedupe_projection_issues,
     _AuthoritativeCandidateAllocator as _AuthoritativeCandidateAllocator,
+    compute_authoritative_catalog_pin as compute_authoritative_catalog_pin,
 )
