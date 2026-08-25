@@ -198,7 +198,12 @@ def _h_raw_files(world: World, text: str, examples: dict) -> tuple[bool, str]:
             "note: null\n"
         ),
         "scenario.feature": (
-            "# smoke suite\n@smoke\nFeature: Demo\n  Given a precondition\n"
+            "# smoke suite\n@smoke\nFeature: Demo\n"
+            "  Background: setup\n"
+            "  Given a precondition\n"
+            "  When the event fires\n"
+            "  And another step\n"
+            "  But a guard holds\n"
         ),
     }
     return True, ""
@@ -224,6 +229,7 @@ def _h_pipeline_call_log(world: World, text: str, examples: dict) -> tuple[bool,
                 "stage": accepted_call,
                 "accepted_draft_digest": "accepted-draft-digest",
                 "attempts": [{"result": "accepted"}],
+                "warnings": ["presentation_fallback: raw JSON payload"],
             },
         },
         {
@@ -237,6 +243,153 @@ def _h_pipeline_call_log(world: World, text: str, examples: dict) -> tuple[bool,
             },
         },
     ]
+    return True, ""
+
+
+def _h_pipeline_call_log_partial(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: ... and a "C" call with no duration telemetry (partial usage)."""
+    match = re.search(
+        r'the pipeline call log contains the accepted "([^"]+)" call with (\d+) '
+        r'prompt tokens, the rejected "([^"]+)" call with (\d+) prompt tokens, '
+        r'and a "([^"]+)" call with no duration telemetry',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse partial-telemetry call-log step: {text}"
+    accepted_call, accepted_prompt, rejected_call, rejected_prompt, partial_call = (
+        match.groups()
+    )
+    # The partial entry keeps prompt/completion counts at the zero default and
+    # explicitly reports unavailable duration telemetry (None).
+    world.trpt_pipeline_call_logs = [
+        {
+            "call": accepted_call,
+            "prompt_tokens": int(accepted_prompt),
+            "completion_tokens": 40,
+            "duration_ms": 25,
+            "semantic_evidence": {
+                "stage": accepted_call,
+                "accepted_draft_digest": "accepted-draft-digest",
+                "attempts": [{"result": "accepted"}],
+            },
+        },
+        {
+            "call": rejected_call,
+            "prompt_tokens": int(rejected_prompt),
+            "completion_tokens": 20,
+            "duration_ms": 15,
+            "semantic_evidence": {
+                "stage": rejected_call,
+                "attempts": [{"result": "invalid"}],
+            },
+        },
+        {
+            "call": partial_call,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "duration_ms": None,
+        },
+    ]
+    return True, ""
+
+
+def _h_coverage_not_confirmed(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the coverage data records no uncovered entry points, zones, threats, or attack patterns with an inventory completeness not confirmed."""
+    world.trpt_coverage_data = {
+        "coverage_gaps": {
+            "uncovered_entry_points": [],
+            "uncovered_zones": [],
+            "uncovered_threats": [],
+            "uncovered_attack_patterns": [],
+        },
+        "coverage_universe": {"completeness": "not_applicable"},
+    }
+    return True, ""
+
+
+def _h_coverage_summary(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Handle: the coverage data records a summary with <category> entries."""
+    match = re.search(r"the coverage data records a summary with (.*)$", text)
+    if not match:
+        return False, f"Could not parse coverage-summary step: {text}"
+    spec = match.group(1)
+    summary: dict[str, Any] = {}
+
+    covered = re.search(r'the covered feasible target "([^"]+)"', spec)
+    if covered:
+        summary["covered_feasible"] = [covered.group(1)]
+
+    selection = re.search(
+        r'a selection limitation for entry point "([^"]+)" with reason '
+        r'"([^"]+)", detail "([^"]+)", and candidate "([^"]+)"',
+        spec,
+    )
+    if selection:
+        ep_id, reason, detail, candidate = selection.groups()
+        summary["selection_limitations"] = [
+            {
+                "entry_point_id": ep_id,
+                "reason": reason,
+                "detail": detail,
+                "candidate_ids": [candidate],
+            }
+        ]
+
+    exclusion = re.search(
+        r'a policy exclusion for entry point "([^"]+)" with reason "([^"]+)"',
+        spec,
+    )
+    if exclusion:
+        ep_id, reason = exclusion.groups()
+        summary["policy_exclusions"] = [{"entry_point_id": ep_id, "reason": reason}]
+
+    for key, label in (
+        ("structural_gaps", "a structural gap"),
+        ("runtime_generation_gaps", "a runtime generation gap"),
+        ("quarantine_admission_failures", "a quarantine admission failure"),
+        ("projection_limitations", "a projection limitation"),
+    ):
+        item = re.search(
+            rf'{label} for entry point "([^"]+)" with reason "([^"]+)"', spec
+        )
+        if item:
+            summary[key] = [{"entry_point_id": item.group(1), "reason": item.group(2)}]
+
+    world.trpt_coverage_data.setdefault("coverage_summary", {}).update(summary)
+    return True, ""
+
+
+def _h_coverage_plan(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Handle: the coverage data records a coverage plan targeting entry point "E" with primary candidate "C", state "S", and ordered choices "A,B"."""
+    match = re.search(
+        r"the coverage data records a coverage plan targeting entry point "
+        r'"([^"]+)" with primary candidate "([^"]+)", state "([^"]+)", and '
+        r'ordered choices "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse coverage-plan step: {text}"
+    ep_id, primary, state, choices_csv = match.groups()
+    world.trpt_coverage_data["coverage_plan"] = {
+        "schema_version": 1,
+        "targets": [
+            {
+                "entry_point_id": ep_id,
+                "entry_point_name": ep_id,
+                "primary_candidate_id": primary,
+                "primary_state": state,
+                "ordered_choices": [
+                    {"candidate_id": candidate.strip()}
+                    for candidate in choices_csv.split(",")
+                    if candidate.strip()
+                ],
+            }
+        ],
+    }
     return True, ""
 
 
@@ -296,4 +449,24 @@ def register(api: Any) -> None:
         'the pipeline call log contains the accepted "([^"]+)" call with \\d+ prompt tokens and the rejected "([^"]+)" call with \\d+ prompt tokens',
         _h_pipeline_call_log,
         source_order=7060,
+    )
+    api.register(
+        'the pipeline call log contains the accepted "([^"]+)" call with \\d+ prompt tokens, the rejected "([^"]+)" call with \\d+ prompt tokens, and a "([^"]+)" call with no duration telemetry',
+        _h_pipeline_call_log_partial,
+        source_order=7061,
+    )
+    api.register(
+        "the coverage data records no uncovered entry points, zones, threats, or attack patterns with an inventory completeness not confirmed",
+        _h_coverage_not_confirmed,
+        source_order=7062,
+    )
+    api.register(
+        "the coverage data records a summary with .*",
+        _h_coverage_summary,
+        source_order=7063,
+    )
+    api.register(
+        'the coverage data records a coverage plan targeting entry point "([^"]+)" with primary candidate "([^"]+)", state "([^"]+)", and ordered choices "([^"]+)"',
+        _h_coverage_plan,
+        source_order=7064,
     )

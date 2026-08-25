@@ -42,21 +42,27 @@ def _h_ts_yaml_quoted(world: World, text: str, examples: dict) -> tuple[bool, st
 
 
 def _h_ts_gherkin_panel(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the Gherkin panel shows a highlighted comment, tag "T", and the keywords "Feature:" and "Given"."""
+    """Handle: the Gherkin panel shows a highlighted comment, tag "T", and the keywords "A", "B", ... ."""
     match = re.search(
         r'the Gherkin panel shows a highlighted comment, tag "([^"]+)", and '
-        r'the keywords "([^"]+)" and "([^"]+)"',
+        r"the keywords (.+)$",
         text,
     )
     if not match:
         return False, f"Could not parse Gherkin panel assertion: {text}"
-    tag, keyword1, keyword2 = match.groups()
+    tag, keywords_phrase = match.groups()
+    keywords = re.findall(r'"([^"]+)"', keywords_phrase)
     region = _section_region(_html(world), "sec-raw")
     ok = 'class="gherkin-comment"' in region
     ok = ok and f'class="gherkin-tag">@{tag}</span>' in region
-    ok = ok and f'class="gherkin-keyword">{keyword1}</span>' in region
-    ok = ok and f'class="gherkin-keyword">{keyword2} </span>' in region
-    return _resolve(ok, f"gherkin tag={tag} keywords={keyword1} {keyword2}")
+    for keyword in keywords:
+        # Step keywords carry a trailing space inside the span; header
+        # keywords ("Feature:", "Background:", ...) do not.
+        ok = ok and (
+            f'class="gherkin-keyword">{keyword}</span>' in region
+            or f'class="gherkin-keyword">{keyword} </span>' in region
+        )
+    return _resolve(ok, f"gherkin tag={tag} keywords={keywords}")
 
 
 def _h_ts_gen_inputs_headers(
@@ -280,6 +286,175 @@ def _h_ts_pipeline_semantic_status(
     )
 
 
+def _h_ts_behavior_spec_keyword_header(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the Behavior Spec tab of scenario "S" renders the keyword "K:" with the text "T"."""
+    match = re.search(
+        r'the Behavior Spec tab of scenario "([^"]+)" renders the keyword '
+        r'"([^"]+)" with the text "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse behavior header assertion: {text}"
+    sid, keyword, header_text = match.groups()
+    region = _card_region(_html(world), sid)
+    ok = f">{keyword}</span>" in region
+    ok = (
+        ok
+        and re.search(
+            re.escape(keyword) + r"</span>\s*" + re.escape(header_text) + r"</div>",
+            region,
+        )
+        is not None
+    )
+    return _resolve(ok, f"behavior header keyword={keyword} text={header_text}")
+
+
+def _h_ts_behavior_spec_step(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the Behavior Spec tab shows the step "K" with the text "T"."""
+    match = re.search(
+        r'the Behavior Spec tab shows the step "([^"]+)" with the text "([^"]+)"$',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse behavior step assertion: {text}"
+    keyword, step_text = match.groups()
+    html = _html(world)
+    ok = f'class="step-keyword">{keyword}</span>' in html
+    ok = ok and f'class="step-text">{step_text}</span>' in html
+    return _resolve(ok, f"behavior step keyword={keyword} text={step_text}")
+
+
+def _h_ts_behavior_spec_step_zone(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the Behavior Spec tab shows the step "K" with the text "T" and the zone badge "Z"."""
+    match = re.search(
+        r'the Behavior Spec tab shows the step "([^"]+)" with the text '
+        r'"([^"]+)" and the zone badge "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse behavior step-zone assertion: {text}"
+    keyword, step_text, zone = match.groups()
+    html = _html(world)
+    ok = f'class="step-keyword">{keyword}</span>' in html
+    # The zone-bearing step wraps the badge inside the step-text span, so the
+    # text is followed by the badge markup rather than a closing span.
+    ok = ok and f'class="step-text">{step_text}' in html
+    ok = ok and 'class="zone-badge"' in html and f">{zone}</span>" in html
+    return _resolve(ok, f"behavior step keyword={keyword} zone={zone}")
+
+
+def _h_ts_behavior_spec_docstring(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the Behavior Spec tab shows the docstring "D"."""
+    match = re.search(r'the Behavior Spec tab shows the docstring "([^"]+)"', text)
+    if not match:
+        return False, f"Could not parse behavior docstring assertion: {text}"
+    html = _html(world)
+    ok = "step-docstring" in html and match.group(1) in html
+    return _resolve(ok, f"behavior docstring={match.group(1)!r}")
+
+
+def _h_ts_behavior_spec_continuation(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the Behavior Spec tab shows the continuation line "L"."""
+    match = re.search(
+        r'the Behavior Spec tab shows the continuation line "([^"]+)"', text
+    )
+    if not match:
+        return False, f"Could not parse behavior continuation assertion: {text}"
+    html = _html(world)
+    return _resolve(match.group(1) in html, f"continuation={match.group(1)!r}")
+
+
+def _h_ts_behavior_spec_no_tag(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the Behavior Spec tab does not render the tag "T"."""
+    match = re.search(r'the Behavior Spec tab does not render the tag "([^"]+)"', text)
+    if not match:
+        return False, f"Could not parse behavior no-tag assertion: {text}"
+    html = _html(world)
+    return _resolve(f"@{match.group(1)}" not in html, f"tag @{match.group(1)} rendered")
+
+
+def _h_ts_llm_tab_entry(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Handle: the LLM Calls tab of scenario "S" shows the entry "E"."""
+    match = re.search(
+        r'the LLM Calls tab of scenario "([^"]+)" shows the entry "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse llm-call entry assertion: {text}"
+    sid, entry = match.groups()
+    return _resolve(entry in _card_region(_html(world), sid), f"entry={entry}")
+
+
+def _h_ts_llm_tab_prompts(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Handle: the LLM Calls tab of scenario "S" renders the system prompt "P" and the user prompt "Q"."""
+    match = re.search(
+        r'the LLM Calls tab of scenario "([^"]+)" renders the system prompt '
+        r'"([^"]+)" and the user prompt "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse llm-call prompts assertion: {text}"
+    sid, system_prompt, user_prompt = match.groups()
+    region = _card_region(_html(world), sid)
+    ok = system_prompt in region and user_prompt in region
+    ok = ok and 'class="call-log-pre"' in region
+    return _resolve(ok, f"prompts system={system_prompt} user={user_prompt}")
+
+
+def _h_ts_pipeline_semantic_warning(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the pipeline calls summary shows the semantic warning "W"."""
+    match = re.search(
+        r'the pipeline calls summary shows the semantic warning "([^"]+)"', text
+    )
+    if not match:
+        return False, f"Could not parse semantic-warning assertion: {text}"
+    region = _section_region(_html(world), "sec-pipeline-calls")
+    ok = "Presentation fallback used:" in _visible(region)
+    ok = ok and match.group(1) in _visible(region)
+    return _resolve(ok, f"semantic warning={match.group(1)!r}")
+
+
+def _h_ts_pipeline_unavailable_warning(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the pipeline calls summary shows the unavailable-metrics warning for call "C"."""
+    match = re.search(
+        r"the pipeline calls summary shows the unavailable-metrics warning "
+        r'for call "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse unavailable-warning assertion: {text}"
+    region = _section_region(_html(world), "sec-pipeline-calls")
+    visible = _visible(region)
+    ok = f"Warning: call {match.group(1)} has unavailable usage metrics" in visible
+    ok = ok and "duration_ms" in visible
+    return _resolve(ok, f"unavailable warning for call={match.group(1)!r}")
+
+
+def _h_ts_pipeline_entry(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Handle: the pipeline calls summary shows the entry "E"."""
+    match = re.search(r'the pipeline calls summary shows the entry "([^"]+)"', text)
+    if not match:
+        return False, f"Could not parse pipeline entry assertion: {text}"
+    region = _section_region(_html(world), "sec-pipeline-calls")
+    return _resolve(match.group(1) in region, f"pipeline entry={match.group(1)!r}")
+
+
 def register(api: Any) -> None:
     # --- Raw panels / tabs / pipeline Then steps ---
     api.register(
@@ -293,7 +468,7 @@ def register(api: Any) -> None:
         source_order=8059,
     )
     api.register(
-        'the Gherkin panel shows a highlighted comment, tag "([^"]+)", and the keywords "([^"]+)" and "([^"]+)"',
+        'the Gherkin panel shows a highlighted comment, tag "([^"]+)", and the keywords .+',
         _h_ts_gherkin_panel,
         source_order=8060,
     )
@@ -366,4 +541,60 @@ def register(api: Any) -> None:
         'the pipeline calls summary shows the semantic status "([^"]+)"',
         _h_ts_pipeline_semantic_status,
         source_order=8074,
+    )
+    # --- Behavior spec / LLM calls tab / pipeline warnings (scenarios 29, 31, 32, 40) ---
+    api.register(
+        'the Behavior Spec tab of scenario "([^"]+)" renders the keyword "([^"]+)" with the text "([^"]+)"',
+        _h_ts_behavior_spec_keyword_header,
+        source_order=8095,
+    )
+    api.register(
+        'the Behavior Spec tab shows the step "([^"]+)" with the text "([^"]+)"$',
+        _h_ts_behavior_spec_step,
+        source_order=8096,
+    )
+    api.register(
+        'the Behavior Spec tab shows the step "([^"]+)" with the text "([^"]+)" and the zone badge "([^"]+)"',
+        _h_ts_behavior_spec_step_zone,
+        source_order=8097,
+    )
+    api.register(
+        'the Behavior Spec tab shows the docstring "([^"]+)"',
+        _h_ts_behavior_spec_docstring,
+        source_order=8098,
+    )
+    api.register(
+        'the Behavior Spec tab shows the continuation line "([^"]+)"',
+        _h_ts_behavior_spec_continuation,
+        source_order=8099,
+    )
+    api.register(
+        'the Behavior Spec tab does not render the tag "([^"]+)"',
+        _h_ts_behavior_spec_no_tag,
+        source_order=8100,
+    )
+    api.register(
+        'the LLM Calls tab of scenario "([^"]+)" shows the entry "([^"]+)"',
+        _h_ts_llm_tab_entry,
+        source_order=8101,
+    )
+    api.register(
+        'the LLM Calls tab of scenario "([^"]+)" renders the system prompt "([^"]+)" and the user prompt "([^"]+)"',
+        _h_ts_llm_tab_prompts,
+        source_order=8102,
+    )
+    api.register(
+        'the pipeline calls summary shows the semantic warning "([^"]+)"',
+        _h_ts_pipeline_semantic_warning,
+        source_order=8103,
+    )
+    api.register(
+        'the pipeline calls summary shows the unavailable-metrics warning for call "([^"]+)"',
+        _h_ts_pipeline_unavailable_warning,
+        source_order=8104,
+    )
+    api.register(
+        'the pipeline calls summary shows the entry "([^"]+)"',
+        _h_ts_pipeline_entry,
+        source_order=8105,
     )

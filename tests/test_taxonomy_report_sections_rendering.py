@@ -56,6 +56,7 @@ def _scenario(
     scenario_seed_metadata: dict[str, Any] | None = None,
     candidate_filter: dict[str, Any] | None = None,
     taxonomy_chain: dict[str, Any] | None = None,
+    capability_profile: dict[str, Any] | None = None,
     feature_files: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Build a reportable scenario with honest optional-field degradation."""
@@ -66,7 +67,7 @@ def _scenario(
         or {"title": sid, "summary": "", "entry_point": "", "zone_sequence": []},
         "faceting": {
             "taxonomy_chain": taxonomy_chain or {},
-            "capability_profile": {},
+            "capability_profile": capability_profile or {},
         },
         "validation": {"semantic": {"corpus_claim_applicability": _corpus_claims()}},
     }
@@ -237,7 +238,10 @@ def test_capability_profile_composite_renders(tmp_path: Path) -> None:
     assert "<h2>Capability Profile</h2>" in region
     assert ">Schneider 5-Zone</span>" in region
     assert '<span class="zone-chip active"' in region and "Input Surfaces" in region
-    assert '<span class="zone-chip inactive"' in region and "Planning &amp; Reasoning" in region
+    assert (
+        '<span class="zone-chip inactive"' in region
+        and "Planning &amp; Reasoning" in region
+    )
 
     memory_idx = region.find("Memory")
     flags_region = region[
@@ -427,7 +431,11 @@ def test_coverage_gaps_counts_tiers_and_attributions(tmp_path: Path) -> None:
                     },
                 ],
                 "excluded_targets": [
-                    {"name": "ze-legacy", "entry_point_id": "ze-legacy", "reason": "deprecated"}
+                    {
+                        "name": "ze-legacy",
+                        "entry_point_id": "ze-legacy",
+                        "reason": "deprecated",
+                    }
                 ],
             },
         )
@@ -468,13 +476,19 @@ def test_threat_technique_matrix_and_roster_render(tmp_path: Path) -> None:
         "pinned_technique_ids": ["AML.T0015"],
         "pinned_technique_names": ["Phishing"],
     }
-    scn_a["actor_profile"] = {"actor_type": "cybercriminal", "capability_level": "advanced"}
+    scn_a["actor_profile"] = {
+        "actor_type": "cybercriminal",
+        "capability_level": "advanced",
+    }
     scn_b = _matrix_scenario("scn-b", "T11", "AP-T11-01", ["AML.T0015", "AML.T0040"])
     scn_b["candidate_filter"] = {
         "pinned_technique_ids": ["AML.T0040"],
         "pinned_technique_names": ["LLM Data Leakage"],
     }
-    scn_b["actor_profile"] = {"actor_type": "nation-state", "capability_level": "expert"}
+    scn_b["actor_profile"] = {
+        "actor_type": "nation-state",
+        "capability_level": "expert",
+    }
 
     data = ReportData(scenarios=[scn_a, scn_b])
 
@@ -670,8 +684,16 @@ def test_actor_profile_block_omitted_when_absent(tmp_path: Path) -> None:
                     "gate": "OR",
                     "label": "Gain access",
                     "children": [
-                        {"gate": "LEAF", "label": "Leaf A", "technique_id": "AML.T0015"},
-                        {"gate": "LEAF", "label": "Leaf B", "technique_id": "AML.T0040"},
+                        {
+                            "gate": "LEAF",
+                            "label": "Leaf A",
+                            "technique_id": "AML.T0015",
+                        },
+                        {
+                            "gate": "LEAF",
+                            "label": "Leaf B",
+                            "technique_id": "AML.T0040",
+                        },
                     ],
                 },
             },
@@ -680,7 +702,10 @@ def test_actor_profile_block_omitted_when_absent(tmp_path: Path) -> None:
             True,
         ),
         (
-            {"goal": "Exfiltrate data", "root": {"gate": "LEAF", "label": "Exfiltrate data"}},
+            {
+                "goal": "Exfiltrate data",
+                "root": {"gate": "LEAF", "label": "Exfiltrate data"},
+            },
             [],
             1,
             False,
@@ -910,10 +935,7 @@ def test_raw_data_yaml_and_gherkin_highlighting(tmp_path: Path) -> None:
                 "note: null\n"
             ),
             "scenario.feature": (
-                "# smoke suite\n"
-                "@smoke\n"
-                "Feature: Demo\n"
-                "  Given a precondition\n"
+                "# smoke suite\n@smoke\nFeature: Demo\n  Given a precondition\n"
             ),
         }
     )
@@ -927,7 +949,7 @@ def test_raw_data_yaml_and_gherkin_highlighting(tmp_path: Path) -> None:
     assert 'class="yaml-number">3</span>' in region
     assert 'class="yaml-bool">true</span>' in region
     assert 'class="yaml-null">null</span>' in region
-    assert '&quot;confirmed&quot;' in region
+    assert "&quot;confirmed&quot;" in region
     assert "yaml-string" not in region
     assert 'class="gherkin-comment"' in region
     assert 'class="gherkin-tag">@smoke</span>' in region
@@ -1073,9 +1095,7 @@ def test_attack_complexity_assessment_block(tmp_path: Path) -> None:
     assert ">Advanced</span>" in region
     assert "Final required level: " in _visible(region)
     assert ">Expert</span>" in region
-    reason_line = re.search(
-        r"<code>R-7</code> &rarr; <strong>expert</strong>", region
-    )
+    reason_line = re.search(r"<code>R-7</code> &rarr; <strong>expert</strong>", region)
     assert reason_line is not None
     assert "requires chaining three tools" in region
     assert "[projection:R7]" in region
@@ -1106,6 +1126,7 @@ def test_pipeline_call_logs_usage_totals_and_semantic_status(tmp_path: Path) -> 
                     "stage": "candidate_filter",
                     "accepted_draft_digest": "abc123",
                     "attempts": [{"result": "accepted"}],
+                    "warnings": ["presentation_fallback: raw JSON payload"],
                 },
             },
             {
@@ -1132,3 +1153,589 @@ def test_pipeline_call_logs_usage_totals_and_semantic_status(tmp_path: Path) -> 
     visible = _visible(region)
     assert "Candidate Filter semantic draft: Accepted provider semantics" in visible
     assert "Capability Profile semantic draft: Rejected: invalid" in visible
+    assert "Presentation fallback used:" in visible
+    assert "raw JSON payload" in visible
+
+
+# ---------------------------------------------------------------------------
+# 30: Threat surface count badges
+# ---------------------------------------------------------------------------
+
+
+def test_threat_surface_count_badges_for_many_mappings(tmp_path: Path) -> None:
+    data = ReportData(
+        threat_surface_data={
+            "entries": [
+                _ts_entry(
+                    "atlas-phishing",
+                    "Spear phishing",
+                    confidence=0.85,
+                    owasp_llm_ids=["LLM01"],
+                    agentic_threat_ids=["T6", "T7", "T8"],
+                    attack_pattern_ids=["AP-T6-01", "AP-T7-01", "AP-T8-01"],
+                )
+            ],
+            "governance_only": [],
+        }
+    )
+
+    html = _html(data, tmp_path)
+    region = _section_region(html, "sec-threats")
+
+    assert ">1 actionable / 0 governance</span>" in region
+    assert '<span class="count-badge"' in region
+    assert "3 threats" in region
+    assert "3 patterns" in region
+
+
+# ---------------------------------------------------------------------------
+# 31: Behavior spec headers, tags, docstrings, And/But steps, zone badges
+# ---------------------------------------------------------------------------
+
+
+def test_behavior_spec_headers_steps_docstring_and_zone_badges(tmp_path: Path) -> None:
+    feature_content = (
+        "@smoke\n"
+        "Feature: Phish suite\n"
+        "Scenario: Phish the desk\n"
+        "  And escalate privileges\n"
+        "  Given access through (Zone input)\n"
+        "  But hold the session\n"
+        "  the platform times out\n"
+        '  """\n'
+        "  requires a compromised credential\n"
+        '  """\n'
+    )
+    data = ReportData(
+        scenarios=[_scenario("scn-a")],
+        feature_files={"scn-a": feature_content},
+    )
+
+    html = _html(data, tmp_path)
+    region = _card_region(html, "scn-a")
+
+    assert re.search(r"Feature:</span>\s*Phish suite</div>", region)
+    assert re.search(r"Scenario:</span>\s*Phish the desk</div>", region)
+    assert (
+        'class="step-keyword">And</span><span class="step-text">'
+        "escalate privileges</span>" in region
+    )
+    assert (
+        'class="step-keyword">But</span><span class="step-text">'
+        "hold the session</span>" in region
+    )
+    assert (
+        'class="step-keyword">Given</span><span class="step-text">'
+        'access through (Zone input)<span class="zone-badge"' in region
+    )
+    assert ">Input Surfaces</span>" in region
+    assert "the platform times out" in region
+    assert (
+        '<div class="step-docstring">requires a compromised credential</div>' in region
+    )
+    # Tag lines are skipped inside the rendered spec block (the raw-data
+    # section later in the document still shows the fixture feature file).
+    spec_start = region.find('<div class="feature-spec">')
+    assert spec_start != -1
+    spec_end = region.find('<div class="tab-panel">', spec_start)
+    assert spec_end != -1
+    assert "@smoke" not in region[spec_start:spec_end]
+
+
+# ---------------------------------------------------------------------------
+# 32: Per-scenario LLM call entries
+# ---------------------------------------------------------------------------
+
+
+def test_per_scenario_llm_call_entries_usage_and_failure_markers(
+    tmp_path: Path,
+) -> None:
+    data = ReportData(
+        scenarios=[_scenario("scn-a")],
+        call_logs={
+            "scn-a": [
+                {
+                    "call": "actor_profile",
+                    "prompt_tokens": 100,
+                    "completion_tokens": 40,
+                    "duration_ms": 250,
+                    "system_prompt": "Assess the profile",
+                    "user_prompt": "Profile the capability",
+                    "success": True,
+                },
+                {
+                    "call": "behavior_spec",
+                    "prompt_tokens": 30,
+                    "completion_tokens": 10,
+                    "duration_ms": 80,
+                    "system_prompt": "Generate the feature",
+                    "user_prompt": "Write the behavior",
+                    "success": False,
+                    "error": "timeout",
+                },
+            ]
+        },
+    )
+
+    html = _html(data, tmp_path)
+    region = _card_region(html, "scn-a")
+
+    assert "Call 0: Actor Profile (100 prompt / 40 completion tokens, 250ms)" in region
+    assert (
+        "Call 1: Behavior Spec (30 prompt / 10 completion tokens, 80ms)"
+        " FAILED: timeout" in region
+    )
+    assert 'class="call-log-pre"' in region
+    for prompt in ("Assess the profile", "Profile the capability"):
+        assert prompt in region
+    for prompt in ("Generate the feature", "Write the behavior"):
+        assert prompt in region
+
+
+# ---------------------------------------------------------------------------
+# 33/38: Categorized coverage summary, plan, and category cards
+# ---------------------------------------------------------------------------
+
+
+def test_coverage_categorized_summary_plan_and_not_confirmed_universe(
+    tmp_path: Path,
+) -> None:
+    data = ReportData(
+        coverage_data=_coverage(
+            coverage_summary={
+                "covered_feasible": ["AP-T6-01"],
+                "selection_limitations": [
+                    {
+                        "entry_point_id": "ze-query",
+                        "reason": "selection_limitation",
+                        "detail": "candidate queue saturated",
+                        "candidate_ids": ["cand-42"],
+                    }
+                ],
+                "policy_exclusions": [
+                    {"entry_point_id": "ze-license", "reason": "out_of_scope"}
+                ],
+            },
+            coverage_plan={
+                "schema_version": 1,
+                "targets": [
+                    {
+                        "entry_point_id": "ze-query",
+                        "entry_point_name": "ze-query",
+                        "primary_candidate_id": "cand-42",
+                        "primary_state": "planned",
+                        "ordered_choices": [
+                            {"candidate_id": "cand-42"},
+                            {"candidate_id": "cand-7"},
+                        ],
+                    }
+                ],
+            },
+        )
+    )
+
+    html = _html(data, tmp_path)
+    region = _section_region(html, "sec-coverage")
+
+    assert ">Known Targets Covered</span>" in region
+    assert (
+        "All identified feasible entry points have scenario coverage; "
+        "inventory completeness is not confirmed." in region
+    )
+    assert "All active zones are traversed by scenarios." in region
+    assert "All in-scope threats have scenario coverage." in region
+    assert "All in-scope attack patterns have scenario coverage." in region
+    assert "Covered Feasible Targets" in region
+    assert ">AP-T6-01</li>" in region
+    assert "Selection Limitations" in region
+    visible = _visible(region)
+    assert "cap overflow (coverage preserved)" in visible
+    assert "candidate queue saturated" in visible
+    assert ">cand-42</code>" in region
+    assert "Policy Exclusions" in region
+    assert "out of scope" in visible
+    assert "Coverage Plan (schema v1)" in region
+    assert "ze-query" in region
+    assert ">planned</td>" in region
+    assert "Not Applicable (Inferred Partial)" in region
+    assert "No operator-confirmed evidence" in region
+
+
+def test_coverage_remaining_category_cards_render(tmp_path: Path) -> None:
+    data = ReportData(
+        coverage_data=_coverage(
+            coverage_summary={
+                "structural_gaps": [
+                    {"entry_point_id": "ze-query", "reason": "projection_limitation"}
+                ],
+                "runtime_generation_gaps": [
+                    {
+                        "entry_point_id": "ze-rag",
+                        "reason": "generation_exhaustion",
+                    }
+                ],
+                "quarantine_admission_failures": [
+                    {"entry_point_id": "ze-scan", "reason": "admission_failure"}
+                ],
+                "projection_limitations": [
+                    {"entry_point_id": "ze-parse", "reason": "projection_limitation"}
+                ],
+            }
+        )
+    )
+
+    html = _html(data, tmp_path)
+    region = _section_region(html, "sec-coverage")
+
+    assert ">Known Targets Covered</span>" in region
+    assert "Structural / Projection Gaps" in region
+    assert "Runtime Generation Gaps" in region
+    assert "Quarantine / Admission Failures" in region
+    assert "Projection Limitations" in region
+    for entry in ("ze-query", "ze-rag", "ze-scan", "ze-parse"):
+        assert entry in region
+    assert "generation exhausted" in _visible(region)
+    assert "admission failure" in _visible(region)
+
+
+# ---------------------------------------------------------------------------
+# 34: Run summary outcome summary and coverage gaps card
+# ---------------------------------------------------------------------------
+
+
+def test_run_summary_outcome_summary_and_coverage_gaps_card(tmp_path: Path) -> None:
+    data = ReportData(
+        scenarios=[
+            _scenario("scn-a", priority={"composite": 0.85}),
+            _scenario("scn-b", priority={"composite": 0.35}),
+        ],
+        manifest_data=_manifest(
+            seeds_generated=12,
+            funnel={
+                "expanded_instances": 10,
+                "filter_submitted": 6,
+                "filter_accepted": 3,
+            },
+            scenarios_generated=4,
+            scenarios_failed=1,
+        ),
+        coverage_data=_coverage(
+            coverage_gaps={
+                "uncovered_entry_points": [
+                    {"name": "ze-query", "entry_point_id": "ze-query"}
+                ],
+                "uncovered_zones": ["input"],
+                "uncovered_threats": ["T6", "T11"],
+                "uncovered_attack_patterns": [],
+            }
+        ),
+    )
+
+    html = _html(data, tmp_path)
+    region = _section_region(html, "sec-run-summary")
+    start = region.find("Outcome Summary")
+    stats = _stats(region[start : start + 3000])
+
+    assert stats["High Priority"] == 1
+    assert stats["Medium Priority"] == 0
+    assert stats["Low Priority"] == 1
+    assert stats["Coverage Gaps"] == 4
+
+
+# ---------------------------------------------------------------------------
+# 35/39: Scenarios-section sub-charts, matrix, filters, and zone crumbs
+# ---------------------------------------------------------------------------
+
+
+def _signals() -> dict[str, str]:
+    return {
+        "technique_maturity": "realized",
+        "risk_impact": "critical",
+        "risk_likelihood": "high",
+        "attack_complexity": "medium",
+        "architecture_match": "explicit",
+        "structural_exposure": "elevated",
+    }
+
+
+def test_scenarios_section_subcharts_matrix_and_filters(tmp_path: Path) -> None:
+    data = ReportData(
+        scenarios=[
+            _scenario(
+                "scn-a",
+                priority={"composite": 0.72, "signals": _signals()},
+                taxonomy_chain={
+                    "owasp_llm_ids": ["LLM01"],
+                    "agentic_threat_ids": ["T6"],
+                },
+                capability_profile={"zones_traversed": ["input", "tool_execution"]},
+                narrative={
+                    "title": "scn-a",
+                    "summary": "",
+                    "entry_point": "ze-query",
+                    "zone_sequence": ["input", "tool_execution"],
+                },
+            ),
+            _scenario(
+                "scn-b",
+                priority={"composite": 0.35, "signals": _signals()},
+                taxonomy_chain={
+                    "owasp_llm_ids": ["LLM02"],
+                    "agentic_threat_ids": ["T6"],
+                },
+                capability_profile={"zones_traversed": ["input"]},
+                narrative={
+                    "title": "scn-b",
+                    "summary": "",
+                    "entry_point": "ze-rag",
+                    "zone_sequence": ["input"],
+                },
+            ),
+        ],
+        manifest_data=_manifest(scenarios_generated=4),
+    )
+
+    html = _html(data, tmp_path)
+    region = _section_region(html, "sec-scenarios")
+
+    assert "Risk Impact: critical" in region
+    assert "Threat x Zone Coverage" in region
+    assert 'data-tooltip="T6 x Input Surfaces: 2 scenarios"' in region
+    assert ">Input Surfaces</div>" in region
+    assert ">Tool Execution</div>" in region
+    assert 'class="ep-dist-name" data-tooltip="ze-query"' in region
+    assert 'class="ep-dist-name" data-tooltip="ze-rag"' in region
+    assert 'data-filter-type="threat" data-filter-value="T6"' in region
+    assert (
+        'data-filter-type="zone" data-filter-value="input"' in region
+        and ">Input Surfaces</span>" in region
+        and 'data-filter-type="zone" data-filter-value="tool_execution"' in region
+        and ">Tool Execution</span>" in region
+    )
+    for priority in ("high", "medium", "low"):
+        assert f'data-filter-type="priority" data-filter-value="{priority}"' in region
+    assert '<span class="stat-label">In Report</span>' in region
+    assert "of 4 generated" in region
+
+    crumbs = _card_region(html, "scn-a")
+    assert 'class="zone-crumb"' in crumbs
+    assert ">input</span>" in crumbs
+    assert ">tool_execution</span>" in crumbs
+    assert "&rarr;" in crumbs
+
+
+def test_threat_zone_matrix_nonzero_gaps_and_empty_cells(tmp_path: Path) -> None:
+    data = ReportData(
+        scenarios=[
+            _scenario(
+                "scn-a",
+                taxonomy_chain={"agentic_threat_ids": ["T6"]},
+                capability_profile={"zones_traversed": ["input"]},
+                narrative={
+                    "title": "scn-a",
+                    "summary": "",
+                    "entry_point": "",
+                    "zone_sequence": ["input"],
+                },
+            ),
+            _scenario(
+                "scn-b",
+                taxonomy_chain={"agentic_threat_ids": ["T11"]},
+                capability_profile={"zones_traversed": ["tool_execution"]},
+                narrative={
+                    "title": "scn-b",
+                    "summary": "",
+                    "entry_point": "",
+                    "zone_sequence": ["tool_execution"],
+                },
+            ),
+        ]
+    )
+
+    html = _html(data, tmp_path)
+    region = _section_region(html, "sec-scenarios")
+
+    assert _stats(region)["Coverage Gaps"] == 2
+    assert 'data-tooltip="T6 x Input Surfaces: 1 scenario"' in region
+    assert 'data-tooltip="T11 x Input Surfaces: no scenarios"' in region
+    assert 'class="matrix-cell empty"' in region
+
+
+# ---------------------------------------------------------------------------
+# 36: Actor profile distribution diversity
+# ---------------------------------------------------------------------------
+
+
+def test_actor_distribution_plural_goals_without_monotone_warning(
+    tmp_path: Path,
+) -> None:
+    scenarios = [
+        _scenario(
+            "scn-a",
+            actor_profile={
+                "actor_type": "cybercriminal",
+                "capability_level": "advanced",
+                "goal_category_parent": "integrity",
+            },
+        ),
+        _scenario(
+            "scn-b",
+            actor_profile={
+                "actor_type": "nation-state",
+                "capability_level": "expert",
+                "goal_category_parent": "privacy",
+            },
+        ),
+        _scenario(
+            "scn-c",
+            actor_profile={
+                "actor_type": "hacktivist",
+                "capability_level": "intermediate",
+                "goal_category_parent": "availability",
+            },
+        ),
+    ]
+
+    data = ReportData(scenarios=scenarios)
+
+    html = _html(data, tmp_path)
+    region = _section_region(html, "sec-diversity")
+
+    assert ">3 types</span>" in region
+    assert ">3 categories</span>" in region
+    assert re.search(r'class="diversity-bar-fill"[^>]*>\s*1\s*</div>', region)
+    assert "33%" in region
+    assert "Low actor diversity" not in region
+    assert "Integrity" in region
+    assert "Privacy" in region
+    assert "Availability" in region
+
+
+# ---------------------------------------------------------------------------
+# 37: Roster technique fallback without pinned techniques
+# ---------------------------------------------------------------------------
+
+
+def test_matrix_roster_technique_fallback_when_unpinned(tmp_path: Path) -> None:
+    scn_a = _matrix_scenario("scn-a", "T6", "AP-T6-01", ["AML.T0015", "AML.T0040"])
+    scn_a["actor_profile"] = {
+        "actor_type": "cybercriminal",
+        "capability_level": "advanced",
+    }
+
+    data = ReportData(scenarios=[scn_a])
+
+    html = _html(data, tmp_path)
+    region = _section_region(html, "sec-threat-matrix")
+
+    assert "1/17 threats" in region
+    assert "2 techniques" in region
+    assert "1 scenarios" in region
+    assert (
+        '<th class="matrix-col-header"' in region
+        and "AML.T0015" in region
+        and "AML.T0040" in region
+    )
+    assert 'class="matrix-count-link"' in region
+    assert 'href="#scenario-scn-a"' in region
+    roster = region[
+        region.find("Scenario Roster") : region.find(
+            "</table>", region.find("Scenario Roster")
+        )
+    ]
+    scn_a_row = roster[
+        roster.find("scn-a") : roster.find("</tr>", roster.find("scn-a"))
+    ]
+    assert "AP-T6-01" in scn_a_row
+    assert ">AML.T0015</span>" in scn_a_row
+    assert ">AML.T0040</span>" in scn_a_row
+
+
+# ---------------------------------------------------------------------------
+# 40: Pipeline call usage warnings and unavailable metrics
+# ---------------------------------------------------------------------------
+
+
+def test_pipeline_calls_partial_telemetry_warning_and_unavailable_summary(
+    tmp_path: Path,
+) -> None:
+    data = ReportData(
+        pipeline_call_logs=[
+            {
+                "call": "candidate_filter",
+                "prompt_tokens": 100,
+                "completion_tokens": 40,
+                "duration_ms": 25,
+                "semantic_evidence": {
+                    "stage": "candidate_filter",
+                    "accepted_draft_digest": "accepted-draft-digest",
+                    "attempts": [{"result": "accepted"}],
+                },
+            },
+            {
+                "call": "capability_profile",
+                "prompt_tokens": 50,
+                "completion_tokens": 20,
+                "duration_ms": 15,
+                "semantic_evidence": {
+                    "stage": "capability_profile",
+                    "attempts": [{"result": "invalid"}],
+                },
+            },
+            {
+                "call": "behavior",
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "duration_ms": None,
+            },
+        ]
+    )
+
+    html = _html(data, tmp_path)
+    region = _section_region(html, "sec-pipeline-calls")
+
+    assert "3 call(s)" in region
+    assert "150 prompt tokens" in region
+    assert "60 completion tokens" in region
+    assert "40ms total" in region
+    visible = _visible(region)
+    assert "Warning: call behavior has unavailable usage metrics" in visible
+    assert "duration_ms" in visible
+    assert (
+        "Call 2: behavior (prompt_tokens=0, completion_tokens=0,"
+        " duration_ms=unavailable)" in region
+    )
+
+
+# ---------------------------------------------------------------------------
+# generator.py: conflicting corpus claims refuse generation
+# ---------------------------------------------------------------------------
+
+
+def test_conflicting_corpus_claims_refuse_generation(tmp_path: Path) -> None:
+    def _claims(evidence: str) -> list[dict[str, str]]:
+        return [
+            {
+                "category": "entry_points",
+                "status": "applicable",
+                "evidence": [evidence],
+            },
+            {
+                "category": "tool_inventory",
+                "status": "not_applicable",
+                "reason": "Acceptance fixture",
+            },
+        ]
+
+    scenario_a = _scenario("scn-a")
+    scenario_a["validation"] = {
+        "semantic": {"corpus_claim_applicability": _claims("a.md")}
+    }
+    scenario_b = _scenario("scn-b")
+    scenario_b["validation"] = {
+        "semantic": {"corpus_claim_applicability": _claims("b.md")}
+    }
+    data = ReportData(scenarios=[scenario_a, scenario_b])
+
+    with pytest.raises(ValueError, match="entry_points"):
+        _html(data, tmp_path)

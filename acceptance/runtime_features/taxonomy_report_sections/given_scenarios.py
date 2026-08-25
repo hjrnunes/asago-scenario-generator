@@ -105,6 +105,35 @@ def _h_each_scenario_actor_goal(
     return True, ""
 
 
+def _h_contains_rich_feature_file(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: ... contains scenario "X" with a behavior feature file containing the tag "T", the section "Feature" titled "F", the section "Scenario" titled "S", the "And" step "A", the "Given" step "G", the "But" step "B", a continuation line "C", and the docstring "D"."""
+    match = re.search(
+        r'the run fixture contains scenario "([^"]+)" with a behavior feature '
+        r'file containing the tag "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse rich feature-file step: {text}"
+    sid, tag = match.groups()
+    spec = text[match.end(2) :]  # remainder after the tag value
+    world.trpt_scenarios.append(_new_scenario(sid))
+    lines = [f"@{tag}"]
+    for section, title in re.findall(r'the section "([^"]+)" titled "([^"]+)"', spec):
+        lines.append(f"{section}: {title}")
+    for keyword, step_text in re.findall(r'the "([^"]+)" step "([^"]+)"', spec):
+        lines.append(f"  {keyword} {step_text}")
+    continuation = re.search(r'a continuation line "([^"]+)"', spec)
+    if continuation:
+        lines.append(f"  {continuation.group(1)}")
+    docstring = re.search(r'the docstring "([^"]+)"', spec)
+    if docstring:
+        lines.extend(['  """', f"  {docstring.group(1)}", '  """'])
+    world.trpt_feature_files[sid] = "\n".join(lines) + "\n"
+    return True, ""
+
+
 def _h_no_run_manifest(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the run fixture contains no run manifest."""
     world.trpt_manifest_data = {}
@@ -362,6 +391,50 @@ def _h_scn_narrative(world: World, text: str, examples: dict) -> tuple[bool, str
     return True, ""
 
 
+def _h_scn_narrative_entry_point(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: scenario "X" carries a narrative entry point "E"."""
+    match = re.search(
+        r'scenario "([^"]+)" carries a narrative entry point "([^"]+)"', text
+    )
+    if not match:
+        return False, f"Could not parse narrative entry-point step: {text}"
+    _scn(world, match.group(1))["narrative"]["entry_point"] = match.group(2)
+    return True, ""
+
+
+def _h_scn_records_call(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Handle: scenario "X" records the call "C" with P prompt tokens, M completion tokens, duration Dms, the system prompt "S", the user prompt "U", and (success|failing with the error "E")."""
+    match = re.search(
+        r'scenario "([^"]+)" records the call "([^"]+)" with (\d+) prompt tokens, '
+        r"(\d+) completion tokens, duration (\d+)ms, the system prompt "
+        r'"([^"]+)", the user prompt "([^"]+)", (?:and )?'
+        r'(success|failing with the error "([^"]+)")',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse per-scenario call step: {text}"
+    groups = match.groups()
+    sid, call, prompt, completion, duration, system_prompt, user_prompt = groups[:7]
+    outcome = groups[7]
+    error = groups[8] if outcome.startswith("failing") else None
+    entry: dict[str, Any] = {
+        "scenario_id": sid,
+        "call": call,
+        "prompt_tokens": int(prompt),
+        "completion_tokens": int(completion),
+        "duration_ms": int(duration),
+        "system_prompt": system_prompt,
+        "user_prompt": user_prompt,
+        "success": not outcome.startswith("failing"),
+    }
+    if error is not None:
+        entry["error"] = error
+    world.trpt_call_logs.setdefault(sid, []).append(entry)
+    return True, ""
+
+
 def _h_scn_technique_scope(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: scenario "X" records technique scope evidence with scenario classifications "A" and no projected-step mappings."""
     match = re.search(
@@ -404,17 +477,17 @@ def _h_scn_attack_tree(world: World, text: str, examples: dict) -> tuple[bool, s
         return False, f"Could not parse attack-tree step: {text}"
     sid, tree_case = match.groups()
 
-    or_match = re.search(
-        r'an OR root labeled "([^"]+)" with two leaf children carrying the '
-        r'techniques "([^"]+)" and "([^"]+)"',
+    gate_match = re.search(
+        r'an (AND|OR) root labeled "([^"]+)" with two leaf children carrying '
+        r'the techniques "([^"]+)" and "([^"]+)"',
         tree_case,
     )
-    if or_match:
-        label, tech1, tech2 = or_match.groups()
+    if gate_match:
+        gate, label, tech1, tech2 = gate_match.groups()
         _scn(world, sid)["attack_tree"] = {
             "goal": label,
             "root": {
-                "gate": "OR",
+                "gate": gate,
                 "label": label,
                 "children": [
                     {"gate": "LEAF", "label": "Leaf 1", "technique_id": tech1},
@@ -435,24 +508,27 @@ def _h_scn_attack_tree(world: World, text: str, examples: dict) -> tuple[bool, s
         return True, ""
 
     action_match = re.search(
-        r'a leaf node labeled "([^"]+)" whose action invokes tool "([^"]+)" and '
-        r'a leaf node labeled "([^"]+)" whose action performs initial ingress '
-        r'through entry point "([^"]+)" in zone "([^"]+)"',
+        r'a leaf node labeled "([^"]+)" whose action invokes tool "([^"]+)"'
+        r'(?: with integration "([^"]+)")? and a leaf node labeled "([^"]+)" '
+        r'whose action performs initial ingress through entry point "([^"]+)" '
+        r'in zone "([^"]+)"',
         tree_case,
     )
     if action_match:
-        label1, tool_id, label2, ep_id, zone = action_match.groups()
+        label1, tool_id, integration_id, label2, ep_id, zone = action_match.groups()
+        tool_action: dict[str, str] = {
+            "kind": "tool_invocation",
+            "tool_id": tool_id,
+        }
+        if integration_id:
+            tool_action["integration_id"] = integration_id
         _scn(world, sid)["attack_tree"] = {
             "goal": "Gain access",
             "root": {
                 "gate": "OR",
                 "label": "Gain access",
                 "children": [
-                    {
-                        "gate": "LEAF",
-                        "label": label1,
-                        "action": {"kind": "tool_invocation", "tool_id": tool_id},
-                    },
+                    {"gate": "LEAF", "label": label1, "action": tool_action},
                     {
                         "gate": "LEAF",
                         "label": label2,
@@ -636,4 +712,19 @@ def register(api: Any) -> None:
         'scenario "([^"]+)" carries an attack complexity assessment at rule version "([^"]+)" with candidate lower bound "([^"]+)", final required level "([^"]+)", and the reason "([^"]+)" of detail "([^"]+)" citing evidence "([^"]+)"',
         _h_scn_complexity,
         source_order=7046,
+    )
+    api.register(
+        'the run fixture contains scenario "([^"]+)" with a behavior feature file containing the tag "([^"]+)".*',
+        _h_contains_rich_feature_file,
+        source_order=7047,
+    )
+    api.register(
+        'scenario "([^"]+)" records the call "([^"]+)" with \\d+ prompt tokens, \\d+ completion tokens, duration \\d+ms, the system prompt "([^"]+)", the user prompt "([^"]+)", (?:and )?(?:success|failing with the error "([^"]+)")',
+        _h_scn_records_call,
+        source_order=7048,
+    )
+    api.register(
+        'scenario "([^"]+)" carries a narrative entry point "([^"]+)"',
+        _h_scn_narrative_entry_point,
+        source_order=7049,
     )

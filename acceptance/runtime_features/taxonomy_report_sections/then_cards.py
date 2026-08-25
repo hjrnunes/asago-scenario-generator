@@ -144,6 +144,13 @@ def _h_ts_attack_tree_tab(world: World, text: str, examples: dict) -> tuple[bool
             and "AML.T0015" in region
             and "AML.T0040" in region
         )
+    elif "renders an AND gate summary" in rendering:
+        ok = (
+            region.count('class="tree-leaf"') == 2
+            and "gate-and" in region
+            and "AML.T0015" in region
+            and "AML.T0040" in region
+        )
     elif "renders exactly one leaf node and no gate summary" in rendering:
         ok = (
             region.count('class="tree-leaf"') == 1
@@ -289,6 +296,158 @@ def _h_ts_no_scenarios_placeholder(
     return _resolve(ok, "scenarios placeholder missing")
 
 
+def _h_ts_scenarios_chart_segment(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the Scenarios section shows the "Chart" chart with the segment "S"."""
+    match = re.search(
+        r'the Scenarios section shows the "([^"]+)" chart with the segment "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse chart-segment assertion: {text}"
+    chart, segment = match.groups()
+    region = _section_region(_html(world), "sec-scenarios")
+    ok = chart in region and segment in region
+    return _resolve(ok, f"chart {chart!r} segment={segment}")
+
+
+def _h_ts_threat_zone_cell(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Handle: the Scenarios section shows the "Threat x Zone Coverage" matrix with the cell "T" x "Z" counting "N"."""
+    match = re.search(
+        r'the Scenarios section shows the "([^"]+)" matrix with the cell '
+        r'"([^"]+)" x "([^"]+)" counting "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse threat-zone cell assertion: {text}"
+    matrix, threat, zone, count = match.groups()
+    region = _section_region(_html(world), "sec-scenarios")
+    ok = matrix in region and f">{count}</div>" in region
+    ok = ok and f"{threat} x {zone}: {count} scenario" in region
+    return _resolve(
+        ok,
+        f"threat-zone cell threat={threat} zone={zone} count={count}",
+    )
+
+
+def _h_ts_threat_zone_empty_cell(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the Scenarios section shows the "Threat x Zone Coverage" matrix with the empty cell "T" x "Z"."""
+    match = re.search(
+        r'the Scenarios section shows the "([^"]+)" matrix with the empty '
+        r'cell "([^"]+)" x "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse empty matrix cell assertion: {text}"
+    matrix, threat, zone = match.groups()
+    region = _section_region(_html(world), "sec-scenarios")
+    ok = matrix in region and "matrix-cell empty" in region
+    ok = ok and f"{threat} x {zone}: no scenarios" in region
+    return _resolve(ok, f"empty cell threat={threat} zone={zone}")
+
+
+def _h_ts_entry_point_distribution(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the Scenarios section shows the "Entry Point Distribution" listing "A" with count N and "B" with count M."""
+    match = re.search(
+        r'the Scenarios section shows the "Entry Point Distribution" listing '
+        r'"([^"]+)" with count (\d+) and "([^"]+)" with count (\d+)',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse ep-distribution assertion: {text}"
+    first_name, first_count, second_name, second_count = match.groups()
+    region = _section_region(_html(world), "sec-scenarios")
+    ok = f'class="ep-dist-name" data-tooltip="{first_name}"' in region
+    ok = ok and f'data-tooltip="{second_name}"' in region
+    ok = (
+        ok
+        and f">{first_count}</span>" in region
+        and f">{second_count}</span>" in region
+    )
+    return _resolve(
+        ok,
+        f"ep distribution {first_name}={first_count} {second_name}={second_count}",
+    )
+
+
+def _h_ts_filter_chips(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Handle: the Scenarios section shows the filter chips "Threats" containing "T", "Zones" containing "Z1" and "Z2", and "Priority" containing "P1", "P2", and "P3"."""
+    match = re.search(
+        r'the Scenarios section shows the filter chips "([^"]+)" containing '
+        r'"([^"]+)", "([^"]+)" containing "([^"]+)" and "([^"]+)", and '
+        r'"([^"]+)" containing "([^"]+)", "([^"]+)", and "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse filter-chips assertion: {text}"
+    (
+        threats_label,
+        threat,
+        zones_label,
+        zone1,
+        zone2,
+        priority_label,
+        priority1,
+        priority2,
+        priority3,
+    ) = match.groups()
+    region = _section_region(_html(world), "sec-scenarios")
+    ok = (
+        threats_label in region
+        and f'data-filter-type="threat" data-filter-value="{threat}"' in region
+    )
+    ok = ok and zones_label in region
+    # Zone chips carry canonical keys in data-filter-value and display names
+    # as their label; assert by the visible label.
+    ok = ok and 'data-filter-type="zone"' in region and f">{zone1}</span>" in region
+    ok = ok and 'data-filter-type="zone"' in region and f">{zone2}</span>" in region
+    ok = ok and priority_label in region
+    for priority in (priority1, priority2, priority3):
+        ok = (
+            ok
+            and f'data-filter-type="priority" data-filter-value="{priority.lower()}"'
+            in region
+        )
+    return _resolve(ok, f"filter chips threat={threat} zones={zone1} {zone2}")
+
+
+def _h_ts_stat_sublabel(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Handle: the Scenarios section shows the stat "N" In Report with the sublabel "S"."""
+    match = re.search(
+        r'the Scenarios section shows the stat "(\d+)" In Report with the '
+        r'sublabel "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse stat-sublabel assertion: {text}"
+    count, sublabel = match.groups()
+    region = _section_region(_html(world), "sec-scenarios")
+    ok = f'<span class="stat-number">{count}</span>' in region
+    ok = ok and 'class="stat-sublabel"' in region and sublabel in region
+    return _resolve(ok, f"stat In Report={count} sublabel={sublabel}")
+
+
+def _h_ts_zone_crumbs(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Handle: the scenario card for "S" shows the zone crumbs "Z1" and "Z2"."""
+    match = re.search(
+        r'the scenario card for "([^"]+)" shows the zone crumbs "([^"]+)" '
+        r'and "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse zone-crumbs assertion: {text}"
+    sid, zone1, zone2 = match.groups()
+    region = _card_region(_html(world), sid)
+    ok = 'class="zone-crumb"' in region and f">{zone1}</span>" in region
+    ok = ok and f">{zone2}</span>" in region
+    return _resolve(ok, f"card {sid} zone crumbs {zone1} {zone2}")
+
+
 def register(api: Any) -> None:
     # --- Scenario card Then steps ---
     api.register(
@@ -385,4 +544,40 @@ def register(api: Any) -> None:
         'the report contains a Scenarios section showing "No scenarios generated."',
         _h_ts_no_scenarios_placeholder,
         source_order=8048,
+    )
+    # --- Scenarios-section sub-charts and cards (scenarios 35, 39) ---
+    api.register(
+        'the Scenarios section shows the "([^"]+)" chart with the segment "([^"]+)"',
+        _h_ts_scenarios_chart_segment,
+        source_order=8088,
+    )
+    api.register(
+        'the Scenarios section shows the "([^"]+)" matrix with the cell "([^"]+)" x "([^"]+)" counting "([^"]+)"',
+        _h_ts_threat_zone_cell,
+        source_order=8089,
+    )
+    api.register(
+        'the Scenarios section shows the "([^"]+)" matrix with the empty cell "([^"]+)" x "([^"]+)"',
+        _h_ts_threat_zone_empty_cell,
+        source_order=8090,
+    )
+    api.register(
+        'the Scenarios section shows the "Entry Point Distribution" listing "([^"]+)" with count (\\d+) and "([^"]+)" with count (\\d+)',
+        _h_ts_entry_point_distribution,
+        source_order=8091,
+    )
+    api.register(
+        "the Scenarios section shows the filter chips .*",
+        _h_ts_filter_chips,
+        source_order=8092,
+    )
+    api.register(
+        'the Scenarios section shows the stat "\\d+" In Report with the sublabel "([^"]+)"',
+        _h_ts_stat_sublabel,
+        source_order=8093,
+    )
+    api.register(
+        'the scenario card for "([^"]+)" shows the zone crumbs "([^"]+)" and "([^"]+)"',
+        _h_ts_zone_crumbs,
+        source_order=8094,
     )

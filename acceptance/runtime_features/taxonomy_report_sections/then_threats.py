@@ -174,6 +174,11 @@ def _h_ts_sidebar_link(world: World, text: str, examples: dict) -> tuple[bool, s
         "Coverage Analysis": "#sec-coverage",
         "Run Summary": "#sec-run-summary",
         "Eval Scorecard": "#sec-scorecard",
+        "Capability Profile": "#sec-profile",
+        "Threat Surface": "#sec-threats",
+        "Scenarios": "#sec-scenarios",
+        "Raw Data": "#sec-raw",
+        "Glossary & Methodology": "#glossary",
     }.get(match.group(1))
     if href is None:
         return False, f"Unknown sidebar section {match.group(1)!r}"
@@ -360,6 +365,204 @@ def _h_ts_diversity_goal(world: World, text: str, examples: dict) -> tuple[bool,
     return _resolve(ok, f"goal bars={bars}")
 
 
+def _h_ts_count_badge(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Handle: the threat surface entry for "R" shows the count badge "N threats|patterns"."""
+    match = re.search(
+        r'the threat surface entry for "([^"]+)" shows the count badge '
+        r'"(\d+) (threats|patterns)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse count-badge assertion: {text}"
+    risk_id, count, kind = match.groups()
+    region = _threats_region(world)
+    row_start = region.find(risk_id)
+    if row_start == -1:
+        return _resolve(False, f"risk row {risk_id!r} is not rendered")
+    row = region[row_start : region.find("</tr>", row_start)]
+    ok = 'class="count-badge"' in row and f">{count} {kind}</span>" in row
+    return _resolve(ok, f"count badge {count} {kind} missing for {risk_id!r}")
+
+
+def _h_ts_sankey_node_tip(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Handle: the threat surface flow diagram node for "R" carries the tip "T"."""
+    match = re.search(
+        r'the threat surface flow diagram node for "([^"]+)" carries the '
+        r'tip "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse sankey-tip assertion: {text}"
+    node_id, tip = match.groups()
+    region = _threats_region(world)
+    return _resolve(
+        f'data-tip="{tip}"' in region,
+        f"sankey node {node_id!r} tip {tip!r} missing",
+    )
+
+
+def _h_ts_coverage_card_containing(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the coverage section shows the "Card" card containing "Item"."""
+    match = re.search(
+        r'the coverage section shows the "([^"]+)" card containing "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse coverage-card-containing assertion: {text}"
+    card, item = match.groups()
+    region = _section_region(_html(world), "sec-coverage")
+    card_start = region.find(f">{card}</span>")
+    if card_start == -1:
+        return _resolve(False, f"coverage card {card!r} is not rendered")
+    card_body = region[card_start : card_start + 4000]
+    return _resolve(
+        item in card_body, f"item {item!r} missing from coverage card {card!r}"
+    )
+
+
+def _h_ts_coverage_card_entry_detail(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the coverage section shows the "Card" card with the entry "E", the reason "R", the detail "D", and the candidate "C"."""
+    match = re.search(
+        r'the coverage section shows the "([^"]+)" card with the entry '
+        r'"([^"]+)", the reason "([^"]+)", the detail "([^"]+)", and the '
+        r'candidate "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse coverage-card-entry detail: {text}"
+    card, entry, reason, detail, candidate = match.groups()
+    region = _section_region(_html(world), "sec-coverage")
+    card_start = region.find(f">{card}</span>")
+    if card_start == -1:
+        return _resolve(False, f"coverage card {card!r} is not rendered")
+    card_body = region[card_start : card_start + 4000]
+    ok = all(value in card_body for value in (entry, reason, detail, candidate))
+    return _resolve(
+        ok,
+        f"coverage card {card!r} entry={entry} reason={reason} detail={detail} candidate={candidate}",
+    )
+
+
+def _h_ts_coverage_card_entry_reason(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the coverage section shows the "Card" card with the entry "E" and the reason "R"."""
+    match = re.search(
+        r'the coverage section shows the "([^"]+)" card with the entry '
+        r'"([^"]+)" and the reason "([^"]+)"$',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse coverage-card-entry reason: {text}"
+    card, entry, reason = match.groups()
+    region = _section_region(_html(world), "sec-coverage")
+    card_start = region.find(f">{card}</span>")
+    if card_start == -1:
+        return _resolve(False, f"coverage card {card!r} is not rendered")
+    card_body = region[card_start : card_start + 4000]
+    ok = entry in card_body and reason in card_body
+    return _resolve(ok, f"coverage card {card!r} entry={entry} reason={reason}")
+
+
+def _h_ts_coverage_plan_row(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the coverage section shows a "Coverage Plan" row for "E" with primary candidate "C" and state "S"."""
+    match = re.search(
+        r'the coverage section shows a "Coverage Plan" row for "([^"]+)" with '
+        r'primary candidate "([^"]+)" and state "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse coverage-plan row assertion: {text}"
+    entry, primary, state = match.groups()
+    region = _section_region(_html(world), "sec-coverage")
+    plan_start = region.find("Coverage Plan (schema v1)")
+    if plan_start == -1:
+        return _resolve(False, "coverage plan table is not rendered")
+    plan_body = region[plan_start : plan_start + 4000]
+    ok = entry in plan_body and primary in plan_body and f">{state}</td>" in plan_body
+    return _resolve(
+        ok, f"coverage plan row entry={entry} primary={primary} state={state}"
+    )
+
+
+def _h_ts_coverage_universe_completeness(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the coverage universe card shows inventory completeness "C" (no evidence clause)."""
+    match = re.search(
+        r'the coverage universe card shows inventory completeness "([^"]+)"$', text
+    )
+    if not match:
+        return False, f"Could not parse universe-completeness assertion: {text}"
+    region = _section_region(_html(world), "sec-coverage")
+    return _resolve(
+        match.group(1) in region, f"universe completeness={match.group(1)!r}"
+    )
+
+
+def _h_ts_coverage_universe_message(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the coverage universe card shows the message "M"."""
+    match = re.search(r'the coverage universe card shows the message "([^"]+)"', text)
+    if not match:
+        return False, f"Could not parse universe-message assertion: {text}"
+    region = _section_region(_html(world), "sec-coverage")
+    return _resolve(match.group(1) in region, f"universe message={match.group(1)!r}")
+
+
+def _h_ts_matrix_tech_headers(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the matrix shows technique column headers for "A" and "B"."""
+    match = re.search(
+        r'the matrix shows technique column headers for "([^"]+)" and "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse matrix-header assertion: {text}"
+    region = _section_region(_html(world), "sec-threat-matrix")
+    ok = "matrix-col-header" in region
+    ok = ok and f'class="matrix-col-header-text">{match.group(1)}</span>' in region
+    ok = ok and f'class="matrix-col-header-text">{match.group(2)}</span>' in region
+    return _resolve(ok, f"matrix headers={match.groups()}")
+
+
+def _h_ts_diversity_no_warning(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the distribution shows no low-diversity warning."""
+    region = _section_region(_html(world), "sec-diversity")
+    return _resolve(
+        "Low actor diversity" not in region, "low-diversity warning is present"
+    )
+
+
+def _h_ts_diversity_block_badge(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: the distribution shows the "Block" block with the badge "B"."""
+    match = re.search(
+        r'the distribution shows the "([^"]+)" block with the badge "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse diversity-block badge: {text}"
+    block, badge = match.groups()
+    region = _section_region(_html(world), "sec-diversity")
+    block_start = region.find(block)
+    if block_start == -1:
+        return _resolve(False, f"diversity block {block!r} is not rendered")
+    block_body = region[block_start : block_start + 3000]
+    return _resolve(badge in block_body, f"block {block!r} badge={badge}")
+
+
 def register(api: Any) -> None:
     # --- Threat surface / coverage / matrix / roster / diversity Then steps ---
     api.register(
@@ -461,4 +664,60 @@ def register(api: Any) -> None:
         'the distribution shows the goal category "([^"]+)" with the count (\\d+)',
         _h_ts_diversity_goal,
         source_order=8029,
+    )
+    # --- Extended pins (scenarios 03, 19, 30, 33, 36-38) ---
+    api.register(
+        'the threat surface entry for "([^"]+)" shows the count badge "\\d+ (?:threats|patterns)"',
+        _h_ts_count_badge,
+        source_order=8075,
+    )
+    api.register(
+        'the threat surface flow diagram node for "([^"]+)" carries the tip "([^"]+)"',
+        _h_ts_sankey_node_tip,
+        source_order=8076,
+    )
+    api.register(
+        'the coverage section shows the "([^"]+)" card containing "([^"]+)"',
+        _h_ts_coverage_card_containing,
+        source_order=8077,
+    )
+    api.register(
+        'the coverage section shows the "([^"]+)" card with the entry "([^"]+)", the reason "([^"]+)", the detail "([^"]+)", and the candidate "([^"]+)"',
+        _h_ts_coverage_card_entry_detail,
+        source_order=8078,
+    )
+    api.register(
+        'the coverage section shows the "([^"]+)" card with the entry "([^"]+)" and the reason "([^"]+)"$',
+        _h_ts_coverage_card_entry_reason,
+        source_order=8079,
+    )
+    api.register(
+        'the coverage section shows a "Coverage Plan" row for "([^"]+)" with primary candidate "([^"]+)" and state "([^"]+)"',
+        _h_ts_coverage_plan_row,
+        source_order=8080,
+    )
+    api.register(
+        'the coverage universe card shows inventory completeness "([^"]+)"$',
+        _h_ts_coverage_universe_completeness,
+        source_order=8081,
+    )
+    api.register(
+        'the coverage universe card shows the message "([^"]+)"',
+        _h_ts_coverage_universe_message,
+        source_order=8082,
+    )
+    api.register(
+        'the matrix shows technique column headers for "([^"]+)" and "([^"]+)"',
+        _h_ts_matrix_tech_headers,
+        source_order=8083,
+    )
+    api.register(
+        "the distribution shows no low-diversity warning",
+        _h_ts_diversity_no_warning,
+        source_order=8084,
+    )
+    api.register(
+        'the distribution shows the "([^"]+)" block with the badge "([^"]+)"',
+        _h_ts_diversity_block_badge,
+        source_order=8085,
     )
