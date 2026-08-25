@@ -4821,3 +4821,209 @@ class TestPostconditionsForStep:
         block = _make_block()
 
         assert block.postconditions_for_step("step.does-not-exist") == ()
+
+
+class TestProjectionBlockCollectors:
+    """Branch-level coverage for _build_projection_block decomposition."""
+
+    def test_narrative_realization_mappings(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _narrative_realization_mappings,
+        )
+
+        candidate, _, _, _ = _project()
+        narrative = _make_narrative(candidate.canonical_ingress.entry_point_id)
+        maps = _narrative_realization_mappings(narrative)
+        assert [m.element_id for m in maps] == ["1", "2", "3"]
+        assert all(m.artifact_stage == ArtifactStage.narrative for m in maps)
+        assert maps[0].projected_step_ids == ("step.1",)
+
+    def test_narrative_realization_mappings_skips_unprojected(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _narrative_realization_mappings,
+        )
+
+        candidate, _, _, _ = _project()
+        narrative = _make_narrative(candidate.canonical_ingress.entry_point_id)
+        narrative.steps = narrative.steps + [
+            NarrativeStep.model_construct(
+                step_number=4,
+                zone="input",
+                action="external",
+                effect="precondition",
+                projected_step_ids=(),
+            )
+        ]
+        maps = _narrative_realization_mappings(narrative)
+        assert [m.element_id for m in maps] == ["1", "2", "3"]
+
+    def test_tree_realization_mappings(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _tree_realization_mappings,
+        )
+
+        candidate, _, _, _ = _project()
+        tree = _make_tree(candidate.canonical_ingress.entry_point_id)
+        maps = _tree_realization_mappings(tree)
+        assert [m.element_id for m in maps] == ["n1.1", "n1.2", "n1.3"]
+        assert all(m.artifact_stage == ArtifactStage.attack_tree for m in maps)
+
+    def test_tree_realization_mappings_none_tree(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _tree_realization_mappings,
+        )
+
+        assert _tree_realization_mappings(None) == []
+
+    def test_behavior_realization_mappings(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _behavior_realization_mappings,
+        )
+
+        spec = make_behavior_spec()
+        behavior_maps, assertion_maps = _behavior_realization_mappings(spec)
+        assert len(behavior_maps) == len(spec.actions)
+        assert all(m.artifact_stage == ArtifactStage.behavior for m in behavior_maps)
+        assert len(assertion_maps) == len(spec.assertions)
+        assert assertion_maps[0].element_id == spec.assertions[0].assertion_id
+
+    def test_behavior_realization_mappings_non_spec(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _behavior_realization_mappings,
+        )
+
+        assert _behavior_realization_mappings("raw text") == ([], [])
+
+
+class TestProjectionContextSerializers:
+    """Branch-level coverage for _build_projection_context decomposition."""
+
+    def test_projection_selected_steps(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _projection_selected_steps,
+        )
+
+        candidate, _, _, _ = _project()
+        chain = candidate.projection.source_chain
+        selected = list(candidate.projection.selected_step_ids)
+        steps = _projection_selected_steps(chain, set(selected))
+        assert [s.step_id for s in steps] == selected
+
+    def test_projection_selected_steps_filters_omitted(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _projection_selected_steps,
+        )
+
+        candidate, _, _, _ = _project()
+        chain = candidate.projection.source_chain
+        steps = _projection_selected_steps(chain, {"step.1"})
+        assert [s.step_id for s in steps] == ["step.1"]
+
+    def test_step_realizations_by_id(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _projection_selected_steps,
+            _step_realizations_by_id,
+        )
+
+        candidate, _, _, _ = _project()
+        chain = candidate.projection.source_chain
+        selected = list(candidate.projection.selected_step_ids)
+        steps = _projection_selected_steps(chain, set(selected))
+        binding_by_slot = {
+            b.slot_id: b.resource_ref for b in candidate.projection.bindings
+        }
+        rmap = _step_realizations_by_id(steps, binding_by_slot)
+        assert set(rmap) == set(selected)
+        assert "action_kind" in rmap[selected[0]]
+        assert "executor_role" in rmap[selected[0]]
+
+    def test_serialize_step_technique_ids(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _serialize_step_technique_ids,
+        )
+
+        candidate, _, _, _ = _project()
+        chain = candidate.projection.source_chain
+        ids = _serialize_step_technique_ids(chain.steps[0])
+        assert ids == ["AML.T0001"]
+
+    def test_serialize_step_resource_links_bound(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _serialize_step_resource_links,
+        )
+
+        candidate, _, _, _ = _project()
+        chain = candidate.projection.source_chain
+        bindings_by_slot = {b.slot_id: b for b in candidate.projection.bindings}
+        links = _serialize_step_resource_links(chain.steps[0], bindings_by_slot)
+        assert links[0]["role"] == "ingress"
+        assert links[0]["slot_id"] == "ingress"
+        assert links[0]["resource_ref"]["kind"] == "entry_point"
+
+    def test_serialize_step_resource_links_unbound(self):
+        from types import SimpleNamespace
+
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _serialize_step_resource_links,
+        )
+
+        unbound = SimpleNamespace(
+            role="r",
+            slot_id="missing-slot",
+            trust_boundary_slot_id=None,
+            target_ingress_slot_id=None,
+        )
+        step = SimpleNamespace(resource_links=[unbound])
+        links = _serialize_step_resource_links(step, {})
+        assert links == [
+            {
+                "role": "r",
+                "slot_id": "missing-slot",
+                "trust_boundary_slot_id": None,
+                "target_ingress_slot_id": None,
+                "resource_ref": None,
+            }
+        ]
+
+    def test_serialize_step_postconditions(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _serialize_step_postconditions,
+        )
+
+        candidate, _, _, _ = _project()
+        chain = candidate.projection.source_chain
+        pcs = _serialize_step_postconditions(chain.steps[0])
+        assert len(pcs) == 1
+        assert (
+            pcs[0]["postcondition_id"]
+            == chain.steps[0].observable_postconditions[0].postcondition_id
+        )
+        assert set(pcs[0]) == {
+            "postcondition_id",
+            "description",
+            "security_relevant",
+            "terminal",
+        }
+
+    def test_serialize_selected_steps(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _projection_selected_steps,
+            _serialize_selected_steps,
+            _step_realizations_by_id,
+        )
+
+        candidate, _, _, _ = _project()
+        chain = candidate.projection.source_chain
+        selected = list(candidate.projection.selected_step_ids)
+        steps = _projection_selected_steps(chain, set(selected))
+        bindings_by_slot = {b.slot_id: b for b in candidate.projection.bindings}
+        binding_by_slot = {
+            b.slot_id: b.resource_ref for b in candidate.projection.bindings
+        }
+        step_realizations = _step_realizations_by_id(steps, binding_by_slot)
+        rows = _serialize_selected_steps(steps, bindings_by_slot, step_realizations)
+        assert [r["step_id"] for r in rows] == selected
+        assert "technique_ids" in rows[0]
+        assert "resource_links" in rows[0]
+        assert "observable_postconditions" in rows[0]
+        assert "realization" in rows[0]
