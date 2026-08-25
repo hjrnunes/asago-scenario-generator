@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 import yaml
 
 from asago_scenario_generator.models.attack_tree import (
@@ -20,7 +21,9 @@ from asago_scenario_generator.models.attack_tree import (
     AttackTreeNode,
     GateType,
 )
-from asago_scenario_generator.models.projection_envelope import ProjectionTraceabilityResult
+from asago_scenario_generator.models.projection_envelope import (
+    ProjectionTraceabilityResult,
+)
 from asago_scenario_generator.models.scenario import (
     ArchitectureMatch,
     AttackComplexity,
@@ -193,7 +196,9 @@ def _make_envelope(
 # ---------------------------------------------------------------------------
 
 
-@patch("asago_scenario_generator.pipeline.projection_validation.validate_projection_traceability")
+@patch(
+    "asago_scenario_generator.pipeline.projection_validation.validate_projection_traceability"
+)
 class TestValidationPersistence:
     """Validation marks should appear in re-written scenario YAMLs."""
 
@@ -324,7 +329,9 @@ class TestValidationPersistence:
 # ---------------------------------------------------------------------------
 
 
-@patch("asago_scenario_generator.pipeline.projection_validation.validate_projection_traceability")
+@patch(
+    "asago_scenario_generator.pipeline.projection_validation.validate_projection_traceability"
+)
 class TestRewriteIntegrity:
     """The validation re-write must not corrupt existing scenario data."""
 
@@ -441,6 +448,218 @@ class TestRewriteIntegrity:
         yaml_path = tmp_path / f"{sid}.yaml"
         data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
         assert data["scenario_id"] == sid
+
+
+class TestOutputWriteHelpers:
+    """Branch-level coverage for write/replace scenario output decomposition."""
+
+    def test_has_structured_behavior_spec_true(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _has_structured_behavior_spec,
+        )
+
+        assert _has_structured_behavior_spec(_make_envelope()) is True
+
+    def test_has_structured_behavior_spec_false(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _has_structured_behavior_spec,
+        )
+
+        env = _make_envelope()
+        env.behavior_spec = "raw text"
+        assert _has_structured_behavior_spec(env) is False
+
+    def test_scenario_output_paths(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _scenario_output_paths,
+        )
+
+        env = _make_envelope()
+        env_path, feature_path, has_behavior = _scenario_output_paths(env, Path("/out"))
+        assert env_path == Path("/out") / f"{env.scenario_id}.yaml"
+        assert feature_path == Path("/out") / f"{env.scenario_id}.feature"
+        assert has_behavior is True
+
+    def test_scenario_output_paths_without_feature(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _scenario_output_paths,
+        )
+
+        env = _make_envelope()
+        env.behavior_spec = "raw text"
+        env_path, feature_path, has_behavior = _scenario_output_paths(env, Path("/out"))
+        assert feature_path is None
+        assert has_behavior is False
+
+    def test_preflight_output_paths_existing_yaml(self, tmp_path):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            ScenarioForgeIntegrityError,
+            _preflight_output_paths,
+            _scenario_output_paths,
+        )
+
+        env = _make_envelope()
+        env_path, feature_path, has_behavior = _scenario_output_paths(env, tmp_path)
+        env_path.write_text("x")
+        with pytest.raises(ScenarioForgeIntegrityError, match="already exists"):
+            _preflight_output_paths(env_path, feature_path, has_behavior)
+
+    def test_preflight_output_paths_existing_feature(self, tmp_path):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            ScenarioForgeIntegrityError,
+            _preflight_output_paths,
+            _scenario_output_paths,
+        )
+
+        env = _make_envelope()
+        env_path, feature_path, has_behavior = _scenario_output_paths(env, tmp_path)
+        feature_path.write_text("x")
+        with pytest.raises(ScenarioForgeIntegrityError, match="already exists"):
+            _preflight_output_paths(env_path, feature_path, has_behavior)
+
+    def test_preflight_output_paths_orphan_feature(self, tmp_path):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            ScenarioForgeIntegrityError,
+            _preflight_output_paths,
+            _scenario_output_paths,
+        )
+
+        env = _make_envelope()
+        env.behavior_spec = "raw text"
+        env_path, _feature_path, has_behavior = _scenario_output_paths(env, tmp_path)
+        env_path.with_suffix(".feature").write_text("x")
+        with pytest.raises(ScenarioForgeIntegrityError, match="Stem mismatch"):
+            _preflight_output_paths(env_path, None, has_behavior)
+
+    def test_preflight_output_paths_ok(self, tmp_path):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _preflight_output_paths,
+            _scenario_output_paths,
+        )
+
+        env = _make_envelope()
+        env_path, feature_path, has_behavior = _scenario_output_paths(env, tmp_path)
+        _preflight_output_paths(env_path, feature_path, has_behavior)
+
+    def test_serialize_envelope_yaml(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _serialize_envelope_yaml,
+        )
+
+        env = _make_envelope()
+        text = _serialize_envelope_yaml(env)
+        assert "scenario_id" in text
+        assert text.startswith("scenario_id:")
+
+    def test_exclusive_create_text_ok(self, tmp_path):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _exclusive_create_text,
+        )
+
+        p = tmp_path / "x.txt"
+        _exclusive_create_text(p, "hello", "YAML")
+        assert p.read_text(encoding="utf-8") == "hello"
+
+    def test_exclusive_create_text_race(self, tmp_path):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            ScenarioForgeIntegrityError,
+            _exclusive_create_text,
+        )
+
+        p = tmp_path / "x.txt"
+        p.write_text("existing")
+        with pytest.raises(ScenarioForgeIntegrityError, match="already exists"):
+            _exclusive_create_text(p, "hello", "YAML")
+
+    def test_require_admitted_scenario_id(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            ScenarioForgeIntegrityError,
+            _require_admitted_scenario_id,
+        )
+
+        env = _make_envelope()
+        _require_admitted_scenario_id(env.scenario_id, env.scenario_id)
+        with pytest.raises(ValueError, match="admitted_scenario_id is required"):
+            _require_admitted_scenario_id("", env.scenario_id)
+        with pytest.raises(ScenarioForgeIntegrityError, match="Scenario ID mismatch"):
+            _require_admitted_scenario_id(
+                "scenario:v2:1111111111111111111111111111111111111111111111111111111111111111",
+                env.scenario_id,
+            )
+
+    def test_verify_replace_pair_missing_yaml(self, tmp_path):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            ScenarioForgeIntegrityError,
+            _verify_replace_pair,
+        )
+
+        env = _make_envelope()
+        with pytest.raises(
+            ScenarioForgeIntegrityError, match="non-existent scenario YAML"
+        ):
+            _verify_replace_pair(env, tmp_path)
+
+    def test_verify_replace_pair_missing_feature(self, tmp_path):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            ScenarioForgeIntegrityError,
+            _verify_replace_pair,
+        )
+
+        env = _make_envelope()
+        (tmp_path / f"{env.scenario_id}.yaml").write_text("x")
+        with pytest.raises(ScenarioForgeIntegrityError, match="Missing feature"):
+            _verify_replace_pair(env, tmp_path)
+
+    def test_verify_replace_pair_feature_mismatch(self, tmp_path):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            ScenarioForgeIntegrityError,
+            _verify_replace_pair,
+        )
+
+        env = _make_envelope()
+        (tmp_path / f"{env.scenario_id}.yaml").write_text("x")
+        (tmp_path / f"{env.scenario_id}.feature").write_text("different bytes")
+        with pytest.raises(ScenarioForgeIntegrityError, match="byte mismatch"):
+            _verify_replace_pair(env, tmp_path)
+
+    def test_verify_replace_pair_stem_mismatch(self, tmp_path):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            ScenarioForgeIntegrityError,
+            _verify_replace_pair,
+        )
+
+        env = _make_envelope()
+        env.behavior_spec = "raw text"
+        (tmp_path / f"{env.scenario_id}.yaml").write_text("x")
+        (tmp_path / f"{env.scenario_id}.feature").write_text("x")
+        with pytest.raises(ScenarioForgeIntegrityError, match="Stem mismatch"):
+            _verify_replace_pair(env, tmp_path)
+
+    def test_verify_replace_pair_ok(self, tmp_path):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _verify_replace_pair,
+        )
+
+        env = _make_envelope()
+        (tmp_path / f"{env.scenario_id}.yaml").write_text("x")
+        (tmp_path / f"{env.scenario_id}.feature").write_text(
+            env.behavior_spec.gherkin_text
+        )
+        env_path, feat_path, has_behavior = _verify_replace_pair(env, tmp_path)
+        assert env_path == tmp_path / f"{env.scenario_id}.yaml"
+        assert feat_path == tmp_path / f"{env.scenario_id}.feature"
+        assert has_behavior is True
+
+    def test_atomic_replace_yaml(self, tmp_path):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _atomic_replace_yaml,
+        )
+
+        env = _make_envelope()
+        yaml_path = tmp_path / f"{env.scenario_id}.yaml"
+        yaml_path.write_text("old")
+        _atomic_replace_yaml("new content", tmp_path, yaml_path)
+        assert yaml_path.read_text(encoding="utf-8") == "new content"
 
 
 # ---------------------------------------------------------------------------

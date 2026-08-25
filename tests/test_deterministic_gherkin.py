@@ -14,12 +14,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from asago_scenario_generator.data.atlas import ATLAS_TECHNIQUE_NAMES
 from asago_scenario_generator.models.attack_tree import (
     AiSystemAction,
     AttackTree,
     AttackTreeNode,
     ExternalPreconditionAction,
     GateType,
+    ImpactAction,
     InitialIngressAction,
     ToolInvocationAction,
 )
@@ -31,6 +33,8 @@ from asago_scenario_generator.models.capability_profile import (
 )
 from asago_scenario_generator.models.scenario import (
     BehaviorAction,
+    BehaviorAssertion,
+    BehaviorScenario,
     BehaviorSpec,
     NarrativeLayer,
     NarrativeStep,
@@ -1985,3 +1989,1008 @@ class TestBuildBehaviorSpecFromTree:
 
         assert first == second
         assert "LLM-authored text" not in first.gherkin_text
+
+
+# ---------------------------------------------------------------------------
+# CRAP-decomposition helper coverage: deterministic Gherkin rendering
+# ---------------------------------------------------------------------------
+
+
+def _render_action(action_id="ba-a", keyword="When", text="do the thing"):
+    return BehaviorAction.model_construct(
+        action_id=action_id,
+        projected_step_ids=("s1",),
+        source_leaf_id="n1",
+        gherkin_keyword=keyword,
+        text=text,
+        realizations=(),
+    )
+
+
+def _render_assertion(assertion_id="assert-s1-pc1", text="see the thing"):
+    return BehaviorAssertion.model_construct(
+        assertion_id=assertion_id,
+        source_step_ids=("s1",),
+        projected_postcondition_ids=("pc1",),
+        gherkin_keyword="Then",
+        text=text,
+    )
+
+
+def _render_scenario(title="Scenario one", *step_ids):
+    return BehaviorScenario.model_construct(
+        scenario_id=f"scn-{title.lower().replace(' ', '-')}",
+        title=title,
+        step_ids=tuple(step_ids),
+    )
+
+
+class TestRenderScenarioSteps:
+    """Branch-level coverage for _render_scenario_steps."""
+
+    def test_action_step_with_zone_suffix(self):
+        from asago_scenario_generator.pipeline.generate.behavior_compiler import (
+            _render_scenario_steps,
+        )
+
+        action = _render_action()
+        lines = _render_scenario_steps(
+            _render_scenario("S", "ba-a"), {"ba-a": action}, {}, {"ba-a": "zone-1"}
+        )
+        assert lines == ["    When do the thing (zone-1)"]
+
+    def test_assertion_step(self):
+        from asago_scenario_generator.pipeline.generate.behavior_compiler import (
+            _render_scenario_steps,
+        )
+
+        assertion = _render_assertion()
+        lines = _render_scenario_steps(
+            _render_scenario("S", "assert-s1-pc1"), {}, {"assert-s1-pc1": assertion}, {}
+        )
+        assert lines == ["    Then see the thing"]
+
+    def test_repeated_semantic_keyword_becomes_and(self):
+        from asago_scenario_generator.pipeline.generate.behavior_compiler import (
+            _render_scenario_steps,
+        )
+
+        first = _render_action("ba-a", "When", "first action")
+        second = _render_action("ba-b", "When", "second action")
+        lines = _render_scenario_steps(
+            _render_scenario("S", "ba-a", "ba-b"),
+            {"ba-a": first, "ba-b": second},
+            {},
+            {},
+        )
+        assert lines == ["    When first action", "    And second action"]
+
+
+class TestRenderScenarioGroup:
+    """Branch-level coverage for _render_scenario_group."""
+
+    def test_single_scenario_no_trailing_blank(self):
+        from asago_scenario_generator.pipeline.generate.behavior_compiler import (
+            _render_scenario_group,
+        )
+
+        action = _render_action()
+        lines = _render_scenario_group(
+            [_render_scenario("Only", "ba-a")], [action], [], {}
+        )
+        assert lines == ["  Scenario: Only", "", "    When do the thing"]
+
+    def test_multiple_scenarios_blank_separator(self):
+        from asago_scenario_generator.pipeline.generate.behavior_compiler import (
+            _render_scenario_group,
+        )
+
+        action = _render_action()
+        lines = _render_scenario_group(
+            [_render_scenario("First", "ba-a"), _render_scenario("Second", "ba-a")],
+            [action],
+            [],
+            {},
+        )
+        assert lines == [
+            "  Scenario: First",
+            "",
+            "    When do the thing",
+            "",
+            "  Scenario: Second",
+            "",
+            "    When do the thing",
+        ]
+
+
+class TestRenderLegacyAndAssertionLines:
+    """Branch-level coverage for the legacy single-scenario rendering."""
+
+    def test_legacy_scenario_steps_with_keyword_transition(self):
+        from asago_scenario_generator.pipeline.generate.behavior_compiler import (
+            _render_legacy_scenario_steps,
+        )
+
+        actions = [
+            _render_action("ba-a", "Given", "given thing"),
+            _render_action("ba-b", "When", "when thing"),
+            _render_action("ba-c", "When", "when thing two"),
+        ]
+        lines = _render_legacy_scenario_steps(actions, {})
+        assert lines == [
+            "    Given given thing",
+            "    When when thing",
+            "    And when thing two",
+        ]
+
+    def test_assertion_lines(self):
+        from asago_scenario_generator.pipeline.generate.behavior_compiler import (
+            _render_assertion_lines,
+        )
+
+        lines = _render_assertion_lines(
+            [_render_assertion(), _render_assertion("x", "y")]
+        )
+        assert lines == ["    Then see the thing", "    Then y"]
+
+
+# ---------------------------------------------------------------------------
+# CRAP-decomposition helper coverage: gherkin.py path/step/context helpers
+# ---------------------------------------------------------------------------
+
+
+class TestEnumeratePathHelpers:
+    """Branch-level coverage for _and_gate_paths / _or_gate_paths."""
+
+    def test_and_gate_cross_product(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _and_gate_paths,
+        )
+
+        tree = _make_tree_deep()
+        and_node = tree.root  # AND with OR child and AND child
+        paths = _and_gate_paths(and_node)
+        # OR child contributes 2 paths, AND child 1 path -> cross product 2
+        assert len(paths) == 2
+        assert all(len(path) == 3 for path in paths)
+
+    def test_or_gate_alternatives(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _or_gate_paths,
+        )
+
+        tree = _make_tree_deep()
+        or_node = tree.root.children[0]
+        assert or_node.gate == GateType.OR
+        paths = _or_gate_paths(or_node)
+        assert len(paths) == 2
+        assert [path[0].id for path in paths] == ["n1.1.1", "n1.1.2"]
+
+    def test_enumerate_paths_leaf(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _enumerate_paths,
+        )
+
+        leaf = _make_leaf("n1.1", "Do thing", "input")
+        paths = _enumerate_paths(leaf)
+        assert paths == [[leaf]]
+
+    def test_enumerate_paths_bare_internal_node(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _enumerate_paths,
+        )
+
+        bare = AttackTreeNode.model_construct(
+            id="n1", label="Bare", gate=GateType.AND, zone="input", children=[]
+        )
+        assert _enumerate_paths(bare) == [[]]
+
+    def test_enumerate_paths_and_gate(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _enumerate_paths,
+        )
+
+        paths = _enumerate_paths(_make_tree_simple().root)
+        assert len(paths) == 1
+        assert [leaf.id for leaf in paths[0]] == ["n1.1", "n1.2"]
+
+    def test_enumerate_paths_or_gate(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _enumerate_paths,
+        )
+
+        paths = _enumerate_paths(_make_tree_with_or_gate().root)
+        assert len(paths) == 2
+
+
+class TestFormatLeafStepTextHelpers:
+    """Branch-level coverage for _format_leaf_step_text decomposition."""
+
+    @staticmethod
+    def _profile_with_entry_point(entry_point_id="ep-1"):
+        return CapabilityProfile(
+            zones_active=["input"],
+            entry_points=[
+                {
+                    "name": "user queries via app",
+                    "direction": "input",
+                    "controllability": "direct",
+                    "ingress_zone": "input",
+                }
+            ],
+            confidence=ConfidenceLevel.high,
+            kc_subcodes=["KC1.1"],
+        )
+
+    def test_resolve_ingress_step_text_plain_leaf(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _resolve_ingress_step_text,
+        )
+
+        leaf = _make_leaf("n1.1", "Plain label", "input")
+        assert _resolve_ingress_step_text(leaf, None) == ("Plain label", "input")
+
+    def test_resolve_ingress_step_text_without_profile(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _resolve_ingress_step_text,
+        )
+
+        leaf = AttackTreeNode(
+            id="n1.0",
+            label="Legacy label",
+            gate=GateType.LEAF,
+            zone="input",
+            action=InitialIngressAction(entry_point_id="ep-1"),
+        )
+        # No profile -> prose fallback (display text only).
+        assert _resolve_ingress_step_text(leaf, None) == ("Legacy label", "input")
+
+    def test_resolve_ingress_step_text_resolved(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _resolve_ingress_step_text,
+        )
+
+        profile = self._profile_with_entry_point()
+        leaf = AttackTreeNode(
+            id="n1.0",
+            label="Legacy label",
+            gate=GateType.LEAF,
+            zone="input",
+            action=InitialIngressAction(
+                entry_point_id=profile.entry_points[0].entry_point_id
+            ),
+        )
+        text, zone = _resolve_ingress_step_text(leaf, profile)
+        assert text == "user queries via app"
+        assert zone == "input"
+
+    def test_resolve_ingress_step_text_unresolved_raises(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _resolve_ingress_step_text,
+        )
+
+        profile = self._profile_with_entry_point()
+        leaf = AttackTreeNode(
+            id="n1.0",
+            label="Legacy label",
+            gate=GateType.LEAF,
+            zone="input",
+            action=InitialIngressAction(entry_point_id="missing-ep"),
+        )
+        with pytest.raises(ValueError, match="unresolved entry_point_id"):
+            _resolve_ingress_step_text(leaf, profile)
+
+    def test_humanize_technique_step_text_raw_id(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _humanize_technique_step_text,
+        )
+
+        leaf = _make_leaf("n1.1", "AML.T0010", "input")
+        assert (
+            _humanize_technique_step_text("AML.T0010", leaf)
+            == ATLAS_TECHNIQUE_NAMES["AML.T0010"]
+        )
+
+    def test_humanize_technique_step_text_known_name_with_description(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _humanize_technique_step_text,
+        )
+
+        leaf = AttackTreeNode(
+            id="n1.1",
+            label="AI Supply Chain Compromise",
+            description="A crafted description",
+            gate=GateType.LEAF,
+            zone="input",
+            action=AiSystemAction(),
+        )
+        assert _humanize_technique_step_text("AI Supply Chain Compromise", leaf) == (
+            "A crafted description"
+        )
+
+    def test_humanize_technique_step_text_known_name_fallback(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _humanize_technique_step_text,
+        )
+
+        leaf = _make_leaf("n1.1", "AI Supply Chain Compromise", "input")
+        assert _humanize_technique_step_text("AI Supply Chain Compromise", leaf) == (
+            "Execute attack step via AI Supply Chain Compromise"
+        )
+
+    def test_humanize_technique_step_text_plain(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _humanize_technique_step_text,
+        )
+
+        leaf = _make_leaf("n1.1", "Do the thing", "input")
+        assert _humanize_technique_step_text("Do the thing", leaf) == "Do the thing"
+
+    def test_append_technique_and_zone(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _append_technique_and_zone,
+        )
+
+        leaf = _make_leaf("n1.1", "Label", "input", "AML.T0051")
+        assert _append_technique_and_zone("Label", leaf, "input") == (
+            "Label [AML.T0051] (input)"
+        )
+
+    def test_append_technique_and_zone_strips_existing_suffix(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _append_technique_and_zone,
+        )
+
+        leaf = _make_leaf("n1.1", "Label", "input", "AML.T0051")
+        assert _append_technique_and_zone("Label [AML.T0054]", leaf, None) == (
+            "Label [AML.T0051]"
+        )
+
+    def test_append_technique_and_zone_no_zone(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _append_technique_and_zone,
+        )
+
+        leaf = _make_leaf("n1.1", "Label", "input", "AML.T0051")
+        assert _append_technique_and_zone("Label", leaf, None) == "Label [AML.T0051]"
+
+
+class TestBuildGherkinTemplateHelpers:
+    """Branch-level coverage for _build_gherkin_template decomposition."""
+
+    def test_background_precondition_ids_common_only(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _background_precondition_ids,
+        )
+
+        tree = _make_tree_deep()
+        paths = _enumerate_paths(tree.root)
+        ids = _background_precondition_ids(paths)
+        # No Given leaves in this tree -> empty intersection
+        assert ids == set()
+
+    def test_background_precondition_ids_empty_paths(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _background_precondition_ids,
+        )
+
+        assert _background_precondition_ids([]) == set()
+
+    def test_background_precondition_ids_shared_given(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _background_precondition_ids,
+        )
+
+        shared = _make_leaf("n0.0", "Shared precondition", "input")
+        shared.action = ExternalPreconditionAction()
+        a = _make_leaf("n1.1", "A", "input")
+        b = _make_leaf("n1.2", "B", "input")
+        paths = [[shared, a], [shared, b]]
+        assert _background_precondition_ids(paths) == {shared.id}
+
+    def test_cap_rendered_paths_under_limit(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _cap_rendered_paths,
+        )
+
+        paths = [[_make_leaf(f"n{i}", f"L{i}", "input")] for i in range(3)]
+        assert _cap_rendered_paths(paths) is paths
+
+    def test_cap_rendered_paths_over_limit(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            MAX_OR_PATHS,
+            _cap_rendered_paths,
+        )
+
+        paths = [
+            [_make_leaf(f"n{i}", f"L{i}", "input")] for i in range(MAX_OR_PATHS + 2)
+        ]
+        capped = _cap_rendered_paths(paths)
+        assert len(capped) == MAX_OR_PATHS
+
+    def test_partition_path_leaves_by_kind(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _partition_path_leaves,
+        )
+
+        given = _make_leaf("n0.0", "Given thing", "input")
+        given.action = ExternalPreconditionAction()
+        when = _make_leaf("n1.1", "When thing", "input")
+        then = _make_leaf("n1.2", "Then thing", "input")
+        then.action = ImpactAction(boundary="internal", target="impact observed")
+        pre, whens, thens = _partition_path_leaves([given, when, then], {"n0.0"})
+        assert pre == []
+        assert whens == [when]
+        assert thens == [then]
+
+    def test_partition_path_leaves_background_given_excluded(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _partition_path_leaves,
+        )
+
+        given = _make_leaf("n0.0", "Given thing", "input")
+        given.action = ExternalPreconditionAction()
+        pre, _whens, _thens = _partition_path_leaves([given], set())
+        assert pre == [given]
+
+    def test_scenario_precondition_lines_multi_path(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _scenario_precondition_lines,
+        )
+
+        given = _make_leaf("n0.0", "Shared precondition", "input")
+        given.action = ExternalPreconditionAction()
+        lines = _scenario_precondition_lines(
+            _make_narrative(), True, 2, [given], _make_profile()
+        )
+        assert lines[0] == "  Scenario: Deceptive Response Generation (Path 2)"
+        assert lines[1] == "    Given the system is in its normal operating state"
+        assert lines[2] == "    And Shared precondition (input)"
+
+    def test_when_step_lines_keyword_transition(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _when_step_lines,
+        )
+
+        a = _make_leaf("n1.1", "First", "input")
+        b = _make_leaf("n1.2", "Second", "input")
+        lines = _when_step_lines([a, b], _make_profile())
+        assert lines == ["    When First (input)", "    And Second (input)"]
+
+    def test_then_step_lines(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _then_step_lines,
+        )
+
+        leaf = _make_leaf("n1.1", "Impact", "input")
+        leaf.action = ImpactAction(boundary="internal", target="impact observed")
+        assert _then_step_lines([leaf], _make_profile()) == ["    Then Impact (input)"]
+
+    def test_path_block_lines_structure(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _path_block_lines,
+        )
+
+        when = _make_leaf("n1.1", "Attack", "input")
+        lines = _path_block_lines(
+            1, [when], set(), False, _make_narrative(), _make_profile()
+        )
+        assert lines[-1] == f"    {_ASSERTIONS_MARKER}"
+        assert "    When Attack (input)" in lines
+
+
+class TestBuildCall3ContextHelpers:
+    """Branch-level coverage for build_call3_context decomposition."""
+
+    def test_leaf_eligible_keyword(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _leaf_eligible_keyword,
+        )
+
+        assert _leaf_eligible_keyword("given") == "Given"
+        assert _leaf_eligible_keyword("then") == "Then"
+        assert _leaf_eligible_keyword("when") == "When"
+
+    def test_leaf_catalog_entry_with_semantics(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _leaf_catalog_entry,
+        )
+
+        leaf = _make_leaf(
+            "n1.1",
+            "Label",
+            "input",
+            projected_step_ids=("s1",),
+            realizations=make_realizations(("s1",)),
+        )
+        entry = _leaf_catalog_entry(leaf, _make_projection_context())
+        assert entry["leaf_id"] == "n1.1"
+        assert entry["projected_step_ids"] == ["s1"]
+        assert entry["eligible_keyword"] == "When"
+        assert "step_semantics" in entry
+
+    def test_leaf_catalog_entry_without_context(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _leaf_catalog_entry,
+        )
+
+        leaf = _make_leaf(
+            "n1.1",
+            "Label",
+            "input",
+            projected_step_ids=("s1",),
+            realizations=make_realizations(("s1",)),
+        )
+        entry = _leaf_catalog_entry(leaf, None)
+        assert "step_semantics" not in entry
+
+    def test_postcondition_ownership_rows(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _postcondition_ownership_rows,
+        )
+
+        rows = _postcondition_ownership_rows(_make_projection_context())
+        assert all("owning_step_id" in row for row in rows)
+        assert (
+            rows == [] if not _make_projection_context().get("selected_steps") else rows
+        )
+        assert _postcondition_ownership_rows(None) == []
+
+
+def _make_assertion(
+    assertion_id: str = "assert-step.1-post.1",
+    source_step_ids: tuple[str, ...] = ("step.1",),
+    projected_postcondition_ids: tuple[str, ...] = ("post.1",),
+    text: str = "the impact is observable",
+) -> Call3Assertion:
+    return Call3Assertion(
+        assertion_id=assertion_id,
+        source_step_ids=source_step_ids,
+        projected_postcondition_ids=projected_postcondition_ids,
+        text=text,
+    )
+
+
+class TestValidateCall3Helpers:
+    """Branch-level coverage for _validate_call3_response decomposition."""
+
+    def test_pc_ownership_tables_builds_maps(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _pc_ownership_tables,
+        )
+
+        ctx = {
+            "selected_steps": [
+                {
+                    "step_id": "s1",
+                    "observable_postconditions": [
+                        {
+                            "postcondition_id": "pc1",
+                            "description": "d",
+                            "security_relevant": True,
+                            "terminal": False,
+                        },
+                        {
+                            "postcondition_id": "pc2",
+                            "description": "d",
+                            "security_relevant": False,
+                            "terminal": False,
+                        },
+                    ],
+                }
+            ]
+        }
+        ownership, pairs = _pc_ownership_tables(ctx)
+        assert ownership == {"pc1": "s1", "pc2": "s1"}
+        assert pairs == {("s1", "pc1")}
+
+    def test_pc_ownership_tables_ambiguous_owner_raises(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _pc_ownership_tables,
+        )
+
+        ctx = {
+            "selected_steps": [
+                {
+                    "step_id": "s1",
+                    "observable_postconditions": [
+                        {
+                            "postcondition_id": "pc1",
+                            "security_relevant": True,
+                            "terminal": False,
+                        }
+                    ],
+                },
+                {
+                    "step_id": "s2",
+                    "observable_postconditions": [
+                        {
+                            "postcondition_id": "pc1",
+                            "security_relevant": True,
+                            "terminal": False,
+                        }
+                    ],
+                },
+            ]
+        }
+        with pytest.raises(ValueError, match="ambiguous owners"):
+            _pc_ownership_tables(ctx)
+
+    def test_require_single_source_step(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _require_single_source_step,
+        )
+
+        with pytest.raises(ValueError, match="source_step_ids"):
+            _require_single_source_step(_make_assertion(source_step_ids=("s1", "s2")))
+        assert _require_single_source_step(_make_assertion()) == "step.1"
+
+    def test_require_single_postcondition(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _require_single_postcondition,
+        )
+
+        with pytest.raises(ValueError, match="projected_postcondition_ids"):
+            _require_single_postcondition(
+                _make_assertion(projected_postcondition_ids=("pc1", "pc2"))
+            )
+        assert _require_single_postcondition(_make_assertion()) == "post.1"
+
+    def test_check_assertion_references_unprojected_step(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _check_assertion_references,
+        )
+
+        with pytest.raises(ValueError, match="unprojected source step"):
+            _check_assertion_references(
+                "step.99", "post.1", {"step.1"}, {"post.1": "step.1"}
+            )
+
+    def test_check_assertion_references_unknown_pc(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _check_assertion_references,
+        )
+
+        with pytest.raises(ValueError, match="unknown postcondition"):
+            _check_assertion_references("step.1", "post.99", {"step.1"}, {})
+
+    def test_check_assertion_references_wrong_owner(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _check_assertion_references,
+        )
+
+        with pytest.raises(ValueError, match="exactly equal"):
+            _check_assertion_references(
+                "step.1", "post.1", {"step.1"}, {"post.1": "step.2"}
+            )
+
+    def test_check_assertion_references_ok(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _check_assertion_references,
+        )
+
+        assert (
+            _check_assertion_references(
+                "step.1", "post.1", {"step.1"}, {"post.1": "step.1"}
+            )
+            == "step.1"
+        )
+
+    def test_check_assertion_id_mismatch(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _check_assertion_id,
+        )
+
+        with pytest.raises(ValueError, match="does not match"):
+            _check_assertion_id("assert-step.1-post.2", "step.1", "post.1")
+
+    def test_check_assertion_id_ok(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _check_assertion_id,
+        )
+
+        _check_assertion_id("assert-step.1-post.1", "step.1", "post.1")
+
+    def test_track_assertion_pair_duplicate_id(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _track_assertion_pair,
+        )
+
+        with pytest.raises(ValueError, match="Duplicate assertion ID"):
+            _track_assertion_pair("a1", ("step.1", "post.1"), {"a1"}, set())
+
+    def test_track_assertion_pair_duplicate_pair(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _track_assertion_pair,
+        )
+
+        with pytest.raises(ValueError, match="duplicates the"):
+            _track_assertion_pair(
+                "a2", ("step.1", "post.1"), set(), {("step.1", "post.1")}
+            )
+
+    def test_track_assertion_pair_ok(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _track_assertion_pair,
+        )
+
+        ids: set[str] = set()
+        seen: set[tuple[str, str]] = set()
+        _track_assertion_pair("a1", ("step.1", "post.1"), ids, seen)
+        assert ids == {"a1"}
+        assert seen == {("step.1", "post.1")}
+
+    def test_check_security_coverage_uncovered(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _check_security_coverage,
+        )
+
+        with pytest.raises(ValueError, match="does not cover security-relevant"):
+            _check_security_coverage({("step.1", "post.1")}, set())
+
+    def test_check_security_coverage_ok(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _check_security_coverage,
+        )
+
+        _check_security_coverage({("step.1", "post.1")}, {("step.1", "post.1")})
+
+
+class TestDeriveBehaviorActionsHelpers:
+    """Branch-level coverage for _derive_behavior_actions decomposition."""
+
+    def test_leaf_realizations_unknown_step_raises(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _leaf_realizations,
+        )
+
+        leaf = _make_leaf(
+            "n1.1",
+            "L",
+            "input",
+            projected_step_ids=("step.99",),
+            realizations=make_realizations(("step.99",)),
+        )
+        with pytest.raises(ValueError, match="unknown projected step"):
+            _leaf_realizations(leaf, {})
+
+    def test_leaf_realizations_builds_records(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _leaf_realizations,
+        )
+
+        ctx = _make_projection_context()
+        step_by_id = {s["step_id"]: s for s in ctx["selected_steps"]}
+        leaf = _make_leaf(
+            "n1.1",
+            "L",
+            "input",
+            projected_step_ids=("step.1",),
+            realizations=make_step_realizations(("step.1",)),
+        )
+        recs = _leaf_realizations(leaf, step_by_id)
+        assert [r.projected_step_id for r in recs] == ["step.1"]
+
+    def test_leaf_behavior_action_given(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _leaf_behavior_action,
+        )
+
+        ctx = _make_projection_context()
+        step_by_id = {s["step_id"]: s for s in ctx["selected_steps"]}
+        leaf = _make_leaf(
+            "n1.1",
+            "Precondition",
+            "input",
+            projected_step_ids=("step.1",),
+            realizations=make_step_realizations(("step.1",)),
+        )
+        leaf.action = ExternalPreconditionAction()
+        action = _leaf_behavior_action(leaf, step_by_id, _make_profile())
+        assert action.action_id == "ba-n1.1"
+        assert action.gherkin_keyword == "Given"
+        assert action.source_leaf_id == "n1.1"
+
+    def test_leaf_behavior_action_when(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _leaf_behavior_action,
+        )
+
+        ctx = _make_projection_context()
+        step_by_id = {s["step_id"]: s for s in ctx["selected_steps"]}
+        leaf = _make_leaf(
+            "n1.1",
+            "Action",
+            "input",
+            projected_step_ids=("step.1",),
+            realizations=make_step_realizations(("step.1",)),
+        )
+        action = _leaf_behavior_action(leaf, step_by_id, _make_profile())
+        assert action.gherkin_keyword == "When"
+
+    def test_leaf_behavior_action_then(self):
+        from asago_scenario_generator.pipeline.generate.gherkin import (
+            _leaf_behavior_action,
+        )
+
+        ctx = _make_projection_context()
+        step_by_id = {s["step_id"]: s for s in ctx["selected_steps"]}
+        leaf = _make_leaf(
+            "n1.1",
+            "Impact",
+            "input",
+            projected_step_ids=("step.1",),
+            realizations=make_step_realizations(("step.1",)),
+        )
+        leaf.action = ImpactAction(boundary="internal", target="impact observed")
+        action = _leaf_behavior_action(leaf, step_by_id, _make_profile())
+        assert action.gherkin_keyword == "Then"
+
+
+class TestAssembleEnvelopeHelpers:
+    """Branch-level coverage for _assemble_envelope decomposition."""
+
+    def test_resolve_envelope_candidate_id_default(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _resolve_envelope_candidate_id,
+        )
+
+        candidate = MagicMock(candidate_id="cand:v2:0123456789abcdef0123456789abcdef")
+        assert (
+            _resolve_envelope_candidate_id("", candidate)
+            == "cand:v2:0123456789abcdef0123456789abcdef"
+        )
+
+    def test_resolve_envelope_candidate_id_match(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _resolve_envelope_candidate_id,
+        )
+
+        cid = "cand:v2:0123456789abcdef0123456789abcdef"
+        candidate = MagicMock(candidate_id=cid)
+        assert _resolve_envelope_candidate_id(cid, candidate) == cid
+
+    def test_resolve_envelope_candidate_id_mismatch(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _resolve_envelope_candidate_id,
+        )
+
+        candidate = MagicMock(candidate_id="cand:v2:0123456789abcdef0123456789abcdef")
+        with pytest.raises(ValueError, match="does not match"):
+            _resolve_envelope_candidate_id(
+                "cand:v2:ffffffffffffffffffffffffffffffff", candidate
+            )
+
+    def test_derive_maestro_layers_from_tree(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _derive_maestro_layers,
+        )
+
+        l1 = _make_leaf("n1.1", "L1", "input")
+        l1.maestro_layer = 5
+        l2 = _make_leaf("n1.2", "L2", "input")
+        tree = AttackTree(
+            id="tree-AP-T7-02",
+            seed_id="AP-T7-01",
+            goal="g",
+            root=AttackTreeNode(
+                id="n1",
+                label="Root",
+                gate=GateType.AND,
+                zone="input",
+                children=[l1, l2],
+            ),
+        )
+        assert _derive_maestro_layers(tree, _make_narrative()) == {5}
+
+    def test_derive_maestro_layers_zone_defaults(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _derive_maestro_layers,
+        )
+
+        assert _derive_maestro_layers(_make_tree_simple(), _make_narrative()) == {1, 3}
+
+    def test_derive_maestro_layers_fallback(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _derive_maestro_layers,
+        )
+
+        narrative = _make_narrative()
+        narrative.zone_sequence = ["custom-zone"]
+        assert _derive_maestro_layers(_make_tree_simple(), narrative) == {3}
+
+    def test_derive_maestro_layers_no_tree(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _derive_maestro_layers,
+        )
+
+        assert _derive_maestro_layers(None, _make_narrative()) == {1, 3}
+
+    def test_build_faceting_metadata(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _build_faceting_metadata,
+        )
+
+        seed = _make_seed()
+        narrative = _make_narrative()
+        faceting = _build_faceting_metadata(seed, narrative, ["AML.T0001"], {3})
+        assert faceting.maestro_layers == [3]
+        assert faceting.risk_card == seed.risk_card_ref
+        assert faceting.taxonomy_chain.atlas_technique_ids == ["AML.T0001"]
+        assert faceting.taxonomy_chain.scenario_seed == "AP-T7-01"
+        assert faceting.capability_profile.entry_point == narrative.entry_point
+
+    def test_build_faceting_metadata_none_classification(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _build_faceting_metadata,
+        )
+
+        faceting = _build_faceting_metadata(_make_seed(), _make_narrative(), None, {3})
+        assert faceting.taxonomy_chain.atlas_technique_ids is None
+
+    def test_scenario_seed_metadata(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _scenario_seed_metadata,
+        )
+
+        meta = _scenario_seed_metadata(_make_seed())
+        assert meta["seed_id"] == "AP-T7-01"
+        assert meta["threat_id"] == "T7"
+        assert meta["attack_pattern_name"] == "Social Engineering via Deception"
+
+    def test_resolve_source_influence_provenance_uses_supplied(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _resolve_source_influence_provenance,
+        )
+
+        block = MagicMock()
+        result = _resolve_source_influence_provenance(
+            block,
+            _make_seed(),
+            object(),
+            None,
+            _make_narrative(),
+            ("step.1",),
+        )
+        assert result is block
+
+    def test_resolve_source_influence_provenance_assembles(self):
+        from unittest.mock import patch
+
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _resolve_source_influence_provenance,
+        )
+
+        with patch(
+            "asago_scenario_generator.pipeline.generate.assembly."
+            "assemble_source_influence_provenance",
+            return_value=MagicMock(),
+        ) as patched:
+            result = _resolve_source_influence_provenance(
+                None,
+                _make_seed(),
+                object(),
+                None,
+                _make_narrative(),
+                ("step.1",),
+            )
+            assert patched.call_count == 1
+            assert result is patched.return_value
+
+    def test_require_structured_behavior_spec(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _require_structured_behavior_spec,
+        )
+        from tests.helpers.projection_factory import make_behavior_spec
+
+        spec = make_behavior_spec()
+        assert _require_structured_behavior_spec(spec) is spec
+
+    def test_require_structured_behavior_spec_rejects(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            GenerationError,
+            _require_structured_behavior_spec,
+        )
+
+        with pytest.raises(GenerationError, match="structured BehaviorSpec"):
+            _require_structured_behavior_spec("raw text")
