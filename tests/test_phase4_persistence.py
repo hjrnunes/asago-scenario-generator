@@ -1847,3 +1847,654 @@ def test_machine_state_does_not_advance_when_transition_persistence_fails(
     assert machine.state is LifecycleState.pending
     assert machine.transitions == []
     assert machine.attempted_candidate_ids == set()
+
+
+class TestPersistenceValidatorHelpers:
+    """Direct coverage for the decomposed persistence validators."""
+
+    def test_path_component_safe(self):
+        from asago_scenario_generator.pipeline.persistence import _path_component_safe
+
+        assert _path_component_safe("a/b") is False
+        assert _path_component_safe("a/../b") is True
+        assert _path_component_safe("a\\b") is True
+
+    def test_unsafe_filename_characters(self):
+        from asago_scenario_generator.pipeline.persistence import (
+            _unsafe_filename_characters,
+        )
+
+        assert _unsafe_filename_characters("a/b") is True
+        assert _unsafe_filename_characters("a\\b") is True
+        assert _unsafe_filename_characters("attempt-1") is False
+
+    def test_quarantine_path_valid(self):
+        from types import SimpleNamespace
+
+        from asago_scenario_generator.pipeline.persistence import (
+            _quarantine_path_valid,
+        )
+
+        assert _quarantine_path_valid(SimpleNamespace(path="quarantine/x.json"))
+        assert not _quarantine_path_valid(SimpleNamespace(path="x.json"))
+        assert not _quarantine_path_valid(SimpleNamespace(path="quarantine/a/b.json"))
+        assert not _quarantine_path_valid(SimpleNamespace(path="quarantine/../x.json"))
+        assert not _quarantine_path_valid(SimpleNamespace(path="quarantine/x.json/"))
+
+    def test_receipt_role_and_identity_helpers(self):
+        from asago_scenario_generator.pipeline.persistence import (
+            _admitted_scenario_ids,
+            _receipt_identity_mismatched,
+            _receipt_roles_mismatched,
+            _terminal_receipt_violation,
+        )
+        from asago_scenario_generator.pipeline.persistence import ArtifactReceipt
+        from asago_scenario_generator.manifest import ArtifactRole
+
+        quarantine = ArtifactReceipt(
+            candidate_id="c1",
+            role=ArtifactRole.QUARANTINE_BUNDLE,
+            path="quarantine/x.json",
+            sha256="0" * 64,
+            scenario_id=None,
+        )
+        yaml = ArtifactReceipt(
+            candidate_id="c1",
+            role=ArtifactRole.SCENARIO_YAML,
+            path="scenarios/s1.yaml",
+            sha256="0" * 64,
+            scenario_id="s1",
+        )
+        feature = ArtifactReceipt(
+            candidate_id="c1",
+            role=ArtifactRole.SCENARIO_FEATURE,
+            path="scenarios/s1.feature",
+            sha256="0" * 64,
+            scenario_id="s1",
+        )
+        assert not _receipt_roles_mismatched(
+            (quarantine,), {ArtifactRole.QUARANTINE_BUNDLE}
+        )
+        assert _receipt_roles_mismatched((yaml,), {ArtifactRole.QUARANTINE_BUNDLE})
+        assert not _receipt_identity_mismatched((quarantine,), "c1")
+        assert _receipt_identity_mismatched((quarantine,), "other")
+        assert _admitted_scenario_ids((yaml, feature)) == {"s1"}
+        assert _terminal_receipt_violation((quarantine,), False, "c1") is None
+        assert _terminal_receipt_violation((yaml, feature), True, "c1") is None
+        assert _terminal_receipt_violation((yaml,), False, "c1") is not None
+        assert _terminal_receipt_violation((yaml, feature), True, "other") is not None
+        second_scenario = ArtifactReceipt(
+            candidate_id="c1",
+            role=ArtifactRole.SCENARIO_FEATURE,
+            path="scenarios/s2.feature",
+            sha256="0" * 64,
+            scenario_id="s2",
+        )
+        assert (
+            _terminal_receipt_violation((yaml, second_scenario), True, "c1") is not None
+        )
+
+    def test_violation_record_builder(self):
+        from types import SimpleNamespace
+
+        from asago_scenario_generator.pipeline.finalization_gates import (
+            GateCode,
+            GateViolation,
+        )
+        from asago_scenario_generator.pipeline.persistence import (
+            _violation_record,
+            ViolationRecord,
+        )
+
+        hard = _violation_record(GateViolation(GateCode.structural, "detail", None))
+        assert isinstance(hard, ViolationRecord)
+        assert hard.code == "structural"
+        assert hard.retryable is False
+
+        string_code = _violation_record(
+            SimpleNamespace(code="custom", detail="d", owner=None)
+        )
+        assert string_code.code == "custom"
+        assert string_code.retryable is False
+
+        owned = _violation_record(
+            SimpleNamespace(code="custom", detail="d", owner=GeneratedStage.actor)
+        )
+        assert owned.owner is GeneratedStage.actor
+        assert owned.retryable is True
+
+        defaulted = _violation_record(SimpleNamespace(detail="d"))
+        assert defaulted.code == "invalid"
+        assert defaulted.retryable is False
+
+        with pytest.raises(TypeError, match="string or enum"):
+            _violation_record(SimpleNamespace(code=42, detail="d", owner=None))
+
+    def test_semantic_outcome_classification(self):
+        from asago_scenario_generator.pipeline.persistence import _semantic_outcome
+
+        assert _semantic_outcome(None) == ("missing_semantic_evidence", [])
+        assert _semantic_outcome({}) == ("missing_attempt_result", [])
+        assert _semantic_outcome(
+            {
+                "attempts": [{"result": "accepted"}],
+                "warnings": ["w1", "w2"],
+            }
+        ) == ("accepted", ["w1", "w2"])
+
+    def test_fsync_dir_and_next_transition_index(self, tmp_path: Path):
+        from types import SimpleNamespace
+
+        from asago_scenario_generator.pipeline.persistence import (
+            _fsync_dir,
+            _next_transition_index,
+        )
+
+        _fsync_dir(tmp_path)
+        assert (
+            _next_transition_index(
+                (
+                    SimpleNamespace(index=2),
+                    SimpleNamespace(index=5),
+                )
+            )
+            == 6
+        )
+
+    def test_diagnostics_copy_authoritative(self):
+        from types import SimpleNamespace
+
+        from asago_scenario_generator.pipeline.finalization_gates import (
+            AdmissionEvidenceId,
+        )
+        from asago_scenario_generator.pipeline.persistence import (
+            _diagnostics_copy_authoritative,
+        )
+
+        violation = SimpleNamespace(detail="copied")
+        diagnostic = SimpleNamespace(detail="copied")
+        backed = SimpleNamespace(
+            gate=AdmissionEvidenceId.identifier_validity,
+            violations=[violation],
+            diagnostics=[diagnostic],
+        )
+        ordinary = SimpleNamespace(
+            gate=AdmissionEvidenceId.identity,
+            violations=[violation],
+            diagnostics=[],
+        )
+        assert _diagnostics_copy_authoritative([backed, ordinary]) is None
+        stray = SimpleNamespace(
+            gate=AdmissionEvidenceId.identifier_validity,
+            violations=[SimpleNamespace(detail="other")],
+            diagnostics=[diagnostic],
+        )
+        with pytest.raises(ValueError, match="copy an authoritative violation"):
+            _diagnostics_copy_authoritative([stray])
+
+    def test_queue_primary_validators(self):
+        from types import SimpleNamespace
+
+        from asago_scenario_generator.pipeline.persistence import (
+            _queue_primary_valid,
+        )
+
+        choice_a = SimpleNamespace(candidate_id="a")
+        choice_b = SimpleNamespace(candidate_id="b")
+        valid = SimpleNamespace(
+            ordered_choices=(choice_a, choice_b),
+            primary_candidate_id="a",
+        )
+        assert _queue_primary_valid(valid) is None
+        missing = SimpleNamespace(
+            ordered_choices=(choice_a, choice_b),
+            primary_candidate_id=None,
+        )
+        with pytest.raises(ValueError, match="require a primary candidate"):
+            _queue_primary_valid(missing)
+        wrong = SimpleNamespace(
+            ordered_choices=(choice_a, choice_b),
+            primary_candidate_id="b",
+        )
+        with pytest.raises(ValueError, match="first ordered choice"):
+            _queue_primary_valid(wrong)
+        empty = SimpleNamespace(ordered_choices=(), primary_candidate_id="a")
+        with pytest.raises(ValueError, match="first ordered choice"):
+            _queue_primary_valid(empty)
+
+    def test_queue_fallbacks_validators(self):
+        from types import SimpleNamespace
+
+        from asago_scenario_generator.pipeline.persistence import (
+            _queue_fallbacks_valid,
+        )
+        from asago_scenario_generator.pipeline.persistence import TargetState
+
+        choice_a = SimpleNamespace(candidate_id="a")
+        choice_b = SimpleNamespace(candidate_id="b")
+        valid = SimpleNamespace(
+            ordered_choices=(choice_a, choice_b),
+            fallback_available=[choice_a, choice_b],
+            attempted_candidate_ids=[],
+            target_state=TargetState.selected,
+        )
+        assert _queue_fallbacks_valid(valid) is None
+        overlaps = SimpleNamespace(
+            ordered_choices=(choice_a, choice_b),
+            fallback_available=[choice_a, choice_b],
+            attempted_candidate_ids=["a"],
+            target_state=TargetState.selected,
+        )
+        with pytest.raises(ValueError, match="exclude attempted"):
+            _queue_fallbacks_valid(overlaps)
+        reordered = SimpleNamespace(
+            ordered_choices=(choice_a, choice_b),
+            fallback_available=[choice_b],
+            attempted_candidate_ids=[],
+            target_state=TargetState.selected,
+        )
+        with pytest.raises(ValueError, match="preserve unattempted"):
+            _queue_fallbacks_valid(reordered)
+        admitted_target = SimpleNamespace(
+            ordered_choices=(choice_a, choice_b),
+            fallback_available=[choice_a],
+            attempted_candidate_ids=[],
+            target_state=TargetState.admitted,
+        )
+        with pytest.raises(ValueError, match="preserve unattempted"):
+            _queue_fallbacks_valid(admitted_target)
+        substituted = SimpleNamespace(
+            ordered_choices=(choice_a, choice_b),
+            fallback_available=[
+                SimpleNamespace(candidate_id="a", distinct=True),
+                choice_b,
+            ],
+            attempted_candidate_ids=[],
+            target_state=TargetState.selected,
+        )
+        with pytest.raises(ValueError, match="exactly equal their ordered choices"):
+            _queue_fallbacks_valid(substituted)
+
+    def test_queue_admitted_state_valid(self):
+        from types import SimpleNamespace
+
+        from asago_scenario_generator.pipeline.persistence import (
+            _queue_admitted_state_valid,
+        )
+        from asago_scenario_generator.pipeline.persistence import TargetState
+
+        choice_a = SimpleNamespace(candidate_id="a")
+        choice_b = SimpleNamespace(candidate_id="b")
+        base = {
+            "ordered_choices": (choice_a, choice_b),
+            "admitted_candidate_id": "a",
+            "target_state": TargetState.admitted,
+            "attempted_candidate_ids": ["a"],
+        }
+        assert _queue_admitted_state_valid(SimpleNamespace(**base)) is None
+        wrong_state = dict(base, target_state=TargetState.selected)
+        with pytest.raises(ValueError, match="target_state=admitted"):
+            _queue_admitted_state_valid(SimpleNamespace(**wrong_state))
+        later_attempts = dict(base, attempted_candidate_ids=["a", "b"])
+        with pytest.raises(ValueError, match="later attempts"):
+            _queue_admitted_state_valid(SimpleNamespace(**later_attempts))
+        missing_admitted = dict(
+            base,
+            admitted_candidate_id=None,
+            target_state=TargetState.selected,
+            attempted_candidate_ids=[],
+        )
+        assert _queue_admitted_state_valid(SimpleNamespace(**missing_admitted)) is None
+        inconsistent = dict(
+            base,
+            admitted_candidate_id=None,
+            target_state=TargetState.admitted,
+            attempted_candidate_ids=[],
+        )
+        with pytest.raises(ValueError, match="requires admitted_candidate_id"):
+            _queue_admitted_state_valid(SimpleNamespace(**inconsistent))
+
+    def test_completeness_evidence_valid(self):
+        from asago_scenario_generator.pipeline.persistence import (
+            _completeness_evidence_valid,
+        )
+
+        assert _completeness_evidence_valid("confirmed_complete", ["ref-1"]) is None
+        assert _completeness_evidence_valid("not_applicable", []) is None
+        assert _completeness_evidence_valid("other", []) is None
+        with pytest.raises(ValueError, match="requires evidence references"):
+            _completeness_evidence_valid("confirmed_complete", [])
+        with pytest.raises(ValueError, match="forbids evidence references"):
+            _completeness_evidence_valid("not_applicable", ["ref-1"])
+
+    def test_gate_report_records_direct(self):
+        from asago_scenario_generator.pipeline.finalization_gates import (
+            AdmissionEvidenceId,
+            GateCode,
+            GateResult,
+            GateViolation,
+        )
+        from asago_scenario_generator.pipeline.persistence import (
+            _gate_report_records,
+        )
+        from asago_scenario_generator.pipeline.persistence import GeneratedStage
+
+        with pytest.raises(TypeError, match="PostbehaviorAdmissionReport"):
+            _gate_report_records(object())
+        assert (
+            _gate_report_records(
+                PostbehaviorAdmissionReport(envelope=object(), gate_results=())
+            )
+            == []
+        )
+        report = PostbehaviorAdmissionReport(
+            envelope=object(),
+            gate_results=(
+                GateResult(
+                    AdmissionEvidenceId.identity,
+                    (GateViolation(GateCode.structural, "hard", None),),
+                    (
+                        GateViolation(
+                            GateCode.zone_difference, "diag", GeneratedStage.tree
+                        ),
+                    ),
+                ),
+            ),
+        )
+        records = _gate_report_records(report)
+        assert records[0].gate == AdmissionEvidenceId.identity.value
+        assert records[0].violations[0].detail == "hard"
+        assert records[0].diagnostics[0].detail == "diag"
+
+    def test_input_identity_valid(self):
+        from types import SimpleNamespace
+
+        from asago_scenario_generator.pipeline.persistence import (
+            _input_identity_valid,
+        )
+        from asago_scenario_generator.pipeline.persistence import GeneratedStage
+
+        def record(**overrides):
+            input_record = SimpleNamespace(
+                candidate_id="c1",
+                stage=GeneratedStage.actor,
+                invocation_index=0,
+                owner_retry_index=0,
+            )
+            record_fields = dict(
+                candidate_id="c1",
+                stage=GeneratedStage.actor,
+                invocation_index=0,
+                owner_retry_index=0,
+            )
+            record_fields.update(overrides)
+            record_fields["input"] = input_record
+            return SimpleNamespace(**record_fields)
+
+        assert _input_identity_valid(record()) is None
+        with pytest.raises(ValueError, match="identity/index mismatch"):
+            _input_identity_valid(record(candidate_id="c2"))
+        with pytest.raises(ValueError, match="identity/index mismatch"):
+            _input_identity_valid(record(stage=GeneratedStage.narrative))
+        with pytest.raises(ValueError, match="identity/index mismatch"):
+            _input_identity_valid(record(invocation_index=1))
+        with pytest.raises(ValueError, match="identity/index mismatch"):
+            _input_identity_valid(record(owner_retry_index=1))
+
+    def test_quarantine_journal_valid_direct(self):
+        from types import SimpleNamespace
+
+        from asago_scenario_generator.pipeline.persistence import (
+            _quarantine_journal_valid,
+            _quarantine_receipt,
+        )
+        from asago_scenario_generator.pipeline.persistence import (
+            QuarantineBundleV1,
+            ViolationRecord,
+        )
+
+        violation = ViolationRecord(
+            code="gate_failed", detail="detail", owner=None, retryable=False
+        )
+        bundle = QuarantineBundleV1(
+            schema_version="1",
+            run_id=RUN_ID,
+            attempt_id="c1:candidate",
+            candidate_id="c1",
+            target_entry_point_id=ENTRY_POINT_ID,
+            actor=None,
+            narrative=None,
+            tree=None,
+            behavior=None,
+            artifact_sha256={},
+            violations=[violation],
+        )
+        attempt = SimpleNamespace(
+            candidate_id="c1",
+            attempt_id="c1:candidate",
+            target_entry_point_id=ENTRY_POINT_ID,
+        )
+        inventory = SimpleNamespace(run_id=RUN_ID, candidate_attempts=[attempt])
+        terminal = SimpleNamespace(
+            candidate_id="c1",
+            violations=[violation],
+            terminal_receipts=[_quarantine_receipt(bundle)],
+        )
+        journal = SimpleNamespace(
+            quarantine_bundle=bundle,
+            admitted_publication=None,
+            finalization_inventory=inventory,
+        )
+        assert _quarantine_journal_valid(journal, terminal) is None
+        missing_attempt = SimpleNamespace(
+            quarantine_bundle=bundle,
+            admitted_publication=None,
+            finalization_inventory=SimpleNamespace(
+                run_id=RUN_ID, candidate_attempts=[]
+            ),
+        )
+        with pytest.raises(ValueError, match="does not match terminal decision"):
+            _quarantine_journal_valid(missing_attempt, terminal)
+        mismatched = SimpleNamespace(
+            quarantine_bundle=bundle.model_copy(update={"candidate_id": "other"}),
+            admitted_publication=None,
+            finalization_inventory=inventory,
+        )
+        with pytest.raises(ValueError, match="does not match terminal decision"):
+            _quarantine_journal_valid(mismatched, terminal)
+        bad_receipts = SimpleNamespace(
+            candidate_id="c1", violations=[violation], terminal_receipts=[]
+        )
+        with pytest.raises(ValueError, match="does not match terminal decision"):
+            _quarantine_journal_valid(journal, bad_receipts)
+        no_bundle = SimpleNamespace(
+            quarantine_bundle=None,
+            admitted_publication=None,
+            finalization_inventory=inventory,
+        )
+        with pytest.raises(ValueError, match="exactly one quarantine bundle"):
+            _quarantine_journal_valid(no_bundle, terminal)
+        with_publication = SimpleNamespace(
+            quarantine_bundle=bundle,
+            admitted_publication=object(),
+            finalization_inventory=inventory,
+        )
+        with pytest.raises(ValueError, match="exactly one quarantine bundle"):
+            _quarantine_journal_valid(with_publication, terminal)
+
+    def test_admission_payload_direct(self):
+        from types import SimpleNamespace
+
+        from asago_scenario_generator.pipeline.persistence import (
+            _admission_payload,
+        )
+        from asago_scenario_generator.pipeline.persistence import (
+            CandidateTerminalStatus,
+        )
+
+        with pytest.raises(ValueError, match="identity mismatch"):
+            _admission_payload(
+                SimpleNamespace(
+                    candidate_id="other",
+                    status=CandidateTerminalStatus.rejected,
+                    admission=None,
+                    violations=(),
+                ),
+                PRIMARY_ID,
+            )
+        with pytest.raises(TypeError, match="must agree"):
+            _admission_payload(
+                SimpleNamespace(
+                    candidate_id=PRIMARY_ID,
+                    status=CandidateTerminalStatus.admitted,
+                    admission=AdmissionDecision(False),
+                    violations=(),
+                ),
+                PRIMARY_ID,
+            )
+        with pytest.raises(TypeError, match="typed report"):
+            _admission_payload(
+                SimpleNamespace(
+                    candidate_id=PRIMARY_ID,
+                    status=CandidateTerminalStatus.admitted,
+                    admission=AdmissionDecision(True),
+                    violations=(),
+                ),
+                PRIMARY_ID,
+            )
+
+    def test_admitting_report_required_and_terminal_state(self):
+        from types import SimpleNamespace
+
+        from asago_scenario_generator.pipeline.persistence import (
+            _admitting_report_required,
+            _terminal_state_for,
+        )
+        from asago_scenario_generator.pipeline.persistence import LifecycleState
+
+        _admitting_report_required(
+            SimpleNamespace(current=LifecycleState.rejected), None
+        )
+        with pytest.raises(TypeError, match="PostbehaviorAdmissionReport"):
+            _admitting_report_required(
+                SimpleNamespace(current=LifecycleState.admitting), None
+            )
+        assert _terminal_state_for(True) is LifecycleState.admitted
+        assert _terminal_state_for(False) is LifecycleState.rejected
+
+    def test_commit_rejects_journaled_and_poisoned_adapter(self, tmp_path: Path):
+        from asago_scenario_generator.pipeline.persistence import (
+            FinalizationPersistenceError,
+        )
+
+        adapter = make_finalization_persistence_adapter(
+            tmp_path, run_id=RUN_ID, coverage_plan=_plan()
+        )
+        (tmp_path / ".finalization-state.json").write_text("{}")
+        with pytest.raises(
+            FinalizationPersistenceError, match="Unresolved finalization journal"
+        ):
+            adapter.record_transition(
+                LifecycleTransition(
+                    LifecycleState.pending,
+                    LifecycleState.revalidating_candidate,
+                    PRIMARY_ID,
+                    "start",
+                )
+            )
+        with pytest.raises(FinalizationPersistenceError, match="journal recovery"):
+            adapter.record_transition(
+                LifecycleTransition(
+                    LifecycleState.pending,
+                    LifecycleState.revalidating_candidate,
+                    PRIMARY_ID,
+                    "start",
+                )
+            )
+
+    def test_stage_result_requires_snapshot_and_replays(self, tmp_path: Path):
+        from asago_scenario_generator.pipeline.finalization import (
+            GeneratedArtifacts,
+            StageInvocation,
+        )
+
+        plan = _plan()
+        adapter = make_finalization_persistence_adapter(
+            tmp_path, run_id=RUN_ID, coverage_plan=plan
+        )
+        adapter.record_transition(
+            LifecycleTransition(
+                LifecycleState.pending,
+                LifecycleState.revalidating_candidate,
+                PRIMARY_ID,
+                "start",
+                transition_index=0,
+            )
+        )
+        adapter.record_transition(
+            LifecycleTransition(
+                LifecycleState.revalidating_candidate,
+                LifecycleState.generating_actor,
+                PRIMARY_ID,
+                "actor",
+                transition_index=1,
+            )
+        )
+        unsnapshotted = StageInvocation(
+            candidate_id=PRIMARY_ID,
+            stage=GeneratedStage.actor,
+            invocation_index=0,
+            owner_retry_index=0,
+            artifacts=GeneratedArtifacts(),
+            candidate_snapshot=None,
+        )
+        with pytest.raises(TypeError, match="candidate snapshot"):
+            adapter.record_stage_result(
+                unsnapshotted,
+                GeneratedStageResult(
+                    artifact=None, evidence=_stage_evidence(GeneratedStage.actor)
+                ),
+            )
+        invocation = StageInvocation(
+            candidate_id=PRIMARY_ID,
+            stage=GeneratedStage.actor,
+            invocation_index=0,
+            owner_retry_index=0,
+            artifacts=GeneratedArtifacts(actor={"actor": "profile"}),
+            candidate_snapshot=plan.targets[0].ordered_choices[0].projected_candidate,
+        )
+        result = GeneratedStageResult(
+            artifact={"stage": "actor"},
+            evidence=_stage_evidence(GeneratedStage.actor),
+        )
+        adapter.record_stage_result(invocation, result)
+        adapter.record_stage_result(invocation, result)
+        inventory = read_finalization_inventory(tmp_path)
+        assert len(inventory.stage_attempts) == 1
+        assert inventory.stage_attempts[0].attempt_id == (f"{PRIMARY_ID}:actor:0")
+
+    def test_record_candidate_attempt_if_missing_direct(self, tmp_path: Path):
+        adapter = make_finalization_persistence_adapter(
+            tmp_path, run_id=RUN_ID, coverage_plan=_plan()
+        )
+        adapter.record_transition(
+            LifecycleTransition(
+                LifecycleState.pending,
+                LifecycleState.revalidating_candidate,
+                PRIMARY_ID,
+                "start",
+            )
+        )
+        committed = adapter.inventory
+        assert [item.candidate_id for item in committed.candidate_attempts] == [
+            PRIMARY_ID
+        ]
+        with pytest.raises(ManifestIntegrityError, match="Unknown coverage-plan"):
+            adapter._record_candidate_attempt_if_missing(committed, "unknown")
+        before = len(committed.candidate_attempts)
+        adapter._record_candidate_attempt_if_missing(committed, PRIMARY_ID)
+        assert len(committed.candidate_attempts) == before
+        replay = committed.model_copy(deep=True)
+        replay.candidate_attempts = []
+        adapter._record_candidate_attempt_if_missing(replay, PRIMARY_ID)
+        assert replay.candidate_attempts == []
