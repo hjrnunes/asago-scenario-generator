@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Executable end-to-end QA suite for taxonomy/risk HTML report sections.
 
-Mirrors ``taxonomy_report_sections_rendering.md`` (QA-TRSR-01..30).  Drives
+Mirrors ``taxonomy_report_sections_rendering.md`` (QA-TRSR-01..36).  Drives
 only the ``asago-scenario-generator report`` CLI (``--output-dir`` /
 ``--output``) against disposable completed-run fixtures whose manifest
 inventories and SHA-256 hashes match their artifacts, then inspects CLI
@@ -76,6 +76,7 @@ _ROLE_MEDIA: dict[str, str] = {
     "threat_surface": "application/yaml",
     "scenario_yaml": "application/yaml",
     "scenario_feature": "text/plain",
+    "scenario_call_log": "application/jsonl",
     "pipeline_call_log": "application/jsonl",
     "coverage_report": "application/json",
     "pipeline_log": "text/plain",
@@ -135,6 +136,7 @@ def _scenario(
     candidate_filter: dict[str, Any] | None = None,
     scenario_seed_metadata: dict[str, Any] | None = None,
     technique_scope_evidence: dict[str, Any] | None = None,
+    validation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """A reportable scenario fixture dict (serialized with IDs by the writer)."""
     scenario: dict[str, Any] = {
@@ -148,7 +150,8 @@ def _scenario(
         },
         "faceting": faceting
         or {"taxonomy_chain": {"owasp_llm_ids": [], "agentic_threat_ids": []}},
-        "validation": {"semantic": {"corpus_claim_applicability": _corpus_claims()}},
+        "validation": validation
+        or {"semantic": {"corpus_claim_applicability": _corpus_claims()}},
     }
     if priority is not _DEFAULT_PRIORITY:
         if priority is not None:
@@ -184,6 +187,7 @@ def _build_run(
     coverage: dict[str, Any] | None = None,
     include_coverage: bool = True,
     calls: list[dict[str, Any]] | None = None,
+    scenario_calls: list[dict[str, Any]] | None = None,
     feature_files: dict[str, str] | None = None,
     manifest_extra: dict[str, Any] | None = None,
     write_manifest: bool = True,
@@ -268,6 +272,20 @@ def _build_run(
             ),
         )
         _register("calls.jsonl", "pipeline_call_log")
+
+    if scenario_calls is not None:
+        # Per-scenario call log: JSON Lines, each line tagged with
+        # ``scenario_id`` so the report loader groups entries per card.
+        import json as _json
+
+        _write(
+            "scenarios/calls.jsonl",
+            "".join(
+                _json.dumps(entry, separators=(",", ":")) + "\n"
+                for entry in scenario_calls
+            ),
+        )
+        _register("scenarios/calls.jsonl", "scenario_call_log")
 
     if not write_manifest:
         return run_dir
@@ -1832,6 +1850,443 @@ def qa_trsr_29() -> None:
     )
 
 
+def qa_trsr_31() -> None:
+    """QA-TRSR-31: behavior spec headers, tags, docstrings, And steps, zone badges."""
+    case = "TRSR-31"
+    run_dir = _build_run(
+        RUN_ROOT / "fixtures" / "trsr-31",
+        scenarios=[_scenario("scn-a")],
+        feature_files={
+            "scn-a": (
+                "@smoke\n"
+                "Scenario: Phish the desk\n"
+                "  Given access through (Zone input)\n"
+                "  And escalate privileges\n"
+                '  """\n'
+                "  requires a compromised credential\n"
+                '  """\n'
+            )
+        },
+    )
+    ok, html = _run_report(case, run_dir, RUN_ROOT / "reports" / case)
+    if not ok:
+        failures.append(f"{case}: report command failed: {html}")
+        return
+    region = _card(html, "scn-a")
+    _expect(
+        case,
+        re.search(r"Scenario:</span>\s*Phish the desk</div>", region) is not None,
+        "Scenario header with Phish the desk missing",
+    )
+    _expect(
+        case,
+        'class="step-keyword">And</span><span class="step-text">'
+        "escalate privileges</span>" in region,
+        "And step missing",
+    )
+    _expect(
+        case,
+        'class="step-keyword">Given</span><span class="step-text">'
+        'access through (Zone input)<span class="zone-badge"' in region,
+        "Given step with zone badge missing",
+    )
+    _expect(
+        case,
+        ">Input Surfaces</span>" in region,
+        "zone badge Input Surfaces missing",
+    )
+    _expect(
+        case,
+        '<div class="step-docstring">requires a compromised credential</div>' in region,
+        "step-docstring block missing",
+    )
+    # Tag lines are skipped by the behavior-spec builder; the raw-data
+    # section later in the document still shows the fixture feature file,
+    # so scope the no-tag pin to the rendered spec block (up to the next
+    # tab panel).
+    spec_start = region.find('<div class="feature-spec">')
+    spec_end = region.find('<div class="tab-panel">', spec_start)
+    if spec_end == -1:
+        spec_end = spec_start + 4000
+    _expect(
+        case,
+        spec_start != -1 and "@smoke" not in region[spec_start:spec_end],
+        "tag @smoke rendered in behavior spec tab",
+    )
+
+
+def qa_trsr_32() -> None:
+    """QA-TRSR-32: per-scenario LLM call entries."""
+    case = "TRSR-32"
+    run_dir = _build_run(
+        RUN_ROOT / "fixtures" / "trsr-32",
+        scenarios=[_scenario("scn-a")],
+        scenario_calls=[
+            {
+                "scenario_id": "scn-a",
+                "call": "actor_profile",
+                "prompt_tokens": 100,
+                "completion_tokens": 40,
+                "duration_ms": 250,
+                "system_prompt": "Assess the profile",
+                "user_prompt": "Profile the capability",
+                "success": True,
+            },
+            {
+                "scenario_id": "scn-a",
+                "call": "behavior_spec",
+                "prompt_tokens": 30,
+                "completion_tokens": 10,
+                "duration_ms": 80,
+                "system_prompt": "Generate the feature",
+                "user_prompt": "Write the behavior",
+                "success": False,
+                "error": "timeout",
+            },
+        ],
+    )
+    ok, html = _run_report(case, run_dir, RUN_ROOT / "reports" / case)
+    if not ok:
+        failures.append(f"{case}: report command failed: {html}")
+        return
+    region = _card(html, "scn-a")
+    for entry in (
+        "Call 0: Actor Profile (100 prompt / 40 completion tokens, 250ms)",
+        "Call 1: Behavior Spec (30 prompt / 10 completion tokens, 80ms)"
+        " FAILED: timeout",
+    ):
+        _expect(case, entry in region, f"call entry {entry!r} missing")
+    for prompt in (
+        "Assess the profile",
+        "Profile the capability",
+        "Generate the feature",
+        "Write the behavior",
+    ):
+        _expect(case, prompt in region, f"prompt {prompt!r} missing")
+    _expect(case, 'class="call-log-pre"' in region, "call-log-pre block missing")
+
+
+def qa_trsr_33() -> None:
+    """QA-TRSR-33: categorized coverage summary, plan, not-confirmed universe."""
+    case = "TRSR-33"
+    run_dir = _build_run(
+        RUN_ROOT / "fixtures" / "trsr-33",
+        scenarios=[_scenario("scn-a")],
+        coverage={
+            "coverage_gaps": {
+                "uncovered_entry_points": [],
+                "uncovered_zones": [],
+                "uncovered_threats": [],
+                "uncovered_attack_patterns": [],
+            },
+            "coverage_universe": {"completeness": "not_applicable"},
+            "coverage_summary": {
+                "covered_feasible": ["AP-T6-01"],
+                "selection_limitations": [
+                    {
+                        "entry_point_id": "ze-query",
+                        "reason": "selection_limitation",
+                        "detail": "candidate queue saturated",
+                        "candidate_ids": ["cand-42"],
+                    }
+                ],
+                "policy_exclusions": [
+                    {"entry_point_id": "ze-license", "reason": "out_of_scope"}
+                ],
+            },
+            "coverage_plan": {
+                "schema_version": 1,
+                "targets": [
+                    {
+                        "entry_point_id": "ze-query",
+                        "entry_point_name": "ze-query",
+                        "primary_candidate_id": "cand-42",
+                        "primary_state": "planned",
+                        "ordered_choices": [
+                            {"candidate_id": "cand-42"},
+                            {"candidate_id": "cand-7"},
+                        ],
+                    }
+                ],
+            },
+        },
+    )
+    ok, html = _run_report(case, run_dir, RUN_ROOT / "reports" / case)
+    if not ok:
+        failures.append(f"{case}: report command failed: {html}")
+        return
+    region = _region(html, "sec-coverage")
+    _expect(case, "Known Targets Covered" in region, "coverage badge missing")
+    for message in (
+        "All identified feasible entry points have scenario coverage; "
+        "inventory completeness is not confirmed.",
+        "All active zones are traversed by scenarios.",
+        "All in-scope threats have scenario coverage.",
+        "All in-scope attack patterns have scenario coverage.",
+    ):
+        _expect(case, message in region, f"message {message!r} missing")
+    _expect(
+        case,
+        "Covered Feasible Targets" in region and ">AP-T6-01</li>" in region,
+        "covered feasible targets card missing",
+    )
+    visible = _visible(region)
+    _expect(
+        case, "Selection Limitations" in region, "selection limitations card missing"
+    )
+    _expect(
+        case,
+        "cap overflow (coverage preserved)" in visible,
+        "selection reason missing",
+    )
+    _expect(case, "candidate queue saturated" in visible, "selection detail missing")
+    _expect(case, "cand-42" in visible, "selection candidate code missing")
+    _expect(case, "Policy Exclusions" in region, "policy exclusions card missing")
+    _expect(case, "out of scope" in visible, "policy exclusion reason missing")
+    _expect(case, "Coverage Plan (schema v1)" in region, "coverage plan table missing")
+    _expect(
+        case,
+        "ze-query" in region and "cand-42" in region and ">planned</td>" in region,
+        "coverage plan row missing",
+    )
+    _expect(
+        case,
+        "Not Applicable (Inferred Partial)" in region,
+        "universe completeness label missing",
+    )
+    _expect(
+        case, "No operator-confirmed evidence" in region, "universe evidence missing"
+    )
+
+
+def qa_trsr_34() -> None:
+    """QA-TRSR-34: run summary outcome summary and coverage gaps card."""
+    case = "TRSR-34"
+    run_dir = _build_run(
+        RUN_ROOT / "fixtures" / "trsr-34",
+        scenarios=[
+            _scenario("scn-a", priority={"composite": 0.85}),
+            _scenario("scn-b", priority={"composite": 0.35}),
+        ],
+        coverage={
+            "coverage_gaps": {
+                "uncovered_entry_points": [
+                    {"name": "ze-query", "entry_point_id": "ze-query"}
+                ],
+                "uncovered_zones": ["input"],
+                "uncovered_threats": ["T6", "T11"],
+                "uncovered_attack_patterns": [],
+            },
+            "coverage_universe": {"completeness": "not_applicable"},
+        },
+        manifest_extra={
+            "seeds_generated": 12,
+            "funnel": {
+                "expanded_instances": 10,
+                "filter_submitted": 6,
+                "filter_accepted": 3,
+            },
+            "scenarios_generated": 4,
+            "scenarios_failed": 1,
+        },
+    )
+    ok, html = _run_report(case, run_dir, RUN_ROOT / "reports" / case)
+    if not ok:
+        failures.append(f"{case}: report command failed: {html}")
+        return
+    region = _region(html, "sec-run-summary")
+    # The Scenarios dashboard later in the document carries its own
+    # "Coverage Gaps" stat, so read the Outcome Summary block in isolation.
+    start = region.find("Outcome Summary")
+    outcome_region = region[start : start + 3000]
+    stats = _stats(outcome_region)
+    for label, count in (
+        ("High Priority", 1),
+        ("Medium Priority", 0),
+        ("Low Priority", 1),
+    ):
+        _expect(
+            case,
+            stats.get(label) == count,
+            f"outcome {label}={stats.get(label)}, expected {count}",
+        )
+    _expect(
+        case,
+        stats.get("Coverage Gaps") == 4,
+        f"coverage card stats={stats.get('Coverage Gaps')}",
+    )
+
+
+def qa_trsr_35() -> None:
+    """QA-TRSR-35: scenarios-section sub-charts and filters."""
+    case = "TRSR-35"
+    signals = {
+        "technique_maturity": "realized",
+        "risk_impact": "critical",
+        "risk_likelihood": "high",
+        "attack_complexity": "medium",
+        "architecture_match": "explicit",
+        "structural_exposure": "elevated",
+    }
+    run_dir = _build_run(
+        RUN_ROOT / "fixtures" / "trsr-35",
+        scenarios=[
+            _scenario(
+                "scn-a",
+                priority={"composite": 0.72, "signals": signals},
+                faceting={
+                    "taxonomy_chain": {
+                        "owasp_llm_ids": ["LLM01"],
+                        "agentic_threat_ids": ["T6"],
+                    },
+                    "capability_profile": {
+                        "zones_traversed": ["input", "tool_execution"]
+                    },
+                },
+                narrative={
+                    "title": "scn-a",
+                    "summary": "",
+                    "entry_point": "ze-query",
+                    "zone_sequence": ["input", "tool_execution"],
+                },
+            ),
+            _scenario(
+                "scn-b",
+                priority={"composite": 0.35, "signals": signals},
+                faceting={
+                    "taxonomy_chain": {
+                        "owasp_llm_ids": ["LLM02"],
+                        "agentic_threat_ids": ["T6"],
+                    },
+                    "capability_profile": {"zones_traversed": ["input"]},
+                },
+                narrative={
+                    "title": "scn-b",
+                    "summary": "",
+                    "entry_point": "ze-rag",
+                    "zone_sequence": ["input"],
+                },
+            ),
+        ],
+        manifest_extra={"scenarios_generated": 4},
+    )
+    ok, html = _run_report(case, run_dir, RUN_ROOT / "reports" / case)
+    if not ok:
+        failures.append(f"{case}: report command failed: {html}")
+        return
+    region = _region(html, "sec-scenarios")
+    _expect(
+        case,
+        "Risk Impact: critical" in region,
+        "signal decomposition segment tooltip missing",
+    )
+    _expect(
+        case,
+        "Threat x Zone Coverage" in region
+        and 'data-tooltip="T6 x Input Surfaces: 2 scenarios"' in region,
+        "threat x zone matrix cell missing",
+    )
+    for expected in (
+        ">Input Surfaces</div>",
+        ">Tool Execution</div>",
+    ):
+        _expect(case, expected in region, f"matrix zone header {expected!r} missing")
+    _expect(
+        case,
+        'class="ep-dist-name" data-tooltip="ze-query"' in region
+        and 'class="ep-dist-name" data-tooltip="ze-rag"' in region,
+        "entry point distribution entries missing",
+    )
+    _expect(
+        case,
+        'data-filter-type="threat" data-filter-value="T6"' in region,
+        "threat filter chip missing",
+    )
+    _expect(
+        case,
+        'data-filter-type="zone" data-filter-value="input"' in region
+        and ">Input Surfaces</span>" in region
+        and 'data-filter-type="zone" data-filter-value="tool_execution"' in region
+        and ">Tool Execution</span>" in region,
+        "zone filter chips missing",
+    )
+    for priority in ("high", "medium", "low"):
+        _expect(
+            case,
+            f'data-filter-type="priority" data-filter-value="{priority}"' in region,
+            f"priority filter chip {priority!r} missing",
+        )
+    _expect(
+        case,
+        '<span class="stat-label">In Report</span>' in region
+        and ">of 4 generated</span>" in region,
+        "In Report sublabel of 4 generated missing",
+    )
+    crumbs = _card(html, "scn-a")
+    _expect(
+        case,
+        'class="zone-crumb"' in crumbs
+        and ">input</span>" in crumbs
+        and ">tool_execution</span>" in crumbs
+        and "&rarr;" in crumbs,
+        "scn-a narrative zone crumbs missing",
+    )
+
+
+def qa_trsr_36() -> None:
+    """QA-TRSR-36: conflicting corpus claims refuse the report command."""
+    case = "TRSR-36"
+
+    def _claims(evidence: str) -> list[dict[str, str]]:
+        return [
+            {
+                "category": "entry_points",
+                "status": "applicable",
+                "evidence": [evidence],
+            },
+            {
+                "category": "tool_inventory",
+                "status": "not_applicable",
+                "reason": "QA fixture",
+            },
+        ]
+
+    run_dir = _build_run(
+        RUN_ROOT / "fixtures" / "trsr-36",
+        scenarios=[
+            _scenario(
+                "scn-a",
+                validation={
+                    "semantic": {"corpus_claim_applicability": _claims("a.md")}
+                },
+            ),
+            _scenario(
+                "scn-b",
+                validation={
+                    "semantic": {"corpus_claim_applicability": _claims("b.md")}
+                },
+            ),
+        ],
+    )
+    out_dir = RUN_ROOT / "reports" / case
+    completed = _run_cli_raw(case, run_dir, out_dir)
+    _expect(
+        case,
+        completed.returncode != 0,
+        f"report command unexpectedly succeeded: {completed.stdout[-300:]}",
+    )
+    _expect(
+        case,
+        not (out_dir / "report.html").is_file(),
+        "report.html produced despite conflicting corpus claims",
+    )
+    _expect(
+        case,
+        "entry_points" in (completed.stderr or ""),
+        "conflicting category not named in stderr",
+    )
+
+
 def _run_gate(name: str, argv: list[str], timeout: int = 3600) -> tuple[bool, str]:
     """Run one documented gate and return (ok, message)."""
     try:
@@ -1943,6 +2398,12 @@ def main() -> int:
         qa_trsr_27,
         qa_trsr_28,
         qa_trsr_29,
+        qa_trsr_31,
+        qa_trsr_32,
+        qa_trsr_33,
+        qa_trsr_34,
+        qa_trsr_35,
+        qa_trsr_36,
     ):
         procedure()
         print(f"  [done] {procedure.__name__}", flush=True)

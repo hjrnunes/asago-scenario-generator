@@ -55,6 +55,7 @@ Feature: Taxonomy/risk HTML report section rendering
     And the threat surface entry for "atlas-phishing" shows the status badge "ACT" and the row values "Spear phishing", "0.85", "LLM01", "T6", and "AP-T6-01"
     And the threat surface entry for "atlas-copyright" shows the status badge "GOV"
     And the governance-only entry shows the placeholder "-" for the OWASP LLM IDs, agentic threats, and attack patterns
+    And the threat surface flow diagram node for "atlas-phishing" carries the tip "atlas-phishing: Spear phishing"
 
   # Taxonomy report section rendering 04 degrades an empty threat surface to placeholders
   Scenario: Taxonomy report section rendering 04 degrades an empty threat surface to placeholders
@@ -177,15 +178,17 @@ Feature: Taxonomy/risk HTML report section rendering
     Examples:
       | tree_case                                                                                                            | tree_rendering                                    |
       | an OR root labeled "Gain access" with two leaf children carrying the techniques "AML.T0015" and "AML.T0040"         | renders an OR gate summary containing two leaf nodes with both technique badges |
+      | an AND root labeled "Open safe" with two leaf children carrying the techniques "AML.T0015" and "AML.T0040"         | renders an AND gate summary containing two leaf nodes with both technique badges |
       | a single leaf node labeled "Exfiltrate data" with no children                                                       | renders exactly one leaf node and no gate summary |
       | no root                                                                                                              | renders no tree node markup                       |
 
   # Taxonomy report section rendering 16 renders unresolved attack tree resource IDs honestly
   Scenario: Taxonomy report section rendering 16 renders unresolved attack tree resource IDs honestly
     Given the run fixture contains scenario "scn-a"
-    And scenario "scn-a" carries an attack tree with a leaf node labeled "Run the tool" whose action invokes tool "tool-code" and a leaf node labeled "Enter the portal" whose action performs initial ingress through entry point "ze-gone" in zone "input"
+    And scenario "scn-a" carries an attack tree with a leaf node labeled "Run the tool" whose action invokes tool "tool-code" with integration "int-oidc" and a leaf node labeled "Enter the portal" whose action performs initial ingress through entry point "ze-gone" in zone "input"
     When the HTML report is generated
     Then the Attack Tree tab shows the leaf node meta "Tool: Unresolved" with code "tool-code"
+    And the leaf node meta shows "Integration: Unresolved" with code "int-oidc"
     And the leaf node meta shows "Entry Point: Unresolved" with code "ze-gone"
 
   # Taxonomy report section rendering 17 renders the scenarios dashboard and a card per scenario
@@ -213,6 +216,13 @@ Feature: Taxonomy/risk HTML report section rendering
     Given the run fixture contains no scenarios
     When the HTML report is generated
     Then the report contains a Scenarios section showing "No scenarios generated."
+    And the report contains no "Threat–Technique Matrix" section
+    And the report contains no "Actor Profile Distribution" section
+    And the sidebar shows a link to the "Capability Profile" section
+    And the sidebar shows a link to the "Threat Surface" section
+    And the sidebar shows a link to the "Scenarios" section
+    And the sidebar shows a link to the "Raw Data" section
+    And the sidebar shows a link to the "Glossary & Methodology" section
 
   # Taxonomy report section rendering 20 renders the run summary funnel, outcomes, and configuration
   Scenario: Taxonomy report section rendering 20 renders the run summary funnel, outcomes, and configuration
@@ -248,7 +258,7 @@ Feature: Taxonomy/risk HTML report section rendering
     Then the report contains a "Raw Data" section with the badge "2 files"
     And the YAML panel shows a highlighted comment, key "completeness", number value 3, boolean value true, and null value
     And the YAML panel renders the quoted string "confirmed" without a highlight class
-    And the Gherkin panel shows a highlighted comment, tag "smoke", and the keywords "Feature:" and "Given"
+    And the Gherkin panel shows a highlighted comment, tag "smoke", and the keywords "Feature:", "Background:", "Given", "When", "And", and "But"
 
   # Taxonomy report section rendering 24 renders the generation inputs block with values and em dashes for gaps
   Scenario: Taxonomy report section rendering 24 renders the generation inputs block with values and em dashes for gaps
@@ -302,3 +312,140 @@ Feature: Taxonomy/risk HTML report section rendering
     And the pipeline calls summary shows "2 call(s)" with "150 prompt tokens", "60 completion tokens", and "40ms total"
     And the pipeline calls summary shows the semantic status "Candidate Filter semantic draft: Accepted provider semantics"
     And the pipeline calls summary shows the semantic status "Capability Profile semantic draft: Rejected: invalid"
+    And the pipeline calls summary shows the semantic warning "raw JSON payload"
+
+  # Taxonomy report section rendering 30 renders count badges when an entry maps to many threats and patterns
+  Scenario: Taxonomy report section rendering 30 renders count badges when an entry maps to many threats and patterns
+    Given the threat surface lists the actionable entry for risk card "atlas-phishing" with risk name "Spear phishing", confidence 0.85, OWASP LLM IDs "LLM01", agentic threats "T6,T7,T8", and attack patterns "AP-T6-01,AP-T7-01,AP-T8-01"
+    When the HTML report is generated
+    Then the report contains a "Threat Surface" section with the badge "1 actionable / 0 governance"
+    And the threat surface entry for "atlas-phishing" shows the count badge "3 threats"
+    And the threat surface entry for "atlas-phishing" shows the count badge "3 patterns"
+
+  # Taxonomy report section rendering 31 renders the behavior spec headers, tags, docstrings, And steps, and zone badges
+  Scenario: Taxonomy report section rendering 31 renders the behavior spec headers, tags, docstrings, And steps, and zone badges
+    Given the run fixture contains scenario "scn-a" with a behavior feature file containing the tag "smoke", the section "Feature" titled "Phish suite", the section "Scenario" titled "Phish the desk", the "And" step "escalate privileges", the "Given" step "access through (Zone input)", the "But" step "hold the session", a continuation line "the platform times out", and the docstring "requires a compromised credential"
+    When the HTML report is generated
+    Then the Behavior Spec tab of scenario "scn-a" renders the keyword "Feature:" with the text "Phish suite"
+    And the Behavior Spec tab of scenario "scn-a" renders the keyword "Scenario:" with the text "Phish the desk"
+    And the Behavior Spec tab shows the step "And" with the text "escalate privileges"
+    And the Behavior Spec tab shows the step "Given" with the text "access through (Zone input)" and the zone badge "Input Surfaces"
+    And the Behavior Spec tab shows the step "But" with the text "hold the session"
+    And the Behavior Spec tab shows the continuation line "the platform times out"
+    And the Behavior Spec tab shows the docstring "requires a compromised credential"
+    And the Behavior Spec tab does not render the tag "smoke"
+
+  # Taxonomy report section rendering 32 renders per-scenario LLM call entries with usage and failure markers
+  Scenario: Taxonomy report section rendering 32 renders per-scenario LLM call entries with usage and failure markers
+    Given the run fixture contains scenario "scn-a"
+    And scenario "scn-a" records the call "actor_profile" with 100 prompt tokens, 40 completion tokens, duration 250ms, the system prompt "Assess the profile", the user prompt "Profile the capability", and success
+    And scenario "scn-a" records the call "behavior_spec" with 30 prompt tokens, 10 completion tokens, duration 80ms, the system prompt "Generate the feature", the user prompt "Write the behavior", failing with the error "timeout"
+    When the HTML report is generated
+    Then the LLM Calls tab of scenario "scn-a" shows the entry "Call 0: Actor Profile (100 prompt / 40 completion tokens, 250ms)"
+    And the LLM Calls tab of scenario "scn-a" shows the entry "Call 1: Behavior Spec (30 prompt / 10 completion tokens, 80ms) FAILED: timeout"
+    And the LLM Calls tab of scenario "scn-a" renders the system prompt "Assess the profile" and the user prompt "Profile the capability"
+
+  # Taxonomy report section rendering 33 renders the categorized coverage summary and plan with a not-confirmed universe
+  Scenario: Taxonomy report section rendering 33 renders the categorized coverage summary and plan with a not-confirmed universe
+    Given the coverage data records no uncovered entry points, zones, threats, or attack patterns with an inventory completeness not confirmed
+    And the coverage data records a summary with the covered feasible target "AP-T6-01", a selection limitation for entry point "ze-query" with reason "selection_limitation", detail "candidate queue saturated", and candidate "cand-42", and a policy exclusion for entry point "ze-license" with reason "out_of_scope"
+    And the coverage data records a coverage plan targeting entry point "ze-query" with primary candidate "cand-42", state "planned", and ordered choices "cand-42,cand-7"
+    When the HTML report is generated
+    Then the report contains a "Coverage Analysis" section with the badge "Known Targets Covered"
+    And the coverage section shows the messages "All identified feasible entry points have scenario coverage; inventory completeness is not confirmed.", "All active zones are traversed by scenarios.", "All in-scope threats have scenario coverage.", and "All in-scope attack patterns have scenario coverage."
+    And the coverage section shows the "Covered Feasible Targets" card containing "AP-T6-01"
+    And the coverage section shows the "Selection Limitations" card with the entry "ze-query", the reason "cap overflow (coverage preserved)", the detail "candidate queue saturated", and the candidate "cand-42"
+    And the coverage section shows the "Policy Exclusions" card with the entry "ze-license" and the reason "out of scope"
+    And the coverage section shows a "Coverage Plan" row for "ze-query" with primary candidate "cand-42" and state "planned"
+    And the coverage universe card shows inventory completeness "Not Applicable (Inferred Partial)"
+    And the coverage universe card shows the message "No operator-confirmed evidence"
+
+  # Taxonomy report section rendering 34 renders the run summary outcome counts and coverage gaps card
+  Scenario: Taxonomy report section rendering 34 renders the run summary outcome counts and coverage gaps card
+    Given the run fixture contains scenario "scn-a" and scenario "scn-b"
+    And scenario "scn-a" carries priority composite 0.85
+    And scenario "scn-b" carries priority composite 0.35
+    And the run manifest records seeds generated 12, candidates expanded 10 with 6 submitted and 3 accepted, 4 scenarios generated, and 1 failed
+    And the coverage data reports 1 uncovered entry point, 1 uncovered zone, and 2 uncovered threats
+    And the coverage data records no uncovered attack patterns
+    When the HTML report is generated
+    Then the report contains a "Run Summary" section
+    And the run summary outcome summary shows "1" High Priority, "0" Medium Priority, and "1" Low Priority
+    And the run summary shows the coverage card "4" Coverage Gaps
+
+  # Taxonomy report section rendering 35 renders the signal decomposition, threat-by-zone matrix, entry point distribution, and filter chips
+  Scenario: Taxonomy report section rendering 35 renders the signal decomposition, threat-by-zone matrix, entry point distribution, and filter chips
+    Given the run fixture contains scenario "scn-a" and scenario "scn-b"
+    And scenario "scn-a" lists OWASP LLM IDs "LLM01" and agentic threats "T6"
+    And scenario "scn-b" lists OWASP LLM IDs "LLM02" and agentic threats "T6"
+    And scenario "scn-a" traverses zones "input,tool_execution"
+    And scenario "scn-b" traverses zones "input"
+    And scenario "scn-a" carries a narrative entry point "ze-query"
+    And scenario "scn-b" carries a narrative entry point "ze-rag"
+    And scenario "scn-a" carries priority composite 0.72 with the signals "realized", "critical", "high", "medium", "explicit", and "elevated"
+    And scenario "scn-b" carries priority composite 0.35 with the signals "realized", "critical", "high", "medium", "explicit", and "elevated"
+    And the run manifest records seeds generated 12, candidates expanded 10 with 6 submitted and 3 accepted, 4 scenarios generated, and 1 failed
+    When the HTML report is generated
+    Then the Scenarios section shows the "Priority Signal Decomposition" chart with the segment "Risk Impact: critical"
+    And the Scenarios section shows the "Threat x Zone Coverage" matrix with the cell "T6" x "Input Surfaces" counting "2"
+    And the Scenarios section shows the "Entry Point Distribution" listing "ze-query" with count 1 and "ze-rag" with count 1
+    And the Scenarios section shows the filter chips "Threats" containing "T6", "Zones" containing "Input Surfaces" and "Tool Execution", and "Priority" containing "High", "Medium", and "Low"
+    And the Scenarios section shows the stat "2" In Report with the sublabel "of 4 generated"
+    And the scenario card for "scn-a" shows the zone crumbs "input" and "tool_execution"
+
+  # Taxonomy report section rendering 36 renders actor diversity without a monotone warning and plural goal categories
+  Scenario: Taxonomy report section rendering 36 renders actor diversity without a monotone warning and plural goal categories
+    Given the run fixture contains scenario "scn-a", "scn-b", and "scn-c"
+    And scenario "scn-a" has actor type "cybercriminal" with capability level "advanced" and goal category "integrity"
+    And scenario "scn-b" has actor type "nation-state" with capability level "expert" and goal category "privacy"
+    And scenario "scn-c" has actor type "hacktivist" with capability level "intermediate" and goal category "availability"
+    When the HTML report is generated
+    Then the report contains an "Actor Profile Distribution" section with the badge "3 types"
+    And the distribution shows the actor type "Cybercriminal" with the count 1 and 33 percent
+    And the distribution shows no low-diversity warning
+    And the distribution shows the goal category "Integrity" with the count 1
+    And the distribution shows the "Goal Category Distribution" block with the badge "3 categories"
+
+  # Taxonomy report section rendering 37 renders the roster technique fallback when no technique is pinned
+  Scenario: Taxonomy report section rendering 37 renders the roster technique fallback when no technique is pinned
+    Given the run fixture contains scenario "scn-a"
+    And scenario "scn-a" lists OWASP LLM IDs "LLM01" and agentic threats "T6"
+    And scenario "scn-a" carries the attack pattern seed "AP-T6-01" with ATLAS techniques "AML.T0015,AML.T0040"
+    And scenario "scn-a" has actor type "cybercriminal" with capability level "advanced"
+    When the HTML report is generated
+    Then the report contains a "Threat–Technique Matrix" section with the badge "1/17 threats", "2 techniques", and "1 scenarios"
+    And the matrix shows technique column headers for "AML.T0015" and "AML.T0040"
+    And the matrix shows for threat "T6" a count of 1 for technique "AML.T0015" linking to scenario "scn-a"
+    And the roster row for "scn-a" shows threat "T6", attack pattern "AP-T6-01", technique "AML.T0015, AML.T0040", actor type "Cybercriminal", and capability "Advanced"
+
+  # Taxonomy report section rendering 38 renders the remaining categorized coverage summary cards
+  Scenario: Taxonomy report section rendering 38 renders the remaining categorized coverage summary cards
+    Given the coverage data records no uncovered entry points, zones, threats, or attack patterns with an inventory completeness not confirmed
+    And the coverage data records a summary with a structural gap for entry point "ze-query" with reason "projection_limitation", a runtime generation gap for entry point "ze-rag" with reason "generation_exhaustion", a quarantine admission failure for entry point "ze-scan" with reason "admission_failure", and a projection limitation for entry point "ze-parse" with reason "projection_limitation"
+    When the HTML report is generated
+    Then the report contains a "Coverage Analysis" section with the badge "Known Targets Covered"
+    And the coverage section shows the "Structural / Projection Gaps" card containing "ze-query"
+    And the coverage section shows the "Runtime Generation Gaps" card containing "ze-rag"
+    And the coverage section shows the "Quarantine / Admission Failures" card containing "ze-scan"
+    And the coverage section shows the "Projection Limitations" card containing "ze-parse"
+
+  # Taxonomy report section rendering 39 renders nonzero scenario coverage gaps and empty threat-by-zone cells
+  Scenario: Taxonomy report section rendering 39 renders nonzero scenario coverage gaps and empty threat-by-zone cells
+    Given the run fixture contains scenario "scn-a" and scenario "scn-b"
+    And scenario "scn-a" lists OWASP LLM IDs "LLM01" and agentic threats "T6"
+    And scenario "scn-b" lists OWASP LLM IDs "LLM02" and agentic threats "T11"
+    And scenario "scn-a" traverses zones "input"
+    And scenario "scn-b" traverses zones "tool_execution"
+    When the HTML report is generated
+    Then the Scenarios section shows "2" Coverage Gaps
+    And the Scenarios section shows the "Threat x Zone Coverage" matrix with the cell "T6" x "Input Surfaces" counting "1"
+    And the Scenarios section shows the "Threat x Zone Coverage" matrix with the empty cell "T11" x "Input Surfaces"
+
+  # Taxonomy report section rendering 40 renders usage warnings and unavailable-metrics summaries for partial telemetry
+  Scenario: Taxonomy report section rendering 40 renders usage warnings and unavailable-metrics summaries for partial telemetry
+    Given the pipeline call log contains the accepted "candidate_filter" call with 100 prompt tokens, the rejected "capability_profile" call with 50 prompt tokens, and a "behavior" call with no duration telemetry
+    When the HTML report is generated
+    Then the report contains a "Pipeline LLM Calls" section
+    And the pipeline calls summary shows "3 call(s)" with "150 prompt tokens", "60 completion tokens", and "40ms total"
+    And the pipeline calls summary shows the unavailable-metrics warning for call "behavior"
+    And the pipeline calls summary shows the entry "Call 2: behavior (prompt_tokens=0, completion_tokens=0, duration_ms=unavailable)"

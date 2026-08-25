@@ -30,9 +30,16 @@ from . import given_profile
 from . import given_run
 from . import given_scenarios
 from . import given_threat_surface
+from . import then_atlas
+from . import then_behavior_spec
 from . import then_cards
+from . import then_coverage
+from . import then_diversity
+from . import then_matrix
 from . import then_panels
+from . import then_pipeline_calls
 from . import then_profile
+from . import then_scenarios
 from . import then_summary
 from . import then_threats
 
@@ -61,9 +68,16 @@ def register(api: Any) -> None:
     given_run.register(api)
     then_profile.register(api)
     then_threats.register(api)
+    then_coverage.register(api)
+    then_matrix.register(api)
+    then_diversity.register(api)
     then_cards.register(api)
+    then_scenarios.register(api)
     then_summary.register(api)
     then_panels.register(api)
+    then_behavior_spec.register(api)
+    then_atlas.register(api)
+    then_pipeline_calls.register(api)
 
 
 __all__ = ["FEATURE_ID", "register"]

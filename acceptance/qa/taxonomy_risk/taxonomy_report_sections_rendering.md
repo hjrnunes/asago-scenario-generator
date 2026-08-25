@@ -53,6 +53,13 @@ case needs, each listed in a `completed` manifest with matching hashes:
   absent for the omission case;
 - `calls.jsonl` (pipeline-level calls with `semantic_evidence`) for
   the pipeline-calls case;
+- `scenarios/calls.jsonl` (per-scenario call log; each line carries a
+  `scenario_id` plus `call`, usage metrics, prompts, and `success` /
+  `error`) for the per-scenario LLM-calls case;
+- `coverage-gaps.json` may also carry `coverage_summary` (with
+  `covered_feasible`, `policy_exclusions`, `selection_limitations`,
+  and the other category lists) and `coverage_plan` (with
+  `schema_version` and `targets`) for the categorized-summary case;
 - raw copies of a `.yaml` and a `.feature` file for the highlighting
   case (the report loads raw files from the manifest inventory the
   same way it loads every other artifact);
@@ -270,16 +277,20 @@ the Attack Tree tab:
 
 1. OR root `Gain access` with two leaf children carrying techniques
    `AML.T0015` and `AML.T0040`.
-2. A single leaf node `Exfiltrate data` with no children and no
+2. AND root `Open safe` with two leaf children carrying techniques
+   `AML.T0015` and `AML.T0040`.
+3. A single leaf node `Exfiltrate data` with no children and no
    technique.
-3. No `attack_tree.root`.
+4. No `attack_tree.root`.
 
 **Expected:** In 1, an OR gate summary (`gate-or`) contains exactly
 two `tree-leaf` nodes and both technique badges appear in
-`tree-meta` spans. In 2, exactly one leaf node renders and no gate
-summary (`gate-and`/`gate-or`) appears. In 3, no tree node markup
-(no `tree-leaf`, no nested `<details open>`) renders; only the
-`Goal:` line remains.
+`tree-meta` spans. In 2, an AND gate summary (`gate-and`) wraps the
+same two-leaf shape inside a `<details open>` gate node and both
+technique badges appear. In 3, exactly one leaf node renders and no
+gate summary (`gate-and`/`gate-or`) appears. In 4, no tree node
+markup (no `tree-leaf`, no nested `<details open>`) renders; only
+the `Goal:` line remains.
 
 ### QA-TRSR-16: unresolved tree resource IDs render honestly
 
@@ -328,7 +339,11 @@ crumbs render.
 1. Fixture: a completed run with no scenario artifacts.
 2. Run `report`.
 
-**Expected:** The Scenarios section shows `No scenarios generated.`
+**Expected:** The Scenarios section shows `No scenarios generated.`;
+the report contains no `Threat–Technique Matrix` section
+(`<h2>Threat&ndash;Technique Matrix</h2>` absent) and no `Actor
+Profile Distribution` section (its `sec-diversity` heading and
+sidebar link are absent).
 
 ### QA-TRSR-20: run summary funnel, stats, config
 
@@ -476,6 +491,118 @@ semantic draft: Rejected: invalid`.
 offline, and no generated acceptance IR, coverage, mutation workspaces,
 or temporary QA captures are newly tracked or staged.
 
+### QA-TRSR-31: behavior spec headers, tags, docstrings, And steps, zone
+badges
+
+1. Fixture: one scenario `scn-a` whose feature file carries a
+   `@smoke` tag, a `Scenario: Phish the desk` header, a
+   `Given access through (Zone input)` step, an `And escalate
+   privileges` step, and a triple-quoted docstring `requires a
+   compromised credential`.
+2. Run `report`.
+
+**Expected:** The Behavior Spec tab of `scn-a` renders the
+`Scenario:` keyword header with `Phish the desk`; the `And` step
+keyword with `escalate privileges`; the `Given` step text `access
+through (Zone input)` with a `zone-badge` for `Input Surfaces`
+(canonical zone `input`); a `step-docstring` div containing
+`requires a compromised credential`; and no `@smoke` tag text
+anywhere in the tab (tag lines are skipped).
+
+### QA-TRSR-32: per-scenario LLM call entries
+
+1. Fixture: one scenario `scn-a`; `scenarios/calls.jsonl` with two
+   entries tagged `scenario_id: scn-a`: `actor_profile` (100 prompt,
+   40 completion, 250ms, success) and `behavior_spec` (30 prompt, 10
+   completion, 80ms, `success: false`, `error: timeout`), each with
+   system and user prompts.
+2. Run `report`.
+
+**Expected:** The LLM Calls tab of `scn-a` shows the summaries
+`Call 0: Actor Profile (100 prompt / 40 completion tokens, 250ms)`
+and `Call 1: Behavior Spec (30 prompt / 10 completion tokens, 80ms)
+FAILED: timeout`; the system and user prompts render in
+`call-log-pre` blocks.
+
+### QA-TRSR-33: categorized coverage summary, plan, not-confirmed
+universe
+
+1. Fixture: coverage-gaps.json with empty gap lists, a
+   `coverage_universe` whose `completeness` is absent (or
+   `not_applicable`) and with no `evidence_refs`; `coverage_summary`
+   with `covered_feasible: [AP-T6-01]`, one `selection_limitations`
+   item (`ze-query`, reason `selection_limitation`, detail
+   `candidate queue saturated`, candidate_ids `[cand-42]`), one
+   `policy_exclusions` item (`ze-license`, reason `out_of_scope`);
+   `coverage_plan` with `schema_version: 1` and one target
+   (`ze-query`, primary candidate `cand-42`, state `planned`,
+   ordered choices `cand-42`, `cand-7`).
+2. Run `report`.
+
+**Expected:** The `Coverage Analysis` badge is `Known Targets
+Covered`; the Entry Points card shows the not-confirmed empty
+message (`All identified feasible entry points have scenario
+coverage; inventory completeness is not confirmed.`) alongside the
+three standard covered messages; the summary renders a `Covered
+Feasible Targets` card containing `AP-T6-01`; a `Selection
+Limitations` card with entry `ze-query`, reason span `cap overflow
+(coverage preserved)`, detail span `candidate queue saturated`, and
+candidate code `cand-42`; a `Policy Exclusions` card with entry
+`ze-license` and reason span `out of scope`; a `Coverage Plan (schema
+v1)` table row for `ze-query` with primary candidate `cand-42` and
+state `planned`; the universe card shows inventory completeness
+`Not Applicable (Inferred Partial)` and the message `No
+operator-confirmed evidence`.
+
+### QA-TRSR-34: run summary outcome summary and coverage gaps card
+
+1. Fixture: two scenarios with composites `0.85` and `0.35`; a
+   run manifest with the QA-TRSR-20 funnel; coverage-gaps.json with
+   1 uncovered entry point, 1 uncovered zone, 2 uncovered threats,
+   and no uncovered attack patterns.
+2. Run `report`.
+
+**Expected:** The Run Summary `Outcome Summary` card shows `1 High
+Priority`, `0 Medium Priority`, `1 Low Priority`; the coverage-gaps
+card inside the summary shows `4 Coverage Gaps` (entry points +
+zones + threats; attack patterns are excluded by the generator).
+
+### QA-TRSR-35: scenarios-section sub-charts and filters
+
+1. Fixture: `scn-a` (threat `[T6]`, zones traversed
+   `[input, tool_execution]`, narrative entry point `ze-query`,
+   composite `0.72` with all six signals) and `scn-b` (threat
+   `[T6]`, zones traversed `[input]`, narrative entry point
+   `ze-rag`, composite `0.35` with all six signals); a run manifest
+   with `scenarios_generated: 4`.
+2. Run `report`.
+
+**Expected:** The `Priority Signal Decomposition` chart shows a
+segment tooltip `Risk Impact: critical` (recorded-case values, not
+title-cased); the `Threat x Zone Coverage` matrix shows the zone
+headers `Input Surfaces` and `Tool Execution` and a `T6 x Input
+Surfaces` cell counting `2`; the `Entry Point Distribution` lists
+`ze-query` (1) and `ze-rag` (1); the filter bar shows a Threats chip
+containing `T6`, Zones chips `Input Surfaces` and `Tool Execution`,
+and Priority chips `High`, `Medium`, `Low`; the Scenarios dashboard
+`In Report` stat carries the sublabel `of 4 generated`; the `scn-a`
+card's Narrative tab shows the zone crumbs `input` and
+`tool_execution` joined by an arrow.
+
+### QA-TRSR-36: conflicting corpus claims refuse the report command
+
+1. Fixture: a completed run with two scenarios whose
+   `validation.semantic.corpus_claim_applicability` records conflict
+   (same category, differing `status` or `evidence`).
+2. Run `report` and capture exit status and stderr; confirm no
+   `report.html` is written.
+
+**Expected:** Exit non-zero, `report.html` absent, and stderr names
+the conflicting corpus-claim category. This failure path cannot be
+driven through the acceptance harness (its When step raises instead
+of asserting), so the pin is CLI-level only, mirroring
+QA-TRSR-21's refusal boundary.
+
 ## Notes and pinned interpretations
 
 - Fixture zone codes are canonical (`input`, `reasoning`,
@@ -533,6 +660,41 @@ or temporary QA captures are newly tracked or staged.
   generator requires, not report content.
 - Raw Data panels are found by the file-name tab button, not by
   index, so insertion order in the fixture is not asserted.
+- The Scenarios dashboard `In Report` stat shows `of N generated`
+  only when the manifest's `scenarios_generated` differs from the
+  rendered count; the Run Summary funnel `In Report` always equals
+  the rendered count.
+- The Run Summary coverage-gaps card counts entry-point + zone +
+  threat gaps only (the generator drops attack-pattern gaps), while
+  the Coverage Analysis badge sums all four lists and the Scenarios
+  dashboard `Coverage Gaps` stat counts un-covered threat×zone
+  combinations — three different numbers that must not be
+  normalized against each other in assertions.
+- Coverage gap attribution codes render through a human-readable
+  map: `selection_limitation` → `cap overflow (coverage preserved)`,
+  `out_of_scope` → `out of scope`. Reason and detail spans both use
+  the `coverage-reason` class; candidate IDs render as `candidate-id`
+  code chips. Summary-category cards render only when their list is
+  non-empty.
+- Priority Signal Decomposition segment tooltips render the recorded
+  signal values verbatim (not title-cased): `Risk Impact: critical`.
+- Behavior-spec rendering skips `@` tag lines, renders
+  `Feature:`/`Scenario:` header lines, renders triple-quoted lines as
+  `step-docstring` divs, and turns parenthesized `(Zone <name>)` step
+  text into a `zone-badge` using canonical zone-name resolution
+  (`(Zone input)` → `Input Surfaces`); `And`/`But`/`*` steps use
+  their own keyword classes.
+- Per-scenario call-log summaries follow the same
+  `N prompt / M completion tokens, Xms` layout as pipeline calls;
+  failed calls append ` FAILED: <error>`.
+- Residual unpinned surfaces (unit-tested only, not e2e-asserted):
+  hover-only tooltips (Sankey node tips, threat/attack-pattern/
+  technique tooltips), per-scenario call anomaly badges
+  (`⚠ slow` / `⚠ high tokens`, which require 3+ calls with an
+  outlier), raw Gherkin highlighting keyword variants beyond
+  `Feature:`/`Given`, the pipeline-call `semantic_evidence.warnings`
+  list, and `build_full_page`'s unconditional sidebar links. A later
+  slice may pin these.
 
 ## Open questions (report contract ambiguities)
 
@@ -564,6 +726,11 @@ or temporary QA captures are newly tracked or staged.
   provide a committed canonical fixture pair (profile entry + tree
   reference) in `data/` for QA reuse, or accept the unresolved-path
   pin as sufficient for this slice.
+- **Run Summary coverage card gap basis:** the card counts entry
+  point, zone, and threat gaps but silently drops attack-pattern
+  gaps, while the Coverage Analysis badge sums all four lists.
+  Decide whether the card should include attack-pattern gaps (or
+  document why it excludes them).
 
 ## Module layout note (architect)
 

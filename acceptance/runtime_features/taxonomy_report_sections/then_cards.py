@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 from runtime_world import World
-from ._helpers import _html, _card_region, _section_region, _stats, _resolve
+from ._helpers import _html, _card_region, _section_region, _resolve
 
 
 def _h_ts_signals_grid(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -144,6 +144,13 @@ def _h_ts_attack_tree_tab(world: World, text: str, examples: dict) -> tuple[bool
             and "AML.T0015" in region
             and "AML.T0040" in region
         )
+    elif "renders an AND gate summary" in rendering:
+        ok = (
+            region.count('class="tree-leaf"') == 2
+            and "gate-and" in region
+            and "AML.T0015" in region
+            and "AML.T0040" in region
+        )
     elif "renders exactly one leaf node and no gate summary" in rendering:
         ok = (
             region.count('class="tree-leaf"') == 1
@@ -182,39 +189,6 @@ def _h_ts_leaf_meta(world: World, text: str, examples: dict) -> tuple[bool, str]
     html = _html(world)
     ok = meta in html and f"<code>{code}</code>" in html
     return _resolve(ok, f"leaf meta={meta} code={code}")
-
-
-def _h_ts_dashboard_stats(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle: the Scenarios section shows the dashboard stats "N" In Report, "H" High Priority, "M" Medium Priority, and "L" Low Priority."""
-    match = re.search(
-        r'the Scenarios section shows the dashboard stats "(\d+)" In Report, '
-        r'"(\d+)" High Priority, "(\d+)" Medium Priority, and "(\d+)" Low Priority',
-        text,
-    )
-    if not match:
-        return False, f"Could not parse dashboard assertion: {text}"
-    expected = {
-        "In Report": int(match.group(1)),
-        "High Priority": int(match.group(2)),
-        "Medium Priority": int(match.group(3)),
-        "Low Priority": int(match.group(4)),
-    }
-    region = _section_region(_html(world), "sec-scenarios")
-    stats = _stats(region)
-    ok = all(stats.get(label) == count for label, count in expected.items())
-    return _resolve(ok, f"dashboard stats={stats}")
-
-
-def _h_ts_coverage_gaps_stat(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the Scenarios section shows "N" Coverage Gaps."""
-    match = re.search(r'the Scenarios section shows "(\d+)" Coverage Gaps', text)
-    if not match:
-        return False, f"Could not parse coverage-gaps stat: {text}"
-    region = _section_region(_html(world), "sec-scenarios")
-    stats = _stats(region)
-    return _resolve(stats.get("Coverage Gaps") == int(match.group(1)), f"stats={stats}")
 
 
 def _h_ts_scenario_card_title(
@@ -289,6 +263,22 @@ def _h_ts_no_scenarios_placeholder(
     return _resolve(ok, "scenarios placeholder missing")
 
 
+def _h_ts_zone_crumbs(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Handle: the scenario card for "S" shows the zone crumbs "Z1" and "Z2"."""
+    match = re.search(
+        r'the scenario card for "([^"]+)" shows the zone crumbs "([^"]+)" '
+        r'and "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse zone-crumbs assertion: {text}"
+    sid, zone1, zone2 = match.groups()
+    region = _card_region(_html(world), sid)
+    ok = 'class="zone-crumb"' in region and f">{zone1}</span>" in region
+    ok = ok and f">{zone2}</span>" in region
+    return _resolve(ok, f"card {sid} zone crumbs {zone1} {zone2}")
+
+
 def register(api: Any) -> None:
     # --- Scenario card Then steps ---
     api.register(
@@ -347,16 +337,6 @@ def register(api: Any) -> None:
         source_order=8040,
     )
     api.register(
-        'the Scenarios section shows the dashboard stats "(\\d+)" In Report, "(\\d+)" High Priority, "(\\d+)" Medium Priority, and "(\\d+)" Low Priority',
-        _h_ts_dashboard_stats,
-        source_order=8041,
-    )
-    api.register(
-        'the Scenarios section shows "(\\d+)" Coverage Gaps',
-        _h_ts_coverage_gaps_stat,
-        source_order=8042,
-    )
-    api.register(
         'the report contains a scenario card for "([^"]+)" with the title "([^"]+)"',
         _h_ts_scenario_card_title,
         source_order=8043,
@@ -385,4 +365,9 @@ def register(api: Any) -> None:
         'the report contains a Scenarios section showing "No scenarios generated."',
         _h_ts_no_scenarios_placeholder,
         source_order=8048,
+    )
+    api.register(
+        'the scenario card for "([^"]+)" shows the zone crumbs "([^"]+)" and "([^"]+)"',
+        _h_ts_zone_crumbs,
+        source_order=8094,
     )

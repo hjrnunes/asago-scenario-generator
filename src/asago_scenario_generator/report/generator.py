@@ -6,6 +6,10 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from asago_scenario_generator.models.scenario import (
+    CorpusClaimApplicability,
+    CorpusClaimCategory,
+)
 from asago_scenario_generator.report.data import ReportData, load_report_data
 from asago_scenario_generator.report.scorecard import build_scorecard_section
 from asago_scenario_generator.report.template import (
@@ -24,6 +28,137 @@ from asago_scenario_generator.report.template import (
 )
 
 logger = logging.getLogger(__name__)
+
+_CANONICAL_CLAIM_CATEGORIES = [
+    CorpusClaimCategory.entry_points,
+    CorpusClaimCategory.tool_inventory,
+]
+"""Deterministic output order for reconciled corpus claim categories."""
+
+
+def _require_claim_value(
+    value: Any,
+    message: str,
+    *,
+    allowed_types: tuple[type, ...],
+) -> Any:
+    """Require a truthy value of the expected container type, else raise."""
+    if not value or not isinstance(value, allowed_types):
+        raise ValueError(message)
+    return value
+
+
+def _extract_claim_records(idx: int, scenario: dict[str, Any]) -> list[Any]:
+    """Pull and validate the corpus claim records of one scenario."""
+    val = _require_claim_value(
+        scenario.get("validation"),
+        f"Scenario {idx} is missing a validation block for "
+        f"corpus claim reconciliation.",
+        allowed_types=(dict,),
+    )
+    semantic = _require_claim_value(
+        val.get("semantic"),
+        f"Scenario {idx} is missing a semantic validation block "
+        f"for corpus claim reconciliation.",
+        allowed_types=(dict,),
+    )
+    raw_claims = _require_claim_value(
+        semantic.get("corpus_claim_applicability"),
+        f"Scenario {idx} is missing corpus_claim_applicability "
+        f"records for reconciliation.",
+        allowed_types=(list,),
+    )
+    try:
+        return [CorpusClaimApplicability.model_validate(r) for r in raw_claims]
+    except Exception as exc:
+        raise ValueError(
+            f"Scenario {idx} has malformed corpus_claim_applicability records: {exc}"
+        ) from exc
+
+
+def _claim_index_by_category(
+    idx: int,
+    records: list[CorpusClaimApplicability],
+) -> dict[str, CorpusClaimApplicability]:
+    """Index validated records by category, rejecting duplicates."""
+    by_cat: dict[str, CorpusClaimApplicability] = {}
+    for r in records:
+        if r.category.value in by_cat:
+            raise ValueError(
+                f"Scenario {idx} has duplicate corpus claim category "
+                f"'{r.category.value}'."
+            )
+        by_cat[r.category.value] = r
+    return by_cat
+
+
+def _require_canonical_categories(
+    index: dict[str, CorpusClaimApplicability],
+) -> None:
+    """Require every canonical category to be present in the index."""
+    for cat in _CANONICAL_CLAIM_CATEGORIES:
+        if cat.value not in index:
+            raise ValueError(
+                f"Scenario 0 is missing corpus claim category "
+                f"'{cat.value}' during reconciliation."
+            )
+
+
+def _assert_claim_pair_consistent(
+    first: dict[str, CorpusClaimApplicability],
+    second: dict[str, CorpusClaimApplicability],
+    cat_value: str,
+    idx: int,
+) -> None:
+    """Require identical status, reason, and evidence for one category."""
+    r1 = first[cat_value]
+    r2 = second[cat_value]
+    if r1.status != r2.status or r1.reason != r2.reason:
+        raise ValueError(
+            f"Corpus claim category '{cat_value}' conflicts between "
+            f"scenario 0 (status={r1.status.value}, "
+            f"reason={r1.reason!r}) and scenario {idx} "
+            f"(status={r2.status.value}, reason={r2.reason!r})."
+        )
+    if sorted(r1.evidence) != sorted(r2.evidence):
+        raise ValueError(
+            f"Corpus claim category '{cat_value}' evidence conflicts "
+            f"between scenario 0 and scenario {idx}."
+        )
+
+
+def _reconcile_scenario_categories(
+    first: dict[str, CorpusClaimApplicability],
+    second: dict[str, CorpusClaimApplicability],
+    idx: int,
+) -> None:
+    """Require one scenario's claims to match the canonical scenario."""
+    for cat in _CANONICAL_CLAIM_CATEGORIES:
+        cat_val = cat.value
+        if cat_val not in second:
+            raise ValueError(
+                f"Scenario {idx} is missing corpus claim category "
+                f"'{cat_val}' during reconciliation."
+            )
+        if cat_val not in first:
+            raise ValueError(
+                f"Scenario 0 is missing corpus claim category "
+                f"'{cat_val}' during reconciliation."
+            )
+        _assert_claim_pair_consistent(first, second, cat_val, idx)
+
+
+def _canonical_claim_json(
+    index: dict[str, CorpusClaimApplicability],
+    cat: CorpusClaimCategory,
+) -> dict[str, Any]:
+    """Return the canonical claim dict for one category, or raise."""
+    r = index.get(cat.value)
+    if r is None:
+        raise ValueError(
+            f"Missing corpus claim category '{cat.value}' in reconciled records."
+        )
+    return r.model_dump(mode="json")
 
 
 def _reconcile_corpus_claims(
@@ -44,117 +179,81 @@ def _reconcile_corpus_claims(
     Raises:
         ValueError: On missing, malformed, duplicate, or conflicting records.
     """
-    from asago_scenario_generator.models.scenario import (
-        CorpusClaimApplicability,
-        CorpusClaimCategory,
-    )
-
     if not scenarios:
         return []
 
-    # Collect validated records from every scenario.
-    per_scenario: list[list[CorpusClaimApplicability]] = []
-    for idx, s in enumerate(scenarios):
-        val = s.get("validation")
-        if not val or not isinstance(val, dict):
-            raise ValueError(
-                f"Scenario {idx} is missing a validation block for "
-                f"corpus claim reconciliation."
-            )
-        semantic = val.get("semantic")
-        if not semantic or not isinstance(semantic, dict):
-            raise ValueError(
-                f"Scenario {idx} is missing a semantic validation block "
-                f"for corpus claim reconciliation."
-            )
-        raw_claims = semantic.get("corpus_claim_applicability")
-        if not raw_claims or not isinstance(raw_claims, list):
-            raise ValueError(
-                f"Scenario {idx} is missing corpus_claim_applicability "
-                f"records for reconciliation."
-            )
-        # Validate each record through Pydantic to enforce status-appropriate
-        # payloads and category completeness.
-        try:
-            records = [CorpusClaimApplicability.model_validate(r) for r in raw_claims]
-        except Exception as exc:
-            raise ValueError(
-                f"Scenario {idx} has malformed corpus_claim_applicability "
-                f"records: {exc}"
-            ) from exc
-        per_scenario.append(records)
+    per_scenario = [_extract_claim_records(idx, s) for idx, s in enumerate(scenarios)]
+    first_by_cat = _claim_index_by_category(0, per_scenario[0])
+    _require_canonical_categories(first_by_cat)
 
-    # Index records by category for cross-scenario comparison.
-    canonical_order = [
-        CorpusClaimCategory.entry_points,
-        CorpusClaimCategory.tool_inventory,
+    for idx, records in enumerate(per_scenario[1:], 1):
+        by_cat = _claim_index_by_category(idx, records)
+        _reconcile_scenario_categories(first_by_cat, by_cat, idx)
+
+    return [
+        _canonical_claim_json(first_by_cat, cat) for cat in _CANONICAL_CLAIM_CATEGORIES
     ]
 
-    # Build a canonical representation from the first scenario.
-    first = per_scenario[0]
-    first_by_cat: dict[str, CorpusClaimApplicability] = {}
-    for r in first:
-        if r.category.value in first_by_cat:
-            raise ValueError(
-                f"Scenario 0 has duplicate corpus claim category '{r.category.value}'."
-            )
-        first_by_cat[r.category.value] = r
 
-    # Verify the first scenario has both required categories.
-    for cat in canonical_order:
-        if cat.value not in first_by_cat:
-            raise ValueError(
-                f"Scenario 0 is missing corpus claim category "
-                f"'{cat.value}' during reconciliation."
-            )
+def _priority_breakdown(
+    scenarios: list[dict[str, Any]],
+) -> tuple[int, int, int]:
+    """Count scenarios into HIGH / MEDIUM / LOW priority buckets."""
+    high_count = 0
+    medium_count = 0
+    low_count = 0
+    for s in scenarios:
+        composite = s.get("priority", {}).get("composite", 0)
+        if composite >= 0.7:
+            high_count += 1
+        elif composite >= 0.4:
+            medium_count += 1
+        else:
+            low_count += 1
+    return high_count, medium_count, low_count
 
-    # Compare all subsequent scenarios against the first.
-    for idx, records in enumerate(per_scenario[1:], 1):
-        by_cat: dict[str, CorpusClaimApplicability] = {}
-        for r in records:
-            if r.category.value in by_cat:
-                raise ValueError(
-                    f"Scenario {idx} has duplicate corpus claim category "
-                    f"'{r.category.value}'."
-                )
-            by_cat[r.category.value] = r
-        for cat in canonical_order:
-            cat_val = cat.value
-            if cat_val not in by_cat:
-                raise ValueError(
-                    f"Scenario {idx} is missing corpus claim category "
-                    f"'{cat_val}' during reconciliation."
-                )
-            if cat_val not in first_by_cat:
-                raise ValueError(
-                    f"Scenario 0 is missing corpus claim category "
-                    f"'{cat_val}' during reconciliation."
-                )
-            r1 = first_by_cat[cat_val]
-            r2 = by_cat[cat_val]
-            if r1.status != r2.status or r1.reason != r2.reason:
-                raise ValueError(
-                    f"Corpus claim category '{cat_val}' conflicts between "
-                    f"scenario 0 (status={r1.status.value}, "
-                    f"reason={r1.reason!r}) and scenario {idx} "
-                    f"(status={r2.status.value}, reason={r2.reason!r})."
-                )
-            if sorted(r1.evidence) != sorted(r2.evidence):
-                raise ValueError(
-                    f"Corpus claim category '{cat_val}' evidence conflicts "
-                    f"between scenario 0 and scenario {idx}."
-                )
 
-    # Return in deterministic category order.
-    result: list[dict[str, Any]] = []
-    for cat in canonical_order:
-        r = first_by_cat.get(cat.value)
-        if r is None:
-            raise ValueError(
-                f"Missing corpus claim category '{cat.value}' in reconciled records."
-            )
-        result.append(r.model_dump(mode="json"))
-    return result
+def _coverage_gaps_count(coverage_data: dict[str, Any]) -> int | None:
+    """Total uncovered entry points, zones, and threats, or None."""
+    if not coverage_data:
+        return None
+    gaps = coverage_data.get("coverage_gaps", {})
+    return (
+        len(gaps.get("uncovered_entry_points", []))
+        + len(gaps.get("uncovered_zones", []))
+        + len(gaps.get("uncovered_threats", []))
+    )
+
+
+def _sorted_scenarios(scenarios: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return scenarios sorted by composite priority, descending."""
+    return sorted(
+        scenarios,
+        key=lambda s: s.get("priority", {}).get("composite", 0),
+        reverse=True,
+    )
+
+
+def _run_summary_section(
+    manifest_data: dict[str, Any],
+    scenarios: list[dict[str, Any]],
+    *,
+    high_count: int,
+    medium_count: int,
+    low_count: int,
+    coverage_gaps: int | None,
+) -> str:
+    """Build the run summary HTML, or empty when no manifest is present."""
+    if not manifest_data:
+        return ""
+    return build_run_summary_section(
+        manifest_data,
+        len(scenarios),
+        high_count=high_count,
+        medium_count=medium_count,
+        low_count=low_count,
+        coverage_gaps=coverage_gaps,
+    )
 
 
 def generate_report(report_data: ReportData, output_dir: Path) -> Path:
@@ -175,7 +274,6 @@ def generate_report(report_data: ReportData, output_dir: Path) -> Path:
     # Unpack data for readability
     profile_data = report_data.profile_data
     ts_data = report_data.threat_surface_data
-    scenarios = list(report_data.scenarios)  # copy so sort is non-destructive
     feature_files = report_data.feature_files
     call_logs = report_data.call_logs
     pipeline_call_logs = report_data.pipeline_call_logs
@@ -185,47 +283,21 @@ def generate_report(report_data: ReportData, output_dir: Path) -> Path:
     use_case_text = report_data.use_case_text
     raw_files = report_data.raw_files
 
-    # Sort scenarios by priority (descending)
-    scenarios.sort(
-        key=lambda s: s.get("priority", {}).get("composite", 0),
-        reverse=True,
-    )
+    # Sort scenarios by priority (descending) — non-destructive copy
+    scenarios = _sorted_scenarios(report_data.scenarios)
 
-    # --- Compute priority breakdown for run summary ---
-    high_count = 0
-    medium_count = 0
-    low_count = 0
-    for s in scenarios:
-        composite = s.get("priority", {}).get("composite", 0)
-        if composite >= 0.7:
-            high_count += 1
-        elif composite >= 0.4:
-            medium_count += 1
-        else:
-            low_count += 1
-
-    # Coverage gaps count (from coverage-gaps.json if available)
-    coverage_gaps_count: int | None = None
-    if coverage_data:
-        gaps = coverage_data.get("coverage_gaps", {})
-        coverage_gaps_count = (
-            len(gaps.get("uncovered_entry_points", []))
-            + len(gaps.get("uncovered_zones", []))
-            + len(gaps.get("uncovered_threats", []))
-        )
+    # --- Compute priority breakdown and coverage gaps for run summary ---
+    high_count, medium_count, low_count = _priority_breakdown(scenarios)
+    coverage_gaps_count = _coverage_gaps_count(coverage_data)
 
     # --- Build HTML sections ---
-    run_summary_html = (
-        build_run_summary_section(
-            manifest_data,
-            len(scenarios),
-            high_count=high_count,
-            medium_count=medium_count,
-            low_count=low_count,
-            coverage_gaps=coverage_gaps_count,
-        )
-        if manifest_data
-        else ""
+    run_summary_html = _run_summary_section(
+        manifest_data,
+        scenarios,
+        high_count=high_count,
+        medium_count=medium_count,
+        low_count=low_count,
+        coverage_gaps=coverage_gaps_count,
     )
     methodology_html = build_methodology_section()
     use_case_html = build_use_case_section(use_case_text) if use_case_text else ""

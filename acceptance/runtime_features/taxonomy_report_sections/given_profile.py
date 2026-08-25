@@ -7,6 +7,13 @@ from typing import Any
 from runtime_world import World
 from runtime_features.taxonomy_report import _split_csv
 
+# Profile key names for the boolean flag steps (feature vocabulary -> model key).
+_PROFILE_FLAG_KEYS: dict[str, str] = {
+    "memory": "has_persistent_memory",
+    "multi-agent": "multi_agent",
+    "hitl": "hitl",
+}
+
 
 def _h_profile_zones(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the capability profile declares active zones "A,B"."""
@@ -49,13 +56,8 @@ def _h_profile_flags(world: World, text: str, examples: dict) -> tuple[bool, str
     if not match:
         return False, f"Could not parse flag step: {text}"
     name1, state1, name2, state2, confidence = match.groups()
-    flag_map = {
-        "memory": "has_persistent_memory",
-        "multi-agent": "multi_agent",
-        "hitl": "hitl",
-    }
-    world.trpt_profile_data[flag_map[name1.lower()]] = state1 == "on"
-    world.trpt_profile_data[flag_map[name2.lower()]] = state2 == "on"
+    world.trpt_profile_data[_PROFILE_FLAG_KEYS[name1.lower()]] = state1 == "on"
+    world.trpt_profile_data[_PROFILE_FLAG_KEYS[name2.lower()]] = state2 == "on"
     world.trpt_profile_data["confidence"] = confidence
     return True, ""
 

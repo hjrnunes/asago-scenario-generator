@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 from typing import Any
+
+from asago_scenario_generator.html_utils import escape_html as _esc
 from runtime_world import World
 from ._helpers import _html, _section_region, _resolve
 
@@ -38,8 +40,6 @@ def _h_ts_profile_zone_chips(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: the capability profile shows an active zone chip "A" and an inactive zone chip "I"."""
-    from asago_scenario_generator.html_utils import escape_html as _esc
-
     match = re.search(
         r'the capability profile shows an active zone chip "([^"]+)" and an '
         r'inactive zone chip "([^"]+)"',

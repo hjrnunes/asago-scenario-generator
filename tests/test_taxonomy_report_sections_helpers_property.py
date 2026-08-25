@@ -41,7 +41,7 @@ from runtime_features.taxonomy_report_sections._helpers import (  # noqa: E402
     _stats,
     _visible,
 )
-from runtime_features.taxonomy_report_sections.then_threats import (  # noqa: E402
+from runtime_features.taxonomy_report_sections.then_coverage import (  # noqa: E402
     _coverage_card_statuses,
 )
 
