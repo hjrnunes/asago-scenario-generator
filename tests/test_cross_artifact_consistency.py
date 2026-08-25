@@ -774,6 +774,24 @@ Feature: Test
         zones = _extract_gherkin_zones_for_validation(gherkin)
         assert "foobar" not in zones
 
+    def test_hash_zone_display_name_token(self):
+        """Display-label tokens resolve to the canonical zone name."""
+        gherkin = "Given a prompt\n# Zone Planning\nWhen the system reasons"
+        zones = _extract_gherkin_zones_for_validation(gherkin)
+        assert zones == {"reasoning"}
+
+    def test_hash_zone_numeric_token(self):
+        """Numeric zone annotations resolve via the 1-based name table."""
+        gherkin = "Given a prompt\n# Zone 2\nWhen the system reasons"
+        zones = _extract_gherkin_zones_for_validation(gherkin)
+        assert zones == {"reasoning"}
+
+    def test_hash_zone_unknown_token_ignored(self):
+        """Unknown hash-zone tokens match neither names nor display labels."""
+        gherkin = "Given a prompt\n# Zone foobar\nWhen the system reasons"
+        zones = _extract_gherkin_zones_for_validation(gherkin)
+        assert zones == set()
+
 
 class TestZoneOmissionTree:
     """Integration tests: zone_omission_tree via validate_scenario_semantics."""
@@ -1066,8 +1084,7 @@ Feature: Attack
             "zone_coverage_dropout",
         }
         assert not any(
-            violation.rule in boundary_zone_rules
-            and "outside" in violation.message
+            violation.rule in boundary_zone_rules and "outside" in violation.message
             for violation in envelope.validation.semantic.violations
         )
 

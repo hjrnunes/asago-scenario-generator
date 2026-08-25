@@ -118,6 +118,11 @@ class TestFinalizationAdaptersDependInward:
         (
             "finalization_admission.py",
             "finalization_gates.py",
+            "finalization_gate_contracts.py",
+            "finalization_parsimony.py",
+            "finalization_prebehavior.py",
+            "finalization_runtime.py",
+            "finalization_snapshots.py",
             *_PERSISTENCE_ADAPTERS,
         ),
     )
@@ -138,6 +143,10 @@ class TestFinalizationAdaptersDependInward:
         (
             "finalization_admission.py",
             "finalization_gates.py",
+            "finalization_gate_contracts.py",
+            "finalization_parsimony.py",
+            "finalization_prebehavior.py",
+            "finalization_runtime.py",
             "persistence_models.py",
             "persistence_artifacts.py",
             "persistence_decisions.py",
