@@ -36,8 +36,14 @@ from asago_scenario_generator.models.attack_tree import (
 )
 from asago_scenario_generator.pipeline.tree_utils import collect_tree_zones
 from asago_scenario_generator.models.scenario import (
+    CorpusClaimApplicability,
+    CorpusClaimCategory,
+    CorpusClaimStatus,
+    PhantomValidation,
+    PhantomViolationRecord,
     SemanticValidation,
     SemanticViolation,
+    StructuralValidation,
     ValidationBlock,
 )
 from asago_scenario_generator.pipeline.technique_scopes import (
@@ -369,6 +375,25 @@ def _extract_gherkin_outcome_lines(gherkin_text: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _first_pattern_match(patterns: list[re.Pattern[str]], text: str) -> str | None:
+    """Return the first pattern match string, if any."""
+    for pattern in patterns:
+        m = pattern.search(text)
+        if m:
+            return m.group(0)
+    return None
+
+
+def _profile_has_admin_capability(profile: CapabilityProfile) -> bool:
+    """True when the profile declares admin/role-management capability."""
+    admin_entry = any(
+        "admin" in ep.name.lower() or "role" in ep.name.lower()
+        for ep in profile.entry_points
+    )
+    admin_kc = any(code.startswith(("KC6.4", "KC6.3")) for code in profile.kc_subcodes)
+    return admin_entry or admin_kc
+
+
 def _check_privilege_escalation(
     text: str,
     profile: CapabilityProfile,
@@ -382,20 +407,23 @@ def _check_privilege_escalation(
     """
     # If the profile explicitly declares admin-level entry points or
     # relevant KC subcodes, privilege references are legitimate.
-    admin_entry = any(
-        "admin" in ep.name.lower() or "role" in ep.name.lower()
-        for ep in profile.entry_points
-    )
     # KC6.4 = identity / auth management; KC6.3 = database (may include role tables)
-    admin_kc = any(code.startswith(("KC6.4", "KC6.3")) for code in profile.kc_subcodes)
-    if admin_entry or admin_kc:
+    if _profile_has_admin_capability(profile):
         return None
 
-    for pattern in _PRIVILEGE_ESCALATION_PATTERNS:
-        m = pattern.search(text)
-        if m:
-            return m.group(0)
-    return None
+    return _first_pattern_match(_PRIVILEGE_ESCALATION_PATTERNS, text)
+
+
+def _profile_has_credential_capability(profile: CapabilityProfile) -> bool:
+    """True when the profile declares raw HTTP credential handling."""
+    api_kc = any(
+        code.startswith(("KC6.1.2", "KC6.1.3")) for code in profile.kc_subcodes
+    )
+    api_entry = any(
+        "api" in ep.name.lower() or "http" in ep.name.lower()
+        for ep in profile.entry_points
+    )
+    return api_kc or api_entry
 
 
 def _check_credential_exposure(
@@ -412,21 +440,38 @@ def _check_credential_exposure(
     """
     # If profile declares extensive API access that handles auth, or
     # entry points involving APIs/HTTP, credential references may be legit.
-    api_kc = any(
-        code.startswith(("KC6.1.2", "KC6.1.3")) for code in profile.kc_subcodes
-    )
-    api_entry = any(
-        "api" in ep.name.lower() or "http" in ep.name.lower()
-        for ep in profile.entry_points
-    )
-    if api_kc or api_entry:
+    if _profile_has_credential_capability(profile):
         return None
 
-    for pattern in _CREDENTIAL_EXPOSURE_PATTERNS:
-        m = pattern.search(text)
-        if m:
-            return m.group(0)
-    return None
+    return _first_pattern_match(_CREDENTIAL_EXPOSURE_PATTERNS, text)
+
+
+def _profile_has_code_execution(profile: CapabilityProfile) -> bool:
+    """True when the profile declares code-execution capability."""
+    return any(code.startswith(("KC6.2.2", "KC6.5")) for code in profile.kc_subcodes)
+
+
+def _code_execution_field_skipped(field_name: str, zone: str) -> bool:
+    """True when the field describes attacker-side behavior by definition."""
+    if field_name == "action":
+        return True
+    if field_name == "tree_label" and zone == "input":
+        return True
+    return False
+
+
+def _checked_code_execution_text(text: str, field_name: str) -> str:
+    """Gherkin outcome lines only; Given/When/And describe attacker actions."""
+    if field_name == "gherkin":
+        text = _extract_gherkin_outcome_lines(text)
+    return text
+
+
+def _attacker_context_match(text: str, match: re.Match[str]) -> bool:
+    """True when a tree/gherkin match is preceded by attacker-referencing words."""
+    start = max(0, match.start() - 20)
+    preceding = text[start : match.start()].lower()
+    return bool(_ATTACKER_CONTEXT_RE.search(preceding))
 
 
 def _check_code_execution(
@@ -459,37 +504,30 @@ def _check_code_execution(
     """
     # Action fields describe what the ATTACKER does — code references
     # there are expected behavior, not a phantom system capability.
-    if field_name == "action":
-        return None
-
     # Input-zone tree labels describe attacker injection — code references
     # describe attacker tooling, not system capabilities.
-    if field_name == "tree_label" and zone == "input":
+    if _code_execution_field_skipped(field_name, zone):
         return None
 
-    has_code_exec = any(
-        code.startswith(("KC6.2.2", "KC6.5")) for code in profile.kc_subcodes
-    )
-    if has_code_exec:
+    if _profile_has_code_execution(profile):
         return None
 
     # For Gherkin, only check Then/But/* lines (system outcome assertions).
     # Given/When/And lines describe attacker actions (3mal).
-    if field_name == "gherkin":
-        text = _extract_gherkin_outcome_lines(text)
-        if not text:
-            return None
+    text = _checked_code_execution_text(text, field_name)
+    if not text:
+        return None
 
+    return _code_execution_match(text, field_name)
+
+
+def _code_execution_match(text: str, field_name: str) -> str | None:
+    """First code-execution pattern match not attributed to attacker context."""
     for pattern in _CODE_EXECUTION_PATTERNS:
         m = pattern.search(text)
-        if m:
-            # For tree labels (no action/effect split),
-            # skip matches preceded by attacker-referencing words.
-            if field_name in ("tree_label", "gherkin"):
-                start = max(0, m.start() - 20)
-                preceding = text[start : m.start()].lower()
-                if _ATTACKER_CONTEXT_RE.search(preceding):
-                    continue
+        if m and not (
+            field_name in ("tree_label", "gherkin") and _attacker_context_match(text, m)
+        ):
             return m.group(0)
     return None
 
@@ -738,6 +776,151 @@ def _collect_node_labels(node: AttackTreeNode) -> list[tuple[str, str]]:
     return labels
 
 
+def _validation_passed(scenario: ScenarioEnvelope) -> bool:
+    """True when all three validation blocks are currently valid."""
+    return (
+        scenario.validation.phantom.valid
+        and scenario.validation.structural.valid
+        and scenario.validation.semantic.valid
+    )
+
+
+def _phantom_step_violations(
+    scenario: ScenarioEnvelope, profile: CapabilityProfile
+) -> list[PhantomViolation]:
+    """Check narrative action/effect fields for phantom capabilities."""
+    violations: list[PhantomViolation] = []
+    for step in scenario.narrative.steps:
+        for field_name in ("action", "effect"):
+            text = getattr(step, field_name)
+            for category, checker, reason in _CHECKERS:
+                matched = checker(text, profile, field_name=field_name)
+                if matched is not None:
+                    violations.append(
+                        PhantomViolation(
+                            step_number=step.step_number,
+                            field=field_name,
+                            category=category,
+                            matched_text=matched,
+                            reason=reason,
+                        )
+                    )
+    return violations
+
+
+def _phantom_label_check(
+    label: str, zone: str, profile: CapabilityProfile
+) -> list[PhantomViolation]:
+    """Phantom violations from one attack-tree node label."""
+    violations: list[PhantomViolation] = []
+    for category, checker, reason in _CHECKERS:
+        matched = checker(label, profile, field_name="tree_label", zone=zone)
+        if matched is not None:
+            violations.append(
+                PhantomViolation(
+                    step_number=0,
+                    field="attack_tree",
+                    category=category,
+                    matched_text=matched,
+                    reason=reason,
+                )
+            )
+    return violations
+
+
+def _phantom_tree_label_violations(
+    scenario: ScenarioEnvelope, profile: CapabilityProfile
+) -> list[PhantomViolation]:
+    """Check attack-tree node labels for phantom capabilities."""
+    violations: list[PhantomViolation] = []
+    if scenario.attack_tree and scenario.attack_tree.root:
+        for label, zone in _collect_node_labels(scenario.attack_tree.root):
+            violations.extend(_phantom_label_check(label, zone, profile))
+    return violations
+
+
+def _phantom_gherkin_violations(
+    scenario: ScenarioEnvelope, profile: CapabilityProfile
+) -> list[PhantomViolation]:
+    """Check Gherkin behavior_spec text for phantom capabilities."""
+    violations: list[PhantomViolation] = []
+    gherkin_text = _semantic_gherkin_text(scenario)
+    if gherkin_text:
+        for category, checker, reason in _CHECKERS:
+            matched = checker(gherkin_text, profile, field_name="gherkin")
+            if matched is not None:
+                violations.append(
+                    PhantomViolation(
+                        step_number=0,
+                        field="behavior_spec",
+                        category=category,
+                        matched_text=matched,
+                        reason=reason,
+                    )
+                )
+    return violations
+
+
+def _phantom_tool_leaf_violation(
+    leaf: AttackTreeNode, profile: CapabilityProfile
+) -> PhantomViolation | None:
+    """Violation when a tool-invocation leaf references an unknown tool."""
+    if leaf.action is None or leaf.action.kind != "tool_invocation":
+        return None
+    if profile.resolve_tool(leaf.action.tool_id) is not None:
+        return None
+    return PhantomViolation(
+        step_number=0,
+        field="attack_tree",
+        category="phantom_tool_invocation",
+        matched_text=leaf.action.tool_id,
+        reason=(
+            f"Leaf node '{leaf.id}' references unknown tool_id '{leaf.action.tool_id}'"
+        ),
+    )
+
+
+def _phantom_tool_violations(
+    scenario: ScenarioEnvelope, profile: CapabilityProfile
+) -> list[PhantomViolation]:
+    """Check tool-invocation leaves for unknown tool ids."""
+    violations: list[PhantomViolation] = []
+    if scenario.attack_tree and scenario.attack_tree.root:
+        for leaf in _collect_leaves(scenario.attack_tree.root):
+            violation = _phantom_tool_leaf_violation(leaf, profile)
+            if violation is not None:
+                violations.append(violation)
+    return violations
+
+
+def _phantom_records(
+    violations: list[PhantomViolation],
+) -> list[PhantomViolationRecord]:
+    """Typed phantom violation records for the validation block."""
+    return [
+        PhantomViolationRecord(
+            step_number=v.step_number,
+            field=v.field,
+            category=v.category,
+            matched_text=v.matched_text,
+            reason=v.reason,
+        )
+        for v in violations
+    ]
+
+
+def _persist_phantom_block(
+    scenario: ScenarioEnvelope, phantom_block: PhantomValidation
+) -> None:
+    """Write the phantom block and refresh the aggregate pass flag."""
+    if scenario.validation is None:
+        scenario.validation = ValidationBlock(phantom=phantom_block)
+    else:
+        scenario.validation.phantom = phantom_block
+    # Update validation_passed to reflect current state.
+    scenario.validation_passed = _validation_passed(scenario)
+
+
 def validate_phantom_capabilities(
     scenarios: list[ScenarioEnvelope],
     profile: CapabilityProfile,
@@ -753,125 +936,25 @@ def validate_phantom_capabilities(
     Also populates ``scenario.validation.phantom`` on each scenario
     (warn + mark, never drops).
     """
-    from asago_scenario_generator.models.scenario import (
-        PhantomValidation,
-        PhantomViolationRecord,
-        ValidationBlock,
-    )
-
     result = ValidationResult()
 
     for scenario in scenarios:
         violations: list[PhantomViolation] = []
 
-        for step in scenario.narrative.steps:
-            for field_name in ("action", "effect"):
-                text = getattr(step, field_name)
-                for category, checker, reason in _CHECKERS:
-                    matched = checker(text, profile, field_name=field_name)
-                    if matched is not None:
-                        violations.append(
-                            PhantomViolation(
-                                step_number=step.step_number,
-                                field=field_name,
-                                category=category,
-                                matched_text=matched,
-                                reason=reason,
-                            )
-                        )
-
         # Also check attack tree node labels
-        if scenario.attack_tree and scenario.attack_tree.root:
-            for label, zone in _collect_node_labels(scenario.attack_tree.root):
-                for category, checker, reason in _CHECKERS:
-                    matched = checker(
-                        label,
-                        profile,
-                        field_name="tree_label",
-                        zone=zone,
-                    )
-                    if matched is not None:
-                        violations.append(
-                            PhantomViolation(
-                                step_number=0,
-                                field="attack_tree",
-                                category=category,
-                                matched_text=matched,
-                                reason=reason,
-                            )
-                        )
-
-        # Also check Gherkin behavior_spec text
-        from asago_scenario_generator.models.scenario import (
-            BehaviorSpec as _BehaviorSpec,
-        )
-
-        gherkin_text_for_phantom = ""
-        if scenario.behavior_spec and isinstance(scenario.behavior_spec, _BehaviorSpec):
-            gherkin_text_for_phantom = scenario.behavior_spec.gherkin_text
-        elif scenario.behavior_spec and isinstance(scenario.behavior_spec, str):
-            gherkin_text_for_phantom = scenario.behavior_spec
-        if gherkin_text_for_phantom:
-            for category, checker, reason in _CHECKERS:
-                matched = checker(
-                    gherkin_text_for_phantom, profile, field_name="gherkin"
-                )
-                if matched is not None:
-                    violations.append(
-                        PhantomViolation(
-                            step_number=0,
-                            field="behavior_spec",
-                            category=category,
-                            matched_text=matched,
-                            reason=reason,
-                        )
-                    )
+        violations.extend(_phantom_step_violations(scenario, profile))
+        violations.extend(_phantom_tree_label_violations(scenario, profile))
+        violations.extend(_phantom_gherkin_violations(scenario, profile))
 
         # Resolve typed tool invocations regardless of inventory completeness.
-        if scenario.attack_tree and scenario.attack_tree.root:
-            leaves = _collect_leaves(scenario.attack_tree.root)
-            for leaf in leaves:
-                if leaf.action is None or leaf.action.kind != "tool_invocation":
-                    continue
-                if profile.resolve_tool(leaf.action.tool_id) is None:
-                    violations.append(
-                        PhantomViolation(
-                            step_number=0,
-                            field="attack_tree",
-                            category="phantom_tool_invocation",
-                            matched_text=leaf.action.tool_id,
-                            reason=(
-                                f"Leaf node '{leaf.id}' references unknown tool_id "
-                                f"'{leaf.action.tool_id}'"
-                            ),
-                        )
-                    )
+        violations.extend(_phantom_tool_violations(scenario, profile))
 
         # Populate the validation.phantom block on the scenario.
-        phantom_records = [
-            PhantomViolationRecord(
-                step_number=v.step_number,
-                field=v.field,
-                category=v.category,
-                matched_text=v.matched_text,
-                reason=v.reason,
-            )
-            for v in violations
-        ]
         phantom_block = PhantomValidation(
             valid=len(violations) == 0,
-            violations=phantom_records,
+            violations=_phantom_records(violations),
         )
-        if scenario.validation is None:
-            scenario.validation = ValidationBlock(phantom=phantom_block)
-        else:
-            scenario.validation.phantom = phantom_block
-        # Update validation_passed to reflect current state.
-        scenario.validation_passed = (
-            scenario.validation.phantom.valid
-            and scenario.validation.structural.valid
-            and scenario.validation.semantic.valid
-        )
+        _persist_phantom_block(scenario, phantom_block)
 
         if violations:
             result.flagged_scenarios.append((scenario, violations))
@@ -931,6 +1014,37 @@ def _has_insider_access_markers(text: str) -> bool:
     return False
 
 
+def _insider_access_violation(
+    scenario_id: str, actor: Any, access: Any
+) -> InsiderAccessViolation | None:
+    """Violation for one insider actor, or None when the floor is met."""
+    if access is None:
+        return InsiderAccessViolation(
+            scenario_id=scenario_id,
+            actor_type=actor.actor_type,
+            reason=(
+                f"Insider actor '{actor.actor_type}' has no typed access "
+                f"provenance — material_insider_advantage evidence is "
+                f"required (cmps.6)."
+            ),
+        )
+    if access.ingress_mode == "direct":
+        advantage = access.material_insider_advantage
+        if not advantage or not advantage.strip():
+            return InsiderAccessViolation(
+                scenario_id=scenario_id,
+                actor_type=actor.actor_type,
+                reason=(
+                    f"Insider actor '{actor.actor_type}' using "
+                    f"direct ingress lacks structured "
+                    f"material_insider_advantage evidence regardless "
+                    f"of access_class '{access.access_class}' — enum "
+                    f"choice is not evidence (cmps.6)."
+                ),
+            )
+    return None
+
+
 def validate_insider_access_floor(
     scenarios: list[ScenarioEnvelope],
 ) -> InsiderAccessResult:
@@ -956,56 +1070,21 @@ def validate_insider_access_floor(
             continue
 
         access = actor.access
-        if access is None:
-            violation = InsiderAccessViolation(
-                scenario_id=scenario.scenario_id,
-                actor_type=actor.actor_type,
-                reason=(
-                    f"Insider actor '{actor.actor_type}' has no typed access "
-                    f"provenance — material_insider_advantage evidence is "
-                    f"required (cmps.6)."
-                ),
-            )
+        violation = _insider_access_violation(scenario.scenario_id, actor, access)
+        if violation is None:
+            # Direct ingress with evidence, or indirect ingress — validated
+            # via influence evidence in the shared access-policy validator.
+            result.clean_scenarios.append(scenario)
+        else:
             logger.warning(
-                "Insider access floor: scenario %s actor_type='%s' has no "
-                "access provenance",
+                "Insider access floor: scenario %s actor_type='%s' %s",
                 scenario.scenario_id,
                 actor.actor_type,
+                "has no access provenance"
+                if access is None
+                else "using direct ingress without material_insider_advantage",
             )
             result.flagged_scenarios.append((scenario, violation))
-            continue
-
-        # Direct ingress requires material insider advantage regardless
-        # of access_class (enum choice is not evidence).  Indirect ingress
-        # is validated via influence evidence in the shared access-policy
-        # validator.
-        if access.ingress_mode == "direct":
-            advantage = access.material_insider_advantage
-            if not advantage or not advantage.strip():
-                violation = InsiderAccessViolation(
-                    scenario_id=scenario.scenario_id,
-                    actor_type=actor.actor_type,
-                    reason=(
-                        f"Insider actor '{actor.actor_type}' using "
-                        f"direct ingress lacks structured "
-                        f"material_insider_advantage evidence regardless "
-                        f"of access_class '{access.access_class}' — enum "
-                        f"choice is not evidence (cmps.6)."
-                    ),
-                )
-                logger.warning(
-                    "Insider access floor: scenario %s actor_type='%s' "
-                    "using direct ingress without material_insider_advantage",
-                    scenario.scenario_id,
-                    actor.actor_type,
-                )
-                result.flagged_scenarios.append((scenario, violation))
-            else:
-                result.clean_scenarios.append(scenario)
-        else:
-            # Indirect ingress — validated via influence evidence /
-            # access-policy validator, not here.
-            result.clean_scenarios.append(scenario)
 
     return result
 
@@ -1032,6 +1111,29 @@ def _load_envelope_schema() -> dict:
     return _cached_schema
 
 
+def _structural_violation_messages(errors: list[Any]) -> list[str]:
+    """Human-readable JSON Schema violation messages."""
+    return [
+        f"{'.'.join(str(p) for p in e.absolute_path)}: {e.message}"
+        if e.absolute_path
+        else e.message
+        for e in errors
+    ]
+
+
+def _persist_structural(
+    scenario: ScenarioEnvelope, structural: StructuralValidation
+) -> None:
+    """Write the structural block and refresh the aggregate pass flag."""
+    if scenario.validation is None:
+        scenario.validation = ValidationBlock(structural=structural)
+    else:
+        scenario.validation.structural = structural
+
+    # Update validation_passed.
+    scenario.validation_passed = _validation_passed(scenario)
+
+
 def validate_scenario_structure(
     scenarios: list[ScenarioEnvelope],
 ) -> None:
@@ -1040,11 +1142,6 @@ def validate_scenario_structure(
     Populates ``scenario.validation.structural`` with results.
     Scenarios are never removed -- violations are recorded as warnings.
     """
-    from asago_scenario_generator.models.scenario import (
-        StructuralValidation,
-        ValidationBlock,
-    )
-
     schema = _load_envelope_schema()
     validator = jsonschema.Draft202012Validator(schema)
 
@@ -1055,25 +1152,9 @@ def validate_scenario_structure(
 
         structural = StructuralValidation(
             valid=len(errors) == 0,
-            violations=[
-                f"{'.'.join(str(p) for p in e.absolute_path)}: {e.message}"
-                if e.absolute_path
-                else e.message
-                for e in errors
-            ],
+            violations=_structural_violation_messages(errors),
         )
-
-        if scenario.validation is None:
-            scenario.validation = ValidationBlock(structural=structural)
-        else:
-            scenario.validation.structural = structural
-
-        # Update validation_passed.
-        scenario.validation_passed = (
-            scenario.validation.phantom.valid
-            and scenario.validation.structural.valid
-            and scenario.validation.semantic.valid
-        )
+        _persist_structural(scenario, structural)
 
 
 # ---------------------------------------------------------------------------
@@ -1108,15 +1189,27 @@ def _collect_tree_node_zones(node: AttackTreeNode) -> set[str]:
     return collect_tree_zones(node, include_empty=False)
 
 
-def _extract_gherkin_zones_for_validation(gherkin_text: str) -> set[str]:
-    """Extract zone annotations from Gherkin text for validation.
+def _zone_display_name_match(token: str, display_names: dict[str, str]) -> str | None:
+    """Zone name whose display label contains the token, if any."""
+    for zone_name, display in display_names.items():
+        if token.lower() in display.lower():
+            return zone_name
+    return None
 
-    Supports:
-    - ``# Zone reasoning`` comments
-    - ``(zone_name)`` inline annotations in step text
 
-    Reuses the same zone name resolution as the eval layer.
-    """
+def _zone_token_to_name(
+    token: str, int_to_name: dict[int, str], valid_zone_set: set[str]
+) -> str | None:
+    """Resolve one ``# Zone <token>`` annotation token to a zone name."""
+    if token.isdigit():
+        return int_to_name.get(int(token))
+    if token in valid_zone_set:
+        return token
+    return None
+
+
+def _zone_annotation_tokens(gherkin_text: str) -> set[str]:
+    """Zone names from ``# Zone <word_or_number>`` annotations."""
     from asago_scenario_generator.models.capability_profile import (
         ZONE_DISPLAY_NAMES,
         ZONE_NAMES,
@@ -1126,28 +1219,44 @@ def _extract_gherkin_zones_for_validation(gherkin_text: str) -> set[str]:
     valid_zone_set = set(ZONE_NAMES)
     zones: set[str] = set()
 
-    # Match "# Zone <word_or_number>"
     for match in re.finditer(r"#\s*[Zz]one\s+(\S+)", gherkin_text):
         token = match.group(1)
-        if token.isdigit():
-            name = _INT_TO_NAME.get(int(token))
-            if name:
-                zones.add(name)
-        elif token in valid_zone_set:
-            zones.add(token)
+        resolved = _zone_token_to_name(token, _INT_TO_NAME, valid_zone_set)
+        if resolved is not None:
+            zones.add(resolved)
         else:
-            for zn, display in ZONE_DISPLAY_NAMES.items():
-                if token.lower() in display.lower():
-                    zones.add(zn)
-                    break
+            display_match = _zone_display_name_match(token, ZONE_DISPLAY_NAMES)
+            if display_match is not None:
+                zones.add(display_match)
 
-    # Match "(zone_name)" inline annotations
+    return zones
+
+
+def _inline_zone_tokens(gherkin_text: str) -> set[str]:
+    """Zone names from ``(zone_name)`` inline annotations."""
+    from asago_scenario_generator.models.capability_profile import ZONE_NAMES
+
+    valid_zone_set = set(ZONE_NAMES)
+    zones: set[str] = set()
+
     for match in re.finditer(r"\((\w+)\)", gherkin_text):
         token = match.group(1)
         if token in valid_zone_set:
             zones.add(token)
 
     return zones
+
+
+def _extract_gherkin_zones_for_validation(gherkin_text: str) -> set[str]:
+    """Extract zone annotations from Gherkin text for validation.
+
+    Supports:
+    - ``# Zone reasoning`` comments
+    - ``(zone_name)`` inline annotations in step text
+
+    Reuses the same zone name resolution as the eval layer.
+    """
+    return _zone_annotation_tokens(gherkin_text) | _inline_zone_tokens(gherkin_text)
 
 
 # ---------------------------------------------------------------------------
@@ -1224,11 +1333,7 @@ def _persist_semantic_validation(
         scenario.validation = ValidationBlock(semantic=semantic)
     else:
         scenario.validation.semantic = semantic
-    scenario.validation_passed = (
-        scenario.validation.phantom.valid
-        and scenario.validation.structural.valid
-        and scenario.validation.semantic.valid
-    )
+    scenario.validation_passed = _validation_passed(scenario)
 
 
 def _validate_scenario_semantics_in_place(
@@ -2092,11 +2197,56 @@ def validate_scenario_semantics(
             scenario.validation = ValidationBlock(semantic=semantic)
         else:
             scenario.validation.semantic = semantic
-        scenario.validation_passed = (
-            scenario.validation.phantom.valid
-            and scenario.validation.structural.valid
-            and scenario.validation.semantic.valid
+        scenario.validation_passed = _validation_passed(scenario)
+
+
+def _clean_evidence(items: tuple[str, ...] | list[str]) -> list[str]:
+    """Non-blank evidence entries."""
+    return [e for e in items if e and e.strip()]
+
+
+def _entry_point_claim(
+    profile: CapabilityProfile,
+) -> CorpusClaimApplicability:
+    """Corpus claim applicability for the entry-point inventory."""
+    if profile.is_entry_point_inventory_complete:
+        return CorpusClaimApplicability(
+            category=CorpusClaimCategory.entry_points,
+            status=CorpusClaimStatus.applicable,
+            reason=None,
+            evidence=_clean_evidence(profile.entry_point_evidence),
         )
+    return CorpusClaimApplicability(
+        category=CorpusClaimCategory.entry_points,
+        status=CorpusClaimStatus.not_applicable,
+        reason=(
+            "Entry-point inventory is inferred_partial, not "
+            "operator-confirmed complete — closed-world corpus "
+            "claims are not applicable."
+        ),
+    )
+
+
+def _tool_inventory_claim(
+    profile: CapabilityProfile,
+) -> CorpusClaimApplicability:
+    """Corpus claim applicability for the tool inventory."""
+    if profile.is_tool_inventory_complete:
+        return CorpusClaimApplicability(
+            category=CorpusClaimCategory.tool_inventory,
+            status=CorpusClaimStatus.applicable,
+            reason=None,
+            evidence=_clean_evidence(profile.tool_inventory_evidence),
+        )
+    return CorpusClaimApplicability(
+        category=CorpusClaimCategory.tool_inventory,
+        status=CorpusClaimStatus.not_applicable,
+        reason=(
+            "Tool inventory is inferred_partial, not "
+            "operator-confirmed complete — closed-world corpus "
+            "claims are not applicable."
+        ),
+    )
 
 
 def check_corpus_claims_applicability(
@@ -2112,64 +2262,8 @@ def check_corpus_claims_applicability(
     This is independent of ``phantom.valid`` — unknown emitted IDs still
     fail regardless of completeness (cmps.9 review correction 2).
     """
-    from asago_scenario_generator.models.scenario import (
-        CorpusClaimApplicability,
-        CorpusClaimCategory,
-        CorpusClaimStatus,
-    )
-
     del scenario
-    records: list[CorpusClaimApplicability] = []
-
-    # Entry-point inventory
-    if profile.is_entry_point_inventory_complete:
-        records.append(
-            CorpusClaimApplicability(
-                category=CorpusClaimCategory.entry_points,
-                status=CorpusClaimStatus.applicable,
-                reason=None,
-                evidence=[e for e in profile.entry_point_evidence if e and e.strip()],
-            )
-        )
-    else:
-        records.append(
-            CorpusClaimApplicability(
-                category=CorpusClaimCategory.entry_points,
-                status=CorpusClaimStatus.not_applicable,
-                reason=(
-                    "Entry-point inventory is inferred_partial, not "
-                    "operator-confirmed complete — closed-world corpus "
-                    "claims are not applicable."
-                ),
-            )
-        )
-
-    # Tool inventory
-    if profile.is_tool_inventory_complete:
-        records.append(
-            CorpusClaimApplicability(
-                category=CorpusClaimCategory.tool_inventory,
-                status=CorpusClaimStatus.applicable,
-                reason=None,
-                evidence=[
-                    e for e in profile.tool_inventory_evidence if e and e.strip()
-                ],
-            )
-        )
-    else:
-        records.append(
-            CorpusClaimApplicability(
-                category=CorpusClaimCategory.tool_inventory,
-                status=CorpusClaimStatus.not_applicable,
-                reason=(
-                    "Tool inventory is inferred_partial, not "
-                    "operator-confirmed complete — closed-world corpus "
-                    "claims are not applicable."
-                ),
-            )
-        )
-
-    return records
+    return [_entry_point_claim(profile), _tool_inventory_claim(profile)]
 
 
 def validate_semantic(
@@ -2327,6 +2421,55 @@ def _is_consequence_leaf(node: AttackTreeNode) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _leaf_mapping_reason(
+    leaf: AttackTreeNode, exact_ids_by_step: dict[str, frozenset[str]]
+) -> str | None:
+    """Reason a leaf technique mismatches its represented projected steps."""
+    if leaf.technique_id is None:
+        return None
+    if not leaf.projected_step_ids:
+        return (
+            f"Leaf '{leaf.id}' carries '{leaf.technique_id}' without "
+            "projected-step IDs."
+        )
+    incompatible = [
+        step_id
+        for step_id in leaf.projected_step_ids
+        if leaf.technique_id not in exact_ids_by_step.get(step_id, frozenset())
+    ]
+    if incompatible:
+        return (
+            f"Leaf '{leaf.id}' technique '{leaf.technique_id}' is not an "
+            f"exact mapping of projected steps {incompatible}."
+        )
+    return None
+
+
+def _leaf_provenance_reasons(
+    leaves: list[AttackTreeNode], exact_ids_by_step: dict[str, frozenset[str]]
+) -> list[str]:
+    """Per-leaf provenance mismatch reasons for one scenario."""
+    reasons: list[str] = []
+    for leaf in leaves:
+        reason = _leaf_mapping_reason(leaf, exact_ids_by_step)
+        if reason is not None:
+            reasons.append(reason)
+    return reasons
+
+
+def _provenance_violation(
+    scenario: ScenarioEnvelope, reasons: list[str]
+) -> LeafTechniqueViolation:
+    """Scenario-level violation record for provenance mismatches."""
+    root = scenario.attack_tree.root
+    return LeafTechniqueViolation(
+        node_id=root.id,
+        label=root.label,
+        zone=root.zone,
+        reason=" ".join(reasons),
+    )
+
+
 def check_leaf_technique_provenance(
     scenarios: list[ScenarioEnvelope],
 ) -> LeafTechniqueResult:
@@ -2349,38 +2492,14 @@ def check_leaf_technique_provenance(
 
         leaves = _collect_leaves(scenario.attack_tree.root)
         exact_ids_by_step = projected_step_mapping_ids_by_step(scenario.projection)
-        reasons: list[str] = []
-        for leaf in leaves:
-            if leaf.technique_id is None:
-                continue
-            if not leaf.projected_step_ids:
-                reasons.append(
-                    f"Leaf '{leaf.id}' carries '{leaf.technique_id}' without "
-                    "projected-step IDs."
-                )
-                continue
-            incompatible = [
-                step_id
-                for step_id in leaf.projected_step_ids
-                if leaf.technique_id not in exact_ids_by_step.get(step_id, frozenset())
-            ]
-            if incompatible:
-                reasons.append(
-                    f"Leaf '{leaf.id}' technique '{leaf.technique_id}' is not an "
-                    f"exact mapping of projected steps {incompatible}."
-                )
+        reasons = _leaf_provenance_reasons(leaves, exact_ids_by_step)
 
         if not reasons:
             result.clean_scenarios.append(scenario)
         else:
-            root = scenario.attack_tree.root
-            violation = LeafTechniqueViolation(
-                node_id=root.id,
-                label=root.label,
-                zone=root.zone,
-                reason=" ".join(reasons),
+            result.flagged_scenarios.append(
+                (scenario, [_provenance_violation(scenario, reasons)])
             )
-            result.flagged_scenarios.append((scenario, [violation]))
 
     return result
 
@@ -2586,6 +2705,156 @@ def _repair_tree_model(root_dict: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _scenario_leaf_budget(scenario: ScenarioEnvelope) -> int:
+    """The parsimony leaf budget for one scenario's tree."""
+    from asago_scenario_generator.pipeline.generate.constants import (
+        compute_leaf_budget,
+    )
+
+    tree = scenario.attack_tree
+    technique_ids = _collect_technique_ids(tree.root)
+    return compute_leaf_budget(len(technique_ids))
+
+
+def _leaf_is_prunable_candidate(leaf: AttackTreeNode) -> bool:
+    """True when a leaf is unannotated and lacks a typed action."""
+    if leaf.technique_id:
+        return False
+    if leaf.action is not None:
+        return False
+    return True
+
+
+def _safe_pruning_parent(
+    root: AttackTreeNode, leaf: AttackTreeNode
+) -> tuple[AttackTreeNode, list[str]] | None:
+    """The parent that may safely lose this leaf, with sibling labels."""
+    parent = _find_parent(root, leaf.id)
+    if parent is None:
+        return None
+    if parent.children and len(parent.children) < 2:
+        return None
+    return parent, _sibling_labels(parent, leaf.id)
+
+
+def _pruning_candidates(
+    leaves: list[AttackTreeNode], root: AttackTreeNode
+) -> list[tuple[AttackTreeNode, AttackTreeNode, list[str]]]:
+    """Unannotated leaves with a parent that can safely lose one child."""
+    candidates: list[tuple[AttackTreeNode, AttackTreeNode, list[str]]] = []
+    for leaf in leaves:
+        if not _leaf_is_prunable_candidate(leaf):
+            continue
+        parent_ctx = _safe_pruning_parent(root, leaf)
+        if parent_ctx is None:
+            continue
+        parent, siblings = parent_ctx
+        candidates.append((leaf, parent, siblings))
+    return candidates
+
+
+def _pruned_node_record(
+    leaf: AttackTreeNode, parent: AttackTreeNode, siblings: list[str]
+) -> PrunedNode:
+    """Record of one pruned leaf."""
+    return PrunedNode(
+        node_id=leaf.id,
+        label=leaf.label,
+        parent_gate=parent.gate.value,
+        reason=(
+            f"Unannotated leaf under {parent.gate.value} gate; "
+            f"token overlap with siblings: "
+            f"{_token_overlap_ratio(leaf.label, siblings):.0%}"
+        ),
+    )
+
+
+def _collapse_if_single_child(
+    parent: AttackTreeNode,
+    pruned_root: AttackTreeNode,
+    pruned_scenario: ScenarioEnvelope,
+) -> AttackTreeNode:
+    """Collapse a single-child gate via repair when the parent is left alone."""
+    if parent.children and len(parent.children) == 1:
+        # Convert to dict, repair, convert back
+        root_dict = pruned_root.model_dump()
+        repaired_dict = _repair_tree_model(root_dict)
+        repaired_root = AttackTreeNode.model_validate(repaired_dict)
+        pruned_scenario.attack_tree = AttackTree(
+            id=pruned_scenario.attack_tree.id,
+            seed_id=pruned_scenario.attack_tree.seed_id,
+            goal=pruned_scenario.attack_tree.goal,
+            root=repaired_root,
+        )
+        return repaired_root
+    return pruned_root
+
+
+def _prune_to_budget(
+    scenario: ScenarioEnvelope, budget: int
+) -> tuple[ScenarioEnvelope, list[PrunedNode]] | None:
+    """Deep-copy prune excess leaves; None when no safe candidates remain."""
+    # Deep-copy so we don't mutate the original
+    pruned_scenario = copy.deepcopy(scenario)
+    pruned_root = pruned_scenario.attack_tree.root
+    pruned_nodes: list[PrunedNode] = []
+
+    while True:
+        current_leaves = _collect_leaves(pruned_root)
+        current_leaf_count = len(current_leaves)
+
+        if current_leaf_count <= budget:
+            break
+
+        # Find pruning candidates: unannotated leaves
+        candidates = _pruning_candidates(current_leaves, pruned_root)
+        if not candidates:
+            break  # no safe candidates remain
+
+        # Sort by pruning priority
+        candidates.sort(key=lambda x: _pruning_priority(x[0], x[1], x[2]))
+
+        # Prune the best candidate
+        leaf, parent, siblings = candidates[0]
+        _remove_child(parent, leaf.id)
+        pruned_nodes.append(_pruned_node_record(leaf, parent, siblings))
+
+        # If parent now has exactly 1 child, collapse it
+        pruned_root = _collapse_if_single_child(parent, pruned_root, pruned_scenario)
+
+    return pruned_scenario, pruned_nodes
+
+
+def _register_pruning_result(
+    result: ParsimonyResult,
+    scenario: ScenarioEnvelope,
+    pruned_scenario: ScenarioEnvelope,
+    pruned_nodes: list[PrunedNode],
+    budget: int,
+    original_leaf_count: int,
+) -> None:
+    """Re-validate the pruned tree and register the scenario outcome."""
+    final_leaves = _collect_leaves(pruned_scenario.attack_tree.root)
+    final_leaf_count = len(final_leaves)
+
+    if final_leaf_count <= budget:
+        # Validate with Pydantic to ensure structural integrity
+        try:
+            pruned_scenario.attack_tree = AttackTree.model_validate(
+                pruned_scenario.attack_tree.model_dump()
+            )
+            result.pruned_scenarios.append((pruned_scenario, pruned_nodes))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Pruned tree for %s failed Pydantic validation: %s",
+                scenario.scenario_id,
+                exc,
+            )
+            result.unprunable_scenarios.append((scenario, original_leaf_count, budget))
+    else:
+        result.unprunable_scenarios.append((scenario, final_leaf_count, budget))
+
+
 def enforce_parsimony(
     scenarios: list[ScenarioEnvelope],
     max_leaf_factor: int = 2,
@@ -2608,109 +2877,23 @@ def enforce_parsimony(
     After pruning, single-child AND/OR gates are collapsed via
     ``_repair_node`` and the resulting tree is re-validated with Pydantic.
     """
-    from asago_scenario_generator.pipeline.generate.constants import compute_leaf_budget
-
     result = ParsimonyResult()
 
     for scenario in scenarios:
-        tree = scenario.attack_tree
-        technique_ids = _collect_technique_ids(tree.root)
-        technique_count = len(technique_ids)
+        budget = _scenario_leaf_budget(scenario)
 
-        budget = compute_leaf_budget(technique_count)
-
-        leaves = _collect_leaves(tree.root)
+        leaves = _collect_leaves(scenario.attack_tree.root)
         leaf_count = len(leaves)
 
         if leaf_count <= budget:
             result.compliant_scenarios.append(scenario)
             continue
 
-        # Deep-copy so we don't mutate the original
-        pruned_scenario = copy.deepcopy(scenario)
-        pruned_root = pruned_scenario.attack_tree.root
-        pruned_nodes: list[PrunedNode] = []
-
-        while True:
-            current_leaves = _collect_leaves(pruned_root)
-            current_leaf_count = len(current_leaves)
-
-            if current_leaf_count <= budget:
-                break
-
-            # Find pruning candidates: unannotated leaves
-            candidates: list[tuple[AttackTreeNode, AttackTreeNode, list[str]]] = []
-            for leaf in current_leaves:
-                if leaf.technique_id:
-                    continue  # never prune annotated leaves
-                if leaf.action is not None:
-                    continue  # never prune leaves with typed actions (cmps.9 review)
-                parent = _find_parent(pruned_root, leaf.id)
-                if parent is None:
-                    continue  # root node, can't prune
-                # Must not leave parent with fewer than 2 children
-                # (we'll handle the collapse after removal, but we need
-                # at least 2 children to remove one safely)
-                if parent.children and len(parent.children) < 2:
-                    continue  # already at minimum
-                siblings = _sibling_labels(parent, leaf.id)
-                candidates.append((leaf, parent, siblings))
-
-            if not candidates:
-                break  # no safe candidates remain
-
-            # Sort by pruning priority
-            candidates.sort(key=lambda x: _pruning_priority(x[0], x[1], x[2]))
-
-            # Prune the best candidate
-            leaf, parent, siblings = candidates[0]
-            _remove_child(parent, leaf.id)
-            pruned_nodes.append(
-                PrunedNode(
-                    node_id=leaf.id,
-                    label=leaf.label,
-                    parent_gate=parent.gate.value,
-                    reason=(
-                        f"Unannotated leaf under {parent.gate.value} gate; "
-                        f"token overlap with siblings: "
-                        f"{_token_overlap_ratio(leaf.label, siblings):.0%}"
-                    ),
-                )
-            )
-
-            # If parent now has exactly 1 child, collapse it
-            if parent.children and len(parent.children) == 1:
-                # Convert to dict, repair, convert back
-                root_dict = pruned_root.model_dump()
-                repaired_dict = _repair_tree_model(root_dict)
-                pruned_root = AttackTreeNode.model_validate(repaired_dict)
-                pruned_scenario.attack_tree = AttackTree(
-                    id=pruned_scenario.attack_tree.id,
-                    seed_id=pruned_scenario.attack_tree.seed_id,
-                    goal=pruned_scenario.attack_tree.goal,
-                    root=pruned_root,
-                )
-
-        # Re-validate the pruned tree
-        final_leaves = _collect_leaves(pruned_root)
-        final_leaf_count = len(final_leaves)
-
-        if final_leaf_count <= budget:
-            # Validate with Pydantic to ensure structural integrity
-            try:
-                pruned_scenario.attack_tree = AttackTree.model_validate(
-                    pruned_scenario.attack_tree.model_dump()
-                )
-                result.pruned_scenarios.append((pruned_scenario, pruned_nodes))
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "Pruned tree for %s failed Pydantic validation: %s",
-                    scenario.scenario_id,
-                    exc,
-                )
-                result.unprunable_scenarios.append((scenario, leaf_count, budget))
-        else:
-            result.unprunable_scenarios.append((scenario, final_leaf_count, budget))
+        pruned = _prune_to_budget(scenario, budget)
+        pruned_scenario, pruned_nodes = pruned
+        _register_pruning_result(
+            result, scenario, pruned_scenario, pruned_nodes, budget, leaf_count
+        )
 
     return result
 
@@ -2865,6 +3048,25 @@ class GateLogicResult:
 _GHERKIN_SCENARIO_RE = re.compile(r"^\s*Scenario:", re.MULTILINE)
 
 
+def _gate_logic_violation(
+    scenario: ScenarioEnvelope,
+    or_gate_count: int,
+    scenario_block_count: int,
+) -> GateLogicViolation:
+    """OR-gate/Gherkin scenario-count mismatch violation record."""
+    return GateLogicViolation(
+        scenario_id=scenario.scenario_id,
+        or_gate_count=or_gate_count,
+        gherkin_scenario_count=scenario_block_count,
+        reason=(
+            f"Attack tree has {or_gate_count} OR gate(s) but Gherkin "
+            f"contains only {scenario_block_count} Scenario block(s). "
+            f"OR branches should produce multiple Scenario blocks "
+            f"(one per alternative path)."
+        ),
+    )
+
+
 def validate_gate_logic_consistency(
     scenarios: list[ScenarioEnvelope],
 ) -> GateLogicResult:
@@ -2886,40 +3088,17 @@ def validate_gate_logic_consistency(
     result = GateLogicResult()
 
     for scenario in scenarios:
-        if not scenario.attack_tree or not scenario.attack_tree.root:
+        checked = _gate_logic_gherkin(scenario)
+        if checked is None:
             result.clean_scenarios.append(scenario)
             continue
 
-        or_gate_count = _count_or_gates(scenario.attack_tree.root)
-        if or_gate_count == 0:
-            result.clean_scenarios.append(scenario)
-            continue
-
-        # Tree has OR gates -- check that Gherkin has multiple Scenario blocks.
-        from asago_scenario_generator.models.scenario import (
-            BehaviorSpec as _BehaviorSpec,
-        )
-
-        gherkin = ""
-        if scenario.behavior_spec and isinstance(scenario.behavior_spec, _BehaviorSpec):
-            gherkin = scenario.behavior_spec.gherkin_text or ""
-        if not gherkin:
-            result.clean_scenarios.append(scenario)
-            continue
-
+        gherkin, or_gate_count = checked
         scenario_block_count = len(_GHERKIN_SCENARIO_RE.findall(gherkin))
 
         if scenario_block_count <= 1:
-            violation = GateLogicViolation(
-                scenario_id=scenario.scenario_id,
-                or_gate_count=or_gate_count,
-                gherkin_scenario_count=scenario_block_count,
-                reason=(
-                    f"Attack tree has {or_gate_count} OR gate(s) but Gherkin "
-                    f"contains only {scenario_block_count} Scenario block(s). "
-                    f"OR branches should produce multiple Scenario blocks "
-                    f"(one per alternative path)."
-                ),
+            violation = _gate_logic_violation(
+                scenario, or_gate_count, scenario_block_count
             )
             logger.warning(
                 "Gate-logic consistency: %s has %d OR gate(s) but "
@@ -2933,6 +3112,21 @@ def validate_gate_logic_consistency(
             result.clean_scenarios.append(scenario)
 
     return result
+
+
+def _gate_logic_gherkin(
+    scenario: ScenarioEnvelope,
+) -> tuple[str, int] | None:
+    """Gherkin text and OR-gate count when the scenario needs checking."""
+    if not scenario.attack_tree or not scenario.attack_tree.root:
+        return None
+    or_gate_count = _count_or_gates(scenario.attack_tree.root)
+    if or_gate_count == 0:
+        return None
+    gherkin = _semantic_gherkin_text(scenario)
+    if not gherkin:
+        return None
+    return gherkin, or_gate_count
 
 
 def _extract_mechanism_keywords(attack_pattern_name: str) -> list[str]:
