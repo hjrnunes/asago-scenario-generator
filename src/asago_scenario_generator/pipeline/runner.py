@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.metadata
+from collections.abc import Sequence
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,6 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from asago_scenario_generator.data.loaders import (
+    _THREAT_GOAL_AFFINITY_PATH,
     load_attack_patterns,
     load_yaml_strict,
 )
@@ -199,34 +201,14 @@ def _readable_evidence_file(path: Path) -> bool:
     return path.exists() and path.is_file()
 
 
-def _complete_v3_run(
-    *,
-    run_dir: Path,
-    run_id: str,
-    timestamp_start: str,
-    provenance: Provenance | None,
-    profile: CapabilityProfile,
-    threat_surface: ThreatSurface,
-    finalization: object,
-    coverage_universe: object,
-    stage_ledger: StageLedger,
-    selection_result: object,
-    fallback_queues: dict,
-    projection_limitation_target_ids: set[str],
-    threats_path: Path | None,
-    eval_enabled: bool,
-    seeds: list[ScenarioSeed],
-    filtered_seeds: list[FilteredSeed] | None,
-    governance_count: int,
-    generation_notes: list[str],
-    filter_quarantines: list[FilterSeedQuarantine] | None = None,
-) -> PipelineResult:
-    """Run the single shared v3 coverage, eval, report, and manifest tail."""
+def _load_finalization_tail_inputs(
+    run_dir: Path, run_id: str, timestamp_start: str, provenance: Provenance | None
+) -> tuple[object, object, list[object]]:
+    """Load and verify the STARTED manifest, inventory, and admitted scenarios."""
     from asago_scenario_generator.pipeline.persistence import (
         build_semantic_generation_summary,
         read_finalization_inventory,
     )
-    from asago_scenario_generator.pipeline.runner_finalization import build_v3_inventory
 
     started_manifest = load_manifest(run_dir, requested_version=MANIFEST_VERSION)
     if started_manifest.status is not RunStatus.STARTED:
@@ -237,6 +219,12 @@ def _complete_v3_run(
     admitted_scenarios = _load_admitted_scenarios(
         run_dir, run_id, timestamp_start, provenance, final_inventory_doc
     )
+    return final_inventory_doc, semantic_generation, admitted_scenarios
+
+
+def _collect_presentation_notes(
+    admitted_scenarios: Sequence[object], generation_notes: list[str]
+) -> None:
     for scenario in admitted_scenarios:
         for note in scenario.generation.notes or ():
             if (
@@ -244,14 +232,21 @@ def _complete_v3_run(
                 and note not in generation_notes
             ):
                 generation_notes.append(note)
-    coverage_gaps = analyze_coverage_gaps(profile, threat_surface, admitted_scenarios)
-    decisions = {
-        item.candidate_id: item for item in final_inventory_doc.admission_decisions
-    }
-    target_to_ingress = {
+
+
+def _target_to_ingress(finalization: object) -> dict[str, str]:
+    return {
         target.effective_target_id: target.entry_point_id
         for target in finalization.coverage_plan.targets
     }
+
+
+def _finalization_target_outcomes(
+    final_inventory_doc: object,
+    decisions: dict[str, object],
+    target_to_ingress: dict[str, str],
+    stage_ledger: object,
+) -> tuple[set[str], set[str]]:
     generated_target_ids: set[str] = set()
     quarantined_target_ids: set[str] = set()
     for candidate_attempt in final_inventory_doc.candidate_attempts:
@@ -282,6 +277,31 @@ def _complete_v3_run(
                 decision.status.value,
                 "; ".join(item.detail for item in decision.violations),
             )
+    return generated_target_ids, quarantined_target_ids
+
+
+def _coverage_gap_analysis(
+    *,
+    profile: object,
+    threat_surface: object,
+    admitted_scenarios: Sequence[object],
+    finalization: object,
+    coverage_universe: object,
+    stage_ledger: object,
+    selection_result: object,
+    fallback_queues: dict,
+    projection_limitation_target_ids: set[str],
+    run_dir: Path,
+    final_inventory_doc: object,
+) -> tuple[set[str], set[str], object, object]:
+    coverage_gaps = analyze_coverage_gaps(profile, threat_surface, admitted_scenarios)
+    decisions = {
+        item.candidate_id: item for item in final_inventory_doc.admission_decisions
+    }
+    target_to_ingress = _target_to_ingress(finalization)
+    generated_target_ids, quarantined_target_ids = _finalization_target_outcomes(
+        final_inventory_doc, decisions, target_to_ingress, stage_ledger
+    )
     quality_gaps, coverage_summary = emit_quality_gaps(
         coverage_universe,
         stage_ledger,
@@ -302,16 +322,31 @@ def _complete_v3_run(
         stage_ledger=stage_ledger,
         finalization_inventory=final_inventory_doc,
     )
+    return generated_target_ids, quarantined_target_ids, quality_gaps, coverage_summary
 
+
+def _remove_stale_optional_products(run_dir: Path) -> None:
     # A prior interrupted completion tail is non-authoritative. Reconcile its
     # optional products before regeneration so failed/disabled retries cannot
     # leave unmanifested stale files behind.
     for stale_name in ("eval-scorecard.yaml", "report.html"):
         (run_dir / stale_name).unlink(missing_ok=True)
 
-    eval_success = False
-    qualification_passed = False
-    eval_manifest = RunManifest(
+
+def _provisional_manifest(
+    run_dir: Path,
+    run_id: str,
+    timestamp_start: str,
+    provenance: Provenance | None,
+    final_inventory_doc: object,
+    *,
+    include_eval: bool = False,
+) -> RunManifest:
+    from asago_scenario_generator.pipeline.runner_finalization import (
+        build_v3_inventory,
+    )
+
+    return RunManifest(
         manifest_version=MANIFEST_VERSION,
         status=RunStatus.STARTED,
         run_id=run_id,
@@ -319,26 +354,49 @@ def _complete_v3_run(
         package_version=importlib.metadata.version("asago-scenario-generator"),
         provenance=provenance,
         inventory=build_v3_inventory(
-            run_dir, final_inventory_doc, include_quarantine=False
+            run_dir,
+            final_inventory_doc,
+            include_quarantine=False,
+            include_eval=include_eval,
         ),
     )
-    if eval_enabled:
-        try:
-            from asago_scenario_generator.eval.runner import run_evaluation
 
-            scorecard = run_evaluation(
-                resolver=build_in_memory_resolver(run_dir, eval_manifest),
-                threats_path=threats_path,
-            )
-            write_eval_scorecard(scorecard, run_dir)
-            eval_success = True
-            qualification_passed = _scorecard_qualification_passed(scorecard)
-        except Exception as exc:  # noqa: BLE001 - non-authoritative output
-            (run_dir / "eval-scorecard.yaml").unlink(missing_ok=True)
-            logger.warning("Eval scorecard generation failed: %s", exc)
-    else:
+
+def _provisional_eval_product(
+    run_dir: Path,
+    run_id: str,
+    timestamp_start: str,
+    provenance: Provenance | None,
+    final_inventory_doc: object,
+    eval_enabled: bool,
+    threats_path: Path | None,
+) -> tuple[bool, bool]:
+    if not eval_enabled:
         logger.info("[Eval] Skipped (--no-eval) — non-authoritative.")
+        return False, False
+    try:
+        from asago_scenario_generator.eval.runner import run_evaluation
 
+        eval_manifest = _provisional_manifest(
+            run_dir, run_id, timestamp_start, provenance, final_inventory_doc
+        )
+        scorecard = run_evaluation(
+            resolver=build_in_memory_resolver(run_dir, eval_manifest),
+            threats_path=threats_path,
+        )
+        write_eval_scorecard(scorecard, run_dir)
+        return True, _scorecard_qualification_passed(scorecard)
+    except Exception as exc:  # noqa: BLE001 - non-authoritative output
+        (run_dir / "eval-scorecard.yaml").unlink(missing_ok=True)
+        logger.warning("Eval scorecard generation failed: %s", exc)
+        return False, False
+
+
+def _terminal_completion_flags(
+    final_inventory_doc: object,
+    filter_quarantines: list[object] | None,
+    finalization: object,
+) -> tuple[bool, bool]:
     had_quarantine = bool(
         final_inventory_doc.quarantine_inventory or filter_quarantines
     )
@@ -346,31 +404,41 @@ def _complete_v3_run(
         target.target_state.value in {"admitted", "exhausted"}
         for target in finalization.coverage_plan.targets
     )
-    report_success = False
+    return had_quarantine, terminal_processing_succeeded
+
+
+def _provisional_report_product(
+    run_dir: Path,
+    run_id: str,
+    timestamp_start: str,
+    provenance: Provenance | None,
+    final_inventory_doc: object,
+    eval_success: bool,
+) -> bool:
     try:
         from asago_scenario_generator.report.data import load_report_data
         from asago_scenario_generator.report.generator import generate_report
 
-        report_manifest = RunManifest(
-            manifest_version=MANIFEST_VERSION,
-            status=RunStatus.STARTED,
-            run_id=run_id,
-            timestamp_start=timestamp_start,
-            package_version=importlib.metadata.version("asago-scenario-generator"),
-            provenance=provenance,
-            inventory=build_v3_inventory(
-                run_dir, final_inventory_doc, include_eval=eval_success
-            ),
+        report_manifest = _provisional_manifest(
+            run_dir,
+            run_id,
+            timestamp_start,
+            provenance,
+            final_inventory_doc,
+            include_eval=eval_success,
         )
         report_data = load_report_data(
             resolver=build_in_memory_resolver(run_dir, report_manifest)
         )
         generate_report(report_data, run_dir)
-        report_success = True
+        return True
     except Exception as exc:  # noqa: BLE001 - non-authoritative output
         (run_dir / "report.html").unlink(missing_ok=True)
         logger.warning("Report generation failed: %s", exc)
+        return False
 
+
+def _close_pipeline_log() -> None:
     # Close the pipeline log before hashing the complete candidate inventory.
     # The first eval/report products above are deliberately provisional: they
     # break the scorecard/report inventory cycle but cannot authorize a run.
@@ -381,77 +449,98 @@ def _complete_v3_run(
             handler.close()
             sf_logger.removeHandler(handler)
 
-    # Authoritative second pass. The complete provisional inventory is first
-    # reconciled with orphan checking enabled. Evaluation is then recomputed
-    # from that strict resolver, the scorecard hash is rebuilt, and the report
-    # is regenerated from the final scorecard before final hashes/validation.
-    if _authoritative_products_ready(eval_success, report_success):
-        try:
-            from asago_scenario_generator.eval.runner import run_evaluation
-            from asago_scenario_generator.report.data import load_report_data
-            from asago_scenario_generator.report.generator import generate_report
 
-            candidate_manifest = RunManifest(
-                manifest_version=MANIFEST_VERSION,
-                status=RunStatus.STARTED,
-                run_id=run_id,
-                timestamp_start=timestamp_start,
-                package_version=importlib.metadata.version("asago-scenario-generator"),
-                provenance=provenance,
-                inventory=build_v3_inventory(
-                    run_dir,
-                    final_inventory_doc,
-                    include_eval=True,
-                    include_report=True,
-                    include_log=True,
-                ),
-            )
-            strict_eval_resolver = ManifestInventoryResolver(
-                run_dir, candidate_manifest, check_orphans=True
-            )
-            scorecard = run_evaluation(
-                resolver=strict_eval_resolver,
-                threats_path=threats_path,
-            )
-            write_eval_scorecard(scorecard, run_dir)
-            qualification_passed = _scorecard_qualification_passed(scorecard)
-
-            report_manifest = RunManifest(
-                manifest_version=MANIFEST_VERSION,
-                status=RunStatus.STARTED,
-                run_id=run_id,
-                timestamp_start=timestamp_start,
-                package_version=importlib.metadata.version("asago-scenario-generator"),
-                provenance=provenance,
-                inventory=build_v3_inventory(
-                    run_dir,
-                    final_inventory_doc,
-                    include_eval=True,
-                    include_report=True,
-                    include_log=True,
-                ),
-            )
-            strict_report_resolver = ManifestInventoryResolver(
-                run_dir, report_manifest, check_orphans=True
-            )
-            report_data = load_report_data(resolver=strict_report_resolver)
-            generate_report(report_data, run_dir)
-        except Exception as exc:  # noqa: BLE001 - run remains non-authoritative
-            eval_success = False
-            report_success = False
-            qualification_passed = False
-            (run_dir / "eval-scorecard.yaml").unlink(missing_ok=True)
-            (run_dir / "report.html").unlink(missing_ok=True)
-            logger.warning("Authoritative eval/report finalization failed: %s", exc)
-
-    ordinary_completion_succeeded = _ordinary_completion_succeeded(
-        terminal_processing_succeeded=terminal_processing_succeeded,
-        had_quarantine=had_quarantine,
-        eval_enabled=eval_enabled,
-        eval_success=eval_success,
-        report_success=report_success,
-        qualification_passed=qualification_passed,
+def _strict_authoritative_manifest(
+    run_dir: Path,
+    run_id: str,
+    timestamp_start: str,
+    provenance: Provenance | None,
+    final_inventory_doc: object,
+) -> RunManifest:
+    from asago_scenario_generator.pipeline.runner_finalization import (
+        build_v3_inventory,
     )
+
+    return RunManifest(
+        manifest_version=MANIFEST_VERSION,
+        status=RunStatus.STARTED,
+        run_id=run_id,
+        timestamp_start=timestamp_start,
+        package_version=importlib.metadata.version("asago-scenario-generator"),
+        provenance=provenance,
+        inventory=build_v3_inventory(
+            run_dir,
+            final_inventory_doc,
+            include_eval=True,
+            include_report=True,
+            include_log=True,
+        ),
+    )
+
+
+def _authoritative_second_pass(
+    run_dir: Path,
+    run_id: str,
+    timestamp_start: str,
+    provenance: Provenance | None,
+    final_inventory_doc: object,
+    threats_path: Path | None,
+) -> tuple[bool, bool, bool]:
+    """Recompute eval and report from a strict orphan-checked resolver."""
+    try:
+        from asago_scenario_generator.eval.runner import run_evaluation
+        from asago_scenario_generator.report.data import load_report_data
+        from asago_scenario_generator.report.generator import generate_report
+
+        candidate_manifest = _strict_authoritative_manifest(
+            run_dir, run_id, timestamp_start, provenance, final_inventory_doc
+        )
+        strict_eval_resolver = ManifestInventoryResolver(
+            run_dir, candidate_manifest, check_orphans=True
+        )
+        scorecard = run_evaluation(
+            resolver=strict_eval_resolver,
+            threats_path=threats_path,
+        )
+        write_eval_scorecard(scorecard, run_dir)
+        qualification_passed = _scorecard_qualification_passed(scorecard)
+
+        report_manifest = _strict_authoritative_manifest(
+            run_dir, run_id, timestamp_start, provenance, final_inventory_doc
+        )
+        strict_report_resolver = ManifestInventoryResolver(
+            run_dir, report_manifest, check_orphans=True
+        )
+        report_data = load_report_data(resolver=strict_report_resolver)
+        generate_report(report_data, run_dir)
+        return True, True, qualification_passed
+    except Exception as exc:  # noqa: BLE001 - run remains non-authoritative
+        eval_success = False
+        report_success = False
+        qualification_passed = False
+        (run_dir / "eval-scorecard.yaml").unlink(missing_ok=True)
+        (run_dir / "report.html").unlink(missing_ok=True)
+        logger.warning("Authoritative eval/report finalization failed: %s", exc)
+        return eval_success, report_success, qualification_passed
+
+
+def _finalize_run_manifest(
+    run_dir: Path,
+    run_id: str,
+    timestamp_start: str,
+    provenance: Provenance | None,
+    final_inventory_doc: object,
+    generation_notes: list[str],
+    semantic_generation: object,
+    eval_enabled: bool,
+    eval_success: bool,
+    report_success: bool,
+    ordinary_completion_succeeded: bool,
+) -> RunManifest:
+    from asago_scenario_generator.pipeline.runner_finalization import (
+        build_v3_inventory,
+    )
+
     final_status = select_final_run_status(
         ordinary_completion_succeeded, generation_notes
     )
@@ -486,7 +575,12 @@ def _complete_v3_run(
     else:
         ManifestInventoryResolver(run_dir, final_manifest, check_orphans=True)
     finalize_manifest(run_dir, final_manifest)
-    filter_quarantine_count = len(filter_quarantines or [])
+    return final_manifest
+
+
+def _result_counts(
+    final_inventory_doc: object, filter_quarantines: list[object] | None
+) -> tuple[int, int, int]:
     admitted_count = sum(
         decision.admitted for decision in final_inventory_doc.admission_decisions
     )
@@ -494,6 +588,121 @@ def _complete_v3_run(
     failed_count = sum(
         decision.status.value == "generation_or_finalization_failed"
         for decision in final_inventory_doc.admission_decisions
+    )
+    filter_quarantine_count = len(filter_quarantines or [])
+    return (
+        admitted_count,
+        finalization_quarantine_count + filter_quarantine_count,
+        failed_count,
+    )
+
+
+def _complete_v3_run(
+    *,
+    run_dir: Path,
+    run_id: str,
+    timestamp_start: str,
+    provenance: Provenance | None,
+    profile: CapabilityProfile,
+    threat_surface: ThreatSurface,
+    finalization: object,
+    coverage_universe: object,
+    stage_ledger: StageLedger,
+    selection_result: object,
+    fallback_queues: dict,
+    projection_limitation_target_ids: set[str],
+    threats_path: Path | None,
+    eval_enabled: bool,
+    seeds: list[ScenarioSeed],
+    filtered_seeds: list[FilteredSeed] | None,
+    governance_count: int,
+    generation_notes: list[str],
+    filter_quarantines: list[FilterSeedQuarantine] | None = None,
+) -> PipelineResult:
+    """Run the single shared v3 coverage, eval, report, and manifest tail."""
+    (
+        final_inventory_doc,
+        semantic_generation,
+        admitted_scenarios,
+    ) = _load_finalization_tail_inputs(run_dir, run_id, timestamp_start, provenance)
+    _collect_presentation_notes(admitted_scenarios, generation_notes)
+    (
+        generated_target_ids,
+        quarantined_target_ids,
+        quality_gaps,
+        coverage_summary,
+    ) = _coverage_gap_analysis(
+        profile=profile,
+        threat_surface=threat_surface,
+        admitted_scenarios=admitted_scenarios,
+        finalization=finalization,
+        coverage_universe=coverage_universe,
+        stage_ledger=stage_ledger,
+        selection_result=selection_result,
+        fallback_queues=fallback_queues,
+        projection_limitation_target_ids=projection_limitation_target_ids,
+        run_dir=run_dir,
+        final_inventory_doc=final_inventory_doc,
+    )
+    _remove_stale_optional_products(run_dir)
+    eval_success, qualification_passed = _provisional_eval_product(
+        run_dir,
+        run_id,
+        timestamp_start,
+        provenance,
+        final_inventory_doc,
+        eval_enabled,
+        threats_path,
+    )
+    had_quarantine, terminal_processing_succeeded = _terminal_completion_flags(
+        final_inventory_doc, filter_quarantines, finalization
+    )
+    report_success = _provisional_report_product(
+        run_dir,
+        run_id,
+        timestamp_start,
+        provenance,
+        final_inventory_doc,
+        eval_success,
+    )
+    _close_pipeline_log()
+
+    # Authoritative second pass. The complete provisional inventory is first
+    # reconciled with orphan checking enabled. Evaluation is then recomputed
+    # from that strict resolver, the scorecard hash is rebuilt, and the report
+    # is regenerated from the final scorecard before final hashes/validation.
+    if _authoritative_products_ready(eval_success, report_success):
+        eval_success, report_success, qualification_passed = _authoritative_second_pass(
+            run_dir,
+            run_id,
+            timestamp_start,
+            provenance,
+            final_inventory_doc,
+            threats_path,
+        )
+    ordinary_completion_succeeded = _ordinary_completion_succeeded(
+        terminal_processing_succeeded=terminal_processing_succeeded,
+        had_quarantine=had_quarantine,
+        eval_enabled=eval_enabled,
+        eval_success=eval_success,
+        report_success=report_success,
+        qualification_passed=qualification_passed,
+    )
+    final_manifest = _finalize_run_manifest(
+        run_dir,
+        run_id,
+        timestamp_start,
+        provenance,
+        final_inventory_doc,
+        generation_notes,
+        semantic_generation,
+        eval_enabled,
+        eval_success,
+        report_success,
+        ordinary_completion_succeeded,
+    )
+    admitted_count, quarantined_count, failed_count = _result_counts(
+        final_inventory_doc, filter_quarantines
     )
     return PipelineResult(
         capability_profile=profile,
@@ -505,11 +714,80 @@ def _complete_v3_run(
         generation_notes=generation_notes,
         run_dir=run_dir,
         run_id=run_id,
-        manifest_status=final_status,
+        manifest_status=final_manifest.status,
         admitted_count=admitted_count,
-        quarantined_count=finalization_quarantine_count + filter_quarantine_count,
+        quarantined_count=quarantined_count,
         failed_count=failed_count,
     )
+
+
+def _repackage_candidate(candidate: object, rank: int) -> object:
+    """Rebuild a qualified candidate with a new selection rank."""
+    from asago_scenario_generator.pipeline.coverage_planning import (
+        QualifiedCandidate,
+    )
+
+    return QualifiedCandidate(
+        projected=candidate.projected,
+        accepted_filters=candidate.accepted_filters,
+        rank=rank,
+    )
+
+
+def _restore_qualified_candidate(ref: object) -> object:
+    """Deserialize one persisted choice reference back to a candidate."""
+    from asago_scenario_generator.pipeline.coverage_planning import (
+        deserialize_qualified_candidate,
+    )
+
+    hydrated = deserialize_qualified_candidate(ref.model_dump(mode="json"))
+    return _repackage_candidate(hydrated, hydrated.rank)
+
+
+def _restore_selected(
+    planning: object, hydrated_by_id: dict[str, object]
+) -> list[object]:
+    """Rebuild the typed selected list in persisted rank order."""
+    try:
+        return [
+            _repackage_candidate(hydrated_by_id[item], rank)
+            for rank, item in enumerate(planning.selected_candidate_ids)
+        ]
+    except KeyError as exc:
+        raise ManifestIntegrityError(
+            "planning checkpoint selected candidate is absent from plan"
+        ) from exc
+
+
+def _pattern_counts(selected: Sequence[object]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for candidate in selected:
+        counts[candidate.pattern_id] = counts.get(candidate.pattern_id, 0) + 1
+    return counts
+
+
+def _coverage_queues_for(
+    coverage_universe: object, coverage_candidates: dict[str, list[object]]
+) -> dict[str, object]:
+    from asago_scenario_generator.pipeline.coverage_planning import (
+        TargetFallbackQueue,
+    )
+
+    return {
+        target.entry_point_id: TargetFallbackQueue(
+            entry_point_id=target.entry_point_id,
+            choices=[
+                _repackage_candidate(candidate, rank)
+                for rank, candidate in enumerate(
+                    sorted(
+                        coverage_candidates.get(target.entry_point_id, []),
+                        key=lambda item: (item.pattern_id, item.candidate_id),
+                    )[:3]
+                )
+            ],
+        )
+        for target in coverage_universe.feasible_targets
+    }
 
 
 def _hydrate_planning_inputs(
@@ -520,47 +798,22 @@ def _hydrate_planning_inputs(
         QualifiedCandidate,
         SelectionResult,
         TargetFallbackQueue,
-        deserialize_qualified_candidate,
     )
 
     hydrated_by_id: dict[str, QualifiedCandidate] = {}
     target_queues: dict[str, TargetFallbackQueue] = {}
     coverage_candidates: dict[str, list[QualifiedCandidate]] = {}
     for target in durable_plan.targets:
-        choices: list[QualifiedCandidate] = []
-        for ref in target.ordered_choices:
-            hydrated = deserialize_qualified_candidate(ref.model_dump(mode="json"))
-            candidate = QualifiedCandidate(
-                projected=hydrated.projected,
-                accepted_filters=hydrated.accepted_filters,
-                rank=hydrated.rank,
-            )
-            choices.append(candidate)
+        choices = [_restore_qualified_candidate(ref) for ref in target.ordered_choices]
+        for candidate in choices:
             hydrated_by_id[candidate.candidate_id] = candidate
             coverage_candidates.setdefault(target.entry_point_id, []).append(candidate)
         target_queues[target.effective_target_id] = TargetFallbackQueue(
             entry_point_id=target.effective_target_id,
             choices=choices,
         )
-    try:
-        selected = [
-            QualifiedCandidate(
-                projected=hydrated_by_id[item].projected,
-                accepted_filters=hydrated_by_id[item].accepted_filters,
-                rank=rank,
-            )
-            for rank, item in enumerate(planning.selected_candidate_ids)
-        ]
-    except KeyError as exc:
-        raise ManifestIntegrityError(
-            "planning checkpoint selected candidate is absent from plan"
-        ) from exc
-    actual_pattern_counts: dict[str, int] = {}
-    for candidate in selected:
-        actual_pattern_counts[candidate.pattern_id] = (
-            actual_pattern_counts.get(candidate.pattern_id, 0) + 1
-        )
-    if actual_pattern_counts != planning.per_pattern_counts:
+    selected = _restore_selected(planning, hydrated_by_id)
+    if _pattern_counts(selected) != planning.per_pattern_counts:
         raise ManifestIntegrityError("planning checkpoint pattern counts mismatch")
 
     selection_result = SelectionResult(
@@ -572,25 +825,7 @@ def _hydrate_planning_inputs(
         attempted_candidate_ids=set(planning.attempted_candidate_ids),
         selection_limitation_target_ids=list(planning.selection_limitation_target_ids),
     )
-    coverage_queues = {
-        target.entry_point_id: TargetFallbackQueue(
-            entry_point_id=target.entry_point_id,
-            choices=[
-                QualifiedCandidate(
-                    projected=candidate.projected,
-                    accepted_filters=candidate.accepted_filters,
-                    rank=rank,
-                )
-                for rank, candidate in enumerate(
-                    sorted(
-                        coverage_candidates.get(target.entry_point_id, []),
-                        key=lambda item: (item.pattern_id, item.candidate_id),
-                    )[:3]
-                )
-            ],
-        )
-        for target in coverage_universe.feasible_targets
-    }
+    coverage_queues = _coverage_queues_for(coverage_universe, coverage_candidates)
     return selection_result, target_queues, coverage_queues
 
 
@@ -699,6 +934,54 @@ def run_profile_only(
     return infer_capability_profile(use_case, client)
 
 
+def _glob_hash_map(directory: Path, pattern: str, data_root: Path) -> dict[str, str]:
+    """Hash every file matched by ``pattern`` as a sorted path→hash map."""
+    if not directory.exists():
+        return {}
+    return {
+        str(yaml_file.relative_to(data_root)): compute_file_sha256(yaml_file)
+        for yaml_file in sorted(directory.glob(pattern))
+    }
+
+
+def _source_profile_hash(hashes: InputHashes, profile_path: Path | None) -> None:
+    if profile_path is not None:
+        hashes.source_profile_hash = compute_file_sha256(profile_path)
+
+
+def _qualification_facts_hash(
+    hashes: InputHashes,
+    qualification_facts_bytes: bytes | None,
+    qualification_facts_path: Path | None,
+) -> None:
+    if qualification_facts_bytes is not None:
+        hashes.qualification_facts_hash = compute_bytes_sha256(
+            qualification_facts_bytes
+        )
+    elif qualification_facts_path is not None:
+        hashes.qualification_facts_hash = compute_file_sha256(qualification_facts_path)
+
+
+def _optional_bundled_hashes(hashes: InputHashes, data_root: Path) -> None:
+    for path, attribute in (
+        (
+            data_root / "attack-patterns" / "attack-patterns.yaml",
+            "attack_patterns_hash",
+        ),
+        (
+            data_root / "attack-patterns" / "attack-patterns.sssom.tsv",
+            "attack_patterns_sssom_hash",
+        ),
+        (
+            data_root / "attack-goals" / "attack-goals.json",
+            "attack_goals_taxonomy_hash",
+        ),
+        (_THREAT_GOAL_AFFINITY_PATH, "threat_goal_affinity_hash"),
+    ):
+        if path.exists():
+            setattr(hashes, attribute, compute_file_sha256(path))
+
+
 def _capture_input_hashes(
     use_case: str,
     risk_extraction_path: Path,
@@ -717,9 +1000,6 @@ def _capture_input_hashes(
     explicit/default threats, optional source profile, and bundled
     taxonomies (attack patterns, attack goals, threat-goal affinity).
     """
-    from asago_scenario_generator.data.loaders import (
-        _THREAT_GOAL_AFFINITY_PATH,
-    )
     from asago_scenario_generator.pipeline.seeds import _DEFAULT_THREATS_PATH
 
     effective_threats = threats_path or _DEFAULT_THREATS_PATH
@@ -727,23 +1007,15 @@ def _capture_input_hashes(
     # Bundled data paths
     data_root = Path(__file__).resolve().parents[3] / "data" / "taxonomies"
     attack_patterns_dir = data_root / "attack-patterns"
-    attack_patterns_yaml = attack_patterns_dir / "attack-patterns.yaml"
-    attack_patterns_sssom = attack_patterns_dir / "attack-patterns.sssom.tsv"
-    attack_goals_json = data_root / "attack-goals" / "attack-goals.json"
 
     # Hash every file actually loaded by the attack-patterns*.yaml and
     # attack-patterns*.sssom.tsv globs as deterministic sorted path→hash maps.
-    attack_patterns_yaml_map: dict[str, str] = {}
-    attack_patterns_sssom_map: dict[str, str] = {}
-    if attack_patterns_dir.exists():
-        for yaml_file in sorted(attack_patterns_dir.glob("attack-patterns*.yaml")):
-            rel = str(yaml_file.relative_to(data_root))
-            attack_patterns_yaml_map[rel] = compute_file_sha256(yaml_file)
-        for sssom_file in sorted(
-            attack_patterns_dir.glob("attack-patterns*.sssom.tsv")
-        ):
-            rel = str(sssom_file.relative_to(data_root))
-            attack_patterns_sssom_map[rel] = compute_file_sha256(sssom_file)
+    attack_patterns_yaml_map = _glob_hash_map(
+        attack_patterns_dir, "attack-patterns*.yaml", data_root
+    )
+    attack_patterns_sssom_map = _glob_hash_map(
+        attack_patterns_dir, "attack-patterns*.sssom.tsv", data_root
+    )
 
     hashes = InputHashes(
         use_case_hash=compute_bytes_sha256(use_case.encode("utf-8")),
@@ -754,25 +1026,133 @@ def _capture_input_hashes(
         attack_patterns_yaml_map=attack_patterns_yaml_map,
         attack_patterns_sssom_map=attack_patterns_sssom_map,
     )
-    if profile_path is not None:
-        hashes.source_profile_hash = compute_file_sha256(profile_path)
-    if qualification_facts_bytes is not None:
-        hashes.qualification_facts_hash = compute_bytes_sha256(
-            qualification_facts_bytes
-        )
-    elif qualification_facts_path is not None:
-        hashes.qualification_facts_hash = compute_file_sha256(qualification_facts_path)
-    if attack_patterns_yaml.exists():
-        hashes.attack_patterns_hash = compute_file_sha256(attack_patterns_yaml)
-    if attack_patterns_sssom.exists():
-        hashes.attack_patterns_sssom_hash = compute_file_sha256(attack_patterns_sssom)
-    if attack_goals_json.exists():
-        hashes.attack_goals_taxonomy_hash = compute_file_sha256(attack_goals_json)
-    if _THREAT_GOAL_AFFINITY_PATH.exists():
-        hashes.threat_goal_affinity_hash = compute_file_sha256(
-            _THREAT_GOAL_AFFINITY_PATH
-        )
+    _source_profile_hash(hashes, profile_path)
+    _qualification_facts_hash(
+        hashes, qualification_facts_bytes, qualification_facts_path
+    )
+    _optional_bundled_hashes(hashes, data_root)
     return hashes
+
+
+_SINGLETON_FAILED_ARTIFACTS: tuple[tuple[ArtifactRole, str], ...] = (
+    (ArtifactRole.USE_CASE, "use-case.txt"),
+    (ArtifactRole.CAPABILITY_PROFILE, "capability-profile.yaml"),
+    (ArtifactRole.THREAT_SURFACE, "threat-surface.yaml"),
+    (ArtifactRole.PLANNING_CHECKPOINT, "planning-checkpoint.json"),
+    (ArtifactRole.COVERAGE_REPORT, "coverage-gaps.json"),
+    (ArtifactRole.PIPELINE_CALL_LOG, "calls.jsonl"),
+    (ArtifactRole.EVAL_SCORECARD, "eval-scorecard.yaml"),
+    (ArtifactRole.REPORT, "report.html"),
+    (ArtifactRole.PIPELINE_LOG, "pipeline.log"),
+    (ArtifactRole.COVERAGE_PLAN, "coverage-plan.json"),
+    (ArtifactRole.FINALIZATION_INVENTORY, "finalization-inventory.json"),
+    (ArtifactRole.CANDIDATE_FILTER_QUARANTINE, "candidate-filter-quarantine.json"),
+)
+
+
+def _best_effort_artifact_entry(
+    full: Path,
+    role: ArtifactRole,
+    rel_path: str,
+    scenario_id: str | None,
+    candidate_id: str | None,
+) -> ArtifactEntry | None:
+    """Record a file with a best-effort hash when canonical entry fails."""
+    try:
+        return ArtifactEntry(
+            role=role,
+            path=rel_path,
+            sha256=compute_file_sha256(full),
+            scenario_id=scenario_id,
+            candidate_id=candidate_id,
+            media_type=_ROLE_METADATA.get(role, {}).get(
+                "media_type", "application/octet-stream"
+            ),
+            schema_version=ARTIFACT_SCHEMA_VERSION,
+        )
+    except Exception:  # noqa: BLE001, S110 - orphan check will flag unreadable files
+        return None  # truly unreadable — orphan check will flag it
+
+
+def _failed_artifact_entry(
+    run_dir: Path,
+    role: ArtifactRole,
+    rel_path: str,
+    scenario_id: str | None = None,
+    candidate_id: str | None = None,
+) -> ArtifactEntry | None:
+    """Independently inventory one existing recognized artifact, if readable."""
+    full = run_dir / rel_path
+    if not _readable_evidence_file(full):
+        return None
+    try:
+        return build_artifact_entry(
+            role=role,
+            run_dir=run_dir,
+            rel_path=rel_path,
+            scenario_id=scenario_id,
+            candidate_id=candidate_id,
+            schema_version="2" if role is ArtifactRole.COVERAGE_PLAN else "1",
+        )
+    except ManifestIntegrityError:
+        # If we cannot build a valid entry (e.g. hash computation failure),
+        # still record the file with a best-effort hash so orphan checks
+        # don't flag it.  This is evidence, not authoritative inventory.
+        return _best_effort_artifact_entry(
+            full, role, rel_path, scenario_id, candidate_id
+        )
+
+
+def _finalization_inventory_receipts(run_dir: Path) -> list[tuple]:
+    """V3 terminal files discovered only through the durable inventory."""
+    finalization_path = run_dir / "finalization-inventory.json"
+    if not finalization_path.is_file():
+        return []
+    try:
+        from asago_scenario_generator.pipeline.persistence import (
+            FinalizationInventoryV1,
+        )
+
+        finalization_inventory = FinalizationInventoryV1.model_validate_json(
+            finalization_path.read_text(encoding="utf-8")
+        )
+        return [
+            (receipt.role, receipt.path, receipt.scenario_id, receipt.candidate_id)
+            for receipt in [
+                *finalization_inventory.admitted_inventory,
+                *finalization_inventory.quarantine_inventory,
+            ]
+        ]
+    except Exception:  # noqa: BLE001, S110 - failed-manifest evidence is best effort
+        return []
+
+
+def _scenario_receipts(write_receipts: list[dict]) -> list[tuple]:
+    """Scenario artifacts from write receipts."""
+    entries: list[tuple] = []
+    for receipt in write_receipts:
+        sid = receipt.get("scenario_id")
+        cid = receipt.get("candidate_id")
+        yaml_name = Path(receipt["yaml_path"]).name
+        entries.append((ArtifactRole.SCENARIO_YAML, f"scenarios/{yaml_name}", sid, cid))
+        feat_path = receipt.get("feature_path")
+        if feat_path:
+            feat_name = Path(feat_path).name
+            entries.append(
+                (ArtifactRole.SCENARIO_FEATURE, f"scenarios/{feat_name}", sid, cid)
+            )
+    return entries
+
+
+def _collect_failed_entries(
+    run_dir: Path, inventory: list[ArtifactEntry], candidates: list[tuple]
+) -> None:
+    for role, rel_path, scenario_id, candidate_id in candidates:
+        entry = _failed_artifact_entry(
+            run_dir, role, rel_path, scenario_id, candidate_id
+        )
+        if entry is not None:
+            inventory.append(entry)
 
 
 def _build_failed_evidence_inventory(
@@ -787,116 +1167,23 @@ def _build_failed_evidence_inventory(
     evidence for every artifact that was actually written before the failure.
     """
     inventory: list[ArtifactEntry] = []
-
-    def _add_if_exists(
-        role: ArtifactRole,
-        rel_path: str,
-        scenario_id: str | None = None,
-        candidate_id: str | None = None,
-    ) -> None:
-        full = run_dir / rel_path
-        if _readable_evidence_file(full):
-            try:
-                inventory.append(
-                    build_artifact_entry(
-                        role=role,
-                        run_dir=run_dir,
-                        rel_path=rel_path,
-                        scenario_id=scenario_id,
-                        candidate_id=candidate_id,
-                        schema_version=(
-                            "2" if role is ArtifactRole.COVERAGE_PLAN else "1"
-                        ),
-                    )
-                )
-            except ManifestIntegrityError:
-                # If we cannot build a valid entry (e.g. hash computation
-                # failure), still record the file with a best-effort hash
-                # so orphan checks don't flag it.  This is evidence, not
-                # authoritative inventory.
-                try:
-                    inventory.append(
-                        ArtifactEntry(
-                            role=role,
-                            path=rel_path,
-                            sha256=compute_file_sha256(full),
-                            scenario_id=scenario_id,
-                            candidate_id=candidate_id,
-                            media_type=_ROLE_METADATA.get(role, {}).get(
-                                "media_type", "application/octet-stream"
-                            ),
-                            schema_version=ARTIFACT_SCHEMA_VERSION,
-                        )
-                    )
-                except Exception:  # noqa: BLE001, S110 - orphan check will flag unreadable files
-                    pass  # truly unreadable — orphan check will flag it
-
-    # Top-level singleton artifacts
-    _add_if_exists(ArtifactRole.USE_CASE, "use-case.txt")
-    _add_if_exists(ArtifactRole.CAPABILITY_PROFILE, "capability-profile.yaml")
-    _add_if_exists(ArtifactRole.THREAT_SURFACE, "threat-surface.yaml")
-    _add_if_exists(ArtifactRole.PLANNING_CHECKPOINT, "planning-checkpoint.json")
-    _add_if_exists(ArtifactRole.COVERAGE_REPORT, "coverage-gaps.json")
-    _add_if_exists(ArtifactRole.PIPELINE_CALL_LOG, "calls.jsonl")
-    _add_if_exists(ArtifactRole.EVAL_SCORECARD, "eval-scorecard.yaml")
-    _add_if_exists(ArtifactRole.REPORT, "report.html")
-    _add_if_exists(ArtifactRole.PIPELINE_LOG, "pipeline.log")
-    _add_if_exists(ArtifactRole.COVERAGE_PLAN, "coverage-plan.json")
-    _add_if_exists(ArtifactRole.FINALIZATION_INVENTORY, "finalization-inventory.json")
-    _add_if_exists(
-        ArtifactRole.CANDIDATE_FILTER_QUARANTINE,
-        "candidate-filter-quarantine.json",
+    _collect_failed_entries(
+        run_dir,
+        inventory,
+        [
+            (role, rel_path, None, None)
+            for role, rel_path in _SINGLETON_FAILED_ARTIFACTS
+        ],
     )
-
-    # V3 terminal files are discovered only through the durable inventory,
-    # never by globbing scenario/quarantine directories.
-    finalization_path = run_dir / "finalization-inventory.json"
-    if finalization_path.is_file():
-        try:
-            from asago_scenario_generator.pipeline.persistence import (
-                FinalizationInventoryV1,
-            )
-
-            finalization_inventory = FinalizationInventoryV1.model_validate_json(
-                finalization_path.read_text(encoding="utf-8")
-            )
-            for receipt in [
-                *finalization_inventory.admitted_inventory,
-                *finalization_inventory.quarantine_inventory,
-            ]:
-                _add_if_exists(
-                    receipt.role,
-                    receipt.path,
-                    scenario_id=receipt.scenario_id,
-                    candidate_id=receipt.candidate_id,
-                )
-        except Exception:  # noqa: BLE001, S110 - failed-manifest evidence is best effort
-            pass
-
-    # Scenario artifacts from write receipts
-    for receipt in write_receipts:
-        sid = receipt.get("scenario_id")
-        cid = receipt.get("candidate_id")
-        yaml_name = Path(receipt["yaml_path"]).name
-        _add_if_exists(
-            ArtifactRole.SCENARIO_YAML,
-            f"scenarios/{yaml_name}",
-            scenario_id=sid,
-            candidate_id=cid,
-        )
-        feat_path = receipt.get("feature_path")
-        if feat_path:
-            feat_name = Path(feat_path).name
-            _add_if_exists(
-                ArtifactRole.SCENARIO_FEATURE,
-                f"scenarios/{feat_name}",
-                scenario_id=sid,
-                candidate_id=cid,
-            )
-
-    # Optional scenario call log
-    _add_if_exists(ArtifactRole.SCENARIO_CALL_LOG, "scenarios/calls.jsonl")
-
+    _collect_failed_entries(
+        run_dir, inventory, _finalization_inventory_receipts(run_dir)
+    )
+    _collect_failed_entries(run_dir, inventory, _scenario_receipts(write_receipts))
+    _collect_failed_entries(
+        run_dir,
+        inventory,
+        [(ArtifactRole.SCENARIO_CALL_LOG, "scenarios/calls.jsonl", None, None)],
+    )
     return inventory
 
 
