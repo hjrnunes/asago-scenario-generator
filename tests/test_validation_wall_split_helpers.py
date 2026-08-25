@@ -27,8 +27,14 @@ from asago_scenario_generator.manifest import (
     RunStatus,
     _check_completed_scenario_pairing,
     _check_completed_scorecard_counts,
+    _check_completed_attempt_equations,
+    _check_completed_duplicate_singletons,
+    _scorecard_entry_verifiable,
+    _strict_resolver_for_completed,
     _v3_scorecard_counts,
     build_artifact_entry,
+    validate_completed_inventory,
+    validate_v3_resolver_policy,
 )
 from asago_scenario_generator.models.attack_pattern import (
     EntryPointResourceReference,
@@ -534,6 +540,131 @@ class TestCheckCompletedScenarioPairing:
         _check_completed_scenario_pairing(manifest)
 
 
+class TestCompletedInventoryDispatch:
+    @staticmethod
+    def _manifest(version: str) -> SimpleNamespace:
+        return SimpleNamespace(manifest_version=version)
+
+    def test_v3_policy_requires_both_resolver_and_version(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import asago_scenario_generator.manifest_completion as completion
+
+        for helper in (
+            "_check_completed_singleton_roles",
+            "_check_completed_duplicate_singletons",
+            "_check_completed_scenario_pairing",
+            "_check_completed_attempt_equations",
+            "_check_completed_inventory_identity",
+        ):
+            monkeypatch.setattr(completion, helper, lambda *args: None)
+
+        resolved = object()
+        monkeypatch.setattr(
+            completion,
+            "_strict_resolver_for_completed",
+            lambda _manifest, _run_dir: resolved,
+        )
+        calls: list[object] = []
+        monkeypatch.setattr(
+            completion,
+            "validate_v3_resolver_policy",
+            lambda resolver: calls.append(resolver),
+        )
+
+        validate_completed_inventory(
+            self._manifest(MANIFEST_V3), eval_enabled=False, run_dir=Path("run")
+        )
+        assert calls == [resolved]
+
+        calls.clear()
+        monkeypatch.setattr(
+            completion,
+            "_strict_resolver_for_completed",
+            lambda _manifest, _run_dir: resolved,
+        )
+        validate_completed_inventory(
+            self._manifest("2"), eval_enabled=False, run_dir=Path("run")
+        )
+        assert calls == []
+
+        calls.clear()
+        monkeypatch.setattr(
+            completion,
+            "_strict_resolver_for_completed",
+            lambda _manifest, _run_dir: None,
+        )
+        validate_completed_inventory(
+            self._manifest(MANIFEST_V3), eval_enabled=False, run_dir=None
+        )
+        assert calls == []
+
+
+class TestV3ResolverPolicy:
+    def test_missing_semantic_summary_is_ignored(self) -> None:
+        validate_v3_resolver_policy(
+            SimpleNamespace(
+                manifest=SimpleNamespace(semantic_generation=None),
+            )
+        )
+
+
+class TestStrictCompletedResolver:
+    @staticmethod
+    def _manifest(version: str) -> SimpleNamespace:
+        return SimpleNamespace(manifest_version=version)
+
+    def test_strict_completed_resolver_checks_orphans(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import asago_scenario_generator.manifest_completion as completion
+
+        calls: list[bool] = []
+
+        class FakeResolver:
+            def __init__(
+                self,
+                _run_dir: Path,
+                _manifest: object,
+                *,
+                check_orphans: bool,
+            ) -> None:
+                calls.append(check_orphans)
+
+        monkeypatch.setattr(completion, "ManifestInventoryResolver", FakeResolver)
+        result = _strict_resolver_for_completed(self._manifest(MANIFEST_V3), tmp_path)
+        assert isinstance(result, FakeResolver)
+        assert calls == [True]
+
+
+class TestCompletedDuplicateSingletons:
+    def test_one_singleton_passes_and_two_fail(self) -> None:
+        entry = SimpleNamespace(role=ArtifactRole.USE_CASE)
+        _check_completed_duplicate_singletons(SimpleNamespace(inventory=[entry]))
+        with pytest.raises(ManifestIntegrityError, match="Duplicate singleton"):
+            _check_completed_duplicate_singletons(
+                SimpleNamespace(inventory=[entry, entry])
+            )
+
+
+class TestCompletedAttemptEquations:
+    def test_v3_does_not_use_legacy_equations(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import asago_scenario_generator.manifest_completion as completion
+
+        calls: list[object] = []
+        monkeypatch.setattr(
+            completion,
+            "validate_attempt_equations",
+            lambda manifest: calls.append(manifest),
+        )
+        _check_completed_attempt_equations(
+            SimpleNamespace(manifest_version=MANIFEST_V3)
+        )
+        assert calls == []
+
+
 class TestV3ScorecardCounts:
     @staticmethod
     def _scorecard_raw() -> dict[str, Any]:
@@ -574,6 +705,13 @@ class TestV3ScorecardCounts:
 
 
 class TestCheckCompletedScorecardCounts:
+    def test_scorecard_is_verifiable_only_with_both_inputs(self) -> None:
+        entry = SimpleNamespace()
+        resolver = object()
+        assert _scorecard_entry_verifiable(entry, resolver)
+        assert not _scorecard_entry_verifiable(entry, None)
+        assert not _scorecard_entry_verifiable(None, resolver)
+
     def test_count_mismatch_raises(self, tmp_path: Path) -> None:
         manifest = _manifest(tmp_path, yaml_ids=("a",))
         with pytest.raises(

@@ -762,6 +762,9 @@ class TestQualificationReportValidation:
     def test_qualified_subset_accepts_projected(self) -> None:
         _validate_report_qualified({"p1", "p2"}, {"p1"})
 
+    def test_qualified_equal_projected_accepts(self) -> None:
+        _validate_report_qualified({"p1"}, {"p1"})
+
     def test_qualified_subset_rejects_unprojected(self) -> None:
         with pytest.raises(ValueError, match="must be projected"):
             _validate_report_qualified({"p1"}, {"p2"})
@@ -1036,6 +1039,14 @@ class TestPreflightMatrixHelpers:
         with pytest.raises(ValueError, match="exact disjoint reviewed partition"):
             _validate_matrix_partition(matrix, catalog)
 
+    def test_validate_matrix_partition_rejects_duplicate_pattern(self) -> None:
+        catalog = {"p1": {}, "p2": {}}
+        matrix = SimpleNamespace(
+            profiles=(SimpleNamespace(applicable_pattern_ids=("p1", "p1")),)
+        )
+        with pytest.raises(ValueError, match="exact disjoint reviewed partition"):
+            _validate_matrix_partition(matrix, catalog)
+
     def test_profile_fact_readiness_accepts_matrix_profiles(self) -> None:
         matrix = load_matrix(MATRIX)
         catalog = load_attack_patterns()
@@ -1122,6 +1133,9 @@ class TestPreflightMatrixHelpers:
         assert _unknown_fact_keys(required, actual_with_unknown) == [
             _fact_key(target.fact.model_dump(mode="json"))
         ]
+
+    def test_fact_key_is_independent_of_mapping_order(self) -> None:
+        assert _fact_key({"a": 1, "b": 2}) == _fact_key({"b": 2, "a": 1})
 
     def test_projected_candidates_scoped_to_profile(self) -> None:
         matrix = load_matrix(MATRIX)
