@@ -10,7 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from asago_scenario_generator.llm.client import LLMResult
+from asago_scenario_generator.llm.client import (
+    CompletionLengthError,
+    LLMResult,
+)
 from asago_scenario_generator.models.scenario import CallMetadata, CallName
 
 if TYPE_CHECKING:
@@ -170,44 +173,20 @@ def stage_attempt_failure(
     adapter's typed error, never from exception text, and carry the code
     ``completion_length`` plus finish reason and usage fields.
     """
-    from asago_scenario_generator.llm.client import CompletionLengthError
-
     if isinstance(exception, CompletionLengthError):
-        return StageAttemptFailure(
-            call_name=call_name,
-            exception=exception,
+        return _completion_length_failure(
+            call_name,
+            exception,
             phase=phase,
             invoked=invoked,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             result=result,
             raw_response=raw_response,
-            code=StageAttemptFailure.COMPLETION_LENGTH_CODE,
-            finish_reason=exception.finish_reason,
-            prompt_tokens=exception.prompt_tokens,
-            completion_tokens=exception.completion_tokens,
-            total_tokens=exception.total_tokens,
-            usage_details=exception.usage_details,
-            response_id=exception.response_id,
-            model=exception.model,
-            partial_character_count=exception.partial_character_count,
-            partial_sha256=exception.partial_sha256,
-            partial_preview_prefix=exception.partial_preview_prefix,
-            partial_preview_suffix=exception.partial_preview_suffix,
-            elapsed_ms=exception.elapsed_ms,
             request_controls=request_controls,
-            retryable=True,
             semantic_evidence=semantic_evidence,
         )
-    code = code or getattr(exception, "stage_failure_code", None)
-    if retryable is None:
-        retryable = getattr(exception, "stage_failure_retryable", None)
-    if code is None:
-        from pydantic import ValidationError
-
-        if invoked and isinstance(exception, ValidationError):
-            code = StageAttemptFailure.SEMANTIC_DRAFT_PROTOCOL_CODE
-            retryable = True
+    code, retryable = _resolved_failure_code(exception, code, retryable, invoked)
     return StageAttemptFailure(
         call_name=call_name,
         exception=exception,
@@ -222,3 +201,64 @@ def stage_attempt_failure(
         retryable=True if retryable is None else bool(retryable),
         semantic_evidence=semantic_evidence,
     )
+
+
+def _completion_length_failure(
+    call_name: CallName,
+    exception: CompletionLengthError,
+    *,
+    phase: Literal["before_invocation", "invocation", "post_response"],
+    invoked: bool,
+    system_prompt: str | None = None,
+    user_prompt: str | None = None,
+    result: LLMResult | None = None,
+    raw_response: Any | None = None,
+    request_controls: dict[str, Any] | None = None,
+    semantic_evidence: StageGenerationEvidence | None = None,
+) -> StageAttemptFailure:
+    """Build the typed failure for an adapter completion-length exhaustion."""
+    return StageAttemptFailure(
+        call_name=call_name,
+        exception=exception,
+        phase=phase,
+        invoked=invoked,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        result=result,
+        raw_response=raw_response,
+        code=StageAttemptFailure.COMPLETION_LENGTH_CODE,
+        finish_reason=exception.finish_reason,
+        prompt_tokens=exception.prompt_tokens,
+        completion_tokens=exception.completion_tokens,
+        total_tokens=exception.total_tokens,
+        usage_details=exception.usage_details,
+        response_id=exception.response_id,
+        model=exception.model,
+        partial_character_count=exception.partial_character_count,
+        partial_sha256=exception.partial_sha256,
+        partial_preview_prefix=exception.partial_preview_prefix,
+        partial_preview_suffix=exception.partial_preview_suffix,
+        elapsed_ms=exception.elapsed_ms,
+        request_controls=request_controls,
+        retryable=True,
+        semantic_evidence=semantic_evidence,
+    )
+
+
+def _resolved_failure_code(
+    exception: BaseException,
+    code: str | None,
+    retryable: bool | None,
+    invoked: bool,
+) -> tuple[str | None, bool | None]:
+    """Resolve the failure code and retryability from the exception itself."""
+    code = code or getattr(exception, "stage_failure_code", None)
+    if retryable is None:
+        retryable = getattr(exception, "stage_failure_retryable", None)
+    if code is None:
+        from pydantic import ValidationError
+
+        if invoked and isinstance(exception, ValidationError):
+            code = StageAttemptFailure.SEMANTIC_DRAFT_PROTOCOL_CODE
+            retryable = True
+    return code, retryable

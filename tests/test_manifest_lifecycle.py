@@ -3337,7 +3337,6 @@ class TestFourthReviewEmptyEvidence:
 def test_record_stage_result_writes_to_calls_jsonl(tmp_path):
     import json
     from unittest.mock import MagicMock
-    from pathlib import Path
     from asago_scenario_generator.pipeline.persistence import (
         FinalizationPersistenceAdapter,
     )
@@ -3639,9 +3638,13 @@ class TestFindRunDirHelpers:
         from asago_scenario_generator.manifest import _runs_in_collection
 
         collection = tmp_path / "output"
-        build_test_run_dir(collection / "20260102T000000_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        build_test_run_dir(
+            collection / "20260102T000000_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        )
         (collection / "plain-dir").mkdir(parents=True)
-        build_test_run_dir(collection / "20260101T000000_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        build_test_run_dir(
+            collection / "20260101T000000_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        )
         runs = _runs_in_collection(collection)
         assert [d.name for d in runs] == [
             "20260101T000000_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -3655,10 +3658,7 @@ class TestFindRunDirHelpers:
         run_dir = build_test_run_dir(
             collection / "20260101T000000_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         )
-        assert (
-            _single_run_in_collection(collection, [run_dir])
-            == run_dir
-        )
+        assert _single_run_in_collection(collection, [run_dir]) == run_dir
 
     def test_single_run_in_collection_empty_raises(self, tmp_path: Path):
         from asago_scenario_generator.manifest import _single_run_in_collection
@@ -3699,7 +3699,9 @@ class TestStrictResolverStatusGates:
         _require_final_status(self._manifest("completed"), tmp_path, require_final=True)
         _require_final_status(self._manifest("started"), tmp_path, require_final=False)
         with pytest.raises(ManifestIntegrityError, match="status is not final"):
-            _require_final_status(self._manifest("started"), tmp_path, require_final=True)
+            _require_final_status(
+                self._manifest("started"), tmp_path, require_final=True
+            )
 
     def test_require_authoritative_status_gate(self, tmp_path: Path):
         from asago_scenario_generator.manifest import _require_authoritative_status
@@ -3770,9 +3772,7 @@ class TestFunnelTallyHelpers:
     def test_disposition_tally_matches_phase_and_disposition(self):
         attempts = self._mixed_attempts()
         assert (
-            _disposition_tally(
-                attempts, AttemptPhase.MAIN, AttemptDisposition.ADMITTED
-            )
+            _disposition_tally(attempts, AttemptPhase.MAIN, AttemptDisposition.ADMITTED)
             == 1
         )
         assert (
@@ -3782,9 +3782,7 @@ class TestFunnelTallyHelpers:
             == 1
         )
         assert (
-            _disposition_tally(
-                attempts, AttemptPhase.MAIN, AttemptDisposition.FAILED
-            )
+            _disposition_tally(attempts, AttemptPhase.MAIN, AttemptDisposition.FAILED)
             == 1
         )
         assert (
@@ -3990,7 +3988,9 @@ class TestAttemptEquationHelpers:
             _require_funnel_lifecycle_keys({"attempted": 1})
 
     def test_check_funnel_aggregate_equations_accepts(self):
-        _check_funnel_aggregate_equations(2, {"attempted": 2, "admitted": 3, "quarantined": 1}, 2, 1)
+        _check_funnel_aggregate_equations(
+            2, {"attempted": 2, "admitted": 3, "quarantined": 1}, 2, 1
+        )
 
     def test_check_funnel_aggregate_equations_attempted_mismatch(self):
         with pytest.raises(ManifestIntegrityError, match="attempted mismatch"):
@@ -4026,19 +4026,31 @@ class TestAttemptEquationHelpers:
     def test_check_main_funnel_equations_attempted_mismatch(self):
         with pytest.raises(ManifestIntegrityError, match="main_attempted mismatch"):
             _check_main_funnel_equations(
-                1, 1, 1, 1, {"main_attempted": 2, "main_admitted": 2, "generation_failed": 1}
+                1,
+                1,
+                1,
+                1,
+                {"main_attempted": 2, "main_admitted": 2, "generation_failed": 1},
             )
 
     def test_check_main_funnel_equations_admitted_mismatch(self):
         with pytest.raises(ManifestIntegrityError, match="main_admitted mismatch"):
             _check_main_funnel_equations(
-                2, 1, 1, 1, {"main_attempted": 2, "main_admitted": 3, "generation_failed": 1}
+                2,
+                1,
+                1,
+                1,
+                {"main_attempted": 2, "main_admitted": 3, "generation_failed": 1},
             )
 
     def test_check_main_funnel_equations_failed_mismatch(self):
         with pytest.raises(ManifestIntegrityError, match="generation_failed mismatch"):
             _check_main_funnel_equations(
-                2, 1, 1, 1, {"main_attempted": 2, "main_admitted": 2, "generation_failed": 2}
+                2,
+                1,
+                1,
+                1,
+                {"main_attempted": 2, "main_admitted": 2, "generation_failed": 2},
             )
 
     def test_check_remediation_funnel_equations_accepts(self):
@@ -4063,7 +4075,11 @@ class TestAttemptEquationHelpers:
                 1,
                 1,
                 1,
-                {"remediation_attempted": 2, "remediation_admitted": 2, "remediation_failed": 1},
+                {
+                    "remediation_attempted": 2,
+                    "remediation_admitted": 2,
+                    "remediation_failed": 1,
+                },
             )
 
     def test_check_remediation_funnel_equations_admitted_mismatch(self):
@@ -4075,19 +4091,25 @@ class TestAttemptEquationHelpers:
                 1,
                 1,
                 1,
-                {"remediation_attempted": 2, "remediation_admitted": 3, "remediation_failed": 1},
+                {
+                    "remediation_attempted": 2,
+                    "remediation_admitted": 3,
+                    "remediation_failed": 1,
+                },
             )
 
     def test_check_remediation_funnel_equations_failed_mismatch(self):
-        with pytest.raises(
-            ManifestIntegrityError, match="remediation_failed mismatch"
-        ):
+        with pytest.raises(ManifestIntegrityError, match="remediation_failed mismatch"):
             _check_remediation_funnel_equations(
                 2,
                 1,
                 1,
                 1,
-                {"remediation_attempted": 2, "remediation_admitted": 2, "remediation_failed": 2},
+                {
+                    "remediation_attempted": 2,
+                    "remediation_admitted": 2,
+                    "remediation_failed": 2,
+                },
             )
 
     def test_check_total_failed_equation_accepts(self):
@@ -4105,9 +4127,7 @@ class TestGitHelperUnits:
         def _boom(*args, **kwargs):
             raise OSError("no git binary")
 
-        monkeypatch.setattr(
-            "asago_scenario_generator.manifest.subprocess.run", _boom
-        )
+        monkeypatch.setattr("asago_scenario_generator.manifest.subprocess.run", _boom)
         assert _run_git(tmp_path, "rev-parse", "HEAD") is None
 
     def test_untracked_files_empty(self):
@@ -4259,7 +4279,9 @@ class TestResolverPathHelpers:
 
     def test_track_canonical_path_rejects_duplicate(self):
         resolver = self._resolver()
-        with pytest.raises(ManifestIntegrityError, match="Duplicate artifact canonical"):
+        with pytest.raises(
+            ManifestIntegrityError, match="Duplicate artifact canonical"
+        ):
             resolver._track_canonical_path(_entry(path="a.txt"), {"a.txt"})
 
     def test_validate_sha256_field_accepts_valid(self):
@@ -4301,9 +4323,7 @@ class TestResolverRoleMetadataHelpers:
 
     def test_validate_role_metadata_media_type_mismatch(self):
         resolver = self._resolver()
-        entry = _entry(
-            role=ArtifactRole.USE_CASE, media_type="application/json"
-        )
+        entry = _entry(role=ArtifactRole.USE_CASE, media_type="application/json")
         with pytest.raises(ManifestIntegrityError, match="expects media_type"):
             resolver._validate_role_metadata(entry, ArtifactRole.USE_CASE)
 
@@ -4412,9 +4432,7 @@ class TestResolverScenarioIdentityHelpers:
 
     def test_quarantine_entry_requires_candidate_id(self):
         resolver = self._resolver()
-        entry = _entry(
-            role=ArtifactRole.QUARANTINE_BUNDLE, path="quarantine/c1.jsonl"
-        )
+        entry = _entry(role=ArtifactRole.QUARANTINE_BUNDLE, path="quarantine/c1.jsonl")
         with pytest.raises(ManifestIntegrityError, match="requires candidate_id"):
             resolver._validate_quarantine_entry(entry, ArtifactRole.QUARANTINE_BUNDLE)
 
@@ -4635,7 +4653,9 @@ class TestResolverPostLoopHelpers:
 
     def test_parse_scenario_yaml_wraps_parse_errors(self):
         entry = _entry(path="scenarios/s1.yaml")
-        with pytest.raises(ManifestIntegrityError, match="Failed to read scenario YAML"):
+        with pytest.raises(
+            ManifestIntegrityError, match="Failed to read scenario YAML"
+        ):
             _parse_scenario_yaml(entry, b"{{{{{{{{")
 
     def test_require_serialized_ids_accepts(self):
@@ -4644,12 +4664,16 @@ class TestResolverPostLoopHelpers:
 
     def test_require_serialized_ids_missing_sid(self):
         entry = _entry(path="scenarios/s1.yaml")
-        with pytest.raises(ManifestIntegrityError, match="missing serialized scenario_id"):
+        with pytest.raises(
+            ManifestIntegrityError, match="missing serialized scenario_id"
+        ):
             _require_serialized_ids(entry, None, "c1")
 
     def test_require_serialized_ids_missing_cid(self):
         entry = _entry(path="scenarios/s1.yaml")
-        with pytest.raises(ManifestIntegrityError, match="missing serialized candidate_id"):
+        with pytest.raises(
+            ManifestIntegrityError, match="missing serialized candidate_id"
+        ):
             _require_serialized_ids(entry, "s1", None)
 
     def test_check_duplicate_candidate_ids_accepts_unique(self):
@@ -4693,7 +4717,9 @@ class TestResolverPostLoopHelpers:
         )
 
     def test_validate_stem_inventory_ids_missing(self):
-        with pytest.raises(ManifestIntegrityError, match="missing inventory scenario_id"):
+        with pytest.raises(
+            ManifestIntegrityError, match="missing inventory scenario_id"
+        ):
             _validate_stem_inventory_ids("s1", "", "s1")
 
     def test_validate_stem_inventory_ids_mismatch(self):
@@ -4709,7 +4735,9 @@ class TestResolverPostLoopHelpers:
             _validate_stem_candidate_id("s1", "c2", "c1")
 
     def test_validate_stem_feature_pair_mismatch(self):
-        with pytest.raises(ManifestIntegrityError, match="Feature scenario_id mismatch"):
+        with pytest.raises(
+            ManifestIntegrityError, match="Feature scenario_id mismatch"
+        ):
             _validate_stem_feature_pair("s1", "other", "s1")
 
     def test_validate_stem_feature_pair_accepts(self):
@@ -4777,13 +4805,162 @@ class TestResolverPostLoopHelpers:
             _validate_v3_required_artifacts({}, RunStatus.COMPLETED)
 
     def test_validate_legacy_role_support_rejects_v3_role_in_v2(self):
-        with pytest.raises(ManifestIntegrityError, match="does not support v3-only role"):
-            _validate_legacy_role_support(
-                "2", ArtifactRole.PLANNING_CHECKPOINT
-            )
+        with pytest.raises(
+            ManifestIntegrityError, match="does not support v3-only role"
+        ):
+            _validate_legacy_role_support("2", ArtifactRole.PLANNING_CHECKPOINT)
 
     def test_validate_legacy_role_support_accepts_v2_roles(self):
         _validate_legacy_role_support("2", ArtifactRole.SCENARIO_YAML)
 
     def test_validate_legacy_role_support_accepts_v3_manifest(self):
         _validate_legacy_role_support("3", ArtifactRole.PLANNING_CHECKPOINT)
+
+
+class TestRunnerCompletionHelpers:
+    """Direct coverage for the decomposed v3 completion-tail helpers."""
+
+    def test_glob_hash_map_sorted_relative_entries(self, tmp_path: Path):
+        from asago_scenario_generator.pipeline.runner import _glob_hash_map
+
+        data_root = tmp_path / "data"
+        patterns_dir = data_root / "taxonomies" / "attack-patterns"
+        patterns_dir.mkdir(parents=True)
+        (patterns_dir / "attack-patterns.yaml").write_text("a", encoding="utf-8")
+        (patterns_dir / "attack-patterns.b.yaml").write_text("b", encoding="utf-8")
+        result = _glob_hash_map(patterns_dir, "attack-patterns*.yaml", data_root)
+        assert list(result) == [
+            "taxonomies/attack-patterns/attack-patterns.b.yaml",
+            "taxonomies/attack-patterns/attack-patterns.yaml",
+        ]
+        assert (
+            result["taxonomies/attack-patterns/attack-patterns.yaml"]
+            == hashlib.sha256(b"a").hexdigest()
+        )
+        assert _glob_hash_map(data_root / "missing", "*.yaml", data_root) == {}
+
+    def test_collect_presentation_notes_deduplicates(self):
+        from types import SimpleNamespace
+
+        from asago_scenario_generator.pipeline.runner import _collect_presentation_notes
+
+        notes: list[str] = ["existing"]
+        scenarios = (
+            SimpleNamespace(
+                generation=SimpleNamespace(
+                    notes=("presentation_fallback:first", "plain-note")
+                )
+            ),
+            SimpleNamespace(
+                generation=SimpleNamespace(
+                    notes=(
+                        "presentation_fallback:first",
+                        "presentation_fallback:second",
+                    )
+                )
+            ),
+        )
+        _collect_presentation_notes(scenarios, notes)
+        assert notes == [
+            "existing",
+            "presentation_fallback:first",
+            "presentation_fallback:second",
+        ]
+
+    def test_remove_stale_optional_products(self, tmp_path: Path):
+        from asago_scenario_generator.pipeline.runner import (
+            _remove_stale_optional_products,
+        )
+
+        (tmp_path / "eval-scorecard.yaml").write_text("x", encoding="utf-8")
+        (tmp_path / "report.html").write_text("y", encoding="utf-8")
+        (tmp_path / "coverage-gaps.json").write_text("z", encoding="utf-8")
+        _remove_stale_optional_products(tmp_path)
+        assert not (tmp_path / "eval-scorecard.yaml").exists()
+        assert not (tmp_path / "report.html").exists()
+        assert (tmp_path / "coverage-gaps.json").exists()
+
+    def test_pattern_counts(self):
+        from types import SimpleNamespace
+
+        from asago_scenario_generator.pipeline.runner import _pattern_counts
+
+        selected = (
+            SimpleNamespace(pattern_id="a"),
+            SimpleNamespace(pattern_id="b"),
+            SimpleNamespace(pattern_id="a"),
+        )
+        assert _pattern_counts(selected) == {"a": 2, "b": 1}
+
+    def test_restore_selected_absent_candidate_raises(self):
+        from types import SimpleNamespace
+
+        from asago_scenario_generator.pipeline.runner import _restore_selected
+        from asago_scenario_generator.pipeline.runner import ManifestIntegrityError
+
+        planning = SimpleNamespace(selected_candidate_ids=("missing",))
+        with pytest.raises(ManifestIntegrityError, match="absent from plan"):
+            _restore_selected(planning, {})
+
+    def test_failed_artifact_entry_readable_and_missing(self, tmp_path: Path):
+        from asago_scenario_generator.pipeline.runner import (
+            _failed_artifact_entry,
+        )
+
+        (tmp_path / "use-case.txt").write_text("uc", encoding="utf-8")
+        entry = _failed_artifact_entry(tmp_path, ArtifactRole.USE_CASE, "use-case.txt")
+        assert entry is not None
+        assert entry.role is ArtifactRole.USE_CASE
+        assert entry.path == "use-case.txt"
+        assert entry.sha256 == hashlib.sha256(b"uc").hexdigest()
+        assert (
+            _failed_artifact_entry(tmp_path, ArtifactRole.REPORT, "report.html") is None
+        )
+
+    def test_best_effort_artifact_entry_hashes_file(self, tmp_path: Path):
+        from asago_scenario_generator.pipeline.runner import (
+            ARTIFACT_SCHEMA_VERSION,
+            _best_effort_artifact_entry,
+        )
+
+        full = tmp_path / "coverage-plan.json"
+        full.write_text("plan", encoding="utf-8")
+        entry = _best_effort_artifact_entry(
+            full, ArtifactRole.COVERAGE_PLAN, "coverage-plan.json", None, None
+        )
+        assert entry is not None
+        assert entry.role is ArtifactRole.COVERAGE_PLAN
+        assert entry.sha256 == hashlib.sha256(b"plan").hexdigest()
+        assert entry.schema_version == ARTIFACT_SCHEMA_VERSION
+
+    def test_scenario_receipts(self):
+        from asago_scenario_generator.pipeline.runner import _scenario_receipts
+
+        receipts = [
+            {
+                "scenario_id": "s1",
+                "candidate_id": "c1",
+                "yaml_path": "work/s1.yaml",
+                "feature_path": "work/s1.feature",
+            },
+            {"scenario_id": "s2", "candidate_id": "c2", "yaml_path": "w/s2.yaml"},
+        ]
+        entries = _scenario_receipts(receipts)
+        assert entries == [
+            (ArtifactRole.SCENARIO_YAML, "scenarios/s1.yaml", "s1", "c1"),
+            (ArtifactRole.SCENARIO_FEATURE, "scenarios/s1.feature", "s1", "c1"),
+            (ArtifactRole.SCENARIO_YAML, "scenarios/s2.yaml", "s2", "c2"),
+        ]
+
+    def test_finalization_inventory_receipts_missing_and_malformed(
+        self, tmp_path: Path
+    ):
+        from asago_scenario_generator.pipeline.runner import (
+            _finalization_inventory_receipts,
+        )
+
+        assert _finalization_inventory_receipts(tmp_path) == []
+        (tmp_path / "finalization-inventory.json").write_text(
+            "{not json", encoding="utf-8"
+        )
+        assert _finalization_inventory_receipts(tmp_path) == []
