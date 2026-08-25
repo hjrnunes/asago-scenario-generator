@@ -142,7 +142,7 @@ class ManifestInventoryResolver:
         _validate_v3_legacy_authority(self.manifest)
         if _is_v3_completed_status(self.manifest):
             _validate_v3_required_artifacts(singleton_counts, self.manifest.status)
-            self._validate_v3_semantic_generation()
+            self._validate_v3_inventory_integrity()
 
         # --- 12. Orphan detection ---
         if self.check_orphans:
@@ -442,9 +442,15 @@ class ManifestInventoryResolver:
                 entry, feature_stems, feature_scenario_ids_map
             )
 
-    def _validate_v3_semantic_generation(self) -> None:
-        """Run v3-only lifecycle authority checks at the resolver boundary."""
-        # Keep v3-only policy out of current production v2 reads.
+    def _validate_v3_inventory_integrity(self) -> None:
+        """Run v3 inventory-level integrity checks against the fully validated
+        inventory: quarantine rules, lifecycle completeness, scorecard
+        binding, and semantic-generation consistency with the finalization
+        inventory.
+
+        Imports from ``pipeline.persistence`` are deferred so the resolver
+        module has no load-time dependency on higher-level modules.
+        """
         from asago_scenario_generator.pipeline.persistence import (
             FinalizationInventoryV1,
             build_semantic_generation_summary,
@@ -832,6 +838,11 @@ def _validate_stem_feature_pair(stem: str, feat_sid: str, inv_sid: str) -> None:
             f"Feature scenario_id mismatch for {stem}.feature: "
             f"feature={feat_sid}, yaml={inv_sid}"
         )
+
+
+# --------------------------------------------------------------------------- #
+# Scorecard binding validation (cross-artifact integrity, no pipeline dep)
+# --------------------------------------------------------------------------- #
 
 
 def _load_v3_scorecard(

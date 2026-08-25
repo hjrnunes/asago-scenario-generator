@@ -50,6 +50,7 @@ from asago_scenario_generator.manifest_completion import (
     _yaml_inventory_keys,
     _quarantined_attempt_keys,
     validate_completed_inventory,
+    validate_v3_resolver_policy,
 )
 from asago_scenario_generator.manifest_errors import ManifestIntegrityError
 from asago_scenario_generator.manifest_funnel import (
