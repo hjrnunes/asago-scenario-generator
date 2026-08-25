@@ -44,6 +44,8 @@ def validate_completed_inventory(
     _check_completed_inventory_identity(manifest)
     if eval_enabled:
         _check_completed_scorecard_counts(manifest, resolver)
+    if resolver is not None and manifest.manifest_version == MANIFEST_V3:
+        validate_v3_resolver_policy(resolver)
 
 
 def _strict_resolver_for_completed(
@@ -327,3 +329,37 @@ def _check_completed_scorecard_counts(
         _check_completed_scorecard_entry(
             manifest, resolver, sc_entry, yaml_count, feature_count
         )
+
+
+# --------------------------------------------------------------------------- #
+# v3 resolver-policy validation (post-resolver, depends on pipeline.persistence)
+# --------------------------------------------------------------------------- #
+
+
+def validate_v3_resolver_policy(resolver: ManifestInventoryResolver) -> None:
+    """Run v3-only semantic-generation comparison against the finalization
+    inventory.
+
+    This is a separate post-resolver step so that the IO-near resolver
+    class does not depend on ``pipeline.persistence`` for higher-level
+    lifecycle authority checks.  Scorecard binding and v3 inventory
+    integrity are validated during resolver construction.
+    """
+    from asago_scenario_generator.pipeline.persistence import (
+        FinalizationInventoryV1,
+        build_semantic_generation_summary,
+    )
+
+    if resolver.manifest.semantic_generation:
+        finalization_entry = resolver.entry_by_role(ArtifactRole.FINALIZATION_INVENTORY)
+        assert finalization_entry is not None
+        authoritative_inventory = FinalizationInventoryV1.model_validate(
+            resolver.read_json(finalization_entry)
+        )
+        expected_semantic_generation = build_semantic_generation_summary(
+            authoritative_inventory
+        )
+        if resolver.manifest.semantic_generation != expected_semantic_generation:
+            raise ManifestIntegrityError(
+                "semantic_generation does not match finalization inventory"
+            )
