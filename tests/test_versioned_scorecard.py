@@ -10,13 +10,16 @@ import pytest
 
 from asago_scenario_generator.eval.runner import run_evaluation
 from asago_scenario_generator.eval.scorecard import (
+    QUALIFICATION_GATE_PATHS,
+    QUALIFICATION_RATIO_GATE_IDS,
+    QUALIFICATION_ZERO_GATE_IDS,
+    REQUIRED_QUALIFICATION_GATE_IDS,
     MetricResult,
     MetricStatus,
-    QUALIFICATION_GATE_PATHS,
-    REQUIRED_QUALIFICATION_GATE_IDS,
     ScorecardV1,
     aggregate_qualification,
     ratio_metric,
+    validate_qualification_gate_semantics,
 )
 from asago_scenario_generator.eval.versioned_metrics import (
     _admission_evidence_metric,
@@ -155,6 +158,80 @@ def test_metric_values_are_bounded_and_exact() -> None:
             evidence=["forged"],
             affected_ids=[],
         )
+
+
+def test_bounded_value_without_threshold_is_valid() -> None:
+    result = MetricResult(
+        status=MetricStatus.PASS,
+        numerator=1,
+        denominator=2,
+        value=0.5,
+        evidence=["test"],
+        affected_ids=[],
+    )
+    assert result.status is MetricStatus.PASS
+    assert result.value == 0.5
+
+
+def test_value_requires_bounded_fields() -> None:
+    with pytest.raises(ValueError, match="bounded values require"):
+        MetricResult(
+            status=MetricStatus.PASS,
+            numerator=1,
+            value=0.5,
+            evidence=["test"],
+            affected_ids=[],
+        )
+
+
+def _valid_qualification_gates() -> dict[str, MetricResult]:
+    """Minimal canonical gate outcomes accepted by the semantics check."""
+    gates: dict[str, MetricResult] = {}
+    for gate_id in QUALIFICATION_RATIO_GATE_IDS:
+        gates[gate_id] = ratio_metric(1, 1, threshold=1.0, evidence=["x"])
+    for gate_id in QUALIFICATION_ZERO_GATE_IDS:
+        gates[gate_id] = MetricResult(
+            status=MetricStatus.PASS,
+            numerator=0,
+            evidence=["x"],
+            affected_ids=[],
+        )
+    return gates
+
+
+def test_error_ratio_gate_cannot_claim_value() -> None:
+    gates = _valid_qualification_gates()
+    gates["capability_grounding"] = MetricResult(
+        status=MetricStatus.ERROR,
+        numerator=1,
+        evidence=["broken"],
+        affected_ids=[],
+    )
+    with pytest.raises(ValueError, match="cannot claim a value"):
+        validate_qualification_gate_semantics(gates)
+
+
+def test_error_ratio_gate_with_clear_fields_is_allowed() -> None:
+    gates = _valid_qualification_gates()
+    gates["capability_grounding"] = MetricResult(
+        status=MetricStatus.ERROR,
+        evidence=["broken"],
+        affected_ids=[],
+    )
+    validate_qualification_gate_semantics(gates)  # must not raise
+
+
+def test_na_ratio_gate_with_zero_counts_is_valid() -> None:
+    gates = _valid_qualification_gates()
+    gates["capability_grounding"] = MetricResult(
+        status=MetricStatus.NOT_APPLICABLE,
+        threshold=1.0,
+        numerator=0,
+        denominator=0,
+        evidence=["empty projected sets"],
+        affected_ids=[],
+    )
+    validate_qualification_gate_semantics(gates)  # must not raise
 
 
 def test_aggregate_excludes_na_and_surfaces_errors() -> None:
