@@ -22,6 +22,7 @@ import hashlib
 import importlib.metadata
 import json
 import os
+import re
 import secrets
 import subprocess
 import tempfile
@@ -129,6 +130,9 @@ def _before_artifact_leaf_open() -> None:
     """Test seam invoked before opening an artifact leaf."""
 
 
+_LEGACY_RUN_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
 class ManifestInventoryResolver(_ManifestInventoryResolver):
     """Compatibility façade for the strict inventory resolver."""
 
@@ -176,17 +180,10 @@ def validate_run_id(run_id: str) -> None:
     if not run_id:
         raise ValueError("run_id must not be empty")
 
-    # Canonical sortable format: YYYYMMDDTHHMMSS_<32hex>
-    if _RUN_ID_RE.match(run_id):
+    # Canonical sortable format or legacy 32-character lowercase hex
+    # (UUID4 without dashes, forensic read only).
+    if _RUN_ID_RE.match(run_id) or _LEGACY_RUN_ID_RE.fullmatch(run_id):
         return
-
-    # Legacy format: 32-char lowercase hex (UUID4 without dashes) — forensic read only
-    if len(run_id) == 32 and run_id == run_id.lower():
-        try:
-            int(run_id, 16)
-            return
-        except ValueError:
-            pass
 
     raise ValueError(
         f"run_id must be a sortable format (YYYYMMDDTHHMMSS_<32hex>) "
@@ -242,7 +239,7 @@ def resolve_run_dir(
     collection_dir.mkdir(parents=True, exist_ok=True)
     run_dir = collection_dir / run_id
 
-    run_dir.mkdir(parents=True, exist_ok=False)
+    run_dir.mkdir(exist_ok=False)
     return run_dir, run_id
 
 
