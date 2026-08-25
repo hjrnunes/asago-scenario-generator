@@ -39,6 +39,22 @@ def _split_curie(curie: str) -> tuple[str, str]:
     return "", curie
 
 
+def _sssom_row_values(
+    row: dict[str, str], has_source_cols: bool
+) -> tuple[str, str, str, str]:
+    """Resolve (subject_id, subject_source, object_id, object_source)."""
+    if has_source_cols:
+        return (
+            row["subject_id"],
+            row["subject_source"],
+            row["object_id"],
+            row["object_source"],
+        )
+    subject_source, subject_id = _split_curie(row["subject_id"])
+    object_source, object_id = _split_curie(row["object_id"])
+    return subject_id, subject_source, object_id, object_source
+
+
 def load_sssom(path: str | Path) -> list[SSSOMMapping]:
     """Parse an SSSOM TSV file, skipping comment lines.
 
@@ -65,27 +81,24 @@ def load_sssom(path: str | Path) -> list[SSSOMMapping]:
     )
 
     for row in reader:
-        if has_source_cols:
-            subject_id = row["subject_id"]
-            subject_source = row["subject_source"]
-            object_id = row["object_id"]
-            object_source = row["object_source"]
-        else:
-            subject_source, subject_id = _split_curie(row["subject_id"])
-            object_source, object_id = _split_curie(row["object_id"])
-
-        mappings.append(
-            SSSOMMapping(
-                subject_id=subject_id,
-                subject_source=subject_source,
-                predicate_id=row["predicate_id"],
-                object_id=object_id,
-                object_source=object_source,
-                mapping_justification=row["mapping_justification"],
-            )
-        )
+        mappings.append(_mapping_from_row(row, has_source_cols))
 
     return mappings
+
+
+def _mapping_from_row(row: dict[str, str], has_source_cols: bool) -> SSSOMMapping:
+    """One SSSOM row as a mapping, resolving the id/source split."""
+    subject_id, subject_source, object_id, object_source = _sssom_row_values(
+        row, has_source_cols
+    )
+    return SSSOMMapping(
+        subject_id=subject_id,
+        subject_source=subject_source,
+        predicate_id=row["predicate_id"],
+        object_id=object_id,
+        object_source=object_source,
+        mapping_justification=row["mapping_justification"],
+    )
 
 
 # Pattern: "llm" followed by 1-2 digits, then optionally a year suffix
