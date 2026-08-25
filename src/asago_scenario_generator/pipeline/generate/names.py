@@ -114,6 +114,39 @@ def pinned_entry_point_name_from_id(
     return id_to_ep.get(pinned_entry_point_id, pinned_entry_point_id)
 
 
+# Resource-ref kind → (ID field, profile name-lookup method).
+_RESOURCE_REF_ID_FIELD_BY_KIND = {
+    "entry_point": "entry_point_id",
+    "tool": "tool_id",
+    "integration": "integration_id",
+    "trust_boundary": "trust_boundary_id",
+    "output_surface": "entry_point_id",
+}
+_RESOURCE_REF_NAME_LOOKUP_BY_KIND = {
+    "entry_point": "id_to_entry_point_name",
+    "tool": "id_to_tool_name",
+    "integration": "id_to_integration_name",
+    "trust_boundary": "id_to_trust_boundary_name",
+    "output_surface": "id_to_entry_point_name",
+}
+
+
+def _humanize_resource_id(
+    result: dict[str, Any],
+    resource_ref: dict[str, Any],
+    kind: str,
+    profile: CapabilityProfile,
+) -> None:
+    """Replace one typed resource ID in a ref dict with its profile name."""
+    id_field = _RESOURCE_REF_ID_FIELD_BY_KIND[kind]
+    resource_id = resource_ref.get(id_field)
+    if not resource_id:
+        return
+    name_lookup = _RESOURCE_REF_NAME_LOOKUP_BY_KIND[kind]
+    names = getattr(profile, name_lookup)()
+    result[id_field] = names.get(resource_id, resource_id)
+
+
 def humanize_resource_ref(
     resource_ref: dict[str, Any] | None,
     profile: CapabilityProfile,
@@ -123,34 +156,10 @@ def humanize_resource_ref(
         return None
 
     kind = resource_ref.get("kind")
+    if kind not in _RESOURCE_REF_ID_FIELD_BY_KIND:
+        return dict(resource_ref)
     result = dict(resource_ref)
-
-    if kind == "entry_point":
-        ep_id = resource_ref.get("entry_point_id")
-        if ep_id:
-            id_to_ep = profile.id_to_entry_point_name()
-            result["entry_point_id"] = id_to_ep.get(ep_id, ep_id)
-    elif kind == "tool":
-        tool_id = resource_ref.get("tool_id")
-        if tool_id:
-            id_to_tool = profile.id_to_tool_name()
-            result["tool_id"] = id_to_tool.get(tool_id, tool_id)
-    elif kind == "integration":
-        int_id = resource_ref.get("integration_id")
-        if int_id:
-            id_to_int = profile.id_to_integration_name()
-            result["integration_id"] = id_to_int.get(int_id, int_id)
-    elif kind == "trust_boundary":
-        tb_id = resource_ref.get("trust_boundary_id")
-        if tb_id:
-            id_to_tb = profile.id_to_trust_boundary_name()
-            result["trust_boundary_id"] = id_to_tb.get(tb_id, tb_id)
-    elif kind == "output_surface":
-        ep_id = resource_ref.get("entry_point_id")
-        if ep_id:
-            id_to_ep = profile.id_to_entry_point_name()
-            result["entry_point_id"] = id_to_ep.get(ep_id, ep_id)
-
+    _humanize_resource_id(result, resource_ref, kind, profile)
     return result
 
 
@@ -183,36 +192,26 @@ def resource_name_for_kind(
     return names.get(resource_id, resource_id)
 
 
-def humanize_projection_context(
-    projection_context: dict[str, Any] | None,
+def _humanized_canonical_ingress_name(
+    canonical_ingress: dict[str, Any],
+    id_to_ep: dict[str, str],
+) -> str:
+    """Canonical ingress display name, or empty when absent."""
+    if not canonical_ingress:
+        return ""
+    ep_id = canonical_ingress.get("entry_point_id")
+    if ep_id:
+        return id_to_ep.get(ep_id, ep_id)
+    return str(canonical_ingress)
+
+
+def _humanized_selected_steps(
+    selected_steps: list[dict[str, Any]],
     profile: CapabilityProfile,
-) -> dict[str, Any] | None:
-    """Replace hex IDs in projection context with human-readable names.
-
-    Returns a new dict (does not mutate the original).  The canonical
-    ingress entry_point_id and all resource_ref values are converted
-    to names.
-    """
-    if projection_context is None:
-        return None
-
-    id_to_ep = profile.id_to_entry_point_name()
-    result = dict(projection_context)
-
-    # Convert canonical_ingress entry_point_id to name
-    canonical_ingress = projection_context.get("canonical_ingress", {})
-    if canonical_ingress:
-        ep_id = canonical_ingress.get("entry_point_id")
-        if ep_id:
-            result["canonical_ingress_name"] = id_to_ep.get(ep_id, ep_id)
-        else:
-            result["canonical_ingress_name"] = str(canonical_ingress)
-    else:
-        result["canonical_ingress_name"] = ""
-
-    # Convert resource_ref values in selected_steps
-    humanized_steps = []
-    for step in projection_context.get("selected_steps", []):
+) -> list[dict[str, Any]]:
+    """Selected steps with human-readable resource references."""
+    humanized_steps: list[dict[str, Any]] = []
+    for step in selected_steps:
         h_step = dict(step)
         h_links = []
         for link in step.get("resource_links", []):
@@ -223,12 +222,16 @@ def humanize_projection_context(
             h_links.append(h_link)
         h_step["resource_links"] = h_links
         humanized_steps.append(h_step)
-    result["selected_steps"] = humanized_steps
+    return humanized_steps
 
-    # Keep canonical IDs in the authoritative path record so generated
-    # stages cannot replace them, while supplying names for prompt prose.
-    humanized_paths = []
-    for path in projection_context.get("source_influence_paths", []):
+
+def _humanized_influence_paths(
+    paths: list[dict[str, Any]],
+    profile: CapabilityProfile,
+) -> list[dict[str, Any]]:
+    """Source-influence paths with human-readable name fields."""
+    humanized_paths: list[dict[str, Any]] = []
+    for path in paths:
         h_path = dict(path)
         h_path["source_name"] = resource_name_for_kind(
             path.get("source_identity_kind"),
@@ -246,7 +249,40 @@ def humanize_projection_context(
             profile,
         )
         humanized_paths.append(h_path)
-    result["source_influence_paths"] = humanized_paths
+    return humanized_paths
+
+
+def humanize_projection_context(
+    projection_context: dict[str, Any] | None,
+    profile: CapabilityProfile,
+) -> dict[str, Any] | None:
+    """Replace hex IDs in projection context with human-readable names.
+
+    Returns a new dict (does not mutate the original).  The canonical
+    ingress entry_point_id and all resource_ref values are converted
+    to names.
+    """
+    if projection_context is None:
+        return None
+
+    id_to_ep = profile.id_to_entry_point_name()
+    result = dict(projection_context)
+
+    # Convert canonical_ingress entry_point_id to name
+    result["canonical_ingress_name"] = _humanized_canonical_ingress_name(
+        projection_context.get("canonical_ingress", {}), id_to_ep
+    )
+
+    # Convert resource_ref values in selected_steps
+    result["selected_steps"] = _humanized_selected_steps(
+        projection_context.get("selected_steps", []), profile
+    )
+
+    # Keep canonical IDs in the authoritative path record so generated
+    # stages cannot replace them, while supplying names for prompt prose.
+    result["source_influence_paths"] = _humanized_influence_paths(
+        projection_context.get("source_influence_paths", []), profile
+    )
 
     # Note: resource_slots and bindings were removed from the projection
     # context in Phase 4 — they are no longer rendered in prompts.
