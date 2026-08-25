@@ -1800,6 +1800,70 @@ class TestAdmissionPortHelpers:
         assert low.code is GateCode.heuristic_correspondence
         assert low.owner is GeneratedStage.tree
 
+    def test_narrative_tree_diagnostics_reports_low_correspondence(self):
+        from asago_scenario_generator.pipeline.finalization_admission import (
+            _narrative_tree_diagnostics,
+        )
+
+        leaf = SimpleNamespace(gate=GateType.LEAF, zone="input")
+        tree = SimpleNamespace(
+            root=SimpleNamespace(
+                gate=GateType.AND,
+                children=tuple(leaf for _ in range(5)),
+            )
+        )
+        envelope = SimpleNamespace(
+            narrative=SimpleNamespace(
+                steps=(SimpleNamespace(zone="input"),),
+            )
+        )
+
+        result = _narrative_tree_diagnostics(envelope, tree)
+
+        assert [item.code for item in result.diagnostics] == [
+            GateCode.heuristic_correspondence
+        ]
+
+    def test_postcondition_owners_skip_unselected_and_reject_ambiguous(self):
+        from asago_scenario_generator.pipeline.finalization_admission import (
+            _postcondition_owners,
+        )
+
+        postcondition = SimpleNamespace(
+            postcondition_id="post.1",
+            security_relevant=True,
+        )
+        projection = SimpleNamespace(
+            selected_step_ids=("step.1", "step.2"),
+            projection=SimpleNamespace(
+                source_chain=SimpleNamespace(
+                    steps=(
+                        SimpleNamespace(
+                            step_id="omitted",
+                            observable_postconditions=(postcondition,),
+                        ),
+                        SimpleNamespace(
+                            step_id="step.1",
+                            observable_postconditions=(postcondition,),
+                        ),
+                        SimpleNamespace(
+                            step_id="step.2",
+                            observable_postconditions=(postcondition,),
+                        ),
+                    )
+                )
+            ),
+        )
+        violations = []
+
+        owners, required, ambiguous = _postcondition_owners(projection, violations)
+
+        assert owners == {"post.1": "step.1"}
+        assert required == {("step.1", "post.1")}
+        assert ambiguous == {"post.1"}
+        assert len(violations) == 1
+        assert violations[0].code is GateCode.candidate_identity
+
     def test_or_tree_gate(self):
         from asago_scenario_generator.pipeline.finalization_admission import (
             _or_tree_gate,

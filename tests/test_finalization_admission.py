@@ -342,6 +342,28 @@ def test_prebehavior_finalization_is_reachable_and_precedes_behavior() -> None:
     assert events == ["actor", "narrative", "tree", "finalize", "behavior"]
 
 
+def test_prebehavior_retry_restarts_at_the_declared_owner() -> None:
+    finalization_count = 0
+
+    def finalize(candidate, artifacts):
+        nonlocal finalization_count
+        finalization_count += 1
+        if finalization_count == 1:
+            return PrebehaviorFinalizationResult(
+                None,
+                (LifecycleViolation("tree needs retry", owner=GeneratedStage.tree),),
+            )
+        return PrebehaviorFinalizationResult(Snapshot(artifacts.tree))
+
+    machine, calls, _ = _machine(finalize=finalize)
+
+    result = machine.run()
+
+    assert result.state is LifecycleState.admitted
+    assert finalization_count == 2
+    assert calls.count(GeneratedStage.tree) == 2
+
+
 def test_stage_retry_exhaustion_records_terminal_before_fallback() -> None:
     calls: list[tuple[str, GeneratedStage]] = []
 
@@ -941,9 +963,7 @@ class TestFinalizationMachineHelpers:
         )
         result = machine._stage_attempt_failure_result(GeneratedStage.narrative, exc)
         assert result.evidence is exc
-        assert (
-            result.violations[0].code == StageAttemptFailure.COMPLETION_LENGTH_CODE
-        )
+        assert result.violations[0].code == StageAttemptFailure.COMPLETION_LENGTH_CODE
         assert result.violations[0].retryable is True
 
         machine.length_retry_counts[GeneratedStage.narrative] = (
@@ -960,16 +980,15 @@ class TestFinalizationMachineHelpers:
             GeneratedStage.narrative, exhausted
         )
         assert (
-            result.violations[0].code
-            == StageAttemptFailure.SEMANTIC_DRAFT_LENGTH_CODE
+            result.violations[0].code == StageAttemptFailure.SEMANTIC_DRAFT_LENGTH_CODE
         )
         assert result.violations[0].retryable is False
 
     def test_finalize_prebehavior_proceed_and_repair(self):
         machine, _calls, persistence = _machine()
         repair = {"repair": 1}
-        machine.prebehavior_finalizer = (
-            lambda candidate, artifacts: PrebehaviorFinalizationResult(
+        machine.prebehavior_finalizer = lambda candidate, artifacts: (
+            PrebehaviorFinalizationResult(
                 Snapshot(artifacts.tree), repair_record=repair
             )
         )
@@ -982,15 +1001,14 @@ class TestFinalizationMachineHelpers:
         assert prepared.snapshot.tree == machine.artifacts.tree
         assert prepared.authority.repair_record is repair
         assert (
-            persistence.transitions[-1].current
-            is LifecycleState.finalizing_prebehavior
+            persistence.transitions[-1].current is LifecycleState.finalizing_prebehavior
         )
 
     def test_finalize_prebehavior_retry_and_terminal(self):
         machine, _calls, _persistence = _machine()
 
-        machine.prebehavior_finalizer = (
-            lambda candidate, artifacts: PrebehaviorFinalizationResult(
+        machine.prebehavior_finalizer = lambda candidate, artifacts: (
+            PrebehaviorFinalizationResult(
                 None,
                 violations=(LifecycleViolation("retry", owner=GeneratedStage.tree),),
             )
@@ -1001,8 +1019,8 @@ class TestFinalizationMachineHelpers:
         assert prepared.action == "retry"
         assert prepared.owner is GeneratedStage.tree
 
-        machine.prebehavior_finalizer = (
-            lambda candidate, artifacts: PrebehaviorFinalizationResult(
+        machine.prebehavior_finalizer = lambda candidate, artifacts: (
+            PrebehaviorFinalizationResult(
                 None, violations=(LifecycleViolation("hard", retryable=False),)
             )
         )
@@ -1015,8 +1033,8 @@ class TestFinalizationMachineHelpers:
             is CandidateTerminalStatus.generation_or_finalization_failed
         )
 
-        machine.prebehavior_finalizer = (
-            lambda candidate, artifacts: PrebehaviorFinalizationResult(None)
+        machine.prebehavior_finalizer = lambda candidate, artifacts: (
+            PrebehaviorFinalizationResult(None)
         )
         prepared = machine._finalize_prebehavior(
             Candidate("c"), "c", Snapshot("v"), True
@@ -1028,7 +1046,9 @@ class TestFinalizationMachineHelpers:
         machine, _calls, _persistence = _machine()
         machine.artifacts.set(GeneratedStage.actor, "actor-artifact")
 
-        cursor = _CandidateCursor(next_stage=GeneratedStage.behavior, snapshot=Snapshot("t"))
+        cursor = _CandidateCursor(
+            next_stage=GeneratedStage.behavior, snapshot=Snapshot("t")
+        )
         outcome = machine._admit_candidate(Candidate("c"), "c", cursor)
         assert outcome == "terminal"
         assert cursor.terminal.status is CandidateTerminalStatus.admitted
@@ -1041,7 +1061,9 @@ class TestFinalizationMachineHelpers:
             )
 
         machine.admission_callback = reject
-        cursor = _CandidateCursor(next_stage=GeneratedStage.behavior, snapshot=Snapshot("t"))
+        cursor = _CandidateCursor(
+            next_stage=GeneratedStage.behavior, snapshot=Snapshot("t")
+        )
         outcome = machine._admit_candidate(Candidate("c"), "c", cursor)
         assert outcome == "retry"
         assert cursor.next_stage is GeneratedStage.tree
@@ -1157,8 +1179,7 @@ class TestFinalizationMachineHelpers:
         machine.state = LifecycleState.generating_actor
         terminal = machine._run_candidate_exception_result("c", RuntimeError("boom"))
         assert (
-            terminal.status
-            is CandidateTerminalStatus.generation_or_finalization_failed
+            terminal.status is CandidateTerminalStatus.generation_or_finalization_failed
         )
         assert terminal.admission is None
         assert terminal.violations[0].code == "lifecycle_callback_exception"
