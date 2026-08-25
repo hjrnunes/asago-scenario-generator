@@ -20,15 +20,19 @@ from asago_scenario_generator.models.projection_envelope import (
     ProjectionTraceabilityViolation,
     ProjectionTraceabilityViolationCode,
 )
-from asago_scenario_generator.pipeline.projection import (
-    CapabilityFactSnapshot,
-    _derive_execution_requirements_core,
-    _fail_closed_if_no_requirements,
+from asago_scenario_generator.pipeline.projection_contracts import (
     _normalize_semantic_order,
     _pattern_pin,
     _projected_mappings,
     compute_derivation_context_digest,
     compute_execution_requirements_digest,
+)
+from asago_scenario_generator.pipeline.projection_requirements import (
+    _derive_execution_requirements_core,
+    _fail_closed_if_no_requirements,
+)
+from asago_scenario_generator.pipeline.projection_snapshot import (
+    CapabilityFactSnapshot,
 )
 
 

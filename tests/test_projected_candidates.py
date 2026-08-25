@@ -965,14 +965,14 @@ def test_derived_id_collision_fails_closed_typed() -> None:
     raw = _pattern(conditional=False)
     # Monkeypatch _requirement_id to force a collision: make it return
     # the same ID for every call regardless of prefix or components.
-    import asago_scenario_generator.pipeline.projection as proj_mod
+    import asago_scenario_generator.pipeline.projection_requirements as req_mod
 
-    original = proj_mod._requirement_id
-    proj_mod._requirement_id = lambda prefix, *components: "req.collision.forced"
+    original = req_mod._requirement_id
+    req_mod._requirement_id = lambda prefix, *components: "req.collision.forced"
     try:
         result = _project(pattern=raw)
     finally:
-        proj_mod._requirement_id = original
+        req_mod._requirement_id = original
     assert len(result.candidates) == 0
     assert any(
         issue.code == "unsupported_requirement_derivation" and "collide" in issue.detail
@@ -1651,7 +1651,7 @@ class TestPatternProjectionState:
     ) -> None:
         results = iter(["candidate-1", "candidate-2"])
         monkeypatch.setattr(
-            "asago_scenario_generator.pipeline.projection."
+            "asago_scenario_generator.pipeline.projection_candidates."
             "_build_candidate_from_combination",
             lambda *args: (next(results), None),
         )
@@ -1678,7 +1678,7 @@ class TestPatternProjectionState:
 
         state = self._state([("res-a",), ("res-b",)])
         monkeypatch.setattr(
-            "asago_scenario_generator.pipeline.projection."
+            "asago_scenario_generator.pipeline.projection_candidates."
             "_build_candidate_from_combination",
             build,
         )
@@ -1697,7 +1697,7 @@ class TestPatternProjectionState:
 
         state = self._state([("res-a",), ("res-b",)])
         monkeypatch.setattr(
-            "asago_scenario_generator.pipeline.projection."
+            "asago_scenario_generator.pipeline.projection_candidates."
             "_build_candidate_from_combination",
             build,
         )
@@ -1715,7 +1715,7 @@ class TestPatternProjectionState:
 
         state = self._state([("res-a",)])
         monkeypatch.setattr(
-            "asago_scenario_generator.pipeline.projection."
+            "asago_scenario_generator.pipeline.projection_candidates."
             "_build_candidate_from_combination",
             build,
         )
@@ -1730,7 +1730,7 @@ class TestPatternProjectionState:
 
         state = self._state([("res-a",)])
         monkeypatch.setattr(
-            "asago_scenario_generator.pipeline.projection."
+            "asago_scenario_generator.pipeline.projection_candidates."
             "_build_candidate_from_combination",
             build,
         )

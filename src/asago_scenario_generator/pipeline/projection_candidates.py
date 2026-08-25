@@ -16,17 +16,23 @@ from asago_scenario_generator.models.attack_pattern import (
     compute_projection_digest,
     validate_projection_snapshot,
 )
-from asago_scenario_generator.pipeline.projection import (
-    CapabilityFactSnapshot,
+from asago_scenario_generator.pipeline.projection_contracts import (
     CandidateComplexityInputs,
     PreconditionEvaluationResult,
     ProjectedCandidate,
     _candidate_v2_id,
+    _projected_mappings,
     compute_execution_requirements_digest,
+)
+from asago_scenario_generator.pipeline.projection_relations import (
+    _source_influence_relation,
+)
+from asago_scenario_generator.pipeline.projection_requirements import (
     _derive_execution_requirements,
     _fail_closed_if_no_requirements,
-    _projected_mappings,
-    _source_influence_relation,
+)
+from asago_scenario_generator.pipeline.projection_snapshot import (
+    CapabilityFactSnapshot,
 )
 
 

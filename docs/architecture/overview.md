@@ -16,6 +16,13 @@ stage call evidence, and typed attempt failures) live in
 persistence consume that boundary without importing one another's
 implementation modules.
 
+Authoritative projection contracts (candidate-v2 identity, digest helpers,
+capability-fact snapshots, and slot-matching policy) live in
+`pipeline.projection_contracts`. Resource matching, qualification, allocation,
+and the public `pipeline.projection` façade depend inward on that leaf. The
+envelope model imports the same contract leaf rather than the projection
+façade, so persistence validation does not pull implementation modules.
+
 The taxonomy/risk workflow uses a semantic-author/compiler seam. The model
 authors actor intent, narrative causality, attack-tree AND topology, and
 concrete behavior interactions through request-local handles. Pure compilers

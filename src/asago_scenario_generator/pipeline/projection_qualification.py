@@ -12,16 +12,19 @@ from asago_scenario_generator.models.attack_pattern import (
     TaxonomyResolver,
     validate_attack_pattern,
 )
-from asago_scenario_generator.pipeline.projection import (
-    CapabilityFactSnapshot,
+from asago_scenario_generator.pipeline.projection_contracts import (
     Digest,
     ProjectionBudget,
     ProjectionIssue,
     _canonical_json,
+    _content_pin,
     _evaluate_preconditions,
     _evaluate_projection_conditions,
     _normalize_semantic_order,
     _pattern_pin,
+)
+from asago_scenario_generator.pipeline.projection_snapshot import (
+    CapabilityFactSnapshot,
 )
 
 
@@ -381,13 +384,6 @@ def _dedupe_projection_issues(
     return {
         _canonical_json(issue.model_dump(mode="json")): issue for issue in issues
     }.values()
-
-
-def _content_pin(domain: str, value: Any) -> str:
-    """Resolve the projection façade's content-pin helper at call time."""
-    from asago_scenario_generator.pipeline import projection
-
-    return projection._content_pin(domain, value)
 
 
 def compute_authoritative_catalog_pin(
