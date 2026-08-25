@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from asago_scenario_generator.models.capability_profile import ConfidenceLevel
 from asago_scenario_generator.models.scenario import (
     NarrativeLayer,
@@ -395,3 +397,85 @@ class TestContextBuildersKillChain:
         )
         assert "kill_chain" in ctx
         assert ctx["kill_chain"] is None
+
+
+class TestTreePromptHelperBranches:
+    """Direct branch coverage for the decomposed build_call2_context helpers."""
+
+    def test_access_provenance_block_empty_without_actor(self) -> None:
+        from asago_scenario_generator.pipeline.generate.tree import (
+            _access_provenance_block_text,
+        )
+
+        assert _access_provenance_block_text(None, None) == ""
+
+    def test_access_provenance_block_empty_without_access(self) -> None:
+        from asago_scenario_generator.pipeline.generate.tree import (
+            _access_provenance_block_text,
+        )
+
+        actor = MagicMock(access=None)
+        assert _access_provenance_block_text(actor, MagicMock()) == ""
+
+    def test_access_provenance_block_empty_without_profile(self) -> None:
+        from asago_scenario_generator.pipeline.generate.tree import (
+            _access_provenance_block_text,
+        )
+
+        actor = MagicMock(access=MagicMock())
+        assert _access_provenance_block_text(actor, None) == ""
+
+    def test_accessible_pinned_entry_allowed(self) -> None:
+        from asago_scenario_generator.models.capability_profile import EntryPoint
+        from asago_scenario_generator.pipeline.generate.tree import (
+            _ensure_accessible_pinned_entry,
+        )
+
+        ep = EntryPoint(name="User chat", direction="input")
+        profile = MagicMock(
+            zones_active=["input", "reasoning"],
+            resolve_entry_point=MagicMock(return_value=ep),
+        )
+        _ensure_accessible_pinned_entry(profile, [ep], ep.entry_point_id)
+
+    def test_inaccessible_pinned_entry_rejected(self) -> None:
+        from asago_scenario_generator.models.capability_profile import EntryPoint
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            GenerationError,
+        )
+        from asago_scenario_generator.pipeline.generate.tree import (
+            _ensure_accessible_pinned_entry,
+        )
+
+        ep = EntryPoint(name="Telemetry", direction="output")
+        profile = MagicMock(
+            zones_active=["input", "reasoning"],
+            resolve_entry_point=MagicMock(return_value=ep),
+        )
+        with pytest.raises(GenerationError, match="not an attacker-accessible"):
+            _ensure_accessible_pinned_entry(profile, [ep], ep.entry_point_id)
+
+    def test_pinned_entry_guard_skips_without_profile(self) -> None:
+        from asago_scenario_generator.pipeline.generate.tree import (
+            _ensure_accessible_pinned_entry,
+        )
+
+        _ensure_accessible_pinned_entry(None, [MagicMock()], "ep")
+
+    def test_pinned_entry_guard_skips_unresolved_count(self) -> None:
+        from asago_scenario_generator.pipeline.generate.tree import (
+            _ensure_accessible_pinned_entry,
+        )
+
+        profile = MagicMock(zones_active=["input"])
+        _ensure_accessible_pinned_entry(profile, [], "ep")
+
+    def test_semantic_draft_flow_requires_projection_and_profile(self) -> None:
+        from asago_scenario_generator.pipeline.generate.tree import (
+            _semantic_draft_flow,
+        )
+
+        assert (
+            _semantic_draft_flow(MagicMock(), MagicMock(), "use case", None, None, None)
+            is None
+        )
