@@ -23,11 +23,13 @@ from asago_scenario_generator.eval.scorecard import (
 from asago_scenario_generator.manifest import ArtifactRole, ManifestInventoryResolver
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.models.scenario import ScenarioEnvelope
-from asago_scenario_generator.pipeline.persistence import (
-    CoveragePlanV2,
+from asago_scenario_generator.pipeline.finalization_gate_contracts import (
+    AdmissionEvidenceId,
+)
+from asago_scenario_generator.pipeline.persistence_journal import (
     FinalizationInventoryV1,
 )
-from asago_scenario_generator.pipeline.finalization_gates import AdmissionEvidenceId
+from asago_scenario_generator.pipeline.persistence_plan import CoveragePlanV2
 
 _TITLE_TOKEN_RE = re.compile(r"[a-z0-9]+")
 _NEAR_TITLE_THRESHOLD = 0.6

@@ -52,6 +52,12 @@ projection-envelope sidecars are built by `pipeline.projection_block`.
 Validation, pre-behavior gates, and assembly consume those leaves instead
 of the IO-near `generate.narrative` and `generate.assembly` façades.
 
+Deterministic evaluation metrics (`consistency`, `diversity`, `gherkin`,
+`grounding`, `plausibility`, `scorecard`, `versioned_metrics`) stay off
+the persistence and finalization façades. Authoritative v3 scorecards
+consume `persistence_plan`, `persistence_journal`, and
+`finalization_gate_contracts`.
+
 The taxonomy/risk workflow uses a semantic-author/compiler seam. The model
 authors actor intent, narrative causality, attack-tree AND topology, and
 concrete behavior interactions through request-local handles. Pure compilers
