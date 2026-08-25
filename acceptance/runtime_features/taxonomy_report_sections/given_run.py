@@ -44,12 +44,11 @@ def _h_coverage_counts(world: World, text: str, examples: dict) -> tuple[bool, s
     if not match:
         return False, f"Could not parse coverage-counts step: {text}"
     ep_count, zone_count, threat_count = (int(g) for g in match.groups())
-    eps = [
-        {"name": "ze-query", "entry_point_id": "ze-query"},
-        *(  # coalesce-expression is overkill; build directly below
-            {"name": f"ze-gap-{i}", "entry_point_id": f"ze-gap-{i}"}
-            for i in range(max(ep_count - 1, 0))
-        ),
+    # Uncovered entry points beyond the first are synthesized as "ze-gap-N".
+    eps = [{"name": "ze-query", "entry_point_id": "ze-query"}]
+    eps += [
+        {"name": f"ze-gap-{i}", "entry_point_id": f"ze-gap-{i}"}
+        for i in range(max(ep_count - 1, 0))
     ]
     world.trpt_coverage_data = {
         "coverage_gaps": {

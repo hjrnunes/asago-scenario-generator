@@ -1242,6 +1242,27 @@ def test_behavior_spec_headers_steps_docstring_and_zone_badges(tmp_path: Path) -
     assert "@smoke" not in region[spec_start:spec_end]
 
 
+def test_behavior_spec_display_name_zone_badge(tmp_path: Path) -> None:
+    feature_content = (
+        "Feature: Zone display names\n"
+        "Scenario: Use display names\n"
+        "  Given access through (Zone Tool Execution)\n"
+    )
+    data = ReportData(
+        scenarios=[_scenario("scn-a")],
+        feature_files={"scn-a": feature_content},
+    )
+
+    html = _html(data, tmp_path)
+    region = _card_region(html, "scn-a")
+
+    assert (
+        'class="step-keyword">Given</span><span class="step-text">'
+        'access through (Zone Tool Execution)<span class="zone-badge"' in region
+    )
+    assert ">Tool Execution</span>" in region
+
+
 # ---------------------------------------------------------------------------
 # 32: Per-scenario LLM call entries
 # ---------------------------------------------------------------------------
@@ -1290,6 +1311,45 @@ def test_per_scenario_llm_call_entries_usage_and_failure_markers(
         assert prompt in region
     for prompt in ("Generate the feature", "Write the behavior"):
         assert prompt in region
+
+
+def test_per_scenario_llm_call_anomaly_badges(tmp_path: Path) -> None:
+    # 20 sampled calls (a single extreme outlier plus a consistent baseline)
+    # so call stats are computed and the outlier is flagged slow / high tokens.
+    baseline_duration, baseline_prompt, baseline_completion = 50, 100, 40
+    calls = [
+        {
+            "call": "narrative",
+            "prompt_tokens": baseline_prompt,
+            "completion_tokens": baseline_completion,
+            "duration_ms": baseline_duration,
+            "success": True,
+        }
+        for _ in range(19)
+    ]
+    calls.append(
+        {
+            "call": "narrative",
+            "prompt_tokens": 1000,
+            "completion_tokens": 400,
+            "duration_ms": 5000,
+            "success": True,
+        }
+    )
+
+    data = ReportData(
+        scenarios=[_scenario("scn-a")],
+        call_logs={"scn-a": calls},
+    )
+
+    html = _html(data, tmp_path)
+    region = _card_region(html, "scn-a")
+
+    assert 'class="call-anomaly-badge">⚠ slow</span>' in region
+    assert 'class="call-anomaly-badge">⚠ high tokens</span>' in region
+    assert 'class="expandable call-anomaly"' in region
+    assert "Call 0: Narrative (100 prompt / 40 completion tokens, 50ms)" in region
+    assert "Call 19: Narrative (1000 prompt / 400 completion tokens, 5000ms)" in region
 
 
 # ---------------------------------------------------------------------------

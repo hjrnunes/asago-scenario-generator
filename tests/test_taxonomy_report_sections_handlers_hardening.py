@@ -31,7 +31,12 @@ from runtime_world import World  # noqa: E402
 from runtime_features.taxonomy_report_sections import (  # noqa: E402
     given_profile,
     given_scenarios,
+    then_atlas,
+    then_behavior_spec,
     then_cards,
+    then_coverage,
+    then_diversity,
+    then_matrix,
     then_panels,
     then_profile,
     then_summary,
@@ -202,7 +207,7 @@ FAIL_LOUDLY: list[tuple[str, Handler, str, str]] = [
     ),
     (
         "behavior spec missing first step text",
-        then_panels._h_ts_behavior_spec_steps,
+        then_behavior_spec._h_ts_behavior_spec_steps,
         'the Behavior Spec tab of scenario "s1" shows the step keywords "Given", '
         '"When", and "Then" with the texts "A", "B", and "C"',
         'id="scenario-s1">'
@@ -214,7 +219,7 @@ FAIL_LOUDLY: list[tuple[str, Handler, str, str]] = [
     ),
     (
         "behavior spec missing second step text",
-        then_panels._h_ts_behavior_spec_steps,
+        then_behavior_spec._h_ts_behavior_spec_steps,
         'the Behavior Spec tab of scenario "s1" shows the step keywords "Given", '
         '"When", and "Then" with the texts "A", "B", and "C"',
         'id="scenario-s1">'
@@ -226,7 +231,7 @@ FAIL_LOUDLY: list[tuple[str, Handler, str, str]] = [
     ),
     (
         "behavior spec missing third step text",
-        then_panels._h_ts_behavior_spec_steps,
+        then_behavior_spec._h_ts_behavior_spec_steps,
         'the Behavior Spec tab of scenario "s1" shows the step keywords "Given", '
         '"When", and "Then" with the texts "A", "B", and "C"',
         'id="scenario-s1">'
@@ -238,14 +243,14 @@ FAIL_LOUDLY: list[tuple[str, Handler, str, str]] = [
     ),
     (
         "atlas none placeholder badge missing",
-        then_panels._h_ts_atlas_none,
+        then_atlas._h_ts_atlas_none,
         'the ATLAS Techniques tab shows the heading "Projected-step mappings" '
         'with the placeholder "none"',
         "Projected-step mappings",
     ),
     (
         "complexity final level missing",
-        then_panels._h_ts_complexity_levels,
+        then_atlas._h_ts_complexity_levels,
         'the attack complexity block shows "Candidate lower bound" as "Advanced" '
         'and "Final required level" as "Expert"',
         '<div id="sec-scenarios">Candidate lower bound: Advanced</div>',
@@ -358,14 +363,14 @@ FAIL_LOUDLY: list[tuple[str, Handler, str, str]] = [
     ),
     (
         "coverage universe evidence missing",
-        then_threats._h_ts_coverage_universe,
+        then_coverage._h_ts_coverage_universe,
         'the coverage universe card shows inventory completeness "Confirmed '
         'Complete" with the evidence "operator-confirmation.md"',
         '<div id="sec-coverage">Confirmed Complete</div>',
     ),
     (
         "coverage card attribution missing from window",
-        then_threats._h_ts_coverage_card_attribution,
+        then_coverage._h_ts_coverage_card_attribution,
         'the coverage card "Entry Points" shows the status "Covered" and the '
         'uncovered entry point "ze-query" with the attribution '
         '"deterministic_rule_rejection"',
@@ -378,20 +383,20 @@ FAIL_LOUDLY: list[tuple[str, Handler, str, str]] = [
     ),
     (
         "coverage cards pair missing second card",
-        then_threats._h_ts_coverage_cards_pair,
+        then_coverage._h_ts_coverage_cards_pair,
         'the coverage section shows the "Entry Points" and "Zones" cards',
         '<div id="sec-coverage">Entry Points</div>',
     ),
     (
         "matrix cell missing scenario link",
-        then_threats._h_ts_matrix_cell,
+        then_matrix._h_ts_matrix_cell,
         'the matrix shows for threat "T6" a count of 2 for technique "AML.T0015" '
         'linking to scenario "s1"',
         '<div id="sec-threat-matrix">class="matrix-count-link">2</a>AML.T0015</div>',
     ),
     (
         "matrix cell missing count",
-        then_threats._h_ts_matrix_cell,
+        then_matrix._h_ts_matrix_cell,
         'the matrix shows for threat "T6" a count of 2 for technique "AML.T0015" '
         'linking to scenario "s1"',
         '<div id="sec-threat-matrix">class="matrix-count-link"'
@@ -399,7 +404,7 @@ FAIL_LOUDLY: list[tuple[str, Handler, str, str]] = [
     ),
     (
         "matrix cell missing technique",
-        then_threats._h_ts_matrix_cell,
+        then_matrix._h_ts_matrix_cell,
         'the matrix shows for threat "T6" a count of 2 for technique "AML.T0015" '
         'linking to scenario "s1"',
         '<div id="sec-threat-matrix">class="matrix-count-link"'
@@ -407,7 +412,7 @@ FAIL_LOUDLY: list[tuple[str, Handler, str, str]] = [
     ),
     (
         "roster no-technique row with technique present",
-        then_threats._h_ts_roster_no_technique,
+        then_matrix._h_ts_roster_no_technique,
         'the roster row for "s1" shows the attack pattern "AP-T6-01" with no '
         "technique value",
         '<div id="sec-threat-matrix">Scenario Roster'
@@ -415,7 +420,7 @@ FAIL_LOUDLY: list[tuple[str, Handler, str, str]] = [
     ),
     (
         "diversity type percent mismatch",
-        then_threats._h_ts_diversity_type,
+        then_diversity._h_ts_diversity_type,
         'the distribution shows the actor type "Cybercriminal" with the count 3 '
         "and 100 percent",
         '<div id="sec-diversity">'
@@ -425,7 +430,7 @@ FAIL_LOUDLY: list[tuple[str, Handler, str, str]] = [
     ),
     (
         "coverage attribution outside the bounded window is not detected",
-        then_threats._h_ts_coverage_card_attribution,
+        then_coverage._h_ts_coverage_card_attribution,
         'the coverage card "Entry Points" shows the status "Covered" and the '
         'uncovered entry point "ze-query" with the attribution "far-behind"',
         '<div id="sec-coverage">'
@@ -483,7 +488,7 @@ POSITIVE_BOUNDARY: list[tuple[str, Handler, str, str]] = [
     ),
     (
         "roster row at roster start",
-        then_threats._h_ts_roster_row,
+        then_matrix._h_ts_roster_row,
         'the roster row for "Scenario Roster" shows threat "T6", attack pattern '
         '"AP-T6-01", technique "AML.T0015", actor type "Cybercriminal", and '
         'capability "Advanced"',
@@ -493,7 +498,7 @@ POSITIVE_BOUNDARY: list[tuple[str, Handler, str, str]] = [
     ),
     (
         "roster no-technique row at roster start",
-        then_threats._h_ts_roster_no_technique,
+        then_matrix._h_ts_roster_no_technique,
         'the roster row for "Scenario Roster" shows the attack pattern "AP-T6-01" '
         "with no technique value",
         '<div id="sec-threat-matrix">Scenario Roster'
@@ -501,7 +506,7 @@ POSITIVE_BOUNDARY: list[tuple[str, Handler, str, str]] = [
     ),
     (
         "diversity type exact match",
-        then_threats._h_ts_diversity_type,
+        then_diversity._h_ts_diversity_type,
         'the distribution shows the actor type "Cybercriminal" with the count 3 '
         "and 100 percent",
         '<div id="sec-diversity">'
@@ -511,7 +516,7 @@ POSITIVE_BOUNDARY: list[tuple[str, Handler, str, str]] = [
     ),
     (
         "coverage attribution within the bounded window is detected",
-        then_threats._h_ts_coverage_card_attribution,
+        then_coverage._h_ts_coverage_card_attribution,
         'the coverage card "Entry Points" shows the status "Covered" and the '
         'uncovered entry point "ze-query" with the attribution "nearby"',
         '<div id="sec-coverage">'

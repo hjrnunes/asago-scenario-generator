@@ -1,4 +1,4 @@
-"""Then step handlers asserting the run summary and funnel."""
+"""Then step handlers asserting the run summary, funnel, and sidebar navigation."""
 
 from __future__ import annotations
 
@@ -6,6 +6,18 @@ import re
 from typing import Any
 from runtime_world import World
 from ._helpers import _html, _section_region, _stats, _resolve
+
+# Report section name -> sidebar anchor for navigation assertions.
+_SIDEBAR_ANCHORS: dict[str, str] = {
+    "Coverage Analysis": "#sec-coverage",
+    "Run Summary": "#sec-run-summary",
+    "Eval Scorecard": "#sec-scorecard",
+    "Capability Profile": "#sec-profile",
+    "Threat Surface": "#sec-threats",
+    "Scenarios": "#sec-scenarios",
+    "Raw Data": "#sec-raw",
+    "Glossary & Methodology": "#glossary",
+}
 
 
 def _h_ts_run_summary_present(
@@ -43,6 +55,17 @@ def _h_ts_sidebar_no_link(world: World, text: str, examples: dict) -> tuple[bool
         '<a href="#sec-run-summary">' not in _html(world),
         "Run Summary sidebar link rendered",
     )
+
+
+def _h_ts_sidebar_link(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Handle: the sidebar shows a link to the "Section" section."""
+    match = re.search(r'the sidebar shows a link to the "([^"]+)" section', text)
+    if not match:
+        return False, f"Could not parse sidebar-link assertion: {text}"
+    href = _SIDEBAR_ANCHORS.get(match.group(1))
+    if href is None:
+        return False, f"Unknown sidebar section {match.group(1)!r}"
+    return _resolve(href in _html(world), f"sidebar link {href} missing")
 
 
 def _h_ts_funnel_stats(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -187,6 +210,11 @@ def register(api: Any) -> None:
         source_order=8050,
     )
     api.register(
+        'the sidebar shows a link to the "([^"]+)" section',
+        _h_ts_sidebar_link,
+        source_order=8019,
+    )
+    api.register(
         'the report contains no "([^"]+)" section',
         _h_ts_no_section,
         source_order=8051,
@@ -194,35 +222,35 @@ def register(api: Any) -> None:
     api.register(
         'the sidebar shows no link to the "Run Summary" section',
         _h_ts_sidebar_no_link,
-        source_order=8051,
+        source_order=8052,
     )
     api.register(
         "the funnel shows .+",
         _h_ts_funnel_stats,
-        source_order=8052,
+        source_order=8053,
     )
     api.register(
         'the run summary shows "(\\d+)" Failed, "(\\d+)" Rejected, and the rejection rate "([^"]+)"',
         _h_ts_run_summary_stats,
-        source_order=8053,
+        source_order=8054,
     )
     api.register(
         'the run summary shows the duration "([^"]+)"',
         _h_ts_run_summary_duration,
-        source_order=8054,
+        source_order=8055,
     )
     api.register(
         'the run summary shows model "([^"]+)", temperature "([^"]+)", start "([^"]+)", and end "([^"]+)"',
         _h_ts_run_summary_config,
-        source_order=8055,
+        source_order=8056,
     )
     api.register(
         'the run summary shows model "unknown", temperature "N/A", start "N/A", and end "N/A"',
         _h_ts_rerun_summary_absent_values,
-        source_order=8056,
+        source_order=8057,
     )
     api.register(
         'the run summary shows the rejection rate "N/A"',
         _h_ts_rejection_rate_na,
-        source_order=8057,
+        source_order=8058,
     )
