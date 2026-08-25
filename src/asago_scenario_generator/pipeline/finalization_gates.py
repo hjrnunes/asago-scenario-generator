@@ -15,7 +15,9 @@ from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel
 
-from asago_scenario_generator.models.attack_pattern import validate_projection_snapshot
+from asago_scenario_generator.models.attack_pattern_validation import (
+    validate_projection_snapshot,
+)
 from asago_scenario_generator.models.attack_tree import (
     AttackTree,
     AttackTreeNode,
@@ -33,14 +35,14 @@ from asago_scenario_generator.pipeline.complexity import (
     assess_final_complexity,
     evaluate_capability_admission,
 )
-from asago_scenario_generator.pipeline.finalization import (
+from asago_scenario_generator.pipeline.finalization_contracts import (
     CandidateFinalizationContext,
     GeneratedArtifacts,
     GeneratedStage,
     LifecycleViolation,
     PrebehaviorFinalizationResult,
 )
-from asago_scenario_generator.pipeline.generate.actor import (
+from asago_scenario_generator.pipeline.generate.actor_access import (
     validate_actor_access_provenance,
 )
 from asago_scenario_generator.pipeline.generate.constants import compute_leaf_budget
@@ -48,7 +50,7 @@ from asago_scenario_generator.pipeline.generate.narrative import (
     validate_narrative_access_realization,
     validate_narrative_step_bounds,
 )
-from asago_scenario_generator.pipeline.projection import (
+from asago_scenario_generator.pipeline.projection_contracts import (
     ProjectedCandidate,
     canonical_json_bytes,
 )

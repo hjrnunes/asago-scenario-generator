@@ -48,12 +48,12 @@ from asago_scenario_generator.models.capability_profile import (
     EntryPoint,
     is_attacker_accessible_ingress,
 )
-from asago_scenario_generator.pipeline.candidates import (
+from asago_scenario_generator.pipeline.candidate_models import (
     CandidateOrigin,
     FilteredSeed,
     RejectionRecord,
 )
-from asago_scenario_generator.pipeline.projection import ProjectedCandidate
+from asago_scenario_generator.pipeline.projection_contracts import ProjectedCandidate
 
 logger = logging.getLogger(__name__)
 
@@ -1631,8 +1631,10 @@ def revalidate_qualified_candidate(
             requalification drifts from the embedded projection.
     """
     from asago_scenario_generator.pipeline.projection import (
-        compute_authoritative_catalog_pin,
         validate_projected_candidate,
+    )
+    from asago_scenario_generator.pipeline.projection_qualification import (
+        compute_authoritative_catalog_pin,
     )
 
     deserialized = deserialize_qualified_candidate(ref)

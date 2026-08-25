@@ -21,7 +21,7 @@ from asago_scenario_generator.models.projection_envelope import (
     ProjectionTraceabilityViolationCode,
 )
 from asago_scenario_generator.models.scenario import ValidationBlock
-from asago_scenario_generator.pipeline.finalization import (
+from asago_scenario_generator.pipeline.finalization_contracts import (
     AdmissionDecision,
     GeneratedArtifacts,
     GeneratedStage,
@@ -45,7 +45,7 @@ from asago_scenario_generator.pipeline.generate.gherkin import (
     _collect_leaf_nodes_dfs,
     _leaf_step_kind,
 )
-from asago_scenario_generator.pipeline.projection import (
+from asago_scenario_generator.pipeline.projection_qualification import (
     compute_authoritative_catalog_pin,
 )
 from asago_scenario_generator.pipeline.projection_validation import (
@@ -194,6 +194,44 @@ if _CLASSIFIED_SEMANTIC_RULES != frozenset(_SEMANTIC_OWNER_BY_RULE):
     raise RuntimeError("hard semantic admission rule taxonomy is not exhaustive")
 
 
+def _require_unique_evidence_ids(evidence_ids: tuple[AdmissionEvidenceId, ...]) -> None:
+    if len(evidence_ids) != len(set(evidence_ids)):
+        raise ValueError("postbehavior admission evidence IDs must be unique")
+
+
+def _require_singleton_exceptional(
+    evidence_ids: tuple[AdmissionEvidenceId, ...], envelope: Any
+) -> None:
+    exceptional = set(evidence_ids) & EXCEPTIONAL_ADMISSION_EVIDENCE_IDS
+    if exceptional and (len(evidence_ids) != 1 or envelope is not None):
+        raise ValueError("exceptional admission evidence must be a singleton")
+
+
+def _authoritative_violations(
+    gate_results: Sequence[GateResult],
+) -> tuple[GateViolation, ...]:
+    return tuple(
+        violation for result in gate_results for violation in result.violations
+    )
+
+
+def _has_stray_diagnostic(
+    gate_results: Sequence[GateResult], authoritative: Sequence[GateViolation]
+) -> bool:
+    for result in gate_results:
+        if result.evidence_id not in DIAGNOSTIC_BACKED_EVIDENCE_IDS:
+            continue
+        for diagnostic in result.diagnostics:
+            if diagnostic not in authoritative:
+                return True
+    return False
+
+
+def _require_diagnostic_copy(gate_results: Sequence[GateResult]) -> None:
+    if _has_stray_diagnostic(gate_results, _authoritative_violations(gate_results)):
+        raise ValueError("category diagnostic must copy an authoritative violation")
+
+
 @dataclass(frozen=True, slots=True)
 class PostbehaviorAdmissionReport:
     """All gate outcomes for an admitted transient envelope."""
@@ -203,21 +241,9 @@ class PostbehaviorAdmissionReport:
 
     def __post_init__(self) -> None:
         evidence_ids = tuple(result.evidence_id for result in self.gate_results)
-        if len(evidence_ids) != len(set(evidence_ids)):
-            raise ValueError("postbehavior admission evidence IDs must be unique")
-        exceptional = set(evidence_ids) & EXCEPTIONAL_ADMISSION_EVIDENCE_IDS
-        if exceptional and (len(evidence_ids) != 1 or self.envelope is not None):
-            raise ValueError("exceptional admission evidence must be a singleton")
-        authoritative = tuple(
-            violation for result in self.gate_results for violation in result.violations
-        )
-        if any(
-            diagnostic not in authoritative
-            for result in self.gate_results
-            if result.evidence_id in DIAGNOSTIC_BACKED_EVIDENCE_IDS
-            for diagnostic in result.diagnostics
-        ):
-            raise ValueError("category diagnostic must copy an authoritative violation")
+        _require_unique_evidence_ids(evidence_ids)
+        _require_singleton_exceptional(evidence_ids, self.envelope)
+        _require_diagnostic_copy(self.gate_results)
 
     @property
     def diagnostics(self) -> tuple[GateViolation, ...]:
@@ -282,37 +308,77 @@ class PostbehaviorAdmissionPort:
     def __call__(
         self, candidate: Any, artifacts: GeneratedArtifacts, snapshot: Any
     ) -> AdmissionDecision:
-        gate_results: list[GateResult] = []
-
         try:
-            snapshot.verify_digest()
-            self.capability_snapshot.assert_integrity()
-            tree = snapshot.tree
-            envelope = self.envelope_assembler(
-                candidate,
-                artifacts.actor,
-                artifacts.narrative,
-                tree,
-                artifacts.behavior,
-            )
-            # The assembler only receives fresh copies.  Reverify the authority
-            # after it returns so aliasing cannot silently change the snapshot.
-            snapshot.verify_digest()
+            envelope, tree = self._assemble_envelope(candidate, artifacts, snapshot)
         except (TypeError, ValueError, AttributeError) as exc:
-            violation = _gate(GateCode.snapshot_integrity, str(exc), None)
-            return AdmissionDecision(
-                False,
-                (violation.lifecycle(),),
-                value=PostbehaviorAdmissionReport(
-                    envelope=None,
-                    gate_results=(
-                        GateResult(
-                            AdmissionEvidenceId.snapshot_integrity, (violation,)
-                        ),
-                    ),
-                ),
+            return _snapshot_integrity_decision(exc)
+        authoritative_pin = compute_authoritative_catalog_pin(
+            self.trusted_catalog, self.taxonomy_resolver
+        )
+        gate_results: list[GateResult] = []
+        identity, trusted = self._identity_gates(envelope, candidate, authoritative_pin)
+        gate_results.append(
+            GateResult(AdmissionEvidenceId.identity, (*identity, *trusted))
+        )
+        pattern = _catalog_pattern(self.trusted_catalog, candidate.pattern_id)
+        trace_data_access: tuple[GateViolation, ...] = ()
+        if pattern is None:
+            gate_results.extend(_missing_pattern_gates(candidate))
+            identifier_diagnostics = identity
+        else:
+            trace_gates, trace_data_access, forged = self._trace_gate_results(
+                envelope, pattern, authoritative_pin
             )
+            gate_results.extend(trace_gates)
+            identifier_diagnostics = (*identity, *forged)
+        gate_results.append(
+            GateResult(
+                AdmissionEvidenceId.identifier_validity,
+                diagnostics=identifier_diagnostics,
+                outcome=not identifier_diagnostics,
+            )
+        )
+        structural, structural_result = _structural_gate(envelope)
+        gate_results.append(structural_result)
+        phantom_copy, phantom_result = _phantom_gate(envelope, self.profile)
+        gate_results.append(phantom_result)
+        semantic, semantic_gates = _semantic_gates(
+            envelope, self.profile, trace_data_access
+        )
+        gate_results.extend(semantic_gates)
+        gate_results.append(_complexity_gate(candidate, tree, artifacts.actor))
+        gate_results.append(
+            self._check_behavior(tree, artifacts.behavior, envelope.projection)
+        )
+        gate_results.append(_narrative_tree_diagnostics(envelope, tree))
+        gate_results.append(check_tree_parsimony(tree))
+        gate_results.append(_or_tree_gate(tree))
+        return _final_report(envelope, gate_results, structural, phantom_copy, semantic)
 
+    def _assemble_envelope(
+        self, candidate: Any, artifacts: GeneratedArtifacts, snapshot: Any
+    ) -> tuple[Any, Any]:
+        # The assembler only receives fresh copies.  Reverify the authority
+        # after it returns so aliasing cannot silently change the snapshot.
+        snapshot.verify_digest()
+        self.capability_snapshot.assert_integrity()
+        tree = snapshot.tree
+        envelope = self.envelope_assembler(
+            candidate,
+            artifacts.actor,
+            artifacts.narrative,
+            tree,
+            artifacts.behavior,
+        )
+        snapshot.verify_digest()
+        return envelope, tree
+
+    def _identity_gates(
+        self,
+        envelope: Any,
+        candidate: Any,
+        authoritative_pin: str,
+    ) -> tuple[tuple[GateViolation, ...], tuple[GateViolation, ...]]:
         identity: list[GateViolation] = []
         if envelope.candidate_id != candidate.candidate_id:
             identity.append(
@@ -330,9 +396,6 @@ class PostbehaviorAdmissionPort:
                     None,
                 )
             )
-        authoritative_pin = compute_authoritative_catalog_pin(
-            self.trusted_catalog, self.taxonomy_resolver
-        )
         trusted_context: list[GateViolation] = []
         if (
             self.expected_catalog_pin is not None
@@ -346,450 +409,649 @@ class PostbehaviorAdmissionPort:
                     None,
                 )
             )
-        gate_results.append(
-            GateResult(
-                AdmissionEvidenceId.identity, tuple((*identity, *trusted_context))
-            )
-        )
+        return tuple(identity), tuple(trusted_context)
 
-        pattern = next(
-            (
-                record
-                for record in self.trusted_catalog
-                if record.get("id") == candidate.pattern_id
-            ),
-            None,
+    def _trace_gate_results(
+        self, envelope: Any, pattern: dict[str, Any], authoritative_pin: str
+    ) -> tuple[list[GateResult], tuple[GateViolation, ...], tuple[GateViolation, ...]]:
+        trace = validate_projection_traceability(
+            envelope,
+            authoritative_pattern=pattern,
+            taxonomy_resolver=self.taxonomy_resolver,
+            capability_snapshot=self.capability_snapshot,
+            expected_catalog_pin=authoritative_pin,
         )
-        trace_data_access: tuple[GateViolation, ...] = ()
-        identifier_diagnostics: tuple[GateViolation, ...] = tuple(identity)
-        if pattern is None:
-            missing_pattern = _gate(
-                GateCode.candidate_identity,
-                f"pattern '{candidate.pattern_id}' is absent from trusted catalog",
-                None,
-            )
-            gate_results.append(
-                GateResult(
-                    AdmissionEvidenceId.projection_traceability,
-                    (missing_pattern,),
-                )
-            )
-            gate_results.append(
-                GateResult(
-                    AdmissionEvidenceId.catalog_taxonomy_pin_validity,
-                    diagnostics=(missing_pattern,),
-                    outcome=False,
-                )
-            )
-        else:
-            trace = validate_projection_traceability(
-                envelope,
-                authoritative_pattern=pattern,
-                taxonomy_resolver=self.taxonomy_resolver,
-                capability_snapshot=self.capability_snapshot,
-                expected_catalog_pin=authoritative_pin,
-            )
-            trace_categories = (
-                (
-                    AdmissionEvidenceId.resource_binding_validity,
-                    {
-                        ProjectionTraceabilityViolationCode.incorrect_resource_binding,
-                        ProjectionTraceabilityViolationCode.incorrect_ingress_binding,
-                    },
-                ),
-                (
-                    AdmissionEvidenceId.execution_requirement_drift,
-                    {ProjectionTraceabilityViolationCode.requirement_drift},
-                ),
-                (
-                    AdmissionEvidenceId.catalog_taxonomy_pin_validity,
-                    {
-                        ProjectionTraceabilityViolationCode.invalid_technique_mapping,
-                        ProjectionTraceabilityViolationCode.authoritative_pattern_pin_mismatch,
-                        ProjectionTraceabilityViolationCode.authoritative_catalog_pin_mismatch,
-                    },
-                ),
-            )
-            identifier_diagnostics = (
-                *identifier_diagnostics,
-                *(
-                    _gate(GateCode.traceability, item.detail, _owner_for_trace(item))
-                    for item in trace.violations
-                    if item.code is ProjectionTraceabilityViolationCode.forged_opaque_id
-                ),
-            )
-            for evidence_id, codes in trace_categories:
-                category_violations = tuple(
-                    _gate(GateCode.traceability, item.detail, _owner_for_trace(item))
-                    for item in trace.violations
-                    if item.code in codes
-                )
-                gate_results.append(
-                    GateResult(
-                        evidence_id,
-                        diagnostics=category_violations,
-                        outcome=not category_violations,
-                    )
-                )
-            trace_data_access = tuple(
-                _gate(GateCode.traceability, item.detail, _owner_for_trace(item))
-                for item in trace.violations
-                if item.code
-                is ProjectionTraceabilityViolationCode.ingress_identity_mismatch
-            )
-            gate_results.append(
-                GateResult(
-                    AdmissionEvidenceId.projection_traceability,
-                    tuple(
-                        _gate(
-                            GateCode.traceability, item.detail, _owner_for_trace(item)
-                        )
-                        for item in trace.violations
-                    ),
-                )
-            )
-
-        gate_results.append(
-            GateResult(
-                AdmissionEvidenceId.identifier_validity,
-                diagnostics=identifier_diagnostics,
-                outcome=not identifier_diagnostics,
-            )
-        )
-
-        structural_copy = envelope.model_copy(deep=True)
-        validate_scenario_structure([structural_copy])
-        structural = structural_copy.validation.structural
-        gate_results.append(
-            GateResult(
-                AdmissionEvidenceId.structural_validity,
-                tuple(
-                    _gate(
-                        GateCode.structural,
-                        detail,
-                        _owner_for_structural(detail),
-                    )
-                    for detail in structural.violations
-                ),
-            )
-        )
-
-        phantom_copy = envelope.model_copy(deep=True)
-        phantom_result = validate_phantom_capabilities([phantom_copy], self.profile)
-        phantom_violations: list[GateViolation] = []
-        for _, violations in phantom_result.flagged_scenarios:
-            for item in violations:
-                owner = (
-                    GeneratedStage.behavior
-                    if item.field == "behavior_spec"
-                    else GeneratedStage.tree
-                    if item.field == "attack_tree"
-                    else GeneratedStage.narrative
-                )
-                phantom_violations.append(_gate(GateCode.phantom, item.reason, owner))
-        gate_results.append(
-            GateResult(AdmissionEvidenceId.phantom_validity, tuple(phantom_violations))
-        )
-
-        semantic = check_scenario_semantics(envelope, self.profile)
-        semantic_hard: list[tuple[str, GateViolation]] = []
-        semantic_diagnostics: list[GateViolation] = []
-        for item in semantic.violations:
-            # Traceability emits source-qualified evidence for this overloaded
-            # rule, so do not duplicate it with an ownerless semantic string.
-            if item.rule == "initial_entry_point_id_mismatch":
-                continue
-            owner = _SEMANTIC_OWNER_BY_RULE.get(item.rule)
-            gate_code = (
-                GateCode.canonical_compilation_failed
-                if item.rule in _CANONICAL_COMPILATION_RULES
-                else GateCode.semantic
-            )
-            violation = _gate(gate_code, item.message, owner)
-            if item.rule in _SEMANTIC_DIAGNOSTIC_RULES:
-                semantic_diagnostics.append(violation)
-            else:
-                semantic_hard.append((item.rule, violation))
-        for evidence_id, rules in (
-            (AdmissionEvidenceId.tool_integration_grounding, _TOOL_RULES),
-            (AdmissionEvidenceId.data_access_grounding, _DATA_ACCESS_RULES),
-            (AdmissionEvidenceId.capability_grounding, _CAPABILITY_RULES),
-        ):
-            selected = tuple(
-                violation for rule, violation in semantic_hard if rule in rules
-            )
-            if evidence_id is AdmissionEvidenceId.data_access_grounding:
-                selected = (*trace_data_access, *selected)
-            # Category outcomes are exact evidence; the hard semantic stream
-            # remains in source order in one authoritative gate.
-            gate_results.append(
+        trace_gates: list[GateResult] = []
+        for evidence_id, codes in _TRACE_CATEGORY_CODES:
+            category_violations = _trace_gates_for_codes(trace.violations, codes)
+            trace_gates.append(
                 GateResult(
                     evidence_id,
-                    diagnostics=selected,
-                    outcome=not selected,
-                    applicable=(
-                        self.profile.is_tool_inventory_complete
-                        if evidence_id is AdmissionEvidenceId.tool_integration_grounding
-                        else self.profile.is_entry_point_inventory_complete
-                        if evidence_id is AdmissionEvidenceId.data_access_grounding
-                        else True
-                    ),
+                    diagnostics=category_violations,
+                    outcome=not category_violations,
                 )
             )
-        gate_results.append(
+        trace_gates.append(
             GateResult(
-                AdmissionEvidenceId.semantic_validity,
-                tuple(v for _, v in semantic_hard),
-                tuple(semantic_diagnostics),
+                AdmissionEvidenceId.projection_traceability,
+                _all_trace_gates(trace.violations),
             )
         )
-
-        all_leaves = tuple(_collect_leaf_nodes_dfs(tree.root))
-        complexity = assess_final_complexity(
-            assess_candidate_complexity(candidate), all_leaves, artifacts.actor.access
+        trace_data_access = _trace_gates_for_code(
+            trace.violations,
+            ProjectionTraceabilityViolationCode.ingress_identity_mismatch,
         )
-        complexity_decision = evaluate_capability_admission(
-            artifacts.actor.capability_level, complexity, phase="final"
-        )
-        complexity_violations: tuple[GateViolation, ...] = ()
-        if not complexity_decision.admitted:
-            routing = complexity_decision.violation.routing
-            owner = (
-                GeneratedStage.actor
-                if routing.stage == "call0_actor_generation"
-                else GeneratedStage.tree
-            )
-            complexity_violations = (
-                _gate(GateCode.capability_complexity, routing.feedback, owner),
-            )
-        gate_results.append(
-            GateResult(
-                AdmissionEvidenceId.actor_attack_complexity, complexity_violations
-            )
-        )
-
-        behavior_result = self._check_behavior(
-            tree, artifacts.behavior, envelope.projection
-        )
-        gate_results.append(behavior_result)
-
-        narrative_zones = {step.zone for step in envelope.narrative.steps}
-        tree_zones = {
-            leaf.zone
-            for leaf in _collect_leaf_nodes_dfs(tree.root)
-            if leaf.zone is not None
-        }
-        diagnostics: list[GateViolation] = []
-        if narrative_zones != tree_zones:
-            diagnostics.append(
-                _gate(
-                    GateCode.zone_difference,
-                    "narrative and final-tree zone sets differ",
-                    GeneratedStage.tree,
-                )
-            )
-        leaf_count = len(_collect_leaf_nodes_dfs(tree.root))
-        step_count = len(envelope.narrative.steps)
-        if leaf_count and step_count:
-            correspondence = min(leaf_count, step_count) / max(leaf_count, step_count)
-            if correspondence < 0.7:
-                diagnostics.append(
-                    _gate(
-                        GateCode.heuristic_correspondence,
-                        f"narrative/tree count correspondence is {correspondence:.2f}",
-                        GeneratedStage.tree,
-                    )
-                )
-        gate_results.append(
-            GateResult(
-                AdmissionEvidenceId.narrative_tree_diagnostics,
-                diagnostics=tuple(diagnostics),
-            )
-        )
-
-        parsimony = check_tree_parsimony(tree)
-        gate_results.append(parsimony)
-        or_violations: tuple[GateViolation, ...] = ()
-        if any(node.gate is GateType.OR for node in _nodes(tree.root)):
-            or_violations = (
-                _gate(
-                    GateCode.or_tree,
-                    "final tree contains an OR gate",
-                    GeneratedStage.tree,
-                ),
-            )
-        gate_results.append(
-            GateResult(AdmissionEvidenceId.or_tree_prohibition, or_violations)
-        )
-
-        violations = tuple(
-            violation.lifecycle()
-            for result in gate_results
-            for violation in result.violations
-        )
-        report = PostbehaviorAdmissionReport(envelope, tuple(gate_results))
-        if violations:
-            return AdmissionDecision(False, violations, value=report)
-        if {result.evidence_id for result in report.gate_results} != set(
-            NORMAL_POSTBEHAVIOR_EVIDENCE_IDS
-        ):
-            raise RuntimeError("successful admission requires canonical gate evidence")
-        validation = ValidationBlock(
-            structural=structural,
-            phantom=phantom_copy.validation.phantom,
-            semantic=semantic,
-        )
-        validated_envelope = envelope.model_copy(
-            update={
-                "validation": validation,
-                "validation_passed": (
-                    validation.structural.valid
-                    and validation.phantom.valid
-                    and validation.semantic.valid
-                ),
-            },
-            deep=True,
-        )
-        report = PostbehaviorAdmissionReport(validated_envelope, tuple(gate_results))
-        return AdmissionDecision(
-            True,
-            value=report,
-        )
+        forged = _forged_identifier_diagnostics(trace.violations)
+        return trace_gates, trace_data_access, forged
 
     def _check_behavior(self, tree: Any, behavior: Any, projection: Any) -> GateResult:
         violations: list[GateViolation] = []
-        leaves = [
-            leaf
-            for leaf in _collect_leaf_nodes_dfs(tree.root)
-            if leaf.projected_step_ids
-        ]
-        security_leaves = [
-            leaf
-            for leaf in leaves
-            if not isinstance(leaf.action, ExternalPreconditionAction)
-        ]
+        leaves = _projected_leaves(tree)
+        security_leaves = _security_leaves(leaves)
         actions = list(getattr(behavior, "actions", ()))
-        if not security_leaves:
-            violations.append(
-                _gate(
-                    GateCode.no_realized_security_actions,
-                    "final tree has no realized security-bearing actions",
-                    GeneratedStage.tree,
-                )
-            )
-        if len(leaves) != len(actions):
-            violations.append(
-                _gate(
-                    GateCode.tree_action_mismatch,
-                    f"tree/action cardinality mismatch: {len(leaves)} != {len(actions)}",
-                    GeneratedStage.tree,
-                )
-            )
-        for index, (leaf, action) in enumerate(zip(leaves, actions, strict=False)):
-            mismatch = (
-                action.action_id != f"ba-{leaf.id}"
-                or action.source_leaf_id != leaf.id
-                or tuple(action.projected_step_ids) != tuple(leaf.projected_step_ids)
-                or action.gherkin_keyword != _keyword(leaf)
-                or tuple(action.realizations) != tuple(leaf.realizations)
-            )
-            if mismatch:
-                violations.append(
-                    _gate(
-                        GateCode.tree_action_mismatch,
-                        f"tree/action mismatch at DFS position {index} for '{leaf.id}'",
-                        GeneratedStage.tree,
-                    )
-                )
-
-        selected = set(projection.selected_step_ids)
-        postcondition_owner: dict[str, str] = {}
-        required_security: set[tuple[str, str]] = set()
-        ambiguous_postconditions: set[str] = set()
-        for step in projection.projection.source_chain.steps:
-            if step.step_id not in selected:
-                continue
-            for postcondition in step.observable_postconditions:
-                postcondition_id = postcondition.postcondition_id
-                existing_owner = postcondition_owner.get(postcondition_id)
-                if existing_owner is not None and existing_owner != step.step_id:
-                    ambiguous_postconditions.add(postcondition_id)
-                    violations.append(
-                        _gate(
-                            GateCode.candidate_identity,
-                            f"postcondition '{postcondition_id}' has ambiguous owners "
-                            f"'{existing_owner}' and '{step.step_id}'",
-                            None,
-                        )
-                    )
-                    continue
-                postcondition_owner[postcondition_id] = step.step_id
-                if postcondition.security_relevant:
-                    required_security.add((step.step_id, postcondition_id))
-        seen_ids: set[str] = set()
-        seen_pairs: set[tuple[str, str]] = set()
-        covered_security: set[tuple[str, str]] = set()
-        for assertion in getattr(behavior, "assertions", ()):
-            if assertion.assertion_id in seen_ids:
-                violations.append(
-                    _gate(
-                        GateCode.assertion_mismatch,
-                        f"duplicate assertion ID '{assertion.assertion_id}'",
-                        GeneratedStage.behavior,
-                    )
-                )
-            seen_ids.add(assertion.assertion_id)
-            if (
-                len(assertion.source_step_ids) != 1
-                or len(assertion.projected_postcondition_ids) != 1
-            ):
-                violations.append(
-                    _gate(
-                        GateCode.assertion_mismatch,
-                        f"assertion '{assertion.assertion_id}' must map one owner to one postcondition",
-                        GeneratedStage.behavior,
-                    )
-                )
-                continue
-            source = assertion.source_step_ids[0]
-            postcondition = assertion.projected_postcondition_ids[0]
-            owner = postcondition_owner.get(postcondition)
-            expected_id = f"assert-{owner}-{postcondition}"
-            pair = (source, postcondition)
-            if (
-                source not in selected
-                or owner is None
-                or source != owner
-                or assertion.assertion_id != expected_id
-                or pair in seen_pairs
-            ):
-                violations.append(
-                    _gate(
-                        GateCode.assertion_mismatch,
-                        f"assertion '{assertion.assertion_id}' has unknown, duplicate, or wrong-owner IDs",
-                        GeneratedStage.behavior,
-                    )
-                )
-            seen_pairs.add(pair)
-            if (
-                postcondition not in ambiguous_postconditions
-                and pair in required_security
-                and source == owner
-            ):
-                covered_security.add(pair)
-        missing = required_security - covered_security
-        if missing:
-            violations.append(
-                _gate(
-                    GateCode.assertion_mismatch,
-                    f"security-relevant postconditions lack assertions: {sorted(missing)}",
-                    GeneratedStage.behavior,
-                )
-            )
+        no_security = _no_security_action_violation(security_leaves)
+        if no_security is not None:
+            violations.append(no_security)
+        violations.extend(_cardinality_violations(leaves, actions))
+        violations.extend(_leaf_action_violations(leaves, actions))
+        (
+            postcondition_owner,
+            required_security,
+            ambiguous_postconditions,
+        ) = _postcondition_owners(projection, violations)
+        covered_security = _assertion_violations(
+            behavior,
+            set(projection.selected_step_ids),
+            postcondition_owner,
+            required_security,
+            ambiguous_postconditions,
+            violations,
+        )
+        missing = _missing_assertion_violation(required_security, covered_security)
+        if missing is not None:
+            violations.append(missing)
         return GateResult(
             AdmissionEvidenceId.behavior_correspondence,
             tuple(dict.fromkeys(violations)),
         )
+
+
+def _projected_leaves(tree: Any) -> list[Any]:
+    return [
+        leaf for leaf in _collect_leaf_nodes_dfs(tree.root) if leaf.projected_step_ids
+    ]
+
+
+def _security_leaves(leaves: Sequence[Any]) -> list[Any]:
+    return [
+        leaf
+        for leaf in leaves
+        if not isinstance(leaf.action, ExternalPreconditionAction)
+    ]
+
+
+def _no_security_action_violation(
+    security_leaves: Sequence[Any],
+) -> GateViolation | None:
+    if security_leaves:
+        return None
+    return _gate(
+        GateCode.no_realized_security_actions,
+        "final tree has no realized security-bearing actions",
+        GeneratedStage.tree,
+    )
+
+
+def _cardinality_violations(
+    leaves: Sequence[Any], actions: Sequence[Any]
+) -> list[GateViolation]:
+    if len(leaves) == len(actions):
+        return []
+    return [
+        _gate(
+            GateCode.tree_action_mismatch,
+            f"tree/action cardinality mismatch: {len(leaves)} != {len(actions)}",
+            GeneratedStage.tree,
+        )
+    ]
+
+
+def _action_leaf_mismatch(leaf: Any, action: Any) -> bool:
+    return (
+        action.action_id != f"ba-{leaf.id}"
+        or action.source_leaf_id != leaf.id
+        or tuple(action.projected_step_ids) != tuple(leaf.projected_step_ids)
+        or action.gherkin_keyword != _keyword(leaf)
+        or tuple(action.realizations) != tuple(leaf.realizations)
+    )
+
+
+def _leaf_action_violations(
+    leaves: Sequence[Any], actions: Sequence[Any]
+) -> list[GateViolation]:
+    violations: list[GateViolation] = []
+    for index, (leaf, action) in enumerate(zip(leaves, actions, strict=False)):
+        if _action_leaf_mismatch(leaf, action):
+            violations.append(
+                _gate(
+                    GateCode.tree_action_mismatch,
+                    f"tree/action mismatch at DFS position {index} for '{leaf.id}'",
+                    GeneratedStage.tree,
+                )
+            )
+    return violations
+
+
+def _ambiguous_owner_violation(
+    existing_owner: str | None, step_id: str, postcondition_id: str
+) -> GateViolation | None:
+    if existing_owner is None or existing_owner == step_id:
+        return None
+    return _gate(
+        GateCode.candidate_identity,
+        f"postcondition '{postcondition_id}' has ambiguous owners "
+        f"'{existing_owner}' and '{step_id}'",
+        None,
+    )
+
+
+def _postcondition_owners(
+    projection: Any, violations: list[GateViolation]
+) -> tuple[dict[str, str], set[tuple[str, str]], set[str]]:
+    selected = set(projection.selected_step_ids)
+    postcondition_owner: dict[str, str] = {}
+    required_security: set[tuple[str, str]] = set()
+    ambiguous_postconditions: set[str] = set()
+    for step in projection.projection.source_chain.steps:
+        if step.step_id not in selected:
+            continue
+        for postcondition in step.observable_postconditions:
+            postcondition_id = postcondition.postcondition_id
+            ambiguous = _ambiguous_owner_violation(
+                postcondition_owner.get(postcondition_id),
+                step.step_id,
+                postcondition_id,
+            )
+            if ambiguous is not None:
+                ambiguous_postconditions.add(postcondition_id)
+                violations.append(ambiguous)
+                continue
+            postcondition_owner[postcondition_id] = step.step_id
+            if postcondition.security_relevant:
+                required_security.add((step.step_id, postcondition_id))
+    return postcondition_owner, required_security, ambiguous_postconditions
+
+
+def _assertion_ids_invalid(
+    assertion: Any, seen_ids: set[str], violations: list[GateViolation]
+) -> bool:
+    if assertion.assertion_id in seen_ids:
+        violations.append(
+            _gate(
+                GateCode.assertion_mismatch,
+                f"duplicate assertion ID '{assertion.assertion_id}'",
+                GeneratedStage.behavior,
+            )
+        )
+    seen_ids.add(assertion.assertion_id)
+    if (
+        len(assertion.source_step_ids) != 1
+        or len(assertion.projected_postcondition_ids) != 1
+    ):
+        violations.append(
+            _gate(
+                GateCode.assertion_mismatch,
+                f"assertion '{assertion.assertion_id}' must map one owner to one postcondition",
+                GeneratedStage.behavior,
+            )
+        )
+        return True
+    return False
+
+
+def _assertion_mismatched(
+    assertion: Any,
+    selected: set[str],
+    owner: str | None,
+    source: str,
+    postcondition: str,
+    seen_pairs: set[tuple[str, str]],
+) -> bool:
+    expected_id = f"assert-{owner}-{postcondition}"
+    pair = (source, postcondition)
+    return (
+        source not in selected
+        or owner is None
+        or source != owner
+        or assertion.assertion_id != expected_id
+        or pair in seen_pairs
+    )
+
+
+def _assertion_covers_security(
+    assertion: Any,
+    ambiguous_postconditions: set[str],
+    required_security: set[tuple[str, str]],
+    postcondition_owner: dict[str, str],
+    covered_security: set[tuple[str, str]],
+    source: str,
+    postcondition: str,
+) -> None:
+    pair = (source, postcondition)
+    if (
+        postcondition not in ambiguous_postconditions
+        and pair in required_security
+        and source == postcondition_owner.get(postcondition)
+    ):
+        covered_security.add(pair)
+
+
+def _assertion_violations(
+    behavior: Any,
+    selected: set[str],
+    postcondition_owner: dict[str, str],
+    required_security: set[tuple[str, str]],
+    ambiguous_postconditions: set[str],
+    violations: list[GateViolation],
+) -> set[tuple[str, str]]:
+    seen_ids: set[str] = set()
+    seen_pairs: set[tuple[str, str]] = set()
+    covered_security: set[tuple[str, str]] = set()
+    for assertion in getattr(behavior, "assertions", ()):
+        if _assertion_ids_invalid(assertion, seen_ids, violations):
+            continue
+        source = assertion.source_step_ids[0]
+        postcondition = assertion.projected_postcondition_ids[0]
+        owner = postcondition_owner.get(postcondition)
+        if _assertion_mismatched(
+            assertion, selected, owner, source, postcondition, seen_pairs
+        ):
+            violations.append(
+                _gate(
+                    GateCode.assertion_mismatch,
+                    f"assertion '{assertion.assertion_id}' has unknown, duplicate, or wrong-owner IDs",
+                    GeneratedStage.behavior,
+                )
+            )
+        seen_pairs.add((source, postcondition))
+        _assertion_covers_security(
+            assertion,
+            ambiguous_postconditions,
+            required_security,
+            postcondition_owner,
+            covered_security,
+            source,
+            postcondition,
+        )
+    return covered_security
+
+
+def _missing_assertion_violation(
+    required_security: set[tuple[str, str]],
+    covered_security: set[tuple[str, str]],
+) -> GateViolation | None:
+    missing = required_security - covered_security
+    if not missing:
+        return None
+    return _gate(
+        GateCode.assertion_mismatch,
+        f"security-relevant postconditions lack assertions: {sorted(missing)}",
+        GeneratedStage.behavior,
+    )
+
+
+_TRACE_CATEGORY_CODES: tuple[
+    tuple[AdmissionEvidenceId, frozenset[ProjectionTraceabilityViolationCode]], ...
+] = (
+    (
+        AdmissionEvidenceId.resource_binding_validity,
+        frozenset(
+            {
+                ProjectionTraceabilityViolationCode.incorrect_resource_binding,
+                ProjectionTraceabilityViolationCode.incorrect_ingress_binding,
+            }
+        ),
+    ),
+    (
+        AdmissionEvidenceId.execution_requirement_drift,
+        frozenset({ProjectionTraceabilityViolationCode.requirement_drift}),
+    ),
+    (
+        AdmissionEvidenceId.catalog_taxonomy_pin_validity,
+        frozenset(
+            {
+                ProjectionTraceabilityViolationCode.invalid_technique_mapping,
+                ProjectionTraceabilityViolationCode.authoritative_pattern_pin_mismatch,
+                ProjectionTraceabilityViolationCode.authoritative_catalog_pin_mismatch,
+            }
+        ),
+    ),
+)
+
+
+def _snapshot_integrity_decision(exc: Exception) -> AdmissionDecision:
+    violation = _gate(GateCode.snapshot_integrity, str(exc), None)
+    return AdmissionDecision(
+        False,
+        (violation.lifecycle(),),
+        value=PostbehaviorAdmissionReport(
+            envelope=None,
+            gate_results=(
+                GateResult(AdmissionEvidenceId.snapshot_integrity, (violation,)),
+            ),
+        ),
+    )
+
+
+def _catalog_pattern(
+    catalog: Sequence[dict[str, Any]], pattern_id: str
+) -> dict[str, Any] | None:
+    return next((record for record in catalog if record.get("id") == pattern_id), None)
+
+
+def _missing_pattern_gates(candidate: Any) -> list[GateResult]:
+    missing_pattern = _gate(
+        GateCode.candidate_identity,
+        f"pattern '{candidate.pattern_id}' is absent from trusted catalog",
+        None,
+    )
+    return [
+        GateResult(AdmissionEvidenceId.projection_traceability, (missing_pattern,)),
+        GateResult(
+            AdmissionEvidenceId.catalog_taxonomy_pin_validity,
+            diagnostics=(missing_pattern,),
+            outcome=False,
+        ),
+    ]
+
+
+def _trace_gates_for_codes(
+    trace_violations: Sequence[Any], codes: set[ProjectionTraceabilityViolationCode]
+) -> tuple[GateViolation, ...]:
+    return tuple(
+        _gate(GateCode.traceability, item.detail, _owner_for_trace(item))
+        for item in trace_violations
+        if item.code in codes
+    )
+
+
+def _trace_gates_for_code(
+    trace_violations: Sequence[Any],
+    code: ProjectionTraceabilityViolationCode,
+) -> tuple[GateViolation, ...]:
+    return tuple(
+        _gate(GateCode.traceability, item.detail, _owner_for_trace(item))
+        for item in trace_violations
+        if item.code is code
+    )
+
+
+def _all_trace_gates(trace_violations: Sequence[Any]) -> tuple[GateViolation, ...]:
+    return tuple(
+        _gate(GateCode.traceability, item.detail, _owner_for_trace(item))
+        for item in trace_violations
+    )
+
+
+def _forged_identifier_diagnostics(
+    trace_violations: Sequence[Any],
+) -> tuple[GateViolation, ...]:
+    return tuple(
+        _gate(GateCode.traceability, item.detail, _owner_for_trace(item))
+        for item in trace_violations
+        if item.code is ProjectionTraceabilityViolationCode.forged_opaque_id
+    )
+
+
+def _structural_gate(envelope: Any) -> tuple[Any, GateResult]:
+    structural_copy = envelope.model_copy(deep=True)
+    validate_scenario_structure([structural_copy])
+    structural = structural_copy.validation.structural
+    result = GateResult(
+        AdmissionEvidenceId.structural_validity,
+        tuple(
+            _gate(GateCode.structural, detail, _owner_for_structural(detail))
+            for detail in structural.violations
+        ),
+    )
+    return structural, result
+
+
+def _phantom_owner(field: str) -> GeneratedStage:
+    if field == "behavior_spec":
+        return GeneratedStage.behavior
+    if field == "attack_tree":
+        return GeneratedStage.tree
+    return GeneratedStage.narrative
+
+
+def _phantom_violations(phantom_result: Any) -> list[GateViolation]:
+    violations: list[GateViolation] = []
+    for _, flagged in phantom_result.flagged_scenarios:
+        for item in flagged:
+            violations.append(
+                _gate(GateCode.phantom, item.reason, _phantom_owner(item.field))
+            )
+    return violations
+
+
+def _phantom_gate(envelope: Any, profile: Any) -> tuple[Any, GateResult]:
+    phantom_copy = envelope.model_copy(deep=True)
+    phantom_result = validate_phantom_capabilities([phantom_copy], profile)
+    result = GateResult(
+        AdmissionEvidenceId.phantom_validity, tuple(_phantom_violations(phantom_result))
+    )
+    return phantom_copy, result
+
+
+def _semantic_violations(
+    semantic: Any,
+) -> tuple[list[tuple[str, GateViolation]], list[GateViolation]]:
+    semantic_hard: list[tuple[str, GateViolation]] = []
+    semantic_diagnostics: list[GateViolation] = []
+    for item in semantic.violations:
+        # Traceability emits source-qualified evidence for this overloaded
+        # rule, so do not duplicate it with an ownerless semantic string.
+        if item.rule == "initial_entry_point_id_mismatch":
+            continue
+        owner = _SEMANTIC_OWNER_BY_RULE.get(item.rule)
+        gate_code = (
+            GateCode.canonical_compilation_failed
+            if item.rule in _CANONICAL_COMPILATION_RULES
+            else GateCode.semantic
+        )
+        violation = _gate(gate_code, item.message, owner)
+        if item.rule in _SEMANTIC_DIAGNOSTIC_RULES:
+            semantic_diagnostics.append(violation)
+        else:
+            semantic_hard.append((item.rule, violation))
+    return semantic_hard, semantic_diagnostics
+
+
+def _grounding_applicable(profile: Any, evidence_id: AdmissionEvidenceId) -> bool:
+    if evidence_id is AdmissionEvidenceId.tool_integration_grounding:
+        return profile.is_tool_inventory_complete
+    if evidence_id is AdmissionEvidenceId.data_access_grounding:
+        return profile.is_entry_point_inventory_complete
+    return True
+
+
+def _grounding_gates(
+    profile: Any,
+    trace_data_access: tuple[GateViolation, ...],
+    semantic_hard: list[tuple[str, GateViolation]],
+) -> list[GateResult]:
+    gates: list[GateResult] = []
+    for evidence_id, rules in (
+        (AdmissionEvidenceId.tool_integration_grounding, _TOOL_RULES),
+        (AdmissionEvidenceId.data_access_grounding, _DATA_ACCESS_RULES),
+        (AdmissionEvidenceId.capability_grounding, _CAPABILITY_RULES),
+    ):
+        selected = tuple(
+            violation for rule, violation in semantic_hard if rule in rules
+        )
+        if evidence_id is AdmissionEvidenceId.data_access_grounding:
+            selected = (*trace_data_access, *selected)
+        gates.append(
+            GateResult(
+                evidence_id,
+                diagnostics=selected,
+                outcome=not selected,
+                applicable=_grounding_applicable(profile, evidence_id),
+            )
+        )
+    return gates
+
+
+def _semantic_gates(
+    envelope: Any, profile: Any, trace_data_access: tuple[GateViolation, ...]
+) -> tuple[Any, list[GateResult]]:
+    semantic = check_scenario_semantics(envelope, profile)
+    semantic_hard, semantic_diagnostics = _semantic_violations(semantic)
+    gates = _grounding_gates(profile, trace_data_access, semantic_hard)
+    gates.append(
+        GateResult(
+            AdmissionEvidenceId.semantic_validity,
+            tuple(violation for _, violation in semantic_hard),
+            tuple(semantic_diagnostics),
+        )
+    )
+    return semantic, gates
+
+
+def _complexity_gate(candidate: Any, tree: Any, actor: Any) -> GateResult:
+    all_leaves = tuple(_collect_leaf_nodes_dfs(tree.root))
+    complexity = assess_final_complexity(
+        assess_candidate_complexity(candidate), all_leaves, actor.access
+    )
+    decision = evaluate_capability_admission(
+        actor.capability_level, complexity, phase="final"
+    )
+    if decision.admitted:
+        return GateResult(AdmissionEvidenceId.actor_attack_complexity)
+    routing = decision.violation.routing
+    owner = (
+        GeneratedStage.actor
+        if routing.stage == "call0_actor_generation"
+        else GeneratedStage.tree
+    )
+    return GateResult(
+        AdmissionEvidenceId.actor_attack_complexity,
+        (_gate(GateCode.capability_complexity, routing.feedback, owner),),
+    )
+
+
+def _correspondence_diagnostic(
+    leaf_count: int, step_count: int
+) -> GateViolation | None:
+    if not leaf_count or not step_count:
+        return None
+    correspondence = min(leaf_count, step_count) / max(leaf_count, step_count)
+    if correspondence < 0.7:
+        return _gate(
+            GateCode.heuristic_correspondence,
+            f"narrative/tree count correspondence is {correspondence:.2f}",
+            GeneratedStage.tree,
+        )
+    return None
+
+
+def _narrative_tree_diagnostics(envelope: Any, tree: Any) -> GateResult:
+    narrative_zones = {step.zone for step in envelope.narrative.steps}
+    tree_zones = {
+        leaf.zone
+        for leaf in _collect_leaf_nodes_dfs(tree.root)
+        if leaf.zone is not None
+    }
+    diagnostics: list[GateViolation] = []
+    if narrative_zones != tree_zones:
+        diagnostics.append(
+            _gate(
+                GateCode.zone_difference,
+                "narrative and final-tree zone sets differ",
+                GeneratedStage.tree,
+            )
+        )
+    leaf_count = len(_collect_leaf_nodes_dfs(tree.root))
+    step_count = len(envelope.narrative.steps)
+    correspondence = _correspondence_diagnostic(leaf_count, step_count)
+    if correspondence is not None:
+        diagnostics.append(correspondence)
+    return GateResult(
+        AdmissionEvidenceId.narrative_tree_diagnostics,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def _or_tree_gate(tree: Any) -> GateResult:
+    if not any(node.gate is GateType.OR for node in _nodes(tree.root)):
+        return GateResult(AdmissionEvidenceId.or_tree_prohibition)
+    return GateResult(
+        AdmissionEvidenceId.or_tree_prohibition,
+        (
+            _gate(
+                GateCode.or_tree,
+                "final tree contains an OR gate",
+                GeneratedStage.tree,
+            ),
+        ),
+    )
+
+
+def _report_violations(gate_results: Sequence[GateResult]) -> tuple[Any, ...]:
+    return tuple(
+        violation.lifecycle()
+        for result in gate_results
+        for violation in result.violations
+    )
+
+
+def _validated_envelope(
+    envelope: Any, structural: Any, phantom_copy: Any, semantic: Any
+) -> Any:
+    validation = ValidationBlock(
+        structural=structural,
+        phantom=phantom_copy.validation.phantom,
+        semantic=semantic,
+    )
+    return envelope.model_copy(
+        update={
+            "validation": validation,
+            "validation_passed": (
+                validation.structural.valid
+                and validation.phantom.valid
+                and validation.semantic.valid
+            ),
+        },
+        deep=True,
+    )
+
+
+def _final_report(
+    envelope: Any,
+    gate_results: Sequence[GateResult],
+    structural: Any,
+    phantom_copy: Any,
+    semantic: Any,
+) -> AdmissionDecision:
+    violations = _report_violations(gate_results)
+    if violations:
+        return AdmissionDecision(
+            False,
+            violations,
+            value=PostbehaviorAdmissionReport(envelope, tuple(gate_results)),
+        )
+    if {result.evidence_id for result in gate_results} != set(
+        NORMAL_POSTBEHAVIOR_EVIDENCE_IDS
+    ):
+        raise RuntimeError("successful admission requires canonical gate evidence")
+    validated_envelope = _validated_envelope(
+        envelope, structural, phantom_copy, semantic
+    )
+    return AdmissionDecision(
+        True,
+        value=PostbehaviorAdmissionReport(validated_envelope, tuple(gate_results)),
+    )
 
 
 def _nodes(node: Any):

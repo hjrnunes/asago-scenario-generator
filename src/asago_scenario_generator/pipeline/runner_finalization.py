@@ -29,6 +29,11 @@ from asago_scenario_generator.pipeline.coverage_planning import (
     revalidate_qualified_candidate,
 )
 from asago_scenario_generator.pipeline.finalization import (
+    TargetFinalizationMachine,
+    make_assertions_only_behavior_callback,
+    retry_directive_for,
+)
+from asago_scenario_generator.pipeline.finalization_contracts import (
     COMPLETION_LENGTH_RETRY_SUFFIXES,
     COMPLETION_LENGTH_RETRY_CONTROLS,
     MAX_OWNER_RETRIES,
@@ -41,9 +46,6 @@ from asago_scenario_generator.pipeline.finalization import (
     GeneratedStageResult,
     LifecycleState,
     LifecycleViolation,
-    TargetFinalizationMachine,
-    make_assertions_only_behavior_callback,
-    retry_directive_for,
 )
 from asago_scenario_generator.pipeline.finalization_admission import (
     make_postbehavior_admission,
@@ -127,42 +129,51 @@ def _hydrate_stage_evidence(record: Any) -> StageCallEvidence | None:
 
 def strict_v3_coverage_plan(plan: CoveragePlan) -> CoveragePlanV2:
     """Translate the cmps.4 queue contract into its strict durable form."""
-    targets: list[CoverageTargetEntry] = []
-    for target in plan.targets:
-        # Queue-local rank is authority; never retain stale/source ranks.
-        choices = [
-            QualifiedCandidateRef.model_validate({**ref, "rank": rank})
-            for rank, ref in enumerate(target.ordered_choices[:3])
-        ]
-        primary = target.primary_candidate_id
-        if primary is not None:
-            choices.sort(key=lambda ref: (ref.candidate_id != primary, ref.rank))
-            choices = [
-                ref.model_copy(update={"rank": rank})
-                for rank, ref in enumerate(choices)
-            ]
-        empty = not choices
-        targets.append(
-            CoverageTargetEntry(
-                target_id=target.effective_target_id,
-                entry_point_id=target.entry_point_id,
-                entry_point_name=target.entry_point_name,
-                ordered_choices=choices,
-                primary_candidate_id=None if empty else primary,
-                attempted_candidate_ids=[],
-                admitted_candidate_id=None,
-                target_state="exhausted" if empty else "selected",
-                # Before reservation every choice, including the primary, is
-                # unattempted and therefore available.
-                fallback_available=choices,
-            )
-        )
+    targets = [_strict_target_entry(target) for target in plan.targets]
     return CoveragePlanV2(
         schema_version="2",
         completeness=plan.completeness,
         evidence_refs=plan.evidence_refs,
         targets=targets,
         selection_limitation_target_ids=plan.selection_limitation_target_ids,
+    )
+
+
+def _ranked_choices(target: Any) -> list[QualifiedCandidateRef]:
+    """Re-rank the queue-local choices, primary first and bounded to three.
+
+    Queue-local rank is authority; never retain stale/source ranks.
+    """
+    choices = [
+        QualifiedCandidateRef.model_validate({**ref, "rank": rank})
+        for rank, ref in enumerate(target.ordered_choices[:3])
+    ]
+    primary = target.primary_candidate_id
+    if primary is not None:
+        choices.sort(key=lambda ref: (ref.candidate_id != primary, ref.rank))
+        choices = [
+            ref.model_copy(update={"rank": rank}) for rank, ref in enumerate(choices)
+        ]
+    return choices
+
+
+def _strict_target_entry(target: Any) -> CoverageTargetEntry:
+    """Build one strict durable target entry from a queue contract entry."""
+    choices = _ranked_choices(target)
+    primary = target.primary_candidate_id
+    empty = not choices
+    return CoverageTargetEntry(
+        target_id=target.effective_target_id,
+        entry_point_id=target.entry_point_id,
+        entry_point_name=target.entry_point_name,
+        ordered_choices=choices,
+        primary_candidate_id=None if empty else primary,
+        attempted_candidate_ids=[],
+        admitted_candidate_id=None,
+        target_state="exhausted" if empty else "selected",
+        # Before reservation every choice, including the primary, is
+        # unattempted and therefore available.
+        fallback_available=choices,
     )
 
 
@@ -177,48 +188,100 @@ def build_v3_inventory(
     include_quarantine: bool = True,
 ) -> list[ArtifactEntry]:
     """Build an exact v3 inventory from typed receipts and known support roles."""
-    entries: list[ArtifactEntry] = []
+    entries = _support_artifacts(
+        run_dir, include_coverage, include_eval, include_report, include_log
+    )
+    entries.extend(_finalization_receipts(finalization_inventory, include_quarantine))
+    return entries
 
-    def add(role: ArtifactRole, path: str, *, required: bool = True) -> None:
-        if not (run_dir / path).is_file():
-            if required:
-                raise FileNotFoundError(f"required v3 artifact is missing: {path}")
-            return
-        entries.append(
-            build_artifact_entry(
-                role=role,
-                run_dir=run_dir,
-                rel_path=path,
-                schema_version="2" if role is ArtifactRole.COVERAGE_PLAN else "1",
-            )
+
+def _add_inventory_artifact(
+    entries: list[ArtifactEntry],
+    run_dir: Path,
+    role: ArtifactRole,
+    path: str,
+    *,
+    required: bool = True,
+) -> None:
+    """Append one support artifact entry when its file exists."""
+    if not (run_dir / path).is_file():
+        if required:
+            raise FileNotFoundError(f"required v3 artifact is missing: {path}")
+        return
+    entries.append(
+        build_artifact_entry(
+            role=role,
+            run_dir=run_dir,
+            rel_path=path,
+            schema_version="2" if role is ArtifactRole.COVERAGE_PLAN else "1",
         )
+    )
 
-    add(ArtifactRole.USE_CASE, "use-case.txt")
-    add(ArtifactRole.CAPABILITY_PROFILE, "capability-profile.yaml")
-    add(ArtifactRole.THREAT_SURFACE, "threat-surface.yaml")
-    add(ArtifactRole.PLANNING_CHECKPOINT, "planning-checkpoint.json")
+
+def _support_artifacts(
+    run_dir: Path,
+    include_coverage: bool,
+    include_eval: bool,
+    include_report: bool,
+    include_log: bool,
+) -> list[ArtifactEntry]:
+    """Build entries for the fixed v3 support artifacts and optional products."""
+    entries: list[ArtifactEntry] = []
+    _add_inventory_artifact(entries, run_dir, ArtifactRole.USE_CASE, "use-case.txt")
+    _add_inventory_artifact(
+        entries, run_dir, ArtifactRole.CAPABILITY_PROFILE, "capability-profile.yaml"
+    )
+    _add_inventory_artifact(
+        entries, run_dir, ArtifactRole.THREAT_SURFACE, "threat-surface.yaml"
+    )
+    _add_inventory_artifact(
+        entries, run_dir, ArtifactRole.PLANNING_CHECKPOINT, "planning-checkpoint.json"
+    )
     if include_coverage:
-        add(ArtifactRole.COVERAGE_REPORT, "coverage-gaps.json")
-    add(ArtifactRole.COVERAGE_PLAN, "coverage-plan.json")
-    add(ArtifactRole.FINALIZATION_INVENTORY, "finalization-inventory.json")
-    add(ArtifactRole.PIPELINE_CALL_LOG, "calls.jsonl", required=False)
-    add(
+        _add_inventory_artifact(
+            entries, run_dir, ArtifactRole.COVERAGE_REPORT, "coverage-gaps.json"
+        )
+    _add_inventory_artifact(
+        entries, run_dir, ArtifactRole.COVERAGE_PLAN, "coverage-plan.json"
+    )
+    _add_inventory_artifact(
+        entries,
+        run_dir,
+        ArtifactRole.FINALIZATION_INVENTORY,
+        "finalization-inventory.json",
+    )
+    _add_inventory_artifact(
+        entries, run_dir, ArtifactRole.PIPELINE_CALL_LOG, "calls.jsonl", required=False
+    )
+    _add_inventory_artifact(
+        entries,
+        run_dir,
         ArtifactRole.CANDIDATE_FILTER_QUARANTINE,
         "candidate-filter-quarantine.json",
         required=False,
     )
     if include_eval:
-        add(ArtifactRole.EVAL_SCORECARD, "eval-scorecard.yaml")
+        _add_inventory_artifact(
+            entries, run_dir, ArtifactRole.EVAL_SCORECARD, "eval-scorecard.yaml"
+        )
     if include_report:
-        add(ArtifactRole.REPORT, "report.html")
+        _add_inventory_artifact(entries, run_dir, ArtifactRole.REPORT, "report.html")
     if include_log:
-        add(ArtifactRole.PIPELINE_LOG, "pipeline.log")
+        _add_inventory_artifact(
+            entries, run_dir, ArtifactRole.PIPELINE_LOG, "pipeline.log"
+        )
+    return entries
 
+
+def _finalization_receipts(
+    finalization_inventory: Any, include_quarantine: bool
+) -> list[ArtifactEntry]:
+    """Append admitted and (optionally) quarantined durable receipts."""
     receipts = list(finalization_inventory.admitted_inventory)
     if include_quarantine:
         receipts.extend(finalization_inventory.quarantine_inventory)
-    for receipt in receipts:
-        entry = ArtifactEntry(
+    return [
+        ArtifactEntry(
             role=receipt.role,
             path=receipt.path,
             sha256=receipt.sha256,
@@ -227,8 +290,8 @@ def build_v3_inventory(
             scenario_id=receipt.scenario_id,
             candidate_id=receipt.candidate_id,
         )
-        entries.append(entry)
-    return entries
+        for receipt in receipts
+    ]
 
 
 def resume_completion_length_counts(
@@ -242,19 +305,26 @@ def resume_completion_length_counts(
     failure is terminal.  Any other latest record leaves the count at zero.
     """
     latest = candidate_stages[-1] if candidate_stages else None
-    return {
-        stage: 1
-        if (
-            latest is not None
-            and latest.stage is stage
-            and any(
-                violation.code == StageAttemptFailure.COMPLETION_LENGTH_CODE
-                for violation in latest.violations
-            )
-        )
-        else 0
-        for stage in GeneratedStage
-    }
+    return {stage: _authorized_length_retry(stage, latest) for stage in GeneratedStage}
+
+
+def _authorized_length_retry(stage: GeneratedStage, latest: Any) -> int:
+    """Return 1 when the one completion-length retry is already authorized."""
+    if (
+        latest is not None
+        and latest.stage is stage
+        and _has_completion_length_violation(latest)
+    ):
+        return 1
+    return 0
+
+
+def _has_completion_length_violation(record: Any) -> bool:
+    """True when the record carries a durable completion-length violation."""
+    return any(
+        violation.code == StageAttemptFailure.COMPLETION_LENGTH_CODE
+        for violation in record.violations
+    )
 
 
 def run_target_finalization(

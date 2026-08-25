@@ -16,28 +16,32 @@ from typing import Annotated, Any, Callable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from asago_scenario_generator.models.attack_pattern import (
-    AgentInternalResourceReference,
+from asago_scenario_generator.models.attack_pattern_chain import (
+    AttackPattern,
+    CanonicalAttackChain,
+    ResourceSlot,
+)
+from asago_scenario_generator.models.attack_pattern_contracts import (
     AllCondition,
     AnyCondition,
-    AttackPattern,
     AuthoritativeFactReference,
-    CanonicalAttackChain,
-    CanonicalResourceReference,
     Condition,
     ConditionEvaluationResult,
-    EntryPointResourceReference,
     EvaluatedFactEvidence,
     ExecutionRequirement,
-    IntegrationResourceReference,
     MappingDecision,
     NotCondition,
+    evaluate_condition,
+)
+from asago_scenario_generator.models.attack_pattern_projection import (
+    AgentInternalResourceReference,
+    CanonicalResourceReference,
+    EntryPointResourceReference,
+    IntegrationResourceReference,
     OutputSurfaceResourceReference,
     ProjectionSnapshot,
-    ResourceSlot,
     ToolResourceReference,
     TrustBoundaryResourceReference,
-    evaluate_condition,
 )
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
