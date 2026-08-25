@@ -12,6 +12,7 @@ build/
 .pytest_cache/
 .hypothesis/
 .mypy_cache/
+.mutate4py/
 .ruff_cache/
 .coverage
 .coverage.*
@@ -19,6 +20,9 @@ htmlcov/
 coverage.xml
 lcov*.info
 coverage.lcov
+
+# Mutate4Py per-file mutation-site manifests
+*.manifest.json
 
 # Generated project output
 output/
