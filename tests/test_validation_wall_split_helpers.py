@@ -620,6 +620,33 @@ class TestLoadV3ScorecardModels:
         ):
             _load_v3_scorecard_models(resolver)
 
+    def test_requires_finalization_entry(self) -> None:
+        resolver = SimpleNamespace(
+            manifest=SimpleNamespace(manifest_version="3"),
+            entry_by_role=lambda role: (
+                SimpleNamespace() if role is ArtifactRole.COVERAGE_PLAN else None
+            ),
+        )
+        with pytest.raises(
+            ValueError, match="requires plan, finalization, and profile"
+        ):
+            _load_v3_scorecard_models(resolver)
+
+    def test_requires_profile_entry(self) -> None:
+        resolver = SimpleNamespace(
+            manifest=SimpleNamespace(manifest_version="3"),
+            entry_by_role=lambda role: (
+                SimpleNamespace()
+                if role
+                in (ArtifactRole.COVERAGE_PLAN, ArtifactRole.FINALIZATION_INVENTORY)
+                else None
+            ),
+        )
+        with pytest.raises(
+            ValueError, match="requires plan, finalization, and profile"
+        ):
+            _load_v3_scorecard_models(resolver)
+
 
 # ---------------------------------------------------------------------------
 # runner_finalization.py: resume replay helpers

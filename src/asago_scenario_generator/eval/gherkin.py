@@ -75,6 +75,35 @@ def extract_tags(gherkin_text: str) -> list[str]:
     return _TAG_RE.findall(gherkin_text)
 
 
+def _ies_singular(seg: str) -> str | None:
+    """-ies singular (e.g. 'repositories' -> 'repository'), or None."""
+    if seg.endswith("ies") and len(seg) > 4:
+        return seg[:-3] + "y"
+    return None
+
+
+def _ses_singular(seg: str) -> str | None:
+    """-ses singular (e.g. 'buses' -> 'bus'), or None."""
+    if seg.endswith("ses") and len(seg) > 4:
+        return seg[:-2]
+    return None
+
+
+def _s_singular(seg: str) -> str | None:
+    """Plain -s singular that is not itself -ss (e.g. 'users' -> 'user')."""
+    if seg.endswith("s") and not seg.endswith("ss") and len(seg) > 2:
+        return seg[:-1]
+    return None
+
+
+def _strip_plural(seg: str) -> str:
+    """Strip a simple plural suffix from one segment."""
+    for singular in (_ies_singular(seg), _ses_singular(seg), _s_singular(seg)):
+        if singular is not None:
+            return singular
+    return seg
+
+
 def _normalize_tag(tag: str) -> str:
     """Normalize a tag for comparison (lowercase, collapse separators, strip plurals).
 
@@ -87,15 +116,7 @@ def _normalize_tag(tag: str) -> str:
     segments = [s for s in norm.split("-") if s not in ("and", "or", "the")]
 
     # Simple plural normalization on each segment
-    normalized_segments: list[str] = []
-    for seg in segments:
-        if seg.endswith("ies") and len(seg) > 4:
-            seg = seg[:-3] + "y"
-        elif seg.endswith("ses") and len(seg) > 4:
-            seg = seg[:-2]
-        elif seg.endswith("s") and not seg.endswith("ss") and len(seg) > 2:
-            seg = seg[:-1]
-        normalized_segments.append(seg)
+    normalized_segments = [_strip_plural(seg) for seg in segments]
 
     # Sort segments so word-order variants collapse
     normalized_segments.sort()
@@ -149,6 +170,26 @@ def score_gherkin_single(gherkin_text: str) -> dict[str, Any]:
     }
 
 
+def _empty_gherkin_score() -> dict[str, Any]:
+    """Aggregate score for an empty batch."""
+    return {
+        "parse_success_rate": 0.0,
+        "mean_step_count": 0.0,
+        "tag_consistency": {"inconsistent_groups": 0, "details": []},
+        "background_missing_warnings": [],
+    }
+
+
+def _background_missing_indices(singles: list[dict[str, Any]]) -> list[int]:
+    """Indices of single-feature scores lacking a Background section."""
+    missing_bg: list[int] = []
+    for i, s in enumerate(singles):
+        if not s["has_background"]:
+            missing_bg.append(i)
+            logger.warning("Feature file %d lacks a Background section", i)
+    return missing_bg
+
+
 def score_gherkin(gherkin_texts: list[str]) -> dict[str, Any]:
     """Compute aggregate Gherkin metrics across a batch.
 
@@ -160,12 +201,7 @@ def score_gherkin(gherkin_texts: list[str]) -> dict[str, Any]:
         and background_missing_warnings.
     """
     if not gherkin_texts:
-        return {
-            "parse_success_rate": 0.0,
-            "mean_step_count": 0.0,
-            "tag_consistency": {"inconsistent_groups": 0, "details": []},
-            "background_missing_warnings": [],
-        }
+        return _empty_gherkin_score()
 
     singles = [score_gherkin_single(text) for text in gherkin_texts]
     n = len(singles)
@@ -173,16 +209,9 @@ def score_gherkin(gherkin_texts: list[str]) -> dict[str, Any]:
     parse_ok = sum(1 for s in singles if s["parse_success"])
     total_steps = sum(s["step_count"] for s in singles)
 
-    # Check for missing Background sections (gate, not a gradient metric)
-    missing_bg: list[int] = []
-    for i, s in enumerate(singles):
-        if not s["has_background"]:
-            missing_bg.append(i)
-            logger.warning("Feature file %d lacks a Background section", i)
-
     return {
         "parse_success_rate": round(parse_ok / n, 4),
         "mean_step_count": round(total_steps / n, 2),
         "tag_consistency": tag_consistency(gherkin_texts),
-        "background_missing_warnings": missing_bg,
+        "background_missing_warnings": _background_missing_indices(singles),
     }

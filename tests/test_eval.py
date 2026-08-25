@@ -11,6 +11,8 @@ import pytest
 import yaml
 
 from asago_scenario_generator.eval.consistency import (
+    _extract_gherkin_zones,
+    _gherkin_background_text,
     entry_point_agreement,
     score_consistency,
     step_node_correspondence,
@@ -248,6 +250,37 @@ class TestZoneAlignment:
         assert 0.0 <= score <= 1.0
 
 
+class TestExtractGherkinZones:
+    def test_numeric_annotation(self) -> None:
+        assert _extract_gherkin_zones("# Zone 2") == {"reasoning"}
+
+    def test_display_name_annotation(self) -> None:
+        assert _extract_gherkin_zones("# Zone Planning & Reasoning") == {"reasoning"}
+
+    def test_unknown_annotation_ignored(self) -> None:
+        assert _extract_gherkin_zones("# Zone unknownzone") == set()
+
+    def test_no_annotations(self) -> None:
+        assert _extract_gherkin_zones("Given a step") == set()
+
+
+class TestGherkinBackgroundText:
+    def test_none_text(self) -> None:
+        assert _gherkin_background_text(None) is None
+
+    def test_empty_text(self) -> None:
+        assert _gherkin_background_text("") is None
+
+    def test_no_background_section(self) -> None:
+        assert _gherkin_background_text("Feature: x\nScenario: y") is None
+
+    def test_background_section(self) -> None:
+        text = "Feature: x\nBackground: Given a seed\nScenario: y"
+        background = _gherkin_background_text(text)
+        assert background is not None
+        assert "seed" in background
+
+
 class TestEntryPointAgreement:
     def test_entry_in_gherkin_background(self):
         scenario = _make_scenario(entry_point="user prompts (zone input)")
@@ -269,6 +302,22 @@ class TestEntryPointAgreement:
         )
         result = entry_point_agreement(scenario)
         assert result == 0
+
+    def test_gherkin_background_without_entry_point(self):
+        scenario = _make_scenario(
+            entry_point="completely unrelated xyz abc",
+            root_label="Something totally different qrs",
+        )
+        result = entry_point_agreement(scenario, _GHERKIN_VALID)
+        assert result == 0
+
+    def test_entry_only_in_gherkin_background(self):
+        scenario = _make_scenario(
+            entry_point="primary entry point",
+            root_label="Compromise agent via user prompts",
+        )
+        result = entry_point_agreement(scenario, _GHERKIN_VALID)
+        assert result == 1
 
     def test_empty_entry_point(self):
         scenario = _make_scenario(entry_point="")
