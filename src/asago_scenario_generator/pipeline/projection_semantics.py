@@ -747,6 +747,244 @@ def _check_behavior_action_semantics(
             )
 
 
+_GHERKIN_KEYWORDS: tuple[str, ...] = ("Given", "When", "Then", "And")
+
+
+def _behavior_element_exists_check(
+    realizations: tuple[Any, ...],
+    actual_action_ids: set[str],
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Flag block behavior realizations whose element is not an actual action."""
+    for r in realizations:
+        if r.element_id not in actual_action_ids:
+            violations.append(
+                ProjectionTraceabilityViolation(
+                    code=ProjectionTraceabilityViolationCode.forged_opaque_id,
+                    stage=ProjectionTraceabilityStage.behavior_spec,
+                    detail=(
+                        f"behavior realization element '{r.element_id}' "
+                        f"does not exist in actual BehaviorSpec actions"
+                    ),
+                    element_id=r.element_id,
+                )
+            )
+
+
+def _behavior_mapping_mismatches(
+    actual_action_map: dict[str, tuple[str, ...]],
+    block_behavior_map: dict[str, tuple[str, ...]],
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Flag actual actions absent from or mismapped in the block realizations."""
+    for action_id, actual_sids in actual_action_map.items():
+        block_sids = block_behavior_map.get(action_id)
+        if block_sids is None:
+            violations.append(
+                ProjectionTraceabilityViolation(
+                    code=ProjectionTraceabilityViolationCode.incomplete_coverage,
+                    stage=ProjectionTraceabilityStage.behavior_spec,
+                    detail=(
+                        f"behavior action '{action_id}' exists in "
+                        f"BehaviorSpec but is absent from block "
+                        f"behavior_realizations"
+                    ),
+                    element_id=action_id,
+                    projected_step_id=actual_sids[0],
+                )
+            )
+        elif set(actual_sids) != set(block_sids):
+            violations.append(
+                ProjectionTraceabilityViolation(
+                    code=ProjectionTraceabilityViolationCode.forged_opaque_id,
+                    stage=ProjectionTraceabilityStage.behavior_spec,
+                    detail=(
+                        f"behavior action '{action_id}' has "
+                        f"projected_step_ids {actual_sids} but block "
+                        f"maps it to {block_sids}"
+                    ),
+                    element_id=action_id,
+                    projected_step_id=actual_sids[0],
+                )
+            )
+
+
+def _behavior_spec_cross_check(
+    behavior_spec: Any,
+    block: ProjectionEnvelopeBlock,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Cross-check block behavior realizations against the actual BehaviorSpec."""
+    actual_action_ids = {a.action_id for a in behavior_spec.actions}
+    actual_action_map: dict[str, tuple[str, ...]] = {
+        a.action_id: a.projected_step_ids for a in behavior_spec.actions
+    }
+    block_behavior_map: dict[str, tuple[str, ...]] = {
+        r.element_id: r.projected_step_ids for r in block.behavior_realizations
+    }
+
+    # Every block behavior realization element must exist in actual actions.
+    _behavior_element_exists_check(
+        block.behavior_realizations, actual_action_ids, violations
+    )
+
+    # Every actual action must be in block realizations with matching steps.
+    _behavior_mapping_mismatches(actual_action_map, block_behavior_map, violations)
+
+
+def _raw_behavior_stage_shape_check(
+    realizations: tuple[Any, ...],
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Flag raw behavior realizations with the wrong artifact stage."""
+    # Raw text/dict behavior spec — validate only the realization
+    # mappings themselves (no structured cross-check possible).
+    for r in realizations:
+        if r.artifact_stage != ArtifactStage.behavior:
+            violations.append(
+                ProjectionTraceabilityViolation(
+                    code=ProjectionTraceabilityViolationCode.forged_opaque_id,
+                    stage=ProjectionTraceabilityStage.behavior_spec,
+                    detail=(
+                        f"behavior realization element '{r.element_id}' has "
+                        f"wrong artifact_stage '{r.artifact_stage.value}'"
+                    ),
+                    element_id=r.element_id,
+                )
+            )
+
+
+def _is_gherkin_step_line(line: str) -> bool:
+    """True when a stripped Gherkin line starts with a step keyword."""
+    return any(line.startswith(kw) for kw in _GHERKIN_KEYWORDS)
+
+
+def _extract_step_text(line: str, zone_pat: Any) -> str | None:
+    """Return the text after the step keyword with the zone suffix stripped."""
+    for kw in _GHERKIN_KEYWORDS:
+        if line.startswith(f"{kw} "):
+            raw = line[len(kw) + 1 :].strip()
+            return zone_pat.sub("", raw).strip()
+    return None
+
+
+def _gherkin_step_texts(gherkin_text: str, zone_pat: Any) -> list[str]:
+    """Collect the step-line texts of a Gherkin document, zones stripped."""
+    step_texts: list[str] = []
+    for line in gherkin_text.splitlines():
+        line = line.strip()
+        if not line or not _is_gherkin_step_line(line):
+            continue
+        raw = _extract_step_text(line, zone_pat)
+        if raw is not None:
+            step_texts.append(raw)
+    return step_texts
+
+
+def _check_action_texts_present(
+    actions: Any,
+    step_texts: list[str],
+    zone_pat: Any,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Flag behavior action texts that do not appear as a Gherkin step line."""
+    for action in actions:
+        base_text = zone_pat.sub("", action.text).strip()
+        if base_text not in step_texts and not any(
+            base_text in st for st in step_texts
+        ):
+            violations.append(
+                ProjectionTraceabilityViolation(
+                    code=ProjectionTraceabilityViolationCode.forged_opaque_id,
+                    stage=ProjectionTraceabilityStage.behavior_spec,
+                    detail=(
+                        f"behavior action '{action.action_id}' text "
+                        f"'{action.text}' does not appear as a Gherkin "
+                        f"step line"
+                    ),
+                    element_id=action.action_id,
+                )
+            )
+
+
+def _check_assertion_texts_present(
+    assertions: Any,
+    step_texts: list[str],
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Flag behavior assertion texts that do not appear as a Gherkin step line."""
+    for assertion in assertions:
+        if assertion.text not in step_texts and not any(
+            assertion.text in st for st in step_texts
+        ):
+            violations.append(
+                ProjectionTraceabilityViolation(
+                    code=ProjectionTraceabilityViolationCode.forged_opaque_id,
+                    stage=ProjectionTraceabilityStage.behavior_spec,
+                    detail=(
+                        f"behavior assertion '{assertion.assertion_id}' "
+                        f"text '{assertion.text}' does not appear as a "
+                        f"Gherkin step line"
+                    ),
+                    element_id=assertion.assertion_id,
+                )
+            )
+
+
+def _gherkin_correspondence_check(
+    behavior_spec: Any,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Verify the stored Gherkin matches the deterministic structured rendering."""
+    # --- Gherkin correspondence (422o.4 blocker #3) ---
+    # Strict deterministic correspondence: re-render the Gherkin from the
+    # structured actions/assertions and compare exactly against the stored
+    # gherkin_text.  This catches any omission, addition, reordering, or
+    # fabrication — no substring matching, no fake IDs.
+    # Zone annotations (display metadata) are stripped before comparison.
+    import re as _re
+
+    from asago_scenario_generator.pipeline.generate.behavior_compiler import (
+        render_gherkin_from_behavior_spec,
+    )
+
+    # Re-render without zone map (zones are display-only).
+    expected_gherkin = render_gherkin_from_behavior_spec(
+        list(behavior_spec.actions),
+        list(behavior_spec.assertions),
+        zone_map=None,
+        scenarios=list(behavior_spec.scenarios),
+    )
+    # Strip zone annotations from both texts for comparison.
+    _zone_pat = _re.compile(r"\s*\([^)]*\)\s*$", _re.MULTILINE)
+    actual_stripped = _zone_pat.sub("", behavior_spec.gherkin_text).strip()
+    expected_stripped = _zone_pat.sub("", expected_gherkin).strip()
+    if actual_stripped != expected_stripped:
+        violations.append(
+            ProjectionTraceabilityViolation(
+                code=ProjectionTraceabilityViolationCode.forged_opaque_id,
+                stage=ProjectionTraceabilityStage.behavior_spec,
+                detail=(
+                    "BehaviorSpec.gherkin_text does not exactly match "
+                    "the deterministic rendering from structured "
+                    "actions/assertions — content was altered, omitted, "
+                    "added, reordered, or fabricated"
+                ),
+            )
+        )
+
+    # Also verify that every action and assertion text appears as a
+    # distinct step line in the Gherkin (defense in depth).
+    step_texts = _gherkin_step_texts(behavior_spec.gherkin_text, _zone_pat)
+
+    # Every action text must appear as a step text.
+    _check_action_texts_present(
+        behavior_spec.actions, step_texts, _zone_pat, violations
+    )
+    # Every assertion text must appear as a step text.
+    _check_assertion_texts_present(behavior_spec.assertions, step_texts, violations)
+
+
 def _check_behavior_realizations(
     envelope: ScenarioEnvelope,
     block: ProjectionEnvelopeBlock,
@@ -763,76 +1001,11 @@ def _check_behavior_realizations(
 
     behavior_spec = envelope.behavior_spec
     if isinstance(behavior_spec, BehaviorSpec):
-        actual_action_ids = {a.action_id for a in behavior_spec.actions}
-        actual_action_map: dict[str, tuple[str, ...]] = {
-            a.action_id: a.projected_step_ids for a in behavior_spec.actions
-        }
-        block_behavior_map: dict[str, tuple[str, ...]] = {
-            r.element_id: r.projected_step_ids for r in realizations
-        }
-
-        # Every block behavior realization element must exist in actual actions.
-        for r in realizations:
-            if r.element_id not in actual_action_ids:
-                violations.append(
-                    ProjectionTraceabilityViolation(
-                        code=ProjectionTraceabilityViolationCode.forged_opaque_id,
-                        stage=ProjectionTraceabilityStage.behavior_spec,
-                        detail=(
-                            f"behavior realization element '{r.element_id}' "
-                            f"does not exist in actual BehaviorSpec actions"
-                        ),
-                        element_id=r.element_id,
-                    )
-                )
-
-        # Every actual action must be in block realizations with matching steps.
-        for action_id, actual_sids in actual_action_map.items():
-            block_sids = block_behavior_map.get(action_id)
-            if block_sids is None:
-                violations.append(
-                    ProjectionTraceabilityViolation(
-                        code=ProjectionTraceabilityViolationCode.incomplete_coverage,
-                        stage=ProjectionTraceabilityStage.behavior_spec,
-                        detail=(
-                            f"behavior action '{action_id}' exists in "
-                            f"BehaviorSpec but is absent from block "
-                            f"behavior_realizations"
-                        ),
-                        element_id=action_id,
-                        projected_step_id=actual_sids[0],
-                    )
-                )
-            elif set(actual_sids) != set(block_sids):
-                violations.append(
-                    ProjectionTraceabilityViolation(
-                        code=ProjectionTraceabilityViolationCode.forged_opaque_id,
-                        stage=ProjectionTraceabilityStage.behavior_spec,
-                        detail=(
-                            f"behavior action '{action_id}' has "
-                            f"projected_step_ids {actual_sids} but block "
-                            f"maps it to {block_sids}"
-                        ),
-                        element_id=action_id,
-                        projected_step_id=actual_sids[0],
-                    )
-                )
+        _behavior_spec_cross_check(behavior_spec, block, violations)
     else:
         # Raw text/dict behavior spec — validate only the realization
         # mappings themselves (no structured cross-check possible).
-        for r in realizations:
-            if r.artifact_stage != ArtifactStage.behavior:
-                violations.append(
-                    ProjectionTraceabilityViolation(
-                        code=ProjectionTraceabilityViolationCode.forged_opaque_id,
-                        stage=ProjectionTraceabilityStage.behavior_spec,
-                        detail=(
-                            f"behavior realization element '{r.element_id}' has "
-                            f"wrong artifact_stage '{r.artifact_stage.value}'"
-                        ),
-                        element_id=r.element_id,
-                    )
-                )
+        _raw_behavior_stage_shape_check(realizations, violations)
 
     violations.extend(
         _check_no_unprojected_steps(
@@ -857,98 +1030,7 @@ def _check_behavior_realizations(
     )
 
     # --- Gherkin correspondence (422o.4 blocker #3) ---
-    # Strict deterministic correspondence: re-render the Gherkin from the
-    # structured actions/assertions and compare exactly against the stored
-    # gherkin_text.  This catches any omission, addition, reordering, or
-    # fabrication — no substring matching, no fake IDs.
-    # Zone annotations (display metadata) are stripped before comparison.
     if isinstance(behavior_spec, BehaviorSpec):
-        import re as _re
-
-        from asago_scenario_generator.pipeline.generate.behavior_compiler import (
-            render_gherkin_from_behavior_spec,
-        )
-
-        # Re-render without zone map (zones are display-only).
-        expected_gherkin = render_gherkin_from_behavior_spec(
-            list(behavior_spec.actions),
-            list(behavior_spec.assertions),
-            zone_map=None,
-            scenarios=list(behavior_spec.scenarios),
-        )
-        # Strip zone annotations from both texts for comparison.
-        _zone_pat = _re.compile(r"\s*\([^)]*\)\s*$", _re.MULTILINE)
-        actual_stripped = _zone_pat.sub("", behavior_spec.gherkin_text).strip()
-        expected_stripped = _zone_pat.sub("", expected_gherkin).strip()
-        if actual_stripped != expected_stripped:
-            violations.append(
-                ProjectionTraceabilityViolation(
-                    code=ProjectionTraceabilityViolationCode.forged_opaque_id,
-                    stage=ProjectionTraceabilityStage.behavior_spec,
-                    detail=(
-                        "BehaviorSpec.gherkin_text does not exactly match "
-                        "the deterministic rendering from structured "
-                        "actions/assertions — content was altered, omitted, "
-                        "added, reordered, or fabricated"
-                    ),
-                )
-            )
-
-        # Also verify that every action and assertion text appears as a
-        # distinct step line in the Gherkin (defense in depth).
-        gherkin_lines = [
-            line.strip()
-            for line in behavior_spec.gherkin_text.splitlines()
-            if line.strip()
-            and any(
-                line.strip().startswith(kw) for kw in ("Given", "When", "Then", "And")
-            )
-        ]
-        # Extract the text content after the keyword, stripping zone suffix.
-        step_texts: list[str] = []
-        for line in gherkin_lines:
-            for kw in ("Given", "When", "Then", "And"):
-                if line.startswith(f"{kw} "):
-                    raw = line[len(kw) + 1 :].strip()
-                    # Strip zone suffix.
-                    raw = _zone_pat.sub("", raw).strip()
-                    step_texts.append(raw)
-                    break
-
-        # Every action text must appear as a step text.
-        for action in behavior_spec.actions:
-            base_text = _zone_pat.sub("", action.text).strip()
-            if base_text not in step_texts and not any(
-                base_text in st for st in step_texts
-            ):
-                violations.append(
-                    ProjectionTraceabilityViolation(
-                        code=ProjectionTraceabilityViolationCode.forged_opaque_id,
-                        stage=ProjectionTraceabilityStage.behavior_spec,
-                        detail=(
-                            f"behavior action '{action.action_id}' text "
-                            f"'{action.text}' does not appear as a Gherkin "
-                            f"step line"
-                        ),
-                        element_id=action.action_id,
-                    )
-                )
-        # Every assertion text must appear as a step text.
-        for assertion in behavior_spec.assertions:
-            if assertion.text not in step_texts and not any(
-                assertion.text in st for st in step_texts
-            ):
-                violations.append(
-                    ProjectionTraceabilityViolation(
-                        code=ProjectionTraceabilityViolationCode.forged_opaque_id,
-                        stage=ProjectionTraceabilityStage.behavior_spec,
-                        detail=(
-                            f"behavior assertion '{assertion.assertion_id}' "
-                            f"text '{assertion.text}' does not appear as a "
-                            f"Gherkin step line"
-                        ),
-                        element_id=assertion.assertion_id,
-                    )
-                )
+        _gherkin_correspondence_check(behavior_spec, violations)
 
     return violations
