@@ -1,3 +1,7 @@
+# acceptance-mutation-manifest-begin
+# {"version":1,"tested_at":"2026-08-24T23:53:08.999595Z","feature_name":"Taxonomy/risk HTML report section rendering","feature_path":"features/taxonomy_report_sections_rendering.feature","background_hash":"0dbc163f19739f08e8832540280b53894b88d0c11dca41acea7c8919b1a41523","implementation_hash":"unknown","scenarios":[]}
+# acceptance-mutation-manifest-end
+
 Feature: Taxonomy/risk HTML report section rendering
   The taxonomy-and-risk report renders the remaining section builders
   that still live in report/template.py: the capability profile, threat
