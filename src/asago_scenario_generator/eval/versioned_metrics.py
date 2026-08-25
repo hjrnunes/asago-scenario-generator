@@ -23,11 +23,13 @@ from asago_scenario_generator.eval.scorecard import (
 from asago_scenario_generator.manifest import ArtifactRole, ManifestInventoryResolver
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.models.scenario import ScenarioEnvelope
-from asago_scenario_generator.pipeline.persistence import (
-    CoveragePlanV2,
+from asago_scenario_generator.pipeline.finalization_gate_contracts import (
+    AdmissionEvidenceId,
+)
+from asago_scenario_generator.pipeline.persistence_journal import (
     FinalizationInventoryV1,
 )
-from asago_scenario_generator.pipeline.finalization_gates import AdmissionEvidenceId
+from asago_scenario_generator.pipeline.persistence_plan import CoveragePlanV2
 
 _TITLE_TOKEN_RE = re.compile(r"[a-z0-9]+")
 _NEAR_TITLE_THRESHOLD = 0.6
@@ -58,11 +60,28 @@ def _title_tokens(value: str) -> set[str]:
     return set(_TITLE_TOKEN_RE.findall(value.casefold()))
 
 
-def _components(nodes: list[str], edges: set[tuple[str, str]]) -> list[list[str]]:
+def _neighbor_map(nodes: list[str], edges: set[tuple[str, str]]) -> dict[str, set[str]]:
+    """Undirected adjacency map built from an edge set."""
     neighbors = {node: set() for node in nodes}
     for left, right in edges:
         neighbors[left].add(right)
         neighbors[right].add(left)
+    return neighbors
+
+
+def _unvisited_neighbors(
+    current: str, neighbors: dict[str, set[str]], seen: set[str]
+) -> list[str]:
+    """Adjacent nodes not yet seen, in deterministic order."""
+    return [
+        neighbor
+        for neighbor in sorted(neighbors[current], reverse=True)
+        if neighbor not in seen
+    ]
+
+
+def _components(nodes: list[str], edges: set[tuple[str, str]]) -> list[list[str]]:
+    neighbors = _neighbor_map(nodes, edges)
     result: list[list[str]] = []
     seen: set[str] = set()
     for node in sorted(nodes):
@@ -74,12 +93,44 @@ def _components(nodes: list[str], edges: set[tuple[str, str]]) -> list[list[str]
         while pending:
             current = pending.pop()
             component.append(current)
-            for neighbor in sorted(neighbors[current], reverse=True):
-                if neighbor not in seen:
-                    seen.add(neighbor)
-                    pending.append(neighbor)
+            for neighbor in _unvisited_neighbors(current, neighbors, seen):
+                seen.add(neighbor)
+                pending.append(neighbor)
         result.append(sorted(component))
     return sorted(result)
+
+
+def _exact_normalized_groups(
+    normalized_groups: dict[str, list[str]],
+) -> list[list[str]]:
+    """Sorted scenario-id groups whose normalized titles repeat."""
+    return sorted(
+        sorted(group)
+        for title, group in normalized_groups.items()
+        if title and len(group) > 1
+    )
+
+
+def _title_edge_similarity(left: str, right: str, titles: dict[str, str]) -> float:
+    """Jaccard similarity of the token sets of two titles."""
+    left_tokens = _title_tokens(titles[left])
+    right_tokens = _title_tokens(titles[right])
+    union = left_tokens | right_tokens
+    return len(left_tokens & right_tokens) / len(union) if union else 0.0
+
+
+def _title_edges(ids: list[str], titles: dict[str, str]) -> set[tuple[str, str]]:
+    """Deterministic near-duplicate edges between scenario ids."""
+    title_edges: set[tuple[str, str]] = set()
+    for index, left in enumerate(ids):
+        for right in ids[index + 1 :]:
+            if _title_edge_similarity(
+                left, right, titles
+            ) >= _NEAR_TITLE_THRESHOLD and _normal_title(titles[left]) != _normal_title(
+                titles[right]
+            ):
+                title_edges.add((left, right))
+    return title_edges
 
 
 def title_duplicate_components(
@@ -89,26 +140,9 @@ def title_duplicate_components(
     normalized_groups: dict[str, list[str]] = {}
     for scenario_id, title in titles.items():
         normalized_groups.setdefault(_normal_title(title), []).append(scenario_id)
-    exact_groups = sorted(
-        sorted(group)
-        for title, group in normalized_groups.items()
-        if title and len(group) > 1
-    )
-    title_edges: set[tuple[str, str]] = set()
+    exact_groups = _exact_normalized_groups(normalized_groups)
     ids = sorted(titles)
-    for index, left in enumerate(ids):
-        for right in ids[index + 1 :]:
-            left_tokens, right_tokens = (
-                _title_tokens(titles[left]),
-                _title_tokens(titles[right]),
-            )
-            union = left_tokens | right_tokens
-            similarity = len(left_tokens & right_tokens) / len(union) if union else 0.0
-            if similarity >= _NEAR_TITLE_THRESHOLD and _normal_title(
-                titles[left]
-            ) != _normal_title(titles[right]):
-                title_edges.add((left, right))
-    return exact_groups, _components(ids, title_edges)
+    return exact_groups, _components(ids, _title_edges(ids, titles))
 
 
 def canonical_entry_point_sets(
@@ -156,6 +190,84 @@ def _resolver_orphan_fact(
     return zero_gate(0, evidence=[evidence])
 
 
+def _decision_evidence_records(
+    decision: Any, evidence_ids: tuple[AdmissionEvidenceId, ...]
+) -> dict[AdmissionEvidenceId, list[Any]]:
+    """Gate-result records per required evidence id for one decision."""
+    return {
+        evidence_id: [
+            gate for gate in decision.gate_results if gate.gate is evidence_id
+        ]
+        for evidence_id in evidence_ids
+    }
+
+
+def _wrong_record_count(records: dict[AdmissionEvidenceId, list[Any]]) -> bool:
+    """True when any evidence id appears more or less than once."""
+    return any(len(items) != 1 for items in records.values())
+
+
+def _unexpected_applicable(
+    records: dict[AdmissionEvidenceId, list[Any]],
+    expected_applicable: bool | None,
+) -> bool:
+    """True when any record's applicable flag contradicts the expectation."""
+    if expected_applicable is None:
+        return False
+    return any(
+        items[0].applicable is not expected_applicable for items in records.values()
+    )
+
+
+def _not_applicable_gate(records: dict[AdmissionEvidenceId, list[Any]]) -> bool:
+    """True when any evidence gate is marked not applicable."""
+    return any(not items[0].applicable for items in records.values())
+
+
+def _malformed_evidence_decision(
+    records: dict[AdmissionEvidenceId, list[Any]],
+    expected_applicable: bool | None,
+) -> bool:
+    """True when evidence records violate the once-per-decision contract."""
+    if _wrong_record_count(records):
+        return True
+    if _unexpected_applicable(records, expected_applicable):
+        return True
+    if _not_applicable_gate(records):
+        return True
+    return False
+
+
+def _evidence_outcome(
+    decision: Any, records: dict[AdmissionEvidenceId, list[Any]]
+) -> str:
+    """'failed', 'exact_admitted_pass', or 'no_pass' for one decision."""
+    if any(not items[0].passed for items in records.values()):
+        return "failed"
+    if decision.admitted:
+        return "exact_admitted_pass"
+    return "no_pass"
+
+
+def _record_evidence_outcomes(
+    decision: Any,
+    records: dict[AdmissionEvidenceId, list[Any]],
+    expected_applicable: bool | None,
+    malformed: list[str],
+    failed: list[str],
+    exact_admitted_passes: list[str],
+) -> None:
+    """Route one decision's evidence records into the outcome lists."""
+    if _malformed_evidence_decision(records, expected_applicable):
+        malformed.append(decision.candidate_id)
+        return
+    outcome = _evidence_outcome(decision, records)
+    if outcome == "failed":
+        failed.append(decision.candidate_id)
+    elif outcome == "exact_admitted_pass":
+        exact_admitted_passes.append(decision.candidate_id)
+
+
 def _admission_evidence_metric(
     final: FinalizationInventoryV1,
     evidence_ids: tuple[AdmissionEvidenceId, ...],
@@ -168,27 +280,15 @@ def _admission_evidence_metric(
     failed: list[str] = []
     exact_admitted_passes: list[str] = []
     for decision in final.admission_decisions:
-        records = {
-            evidence_id: [
-                gate for gate in decision.gate_results if gate.gate is evidence_id
-            ]
-            for evidence_id in evidence_ids
-        }
-        if any(len(items) != 1 for items in records.values()):
-            malformed.append(decision.candidate_id)
-            continue
-        if expected_applicable is not None and any(
-            items[0].applicable is not expected_applicable for items in records.values()
-        ):
-            malformed.append(decision.candidate_id)
-            continue
-        if any(not items[0].applicable for items in records.values()):
-            malformed.append(decision.candidate_id)
-            continue
-        if any(not items[0].passed for items in records.values()):
-            failed.append(decision.candidate_id)
-        elif decision.admitted:
-            exact_admitted_passes.append(decision.candidate_id)
+        records = _decision_evidence_records(decision, evidence_ids)
+        _record_evidence_outcomes(
+            decision,
+            records,
+            expected_applicable,
+            malformed,
+            failed,
+            exact_admitted_passes,
+        )
     if failed:
         return ratio_metric(
             0,
