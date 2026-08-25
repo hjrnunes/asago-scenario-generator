@@ -57,6 +57,7 @@ from asago_scenario_generator.manifest import (
     validate_run_id,
     write_failed_manifest,
     write_manifest_sentinel,
+    write_started_manifest,
 )
 from asago_scenario_generator.manifest import (
     _attempt_tallies,
@@ -145,6 +146,11 @@ class TestImmutableTwoRun:
         assert is_sortable_run_id(run_id_2)
         assert run_dir_1.parent == collection
         assert run_dir_2.parent == collection
+
+    def test_nested_collection_directory_is_created(self, tmp_path: Path):
+        collection = tmp_path / "nested" / "output"
+        run_dir, _run_id = resolve_run_dir(collection)
+        assert run_dir.parent == collection
 
     def test_first_run_unchanged_after_second(self, tmp_path: Path):
         collection = tmp_path / "output"
@@ -237,6 +243,11 @@ class TestRunLocalLogging:
 class TestManifestSentinel:
     """Versioned manifest sentinel survives every exit path."""
 
+    def test_atomic_yaml_write_creates_nested_parent(self, tmp_path: Path):
+        path = tmp_path / "nested" / "directory" / "manifest.yaml"
+        atomic_write_yaml(path, {"status": "started"})
+        assert yaml.safe_load(path.read_text()) == {"status": "started"}
+
     def test_sentinel_written_before_pipeline_work(self, tmp_path: Path):
         collection = tmp_path / "output"
         run_dir, run_id = resolve_run_dir(collection)
@@ -276,7 +287,45 @@ class TestManifestSentinel:
         assert loaded.status == RunStatus.FAILED
         assert loaded.run_id == run_id
         assert loaded.error == "Something went wrong"
+        assert loaded.timestamp_end is not None
         assert len(loaded.attempts) == 1
+        raw_failed = yaml.safe_load(
+            (run_dir / MANIFEST_FILENAME).read_text(encoding="utf-8")
+        )
+        assert "provenance" not in raw_failed
+
+    def test_failed_manifest_preserves_existing_end_timestamp(self, tmp_path: Path):
+        run_dir, run_id = resolve_run_dir(tmp_path / "output")
+        manifest = RunManifest(
+            status=RunStatus.STARTED,
+            run_id=run_id,
+            timestamp_start="2026-01-01T00:00:00+00:00",
+            timestamp_end="2026-01-02T00:00:00+00:00",
+        )
+        write_failed_manifest(run_dir, manifest)
+        assert load_manifest(run_dir).timestamp_end == "2026-01-02T00:00:00+00:00"
+
+    def test_manifest_writers_omit_none_fields(self, tmp_path: Path):
+        run_dir, run_id = resolve_run_dir(tmp_path / "output")
+        manifest = RunManifest(
+            status=RunStatus.STARTED,
+            run_id=run_id,
+            timestamp_start="2026-01-01T00:00:00+00:00",
+        )
+
+        write_started_manifest(run_dir, manifest)
+        started = yaml.safe_load(
+            (run_dir / MANIFEST_FILENAME).read_text(encoding="utf-8")
+        )
+        assert "error" not in started
+
+        manifest.status = RunStatus.COMPLETED
+        finalize_manifest(run_dir, manifest)
+        finalized = yaml.safe_load(
+            (run_dir / MANIFEST_FILENAME).read_text(encoding="utf-8")
+        )
+        assert "error" not in finalized
+
 
     def test_finalize_requires_final_status(self, tmp_path: Path):
         collection = tmp_path / "output"
