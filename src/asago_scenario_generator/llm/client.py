@@ -13,6 +13,8 @@ from typing import Any
 from openai import LengthFinishReasonError, OpenAI
 from pydantic import BaseModel, Field
 
+from asago_scenario_generator.llm.messages import prompt_messages as _prompt_messages
+
 _DEFAULT_TEMPERATURE = 0.4
 
 
@@ -361,13 +363,6 @@ def _inject_openrouter_defaults(
 def _effective_temperature(explicit: float | None, fallback: float) -> float:
     """The effective temperature: explicit value, else the client default."""
     return explicit if explicit is not None else fallback
-
-
-def _prompt_messages(system_prompt: str, user_prompt: str) -> list[dict[str, str]]:
-    return [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-    ]
 
 
 def _completion_extra_kwargs(

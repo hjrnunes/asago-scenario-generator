@@ -11,7 +11,9 @@ run manifests. Shared LLM adapters, deterministic validators, evaluation, and
 reporting sit around those contracts. Named model-profile loading lives in
 `model_profiles` so generation configuration and STPA infrastructure both
 depend inward on that leaf. The historical `stpa.infra.model_profiles`
-import path remains a façade.
+import path remains a façade. Taxonomy prompt-message construction lives in
+`llm.messages`. STPA keeps a structurally distinct local helper so the
+clean-copy boundary stays intact.
 
 Generation lifecycle contracts (retry directives, causal provider controls,
 stage call evidence, and typed attempt failures) live in
