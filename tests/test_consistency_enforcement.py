@@ -1003,7 +1003,7 @@ class TestDirectIntegrationInToolExecution:
     def test_integration_interaction_grounding_no_violation(self) -> None:
         """Direct grounding check accepts integration_interaction."""
         from asago_scenario_generator.models.attack_tree import IntegrationInteractionAction
-        from asago_scenario_generator.pipeline.generate.tree import (
+        from asago_scenario_generator.pipeline.generate.tree_validation import (
             _check_tool_execution_leaf_grounding,
         )
 
@@ -1023,7 +1023,7 @@ class TestDirectIntegrationInToolExecution:
     def test_ai_action_in_tool_execution_still_flagged(self) -> None:
         """An ai_system_action in tool_execution is still flagged (not a
         valid typed action for that zone per the matrix)."""
-        from asago_scenario_generator.pipeline.generate.tree import (
+        from asago_scenario_generator.pipeline.generate.tree_validation import (
             _check_tool_execution_leaf_grounding,
         )
 

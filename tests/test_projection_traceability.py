@@ -4049,7 +4049,7 @@ class TestCall2ProjectionValidation:
         from asago_scenario_generator.pipeline.generate.assembly import (
             _build_projection_context,
         )
-        from asago_scenario_generator.pipeline.generate.tree import (
+        from asago_scenario_generator.pipeline.generate.tree_validation import (
             _validate_tree_against_projection,
         )
 
@@ -4099,7 +4099,7 @@ class TestCall2ProjectionValidation:
         from asago_scenario_generator.pipeline.generate.assembly import (
             _build_projection_context,
         )
-        from asago_scenario_generator.pipeline.generate.tree import (
+        from asago_scenario_generator.pipeline.generate.tree_validation import (
             _validate_tree_against_projection,
         )
 
@@ -4149,7 +4149,7 @@ class TestCall2ProjectionValidation:
         from asago_scenario_generator.pipeline.generate.assembly import (
             _build_projection_context,
         )
-        from asago_scenario_generator.pipeline.generate.tree import (
+        from asago_scenario_generator.pipeline.generate.tree_validation import (
             _validate_tree_against_projection,
         )
 
@@ -4208,6 +4208,8 @@ class TestCall2ProjectionValidation:
         )
         from asago_scenario_generator.pipeline.generate.tree import (
             _fill_tree_realizations,
+        )
+        from asago_scenario_generator.pipeline.generate.tree_validation import (
             _validate_tree_against_projection,
         )
 
@@ -4237,7 +4239,7 @@ class TestCall2ProjectionValidation:
         from asago_scenario_generator.pipeline.generate.assembly import (
             _build_projection_context,
         )
-        from asago_scenario_generator.pipeline.generate.tree import (
+        from asago_scenario_generator.pipeline.generate.tree_validation import (
             _validate_tree_against_projection,
         )
 
@@ -4427,7 +4429,7 @@ class TestExternalPreconditionBypass:
         from asago_scenario_generator.pipeline.generate.assembly import (
             _build_projection_context,
         )
-        from asago_scenario_generator.pipeline.generate.tree import (
+        from asago_scenario_generator.pipeline.generate.tree_validation import (
             _validate_tree_against_projection,
         )
 

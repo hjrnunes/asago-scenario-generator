@@ -25,6 +25,19 @@ GENERATE_DIR = (
     / "pipeline"
     / "generate"
 )
+TESTS_DIR = Path(__file__).resolve().parent
+ACCEPTANCE_DIR = TESTS_DIR.parent / "acceptance"
+
+_TREE_FACADE = "asago_scenario_generator.pipeline.generate.tree"
+_TREE_TRANSPORT = "asago_scenario_generator.pipeline.generate.tree_transport"
+_TREE_VALIDATION = "asago_scenario_generator.pipeline.generate.tree_validation"
+_LEAF_HELPERS_ON_TREE = frozenset(
+    {
+        "_check_tool_execution_leaf_grounding",
+        "_enumerate_root_to_leaf_paths",
+        "normalize_attack_tree_transport",
+    }
+)
 
 
 def _imported_modules(path: Path) -> set[str]:
@@ -37,6 +50,16 @@ def _imported_modules(path: Path) -> set[str]:
         elif isinstance(node, ast.ImportFrom) and node.module:
             modules.add(node.module)
     return modules
+
+
+def _imported_names(path: Path, module: str) -> set[str]:
+    """Return names imported from *module* in a source file."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == module:
+            names.update(alias.name for alias in node.names)
+    return names
 
 
 def test_actor_context_does_not_import_actor_or_form_a_cycle() -> None:
@@ -256,6 +279,39 @@ class TestGenerateSupportLeavesStayOffTheTreeFacade:
             ]
             assert not violations, (
                 f"{module} imports forbidden modules: {sorted(violations)}"
+            )
+
+
+class TestTreeFacadeDoesNotReexportLeafHelpers:
+    """Path, grounding, and transport helpers stay on their leaves."""
+
+    def test_tree_does_not_import_unused_leaf_helpers(self) -> None:
+        """The IO-near façade must not pull helpers it no longer owns."""
+        names = _imported_names(GENERATE_DIR / "tree.py", _TREE_VALIDATION)
+        names |= _imported_names(GENERATE_DIR / "tree.py", _TREE_TRANSPORT)
+        leaked = names & _LEAF_HELPERS_ON_TREE
+        assert not leaked, f"tree.py re-imports leaf helpers: {sorted(leaked)}"
+
+    def test_assembly_consumes_tree_validation_not_the_facade(self) -> None:
+        """Envelope assembly reaches consistency through the validation leaf."""
+        imports = _imported_modules(GENERATE_DIR / "assembly.py")
+        assert _TREE_VALIDATION in imports
+        assert _TREE_FACADE not in imports
+
+    def test_consumers_import_leaf_helpers_from_leaves(self) -> None:
+        """Tests and acceptance do not reach leaf helpers through tree.py."""
+        consumers = (
+            TESTS_DIR / "test_consistency_enforcement.py",
+            TESTS_DIR / "test_cmps9_typed_actions.py",
+            TESTS_DIR / "test_external_impact_transport.py",
+            TESTS_DIR / "test_projection_traceability.py",
+            TESTS_DIR / "test_attack_tree_retry.py",
+            ACCEPTANCE_DIR / "runtime_features" / "taxonomy_risk.py",
+        )
+        for path in consumers:
+            leaked = _imported_names(path, _TREE_FACADE) & _LEAF_HELPERS_ON_TREE
+            assert not leaked, (
+                f"{path.name} imports leaf helpers from tree.py: {sorted(leaked)}"
             )
 
 

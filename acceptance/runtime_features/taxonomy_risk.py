@@ -3326,7 +3326,7 @@ def _h_candidate_bound_present_before_request(
 def _h_import_grounding_helper(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    from asago_scenario_generator.pipeline.generate.tree import (
+    from asago_scenario_generator.pipeline.generate.tree_validation import (
         _check_tool_execution_leaf_grounding,
     )
 
