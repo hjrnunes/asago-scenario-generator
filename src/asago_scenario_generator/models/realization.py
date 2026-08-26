@@ -18,6 +18,7 @@ there is no duplicate derivation path.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -113,6 +114,18 @@ class ProjectedStepRealization(BaseModel):
 # Canonical derivation — single source of truth
 # ---------------------------------------------------------------------------#
 
+# Opaque resource-ID field per CanonicalResourceReference subtype, in
+# exhaustive match order.  ``AgentInternalResourceReference`` has no ID
+# field; the value ``None`` marks its fixed literal return.
+_RESOURCE_ID_FIELDS: tuple[tuple[type[Any], str | None], ...] = (
+    (EntryPointResourceReference, "entry_point_id"),
+    (ToolResourceReference, "tool_id"),
+    (IntegrationResourceReference, "integration_id"),
+    (TrustBoundaryResourceReference, "trust_boundary_id"),
+    (OutputSurfaceResourceReference, "entry_point_id"),
+    (AgentInternalResourceReference, None),
+)
+
 
 def extract_resource_id(ref: Any) -> str:
     """Extract the typed opaque resource ID from a ``CanonicalResourceReference``.
@@ -124,22 +137,87 @@ def extract_resource_id(ref: Any) -> str:
     For ``AgentInternalResourceReference`` (which has no ID field),
     returns ``"agent_internal"``.
     """
-    if isinstance(ref, EntryPointResourceReference):
-        return ref.entry_point_id
-    if isinstance(ref, ToolResourceReference):
-        return ref.tool_id
-    if isinstance(ref, IntegrationResourceReference):
-        return ref.integration_id
-    if isinstance(ref, TrustBoundaryResourceReference):
-        return ref.trust_boundary_id
-    if isinstance(ref, OutputSurfaceResourceReference):
-        return ref.entry_point_id
-    if isinstance(ref, AgentInternalResourceReference):
-        return "agent_internal"
+    for ref_type, field in _RESOURCE_ID_FIELDS:
+        if isinstance(ref, ref_type):
+            return "agent_internal" if field is None else getattr(ref, field)
     raise TypeError(
         f"Unsupported resource reference type {type(ref).__name__}: "
         f"expected a CanonicalResourceReference subtype"
     )
+
+
+def _resource_ref_ids(
+    step: CanonicalChainStep,
+    binding_by_slot: dict[str, Any],
+) -> tuple[str, ...]:
+    """Opaque resource IDs for the step's resource links, in link order.
+
+    Only links whose slot has a concrete binding contribute; the fallback
+    realization records used by isolated model tests have no bindings.
+    """
+    return tuple(
+        extract_resource_id(binding_by_slot[link.slot_id])
+        for link in step.resource_links
+        if link.slot_id in binding_by_slot
+    )
+
+
+def _consumed_ref_ids(step: CanonicalChainStep) -> tuple[str, ...]:
+    """Consumed reference IDs, in canonical step order."""
+    return tuple(c.ref_id for c in step.consumed)
+
+
+def _produced_ref_ids(step: CanonicalChainStep) -> tuple[str, ...]:
+    """Produced reference IDs, in canonical step order."""
+    return tuple(p.ref_id for p in step.produced)
+
+
+def _produced_effect_ids(step: CanonicalChainStep) -> tuple[str, ...]:
+    """Produced effect IDs — the subset of produced refs with kind 'effect'."""
+    return tuple(p.ref_id for p in step.produced if p.kind == "effect")
+
+
+def _outcome_link_pc_ids(step: CanonicalChainStep) -> tuple[str, ...]:
+    """Observable outcome-link postcondition IDs, in step order."""
+    return tuple(ol.postcondition_id for ol in step.observable_outcome_links)
+
+
+def _postcondition_ids(step: CanonicalChainStep) -> tuple[str, ...]:
+    """Owned observable postcondition IDs, in step order."""
+    return tuple(pc.postcondition_id for pc in step.observable_postconditions)
+
+
+def _realization_cover_error(
+    realizations: Sequence[Any],
+    projected_step_ids: Sequence[str],
+    subject: str,
+) -> str | None:
+    """Error message when realization records do not cover projected step IDs.
+
+    Returns ``None`` when every projected step ID has exactly one
+    realization record (including the both-empty case).  ``subject`` names
+    the owning element in the message (e.g. ``"narrative step 2"`` or
+    ``"LEAF node 'n1.1'"``).
+    """
+    real_ids = [r.projected_step_id for r in realizations]
+    projected_ids = set(projected_step_ids)
+    if len(set(real_ids)) != len(real_ids):
+        return (
+            f"{subject} has duplicate realization records (same "
+            f"projected_step_id appears more than once)"
+        )
+    if len(real_ids) != len(projected_ids):
+        return (
+            f"{subject} has {len(real_ids)} realization records but "
+            f"{len(projected_ids)} projected_step_ids — exactly one "
+            f"record per projected_step_id is required"
+        )
+    if set(real_ids) != projected_ids:
+        return (
+            f"{subject} realization IDs {set(real_ids)} do not match "
+            f"projected_step_ids {projected_ids}"
+        )
+    return None
 
 
 def derive_step_realization(
@@ -156,26 +234,15 @@ def derive_step_realization(
     extraction.  Tuples preserve canonical order (step order), enabling
     direct ``==`` comparison without sorting.
     """
-    resource_ref_ids = tuple(
-        extract_resource_id(binding_by_slot[link.slot_id])
-        for link in step.resource_links
-        if link.slot_id in binding_by_slot
-    )
     return ProjectedStepRealization(
         projected_step_id=step.step_id,
         action_kind=step.action_kind,
         executor_role=step.executor_role,
         boundary_position=step.boundary_position,
-        resource_ref_ids=resource_ref_ids,
-        consumed_ref_ids=tuple(c.ref_id for c in step.consumed),
-        produced_ref_ids=tuple(p.ref_id for p in step.produced),
-        produced_effect_ids=tuple(
-            p.ref_id for p in step.produced if p.kind == "effect"
-        ),
-        outcome_link_pc_ids=tuple(
-            ol.postcondition_id for ol in step.observable_outcome_links
-        ),
-        postcondition_ids=tuple(
-            pc.postcondition_id for pc in step.observable_postconditions
-        ),
+        resource_ref_ids=_resource_ref_ids(step, binding_by_slot),
+        consumed_ref_ids=_consumed_ref_ids(step),
+        produced_ref_ids=_produced_ref_ids(step),
+        produced_effect_ids=_produced_effect_ids(step),
+        outcome_link_pc_ids=_outcome_link_pc_ids(step),
+        postcondition_ids=_postcondition_ids(step),
     )
