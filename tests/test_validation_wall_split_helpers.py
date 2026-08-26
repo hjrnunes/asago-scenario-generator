@@ -1204,6 +1204,12 @@ class TestCheckV3CompletedStatus:
         resolver = SimpleNamespace(manifest=SimpleNamespace(status=RunStatus.COMPLETED))
         _check_v3_completed_status(resolver, set())
 
+    def test_completed_with_warnings_without_quarantine_passes(self) -> None:
+        resolver = SimpleNamespace(
+            manifest=SimpleNamespace(status=RunStatus.COMPLETED_WITH_WARNINGS)
+        )
+        _check_v3_completed_status(resolver, set())
+
 
 class TestCheckGateViolationsMatchTerminal:
     @staticmethod

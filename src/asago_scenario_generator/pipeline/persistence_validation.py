@@ -1948,6 +1948,7 @@ def _check_v3_completed_status(
         )
     if not quarantined and resolver.manifest.status not in {
         RunStatus.COMPLETED,
+        RunStatus.COMPLETED_WITH_WARNINGS,
         RunStatus.COMPLETED_WITH_ERRORS,
     }:
         raise ManifestIntegrityError(
