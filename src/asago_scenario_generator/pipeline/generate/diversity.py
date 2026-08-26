@@ -15,6 +15,24 @@ from asago_scenario_generator.pipeline.generate.constants import (
 )
 
 
+def _entry_point_zone_keyword_matches(ep_lower: str) -> set[str]:
+    """Zones implied by an entry-point name, defaulting to ``input``."""
+    ep_zones: set[str] = set()
+    for keyword, zones in _ENTRY_POINT_ZONE_KEYWORDS.items():
+        if keyword in ep_lower:
+            ep_zones.update(zones)
+    if not ep_zones:
+        ep_zones = {"input"}
+    return ep_zones
+
+
+def _zone_overlap_score(ep_zones: set[str], target_zones: set[str]) -> float:
+    """Jaccard overlap of entry-point zones with the threat's zone sequence."""
+    overlap = len(ep_zones & target_zones)
+    total = len(ep_zones | target_zones)
+    return overlap / total if total > 0 else 0.0
+
+
 def compute_entry_point_affinity(
     entry_points: list[str],
     zone_sequence: list[str],
@@ -29,23 +47,12 @@ def compute_entry_point_affinity(
         return {}
 
     target_zones = set(zone_sequence)
-    scores: dict[str, float] = {}
-
-    for ep in entry_points:
-        ep_lower = ep.lower()
-        ep_zones: set[str] = set()
-        for keyword, zones in _ENTRY_POINT_ZONE_KEYWORDS.items():
-            if keyword in ep_lower:
-                ep_zones.update(zones)
-        # Default: if no keywords matched, assume it feeds "input"
-        if not ep_zones:
-            ep_zones = {"input"}
-
-        overlap = len(ep_zones & target_zones)
-        total = len(ep_zones | target_zones)
-        scores[ep] = overlap / total if total > 0 else 0.0
-
-    return scores
+    return {
+        ep: _zone_overlap_score(
+            _entry_point_zone_keyword_matches(ep.lower()), target_zones
+        )
+        for ep in entry_points
+    }
 
 
 def assign_entry_point(
@@ -167,6 +174,20 @@ def get_overused_patterns(
     return overused[:5]
 
 
+def _phase_for_action_text(action_lower: str) -> str:
+    """Map action text to the first matching canonical phase label."""
+    for phase, keywords in _PHASE_KEYWORDS.items():
+        if any(kw in action_lower for kw in keywords):
+            return phase
+    return "other"
+
+
+def _append_distinct_phase(phases: list[str], matched_phase: str) -> None:
+    """Append a phase, collapsing consecutive duplicates."""
+    if not phases or phases[-1] != matched_phase:
+        phases.append(matched_phase)
+
+
 def extract_structural_pattern(narrative: NarrativeLayer) -> str:
     """Extract the structural attack phase sequence from a narrative.
 
@@ -184,15 +205,8 @@ def extract_structural_pattern(narrative: NarrativeLayer) -> str:
     """
     phases: list[str] = []
     for step in narrative.steps:
-        action_lower = step.action.lower()
-        matched_phase = "other"
-        for phase, keywords in _PHASE_KEYWORDS.items():
-            if any(kw in action_lower for kw in keywords):
-                matched_phase = phase
-                break
-        # Collapse consecutive duplicates
-        if not phases or phases[-1] != matched_phase:
-            phases.append(matched_phase)
+        matched_phase = _phase_for_action_text(step.action.lower())
+        _append_distinct_phase(phases, matched_phase)
 
     return "->".join(phases)
 
