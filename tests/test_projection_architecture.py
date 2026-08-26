@@ -134,6 +134,7 @@ class TestProjectionAdaptersDependInward:
             "projection_allocator.py",
             "projection_drift.py",
             "projection_snapshot.py",
+            "projection_validation.py",
         ),
     )
     def test_adapter_imports_contract_leaf(self, module_name: str) -> None:
@@ -144,4 +145,38 @@ class TestProjectionAdaptersDependInward:
         )
         assert _FACADE_MODULE not in imports, (
             f"{module_name} must not import the public projection façade"
+        )
+
+
+class TestProjectionCheckLeavesStayOffTheFacade:
+    """Traceability check modules stay inward of the public façade."""
+
+    @pytest.mark.parametrize(
+        "module_name",
+        (
+            "projection_drift.py",
+            "projection_realizations.py",
+            "projection_semantics.py",
+            "projection_validation.py",
+            "technique_scopes.py",
+        ),
+    )
+    def test_check_leaf_does_not_import_projection_facade(
+        self, module_name: str
+    ) -> None:
+        """Drift, realization, and semantic checks stay off the façade."""
+        imports = _imported_modules(PIPELINE_DIR / module_name)
+        assert _FACADE_MODULE not in imports, (
+            f"{module_name} must not import the public projection façade"
+        )
+        violations = [
+            imp
+            for imp in imports
+            if any(
+                imp == forbidden or imp.startswith(forbidden + ".")
+                for forbidden in _FORBIDDEN_IO_NEAR_PREFIXES
+            )
+        ]
+        assert not violations, (
+            f"{module_name} imports IO-near modules: {sorted(violations)}"
         )

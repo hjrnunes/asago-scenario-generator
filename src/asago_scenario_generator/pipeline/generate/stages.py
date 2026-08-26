@@ -39,7 +39,7 @@ from asago_scenario_generator.pipeline.generation_contracts import (
     StageCallEvidence,
     stage_attempt_failure,
 )
-from asago_scenario_generator.pipeline.projection import (
+from asago_scenario_generator.pipeline.projection_contracts import (
     CapabilityFactSnapshot,
     ProjectedCandidate,
 )

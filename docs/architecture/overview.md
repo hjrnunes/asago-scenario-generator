@@ -20,8 +20,10 @@ Authoritative projection contracts (candidate-v2 identity, digest helpers,
 capability-fact snapshots, and slot-matching policy) live in
 `pipeline.projection_contracts`. Resource matching, qualification, allocation,
 and the public `pipeline.projection` façade depend inward on that leaf. The
-envelope model imports the same contract leaf rather than the projection
-façade, so persistence validation does not pull implementation modules.
+envelope model and generate-stage orchestration import the same contract
+leaf rather than the projection façade, so persistence validation and
+stage adapters do not pull implementation modules. Projection drift,
+realization, and semantic checks stay off that façade as well.
 
 Finalization lifecycle types, retry budgets, and choice-queue policy live in
 `pipeline.finalization_contracts`. Admission, gate contracts, snapshots,
@@ -50,7 +52,12 @@ do not import the façade or IO-near modules. Narrative access-realization
 and step-bound checks live in `pipeline.generate.narrative_access`;
 narrative semantic draft contracts and compilation live in
 `pipeline.generate.narrative_semantics`; actor draft compilation lives in
-`pipeline.generate.actor_semantics`. Projection-envelope sidecars are
+`pipeline.generate.actor_semantics`. Attack-tree transport, zone
+enforcement, name resolution, and diversity helpers live in
+`pipeline.generate.tree_transport`, `tree_validation`, `zones`, `names`,
+and `diversity`; those leaves stay off the IO-near `generate.tree`
+façade. Scenario versus projected-step ATLAS identity lives in
+`pipeline.technique_scopes`. Projection-envelope sidecars are
 built by `pipeline.projection_block`. Validation, pre-behavior gates,
 stage orchestration, and assembly consume those leaves instead of the
 IO-near `generate.narrative`, `generate.actor`, and `generate.assembly`
