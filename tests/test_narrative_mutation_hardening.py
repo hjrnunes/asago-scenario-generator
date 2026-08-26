@@ -47,6 +47,7 @@ from asago_scenario_generator.pipeline.generate.narrative import (
     build_call1_response_model,
     _resolve_initial_entry_point_name,
     _resolve_narrative_access_names,
+    _sanitize_non_latin,
 )
 
 
@@ -136,6 +137,13 @@ class TestSanitizeNarrative:
         narrative = _make_narrative(action="攻击", effect="检测")
         result = _sanitize_narrative(narrative)
         assert result.steps[0].action != narrative.steps[0].action
+
+
+def test_sanitize_non_latin_collapses_whitespace_left_by_removal() -> None:
+    """Script removal must not leave doubled spaces or padded lines."""
+    assert _sanitize_non_latin("probe  \t攻击  system\n  impact") == (
+        "probe system\nimpact"
+    )
 
 
 # -- _single_source_path --------------------------------------------------
