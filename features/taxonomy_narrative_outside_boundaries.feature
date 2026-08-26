@@ -1,3 +1,8 @@
+# mutation-stamp: sha256=54ad100b3831af728b19fa91e17805f70d1d7b14ee7cceb06be948f51f498acb
+# acceptance-mutation-manifest-begin
+# {"version":1,"tested_at":"2026-08-26T17:49:51.579110Z","feature_name":"Taxonomy narrative outside boundaries","feature_path":"features/taxonomy_narrative_outside_boundaries.feature","background_hash":"3daff95561111fd4bb4a6016f7c3daf493a031162ba3b320422d2e7b4859ca4d","implementation_hash":"unknown","scenarios":[{"index":0,"name":"Taxonomy narrative outside boundaries 01 accepts each stage-specific narrative boundary rule","scenario_hash":"1a6ee5a3d98d9c87d9050c52ed0e176bfbee65905c4161500b2563aee7943ff8","mutation_count":18,"result":{"Total":18,"Killed":18,"Survived":0,"Errors":0},"tested_at":"2026-08-26T17:49:51.579110Z"},{"index":2,"name":"Taxonomy narrative outside boundaries 03 rejects boundary and active-zone mismatches without semantic repair","scenario_hash":"02de235e28fbbc2d5807b91bb759b67528ff35288adac69214fb2b322623de2d","mutation_count":48,"result":{"Total":48,"Killed":48,"Survived":0,"Errors":0},"tested_at":"2026-08-26T17:49:51.579110Z"}]}
+# acceptance-mutation-manifest-end
+
 Feature: Taxonomy narrative outside boundaries
   Taxonomy narratives represent activity outside the assessed AI boundary
   without treating that representation as an active Schneider zone.

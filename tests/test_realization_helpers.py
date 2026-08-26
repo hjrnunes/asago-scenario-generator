@@ -21,6 +21,7 @@ from asago_scenario_generator.models.realization import (
     _postcondition_ids,
     _produced_effect_ids,
     _produced_ref_ids,
+    _realization_cover_error,
     _resource_ref_ids,
     derive_step_realization,
     extract_resource_id,
@@ -156,3 +157,14 @@ class TestDeriveStepRealization:
             binding_by_slot,
         )
         assert record.resource_ref_ids == ("agent_internal",)
+
+
+def test_realization_cover_rejects_same_count_with_different_ids() -> None:
+    error = _realization_cover_error(
+        [SimpleNamespace(projected_step_id="actual")],
+        ["expected"],
+        "narrative step 1",
+    )
+
+    assert error is not None
+    assert "do not match" in error

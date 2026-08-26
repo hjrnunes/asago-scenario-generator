@@ -14,6 +14,7 @@ from asago_scenario_generator.models.complexity import (
     RealizationRetryRouting,
 )
 from asago_scenario_generator.pipeline.complexity import (
+    _assemble_phase,
     _below_capability_violation,
     _call0_feedback,
     _phase_assessment,
@@ -84,6 +85,13 @@ class TestPhaseAssessment:
 
     def test_returns_none_when_final_uncomputed(self) -> None:
         assert _phase_assessment(_assessment(), "final") is None
+
+
+def test_assemble_phase_rejects_conflicting_reasons_for_one_rule() -> None:
+    conflicting = _CALL0_REASON.model_copy(update={"detail": "different evidence"})
+
+    with pytest.raises(ValueError, match="conflicting complexity reasons"):
+        _assemble_phase("final", [_CALL0_REASON, conflicting])
 
 
 class TestQuarantineViolation:

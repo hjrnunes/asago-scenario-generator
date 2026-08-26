@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from asago_scenario_generator.models.attack_pattern import (
+from asago_scenario_generator.models.attack_pattern_projection import (
     CanonicalResourceReference,
 )
 from asago_scenario_generator.pipeline.projection_contracts import (

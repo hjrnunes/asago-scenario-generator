@@ -33,9 +33,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from asago_scenario_generator.models.attack_pattern import (
-    EntryPointResourceReference,
+from asago_scenario_generator.models.attack_pattern_contracts import (
     ExecutionRequirement,
+)
+from asago_scenario_generator.models.attack_pattern_projection import (
+    EntryPointResourceReference,
     ProjectionSnapshot,
 )
 from asago_scenario_generator.pipeline.projection_contracts import (
@@ -400,3 +402,8 @@ def _is_entry_point_binding(binding: Any) -> bool:
 def _matches_canonical_ingress(binding: Any, canonical_ingress: Any) -> bool:
     """Whether the binding resource equals the canonical ingress reference."""
     return binding.resource_ref == canonical_ingress
+
+
+# mutate4py-manifest-begin
+# {"version":1,"tested_at":"2026-08-26T15:33:02Z","module_hash":"2db51e9bf1b09eed3dc9086bb60e33857a8f4c25ea1e1b165a20e13eb065f215","source_sha256":"1842267ebde53aa5c451dc71fde23b4c6a15b9f6e9e3ed1cd4e92f44099e0738","functions":[{"id":"func/ArtifactRealizationMapping._unique_steps","name":"_unique_steps","line":93,"end_line":99,"hash":"307ed111aa5f377a56b72b27a1e62b6b328f6f91bc80c53893e70d1081277370"},{"id":"func/AssertionRealizationMapping._unique_ids","name":"_unique_ids","line":131,"end_line":144,"hash":"0be3b394fbe1c334f1de8dfed6b8fa5cac0782c2005710d004fb59fbb0560fec"},{"id":"func/ProjectionTraceabilityResult._sync_valid","name":"_sync_valid","line":204,"end_line":210,"hash":"ecee26ec7023dadcc7da0de89269988fd49d68ef6c1eb94c3d4fb00a2c579387"},{"id":"func/ProjectionEnvelopeBlock._ingress_matches_projection","name":"_ingress_matches_projection","line":263,"end_line":274,"hash":"13f8873728b1b6f18e0a1f188a2f72e4a0889d235fb48b24cebb5338bbf83192"},{"id":"func/ProjectionEnvelopeBlock._execution_requirements_digest_matches","name":"_execution_requirements_digest_matches","line":277,"end_line":285,"hash":"8177040b5d3f3e77348c1c98e334d82c21b5f9f82714e0e7ebd890ea630a3884"},{"id":"func/ProjectionEnvelopeBlock._derivation_context_digest_matches","name":"_derivation_context_digest_matches","line":288,"end_line":305,"hash":"70019e51f78b157f5aafb62980d5ca8f6a503949b5d791a370f69e441c495f63"},{"id":"func/ProjectionEnvelopeBlock._capability_snapshot_digest_matches","name":"_capability_snapshot_digest_matches","line":308,"end_line":324,"hash":"66b73ffc3bf6fe6933ef94c60cc6514ac25e9937249dc52eeae28a155765983d"},{"id":"func/ProjectionEnvelopeBlock._ingress_controllability_matches_evidence","name":"_ingress_controllability_matches_evidence","line":327,"end_line":351,"hash":"bf7f2abebdaefa1f9b4dbd9f59ac69e7ab073113eba70ef72363b0b8584b4642"},{"id":"func/ProjectionEnvelopeBlock.selected_step_ids","name":"selected_step_ids","line":354,"end_line":356,"hash":"08b2c7af8c21891c3bac03e27469ca48d11602efd757f5a309c5b87a1208d4f9"},{"id":"func/ProjectionEnvelopeBlock.projected_step_order","name":"projected_step_order","line":359,"end_line":364,"hash":"a876bad4982017d8a4204376b8d2f6715a52a92f171fca58d22f48efd31d189c"},{"id":"func/ProjectionEnvelopeBlock.postconditions_for_step","name":"postconditions_for_step","line":366,"end_line":372,"hash":"fbf9d566b36616a6c254493390a455cb4c5681c52803fcb7d7cd0ab7d930b3a8"},{"id":"func/ProjectionEnvelopeBlock.security_relevant_postconditions","name":"security_relevant_postconditions","line":374,"end_line":385,"hash":"28f85cc7e1fcc2be468dff8ab3b09c8d415d1944656c3233d2df9b2cb2807df1"},{"id":"func/_ingress_binding","name":"_ingress_binding","line":388,"end_line":394,"hash":"96193babd92d81d84109cd5fb180d779e8d05f1aea7a7132c6252200d97bc4fc"},{"id":"func/_is_entry_point_binding","name":"_is_entry_point_binding","line":397,"end_line":399,"hash":"ba4978e32282913e28e70e41273e0622954280ae029cc7c80f0dbdf0599434c8"},{"id":"func/_matches_canonical_ingress","name":"_matches_canonical_ingress","line":402,"end_line":404,"hash":"fa80066267684e9fc4e08f32b28fced043c982824a6e5af541095272490ddf96"}]}
+# mutate4py-manifest-end

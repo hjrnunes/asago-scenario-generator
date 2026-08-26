@@ -113,13 +113,15 @@ from asago_scenario_generator.pipeline.generate.narrative import (
     Call1Response,
     Call1Step,
     _call_narrative,
-    _derive_zone_sequence,
     _is_latin_or_common,
     _map_call1_to_narrative,
     _sanitize_narrative,
     _sanitize_non_latin,
     build_call1_context,
     build_call1_response_model,
+)
+from asago_scenario_generator.pipeline.generate.narrative_semantics import (
+    _derive_zone_sequence,
 )
 
 # ontology

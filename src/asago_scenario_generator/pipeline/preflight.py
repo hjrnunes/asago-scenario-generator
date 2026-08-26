@@ -15,17 +15,17 @@ from asago_scenario_generator.data.loaders import (
     load_yaml_strict,
 )
 from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
-from asago_scenario_generator.models.attack_pattern import (
+from asago_scenario_generator.models.attack_pattern_contracts import (
     AuthoritativeFactReference,
     EvaluatedFactEvidence,
     Scalar,
+)
+from asago_scenario_generator.models.attack_pattern_validation import (
     validate_attack_pattern,
 )
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
-from asago_scenario_generator.pipeline.candidates import (
-    apply_rule_based_filter,
-    expand_candidates,
-)
+from asago_scenario_generator.pipeline.candidate_expansion import expand_candidates
+from asago_scenario_generator.pipeline.candidate_rules import apply_rule_based_filter
 from asago_scenario_generator.pipeline.projection import (
     ProjectionReadinessReport,
     capture_capability_snapshot,

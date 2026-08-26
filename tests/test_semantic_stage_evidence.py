@@ -17,7 +17,7 @@ from asago_scenario_generator.pipeline.generate.actor import (
     ActorDraftViolation,
     ActorSemanticDraftError,
 )
-from asago_scenario_generator.pipeline.generate.narrative import NarrativeDraftV2
+from asago_scenario_generator.pipeline.generate.narrative_semantics import NarrativeDraftV2
 from asago_scenario_generator.pipeline.generate.behavior_semantics import (
     BehaviorDraftV2,
 )
