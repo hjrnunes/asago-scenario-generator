@@ -159,6 +159,8 @@ class TestProjectionCheckLeavesStayOffTheFacade:
             "projection_semantics.py",
             "projection_validation.py",
             "technique_scopes.py",
+            "coverage_planning_universe.py",
+            "coverage_planning_flow.py",
         ),
     )
     def test_check_leaf_does_not_import_projection_facade(

@@ -35,7 +35,11 @@ façade.
 
 Candidate identity and filter wire models live in `pipeline.candidate_models`.
 Expansion, rules, capping, coverage planning, and pipeline IO consume that
-leaf rather than the `pipeline.candidates` façade.
+leaf rather than the `pipeline.candidates` façade. Coverage-universe
+construction and min-cost assignment live in
+`pipeline.coverage_planning_universe` and `pipeline.coverage_planning_flow`;
+those leaves stay off the candidates and projection façades. Queue
+construction and plan persistence remain in `pipeline.coverage_planning`.
 
 Authoritative attack-pattern models are split by responsibility
 (`attack_pattern_contracts`, `attack_pattern_chain`,

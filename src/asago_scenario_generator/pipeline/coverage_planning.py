@@ -38,20 +38,45 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
 
-from asago_scenario_generator.models.capability_profile import (
-    CapabilityProfile,
-    EntryPoint,
-    is_attacker_accessible_ingress,
-)
 from asago_scenario_generator.pipeline.candidate_models import (
     CandidateOrigin,
     FilteredSeed,
     RejectionRecord,
+)
+
+# Re-export these helpers for compatibility with existing planner consumers.
+from asago_scenario_generator.pipeline.coverage_planning_flow import (  # noqa: F401
+    _add_pattern_sink_edges,
+    _add_target_pattern_edges,
+    _augment_path,
+    _best_candidate_per_target_pattern,
+    _build_flow_network,
+    _collect_pattern_index,
+    _convex_pattern_cost,
+    _extract_assignment,
+    _flowing_pattern_edge,
+    _relax_node,
+    _solve_min_cost_assignment,
+    _spfa_shortest_path,
+    add_edge,
+)
+from asago_scenario_generator.pipeline.coverage_planning_universe import (  # noqa: F401
+    CoverageCompleteness,
+    CoverageExclusionReason,
+    CoverageTarget,
+    CoverageUniverse,
+    ExcludedTarget,
+    _classify_exclusion,
+    _exclusion_from_entry,
+    _target_from_entry,
+    _universe_completeness,
+    build_coverage_universe,
 )
 from asago_scenario_generator.pipeline.projection_contracts import ProjectedCandidate
 
@@ -69,194 +94,6 @@ class GenerationMode(str, Enum):
 
     EXHAUSTIVE = "exhaustive"
     COVERAGE = "coverage"
-
-
-# ---------------------------------------------------------------------------
-# Coverage universe
-# ---------------------------------------------------------------------------
-
-
-class CoverageExclusionReason(str, Enum):
-    """Typed reason for excluding an entry point from the coverage universe."""
-
-    OUTPUT_ONLY = "output_only"
-    SYSTEM_CONTROLLED = "system_controlled"
-    INACTIVE_ZONE = "inactive_zone"
-    NO_INGRESS_ZONE = "no_ingress_zone"
-
-
-class CoverageCompleteness(str, Enum):
-    """Whether the entry-point inventory is known to be complete.
-
-    Derived from :attr:`CapabilityProfile.is_entry_point_inventory_complete`:
-    ``confirmed_complete`` only when the operator has confirmed the inventory
-    is exhaustive with evidence; ``not_applicable`` otherwise (inferred-partial
-    inventory — completeness cannot be claimed).
-    """
-
-    NOT_APPLICABLE = "not_applicable"
-    CONFIRMED_COMPLETE = "confirmed_complete"
-
-
-@dataclass(frozen=True)
-class CoverageTarget:
-    """A feasible coverage target — an attacker-accessible ingress entry point.
-
-    Carries the canonical ``entry_point_id``, display name, direction, and
-    effective controllability.  Direction is always ``input`` or
-    ``bidirectional``; controllability is always ``direct`` or ``indirect``.
-    """
-
-    entry_point_id: str
-    name: str
-    direction: str
-    controllability: str
-
-
-@dataclass(frozen=True)
-class ExcludedTarget:
-    """An entry point excluded from the coverage universe with a typed reason."""
-
-    entry_point_id: str
-    name: str
-    direction: str
-    controllability: str
-    reason: CoverageExclusionReason
-
-
-@dataclass
-class CoverageUniverse:
-    """The complete coverage universe: feasible targets plus typed exclusions.
-
-    ``completeness`` is derived from the profile's
-    ``is_entry_point_inventory_complete`` property — never from free-form
-    input.  ``evidence_refs`` carries the operator-confirmed evidence sources
-    when completeness is ``confirmed_complete``.
-    """
-
-    feasible_targets: list[CoverageTarget] = field(default_factory=list)
-    excluded_targets: list[ExcludedTarget] = field(default_factory=list)
-    completeness: CoverageCompleteness = CoverageCompleteness.NOT_APPLICABLE
-    evidence_refs: list[str] = field(default_factory=list)
-
-    @property
-    def feasible_target_ids(self) -> set[str]:
-        """Set of entry_point_ids for all feasible targets."""
-        return {t.entry_point_id for t in self.feasible_targets}
-
-    def to_dict(self) -> dict:
-        return {
-            "feasible_targets": [
-                {
-                    "entry_point_id": t.entry_point_id,
-                    "name": t.name,
-                    "direction": t.direction,
-                    "controllability": t.controllability,
-                }
-                for t in self.feasible_targets
-            ],
-            "excluded_targets": [
-                {
-                    "entry_point_id": e.entry_point_id,
-                    "name": e.name,
-                    "direction": e.direction,
-                    "controllability": e.controllability,
-                    "reason": e.reason.value,
-                }
-                for e in self.excluded_targets
-            ],
-            "completeness": self.completeness.value,
-            "evidence_refs": list(self.evidence_refs),
-        }
-
-
-def _classify_exclusion(
-    ep: EntryPoint,
-    active_zones: set[str],
-) -> CoverageExclusionReason | None:
-    """Return the typed exclusion reason for a non-feasible entry point, or None if feasible."""
-    if ep.direction == "output":
-        return CoverageExclusionReason.OUTPUT_ONLY
-    if ep.effective_controllability == "system":
-        return CoverageExclusionReason.SYSTEM_CONTROLLED
-    zone = ep.effective_ingress_zone
-    if zone is None:
-        return CoverageExclusionReason.NO_INGRESS_ZONE
-    if zone not in active_zones:
-        return CoverageExclusionReason.INACTIVE_ZONE
-    return None
-
-
-def build_coverage_universe(
-    profile: CapabilityProfile,
-) -> CoverageUniverse:
-    """Build the coverage universe from the capability profile.
-
-    Iterates every entry point in the profile.  Entry points with direction
-    ``input`` or ``bidirectional`` and effective controllability ``direct``
-    or ``indirect`` in an active zone are feasible targets.  All others are
-    excluded with a typed reason.
-
-    Completeness is derived from
-    :attr:`CapabilityProfile.is_entry_point_inventory_complete` — the
-    operator-confirmed property.  Free-form enum input is not accepted; an
-    inferred profile cannot claim confirmed completeness.
-
-    Args:
-        profile: The capability profile from Stage 1.
-
-    Returns:
-        A :class:`CoverageUniverse` with feasible targets, typed
-        exclusions, and profile-derived completeness.
-    """
-    active_zones = set(profile.zones_active) if profile.zones_active else set()
-    feasible: list[CoverageTarget] = []
-    excluded: list[ExcludedTarget] = []
-
-    for ep in profile.entry_points:
-        if is_attacker_accessible_ingress(ep, active_zones):
-            feasible.append(
-                CoverageTarget(
-                    entry_point_id=ep.entry_point_id,
-                    name=ep.name,
-                    direction=ep.direction,
-                    controllability=ep.effective_controllability,
-                )
-            )
-        else:
-            reason = _classify_exclusion(ep, active_zones)
-            if reason is None:
-                reason = CoverageExclusionReason.NO_INGRESS_ZONE
-            excluded.append(
-                ExcludedTarget(
-                    entry_point_id=ep.entry_point_id,
-                    name=ep.name,
-                    direction=ep.direction,
-                    controllability=ep.effective_controllability,
-                    reason=reason,
-                )
-            )
-
-    if profile.is_entry_point_inventory_complete:
-        completeness = CoverageCompleteness.CONFIRMED_COMPLETE
-        evidence_refs = [e for e in profile.entry_point_evidence if e and e.strip()]
-    else:
-        completeness = CoverageCompleteness.NOT_APPLICABLE
-        evidence_refs = []
-
-    universe = CoverageUniverse(
-        feasible_targets=feasible,
-        excluded_targets=excluded,
-        completeness=completeness,
-        evidence_refs=evidence_refs,
-    )
-    logger.info(
-        "Coverage universe: %d feasible target(s), %d excluded, completeness=%s",
-        len(feasible),
-        len(excluded),
-        completeness.value,
-    )
-    return universe
 
 
 # ---------------------------------------------------------------------------
@@ -411,15 +248,7 @@ class QualifiedCandidate:
     @property
     def merged_origins(self) -> list[CandidateOrigin]:
         """Merged origins from all accepted filter records, deduplicated."""
-        seen: list[str] = []
-        merged: list[CandidateOrigin] = []
-        for record in self._sorted_filters:
-            for origin in record.origins:
-                key = origin.model_dump_json()
-                if key not in seen:
-                    seen.append(key)
-                    merged.append(origin)
-        return merged
+        return _merge_deduped(self._sorted_filters, lambda record: record.origins)
 
     @property
     def origins(self) -> list[CandidateOrigin]:
@@ -429,15 +258,9 @@ class QualifiedCandidate:
     @property
     def merged_rejection_rationales(self) -> list[RejectionRecord]:
         """Merged rule-removal provenance from all accepted filter records."""
-        seen: list[str] = []
-        merged: list[RejectionRecord] = []
-        for record in self._sorted_filters:
-            for rr in record.rejection_rationales:
-                key = rr.model_dump_json()
-                if key not in seen:
-                    seen.append(key)
-                    merged.append(rr)
-        return merged
+        return _merge_deduped(
+            self._sorted_filters, lambda record: record.rejection_rationales
+        )
 
     @property
     def rejection_rationales(self) -> list[RejectionRecord]:
@@ -465,22 +288,44 @@ class QualifiedCandidate:
             "rejection_rationales": [
                 r.model_dump(mode="json") for r in self.merged_rejection_rationales
             ],
-            "pinned_entry_point": (
-                self._sorted_filters[0].pinned_entry_point
-                if self._sorted_filters
-                else ""
-            ),
-            "pinned_technique_ids": (
-                list(self._sorted_filters[0].pinned_technique_ids)
-                if self._sorted_filters
-                else []
-            ),
-            "pinned_technique_names": (
-                list(self._sorted_filters[0].pinned_technique_names)
-                if self._sorted_filters
-                else []
-            ),
+            **_first_filter_summary(self._sorted_filters),
         }
+
+
+def _merge_deduped(
+    records: Sequence[AcceptedFilterRecord],
+    items_of: Any,
+) -> list[Any]:
+    """Merge items from accepted filter records, deduplicating by JSON identity.
+
+    Order follows the canonically sorted filter records and preserves first
+    occurrence per item — no first-wins loss of provenance.
+    """
+    seen: list[str] = []
+    merged: list[Any] = []
+    for record in records:
+        for item in items_of(record):
+            key = item.model_dump_json()
+            if key not in seen:
+                seen.append(key)
+                merged.append(item)
+    return merged
+
+
+def _first_filter_summary(records: Sequence[AcceptedFilterRecord]) -> dict:
+    """Pinned-technique summary of the first (canonically sorted) filter record."""
+    if not records:
+        return {
+            "pinned_entry_point": "",
+            "pinned_technique_ids": [],
+            "pinned_technique_names": [],
+        }
+    first = records[0]
+    return {
+        "pinned_entry_point": first.pinned_entry_point,
+        "pinned_technique_ids": list(first.pinned_technique_ids),
+        "pinned_technique_names": list(first.pinned_technique_names),
+    }
 
 
 def _qualified_sort_key(qc: QualifiedCandidate) -> tuple[str, str]:
@@ -789,145 +634,89 @@ class SelectionResult:
     selection_limitation_target_ids: list[str] = field(default_factory=list)
 
 
-def _solve_min_cost_assignment(
-    target_ids: list[str],
-    target_choices_map: dict[str, list[QualifiedCandidate]],
-    max_per_pattern: int | None,
-) -> dict[str, QualifiedCandidate]:
-    """Solve global primary assignment via min-cost flow (successive shortest paths).
+def _target_choice_lists(
+    sorted_targets: Sequence[CoverageTarget],
+    fallback_queues: dict[str, TargetFallbackQueue],
+) -> list[tuple[str, list[QualifiedCandidate]]]:
+    """Collect the choice lists for targets that have candidates."""
+    result: list[tuple[str, list[QualifiedCandidate]]] = []
+    for target in sorted_targets:
+        ep_id = target.entry_point_id
+        queue = fallback_queues.get(ep_id)
+        if queue is None or queue.is_empty:
+            continue
+        result.append((ep_id, list(queue.choices)))
+    return result
 
-    Builds a bipartite flow network: source → targets → patterns → sink.
-    Pattern→sink edges have convex costs so that the k-th unit (0-indexed)
-    to a pattern costs ``k * CONCENTRATION_SCALE``, plus
-    ``CAP_OVERFLOW_PENALTY * CONCENTRATION_SCALE`` if ``k >= max_per_pattern``.
-    This minimizes concentration (spreads assignments across patterns) and
-    cap overflow.
 
-    Target→pattern edges have cost = candidate rank (0-indexed position in
-    the sorted-by-candidate_id list of patterns for that target), providing
-    canonical candidate-ID tie-breaking at lower priority than concentration.
-
-    Complexity: O(N² · (N+M) · E) where N = targets, M = patterns,
-    E = edges.  Polynomial and feasible for ~49 targets.
-
-    Returns mapping from target_id to the assigned QualifiedCandidate.
-    """
-    from collections import deque
-
-    N = len(target_ids)
-    if N == 0:
-        return {}
-
-    # Collect unique patterns, sorted for determinism.
-    all_patterns = sorted(
-        {qc.pattern_id for choices in target_choices_map.values() for qc in choices}
+def _no_candidate_selection(
+    sorted_targets: Sequence[CoverageTarget],
+) -> SelectionResult:
+    """Selection result when no feasible target has any candidate."""
+    return SelectionResult(
+        selected=[],
+        capped_count=0,
+        uncovered_target_ids=[t.entry_point_id for t in sorted_targets],
+        per_pattern_counts={},
+        primary_candidate_ids={},
+        attempted_candidate_ids=set(),
+        selection_limitation_target_ids=[],
     )
-    M = len(all_patterns)
-    pattern_idx = {p: i for i, p in enumerate(all_patterns)}
 
-    # For each (target, pattern), pick the lowest candidate_id candidate.
-    best_per_tp: dict[tuple[str, str], QualifiedCandidate] = {}
-    for t_id in target_ids:
-        for qc in target_choices_map[t_id]:
-            key = (t_id, qc.pattern_id)
-            if (
-                key not in best_per_tp
-                or qc.candidate_id < best_per_tp[key].candidate_id
-            ):
-                best_per_tp[key] = qc
 
-    # Cost scaling: ensure lexicographic priority
-    #   cap overflow > concentration > candidate tie-break
-    CONCENTRATION_SCALE = 2 * N + 1  # > max total candidate tie-break (2*N)
-    CAP_OVERFLOW_PENALTY = N * N + 1  # > max total concentration (N*(N-1)/2)
+def _build_primary_selection(
+    best_assignment: dict[str, QualifiedCandidate],
+) -> tuple[list[QualifiedCandidate], set[str], dict[str, str]]:
+    """Build the final selected list from the best assignment.
 
-    # Build flow network.
-    # Nodes: 0=source, 1..N=targets, N+1..N+M=patterns, N+M+1=sink
-    source = 0
-    sink = N + M + 1
-    num_nodes = N + M + 2
+    Deduplicates by candidate_id — one candidate may serve multiple
+    targets — and assigns deterministic ranks in sorted target order.
+    """
+    selected: list[QualifiedCandidate] = []
+    selected_ids: set[str] = set()
+    primary_ids: dict[str, str] = {}
 
-    # Edge: [to, capacity, cost, rev_index]
-    graph: list[list[list[int]]] = [[] for _ in range(num_nodes)]
+    for ep_id, qc in sorted(best_assignment.items()):
+        if qc.candidate_id not in selected_ids:
+            rank = len(selected)
+            selected.append(replace(qc, rank=rank))
+            selected_ids.add(qc.candidate_id)
+        primary_ids[ep_id] = qc.candidate_id
+    return selected, selected_ids, primary_ids
 
-    def add_edge(u: int, v: int, cap: int, cost: int) -> None:
-        graph[u].append([v, cap, cost, len(graph[v])])
-        graph[v].append([u, 0, -cost, len(graph[u]) - 1])
 
-    # Source → targets (cap=1, cost=0).
-    for i in range(N):
-        add_edge(source, 1 + i, 1, 0)
+def _derive_selection_limitations(
+    best_assignment: dict[str, QualifiedCandidate],
+    max_per_pattern: int | None,
+) -> list[str]:
+    """Derive structured selection limitations for over-cap targets.
 
-    # Targets → patterns (cap=1, cost=rank for candidate-ID tie-break).
-    for i, t_id in enumerate(target_ids):
-        # Sort this target's patterns by the best candidate's candidate_id.
-        target_patterns = sorted(
-            {qc.pattern_id for qc in target_choices_map[t_id]},
-            key=lambda p: best_per_tp[(t_id, p)].candidate_id,
-        )
-        for rank, p_id in enumerate(target_patterns):
-            pi = pattern_idx[p_id]
-            add_edge(1 + i, 1 + N + pi, 1, rank)
+    For each pattern, the first ``max_per_pattern`` targets (sorted by
+    target ID) are in-cap; the rest are overflow with explicit limitations.
+    This includes sole-choice overflows.
+    """
+    if max_per_pattern is None:
+        return []
+    targets_by_pattern: dict[str, list[str]] = {}
+    for ep_id in sorted(best_assignment):
+        qc = best_assignment[ep_id]
+        targets_by_pattern.setdefault(qc.pattern_id, []).append(ep_id)
 
-    # Patterns → sink with convex costs (cap=N per pattern, increasing cost).
-    for pi in range(M):
-        for k in range(N):
-            base_cost = k * CONCENTRATION_SCALE
-            if max_per_pattern is not None and k >= max_per_pattern:
-                base_cost += CAP_OVERFLOW_PENALTY * CONCENTRATION_SCALE
-            add_edge(1 + N + pi, sink, 1, base_cost)
+    limitations: list[str] = []
+    for ep_ids in targets_by_pattern.values():
+        if len(ep_ids) > max_per_pattern:
+            limitations.extend(ep_ids[max_per_pattern:])
+    return limitations
 
-    # Min-cost max-flow via successive shortest paths (SPFA / Bellman-Ford).
-    total_flow = 0
-    while total_flow < N:
-        dist = [float("inf")] * num_nodes
-        dist[source] = 0
-        in_queue = [False] * num_nodes
-        in_queue[source] = True
-        queue: deque[int] = deque([source])
-        parent_node = [-1] * num_nodes
-        parent_edge_idx = [-1] * num_nodes
 
-        while queue:
-            u = queue.popleft()
-            in_queue[u] = False
-            for ei, edge in enumerate(graph[u]):
-                v, cap, cost, _ = edge
-                if cap > 0 and dist[u] + cost < dist[v]:
-                    dist[v] = dist[u] + cost
-                    parent_node[v] = u
-                    parent_edge_idx[v] = ei
-                    if not in_queue[v]:
-                        queue.append(v)
-                        in_queue[v] = True
-
-        if dist[sink] == float("inf"):
-            break  # No more augmenting paths.
-
-        # Augment 1 unit of flow along the shortest path.
-        v = sink
-        while v != source:
-            u = parent_node[v]
-            ei = parent_edge_idx[v]
-            graph[u][ei][1] -= 1  # reduce forward capacity
-            rev_i = graph[u][ei][3]
-            graph[v][rev_i][1] += 1  # increase reverse capacity
-            v = u
-        total_flow += 1
-
-    # Extract assignment: check which target→pattern forward edges have flow.
-    assignment: dict[str, QualifiedCandidate] = {}
-    for i, t_id in enumerate(target_ids):
-        for edge in graph[1 + i]:
-            v = edge[0]
-            # Pattern node range: [1+N, N+M]
-            if 1 + N <= v <= N + M and edge[1] == 0:
-                pi = v - 1 - N
-                p_id = all_patterns[pi]
-                assignment[t_id] = best_per_tp[(t_id, p_id)]
-                break
-
-    return assignment
+def _uncovered_target_ids(
+    sorted_targets: Sequence[CoverageTarget],
+    primary_ids: dict[str, str],
+) -> list[str]:
+    """Entry-point IDs of feasible targets without a primary assignment."""
+    return [
+        t.entry_point_id for t in sorted_targets if t.entry_point_id not in primary_ids
+    ]
 
 
 def select_with_coverage_priority(
@@ -977,83 +766,25 @@ def select_with_coverage_priority(
         primary/attempted candidate tracking, and selection limitations.
     """
     sorted_targets = sorted(universe.feasible_targets, key=lambda t: t.entry_point_id)
-
-    # Collect the choice lists for targets that have candidates.
-    target_choice_lists: list[tuple[str, list[QualifiedCandidate]]] = []
-    for target in sorted_targets:
-        ep_id = target.entry_point_id
-        queue = fallback_queues.get(ep_id)
-        if queue is None or queue.is_empty:
-            continue
-        target_choice_lists.append((ep_id, list(queue.choices)))
+    target_choice_lists = _target_choice_lists(sorted_targets, fallback_queues)
 
     if not target_choice_lists:
-        # No targets have candidates.
-        uncovered = [t.entry_point_id for t in sorted_targets]
-        return SelectionResult(
-            selected=[],
-            capped_count=0,
-            uncovered_target_ids=uncovered,
-            per_pattern_counts={},
-            primary_candidate_ids={},
-            attempted_candidate_ids=set(),
-            selection_limitation_target_ids=[],
-        )
+        return _no_candidate_selection(sorted_targets)
 
-    # Build the choices map for the min-cost flow solver.
     coverable_target_ids = [ep_id for ep_id, _ in target_choice_lists]
     target_choices_map: dict[str, list[QualifiedCandidate]] = {
         ep_id: choices for ep_id, choices in target_choice_lists
     }
 
-    # Solve the global assignment via min-cost flow (polynomial, O(N²·(N+M)·E)).
     best_assignment = _solve_min_cost_assignment(
         coverable_target_ids,
         target_choices_map,
         max_per_pattern,
     )
 
-    # Build the final selected list from the best assignment.
-    # Deduplicate by candidate_id — one candidate may serve multiple targets.
-    selected: list[QualifiedCandidate] = []
-    selected_ids: set[str] = set()
-    primary_ids: dict[str, str] = {}
-    pattern_counts_final: dict[str, int] = {}
-    limitations: list[str] = []
-
-    # Process targets in sorted order for deterministic selected list.
-    for ep_id, qc in sorted(best_assignment.items()):
-        if qc.candidate_id not in selected_ids:
-            rank = len(selected)
-            selected.append(replace(qc, rank=rank))
-            selected_ids.add(qc.candidate_id)
-        primary_ids[ep_id] = qc.candidate_id
-        pattern_counts_final[qc.pattern_id] = (
-            pattern_counts_final.get(qc.pattern_id, 0) + 1
-        )
-
-    # Derive structured selection limitations for over-cap targets.
-    # For each pattern, the first max_per_pattern targets (sorted by
-    # target ID) are in-cap; the rest are overflow with explicit limitations.
-    # This includes sole-choice overflows.
-    if max_per_pattern is not None:
-        # Group targets by their assigned pattern.
-        targets_by_pattern: dict[str, list[str]] = {}
-        for ep_id in sorted(best_assignment):
-            qc = best_assignment[ep_id]
-            targets_by_pattern.setdefault(qc.pattern_id, []).append(ep_id)
-
-        for ep_ids in targets_by_pattern.values():
-            count = len(ep_ids)
-            if count > max_per_pattern:
-                # First max_per_pattern targets (sorted) are in-cap;
-                # the rest are overflow.
-                overflow_ids = ep_ids[max_per_pattern:]
-                limitations.extend(overflow_ids)
-
-    uncovered = [
-        t.entry_point_id for t in sorted_targets if t.entry_point_id not in primary_ids
-    ]
+    selected, selected_ids, primary_ids = _build_primary_selection(best_assignment)
+    limitations = _derive_selection_limitations(best_assignment, max_per_pattern)
+    uncovered = _uncovered_target_ids(sorted_targets, primary_ids)
 
     per_pattern: dict[str, int] = {}
     for qc in selected:
@@ -1141,6 +872,41 @@ class CoveragePlan:
         }
 
 
+def _plan_entry_for_target(
+    target: CoverageTarget,
+    queue: TargetFallbackQueue | None,
+    primary_id: str | None,
+    attempted: set[str],
+    outcomes: dict[str, str],
+) -> CoveragePlanEntry:
+    """Build one coverage plan entry for a feasible target.
+
+    ``ordered_choices`` is the full ranked list of qualified candidate
+    references.  ``fallback_available`` lists choices that have not been
+    selected or attempted — suitable for cmps.5 retry.
+    """
+    ep_id = target.entry_point_id
+    choices = queue.choices if queue else []
+    ordered_refs = [qc.to_plan_ref() for qc in choices]
+
+    if primary_id is not None:
+        state = outcomes.get(primary_id, "selected")
+    else:
+        state = "uncovered"
+
+    fallback = [qc.to_plan_ref() for qc in choices if qc.candidate_id not in attempted]
+
+    return CoveragePlanEntry(
+        target_id=ep_id,
+        entry_point_id=ep_id,
+        entry_point_name=target.name,
+        ordered_choices=ordered_refs,
+        primary_candidate_id=primary_id,
+        primary_state=state,
+        fallback_available=fallback,
+    )
+
+
 def build_coverage_plan(
     universe: CoverageUniverse,
     fallback_queues: dict[str, TargetFallbackQueue],
@@ -1169,31 +935,14 @@ def build_coverage_plan(
     entries: list[CoveragePlanEntry] = []
 
     for target in universe.feasible_targets:
-        ep_id = target.entry_point_id
-        queue = fallback_queues.get(ep_id)
-        choices = queue.choices if queue else []
-        ordered_refs = [qc.to_plan_ref() for qc in choices]
-
-        primary_id = selection_result.primary_candidate_ids.get(ep_id)
-        if primary_id is not None:
-            state = outcomes.get(primary_id, "selected")
-        else:
-            state = "uncovered"
-
-        # fallback_available: choices not selected or attempted.
-        fallback = [
-            qc.to_plan_ref() for qc in choices if qc.candidate_id not in attempted
-        ]
-
+        primary_id = selection_result.primary_candidate_ids.get(target.entry_point_id)
         entries.append(
-            CoveragePlanEntry(
-                target_id=ep_id,
-                entry_point_id=ep_id,
-                entry_point_name=target.name,
-                ordered_choices=ordered_refs,
-                primary_candidate_id=primary_id,
-                primary_state=state,
-                fallback_available=fallback,
+            _plan_entry_for_target(
+                target,
+                fallback_queues.get(target.entry_point_id),
+                primary_id,
+                attempted,
+                outcomes,
             )
         )
 
@@ -1231,6 +980,45 @@ def _exhaustive_target_id(candidate_id: str) -> str:
     return f"candidate-target:{digest}"
 
 
+def _group_ranked_by_pattern_and_ingress(
+    ranked: Sequence[QualifiedCandidate],
+) -> dict[str, dict[str, list[QualifiedCandidate]]]:
+    """Group ranked candidates by pattern_id, then by entry_point_id."""
+    by_pattern: dict[str, dict[str, list[QualifiedCandidate]]] = {}
+    for candidate in ranked:
+        by_pattern.setdefault(candidate.pattern_id, {}).setdefault(
+            candidate.entry_point_id, []
+        ).append(candidate)
+    return by_pattern
+
+
+def _round_robin_within_pattern(
+    by_ingress: dict[str, list[QualifiedCandidate]],
+    max_per_pattern: int,
+) -> list[QualifiedCandidate]:
+    """Select up to ``max_per_pattern`` candidates round-robin across ingresses."""
+    ingress_ids = sorted(by_ingress)
+    cursors = dict.fromkeys(ingress_ids, 0)
+    selected: list[QualifiedCandidate] = []
+    pattern_count = 0
+    while pattern_count < max_per_pattern:
+        progressed = False
+        for entry_point_id in ingress_ids:
+            cursor = cursors[entry_point_id]
+            choices = by_ingress[entry_point_id]
+            if cursor >= len(choices):
+                continue
+            selected.append(choices[cursor])
+            cursors[entry_point_id] = cursor + 1
+            pattern_count += 1
+            progressed = True
+            if pattern_count >= max_per_pattern:
+                break
+        if not progressed:
+            break
+    return selected
+
+
 def _select_exhaustive_candidates(
     qualified: list[QualifiedCandidate],
     max_per_pattern: int | None,
@@ -1245,77 +1033,22 @@ def _select_exhaustive_candidates(
     if max_per_pattern is None:
         return [replace(candidate, rank=rank) for rank, candidate in enumerate(ranked)]
 
-    by_pattern: dict[str, dict[str, list[QualifiedCandidate]]] = {}
-    for candidate in ranked:
-        by_pattern.setdefault(candidate.pattern_id, {}).setdefault(
-            candidate.entry_point_id, []
-        ).append(candidate)
-
     selected: list[QualifiedCandidate] = []
+    by_pattern = _group_ranked_by_pattern_and_ingress(ranked)
     for pattern_id in sorted(by_pattern):
-        by_ingress = by_pattern[pattern_id]
-        ingress_ids = sorted(by_ingress)
-        cursors = {entry_point_id: 0 for entry_point_id in ingress_ids}
-        pattern_count = 0
-        while pattern_count < max_per_pattern:
-            progressed = False
-            for entry_point_id in ingress_ids:
-                cursor = cursors[entry_point_id]
-                choices = by_ingress[entry_point_id]
-                if cursor >= len(choices):
-                    continue
-                selected.append(choices[cursor])
-                cursors[entry_point_id] = cursor + 1
-                pattern_count += 1
-                progressed = True
-                if pattern_count >= max_per_pattern:
-                    break
-            if not progressed:
-                break
+        selected.extend(
+            _round_robin_within_pattern(by_pattern[pattern_id], max_per_pattern)
+        )
 
     selected.sort(key=_qualified_sort_key)
     return [replace(candidate, rank=rank) for rank, candidate in enumerate(selected)]
 
 
-def plan_generation(
-    qualified: list[QualifiedCandidate],
-    universe: CoverageUniverse,
-    *,
-    mode: GenerationMode | str = GenerationMode.EXHAUSTIVE,
-    max_per_pattern: int | None = None,
-) -> GenerationPlanningResult:
-    """Plan qualified candidates for exhaustive corpus or coverage generation.
-
-    Exhaustive mode creates one one-choice durable target per selected
-    candidate.  Coverage mode preserves the historical one bounded fallback
-    queue per feasible ingress.
-    """
-    generation_mode = GenerationMode(mode)
-    if max_per_pattern is not None and max_per_pattern < 1:
-        raise ValueError("max_per_pattern must be a positive integer")
-    coverage_queues = build_fallback_queues(qualified, universe)
-    if generation_mode is GenerationMode.COVERAGE:
-        selection = select_with_coverage_priority(
-            qualified,
-            coverage_queues,
-            universe,
-            max_per_pattern=max_per_pattern,
-        )
-        plan = build_coverage_plan(universe, coverage_queues, selection)
-        return GenerationPlanningResult(
-            mode=generation_mode,
-            selection=selection,
-            plan=plan,
-            target_queues=coverage_queues,
-            coverage_queues=coverage_queues,
-        )
-
-    selected = _select_exhaustive_candidates(qualified, max_per_pattern)
-    selected_ids = {candidate.candidate_id for candidate in selected}
-    selected_ingresses = {candidate.entry_point_id for candidate in selected}
-    target_names = {
-        target.entry_point_id: target.name for target in universe.feasible_targets
-    }
+def _exhaustive_target_entries(
+    selected: Sequence[QualifiedCandidate],
+    target_names: dict[str, str],
+) -> tuple[dict[str, TargetFallbackQueue], list[CoveragePlanEntry], dict[str, str]]:
+    """Build one one-choice durable target per selected candidate."""
     target_queues: dict[str, TargetFallbackQueue] = {}
     plan_targets: list[CoveragePlanEntry] = []
     primary_candidate_ids: dict[str, str] = {}
@@ -1341,13 +1074,16 @@ def plan_generation(
                 fallback_available=[],
             )
         )
+    return target_queues, plan_targets, primary_candidate_ids
 
-    uncovered_target_ids = sorted(universe.feasible_target_ids - selected_ingresses)
-    cap_limited_target_ids = sorted(
-        target_id
-        for target_id in uncovered_target_ids
-        if not coverage_queues[target_id].is_empty
-    )
+
+def _uncovered_exhaustive_entries(
+    uncovered_target_ids: Sequence[str],
+    universe: CoverageUniverse,
+) -> tuple[dict[str, TargetFallbackQueue], list[CoveragePlanEntry]]:
+    """Empty-queue entries for feasible targets left uncovered by the cap."""
+    target_queues: dict[str, TargetFallbackQueue] = {}
+    plan_targets: list[CoveragePlanEntry] = []
     for target in sorted(
         universe.feasible_targets, key=lambda item: item.entry_point_id
     ):
@@ -1368,6 +1104,64 @@ def plan_generation(
                 fallback_available=[],
             )
         )
+    return target_queues, plan_targets
+
+
+def _cap_limited_target_ids(
+    uncovered_target_ids: Sequence[str],
+    coverage_queues: dict[str, TargetFallbackQueue],
+) -> list[str]:
+    """Uncovered targets whose queue had candidates — cap limited, not seedless."""
+    return sorted(
+        target_id
+        for target_id in uncovered_target_ids
+        if not coverage_queues[target_id].is_empty
+    )
+
+
+def _plan_coverage_generation(
+    qualified: list[QualifiedCandidate],
+    universe: CoverageUniverse,
+    coverage_queues: dict[str, TargetFallbackQueue],
+    max_per_pattern: int | None,
+) -> tuple[SelectionResult, CoveragePlan]:
+    """Coverage-mode selection and plan over the per-ingress fallback queues."""
+    selection = select_with_coverage_priority(
+        qualified,
+        coverage_queues,
+        universe,
+        max_per_pattern=max_per_pattern,
+    )
+    plan = build_coverage_plan(universe, coverage_queues, selection)
+    return selection, plan
+
+
+def _plan_exhaustive_generation(
+    qualified: list[QualifiedCandidate],
+    universe: CoverageUniverse,
+    coverage_queues: dict[str, TargetFallbackQueue],
+    max_per_pattern: int | None,
+) -> tuple[SelectionResult, CoveragePlan, dict[str, TargetFallbackQueue]]:
+    """Exhaustive-mode selection, plan, and durable per-candidate targets."""
+    selected = _select_exhaustive_candidates(qualified, max_per_pattern)
+    selected_ids = {candidate.candidate_id for candidate in selected}
+    selected_ingresses = {candidate.entry_point_id for candidate in selected}
+    target_names = {
+        target.entry_point_id: target.name for target in universe.feasible_targets
+    }
+    target_queues, plan_targets, primary_candidate_ids = _exhaustive_target_entries(
+        selected, target_names
+    )
+
+    uncovered_target_ids = sorted(universe.feasible_target_ids - selected_ingresses)
+    uncovered_queues, uncovered_entries = _uncovered_exhaustive_entries(
+        uncovered_target_ids, universe
+    )
+    target_queues.update(uncovered_queues)
+    plan_targets.extend(uncovered_entries)
+    cap_limited_target_ids = _cap_limited_target_ids(
+        uncovered_target_ids, coverage_queues
+    )
 
     per_pattern_counts: dict[str, int] = {}
     for candidate in selected:
@@ -1389,6 +1183,41 @@ def plan_generation(
         evidence_refs=list(universe.evidence_refs),
         targets=plan_targets,
         selection_limitation_target_ids=cap_limited_target_ids,
+    )
+    return selection, plan, target_queues
+
+
+def plan_generation(
+    qualified: list[QualifiedCandidate],
+    universe: CoverageUniverse,
+    *,
+    mode: GenerationMode | str = GenerationMode.EXHAUSTIVE,
+    max_per_pattern: int | None = None,
+) -> GenerationPlanningResult:
+    """Plan qualified candidates for exhaustive corpus or coverage generation.
+
+    Exhaustive mode creates one one-choice durable target per selected
+    candidate.  Coverage mode preserves the historical one bounded fallback
+    queue per feasible ingress.
+    """
+    generation_mode = GenerationMode(mode)
+    if max_per_pattern is not None and max_per_pattern < 1:
+        raise ValueError("max_per_pattern must be a positive integer")
+    coverage_queues = build_fallback_queues(qualified, universe)
+    if generation_mode is GenerationMode.COVERAGE:
+        selection, plan = _plan_coverage_generation(
+            qualified, universe, coverage_queues, max_per_pattern
+        )
+        return GenerationPlanningResult(
+            mode=generation_mode,
+            selection=selection,
+            plan=plan,
+            target_queues=coverage_queues,
+            coverage_queues=coverage_queues,
+        )
+
+    selection, plan, target_queues = _plan_exhaustive_generation(
+        qualified, universe, coverage_queues, max_per_pattern
     )
     return GenerationPlanningResult(
         mode=generation_mode,
@@ -1463,6 +1292,119 @@ class DeserializedPlanRef:
         )
 
 
+def _verify_outer_identity(ref: dict, pc: ProjectedCandidate) -> None:
+    """Verify the outer IDs agree with the embedded projected candidate."""
+    outer_candidate_id = ref.get("candidate_id", "")
+    if outer_candidate_id != pc.candidate_id:
+        raise ValueError(
+            f"plan ref outer candidate_id '{outer_candidate_id}' disagrees "
+            f"with embedded projected candidate_id '{pc.candidate_id}'"
+        )
+    outer_pattern_id = ref.get("pattern_id", "")
+    if outer_pattern_id != pc.pattern_id:
+        raise ValueError(
+            f"plan ref outer pattern_id '{outer_pattern_id}' disagrees "
+            f"with embedded projected pattern_id '{pc.pattern_id}'"
+        )
+    outer_entry_point_id = ref.get("entry_point_id", "")
+    if outer_entry_point_id != pc.canonical_ingress.entry_point_id:
+        raise ValueError(
+            f"plan ref outer entry_point_id '{outer_entry_point_id}' disagrees "
+            f"with embedded projected ingress entry_point_id "
+            f"'{pc.canonical_ingress.entry_point_id}'"
+        )
+
+
+def _deserialize_filter_records(
+    raw_filters: Sequence[dict],
+) -> list[AcceptedFilterRecord]:
+    """Deserialize accepted filter records, enforcing seed presence and fidelity.
+
+    The serialized summary fields are not independent evidence — they must
+    exactly be the canonical projection of the embedded seed.
+    """
+    if not raw_filters:
+        raise ValueError("plan ref has no accepted filter records")
+
+    records: list[AcceptedFilterRecord] = []
+    for raw in raw_filters:
+        record = AcceptedFilterRecord.from_dict(raw)
+        if record.seed is None:
+            raise ValueError(
+                f"accepted filter record '{record.filter_candidate_id}' is missing seed"
+            )
+        if record != AcceptedFilterRecord.from_seed(record.seed):
+            raise ValueError(
+                f"accepted filter record '{record.filter_candidate_id}' does not "
+                "match its embedded FilteredSeed"
+            )
+        records.append(record)
+    return records
+
+
+def _verify_canonical_filter_ids(records: Sequence[AcceptedFilterRecord]) -> None:
+    """Reject duplicate and noncanonically ordered filter_candidate_ids."""
+    filter_ids = [r.filter_candidate_id for r in records]
+    if len(set(filter_ids)) != len(filter_ids):
+        dupes = sorted(cid for cid, count in Counter(filter_ids).items() if count > 1)
+        raise ValueError(f"plan ref has duplicate filter_candidate_ids: {dupes}")
+
+    expected_order = sorted(filter_ids)
+    if filter_ids != expected_order:
+        raise ValueError(
+            f"plan ref accepted_filters are not in canonical order "
+            f"(sorted by filter_candidate_id): got {filter_ids}, "
+            f"expected {expected_order}"
+        )
+
+
+def _verify_seed_ingress_agreement(
+    records: Sequence[AcceptedFilterRecord], pc: ProjectedCandidate
+) -> None:
+    """Verify each seed's entry_point_id matches the projected ingress."""
+    for record in records:
+        if record.seed is not None and (
+            record.seed.entry_point_id != pc.canonical_ingress.entry_point_id
+        ):
+            raise ValueError(
+                f"accepted filter record '{record.filter_candidate_id}' "
+                f"seed entry_point_id '{record.seed.entry_point_id}' "
+                f"disagrees with projected ingress "
+                f"'{pc.canonical_ingress.entry_point_id}'"
+            )
+
+
+def _verify_outer_summaries(
+    ref: dict, records: Sequence[AcceptedFilterRecord], pc: ProjectedCandidate
+) -> None:
+    """Validate duplicated outer summaries rather than trusting them.
+
+    This keeps existing plan consumers compatible without creating a second,
+    mutable source of filter provenance.
+    """
+    canonical_qc = QualifiedCandidate(
+        projected=pc, accepted_filters=tuple(records), rank=0
+    )
+    expected_outer = {
+        "filter_candidate_id": canonical_qc.filter_candidate_id,
+        "accepted_rationale": canonical_qc.accepted_rationale,
+        "origins": [o.model_dump(mode="json") for o in canonical_qc.merged_origins],
+        "rejection_rationales": [
+            r.model_dump(mode="json") for r in canonical_qc.merged_rejection_rationales
+        ],
+        "pinned_entry_point": canonical_qc.generation_seed.pinned_entry_point,
+        "pinned_technique_ids": list(canonical_qc.generation_seed.pinned_technique_ids),
+        "pinned_technique_names": list(
+            canonical_qc.generation_seed.pinned_technique_names
+        ),
+    }
+    for field_name, expected in expected_outer.items():
+        if ref.get(field_name) != expected:
+            raise ValueError(
+                f"plan ref outer {field_name} does not match accepted filter records"
+            )
+
+
 def deserialize_qualified_candidate(ref: dict) -> DeserializedPlanRef:
     """Deserialize a persisted plan ref into a typed, verified contract.
 
@@ -1494,109 +1436,44 @@ def deserialize_qualified_candidate(ref: dict) -> DeserializedPlanRef:
     # Validate the projected candidate through model_validate.
     pc = deserialize_plan_ref(ref)
 
-    # Verify outer IDs agree with embedded projected candidate.
-    outer_candidate_id = ref.get("candidate_id", "")
-    if outer_candidate_id != pc.candidate_id:
-        raise ValueError(
-            f"plan ref outer candidate_id '{outer_candidate_id}' disagrees "
-            f"with embedded projected candidate_id '{pc.candidate_id}'"
-        )
-    outer_pattern_id = ref.get("pattern_id", "")
-    if outer_pattern_id != pc.pattern_id:
-        raise ValueError(
-            f"plan ref outer pattern_id '{outer_pattern_id}' disagrees "
-            f"with embedded projected pattern_id '{pc.pattern_id}'"
-        )
-    outer_entry_point_id = ref.get("entry_point_id", "")
-    if outer_entry_point_id != pc.canonical_ingress.entry_point_id:
-        raise ValueError(
-            f"plan ref outer entry_point_id '{outer_entry_point_id}' disagrees "
-            f"with embedded projected ingress entry_point_id "
-            f"'{pc.canonical_ingress.entry_point_id}'"
-        )
-
-    # Deserialize accepted filter records.
-    raw_filters = ref.get("accepted_filters", [])
-    if not raw_filters:
-        raise ValueError("plan ref has no accepted filter records")
-
-    records: list[AcceptedFilterRecord] = []
-    for raw in raw_filters:
-        record = AcceptedFilterRecord.from_dict(raw)
-        if record.seed is None:
-            raise ValueError(
-                f"accepted filter record '{record.filter_candidate_id}' is missing seed"
-            )
-        # The serialized summary fields are not independent evidence.  They
-        # must exactly be the canonical projection of the embedded seed.
-        if record != AcceptedFilterRecord.from_seed(record.seed):
-            raise ValueError(
-                f"accepted filter record '{record.filter_candidate_id}' does not "
-                "match its embedded FilteredSeed"
-            )
-        records.append(record)
-
-    # Reject duplicate filter_candidate_ids.
-    filter_ids = [r.filter_candidate_id for r in records]
-    if len(set(filter_ids)) != len(filter_ids):
-        from collections import Counter
-
-        dupes = sorted(cid for cid, count in Counter(filter_ids).items() if count > 1)
-        raise ValueError(f"plan ref has duplicate filter_candidate_ids: {dupes}")
-
-    # Reject noncanonical filter order — must be sorted by filter_candidate_id.
-    expected_order = sorted(filter_ids)
-    if filter_ids != expected_order:
-        raise ValueError(
-            f"plan ref accepted_filters are not in canonical order "
-            f"(sorted by filter_candidate_id): got {filter_ids}, "
-            f"expected {expected_order}"
-        )
-
-    # Verify each seed's entry_point_id matches the projected ingress.
-    for record in records:
-        if record.seed is not None and (
-            record.seed.entry_point_id != pc.canonical_ingress.entry_point_id
-        ):
-            raise ValueError(
-                f"accepted filter record '{record.filter_candidate_id}' "
-                f"seed entry_point_id '{record.seed.entry_point_id}' "
-                f"disagrees with projected ingress "
-                f"'{pc.canonical_ingress.entry_point_id}'"
-            )
+    _verify_outer_identity(ref, pc)
+    records = _deserialize_filter_records(ref.get("accepted_filters", []))
+    _verify_canonical_filter_ids(records)
+    _verify_seed_ingress_agreement(records, pc)
 
     rank = ref.get("rank", 0)
-
-    # Validate duplicated outer summaries rather than trusting them.  This
-    # keeps existing plan consumers compatible without creating a second,
-    # mutable source of filter provenance.
-    canonical_qc = QualifiedCandidate(
-        projected=pc, accepted_filters=tuple(records), rank=rank
-    )
-    expected_outer = {
-        "filter_candidate_id": canonical_qc.filter_candidate_id,
-        "accepted_rationale": canonical_qc.accepted_rationale,
-        "origins": [o.model_dump(mode="json") for o in canonical_qc.merged_origins],
-        "rejection_rationales": [
-            r.model_dump(mode="json") for r in canonical_qc.merged_rejection_rationales
-        ],
-        "pinned_entry_point": canonical_qc.generation_seed.pinned_entry_point,
-        "pinned_technique_ids": list(canonical_qc.generation_seed.pinned_technique_ids),
-        "pinned_technique_names": list(
-            canonical_qc.generation_seed.pinned_technique_names
-        ),
-    }
-    for field_name, expected in expected_outer.items():
-        if ref.get(field_name) != expected:
-            raise ValueError(
-                f"plan ref outer {field_name} does not match accepted filter records"
-            )
+    _verify_outer_summaries(ref, records, pc)
 
     return DeserializedPlanRef(
         projected=pc,
         accepted_filters=tuple(records),
         rank=rank,
     )
+
+
+def _find_trusted_record(
+    trusted_catalog: Sequence[dict[str, Any]], pattern_id: str
+) -> dict[str, Any] | None:
+    """Locate the matching record in the COMPLETE trusted catalog by pattern ID."""
+    return next(
+        (record for record in trusted_catalog if record.get("id") == pattern_id),
+        None,
+    )
+
+
+def _expected_authoritative_pin(
+    trusted_catalog: Sequence[dict[str, Any]],
+    taxonomy_resolver: Any,
+    expected_catalog_pin: str | None,
+) -> str:
+    """Resolve the authoritative catalog pin, computing it when not supplied."""
+    if expected_catalog_pin is None:
+        from asago_scenario_generator.pipeline.projection_qualification import (
+            compute_authoritative_catalog_pin,
+        )
+
+        return compute_authoritative_catalog_pin(trusted_catalog, taxonomy_resolver)
+    return expected_catalog_pin
 
 
 def revalidate_qualified_candidate(
@@ -1633,40 +1510,29 @@ def revalidate_qualified_candidate(
     from asago_scenario_generator.pipeline.projection import (
         validate_projected_candidate,
     )
-    from asago_scenario_generator.pipeline.projection_qualification import (
-        compute_authoritative_catalog_pin,
-    )
 
     deserialized = deserialize_qualified_candidate(ref)
 
-    # Locate the matching record in the COMPLETE trusted catalog, then use
-    # the direct validation contract.  Do not bounded-reproject: an exact
-    # binding variant can validly sit beyond any chosen projection budget.
+    # Use the direct validation contract.  Do not bounded-reproject: an
+    # exact binding variant can validly sit beyond any chosen projection
+    # budget.
     trusted_pattern_id = deserialized.pattern_id
-    trusted_record = next(
-        (
-            record
-            for record in trusted_catalog
-            if record.get("id") == trusted_pattern_id
-        ),
-        None,
-    )
+    trusted_record = _find_trusted_record(trusted_catalog, trusted_pattern_id)
     if trusted_record is None:
         raise ValueError(
             f"authoritative drift: pattern '{trusted_pattern_id}' not found "
             f"in trusted catalog"
         )
 
-    if expected_catalog_pin is None:
-        expected_catalog_pin = compute_authoritative_catalog_pin(
-            trusted_catalog, taxonomy_resolver
-        )
+    pin = _expected_authoritative_pin(
+        trusted_catalog, taxonomy_resolver, expected_catalog_pin
+    )
     validated = validate_projected_candidate(
         deserialized.projected.model_dump(mode="json"),
         snapshot,
         trusted_record,
         taxonomy_resolver,
-        expected_catalog_pin=expected_catalog_pin,
+        expected_catalog_pin=pin,
     )
     if validated != deserialized.projected:
         raise ValueError(
@@ -1767,6 +1633,142 @@ class CoverageSummary:
         }
 
 
+def _quarantine_gap(target: CoverageTarget, stage_ledger: StageLedger) -> QualityGap:
+    """Admission-failure gap with the exact quarantined (or generated) candidate IDs."""
+    ep_id = target.entry_point_id
+    quarantined_cids = stage_ledger.candidate_ids_for_stage(ep_id, STAGE_QUARANTINE)
+    if not quarantined_cids:
+        # Fallback to candidates that reached generation.
+        quarantined_cids = stage_ledger.candidate_ids_for_stage(ep_id, STAGE_GENERATION)
+    return QualityGap(
+        entry_point_id=ep_id,
+        entry_point_name=target.name,
+        reason=CoverageGapReason.ADMISSION_FAILURE,
+        candidate_ids=quarantined_cids,
+        detail="Generated scenario(s) quarantined during validation.",
+    )
+
+
+def _projection_limitation_gap(target: CoverageTarget) -> QualityGap:
+    """Budget-omission gap for a target excluded by projection allocation."""
+    return QualityGap(
+        entry_point_id=target.entry_point_id,
+        entry_point_name=target.name,
+        reason=CoverageGapReason.PROJECTION_LIMITATION,
+        candidate_ids=[],
+        detail="Target omitted by projection budget allocation.",
+    )
+
+
+def _furthest_stage_gap(
+    target: CoverageTarget, stage_ledger: StageLedger
+) -> tuple[QualityGap, StageEvent] | None:
+    """Gap attributed to the furthest actual stage event for a target."""
+    ep_id = target.entry_point_id
+    furthest = stage_ledger.furthest_event(ep_id)
+    if furthest is None:
+        return None
+    reason = _STAGE_TO_GAP_REASON.get(furthest.stage, CoverageGapReason.NO_SEED)
+    gap = QualityGap(
+        entry_point_id=ep_id,
+        entry_point_name=target.name,
+        reason=reason,
+        candidate_ids=stage_ledger.candidate_ids_for_stage(ep_id, furthest.stage),
+        detail=furthest.detail,
+    )
+    return gap, furthest
+
+
+def _no_evidence_gap(target: CoverageTarget, uncovered: bool) -> QualityGap:
+    """No-seed gap for a target with no stage ledger evidence."""
+    detail = (
+        "No seed or candidate was produced for this target."
+        if uncovered
+        else "No stage evidence recorded for this target."
+    )
+    return QualityGap(
+        entry_point_id=target.entry_point_id,
+        entry_point_name=target.name,
+        reason=CoverageGapReason.NO_SEED,
+        candidate_ids=[],
+        detail=detail,
+    )
+
+
+def _categorize_furthest_gap(
+    furthest: StageEvent,
+    gap: QualityGap,
+    structural_gaps: list[dict],
+    selection_limitations: list[dict],
+    runtime_gaps: list[dict],
+    quarantine_failures: list[dict],
+) -> None:
+    """Route a stage-attributed gap into its coverage summary category."""
+    if furthest.stage in (STAGE_RULES, STAGE_FILTER, STAGE_PROJECTION):
+        structural_gaps.append(gap.to_dict())
+    elif furthest.stage == STAGE_SELECTION:
+        selection_limitations.append(gap.to_dict())
+    elif furthest.stage == STAGE_GENERATION:
+        runtime_gaps.append(gap.to_dict())
+    elif furthest.stage in (STAGE_ADMISSION, STAGE_QUARANTINE):
+        quarantine_failures.append(gap.to_dict())
+
+
+def _policy_exclusion_dicts(universe: CoverageUniverse) -> list[dict]:
+    """Serialized policy exclusions from the coverage universe."""
+    return [
+        {
+            "entry_point_id": exc.entry_point_id,
+            "name": exc.name,
+            "reason": exc.reason.value,
+        }
+        for exc in universe.excluded_targets
+    ]
+
+
+def _normalize_gap_sets(
+    generated_target_ids: set[str] | None,
+    quarantined_target_ids: set[str] | None,
+    projection_limitation_target_ids: set[str] | None,
+) -> tuple[set[str], set[str], set[str]]:
+    """Normalize optional target-ID sets to non-None sets."""
+    return (
+        generated_target_ids or set(),
+        quarantined_target_ids or set(),
+        projection_limitation_target_ids or set(),
+    )
+
+
+def _record_ledger_gap(
+    target: CoverageTarget,
+    stage_ledger: StageLedger,
+    selection_result: SelectionResult,
+    gaps: list[QualityGap],
+    structural_gaps: list[dict],
+    selection_limitations: list[dict],
+    runtime_gaps: list[dict],
+    quarantine_failures: list[dict],
+) -> None:
+    """Record the furthest-stage gap for a target with no special disposition."""
+    furthest_gap = _furthest_stage_gap(target, stage_ledger)
+    if furthest_gap is not None:
+        gap, furthest = furthest_gap
+        gaps.append(gap)
+        _categorize_furthest_gap(
+            furthest,
+            gap,
+            structural_gaps,
+            selection_limitations,
+            runtime_gaps,
+            quarantine_failures,
+        )
+    else:
+        uncovered = target.entry_point_id in selection_result.uncovered_target_ids
+        gap = _no_evidence_gap(target, uncovered)
+        gaps.append(gap)
+        structural_gaps.append(gap.to_dict())
+
+
 def emit_quality_gaps(
     universe: CoverageUniverse,
     stage_ledger: StageLedger,
@@ -1796,13 +1798,12 @@ def emit_quality_gaps(
     Returns:
         Tuple of (quality_gaps, coverage_summary).
     """
-    generated = generated_target_ids or set()
-    quarantined = quarantined_target_ids or set()
-    proj_limitations = projection_limitation_target_ids or set()
+    generated, quarantined, proj_limitations = _normalize_gap_sets(
+        generated_target_ids, quarantined_target_ids, projection_limitation_target_ids
+    )
 
     gaps: list[QualityGap] = []
     covered: list[str] = []
-    policy_exclusions: list[dict] = []
     structural_gaps: list[dict] = []
     selection_limitations: list[dict] = []
     runtime_gaps: list[dict] = []
@@ -1811,107 +1812,37 @@ def emit_quality_gaps(
 
     for target in universe.feasible_targets:
         ep_id = target.entry_point_id
-        target_name = target.name
 
         if ep_id in generated:
             covered.append(ep_id)
             continue
 
         if ep_id in quarantined:
-            # Exact quarantined candidate IDs from the ledger.
-            quarantined_cids = stage_ledger.candidate_ids_for_stage(
-                ep_id, STAGE_QUARANTINE
-            )
-            if not quarantined_cids:
-                # Fallback to candidates that reached generation.
-                quarantined_cids = stage_ledger.candidate_ids_for_stage(
-                    ep_id, STAGE_GENERATION
-                )
-            gap = QualityGap(
-                entry_point_id=ep_id,
-                entry_point_name=target_name,
-                reason=CoverageGapReason.ADMISSION_FAILURE,
-                candidate_ids=quarantined_cids,
-                detail="Generated scenario(s) quarantined during validation.",
-            )
+            gap = _quarantine_gap(target, stage_ledger)
             gaps.append(gap)
             quarantine_failures.append(gap.to_dict())
             continue
 
         if ep_id in proj_limitations:
-            gap = QualityGap(
-                entry_point_id=ep_id,
-                entry_point_name=target_name,
-                reason=CoverageGapReason.PROJECTION_LIMITATION,
-                candidate_ids=[],
-                detail="Target omitted by projection budget allocation.",
-            )
+            gap = _projection_limitation_gap(target)
             gaps.append(gap)
             projection_lims.append(gap.to_dict())
             continue
 
-        # Use actual stage ledger evidence for attribution.
-        furthest = stage_ledger.furthest_event(ep_id)
-
-        if furthest is not None:
-            reason = _STAGE_TO_GAP_REASON.get(furthest.stage, CoverageGapReason.NO_SEED)
-            # Exact candidate IDs from the furthest stage.
-            stage_cids = stage_ledger.candidate_ids_for_stage(ep_id, furthest.stage)
-            gap = QualityGap(
-                entry_point_id=ep_id,
-                entry_point_name=target_name,
-                reason=reason,
-                candidate_ids=stage_cids,
-                detail=furthest.detail,
-            )
-            gaps.append(gap)
-
-            # Categorize.
-            if furthest.stage in (STAGE_RULES, STAGE_FILTER, STAGE_PROJECTION):
-                structural_gaps.append(gap.to_dict())
-            elif furthest.stage == STAGE_SELECTION:
-                selection_limitations.append(gap.to_dict())
-            elif furthest.stage == STAGE_GENERATION:
-                runtime_gaps.append(gap.to_dict())
-            elif furthest.stage in (STAGE_ADMISSION, STAGE_QUARANTINE):
-                quarantine_failures.append(gap.to_dict())
-        elif ep_id in selection_result.uncovered_target_ids:
-            # Target had no candidates at all (no stage events).
-            gap = QualityGap(
-                entry_point_id=ep_id,
-                entry_point_name=target_name,
-                reason=CoverageGapReason.NO_SEED,
-                candidate_ids=[],
-                detail="No seed or candidate was produced for this target.",
-            )
-            gaps.append(gap)
-            structural_gaps.append(gap.to_dict())
-        else:
-            # No stage events and not uncovered — shouldn't happen, but
-            # emit a no_seed gap rather than fabricating coverage.
-            gap = QualityGap(
-                entry_point_id=ep_id,
-                entry_point_name=target_name,
-                reason=CoverageGapReason.NO_SEED,
-                candidate_ids=[],
-                detail="No stage evidence recorded for this target.",
-            )
-            gaps.append(gap)
-            structural_gaps.append(gap.to_dict())
-
-    # Policy exclusions from the universe.
-    for exc in universe.excluded_targets:
-        policy_exclusions.append(
-            {
-                "entry_point_id": exc.entry_point_id,
-                "name": exc.name,
-                "reason": exc.reason.value,
-            }
+        _record_ledger_gap(
+            target,
+            stage_ledger,
+            selection_result,
+            gaps,
+            structural_gaps,
+            selection_limitations,
+            runtime_gaps,
+            quarantine_failures,
         )
 
     summary = CoverageSummary(
         covered_feasible=covered,
-        policy_exclusions=policy_exclusions,
+        policy_exclusions=_policy_exclusion_dicts(universe),
         structural_gaps=structural_gaps,
         selection_limitations=selection_limitations,
         runtime_generation_gaps=runtime_gaps,
