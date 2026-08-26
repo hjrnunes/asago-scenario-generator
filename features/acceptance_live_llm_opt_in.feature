@@ -31,16 +31,17 @@ Feature: Acceptance live LLM opt-in
   # Acceptance live LLM opt-in ALO-03 other values do not authorize live work
   Scenario Outline: Acceptance live LLM opt-in ALO-03 other values do not authorize live work
     Given ASAGO_SCENARIO_GENERATOR_QA_PIPELINE is "<value>"
+    And the live-LLM opt-in value is observed as "<expected_value>"
     And live LLM endpoint variables are configured
     When the isolated acceptance fixture is executed
     Then the live-LLM scenario is not executed
     And the live-LLM scenario is reported as skipped because ASAGO_SCENARIO_GENERATOR_QA_PIPELINE is not "1"
 
     Examples:
-      | value |
-      | 0     |
-      | true  |
-      | yes   |
+      | value | expected_value |
+      | 0     | 0              |
+      | true  | true           |
+      | yes   | yes            |
 
   # Acceptance live LLM opt-in ALO-04 opt-in without an endpoint fails visibly
   Scenario: Acceptance live LLM opt-in ALO-04 opt-in without an endpoint fails visibly
