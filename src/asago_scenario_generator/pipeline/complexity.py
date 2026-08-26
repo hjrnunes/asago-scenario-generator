@@ -47,6 +47,7 @@ from asago_scenario_generator.models.attack_tree import (
 from asago_scenario_generator.models.complexity import (
     COMPLEXITY_RULE_TABLE,
     COMPLEXITY_RULE_VERSION,
+    AdmissionStage,
     AssessmentPhase,
     AttackComplexityAssessment,
     Call0RegenerationRouting,
@@ -399,97 +400,171 @@ def evaluate_capability_admission(
     relabelled.  Requesting a phase whose assessment has not been
     computed fails closed to the quarantine fallback owned by cmps.5.
     """
-    phase_assessment = (
-        assessment.candidate_lower_bound
-        if phase == "candidate_lower_bound"
-        else assessment.final
-    )
+    phase_assessment = _phase_assessment(assessment, phase)
     if phase_assessment is None:
         return CapabilityAdmissionDecision(
             admitted=False,
-            violation=CapabilityAdmissionViolation(
-                rule_id="complexity_assessment_phase_unavailable",
-                phase=phase,
-                rule_version=assessment.rule_version,
-                actor_capability_level=actor_capability_level,
-                required_level=None,
-                triggering_reasons=(),
-                routing=QuarantineRouting(
-                    feedback=(
-                        f"No '{phase}' attack-complexity assessment exists "
-                        f"(rule v{assessment.rule_version}); admission cannot "
-                        "be established — fail closed to the quarantine "
-                        "fallback owned by cmps.5."
-                    ),
-                ),
-            ),
+            violation=_quarantine_violation(assessment, phase, actor_capability_level),
         )
 
     required = phase_assessment.required_level
     if capability_level_rank(actor_capability_level) >= capability_level_rank(required):
         return CapabilityAdmissionDecision(admitted=True)
 
-    triggering = tuple(
+    return CapabilityAdmissionDecision(
+        admitted=False,
+        violation=_below_capability_violation(
+            actor_capability_level, phase_assessment, phase, assessment.rule_version
+        ),
+    )
+
+
+def _phase_assessment(
+    assessment: AttackComplexityAssessment, phase: AssessmentPhase
+) -> ComplexityPhaseAssessment | None:
+    """Assessment for the requested phase, or None when not computed."""
+    if phase == "candidate_lower_bound":
+        return assessment.candidate_lower_bound
+    return assessment.final
+
+
+def _quarantine_violation(
+    assessment: AttackComplexityAssessment,
+    phase: AssessmentPhase,
+    actor_capability_level: CapabilityLevel,
+) -> CapabilityAdmissionViolation:
+    """Fail-closed violation when the requested phase was never computed."""
+    return CapabilityAdmissionViolation(
+        rule_id="complexity_assessment_phase_unavailable",
+        phase=phase,
+        rule_version=assessment.rule_version,
+        actor_capability_level=actor_capability_level,
+        required_level=None,
+        triggering_reasons=(),
+        routing=QuarantineRouting(
+            feedback=(
+                f"No '{phase}' attack-complexity assessment exists "
+                f"(rule v{assessment.rule_version}); admission cannot "
+                "be established — fail closed to the quarantine "
+                "fallback owned by cmps.5."
+            ),
+        ),
+    )
+
+
+def _triggering_reasons(
+    phase_assessment: ComplexityPhaseAssessment, required: CapabilityLevel
+) -> tuple[ComplexityReason, ...]:
+    """Reasons establishing the required level, in rule-table order."""
+    return tuple(
         reason
         for reason in phase_assessment.reasons
         if reason.required_level == required
     )
-    rule_ids = ", ".join(reason.rule_id for reason in triggering)
-    stage = earliest_responsible_stage(triggering)
-    routing: ComplexityAdmissionRouting
+
+
+def _reason_rule_ids(reasons: tuple[ComplexityReason, ...]) -> str:
+    """Comma-joined rule IDs for admission feedback messages."""
+    return ", ".join(reason.rule_id for reason in reasons)
+
+
+def _call0_feedback(
+    actor_capability_level: CapabilityLevel,
+    required: CapabilityLevel,
+    rule_ids: str,
+    phase: AssessmentPhase,
+    rule_version: str,
+) -> str:
+    """Feedback for the bounded Call 0 actor-regeneration retry."""
+    if phase == "candidate_lower_bound":
+        return (
+            f"Actor capability '{actor_capability_level}' is below the "
+            f"candidate lower bound '{required}' (complexity rule "
+            f"v{rule_version}; triggered by: {rule_ids}). "
+            f"Regenerate the actor with capability_level >= '{required}' "
+            "through the bounded Call 0 retry loop, or reject the "
+            "candidate. Capability is fixed at construction; never "
+            "relabel an existing actor."
+        )
+    return (
+        f"Actor capability '{actor_capability_level}' is below the "
+        f"final required level '{required}' (complexity rule "
+        f"v{rule_version}; triggered by: {rule_ids}). "
+        "The triggering evidence is established at Call 0 actor "
+        "generation: rerun the bounded Call 0 retry loop to "
+        f"construct an actor with capability_level >= '{required}' "
+        "(or compatible access provenance). The realized actor is "
+        "immutable; never relabel it. Retry exhaustion falls back "
+        "to quarantine owned by cmps.5."
+    )
+
+
+def _realization_retry_feedback(
+    actor_capability_level: CapabilityLevel,
+    required: CapabilityLevel,
+    rule_ids: str,
+    rule_version: str,
+) -> str:
+    """Feedback for the attack-tree realization retry."""
+    return (
+        f"Actor capability '{actor_capability_level}' is below the "
+        f"final required level '{required}' (complexity rule "
+        f"v{rule_version}; triggered by: {rule_ids}). "
+        "The complexity was introduced by typed realized actions "
+        "after Call 0: retry attack-tree realization for a simpler "
+        "attack that does not trigger these rules. The actor is "
+        "immutable; never relabel or upgrade it. Retry exhaustion "
+        "falls back to quarantine owned by cmps.5."
+    )
+
+
+def _violation_routing(
+    actor_capability_level: CapabilityLevel,
+    required: CapabilityLevel,
+    rule_ids: str,
+    phase: AssessmentPhase,
+    rule_version: str,
+    stage: AdmissionStage,
+) -> ComplexityAdmissionRouting:
+    """Bounded retry routing for a below-capability violation."""
     if stage == "call0_actor_generation":
-        if phase == "candidate_lower_bound":
-            feedback = (
-                f"Actor capability '{actor_capability_level}' is below the "
-                f"candidate lower bound '{required}' (complexity rule "
-                f"v{assessment.rule_version}; triggered by: {rule_ids}). "
-                f"Regenerate the actor with capability_level >= '{required}' "
-                "through the bounded Call 0 retry loop, or reject the "
-                "candidate. Capability is fixed at construction; never "
-                "relabel an existing actor."
-            )
-        else:
-            feedback = (
-                f"Actor capability '{actor_capability_level}' is below the "
-                f"final required level '{required}' (complexity rule "
-                f"v{assessment.rule_version}; triggered by: {rule_ids}). "
-                "The triggering evidence is established at Call 0 actor "
-                "generation: rerun the bounded Call 0 retry loop to "
-                f"construct an actor with capability_level >= '{required}' "
-                "(or compatible access provenance). The realized actor is "
-                "immutable; never relabel it. Retry exhaustion falls back "
-                "to quarantine owned by cmps.5."
-            )
-        routing = Call0RegenerationRouting(feedback=feedback)
-    elif stage == "attack_tree_realization":
-        routing = RealizationRetryRouting(
-            feedback=(
-                f"Actor capability '{actor_capability_level}' is below the "
-                f"final required level '{required}' (complexity rule "
-                f"v{assessment.rule_version}; triggered by: {rule_ids}). "
-                "The complexity was introduced by typed realized actions "
-                "after Call 0: retry attack-tree realization for a simpler "
-                "attack that does not trigger these rules. The actor is "
-                "immutable; never relabel or upgrade it. Retry exhaustion "
-                "falls back to quarantine owned by cmps.5."
+        return Call0RegenerationRouting(
+            feedback=_call0_feedback(
+                actor_capability_level, required, rule_ids, phase, rule_version
             )
         )
-    else:
-        # Unreachable in rule table v1: no rule is quarantine-owned, and the
-        # violation model rejects below-complexity routing whose stage does
-        # not match the earliest responsible stage implied by the reasons.
-        raise ValueError(
-            f"no bounded retry stage owns the triggering rules: {rule_ids}"
+    if stage == "attack_tree_realization":
+        return RealizationRetryRouting(
+            feedback=_realization_retry_feedback(
+                actor_capability_level, required, rule_ids, rule_version
+            )
         )
-    return CapabilityAdmissionDecision(
-        admitted=False,
-        violation=CapabilityAdmissionViolation(
-            rule_id="actor_capability_below_attack_complexity",
-            phase=phase,
-            rule_version=assessment.rule_version,
-            actor_capability_level=actor_capability_level,
-            required_level=required,
-            triggering_reasons=triggering,
-            routing=routing,
-        ),
+    # Unreachable in rule table v1: no rule is quarantine-owned, and the
+    # violation model rejects below-complexity routing whose stage does
+    # not match the earliest responsible stage implied by the reasons.
+    raise ValueError(f"no bounded retry stage owns the triggering rules: {rule_ids}")
+
+
+def _below_capability_violation(
+    actor_capability_level: CapabilityLevel,
+    phase_assessment: ComplexityPhaseAssessment,
+    phase: AssessmentPhase,
+    rule_version: str,
+) -> CapabilityAdmissionViolation:
+    """Typed violation routed to the earliest responsible retry stage."""
+    required = phase_assessment.required_level
+    triggering = _triggering_reasons(phase_assessment, required)
+    rule_ids = _reason_rule_ids(triggering)
+    stage = earliest_responsible_stage(triggering)
+    routing = _violation_routing(
+        actor_capability_level, required, rule_ids, phase, rule_version, stage
+    )
+    return CapabilityAdmissionViolation(
+        rule_id="actor_capability_below_attack_complexity",
+        phase=phase,
+        rule_version=rule_version,
+        actor_capability_level=actor_capability_level,
+        required_level=required,
+        triggering_reasons=triggering,
+        routing=routing,
     )
