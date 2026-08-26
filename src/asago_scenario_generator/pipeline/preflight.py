@@ -84,62 +84,71 @@ def _fact_key(reference: AuthoritativeFactReference) -> tuple[object, ...]:
     )
 
 
+def _group_supplied_readings(
+    supplied: Sequence[EvaluatedFactEvidence],
+) -> dict[tuple[object, ...], list[EvaluatedFactEvidence]]:
+    """Group supplied readings by fact key, collapsing identical duplicates."""
+    supplied_by_key: dict[tuple[object, ...], list[EvaluatedFactEvidence]] = {}
+    for item in supplied:
+        readings = supplied_by_key.setdefault(_fact_key(item.fact), [])
+        if item not in readings:
+            readings.append(item)
+    return supplied_by_key
+
+
+def _state_for_required(
+    reference: AuthoritativeFactReference,
+    readings: tuple[EvaluatedFactEvidence, ...],
+) -> ProjectionFactState:
+    """Classification for a required fact: absent, contradictory, or reading."""
+    if not readings:
+        return ProjectionFactState(fact=reference, status="absent", required=True)
+    if len(readings) > 1:
+        return ProjectionFactState(
+            fact=reference,
+            status="contradictory",
+            required=True,
+            readings=readings,
+        )
+    reading = readings[0]
+    return ProjectionFactState(
+        fact=reference,
+        status=reading.status,
+        value=reading.value,
+        required=True,
+        readings=readings,
+    )
+
+
+def _state_for_obsolete(
+    readings: tuple[EvaluatedFactEvidence, ...],
+) -> ProjectionFactState:
+    """Classification for a supplied fact that no required fact references."""
+    reading = readings[0]
+    return ProjectionFactState(
+        fact=reading.fact,
+        status="contradictory" if len(readings) > 1 else "stale",
+        value=None if len(readings) > 1 else reading.value,
+        required=False,
+        readings=readings,
+    )
+
+
 def classify_fact_readings(
     required: Sequence[AuthoritativeFactReference],
     supplied: Sequence[EvaluatedFactEvidence],
 ) -> tuple[ProjectionFactState, ...]:
     """Classify required and obsolete readings without hiding conflicts."""
     required_by_key = {_fact_key(reference): reference for reference in required}
-    supplied_by_key: dict[tuple[object, ...], list[EvaluatedFactEvidence]] = {}
-    for item in supplied:
-        readings = supplied_by_key.setdefault(_fact_key(item.fact), [])
-        if item not in readings:
-            readings.append(item)
+    supplied_by_key = _group_supplied_readings(supplied)
 
     states: list[ProjectionFactState] = []
-    for key, reference in sorted(required_by_key.items()):
-        readings = tuple(supplied_by_key.get(key, ()))
-        if not readings:
-            states.append(
-                ProjectionFactState(
-                    fact=reference,
-                    status="absent",
-                    required=True,
-                )
-            )
-        elif len(readings) > 1:
-            states.append(
-                ProjectionFactState(
-                    fact=reference,
-                    status="contradictory",
-                    required=True,
-                    readings=readings,
-                )
-            )
-        else:
-            reading = readings[0]
-            states.append(
-                ProjectionFactState(
-                    fact=reference,
-                    status=reading.status,
-                    value=reading.value,
-                    required=True,
-                    readings=readings,
-                )
-            )
+    for reference in sorted(required_by_key.values(), key=_fact_key):
+        readings = tuple(supplied_by_key.get(_fact_key(reference), ()))
+        states.append(_state_for_required(reference, readings))
 
     for key in sorted(set(supplied_by_key) - set(required_by_key)):
-        readings = tuple(supplied_by_key[key])
-        reading = readings[0]
-        states.append(
-            ProjectionFactState(
-                fact=reading.fact,
-                status="contradictory" if len(readings) > 1 else "stale",
-                value=None if len(readings) > 1 else reading.value,
-                required=False,
-                readings=readings,
-            )
-        )
+        states.append(_state_for_obsolete(tuple(supplied_by_key[key])))
     return tuple(states)
 
 
