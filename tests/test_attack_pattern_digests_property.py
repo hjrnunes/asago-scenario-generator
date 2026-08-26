@@ -5,11 +5,19 @@ from __future__ import annotations
 import json
 import unicodedata
 
-from hypothesis import given, settings, strategies as st
+from hypothesis import assume, given, settings, strategies as st
 
 from asago_scenario_generator.data.canonical import _nfc
 from asago_scenario_generator.data.catalog_lineage_snapshot import (
     compute_source_catalog_digest,
+)
+from asago_scenario_generator.models.attack_pattern_contracts import (
+    AllCondition,
+    AuthoritativeFactReference,
+    EqualityCondition,
+    EvaluatedFactEvidence,
+    NotCondition,
+    evaluate_condition,
 )
 from asago_scenario_generator.models.attack_pattern_digests import (
     _canonical_json as digest_canonical_json,
@@ -105,3 +113,87 @@ def test_source_catalog_digest_is_order_insensitive(
         [filename],
     )
     assert other != first
+
+
+def _fact(fact_id: str) -> AuthoritativeFactReference:
+    return AuthoritativeFactReference(
+        namespace="profile",
+        fact_id=fact_id,
+        value_type="string",
+        property_path=(),
+    )
+
+
+def _equality(fact_id: str, value: str) -> EqualityCondition:
+    return EqualityCondition(
+        op="equality",
+        schema_version="1",
+        fact=_fact(fact_id),
+        value=value,
+    )
+
+
+def _evidence(
+    fact_id: str,
+    status: str,
+    value: str | None,
+) -> EvaluatedFactEvidence:
+    return EvaluatedFactEvidence(
+        fact=_fact(fact_id),
+        status=status,  # type: ignore[arg-type]
+        value=value,
+    )
+
+
+_STATUSES = st.sampled_from(("present", "absent", "unknown"))
+_VALUES = st.text(
+    alphabet="abcdefghijklmnopqrstuvwxyz",
+    min_size=1,
+    max_size=8,
+)
+_FACT_IDS = st.text(
+    alphabet="abcdefghijklmnopqrstuvwxyz",
+    min_size=1,
+    max_size=8,
+)
+
+
+@settings(max_examples=_MAX_EXAMPLES, deadline=None)
+@given(
+    left_id=_FACT_IDS,
+    right_id=_FACT_IDS,
+    left_value=_VALUES,
+    right_value=_VALUES,
+    left_status=_STATUSES,
+    right_status=_STATUSES,
+)
+def test_condition_evaluation_is_order_insensitive_and_double_negation_identity(
+    left_id: str,
+    right_id: str,
+    left_value: str,
+    right_value: str,
+    left_status: str,
+    right_status: str,
+) -> None:
+    """Evidence order does not change a conjunction; not-not preserves the verdict."""
+    assume(left_id != right_id)
+    left_ev_value = left_value if left_status == "present" else None
+    right_ev_value = right_value if right_status == "present" else None
+    left = _equality(left_id, left_value)
+    right = _equality(right_id, right_value)
+    conjunction = AllCondition(
+        op="all",
+        schema_version="1",
+        operands=(left, right),
+    )
+    evidence = (
+        _evidence(left_id, left_status, left_ev_value),
+        _evidence(right_id, right_status, right_ev_value),
+    )
+    reversed_evidence = tuple(reversed(evidence))
+    first = evaluate_condition(conjunction, evidence)
+    second = evaluate_condition(conjunction, reversed_evidence)
+    assert first == second
+    negated = NotCondition(op="not", schema_version="1", operand=conjunction)
+    double_negated = NotCondition(op="not", schema_version="1", operand=negated)
+    assert evaluate_condition(double_negated, evidence) == first

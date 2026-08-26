@@ -11,7 +11,7 @@ cross-checked exactly against this rendering.
 
 from __future__ import annotations
 
-from asago_scenario_generator.models.attack_pattern import CanonicalAttackChain
+from asago_scenario_generator.models.attack_pattern_chain import CanonicalAttackChain
 from asago_scenario_generator.models.attack_tree import AttackTree, AttackTreeNode
 from asago_scenario_generator.models.projection_envelope import (
     ProjectionEnvelopeBlock,

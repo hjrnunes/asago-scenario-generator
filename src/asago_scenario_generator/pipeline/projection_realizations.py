@@ -11,7 +11,7 @@ from __future__ import annotations
 from itertools import pairwise
 from typing import TYPE_CHECKING, Any
 
-from asago_scenario_generator.models.attack_pattern import (
+from asago_scenario_generator.models.attack_pattern_projection import (
     EntryPointResourceReference,
     IntegrationResourceReference,
     ToolResourceReference,

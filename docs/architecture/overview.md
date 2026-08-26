@@ -49,7 +49,9 @@ Authoritative attack-pattern models are split by responsibility
 (`attack_pattern_contracts`, `attack_pattern_chain`,
 `attack_pattern_projection`, `attack_pattern_digests`,
 `attack_pattern_validation`) behind the historical
-`models.attack_pattern` façade. Catalog-lineage source-catalog pinning lives
+`models.attack_pattern` façade. Projection, preflight, runner, catalog
+qualification, taxonomy pins, and the behavior compiler consume those
+leaves rather than the façade. Catalog-lineage source-catalog pinning lives
 in `data.catalog_lineage_snapshot` so normal lineage validation does not
 consult the mutable live catalog. Canonical realization derivation lives
 in `models.realization`; the envelope block lives in

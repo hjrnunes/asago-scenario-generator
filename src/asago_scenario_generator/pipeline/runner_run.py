@@ -43,7 +43,9 @@ from asago_scenario_generator.manifest import (
     write_manifest_sentinel,
     write_started_manifest,
 )
-from asago_scenario_generator.models.attack_pattern import validate_attack_pattern
+from asago_scenario_generator.models.attack_pattern_validation import (
+    validate_attack_pattern,
+)
 from asago_scenario_generator.models.capability_profile import (
     ZONE_NAMES,
     CapabilityProfile,

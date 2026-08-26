@@ -6,7 +6,7 @@ from __future__ import annotations
 # models package while resolving this import; doing it in the opposite order
 # would let models.projection_envelope observe a partially initialized
 # projection_contracts module.
-from asago_scenario_generator.models.attack_pattern import (  # noqa: F401
+from asago_scenario_generator.models.attack_pattern_chain import (  # noqa: F401
     AttackPattern as _ModelImportOrderGuard,
 )
 
