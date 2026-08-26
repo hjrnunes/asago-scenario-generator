@@ -16,7 +16,7 @@ from asago_scenario_generator.models.scenario import (
     NarrativeLayer,
     NarrativeStep,
 )
-from asago_scenario_generator.pipeline.generate.narrative import (
+from asago_scenario_generator.pipeline.generate.narrative_access import (
     validate_narrative_access_realization,
 )
 from tests.helpers.realization_helper import make_realizations

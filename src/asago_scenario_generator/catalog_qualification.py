@@ -26,7 +26,10 @@ from asago_scenario_generator.manifest import (
     RunManifest,
     RunStatus,
 )
-from asago_scenario_generator.models.attack_pattern import Digest, EvaluatedFactEvidence
+from asago_scenario_generator.models.attack_pattern_contracts import (
+    Digest,
+    EvaluatedFactEvidence,
+)
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.models.scenario import ScenarioEnvelope
 from asago_scenario_generator.pipeline.coverage_planning import (

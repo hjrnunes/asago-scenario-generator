@@ -72,36 +72,6 @@ class NarrativeRealizationViolation:
     message: str
 
 
-def _missing_access_realization_violation() -> NarrativeRealizationViolation:
-    """Narrative without typed access provenance (cmps.6)."""
-    return NarrativeRealizationViolation(
-        rule="missing_access_realization",
-        message=(
-            "Narrative lacks typed access_realization — required "
-            "when actor access provenance is present (cmps.6)."
-        ),
-    )
-
-
-def _entry_point_mismatch_violation(
-    realization: NarrativeAccessRealization, access: ActorAccessProvenance
-) -> list[NarrativeRealizationViolation]:
-    """initial_entry_point_id mismatches."""
-    if realization.initial_entry_point_id != access.initial_entry_point_id:
-        return [
-            NarrativeRealizationViolation(
-                rule="realization_entry_point_mismatch",
-                message=(
-                    f"Narrative access_realization initial_entry_point_id "
-                    f"'{realization.initial_entry_point_id}' does not match "
-                    f"actor access provenance "
-                    f"'{access.initial_entry_point_id}'."
-                ),
-            )
-        ]
-    return []
-
-
 def _source_identity(
     typed_id: str | None,
     legacy_name: str | None,
@@ -110,10 +80,26 @@ def _source_identity(
     return typed_id if typed_id is not None else legacy_name
 
 
-def _source_id_mismatch(
-    realization: NarrativeAccessRealization, access: ActorAccessProvenance
-) -> list[NarrativeRealizationViolation]:
-    """Canonical or legacy source identity mismatch against provenance."""
+def _entry_point_violation(
+    realization: NarrativeAccessRealization,
+    access: ActorAccessProvenance,
+) -> NarrativeRealizationViolation | None:
+    if realization.initial_entry_point_id == access.initial_entry_point_id:
+        return None
+    return NarrativeRealizationViolation(
+        rule="realization_entry_point_mismatch",
+        message=(
+            "Narrative access_realization initial_entry_point_id "
+            f"'{realization.initial_entry_point_id}' does not match "
+            f"actor access provenance '{access.initial_entry_point_id}'."
+        ),
+    )
+
+
+def _source_id_violation(
+    realization: NarrativeAccessRealization,
+    access: ActorAccessProvenance,
+) -> NarrativeRealizationViolation | None:
     realization_source_id = _source_identity(
         realization.influence_source_id,
         realization.influence_source,
@@ -122,115 +108,116 @@ def _source_id_mismatch(
         access.influence_source_id,
         access.influence_source,
     )
-    if realization_source_id != access_source_id:
-        return [
-            NarrativeRealizationViolation(
-                rule="realization_influence_source_mismatch",
-                message=(
-                    f"Narrative access_realization influence_source "
-                    f"'{realization_source_id}' does not match actor "
-                    f"access provenance '{access_source_id}'."
-                ),
-            )
-        ]
-    return []
+    if realization_source_id == access_source_id:
+        return None
+    return NarrativeRealizationViolation(
+        rule="realization_influence_source_mismatch",
+        message=(
+            f"Narrative access_realization influence_source "
+            f"'{realization_source_id}' does not match actor "
+            f"access provenance '{access_source_id}'."
+        ),
+    )
 
 
-def _source_kind_mismatch(
-    realization: NarrativeAccessRealization, access: ActorAccessProvenance
-) -> list[NarrativeRealizationViolation]:
-    """Source-kind mismatch against actor provenance."""
-    if realization.influence_source_kind != access.influence_source_kind:
-        return [
-            NarrativeRealizationViolation(
-                rule="realization_influence_source_mismatch",
-                message=(
-                    "Narrative access_realization source kind does not match "
-                    "actor access provenance."
-                ),
-            )
-        ]
-    return []
-
-
-def _influence_source_violations(
-    realization: NarrativeAccessRealization, access: ActorAccessProvenance
-) -> list[NarrativeRealizationViolation]:
-    """Source identity and kind mismatches."""
-    return _source_id_mismatch(realization, access) + _source_kind_mismatch(
-        realization, access
+def _source_kind_violation(
+    realization: NarrativeAccessRealization,
+    access: ActorAccessProvenance,
+) -> NarrativeRealizationViolation | None:
+    if realization.influence_source_kind == access.influence_source_kind:
+        return None
+    return NarrativeRealizationViolation(
+        rule="realization_influence_source_mismatch",
+        message=(
+            "Narrative access_realization source kind does not match "
+            "actor access provenance."
+        ),
     )
 
 
 def _trust_boundary_violation(
-    realization: NarrativeAccessRealization, access: ActorAccessProvenance
-) -> list[NarrativeRealizationViolation]:
-    """trust_boundary_id mismatch."""
-    if realization.trust_boundary_id != access.trust_boundary_id:
-        return [
-            NarrativeRealizationViolation(
-                rule="realization_trust_boundary_mismatch",
-                message=(
-                    f"Narrative access_realization trust_boundary_id "
-                    f"'{realization.trust_boundary_id}' does not match actor "
-                    f"access provenance '{access.trust_boundary_id}'."
-                ),
-            )
-        ]
-    return []
+    realization: NarrativeAccessRealization,
+    access: ActorAccessProvenance,
+) -> NarrativeRealizationViolation | None:
+    if realization.trust_boundary_id == access.trust_boundary_id:
+        return None
+    return NarrativeRealizationViolation(
+        rule="realization_trust_boundary_mismatch",
+        message=(
+            f"Narrative access_realization trust_boundary_id "
+            f"'{realization.trust_boundary_id}' does not match actor "
+            f"access provenance '{access.trust_boundary_id}'."
+        ),
+    )
 
 
-def _step_not_found_violation(
-    realization: NarrativeAccessRealization, step_numbers: set[int]
-) -> list[NarrativeRealizationViolation]:
-    """responsible_step_number without a matching narrative step."""
-    if realization.responsible_step_number not in step_numbers:
-        return [
-            NarrativeRealizationViolation(
-                rule="realization_step_not_found",
-                message=(
-                    f"Narrative access_realization responsible_step_number "
-                    f"{realization.responsible_step_number} does not refer "
-                    f"to any narrative step (valid: {sorted(step_numbers)})."
-                ),
-            )
-        ]
-    return []
+def _responsible_step_violation(
+    narrative: NarrativeLayer,
+    realization: NarrativeAccessRealization,
+) -> NarrativeRealizationViolation | None:
+    step_numbers = {step.step_number for step in narrative.steps}
+    if realization.responsible_step_number in step_numbers:
+        return None
+    return NarrativeRealizationViolation(
+        rule="realization_step_not_found",
+        message=(
+            f"Narrative access_realization responsible_step_number "
+            f"{realization.responsible_step_number} does not refer "
+            f"to any narrative step (valid: {sorted(step_numbers)})."
+        ),
+    )
 
 
-def _direct_access_violations(
-    realization: NarrativeAccessRealization, access: ActorAccessProvenance
-) -> list[NarrativeRealizationViolation]:
-    """Direct ingress must omit indirect-only references."""
-    if access.ingress_mode != "direct":
-        return []
-    violations: list[NarrativeRealizationViolation] = []
-    if (
-        realization.influence_source is not None
-        or realization.influence_source_id is not None
+def _direct_source_violation(
+    realization: NarrativeAccessRealization,
+    access: ActorAccessProvenance,
+) -> NarrativeRealizationViolation | None:
+    if access.ingress_mode != "direct" or (
+        realization.influence_source is None and realization.influence_source_id is None
     ):
-        violations.append(
-            NarrativeRealizationViolation(
-                rule="direct_realization_has_indirect_ref",
-                message=(
-                    "Narrative access_realization has influence_source "
-                    "but actor access provenance is direct ingress — "
-                    "direct access must omit indirect-only references."
-                ),
-            )
-        )
-    if realization.trust_boundary_id is not None:
-        violations.append(
-            NarrativeRealizationViolation(
-                rule="direct_realization_has_indirect_ref",
-                message=(
-                    "Narrative access_realization has trust_boundary_id "
-                    "but actor access provenance is direct ingress — "
-                    "direct access must omit indirect-only references."
-                ),
-            )
-        )
-    return violations
+        return None
+    return NarrativeRealizationViolation(
+        rule="direct_realization_has_indirect_ref",
+        message=(
+            "Narrative access_realization has influence_source "
+            "but actor access provenance is direct ingress — "
+            "direct access must omit indirect-only references."
+        ),
+    )
+
+
+def _direct_boundary_violation(
+    realization: NarrativeAccessRealization,
+    access: ActorAccessProvenance,
+) -> NarrativeRealizationViolation | None:
+    if access.ingress_mode != "direct" or realization.trust_boundary_id is None:
+        return None
+    return NarrativeRealizationViolation(
+        rule="direct_realization_has_indirect_ref",
+        message=(
+            "Narrative access_realization has trust_boundary_id "
+            "but actor access provenance is direct ingress — "
+            "direct access must omit indirect-only references."
+        ),
+    )
+
+
+def _realization_violations(
+    narrative: NarrativeLayer,
+    realization: NarrativeAccessRealization,
+    access: ActorAccessProvenance,
+) -> list[NarrativeRealizationViolation]:
+    """Collect independent identity and access checks in stable order."""
+    identity_checks = (
+        _entry_point_violation(realization, access),
+        _source_id_violation(realization, access),
+        _source_kind_violation(realization, access),
+        _trust_boundary_violation(realization, access),
+        _responsible_step_violation(narrative, realization),
+        _direct_source_violation(realization, access),
+        _direct_boundary_violation(realization, access),
+    )
+    return [violation for violation in identity_checks if violation is not None]
 
 
 def validate_narrative_access_realization(
@@ -254,24 +241,28 @@ def validate_narrative_access_realization(
     6. Direct access must omit indirect-only references (influence_source,
        trust_boundary_id must be None when ingress_mode is direct).
     """
+    violations: list[NarrativeRealizationViolation] = []
+
     access = actor_profile.access if actor_profile else None
     if access is None:
-        return []  # Actor access missing is flagged separately.
+        return violations  # Actor access missing is flagged separately.
 
     realization = narrative.access_realization
     if realization is None:
-        return [_missing_access_realization_violation()]
+        violations.append(
+            NarrativeRealizationViolation(
+                rule="missing_access_realization",
+                message=(
+                    "Narrative lacks typed access_realization — required "
+                    "when actor access provenance is present (cmps.6)."
+                ),
+            )
+        )
+        return violations
 
-    violations: list[NarrativeRealizationViolation] = []
-    violations.extend(_entry_point_mismatch_violation(realization, access))
-    violations.extend(_influence_source_violations(realization, access))
-    violations.extend(_trust_boundary_violation(realization, access))
-    step_numbers = {s.step_number for s in narrative.steps}
-    violations.extend(_step_not_found_violation(realization, step_numbers))
-    violations.extend(_direct_access_violations(realization, access))
-    return violations
+    return violations + _realization_violations(narrative, realization, access)
 
 
 # mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-26T11:26:27Z","module_hash":"2cd4915d5c9eddedba27357466b6a7bb2bd01ee79ecf73e39b899cf8d68030da","source_sha256":"a7900f962da3ecd1a16a1535f214adce23ebaddd249d1cf29c56d7fd76da5498","functions":[{"id":"func/validate_narrative_step_bounds","name":"validate_narrative_step_bounds","line":26,"end_line":64,"hash":"c60c7f9ebecb08832667e478952fe7477cff6628e6cdf55a08717ed2de42bd4d"},{"id":"func/_missing_access_realization_violation","name":"_missing_access_realization_violation","line":75,"end_line":83,"hash":"281544308d831956c610d6adc8b9fc46f3645ab0a76d3a53151cb9c3ad6bd372"},{"id":"func/_entry_point_mismatch_violation","name":"_entry_point_mismatch_violation","line":86,"end_line":102,"hash":"40be5b1ca130761888fd2d488056db0a778ecb91dfcc6053fcb57a12d56ae2fe"},{"id":"func/_source_identity","name":"_source_identity","line":105,"end_line":110,"hash":"ea2fc29eeacfa561a3ad159543ba5057b9dffafad15faeaf577421d7137b2996"},{"id":"func/_source_id_mismatch","name":"_source_id_mismatch","line":113,"end_line":136,"hash":"8b156b5556097238cff5a43f1ddb317f8671a13a69f9a6b916bd2461ee647184"},{"id":"func/_source_kind_mismatch","name":"_source_kind_mismatch","line":139,"end_line":153,"hash":"32b85462af37365b76036171bb0711f264c24746146907f7d764bf75f1c79d5e"},{"id":"func/_influence_source_violations","name":"_influence_source_violations","line":156,"end_line":162,"hash":"c9861e1cb7c71fc1064d387acc4378b0ed6205f4502392a483421e1b7d3011b6"},{"id":"func/_trust_boundary_violation","name":"_trust_boundary_violation","line":165,"end_line":180,"hash":"c299c0ec1eed9aa76899bd6da6faf1155bc770b036cc4429217c000922144287"},{"id":"func/_step_not_found_violation","name":"_step_not_found_violation","line":183,"end_line":198,"hash":"7a171e6550a0ba347a11503719faab41d6f6a0993c6420e33a9f30f994fc9d81"},{"id":"func/_direct_access_violations","name":"_direct_access_violations","line":201,"end_line":233,"hash":"42800a6e6cdac6c9bdb7940bdc052a51d0de87f05da5cb90c1a4a2f3c9867ac3"},{"id":"func/validate_narrative_access_realization","name":"validate_narrative_access_realization","line":236,"end_line":272,"hash":"8e88f7877af7b847379a941ac1ddab5291695f6d76f3c11d5deb1543ceb25c9d"}]}
+# {"version":1,"tested_at":"2026-08-26T09:12:59Z","module_hash":"682ffc5059b0b96073f368aa47cc8f79dae76b0ac44a9e4edcc51906ea438e62","source_sha256":"3f189c40851cf810d12e32073e888ad8f3360ad984ed7775f258ab9a0b696841","functions":[{"id":"func/validate_narrative_step_bounds","name":"validate_narrative_step_bounds","line":26,"end_line":64,"hash":"c60c7f9ebecb08832667e478952fe7477cff6628e6cdf55a08717ed2de42bd4d"},{"id":"func/_source_identity","name":"_source_identity","line":75,"end_line":80,"hash":"ea2fc29eeacfa561a3ad159543ba5057b9dffafad15faeaf577421d7137b2996"},{"id":"func/_entry_point_violation","name":"_entry_point_violation","line":83,"end_line":96,"hash":"65dce7014207f309615c5ea1c907068434674676f76725d8f9f4a8618ab7c779"},{"id":"func/_source_id_violation","name":"_source_id_violation","line":99,"end_line":120,"hash":"03fb179042b13c79e60cc77543a0a12df0a0eccb6eff6ec29841d0347709cbfa"},{"id":"func/_source_kind_violation","name":"_source_kind_violation","line":123,"end_line":135,"hash":"4f87a5bb198ba488a27a824a32dd9082f357bbc0a1e6ee8ddecaaec24219c990"},{"id":"func/_trust_boundary_violation","name":"_trust_boundary_violation","line":138,"end_line":151,"hash":"53f2a2b7838e8a24404139df90a20655a374b4f438c98b1bbeefe0381509f693"},{"id":"func/_responsible_step_violation","name":"_responsible_step_violation","line":154,"end_line":168,"hash":"78a1063925f8235f0c0cd75a08678cf0236ddc6aa5e781a701f27ba3268895e8"},{"id":"func/_direct_source_violation","name":"_direct_source_violation","line":171,"end_line":187,"hash":"fcc467623d50f5f4f14f4ba9468d413103afc95e9ffef6e18cb406a9c3e5980b"},{"id":"func/_direct_boundary_violation","name":"_direct_boundary_violation","line":190,"end_line":203,"hash":"b4d7873aa570eea40c42129c4c788984b4e64b07b219f95df69af0e43d62e91a"},{"id":"func/_realization_violations","name":"_realization_violations","line":206,"end_line":221,"hash":"0f01f68df758a82384a5290ee7ddfb3c6491b9e94a51f2d224d3b244c53f9b30"},{"id":"func/validate_narrative_access_realization","name":"validate_narrative_access_realization","line":224,"end_line":264,"hash":"7987ec4e3fc14549ba2c33f1a224cf08b946ba68e93bb42c9374a80402a484c0"}]}
 # mutate4py-manifest-end
