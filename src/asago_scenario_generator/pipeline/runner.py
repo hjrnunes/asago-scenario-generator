@@ -44,7 +44,7 @@ from asago_scenario_generator.manifest import (
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
 )
-from asago_scenario_generator.models.attack_pattern import (
+from asago_scenario_generator.models.attack_pattern_contracts import (
     EvaluatedFactEvidence,
 )
 from asago_scenario_generator.models.scenario import ScenarioEnvelope

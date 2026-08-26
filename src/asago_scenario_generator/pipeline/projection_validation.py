@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from asago_scenario_generator.models.attack_pattern import TaxonomyResolver
+from asago_scenario_generator.models.attack_pattern_contracts import TaxonomyResolver
 from asago_scenario_generator.models.attack_tree import (
     GateType,
     InitialIngressAction,

@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from asago_scenario_generator.models.attack_pattern import (
-    AttackPattern,
-    TaxonomyResolver,
+from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
+from asago_scenario_generator.models.attack_pattern_contracts import TaxonomyResolver
+from asago_scenario_generator.models.attack_pattern_validation import (
     validate_attack_pattern,
 )
 from asago_scenario_generator.models.projection_envelope import (
@@ -61,7 +61,7 @@ def _verify_projection_digest(
     # re-validate the snapshot's digest by re-serializing and checking
     # against the stored projection_digest.
     try:
-        from asago_scenario_generator.models.attack_pattern import (
+        from asago_scenario_generator.models.attack_pattern_digests import (
             compute_projection_digest,
         )
 

@@ -5,15 +5,21 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any, Callable, Literal
 
-from asago_scenario_generator.models.attack_pattern import (
-    CanonicalAttackChain,
-    CanonicalResourceReference,
+from asago_scenario_generator.models.attack_pattern_chain import CanonicalAttackChain
+from asago_scenario_generator.models.attack_pattern_contracts import (
     ConditionEvaluationResult,
-    EntryPointResourceReference,
     ExecutionRequirement,
+)
+from asago_scenario_generator.models.attack_pattern_digests import (
+    compute_projection_digest,
+)
+from asago_scenario_generator.models.attack_pattern_projection import (
+    CanonicalResourceReference,
+    EntryPointResourceReference,
     ResourceBinding,
     StepOmission,
-    compute_projection_digest,
+)
+from asago_scenario_generator.models.attack_pattern_validation import (
     validate_projection_snapshot,
 )
 from asago_scenario_generator.pipeline.projection_contracts import (
