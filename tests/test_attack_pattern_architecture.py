@@ -15,11 +15,15 @@ MODELS_DIR = (
     / "models"
 )
 DATA_DIR = (
+    Path(__file__).resolve().parent.parent / "src" / "asago_scenario_generator" / "data"
+)
+PIPELINE_DIR = (
     Path(__file__).resolve().parent.parent
     / "src"
     / "asago_scenario_generator"
-    / "data"
+    / "pipeline"
 )
+SRC_DIR = Path(__file__).resolve().parent.parent / "src" / "asago_scenario_generator"
 
 _FACADE_MODULE = "asago_scenario_generator.models.attack_pattern"
 _FORBIDDEN_IO_NEAR_PREFIXES = (
@@ -106,6 +110,44 @@ class TestCatalogLineageSnapshotLeaf:
             )
         ]
         assert not violations, (
-            "catalog_lineage_snapshot imports IO-near modules: "
-            f"{sorted(violations)}"
+            f"catalog_lineage_snapshot imports IO-near modules: {sorted(violations)}"
         )
+
+
+class TestAttackPatternConsumersDependInward:
+    """Pipeline and data adapters consume attack-pattern leaves, not the façade."""
+
+    _CONSUMERS = (
+        DATA_DIR / "taxonomy_pins.py",
+        SRC_DIR / "catalog_qualification.py",
+        PIPELINE_DIR / "preflight.py",
+        PIPELINE_DIR / "runner.py",
+        PIPELINE_DIR / "runner_run.py",
+        PIPELINE_DIR / "projection.py",
+        PIPELINE_DIR / "projection_allocation.py",
+        PIPELINE_DIR / "projection_allocator.py",
+        PIPELINE_DIR / "projection_candidates.py",
+        PIPELINE_DIR / "projection_drift.py",
+        PIPELINE_DIR / "projection_qualification.py",
+        PIPELINE_DIR / "projection_realizations.py",
+        PIPELINE_DIR / "projection_relations.py",
+        PIPELINE_DIR / "projection_requirements.py",
+        PIPELINE_DIR / "projection_resources.py",
+        PIPELINE_DIR / "projection_semantics.py",
+        PIPELINE_DIR / "projection_snapshot.py",
+        PIPELINE_DIR / "projection_validation.py",
+        PIPELINE_DIR / "generate" / "behavior_compiler.py",
+    )
+
+    @pytest.mark.parametrize(
+        "path",
+        _CONSUMERS,
+        ids=lambda path: str(path.relative_to(SRC_DIR)),
+    )
+    def test_consumer_does_not_import_attack_pattern_facade(self, path: Path) -> None:
+        """Adapters reach types through responsibility leaves."""
+        imports = _imported_modules(path)
+        assert _FACADE_MODULE not in imports, (
+            f"{path.name} must not import the public attack-pattern façade"
+        )
+        assert not any(imp.startswith(_FACADE_MODULE + ".") for imp in imports)

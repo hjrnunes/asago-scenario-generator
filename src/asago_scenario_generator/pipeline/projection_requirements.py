@@ -4,18 +4,22 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from asago_scenario_generator.models.attack_pattern import (
+from asago_scenario_generator.models.attack_pattern_chain import (
     CanonicalAttackChain,
-    CanonicalResourceReference,
+    ResourceSlot,
+)
+from asago_scenario_generator.models.attack_pattern_contracts import (
     DirectInputControlRequirement,
-    EntryPointResourceReference,
     ExecutionRequirement,
     ObservationRequirement,
-    ProjectionSnapshot,
-    ResourceSlot,
     SecurityOutcomeAssertionRequirement,
     StateChangingToolFixtureRequirement,
     UpstreamSourceInfluenceRequirement,
+)
+from asago_scenario_generator.models.attack_pattern_projection import (
+    CanonicalResourceReference,
+    EntryPointResourceReference,
+    ProjectionSnapshot,
 )
 from asago_scenario_generator.pipeline.projection_contracts import (
     ProjectionIssue,

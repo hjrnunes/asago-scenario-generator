@@ -38,21 +38,33 @@ Durable encoding uses `projection_contracts.canonical_json_bytes`; inventory
 validation depends on persistence record modules rather than the persistence
 façade.
 
-Candidate identity and filter wire models live in `pipeline.candidate_models`.
-Expansion, rules, capping, coverage planning, and pipeline IO consume that
-leaf rather than the `pipeline.candidates` façade. Coverage-universe
-construction and min-cost assignment live in
-`pipeline.coverage_planning_universe` and `pipeline.coverage_planning_flow`;
-those leaves stay off the candidates and projection façades. Queue
-construction and plan persistence remain in `pipeline.coverage_planning`.
+Candidate identity, filter wire models, and origin canonicalization live in
+`pipeline.candidate_models`. Expansion, rules, capping, coverage planning,
+pipeline IO, preflight, and runner orchestration consume that leaf rather
+than the `pipeline.candidates` façade. Coverage-universe construction and
+min-cost assignment live in `pipeline.coverage_planning_universe` and
+`pipeline.coverage_planning_flow`; those leaves stay off the candidates and
+projection façades. Queue construction and plan persistence remain in
+`pipeline.coverage_planning`.
 
 Authoritative attack-pattern models are split by responsibility
 (`attack_pattern_contracts`, `attack_pattern_chain`,
 `attack_pattern_projection`, `attack_pattern_digests`,
 `attack_pattern_validation`) behind the historical
-`models.attack_pattern` façade. Catalog-lineage source-catalog pinning lives
+`models.attack_pattern` façade. Projection, preflight, runner, catalog
+qualification, taxonomy pins, and the behavior compiler consume those
+leaves rather than the façade. Catalog-lineage source-catalog pinning lives
 in `data.catalog_lineage_snapshot` so normal lineage validation does not
-consult the mutable live catalog.
+consult the mutable live catalog. Canonical realization derivation lives
+in `models.realization`; the envelope block lives in
+`models.projection_envelope`. Both consume attack-pattern leaves and
+`pipeline.projection_contracts` rather than the attack-pattern or
+projection façades.
+
+Attack-complexity models and admission routing live in
+`models.complexity`. The reviewed rule table and fail-closed admission
+check live in `pipeline.complexity` and depend inward on those models
+plus `pipeline.projection_contracts`, not the projection façade.
 
 Scenario validation is split by responsibility (`validation_common`,
 structure, phantom, insider, provenance, parsimony, goal, and semantic
@@ -61,11 +73,16 @@ do not import the façade or IO-near modules. Narrative access-realization
 and step-bound checks live in `pipeline.generate.narrative_access`;
 narrative semantic draft contracts and compilation live in
 `pipeline.generate.narrative_semantics`; actor draft compilation lives in
-`pipeline.generate.actor_semantics`. Attack-tree transport, zone
+`pipeline.generate.actor_semantics`. Tests and acceptance import access
+bounds, draft contracts, and zone-sequence derivation from those leaves
+rather than the IO-near `generate.narrative` façade. Attack-tree transport, zone
 enforcement, name resolution, and diversity helpers live in
 `pipeline.generate.tree_transport`, `tree_validation`, `zones`, `names`,
 and `diversity`; those leaves stay off the IO-near `generate.tree`
-façade. Scenario versus projected-step ATLAS identity lives in
+façade. Path enumeration, tool-execution grounding, and transport
+normalization are imported from those leaves by tests and acceptance
+rather than re-exported through `generate.tree`. Scenario versus
+projected-step ATLAS identity lives in
 `pipeline.technique_scopes`. Projection-envelope sidecars are
 built by `pipeline.projection_block`. Validation, pre-behavior gates,
 stage orchestration, and assembly consume those leaves instead of the

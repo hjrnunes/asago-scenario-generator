@@ -47,9 +47,11 @@ from asago_scenario_generator.models.scenario import (
     TaxonomyChain,
     TechniqueMaturity,
 )
-from asago_scenario_generator.pipeline.generate.tree import (
-    _validate_tree_against_projection,
+from asago_scenario_generator.pipeline.generate.tree_transport import (
     normalize_attack_tree_transport,
+)
+from asago_scenario_generator.pipeline.generate.tree_validation import (
+    _validate_tree_against_projection,
 )
 from asago_scenario_generator.pipeline.projection_validation import (
     validate_projection_traceability,

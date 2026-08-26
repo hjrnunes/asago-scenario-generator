@@ -5,11 +5,13 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from asago_scenario_generator.models.attack_pattern import (
+from asago_scenario_generator.models.attack_pattern_chain import (
     AttackPattern,
     CanonicalAttackChain,
-    StepOmission,
-    TaxonomyResolver,
+)
+from asago_scenario_generator.models.attack_pattern_contracts import TaxonomyResolver
+from asago_scenario_generator.models.attack_pattern_projection import StepOmission
+from asago_scenario_generator.models.attack_pattern_validation import (
     validate_attack_pattern,
 )
 from asago_scenario_generator.pipeline.projection_contracts import (

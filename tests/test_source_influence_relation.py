@@ -29,6 +29,8 @@ from asago_scenario_generator.pipeline.generate.assembly import (
 )
 from asago_scenario_generator.pipeline.generate.narrative import (
     _apply_projection_access_realization,
+)
+from asago_scenario_generator.pipeline.generate.narrative_access import (
     validate_narrative_access_realization,
 )
 from asago_scenario_generator.pipeline.generate.names import (

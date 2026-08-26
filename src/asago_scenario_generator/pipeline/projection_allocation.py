@@ -6,11 +6,15 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-from asago_scenario_generator.models.attack_pattern import (
+from asago_scenario_generator.models.attack_pattern_chain import (
     AttackPattern,
     CanonicalAttackChain,
-    CanonicalResourceReference,
+)
+from asago_scenario_generator.models.attack_pattern_contracts import (
     ConditionEvaluationResult,
+)
+from asago_scenario_generator.models.attack_pattern_projection import (
+    CanonicalResourceReference,
     EntryPointResourceReference,
     StepOmission,
 )

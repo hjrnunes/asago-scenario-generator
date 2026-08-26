@@ -34,7 +34,10 @@ import yaml
 
 from asago_scenario_generator.data.canonical import _canonical_json, _nfc
 
-from asago_scenario_generator.models.attack_pattern import TaxonomyContext, TaxonomyPin
+from asago_scenario_generator.models.attack_pattern_contracts import (
+    TaxonomyContext,
+    TaxonomyPin,
+)
 
 _DEFAULT_ATLAS_PATH = (
     Path(__file__).resolve().parents[3]

@@ -6,14 +6,12 @@ import logging
 from collections import defaultdict
 from collections.abc import Sequence
 
-from asago_scenario_generator.pipeline.candidate_expansion import (
-    _canonicalize_and_dedup_origins,
-    _non_provenance_conflicts,
-)
 from asago_scenario_generator.pipeline.candidate_models import (
     CandidateOrigin,
     FilteredSeed,
     StageRecord,
+    _canonicalize_and_dedup_origins,
+    _non_provenance_conflicts,
 )
 
 logger = logging.getLogger("asago_scenario_generator.pipeline.candidates")
