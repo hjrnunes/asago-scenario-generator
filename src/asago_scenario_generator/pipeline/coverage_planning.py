@@ -1951,9 +1951,6 @@ def revalidate_qualified_candidate(
     from asago_scenario_generator.pipeline.projection import (
         validate_projected_candidate,
     )
-    from asago_scenario_generator.pipeline.projection_qualification import (
-        compute_authoritative_catalog_pin,
-    )
 
     deserialized = deserialize_qualified_candidate(ref)
 
