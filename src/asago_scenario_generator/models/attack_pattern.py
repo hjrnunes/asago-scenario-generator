@@ -200,3 +200,8 @@ __all__ = (
     "validate_legacy_attack_pattern",
     "validate_projection_snapshot",
 )
+
+
+# mutate4py-manifest-begin
+# {"version":1,"tested_at":"2026-08-26T21:05:37Z","module_hash":"ac3e90a4811ff11bb410760411c106d582efbe366063bf57ae28f9c58172d503","source_sha256":"8c3ae64551d44d824ac780c4d51bf4cb8fd69232391478c59bf2077296ae2e3e","functions":[{"id":"func/__getattr__","name":"__getattr__","line":116,"end_line":123,"hash":"229f20d657080271a4f207399f9652c745c062aaae434577df084a3159235ed2"}]}
+# mutate4py-manifest-end
