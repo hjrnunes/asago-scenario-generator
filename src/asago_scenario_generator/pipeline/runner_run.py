@@ -48,13 +48,13 @@ from asago_scenario_generator.models.capability_profile import (
     ZONE_NAMES,
     CapabilityProfile,
 )
-from asago_scenario_generator.pipeline.candidates import (
+from asago_scenario_generator.pipeline.candidate_expansion import expand_candidates
+from asago_scenario_generator.pipeline.candidate_filter import filter_candidates
+from asago_scenario_generator.pipeline.candidate_models import (
     FilterProtocolError,
     StageRecord,
-    apply_rule_based_filter,
-    expand_candidates,
-    filter_candidates,
 )
+from asago_scenario_generator.pipeline.candidate_rules import apply_rule_based_filter
 
 if TYPE_CHECKING:
     from asago_scenario_generator.pipeline.runner import PipelineResult

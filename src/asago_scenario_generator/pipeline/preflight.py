@@ -22,10 +22,8 @@ from asago_scenario_generator.models.attack_pattern import (
     validate_attack_pattern,
 )
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
-from asago_scenario_generator.pipeline.candidates import (
-    apply_rule_based_filter,
-    expand_candidates,
-)
+from asago_scenario_generator.pipeline.candidate_expansion import expand_candidates
+from asago_scenario_generator.pipeline.candidate_rules import apply_rule_based_filter
 from asago_scenario_generator.pipeline.projection import (
     ProjectionReadinessReport,
     capture_capability_snapshot,

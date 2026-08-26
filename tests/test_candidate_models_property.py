@@ -6,7 +6,12 @@ import hashlib
 
 from hypothesis import given, settings, strategies as st
 
-from asago_scenario_generator.pipeline.candidate_models import compute_candidate_id
+from asago_scenario_generator.pipeline.candidate_models import (
+    CandidateOrigin,
+    RemovalDecision,
+    _canonicalize_and_dedup_origins,
+    compute_candidate_id,
+)
 
 _MAX_EXAMPLES = 60
 _IDS = st.text(
@@ -26,7 +31,9 @@ def test_candidate_id_is_deterministic_and_order_insensitive(
 ) -> None:
     """The same identity always yields the same cand:v2 digest."""
     first = compute_candidate_id(seed_id, entry_point_id, technique_ids)
-    second = compute_candidate_id(seed_id, entry_point_id, list(reversed(technique_ids)))
+    second = compute_candidate_id(
+        seed_id, entry_point_id, list(reversed(technique_ids))
+    )
     third = compute_candidate_id(
         seed_id, entry_point_id, [*technique_ids, *technique_ids]
     )
@@ -73,3 +80,60 @@ def test_candidate_id_matches_sha256_prefix(
     assert compute_candidate_id(seed_id, entry_point_id, technique_ids) == (
         f"cand:v2:{expected}"
     )
+
+
+_STAGES = st.sampled_from(("expansion", "rule_pruning", "capping"))
+_RULES = st.one_of(st.none(), st.sampled_from(("direct_vs_indirect", "threat_prereq")))
+_REASONS = st.text(
+    alphabet="abcdefghijklmnopqrstuvwxyz ",
+    min_size=1,
+    max_size=24,
+)
+
+
+@settings(max_examples=_MAX_EXAMPLES, deadline=None)
+@given(
+    source_id=_IDS,
+    original=_TECHNIQUES,
+    removed=_TECHNIQUES,
+    stage=_STAGES,
+    rule=_RULES,
+    reason=_REASONS,
+)
+def test_origin_canonicalization_is_order_insensitive_and_idempotent(
+    source_id: str,
+    original: list[str],
+    removed: list[str],
+    stage: str,
+    rule: str | None,
+    reason: str,
+) -> None:
+    """Reversed origin fields collapse to one canonical provenance record."""
+    decisions = tuple(
+        RemovalDecision(technique_id=tid, rule=rule or "none", reason=reason)
+        for tid in removed
+    )
+    first = CandidateOrigin(
+        source_candidate_id=source_id,
+        original_technique_ids=tuple(original),
+        applied_rule=rule,
+        removed_technique_ids=tuple(removed),
+        removal_reasons=tuple(reason for _ in removed),
+        removal_decisions=decisions,
+        transform_stage=stage,
+    )
+    reversed_origin = CandidateOrigin(
+        source_candidate_id=source_id,
+        original_technique_ids=tuple(reversed(original)),
+        applied_rule=rule,
+        removed_technique_ids=tuple(reversed(removed)),
+        removal_reasons=tuple(reason for _ in removed),
+        removal_decisions=tuple(reversed(decisions)),
+        transform_stage=stage,
+    )
+    canonical = _canonicalize_and_dedup_origins([first, reversed_origin, first])
+    again = _canonicalize_and_dedup_origins(canonical)
+    assert len(canonical) == 1
+    assert again == canonical
+    assert canonical[0].original_technique_ids == tuple(sorted(original))
+    assert canonical[0].removed_technique_ids == tuple(sorted(removed))

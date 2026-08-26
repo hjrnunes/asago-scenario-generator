@@ -48,7 +48,7 @@ from asago_scenario_generator.models.attack_pattern import (
     EvaluatedFactEvidence,
 )
 from asago_scenario_generator.models.scenario import ScenarioEnvelope
-from asago_scenario_generator.pipeline.candidates import (
+from asago_scenario_generator.pipeline.candidate_models import (
     FilteredSeed,
     FilterSeedQuarantine,
     RemovalDecision,
