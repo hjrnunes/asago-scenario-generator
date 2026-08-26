@@ -1751,6 +1751,40 @@ class TestGenerateCompatibilityHelpers:
         assert isinstance(fallback, int)
 
 
+class TestStageHandleMapHelpers:
+    def test_tree_handles_empty_without_result(self) -> None:
+        from asago_scenario_generator.pipeline.generate.stages import (
+            _tree_handles_for_result,
+        )
+
+        recorder = SimpleNamespace(result=None)
+        assert _tree_handles_for_result(_prepared(), object(), recorder) == {}
+
+    def test_tree_handles_empty_without_compiled_draft(self) -> None:
+        from asago_scenario_generator.pipeline.generate.stages import (
+            _tree_handles_for_result,
+        )
+
+        recorder = SimpleNamespace(result=SimpleNamespace(content="raw text"))
+        assert _tree_handles_for_result(_prepared(), object(), recorder) == {}
+
+    def test_behavior_handles_empty_without_result(self) -> None:
+        from asago_scenario_generator.pipeline.generate.stages import (
+            _behavior_handles_for_result,
+        )
+
+        recorder = SimpleNamespace(result=None)
+        assert _behavior_handles_for_result(_prepared(), object(), recorder) == {}
+
+    def test_behavior_handles_empty_without_compiled_draft(self) -> None:
+        from asago_scenario_generator.pipeline.generate.stages import (
+            _behavior_handles_for_result,
+        )
+
+        recorder = SimpleNamespace(result=SimpleNamespace(content="raw text"))
+        assert _behavior_handles_for_result(_prepared(), object(), recorder) == {}
+
+
 class TestGenerateCompatibilitySubHelpers:
     """Branch-level coverage for the retry/check sub-helpers."""
 
