@@ -38,21 +38,45 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from collections import Counter, deque
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
 
-from asago_scenario_generator.models.capability_profile import (
-    CapabilityProfile,
-    EntryPoint,
-    is_attacker_accessible_ingress,
-)
 from asago_scenario_generator.pipeline.candidates import (
     CandidateOrigin,
     FilteredSeed,
     RejectionRecord,
+)
+
+# Re-export these helpers for compatibility with existing planner consumers.
+from asago_scenario_generator.pipeline.coverage_planning_flow import (  # noqa: F401
+    _add_pattern_sink_edges,
+    _add_target_pattern_edges,
+    _augment_path,
+    _best_candidate_per_target_pattern,
+    _build_flow_network,
+    _collect_pattern_index,
+    _convex_pattern_cost,
+    _extract_assignment,
+    _flowing_pattern_edge,
+    _relax_node,
+    _solve_min_cost_assignment,
+    _spfa_shortest_path,
+    add_edge,
+)
+from asago_scenario_generator.pipeline.coverage_planning_universe import (  # noqa: F401
+    CoverageCompleteness,
+    CoverageExclusionReason,
+    CoverageTarget,
+    CoverageUniverse,
+    ExcludedTarget,
+    _classify_exclusion,
+    _exclusion_from_entry,
+    _target_from_entry,
+    _universe_completeness,
+    build_coverage_universe,
 )
 from asago_scenario_generator.pipeline.projection import ProjectedCandidate
 
@@ -70,211 +94,6 @@ class GenerationMode(str, Enum):
 
     EXHAUSTIVE = "exhaustive"
     COVERAGE = "coverage"
-
-
-# ---------------------------------------------------------------------------
-# Coverage universe
-# ---------------------------------------------------------------------------
-
-
-class CoverageExclusionReason(str, Enum):
-    """Typed reason for excluding an entry point from the coverage universe."""
-
-    OUTPUT_ONLY = "output_only"
-    SYSTEM_CONTROLLED = "system_controlled"
-    INACTIVE_ZONE = "inactive_zone"
-    NO_INGRESS_ZONE = "no_ingress_zone"
-
-
-class CoverageCompleteness(str, Enum):
-    """Whether the entry-point inventory is known to be complete.
-
-    Derived from :attr:`CapabilityProfile.is_entry_point_inventory_complete`:
-    ``confirmed_complete`` only when the operator has confirmed the inventory
-    is exhaustive with evidence; ``not_applicable`` otherwise (inferred-partial
-    inventory — completeness cannot be claimed).
-    """
-
-    NOT_APPLICABLE = "not_applicable"
-    CONFIRMED_COMPLETE = "confirmed_complete"
-
-
-@dataclass(frozen=True)
-class CoverageTarget:
-    """A feasible coverage target — an attacker-accessible ingress entry point.
-
-    Carries the canonical ``entry_point_id``, display name, direction, and
-    effective controllability.  Direction is always ``input`` or
-    ``bidirectional``; controllability is always ``direct`` or ``indirect``.
-    """
-
-    entry_point_id: str
-    name: str
-    direction: str
-    controllability: str
-
-
-@dataclass(frozen=True)
-class ExcludedTarget:
-    """An entry point excluded from the coverage universe with a typed reason."""
-
-    entry_point_id: str
-    name: str
-    direction: str
-    controllability: str
-    reason: CoverageExclusionReason
-
-
-@dataclass
-class CoverageUniverse:
-    """The complete coverage universe: feasible targets plus typed exclusions.
-
-    ``completeness`` is derived from the profile's
-    ``is_entry_point_inventory_complete`` property — never from free-form
-    input.  ``evidence_refs`` carries the operator-confirmed evidence sources
-    when completeness is ``confirmed_complete``.
-    """
-
-    feasible_targets: list[CoverageTarget] = field(default_factory=list)
-    excluded_targets: list[ExcludedTarget] = field(default_factory=list)
-    completeness: CoverageCompleteness = CoverageCompleteness.NOT_APPLICABLE
-    evidence_refs: list[str] = field(default_factory=list)
-
-    @property
-    def feasible_target_ids(self) -> set[str]:
-        """Set of entry_point_ids for all feasible targets."""
-        return {t.entry_point_id for t in self.feasible_targets}
-
-    def to_dict(self) -> dict:
-        return {
-            "feasible_targets": [
-                {
-                    "entry_point_id": t.entry_point_id,
-                    "name": t.name,
-                    "direction": t.direction,
-                    "controllability": t.controllability,
-                }
-                for t in self.feasible_targets
-            ],
-            "excluded_targets": [
-                {
-                    "entry_point_id": e.entry_point_id,
-                    "name": e.name,
-                    "direction": e.direction,
-                    "controllability": e.controllability,
-                    "reason": e.reason.value,
-                }
-                for e in self.excluded_targets
-            ],
-            "completeness": self.completeness.value,
-            "evidence_refs": list(self.evidence_refs),
-        }
-
-
-def _classify_exclusion(
-    ep: EntryPoint,
-    active_zones: set[str],
-) -> CoverageExclusionReason | None:
-    """Return the typed exclusion reason for a non-feasible entry point, or None if feasible."""
-    if ep.direction == "output":
-        return CoverageExclusionReason.OUTPUT_ONLY
-    if ep.effective_controllability == "system":
-        return CoverageExclusionReason.SYSTEM_CONTROLLED
-    zone = ep.effective_ingress_zone
-    if zone is None:
-        return CoverageExclusionReason.NO_INGRESS_ZONE
-    if zone not in active_zones:
-        return CoverageExclusionReason.INACTIVE_ZONE
-    return None
-
-
-def _target_from_entry(ep: EntryPoint) -> CoverageTarget:
-    """Build a feasible :class:`CoverageTarget` from a profile entry point."""
-    return CoverageTarget(
-        entry_point_id=ep.entry_point_id,
-        name=ep.name,
-        direction=ep.direction,
-        controllability=ep.effective_controllability,
-    )
-
-
-def _exclusion_from_entry(
-    ep: EntryPoint, reason: CoverageExclusionReason
-) -> ExcludedTarget:
-    """Build a typed :class:`ExcludedTarget` from a profile entry point."""
-    return ExcludedTarget(
-        entry_point_id=ep.entry_point_id,
-        name=ep.name,
-        direction=ep.direction,
-        controllability=ep.effective_controllability,
-        reason=reason,
-    )
-
-
-def _universe_completeness(
-    profile: CapabilityProfile,
-) -> tuple[CoverageCompleteness, list[str]]:
-    """Derive completeness and evidence refs from the profile.
-
-    ``confirmed_complete`` only when the operator confirmed the inventory
-    with evidence; otherwise ``not_applicable`` with no evidence refs.
-    """
-    if profile.is_entry_point_inventory_complete:
-        evidence = [e for e in profile.entry_point_evidence if e and e.strip()]
-        return CoverageCompleteness.CONFIRMED_COMPLETE, evidence
-    return CoverageCompleteness.NOT_APPLICABLE, []
-
-
-def build_coverage_universe(
-    profile: CapabilityProfile,
-) -> CoverageUniverse:
-    """Build the coverage universe from the capability profile.
-
-    Iterates every entry point in the profile.  Entry points with direction
-    ``input`` or ``bidirectional`` and effective controllability ``direct``
-    or ``indirect`` in an active zone are feasible targets.  All others are
-    excluded with a typed reason.
-
-    Completeness is derived from
-    :attr:`CapabilityProfile.is_entry_point_inventory_complete` — the
-    operator-confirmed property.  Free-form enum input is not accepted; an
-    inferred profile cannot claim confirmed completeness.
-
-    Args:
-        profile: The capability profile from Stage 1.
-
-    Returns:
-        A :class:`CoverageUniverse` with feasible targets, typed
-        exclusions, and profile-derived completeness.
-    """
-    active_zones = set(profile.zones_active) if profile.zones_active else set()
-    feasible: list[CoverageTarget] = []
-    excluded: list[ExcludedTarget] = []
-
-    for ep in profile.entry_points:
-        if is_attacker_accessible_ingress(ep, active_zones):
-            feasible.append(_target_from_entry(ep))
-        else:
-            reason = _classify_exclusion(ep, active_zones)
-            if reason is None:
-                reason = CoverageExclusionReason.NO_INGRESS_ZONE
-            excluded.append(_exclusion_from_entry(ep, reason))
-
-    completeness, evidence_refs = _universe_completeness(profile)
-
-    universe = CoverageUniverse(
-        feasible_targets=feasible,
-        excluded_targets=excluded,
-        completeness=completeness,
-        evidence_refs=evidence_refs,
-    )
-    logger.info(
-        "Coverage universe: %d feasible target(s), %d excluded, completeness=%s",
-        len(feasible),
-        len(excluded),
-        completeness.value,
-    )
-    return universe
 
 
 # ---------------------------------------------------------------------------
@@ -813,266 +632,6 @@ class SelectionResult:
     primary_candidate_ids: dict[str, str] = field(default_factory=dict)
     attempted_candidate_ids: set[str] = field(default_factory=set)
     selection_limitation_target_ids: list[str] = field(default_factory=list)
-
-
-def add_edge(graph: list[list[list[int]]], u: int, v: int, cap: int, cost: int) -> None:
-    """Add a directed edge with capacity and cost, plus its reverse edge."""
-    graph[u].append([v, cap, cost, len(graph[v])])
-    graph[v].append([u, 0, -cost, len(graph[u]) - 1])
-
-
-def _collect_pattern_index(
-    target_choices_map: dict[str, list[QualifiedCandidate]],
-) -> tuple[list[str], dict[str, int]]:
-    """Collect the sorted unique pattern IDs and their node offsets."""
-    all_patterns = sorted(
-        {qc.pattern_id for choices in target_choices_map.values() for qc in choices}
-    )
-    pattern_idx = {p: i for i, p in enumerate(all_patterns)}
-    return all_patterns, pattern_idx
-
-
-def _best_candidate_per_target_pattern(
-    target_ids: list[str],
-    target_choices_map: dict[str, list[QualifiedCandidate]],
-) -> dict[tuple[str, str], QualifiedCandidate]:
-    """For each (target, pattern) pair, pick the lowest candidate_id candidate."""
-    best_per_tp: dict[tuple[str, str], QualifiedCandidate] = {}
-    for t_id in target_ids:
-        for qc in target_choices_map[t_id]:
-            key = (t_id, qc.pattern_id)
-            if (
-                key not in best_per_tp
-                or qc.candidate_id < best_per_tp[key].candidate_id
-            ):
-                best_per_tp[key] = qc
-    return best_per_tp
-
-
-def _convex_pattern_cost(
-    k: int,
-    max_per_pattern: int | None,
-    concentration_scale: int,
-    cap_overflow_penalty: int,
-) -> int:
-    """Cost of the k-th flow unit into one pattern.
-
-    The k-th unit (0-indexed) costs ``k * concentration_scale``, plus
-    ``cap_overflow_penalty * concentration_scale`` when the per-pattern
-    cap is exceeded — minimizing concentration, then cap overflow.
-    """
-    base_cost = k * concentration_scale
-    if max_per_pattern is not None and k >= max_per_pattern:
-        base_cost += cap_overflow_penalty * concentration_scale
-    return base_cost
-
-
-def _add_target_pattern_edges(
-    graph: list[list[list[int]]],
-    target_ids: list[str],
-    target_choices_map: dict[str, list[QualifiedCandidate]],
-    best_per_tp: dict[tuple[str, str], QualifiedCandidate],
-    pattern_idx: dict[str, int],
-    N: int,
-) -> None:
-    """Connect each target to its patterns with candidate-ID tie-break ranks."""
-    for i, t_id in enumerate(target_ids):
-        target_patterns = sorted(
-            {qc.pattern_id for qc in target_choices_map[t_id]},
-            key=lambda p: best_per_tp[(t_id, p)].candidate_id,
-        )
-        for rank, p_id in enumerate(target_patterns):
-            pi = pattern_idx[p_id]
-            add_edge(graph, 1 + i, 1 + N + pi, 1, rank)
-
-
-def _add_pattern_sink_edges(
-    graph: list[list[list[int]]],
-    N: int,
-    M: int,
-    sink: int,
-    max_per_pattern: int | None,
-    concentration_scale: int,
-    cap_overflow_penalty: int,
-) -> None:
-    """Connect each pattern to the sink with convex per-unit costs."""
-    for pi in range(M):
-        for k in range(N):
-            cost = _convex_pattern_cost(
-                k, max_per_pattern, concentration_scale, cap_overflow_penalty
-            )
-            add_edge(graph, 1 + N + pi, sink, 1, cost)
-
-
-def _build_flow_network(
-    target_ids: list[str],
-    target_choices_map: dict[str, list[QualifiedCandidate]],
-    best_per_tp: dict[tuple[str, str], QualifiedCandidate],
-    pattern_idx: dict[str, int],
-    max_per_pattern: int | None,
-    N: int,
-    M: int,
-) -> tuple[list[list[list[int]]], int, int]:
-    """Build the bipartite min-cost flow network.
-
-    Nodes: 0=source, 1..N=targets, N+1..N+M=patterns, N+M+1=sink.
-    Edge shape: ``[to, capacity, cost, rev_index]``.
-    """
-    source = 0
-    sink = N + M + 1
-    graph: list[list[list[int]]] = [[] for _ in range(N + M + 2)]
-
-    for i in range(N):
-        add_edge(graph, source, 1 + i, 1, 0)
-    _add_target_pattern_edges(
-        graph, target_ids, target_choices_map, best_per_tp, pattern_idx, N
-    )
-    concentration_scale = 2 * N + 1  # > max total candidate tie-break (2*N)
-    cap_overflow_penalty = N * N + 1  # > max total concentration (N*(N-1)/2)
-    _add_pattern_sink_edges(
-        graph, N, M, sink, max_per_pattern, concentration_scale, cap_overflow_penalty
-    )
-    return graph, source, sink
-
-
-def _relax_node(
-    graph: list[list[list[int]]],
-    u: int,
-    dist: list[float],
-    in_queue: list[bool],
-    queue: deque[int],
-    parent_node: list[int],
-    parent_edge_idx: list[int],
-) -> None:
-    """Relax every residual edge leaving node ``u`` (one SPFA step)."""
-    for ei, edge in enumerate(graph[u]):
-        v, cap, cost, _ = edge
-        if cap > 0 and dist[u] + cost < dist[v]:
-            dist[v] = dist[u] + cost
-            parent_node[v] = u
-            parent_edge_idx[v] = ei
-            if not in_queue[v]:
-                queue.append(v)
-                in_queue[v] = True
-
-
-def _spfa_shortest_path(
-    graph: list[list[list[int]]],
-    source: int,
-    sink: int,
-    num_nodes: int,
-) -> tuple[list[int], list[int]] | None:
-    """Shortest augmenting path from source to sink (SPFA / Bellman-Ford).
-
-    Returns ``(parent_node, parent_edge_idx)``, or None when the sink is
-    unreachable through residual edges.
-    """
-    dist = [float("inf")] * num_nodes
-    dist[source] = 0
-    in_queue = [False] * num_nodes
-    in_queue[source] = True
-    queue: deque[int] = deque([source])
-    parent_node = [-1] * num_nodes
-    parent_edge_idx = [-1] * num_nodes
-
-    while queue:
-        u = queue.popleft()
-        in_queue[u] = False
-        _relax_node(graph, u, dist, in_queue, queue, parent_node, parent_edge_idx)
-
-    if dist[sink] == float("inf"):
-        return None
-    return parent_node, parent_edge_idx
-
-
-def _augment_path(
-    graph: list[list[list[int]]],
-    source: int,
-    sink: int,
-    parent_node: list[int],
-    parent_edge_idx: list[int],
-) -> None:
-    """Push one unit of flow along the recorded parent path."""
-    v = sink
-    while v != source:
-        u = parent_node[v]
-        ei = parent_edge_idx[v]
-        graph[u][ei][1] -= 1  # reduce forward capacity
-        rev_i = graph[u][ei][3]
-        graph[v][rev_i][1] += 1  # increase reverse capacity
-        v = u
-
-
-def _flowing_pattern_edge(edge: list[int], N: int, M: int) -> bool:
-    """True when a target edge carries flow into a pattern node."""
-    v = edge[0]
-    return 1 + N <= v <= N + M and edge[1] == 0
-
-
-def _extract_assignment(
-    graph: list[list[list[int]]],
-    N: int,
-    M: int,
-    target_ids: list[str],
-    all_patterns: list[str],
-    best_per_tp: dict[tuple[str, str], QualifiedCandidate],
-) -> dict[str, QualifiedCandidate]:
-    """Extract the assignment from target→pattern forward edges with flow."""
-    assignment: dict[str, QualifiedCandidate] = {}
-    for i, t_id in enumerate(target_ids):
-        for edge in graph[1 + i]:
-            if _flowing_pattern_edge(edge, N, M):
-                pi = edge[0] - 1 - N
-                p_id = all_patterns[pi]
-                assignment[t_id] = best_per_tp[(t_id, p_id)]
-                break
-    return assignment
-
-
-def _solve_min_cost_assignment(
-    target_ids: list[str],
-    target_choices_map: dict[str, list[QualifiedCandidate]],
-    max_per_pattern: int | None,
-) -> dict[str, QualifiedCandidate]:
-    """Solve global primary assignment via min-cost flow (successive shortest paths).
-
-    Builds a bipartite flow network: source → targets → patterns → sink.
-    Pattern→sink edges have convex costs so that the k-th unit (0-indexed)
-    to a pattern costs ``k * CONCENTRATION_SCALE``, plus
-    ``CAP_OVERFLOW_PENALTY * CONCENTRATION_SCALE`` if ``k >= max_per_pattern``.
-    This minimizes concentration (spreads assignments across patterns) and
-    cap overflow.
-
-    Target→pattern edges have cost = candidate rank (0-indexed position in
-    the sorted-by-candidate_id list of patterns for that target), providing
-    canonical candidate-ID tie-breaking at lower priority than concentration.
-
-    Complexity: O(N² · (N+M) · E) where N = targets, M = patterns,
-    E = edges.  Polynomial and feasible for ~49 targets.
-
-    Returns mapping from target_id to the assigned QualifiedCandidate.
-    """
-    N = len(target_ids)
-    if N == 0:
-        return {}
-
-    all_patterns, pattern_idx = _collect_pattern_index(target_choices_map)
-    M = len(all_patterns)
-    best_per_tp = _best_candidate_per_target_pattern(target_ids, target_choices_map)
-    graph, source, sink = _build_flow_network(
-        target_ids, target_choices_map, best_per_tp, pattern_idx, max_per_pattern, N, M
-    )
-
-    total_flow = 0
-    while total_flow < N:
-        path = _spfa_shortest_path(graph, source, sink, N + M + 2)
-        if path is None:
-            break  # No more augmenting paths.
-        parent_node, parent_edge_idx = path
-        _augment_path(graph, source, sink, parent_node, parent_edge_idx)
-        total_flow += 1
-
-    return _extract_assignment(graph, N, M, target_ids, all_patterns, best_per_tp)
 
 
 def _target_choice_lists(
