@@ -92,11 +92,11 @@ def _looks_like_path_reference(content: str) -> bool:
     detecting a use-case file that contains a path to the real
     use-case file instead of actual content.
     """
+    if "\n" in content or "\r" in content:
+        return False
     reference = content.strip()
     return (
         len(reference) < 200
-        and "\n" not in reference
-        and "\r" not in reference
         and reference.endswith((".txt", ".md"))
     )
 
