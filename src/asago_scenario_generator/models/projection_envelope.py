@@ -29,7 +29,7 @@ Design invariants:
 from __future__ import annotations
 
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -258,14 +258,12 @@ class ProjectionEnvelopeBlock(ProjectionModel):
     @model_validator(mode="after")
     def _ingress_matches_projection(self) -> ProjectionEnvelopeBlock:
         chain = self.projection.source_chain
-        ingress_binding = next(
-            b
-            for b in self.projection.bindings
-            if b.slot_id == chain.initial_ingress_slot_id
+        ingress_binding = _ingress_binding(
+            self.projection, chain.initial_ingress_slot_id
         )
-        if not isinstance(ingress_binding.resource_ref, EntryPointResourceReference):
+        if not _is_entry_point_binding(ingress_binding):
             raise TypeError("ingress binding must be an entry-point reference")
-        if ingress_binding.resource_ref != self.canonical_ingress:
+        if not _matches_canonical_ingress(ingress_binding, self.canonical_ingress):
             raise ValueError(
                 "canonical_ingress does not match the projection's ingress binding"
             )
@@ -389,3 +387,22 @@ class ProjectionEnvelopeBlock(ProjectionModel):
                 if pc.security_relevant:
                     result.setdefault(step.step_id, []).append(pc.postcondition_id)
         return result
+
+
+def _ingress_binding(projection: ProjectionSnapshot, slot_id: str) -> Any:
+    """The projection binding for the initial ingress slot.
+
+    Raises ``StopIteration`` when no binding matches — the projection
+    snapshot contract requires the initial ingress slot to be bound.
+    """
+    return next(b for b in projection.bindings if b.slot_id == slot_id)
+
+
+def _is_entry_point_binding(binding: Any) -> bool:
+    """Whether a binding references a typed entry-point resource."""
+    return isinstance(binding.resource_ref, EntryPointResourceReference)
+
+
+def _matches_canonical_ingress(binding: Any, canonical_ingress: Any) -> bool:
+    """Whether the binding resource equals the canonical ingress reference."""
+    return binding.resource_ref == canonical_ingress

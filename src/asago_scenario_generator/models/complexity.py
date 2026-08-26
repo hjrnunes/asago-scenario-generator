@@ -335,34 +335,75 @@ class ComplexityPhaseAssessment(ComplexityModel):
 
     @model_validator(mode="after")
     def deterministic_reason_order(self) -> ComplexityPhaseAssessment:
-        rule_ids = [reason.rule_id for reason in self.reasons]
-        if len(set(rule_ids)) != len(rule_ids):
-            raise ValueError("complexity reasons must be unique by rule_id")
-        for reason in self.reasons:
-            spec = COMPLEXITY_RULE_TABLE[reason.rule_id]
-            if spec.origin_phase == "final" and self.phase == "candidate_lower_bound":
-                raise ValueError(
-                    f"rule {reason.rule_id} originates in the final phase "
-                    "and cannot appear in a candidate_lower_bound assessment"
-                )
-        ordered = sorted(
-            self.reasons,
-            key=lambda r: (-capability_level_rank(r.required_level), r.rule_id),
-        )
-        if list(self.reasons) != ordered:
-            raise ValueError(
-                "complexity reasons must be ordered by descending required "
-                "level then ascending rule_id"
-            )
-        if self.reasons:
-            top = capability_level_rank(self.reasons[0].required_level)
-            if capability_level_rank(self.required_level) != top:
-                raise ValueError(
-                    "phase required_level must equal the highest reason level"
-                )
-        elif self.required_level != "novice":
-            raise ValueError("a reasonless phase assessment must be novice")
+        error = _reason_order_error(self.phase, self.reasons)
+        if error is not None:
+            raise ValueError(error)
+        level_error = _phase_level_error(self.required_level, self.reasons)
+        if level_error is not None:
+            raise ValueError(level_error)
         return self
+
+
+def _unique_rule_ids_error(reasons: tuple[ComplexityReason, ...]) -> str | None:
+    """Error when reasons repeat a rule_id, or None."""
+    rule_ids = [reason.rule_id for reason in reasons]
+    if len(set(rule_ids)) != len(rule_ids):
+        return "complexity reasons must be unique by rule_id"
+    return None
+
+
+def _final_phase_reason_error(
+    phase: AssessmentPhase, reasons: tuple[ComplexityReason, ...]
+) -> str | None:
+    """Error when a final-phase rule appears in a candidate assessment, or None."""
+    for reason in reasons:
+        spec = COMPLEXITY_RULE_TABLE[reason.rule_id]
+        if spec.origin_phase == "final" and phase == "candidate_lower_bound":
+            return (
+                f"rule {reason.rule_id} originates in the final phase "
+                "and cannot appear in a candidate_lower_bound assessment"
+            )
+    return None
+
+
+def _ordered_reasons_error(reasons: tuple[ComplexityReason, ...]) -> str | None:
+    """Error when reasons are not deterministically ordered, or None."""
+    ordered = sorted(
+        reasons,
+        key=lambda r: (-capability_level_rank(r.required_level), r.rule_id),
+    )
+    if list(reasons) != ordered:
+        return (
+            "complexity reasons must be ordered by descending required "
+            "level then ascending rule_id"
+        )
+    return None
+
+
+def _reason_order_error(
+    phase: AssessmentPhase, reasons: tuple[ComplexityReason, ...]
+) -> str | None:
+    """First reason-ordering violation message, or None when valid."""
+    error = _unique_rule_ids_error(reasons)
+    if error is not None:
+        return error
+    error = _final_phase_reason_error(phase, reasons)
+    if error is not None:
+        return error
+    return _ordered_reasons_error(reasons)
+
+
+def _phase_level_error(
+    required_level: CapabilityLevel, reasons: tuple[ComplexityReason, ...]
+) -> str | None:
+    """Error when the phase level contradicts the reasons, or None."""
+    if reasons:
+        top = capability_level_rank(reasons[0].required_level)
+        if capability_level_rank(required_level) != top:
+            return "phase required_level must equal the highest reason level"
+    elif required_level != "novice":
+        return "a reasonless phase assessment must be novice"
+    return None
 
 
 class AttackComplexityAssessment(ComplexityModel):
@@ -562,48 +603,79 @@ class CapabilityAdmissionViolation(ComplexityModel):
 
     @model_validator(mode="after")
     def coherent_violation(self) -> CapabilityAdmissionViolation:
-        below = self.rule_id == "actor_capability_below_attack_complexity"
-        if below and self.required_level is None:
-            raise ValueError("below-complexity violations require a required_level")
-        if below and not self.triggering_reasons:
-            raise ValueError("below-complexity violations require reasons")
-        if below and capability_level_rank(
-            self.actor_capability_level
-        ) >= capability_level_rank(self.required_level):  # type: ignore[arg-type]
-            raise ValueError(
-                "below-complexity violation requires actor level strictly "
-                "below the required level"
+        error = (
+            _below_complexity_level_error(
+                self.actor_capability_level,
+                self.required_level,
+                self.triggering_reasons,
+                self.routing.stage,
             )
-        if not below and self.required_level is not None:
-            raise ValueError(
-                "phase-unavailable violations must not carry a required_level"
+            if self.rule_id == "actor_capability_below_attack_complexity"
+            else _phase_unavailable_error(
+                self.required_level, self.triggering_reasons, self.routing
             )
-        if not below and self.triggering_reasons:
-            raise ValueError(
-                "phase-unavailable violations must not carry triggering reasons"
-            )
-        if below:
-            top = max(
-                capability_level_rank(reason.required_level)
-                for reason in self.triggering_reasons
-            )
-            if capability_level_rank(self.required_level) != top:  # type: ignore[arg-type]
-                raise ValueError(
-                    "required_level must equal the top level of the triggering reasons"
-                )
-            expected_stage = earliest_responsible_stage(self.triggering_reasons)
-            if self.routing.stage != expected_stage:
-                raise ValueError(
-                    f"routing stage '{self.routing.stage}' does not match the "
-                    f"deterministic earliest responsible stage "
-                    f"'{expected_stage}' implied by the triggering reasons"
-                )
-        elif not isinstance(self.routing, QuarantineRouting):
-            raise ValueError(
-                "phase-unavailable violations must carry quarantine routing "
-                "(the fail-closed fallback owned by cmps.5)"
-            )
+        )
+        if error is not None:
+            raise ValueError(error)
         return self
+
+
+def _top_reason_level(reasons: tuple[ComplexityReason, ...]) -> int:
+    """Rank of the highest-required-level triggering reason."""
+    return max(capability_level_rank(reason.required_level) for reason in reasons)
+
+
+def _routing_stage_error(
+    stage: AdmissionStage, reasons: tuple[ComplexityReason, ...]
+) -> str | None:
+    """Error when routing stage is not the earliest responsible stage, or None."""
+    expected_stage = earliest_responsible_stage(reasons)
+    if stage != expected_stage:
+        return (
+            f"routing stage '{stage}' does not match the "
+            f"deterministic earliest responsible stage "
+            f"'{expected_stage}' implied by the triggering reasons"
+        )
+    return None
+
+
+def _below_complexity_level_error(
+    actor_level: CapabilityLevel,
+    required_level: CapabilityLevel | None,
+    reasons: tuple[ComplexityReason, ...],
+    routing_stage: AdmissionStage,
+) -> str | None:
+    """First below-complexity coherence error, or None when coherent."""
+    if required_level is None:
+        return "below-complexity violations require a required_level"
+    if not reasons:
+        return "below-complexity violations require reasons"
+    if capability_level_rank(actor_level) >= capability_level_rank(required_level):
+        return (
+            "below-complexity violation requires actor level strictly "
+            "below the required level"
+        )
+    if capability_level_rank(required_level) != _top_reason_level(reasons):
+        return "required_level must equal the top level of the triggering reasons"
+    return _routing_stage_error(routing_stage, reasons)
+
+
+def _phase_unavailable_error(
+    required_level: CapabilityLevel | None,
+    reasons: tuple[ComplexityReason, ...],
+    routing: ComplexityAdmissionRouting,
+) -> str | None:
+    """First phase-unavailable coherence error, or None when coherent."""
+    if required_level is not None:
+        return "phase-unavailable violations must not carry a required_level"
+    if reasons:
+        return "phase-unavailable violations must not carry triggering reasons"
+    if not isinstance(routing, QuarantineRouting):
+        return (
+            "phase-unavailable violations must carry quarantine routing "
+            "(the fail-closed fallback owned by cmps.5)"
+        )
+    return None
 
 
 class CapabilityAdmissionDecision(ComplexityModel):

@@ -25,7 +25,10 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from asago_scenario_generator.models.realization import ProjectedStepRealization
+from asago_scenario_generator.models.realization import (
+    ProjectedStepRealization,
+    _realization_cover_error,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -351,38 +354,10 @@ class AttackTreeNode(BaseModel):
     @model_validator(mode="after")
     def validate_gate_children_action(self) -> AttackTreeNode:
         """Enforce gate/children/action conditional rules."""
-        child_count = len(self.children) if self.children else 0
-
-        if self.gate == GateType.LEAF:
-            if child_count > 0:
-                raise ValueError(
-                    f"LEAF node '{self.id}' must not have children (has {child_count})"
-                )
-            if self.action is None:
-                raise ValueError(
-                    f"LEAF node '{self.id}' must carry exactly one typed action "
-                    f"(action is None).  Every leaf must have a discriminated action."
-                )
-        else:
-            # AND/OR internal node
-            if child_count < 2:
-                raise ValueError(
-                    f"{self.gate.value} node '{self.id}' must have at least 2 children (has {child_count})"
-                )
-            if self.action is not None:
-                raise ValueError(
-                    f"{self.gate.value} node '{self.id}' must not carry a leaf action "
-                    f"(internal nodes are logical composition only)."
-                )
-
-        # Validate child IDs are prefixed with parent ID
-        if self.children:
-            for child in self.children:
-                if not child.id.startswith(self.id + "."):
-                    raise ValueError(
-                        f"Child node '{child.id}' must have id starting with '{self.id}.' "
-                        f"(parent prefix)"
-                    )
+        _validate_gate_arity(self)
+        prefix_error = _child_id_prefix_error(self)
+        if prefix_error is not None:
+            raise ValueError(prefix_error)
 
         # --- Conditional zone validation for leaf actions ---
         if self.gate == GateType.LEAF and self.action is not None:
@@ -394,84 +369,134 @@ class AttackTreeNode(BaseModel):
         # preconditions may carry a mapped canonical realization; normalized
         # internal/crossing external leaves carry neither IDs nor realizations.
         if self.gate == GateType.LEAF:
-            real_ids_list = [r.projected_step_id for r in self.realizations]
-            projected_ids = set(self.projected_step_ids)
-
-            # Duplicate realization records are always invalid.
-            if len(set(real_ids_list)) != len(real_ids_list):
-                raise ValueError(
-                    f"LEAF node '{self.id}' has duplicate realization "
-                    f"records (same projected_step_id appears more than once)"
-                )
-
-            # Count/uniqueness: exactly one realization per projected ID.
-            if len(real_ids_list) != len(projected_ids):
-                raise ValueError(
-                    f"LEAF node '{self.id}' has {len(real_ids_list)} "
-                    f"realization records but {len(projected_ids)} "
-                    f"projected_step_ids — exactly one record per "
-                    f"projected_step_id is required"
-                )
-
-            # ID set equality (catches empty IDs + nonempty realizations
-            # and vice versa).
-            realization_ids = set(real_ids_list)
-            if realization_ids != projected_ids:
-                raise ValueError(
-                    f"LEAF node '{self.id}' realization IDs "
-                    f"{realization_ids} do not match projected_step_ids "
-                    f"{projected_ids}"
-                )
+            cover_error = _realization_cover_error(
+                self.realizations,
+                self.projected_step_ids,
+                f"LEAF node '{self.id}'",
+            )
+            if cover_error is not None:
+                raise ValueError(cover_error)
 
         return self
 
     def _validate_action_zone(self) -> None:
         """Enforce action-specific zone requirements using the authoritative matrix."""
         action = self.action
-        kind = action.kind
-        rule = ACTION_ZONE_RULES.get(kind, {})
-        zone_required = rule.get("zone_required", False)
-        valid_zones = rule.get("valid_zones", frozenset())
+        if action is None:
+            return
+        rule = ACTION_ZONE_RULES.get(action.kind, {})
+        error = _zone_rule_error(self, action.kind, rule)
+        if error is not None:
+            raise ValueError(error)
 
-        if kind == "impact":
-            assert isinstance(action, ImpactAction)  # kind=="impact" guard
-            boundary = action.boundary
-            if boundary == "internal":
-                if self.zone is None:
-                    raise ValueError(
-                        f"LEAF node '{self.id}' with internal impact must have "
-                        f"a Schneider zone (zone is None)."
-                    )
-                if self.zone not in valid_zones:
-                    raise ValueError(
-                        f"LEAF node '{self.id}' with internal impact has invalid "
-                        f"zone '{self.zone}'. Valid zones: {sorted(valid_zones)}"
-                    )
-            else:  # boundary == "external"
-                if self.zone is not None:
-                    raise ValueError(
-                        f"LEAF node '{self.id}' with external impact must not have "
-                        f"a Schneider zone (got '{self.zone}'). External impacts "
-                        f"are outside the AI boundary."
-                    )
-        elif zone_required is False:
-            if self.zone is not None:
-                raise ValueError(
-                    f"LEAF node '{self.id}' with {kind} action "
-                    f"must not have a Schneider zone (got '{self.zone}'). "
-                    f"External preconditions are outside the AI boundary."
-                )
-        elif zone_required is True:
-            if self.zone is None:
-                raise ValueError(
-                    f"LEAF node '{self.id}' with {kind} action must have "
-                    f"a valid zone (zone is None)."
-                )
-            if self.zone not in valid_zones:
-                raise ValueError(
-                    f"LEAF node '{self.id}' with {kind} action has invalid "
-                    f"zone '{self.zone}'. Valid zones: {sorted(valid_zones)}"
-                )
+
+def _validate_leaf_arity(node: AttackTreeNode) -> None:
+    """LEAF nodes must have no children and carry exactly one typed action."""
+    child_count = len(node.children) if node.children else 0
+    if child_count > 0:
+        raise ValueError(
+            f"LEAF node '{node.id}' must not have children (has {child_count})"
+        )
+    if node.action is None:
+        raise ValueError(
+            f"LEAF node '{node.id}' must carry exactly one typed action "
+            f"(action is None).  Every leaf must have a discriminated action."
+        )
+
+
+def _validate_internal_arity(node: AttackTreeNode) -> None:
+    """AND/OR nodes must have at least two children and no leaf action."""
+    child_count = len(node.children) if node.children else 0
+    if child_count < 2:
+        raise ValueError(
+            f"{node.gate.value} node '{node.id}' must have at least 2 children (has {child_count})"
+        )
+    if node.action is not None:
+        raise ValueError(
+            f"{node.gate.value} node '{node.id}' must not carry a leaf action "
+            f"(internal nodes are logical composition only)."
+        )
+
+
+def _validate_gate_arity(node: AttackTreeNode) -> None:
+    """Dispatch gate/children/action arity rules by node gate."""
+    if node.gate == GateType.LEAF:
+        _validate_leaf_arity(node)
+    else:
+        _validate_internal_arity(node)
+
+
+def _child_id_prefix_error(node: AttackTreeNode) -> str | None:
+    """First child whose ID does not start with the parent prefix, else None."""
+    for child in node.children or ():
+        if not child.id.startswith(node.id + "."):
+            return (
+                f"Child node '{child.id}' must have id starting with "
+                f"'{node.id}.' (parent prefix)"
+            )
+    return None
+
+
+def _impact_zone_error(node: AttackTreeNode, valid_zones: frozenset[str]) -> str | None:
+    """Zone error for impact actions, or None when valid."""
+    assert isinstance(node.action, ImpactAction)  # kind=="impact" guard
+    if node.action.boundary == "internal":
+        if node.zone is None:
+            return (
+                f"LEAF node '{node.id}' with internal impact must have "
+                f"a Schneider zone (zone is None)."
+            )
+        if node.zone not in valid_zones:
+            return (
+                f"LEAF node '{node.id}' with internal impact has invalid "
+                f"zone '{node.zone}'. Valid zones: {sorted(valid_zones)}"
+            )
+    elif node.zone is not None:  # boundary == "external"
+        return (
+            f"LEAF node '{node.id}' with external impact must not have "
+            f"a Schneider zone (got '{node.zone}'). External impacts "
+            f"are outside the AI boundary."
+        )
+    return None
+
+
+def _forbidden_zone_error(node: AttackTreeNode, kind: str) -> str | None:
+    """Zone error for actions that must not carry a zone, or None."""
+    if node.zone is not None:
+        return (
+            f"LEAF node '{node.id}' with {kind} action "
+            f"must not have a Schneider zone (got '{node.zone}'). "
+            f"External preconditions are outside the AI boundary."
+        )
+    return None
+
+
+def _required_zone_error(
+    node: AttackTreeNode, kind: str, valid_zones: frozenset[str]
+) -> str | None:
+    """Zone error for actions that require a valid zone, or None."""
+    if node.zone is None:
+        return (
+            f"LEAF node '{node.id}' with {kind} action must have "
+            f"a valid zone (zone is None)."
+        )
+    if node.zone not in valid_zones:
+        return (
+            f"LEAF node '{node.id}' with {kind} action has invalid "
+            f"zone '{node.zone}'. Valid zones: {sorted(valid_zones)}"
+        )
+    return None
+
+
+def _zone_rule_error(
+    node: AttackTreeNode, kind: str, rule: dict[str, Any]
+) -> str | None:
+    """Action-kind zone requirement error from the authoritative matrix."""
+    if kind == "impact":
+        return _impact_zone_error(node, rule.get("valid_zones", frozenset()))
+    if rule.get("zone_required", False) is False:
+        return _forbidden_zone_error(node, kind)
+    return _required_zone_error(node, kind, rule.get("valid_zones", frozenset()))
 
 
 # ---------------------------------------------------------------------------
@@ -539,6 +564,19 @@ def _collect_technique_ids_from_node(
 # ---------------------------------------------------------------------------
 
 
+def _repair_children(node: dict[str, Any]) -> list | None:
+    """Recursively repaired children list, or None when the node has none."""
+    children = node.get("children")
+    if children and isinstance(children, list):
+        return [_repair_node(child) for child in children]
+    return None
+
+
+def _is_single_child_gate(gate: str, children: list | None) -> bool:
+    """Whether an AND/OR gate has exactly one child to collapse."""
+    return gate in ("AND", "OR") and children is not None and len(children) == 1
+
+
 def _repair_node(node: dict[str, Any]) -> dict[str, Any]:
     """Recursively repair a node dict, collapsing single-child AND/OR nodes.
 
@@ -550,15 +588,15 @@ def _repair_node(node: dict[str, Any]) -> dict[str, Any]:
     The function recurses depth-first so that deeply-nested single-child chains
     are collapsed from the bottom up.
     """
-    children = node.get("children")
+    children = _repair_children(node)
 
     # Recurse into children first (bottom-up repair).
-    if children and isinstance(children, list):
-        node["children"] = [_repair_node(c) for c in children]
+    if children is not None:
+        node["children"] = children
 
     gate = node.get("gate", "").upper()
 
-    if gate in ("AND", "OR") and children and len(children) == 1:
+    if _is_single_child_gate(gate, children):
         parent_id = node["id"]
         child = node["children"][0]
         logger.warning(
