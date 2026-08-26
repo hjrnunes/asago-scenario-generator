@@ -28,7 +28,7 @@ from asago_scenario_generator.pipeline.generate import (
     generate_scenario,
 )
 from asago_scenario_generator.pipeline.generate.actor import build_call0_context
-from asago_scenario_generator.pipeline.generate.narrative import (
+from asago_scenario_generator.pipeline.generate.narrative_access import (
     validate_narrative_access_realization,
 )
 from asago_scenario_generator.pipeline.seeds import RiskCardRef, ScenarioSeed

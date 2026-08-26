@@ -23,7 +23,7 @@ from asago_scenario_generator.pipeline.finalization import (
     GeneratedStage,
     MAX_OWNER_RETRIES,
 )
-from asago_scenario_generator.pipeline.generate.narrative import (
+from asago_scenario_generator.pipeline.generate.narrative_access import (
     MAX_NARRATIVE_STEPS,
     NARRATIVE_CONNECTOR_STEPS,
 )
@@ -4079,7 +4079,7 @@ def _h_derive_zone_sequence(
 ) -> tuple[bool, str]:
     from types import SimpleNamespace
 
-    from asago_scenario_generator.pipeline.generate.narrative import (
+    from asago_scenario_generator.pipeline.generate.narrative_semantics import (
         _derive_zone_sequence,
     )
 

@@ -12,6 +12,28 @@ PIPELINE_DIR = (
     / "pipeline"
 )
 GENERATE_DIR = PIPELINE_DIR / "generate"
+TESTS_DIR = Path(__file__).resolve().parent
+ACCEPTANCE_DIR = TESTS_DIR.parent / "acceptance"
+
+_NARRATIVE_FACADE = "asago_scenario_generator.pipeline.generate.narrative"
+_NARRATIVE_ACCESS = "asago_scenario_generator.pipeline.generate.narrative_access"
+_NARRATIVE_SEMANTICS = "asago_scenario_generator.pipeline.generate.narrative_semantics"
+_LEAF_HELPERS_ON_NARRATIVE = frozenset(
+    {
+        "MAX_NARRATIVE_STEPS",
+        "NARRATIVE_CONNECTOR_STEPS",
+        "validate_narrative_access_realization",
+        "compile_narrative_draft",
+        "create_narrative_draft_model",
+        "create_narrative_draft_v3_model",
+        "NarrativeDraftContext",
+        "NarrativeDraftV2",
+        "NarrativeDraftV3",
+        "NarrativeProjectedStep",
+        "NarrativeSemanticDraftError",
+        "_derive_zone_sequence",
+    }
+)
 
 _FORBIDDEN_IO_NEAR_PREFIXES = (
     "asago_scenario_generator.llm",
@@ -36,6 +58,16 @@ def _imported_modules(path: Path) -> set[str]:
         elif isinstance(node, ast.ImportFrom) and node.module:
             modules.add(node.module)
     return modules
+
+
+def _imported_names(path: Path, module: str) -> set[str]:
+    """Return names imported from *module* in a source file."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == module:
+            names.update(alias.name for alias in node.names)
+    return names
 
 
 class TestNarrativeAccessLeaf:
@@ -94,6 +126,45 @@ class TestNarrativeSemanticsLeaf:
             "narrative_semantics reaches orchestration siblings: "
             f"{sorted(siblings)}"
         )
+
+
+class TestNarrativeConsumersDependInward:
+    """Tests and acceptance consume access and draft leaves, not the façade."""
+
+    _CONSUMERS = (
+        GENERATE_DIR / "__init__.py",
+        TESTS_DIR / "test_cmps6_narrative_realization.py",
+        TESTS_DIR / "test_cmps6_third_correction.py",
+        TESTS_DIR / "test_source_influence_relation.py",
+        TESTS_DIR / "test_semantic_stage_evidence.py",
+        TESTS_DIR / "test_semantic_actor_narrative.py",
+        TESTS_DIR / "test_narrative_outside_boundaries.py",
+        ACCEPTANCE_DIR / "runtime_features" / "taxonomy_risk.py",
+    )
+
+    def test_consumers_import_leaf_helpers_from_leaves(self) -> None:
+        """Leaf helpers stay off the IO-near narrative façade."""
+        for path in self._CONSUMERS:
+            leaked = (
+                _imported_names(path, _NARRATIVE_FACADE) & _LEAF_HELPERS_ON_NARRATIVE
+            )
+            assert not leaked, (
+                f"{path.name} imports leaf helpers from narrative.py: "
+                f"{sorted(leaked)}"
+            )
+
+    def test_package_reexport_imports_zone_sequence_from_semantics(self) -> None:
+        """Historical package re-export reaches the semantics leaf."""
+        names = _imported_names(GENERATE_DIR / "__init__.py", _NARRATIVE_SEMANTICS)
+        assert "_derive_zone_sequence" in names
+        facade_names = _imported_names(GENERATE_DIR / "__init__.py", _NARRATIVE_FACADE)
+        assert "_derive_zone_sequence" not in facade_names
+
+    def test_prebehavior_imports_access_leaf_not_narrative_facade(self) -> None:
+        """Pre-behavior gates reach step bounds through the access leaf."""
+        imports = _imported_modules(PIPELINE_DIR / "finalization_prebehavior.py")
+        assert _NARRATIVE_ACCESS in imports
+        assert _NARRATIVE_FACADE not in imports
 
 
 class TestProjectionBlockLeaf:

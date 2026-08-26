@@ -71,7 +71,9 @@ do not import the façade or IO-near modules. Narrative access-realization
 and step-bound checks live in `pipeline.generate.narrative_access`;
 narrative semantic draft contracts and compilation live in
 `pipeline.generate.narrative_semantics`; actor draft compilation lives in
-`pipeline.generate.actor_semantics`. Attack-tree transport, zone
+`pipeline.generate.actor_semantics`. Tests and acceptance import access
+bounds, draft contracts, and zone-sequence derivation from those leaves
+rather than the IO-near `generate.narrative` façade. Attack-tree transport, zone
 enforcement, name resolution, and diversity helpers live in
 `pipeline.generate.tree_transport`, `tree_validation`, `zones`, `names`,
 and `diversity`; those leaves stay off the IO-near `generate.tree`
