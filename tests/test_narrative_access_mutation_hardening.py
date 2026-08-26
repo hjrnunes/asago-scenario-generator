@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from asago_scenario_generator.pipeline.generate.narrative_access import (
-    _direct_access_violations,
+    _direct_source_violation,
     _source_identity,
 )
 
@@ -26,8 +26,7 @@ def test_direct_access_rejects_an_influence_source_reference() -> None:
     )
     access = SimpleNamespace(ingress_mode="direct")
 
-    violations = _direct_access_violations(realization, access)
+    violation = _direct_source_violation(realization, access)
 
-    assert [violation.rule for violation in violations] == [
-        "direct_realization_has_indirect_ref"
-    ]
+    assert violation is not None
+    assert violation.rule == "direct_realization_has_indirect_ref"
