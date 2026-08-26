@@ -193,6 +193,25 @@ class TestActorSemanticLeafBoundaries:
             )
 
 
+class TestStagesDependInwardOnDraftLeaves:
+    """Stage orchestration consumes draft contracts, not IO-near façades."""
+
+    def test_stages_import_semantic_leaves_not_actor_or_narrative_facades(
+        self,
+    ) -> None:
+        """Accepted-draft evidence stays on the compiler leaves."""
+        imports = _imported_modules(GENERATE_DIR / "stages.py")
+        assert (
+            "asago_scenario_generator.pipeline.generate.actor_semantics" in imports
+        )
+        assert (
+            "asago_scenario_generator.pipeline.generate.narrative_semantics"
+            in imports
+        )
+        assert "asago_scenario_generator.pipeline.generate.actor" not in imports
+        assert "asago_scenario_generator.pipeline.generate.narrative" not in imports
+
+
 class TestBehaviorCompilerBoundary:
     """The deterministic behavior compiler is a pure, dependency-inward leaf."""
 

@@ -26,7 +26,6 @@ from asago_scenario_generator.pipeline.generate.canonical_projection import (
 )
 from asago_scenario_generator.pipeline.generate.narrative_access import (
     MAX_NARRATIVE_STEPS,
-    NARRATIVE_CONNECTOR_STEPS,
 )
 from asago_scenario_generator.pipeline.seeds import ScenarioSeed
 

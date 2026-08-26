@@ -48,9 +48,13 @@ structure, phantom, insider, provenance, parsimony, goal, and semantic
 leaves) behind the historical `pipeline.validation` façade. Those leaves
 do not import the façade or IO-near modules. Narrative access-realization
 and step-bound checks live in `pipeline.generate.narrative_access`;
-projection-envelope sidecars are built by `pipeline.projection_block`.
-Validation, pre-behavior gates, and assembly consume those leaves instead
-of the IO-near `generate.narrative` and `generate.assembly` façades.
+narrative semantic draft contracts and compilation live in
+`pipeline.generate.narrative_semantics`; actor draft compilation lives in
+`pipeline.generate.actor_semantics`. Projection-envelope sidecars are
+built by `pipeline.projection_block`. Validation, pre-behavior gates,
+stage orchestration, and assembly consume those leaves instead of the
+IO-near `generate.narrative`, `generate.actor`, and `generate.assembly`
+façades.
 
 Deterministic evaluation metrics (`consistency`, `diversity`, `gherkin`,
 `grounding`, `plausibility`, `scorecard`, `versioned_metrics`) stay off

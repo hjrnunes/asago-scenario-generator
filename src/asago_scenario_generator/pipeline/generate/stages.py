@@ -22,12 +22,12 @@ from asago_scenario_generator.models.scenario import (
 from asago_scenario_generator.pipeline.generate.constants import (
     _ADVERSARIAL_ONLY_THREATS,
 )
-from asago_scenario_generator.pipeline.generate.actor import (
+from asago_scenario_generator.pipeline.generate.actor_semantics import (
     ActorDraftV2,
     ActorDraftV3,
     ActorSemanticDraftError,
 )
-from asago_scenario_generator.pipeline.generate.narrative import (
+from asago_scenario_generator.pipeline.generate.narrative_semantics import (
     NarrativeDraftV2,
     NarrativeDraftV3,
     NarrativeSemanticDraftError,
