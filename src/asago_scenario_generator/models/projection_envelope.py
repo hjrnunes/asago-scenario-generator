@@ -33,9 +33,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from asago_scenario_generator.models.attack_pattern import (
-    EntryPointResourceReference,
+from asago_scenario_generator.models.attack_pattern_contracts import (
     ExecutionRequirement,
+)
+from asago_scenario_generator.models.attack_pattern_projection import (
+    EntryPointResourceReference,
     ProjectionSnapshot,
 )
 from asago_scenario_generator.pipeline.projection_contracts import (

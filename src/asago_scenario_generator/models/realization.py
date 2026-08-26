@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from asago_scenario_generator.models.attack_pattern import (
+from asago_scenario_generator.models.attack_pattern_projection import (
     AgentInternalResourceReference,
     EntryPointResourceReference,
     IntegrationResourceReference,
@@ -33,7 +33,7 @@ from asago_scenario_generator.models.attack_pattern import (
 )
 
 if TYPE_CHECKING:
-    from asago_scenario_generator.models.attack_pattern import CanonicalChainStep
+    from asago_scenario_generator.models.attack_pattern_chain import CanonicalChainStep
 
 
 _REALIZATION_ID_MAX_LENGTH = 200

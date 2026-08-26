@@ -4,7 +4,7 @@ One closed, versioned rule table with two phases:
 
 - **Candidate lower bound** (:func:`assess_candidate_complexity`) — runs
   before Call 0 and consumes only typed candidate-v2 inputs:
-  :class:`~asago_scenario_generator.pipeline.projection.ProjectedCandidate`
+  :class:`~asago_scenario_generator.pipeline.projection_contracts.ProjectedCandidate`
   ``complexity_inputs``, the immutable projection's selected steps, and
   the derived adapter-neutral execution requirements.
 - **Final assessment** (:func:`assess_final_complexity`) — runs after
