@@ -80,6 +80,65 @@ def _get_technique_scopes(
     )
 
 
+def _threat_ref_details(
+    scenario_id: str,
+    threat_ids: list[str],
+    valid_ids: set[str],
+) -> tuple[int, int, list[dict[str, str]]]:
+    """Valid/dangling counts and dangling details for one scenario."""
+    total = 0
+    valid = 0
+    dangling: list[dict[str, str]] = []
+    for tid in threat_ids:
+        total += 1
+        if tid in valid_ids:
+            valid += 1
+        else:
+            dangling.append(
+                {
+                    "scenario_id": scenario_id,
+                    "threat_id": tid,
+                }
+            )
+    return total, valid, dangling
+
+
+def _technique_grounding_details(
+    scenario_id: str,
+    technique_ids: list[str],
+    exact_mappings: list[str],
+) -> tuple[int, int, list[dict[str, str]]]:
+    """Grounded/ungrounded counts and details for one scenario."""
+    if not technique_ids:
+        return 0, 0, []
+    allowed = set(exact_mappings)
+    total = 0
+    grounded = 0
+    ungrounded: list[dict[str, str]] = []
+    for tech_id in technique_ids:
+        total += 1
+        if allowed and tech_id in allowed:
+            grounded += 1
+        elif not allowed:
+            # No seed technique IDs -> any technique_id is ungrounded
+            ungrounded.append(
+                {
+                    "scenario_id": scenario_id,
+                    "technique_id": tech_id,
+                    "reason": "no_projected_step_mapping_ids",
+                }
+            )
+        else:
+            ungrounded.append(
+                {
+                    "scenario_id": scenario_id,
+                    "technique_id": tech_id,
+                    "reason": "not_in_projected_step_mappings",
+                }
+            )
+    return total, grounded, ungrounded
+
+
 def score_grounding(
     scenarios: list[dict[str, Any]],
     threats_path: Path | None = None,
@@ -122,17 +181,12 @@ def score_grounding(
 
         # --- threat_id validation ---
         threat_ids = _collect_tree_threat_ids(root)
-        for tid in threat_ids:
-            total_refs += 1
-            if tid in valid_ids:
-                valid_refs += 1
-            else:
-                dangling.append(
-                    {
-                        "scenario_id": scenario_id,
-                        "threat_id": tid,
-                    }
-                )
+        t_total, t_valid, t_dangling = _threat_ref_details(
+            scenario_id, threat_ids, valid_ids
+        )
+        total_refs += t_total
+        valid_refs += t_valid
+        dangling.extend(t_dangling)
 
         # --- technique_id grounding ---
         technique_ids = _collect_tree_technique_ids(root)
@@ -143,29 +197,12 @@ def score_grounding(
         projected_step_mappings.update(exact_mappings)
         legacy_scope_count += int(legacy_derived)
 
-        if technique_ids:
-            allowed = set(exact_mappings)
-            for tech_id in technique_ids:
-                total_technique_refs += 1
-                if allowed and tech_id in allowed:
-                    grounded_technique_refs += 1
-                elif not allowed:
-                    # No seed technique IDs -> any technique_id is ungrounded
-                    ungrounded_techniques.append(
-                        {
-                            "scenario_id": scenario_id,
-                            "technique_id": tech_id,
-                            "reason": "no_projected_step_mapping_ids",
-                        }
-                    )
-                else:
-                    ungrounded_techniques.append(
-                        {
-                            "scenario_id": scenario_id,
-                            "technique_id": tech_id,
-                            "reason": "not_in_projected_step_mappings",
-                        }
-                    )
+        g_total, g_grounded, g_ungrounded = _technique_grounding_details(
+            scenario_id, technique_ids, exact_mappings
+        )
+        total_technique_refs += g_total
+        grounded_technique_refs += g_grounded
+        ungrounded_techniques.extend(g_ungrounded)
 
     validity = valid_refs / total_refs if total_refs > 0 else 1.0
     technique_grounding = (
@@ -237,6 +274,49 @@ def _extract_spec_technique_ids(
     return _extract_technique_ids_from_text(text)
 
 
+def _technique_agreement_detail(
+    scenario: dict[str, Any],
+    gherkin_text: str | None,
+    tree_ids: set[str],
+    classifications: list[str],
+    projected_mappings: list[str],
+    legacy_derived: bool,
+) -> tuple[float, dict[str, Any]]:
+    """Agreement ratio and detail record for one scenario."""
+    narrative_ids = _extract_narrative_technique_ids(scenario)
+    spec_ids = _extract_spec_technique_ids(scenario, gherkin_text)
+
+    # Jaccard similarity of tree and spec sets only
+    union = tree_ids | spec_ids
+    if not union:
+        # Vacuously agree when no techniques in either lens
+        agreement = 1.0
+    else:
+        intersection = tree_ids & spec_ids
+        agreement = len(intersection) / len(union)
+
+    # Build detail record for imperfect agreement
+    detail: dict[str, Any] = {
+        "technique_agreement": round(agreement, 4),
+        "scenario_classifications": classifications,
+        "projected_step_mappings": projected_mappings,
+        "narrative_references": sorted(narrative_ids),
+        "tree_projected_step_mappings": sorted(tree_ids),
+        "spec_projected_step_mappings": sorted(spec_ids),
+        "legacy_derived": legacy_derived,
+    }
+
+    missing_from_tree = spec_ids - tree_ids
+    missing_from_spec = tree_ids - spec_ids
+
+    if missing_from_tree:
+        detail["missing_from_tree"] = sorted(missing_from_tree)
+    if missing_from_spec:
+        detail["missing_from_spec"] = sorted(missing_from_spec)
+
+    return agreement, detail
+
+
 def score_technique_agreement(
     scenarios: list[dict[str, Any]],
     gherkin_files: dict[str, str] | None = None,
@@ -273,46 +353,23 @@ def score_technique_agreement(
     for scenario in scenarios:
         scenario_id = scenario.get("scenario_id", "unknown")
 
-        narrative_ids = _extract_narrative_technique_ids(scenario)
-
         tree_root = scenario.get("attack_tree", {}).get("root", {})
         tree_ids = set(_collect_tree_technique_ids(tree_root))
 
         gherkin_text = gherkin_files.get(scenario_id)
-        spec_ids = _extract_spec_technique_ids(scenario, gherkin_text)
         classifications, projected_mappings, legacy_derived = _get_technique_scopes(
             scenario, list(tree_ids)
         )
 
-        # Jaccard similarity of tree and spec sets only
-        union = tree_ids | spec_ids
-        if not union:
-            # Vacuously agree when no techniques in either lens
-            agreement = 1.0
-        else:
-            intersection = tree_ids & spec_ids
-            agreement = len(intersection) / len(union)
-
+        agreement, detail = _technique_agreement_detail(
+            scenario,
+            gherkin_text,
+            tree_ids,
+            classifications,
+            projected_mappings,
+            legacy_derived,
+        )
         agreements.append(agreement)
-
-        # Build detail record for imperfect agreement
-        detail: dict[str, Any] = {
-            "technique_agreement": round(agreement, 4),
-            "scenario_classifications": classifications,
-            "projected_step_mappings": projected_mappings,
-            "narrative_references": sorted(narrative_ids),
-            "tree_projected_step_mappings": sorted(tree_ids),
-            "spec_projected_step_mappings": sorted(spec_ids),
-            "legacy_derived": legacy_derived,
-        }
-
-        missing_from_tree = spec_ids - tree_ids
-        missing_from_spec = tree_ids - spec_ids
-
-        if missing_from_tree:
-            detail["missing_from_tree"] = sorted(missing_from_tree)
-        if missing_from_spec:
-            detail["missing_from_spec"] = sorted(missing_from_spec)
 
         if agreement < 1.0:
             per_scenario[scenario_id] = detail

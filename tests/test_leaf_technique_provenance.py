@@ -43,6 +43,8 @@ from asago_scenario_generator.models.scenario import (
 from asago_scenario_generator.pipeline.validation import (
     LeafTechniqueViolation,
     _is_consequence_leaf,
+    _leaf_mapping_reason,
+    _leaf_provenance_reasons,
     check_leaf_technique_provenance,
 )
 from tests.helpers.projection_factory import make_behavior_spec, make_projection_block
@@ -851,3 +853,126 @@ class TestLeafTechniqueViolation:
         assert v.label == "Craft phishing lure"
         assert v.zone == "input"
         assert "provenance" in v.reason
+
+
+# ---------------------------------------------------------------------------
+# Tests: leaf mapping reason helper branches
+# ---------------------------------------------------------------------------
+
+
+class TestLeafMappingReason:
+    """Direct coverage of the per-leaf provenance mismatch reason."""
+
+    def _leaf(self, **kwargs) -> _AttackTreeNode:
+        projected_ids = kwargs.get("projected_step_ids")
+        if projected_ids:
+            kwargs.setdefault(
+                "realizations",
+                make_realizations(
+                    projected_ids,
+                    action_kind="prepare",
+                    executor_role="attacker",
+                    boundary_position="crossing",
+                ),
+            )
+        return AttackTreeNode(
+            id="n1.1", label="Step", gate=GateType.LEAF, zone="input", **kwargs
+        )
+
+    def test_unannotated_technique_is_clean(self) -> None:
+        leaf = self._leaf(technique_id=None, projected_step_ids=("step.1",))
+        assert _leaf_mapping_reason(leaf, {"step.1": frozenset({"AML.T0051"})}) is None
+
+    def test_leaf_without_projected_step_ids_is_flagged(self) -> None:
+        leaf = self._leaf(technique_id="AML.T0051")
+        reason = _leaf_mapping_reason(leaf, {})
+        assert reason is not None
+        assert "without projected-step IDs" in reason
+        assert "AML.T0051" in reason
+
+    def test_exact_technique_mapping_is_clean(self) -> None:
+        leaf = self._leaf(
+            technique_id="AML.T0051", projected_step_ids=("step.1", "step.2")
+        )
+        exact = {
+            "step.1": frozenset({"AML.T0051", "AML.T0001"}),
+            "step.2": frozenset({"AML.T0051"}),
+        }
+        assert _leaf_mapping_reason(leaf, exact) is None
+
+    def test_mismatched_technique_is_flagged(self) -> None:
+        leaf = self._leaf(technique_id="AML.T0051", projected_step_ids=("step.1",))
+        exact = {"step.1": frozenset({"AML.T0001"})}
+        reason = _leaf_mapping_reason(leaf, exact)
+        assert reason is not None
+        assert "not an exact mapping" in reason
+        assert "['step.1']" in reason
+
+    def test_partial_mismatch_lists_offending_steps(self) -> None:
+        leaf = self._leaf(
+            technique_id="AML.T0051", projected_step_ids=("step.1", "step.2")
+        )
+        exact = {
+            "step.1": frozenset({"AML.T0051"}),
+            "step.2": frozenset({"AML.T0001"}),
+        }
+        reason = _leaf_mapping_reason(leaf, exact)
+        assert reason is not None
+        assert "step.2" in reason
+        assert "step.1" not in reason
+
+
+class TestLeafProvenanceReasons:
+    """Aggregate per-leaf reasons keep only non-None entries."""
+
+    def test_mismatches_only(self) -> None:
+        good = AttackTreeNode(
+            id="n1.1",
+            label="Good",
+            gate=GateType.LEAF,
+            zone="input",
+            technique_id="AML.T0001",
+            projected_step_ids=("step.1",),
+            realizations=make_realizations(
+                ("step.1",),
+                action_kind="prepare",
+                executor_role="attacker",
+                boundary_position="crossing",
+            ),
+        )
+        bad = AttackTreeNode(
+            id="n1.2",
+            label="Bad",
+            gate=GateType.LEAF,
+            zone="input",
+            technique_id="AML.T0051",
+            projected_step_ids=("step.1",),
+            realizations=make_realizations(
+                ("step.1",),
+                action_kind="prepare",
+                executor_role="attacker",
+                boundary_position="crossing",
+            ),
+        )
+        exact = {"step.1": frozenset({"AML.T0001"})}
+        reasons = _leaf_provenance_reasons([good, bad], exact)
+        assert len(reasons) == 1
+        assert "n1.2" in reasons[0]
+
+    def test_all_clean_yields_no_reasons(self) -> None:
+        leaf = AttackTreeNode(
+            id="n1.1",
+            label="Good",
+            gate=GateType.LEAF,
+            zone="input",
+            technique_id="AML.T0051",
+            projected_step_ids=("step.1",),
+            realizations=make_realizations(
+                ("step.1",),
+                action_kind="prepare",
+                executor_role="attacker",
+                boundary_position="crossing",
+            ),
+        )
+        exact = {"step.1": frozenset({"AML.T0051"})}
+        assert _leaf_provenance_reasons([leaf], exact) == []

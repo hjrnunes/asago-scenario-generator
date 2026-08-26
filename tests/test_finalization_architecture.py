@@ -118,6 +118,11 @@ class TestFinalizationAdaptersDependInward:
         (
             "finalization_admission.py",
             "finalization_gates.py",
+            "finalization_gate_contracts.py",
+            "finalization_parsimony.py",
+            "finalization_prebehavior.py",
+            "finalization_runtime.py",
+            "finalization_snapshots.py",
             *_PERSISTENCE_ADAPTERS,
         ),
     )
@@ -138,6 +143,10 @@ class TestFinalizationAdaptersDependInward:
         (
             "finalization_admission.py",
             "finalization_gates.py",
+            "finalization_gate_contracts.py",
+            "finalization_parsimony.py",
+            "finalization_prebehavior.py",
+            "finalization_runtime.py",
             "persistence_models.py",
             "persistence_artifacts.py",
             "persistence_decisions.py",
@@ -177,3 +186,17 @@ class TestPersistenceCanonicalEncoderDependsInward:
         imports = _imported_modules(PIPELINE_DIR / "persistence_validation.py")
         assert "asago_scenario_generator.pipeline.persistence" not in imports
         assert "asago_scenario_generator.pipeline.projection" not in imports
+
+
+class TestPrebehaviorDependsInward:
+    """Pre-behavior gates consume contract leaves, not generate façades."""
+
+    def test_prebehavior_does_not_import_generate_facades(self) -> None:
+        """Ownership and realization gates stay off the IO-near façades."""
+        imports = _imported_modules(PIPELINE_DIR / "finalization_prebehavior.py")
+        assert "asago_scenario_generator.pipeline.generate.narrative" not in imports
+        assert "asago_scenario_generator.pipeline.generate.assembly" not in imports
+        assert (
+            "asago_scenario_generator.pipeline.generate.narrative_access" in imports
+        )
+        assert "asago_scenario_generator.pipeline.projection_block" in imports

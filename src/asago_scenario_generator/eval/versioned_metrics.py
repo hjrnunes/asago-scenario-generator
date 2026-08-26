@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from itertools import combinations
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -23,18 +24,16 @@ from asago_scenario_generator.eval.scorecard import (
 from asago_scenario_generator.manifest import ArtifactRole, ManifestInventoryResolver
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.models.scenario import ScenarioEnvelope
-from asago_scenario_generator.pipeline.persistence import (
-    CoveragePlanV2,
+from asago_scenario_generator.pipeline.finalization_gate_contracts import (
+    AdmissionEvidenceId,
+)
+from asago_scenario_generator.pipeline.persistence_journal import (
     FinalizationInventoryV1,
 )
-from asago_scenario_generator.pipeline.finalization_gates import AdmissionEvidenceId
+from asago_scenario_generator.pipeline.persistence_plan import CoveragePlanV2
 
 _TITLE_TOKEN_RE = re.compile(r"[a-z0-9]+")
 _NEAR_TITLE_THRESHOLD = 0.6
-
-
-def _ids(items: list[dict[str, Any]], key: str) -> set[str]:
-    return {str(item[key]) for item in items if item.get(key)}
 
 
 def _tree_leaves(node: dict[str, Any]) -> list[dict[str, Any]]:
@@ -58,11 +57,28 @@ def _title_tokens(value: str) -> set[str]:
     return set(_TITLE_TOKEN_RE.findall(value.casefold()))
 
 
-def _components(nodes: list[str], edges: set[tuple[str, str]]) -> list[list[str]]:
+def _neighbor_map(nodes: list[str], edges: set[tuple[str, str]]) -> dict[str, set[str]]:
+    """Undirected adjacency map built from an edge set."""
     neighbors = {node: set() for node in nodes}
     for left, right in edges:
         neighbors[left].add(right)
         neighbors[right].add(left)
+    return neighbors
+
+
+def _unvisited_neighbors(
+    current: str, neighbors: dict[str, set[str]], seen: set[str]
+) -> list[str]:
+    """Adjacent nodes not yet seen, in deterministic order."""
+    return [
+        neighbor
+        for neighbor in sorted(neighbors[current], reverse=True)
+        if neighbor not in seen
+    ]
+
+
+def _components(nodes: list[str], edges: set[tuple[str, str]]) -> list[list[str]]:
+    neighbors = _neighbor_map(nodes, edges)
     result: list[list[str]] = []
     seen: set[str] = set()
     for node in sorted(nodes):
@@ -74,12 +90,43 @@ def _components(nodes: list[str], edges: set[tuple[str, str]]) -> list[list[str]
         while pending:
             current = pending.pop()
             component.append(current)
-            for neighbor in sorted(neighbors[current], reverse=True):
-                if neighbor not in seen:
-                    seen.add(neighbor)
-                    pending.append(neighbor)
+            for neighbor in _unvisited_neighbors(current, neighbors, seen):
+                seen.add(neighbor)
+                pending.append(neighbor)
         result.append(sorted(component))
     return sorted(result)
+
+
+def _exact_normalized_groups(
+    normalized_groups: dict[str, list[str]],
+) -> list[list[str]]:
+    """Sorted scenario-id groups whose normalized titles repeat."""
+    return sorted(
+        sorted(group)
+        for title, group in normalized_groups.items()
+        if title and len(group) > 1
+    )
+
+
+def _title_edge_similarity(left: str, right: str, titles: dict[str, str]) -> float:
+    """Jaccard similarity of the token sets of two titles."""
+    left_tokens = _title_tokens(titles[left])
+    right_tokens = _title_tokens(titles[right])
+    union = left_tokens | right_tokens
+    return len(left_tokens & right_tokens) / len(union) if union else 0.0
+
+
+def _title_edges(ids: list[str], titles: dict[str, str]) -> set[tuple[str, str]]:
+    """Deterministic near-duplicate edges between scenario ids."""
+    title_edges: set[tuple[str, str]] = set()
+    for left, right in combinations(ids, 2):
+        if _title_edge_similarity(
+            left, right, titles
+        ) >= _NEAR_TITLE_THRESHOLD and _normal_title(titles[left]) != _normal_title(
+            titles[right]
+        ):
+            title_edges.add((left, right))
+    return title_edges
 
 
 def title_duplicate_components(
@@ -89,26 +136,9 @@ def title_duplicate_components(
     normalized_groups: dict[str, list[str]] = {}
     for scenario_id, title in titles.items():
         normalized_groups.setdefault(_normal_title(title), []).append(scenario_id)
-    exact_groups = sorted(
-        sorted(group)
-        for title, group in normalized_groups.items()
-        if title and len(group) > 1
-    )
-    title_edges: set[tuple[str, str]] = set()
+    exact_groups = _exact_normalized_groups(normalized_groups)
     ids = sorted(titles)
-    for index, left in enumerate(ids):
-        for right in ids[index + 1 :]:
-            left_tokens, right_tokens = (
-                _title_tokens(titles[left]),
-                _title_tokens(titles[right]),
-            )
-            union = left_tokens | right_tokens
-            similarity = len(left_tokens & right_tokens) / len(union) if union else 0.0
-            if similarity >= _NEAR_TITLE_THRESHOLD and _normal_title(
-                titles[left]
-            ) != _normal_title(titles[right]):
-                title_edges.add((left, right))
-    return exact_groups, _components(ids, title_edges)
+    return exact_groups, _components(ids, _title_edges(ids, titles))
 
 
 def canonical_entry_point_sets(
@@ -144,7 +174,8 @@ def _count_metric(count: int, evidence: list[str], affected: list[str]) -> Metri
 def _resolver_orphan_fact(
     resolver: ManifestInventoryResolver, *, evidence: str
 ) -> MetricResult:
-    if not getattr(resolver, "check_orphans", False):
+    check_orphans = getattr(resolver, "check_orphans", False)
+    if not check_orphans:
         return MetricResult(
             status=MetricStatus.NOT_APPLICABLE,
             evidence=[
@@ -154,6 +185,84 @@ def _resolver_orphan_fact(
             affected_ids=[],
         )
     return zero_gate(0, evidence=[evidence])
+
+
+def _decision_evidence_records(
+    decision: Any, evidence_ids: tuple[AdmissionEvidenceId, ...]
+) -> dict[AdmissionEvidenceId, list[Any]]:
+    """Gate-result records per required evidence id for one decision."""
+    return {
+        evidence_id: [
+            gate for gate in decision.gate_results if gate.gate is evidence_id
+        ]
+        for evidence_id in evidence_ids
+    }
+
+
+def _wrong_record_count(records: dict[AdmissionEvidenceId, list[Any]]) -> bool:
+    """True when any evidence id appears more or less than once."""
+    return any(len(items) != 1 for items in records.values())
+
+
+def _unexpected_applicable(
+    records: dict[AdmissionEvidenceId, list[Any]],
+    expected_applicable: bool | None,
+) -> bool:
+    """True when any record's applicable flag contradicts the expectation."""
+    if expected_applicable is None:
+        return False
+    return any(
+        items[0].applicable is not expected_applicable for items in records.values()
+    )
+
+
+def _not_applicable_gate(records: dict[AdmissionEvidenceId, list[Any]]) -> bool:
+    """True when any evidence gate is marked not applicable."""
+    return any(not items[0].applicable for items in records.values())
+
+
+def _malformed_evidence_decision(
+    records: dict[AdmissionEvidenceId, list[Any]],
+    expected_applicable: bool | None,
+) -> bool:
+    """True when evidence records violate the once-per-decision contract."""
+    if _wrong_record_count(records):
+        return True
+    if _unexpected_applicable(records, expected_applicable):
+        return True
+    if _not_applicable_gate(records):
+        return True
+    return False
+
+
+def _evidence_outcome(
+    decision: Any, records: dict[AdmissionEvidenceId, list[Any]]
+) -> str:
+    """'failed', 'exact_admitted_pass', or 'no_pass' for one decision."""
+    if any(not items[0].passed for items in records.values()):
+        return "failed"
+    if decision.admitted:
+        return "exact_admitted_pass"
+    return "no_pass"
+
+
+def _record_evidence_outcomes(
+    decision: Any,
+    records: dict[AdmissionEvidenceId, list[Any]],
+    expected_applicable: bool | None,
+    malformed: list[str],
+    failed: list[str],
+    exact_admitted_passes: list[str],
+) -> None:
+    """Route one decision's evidence records into the outcome lists."""
+    if _malformed_evidence_decision(records, expected_applicable):
+        malformed.append(decision.candidate_id)
+        return
+    outcome = _evidence_outcome(decision, records)
+    if outcome == "failed":
+        failed.append(decision.candidate_id)
+    elif outcome == "exact_admitted_pass":
+        exact_admitted_passes.append(decision.candidate_id)
 
 
 def _admission_evidence_metric(
@@ -168,27 +277,15 @@ def _admission_evidence_metric(
     failed: list[str] = []
     exact_admitted_passes: list[str] = []
     for decision in final.admission_decisions:
-        records = {
-            evidence_id: [
-                gate for gate in decision.gate_results if gate.gate is evidence_id
-            ]
-            for evidence_id in evidence_ids
-        }
-        if any(len(items) != 1 for items in records.values()):
-            malformed.append(decision.candidate_id)
-            continue
-        if expected_applicable is not None and any(
-            items[0].applicable is not expected_applicable for items in records.values()
-        ):
-            malformed.append(decision.candidate_id)
-            continue
-        if any(not items[0].applicable for items in records.values()):
-            malformed.append(decision.candidate_id)
-            continue
-        if any(not items[0].passed for items in records.values()):
-            failed.append(decision.candidate_id)
-        elif decision.admitted:
-            exact_admitted_passes.append(decision.candidate_id)
+        records = _decision_evidence_records(decision, evidence_ids)
+        _record_evidence_outcomes(
+            decision,
+            records,
+            expected_applicable,
+            malformed,
+            failed,
+            exact_admitted_passes,
+        )
     if failed:
         return ratio_metric(
             0,
@@ -837,18 +934,14 @@ def _build_v3_agreement_metrics(
     return agreement
 
 
-def _v3_exact_affected(exact_groups: list[list[str]]) -> list[str]:
-    """Return scenario IDs participating in exact duplicate groups."""
-    return sorted({sid for group in exact_groups for sid in group})
-
-
 def _v3_structural_signature_match(
     structures: dict[str, tuple[str, ...]],
     left: str,
     right: str,
 ) -> bool:
     """True when two scenarios share a nonempty structural signature."""
-    return bool(structures[left]) and structures[left] == structures[right]
+    signature = structures[left]
+    return bool(signature) and signature == structures[right]
 
 
 def _v3_structural_edges(
@@ -1073,3 +1166,8 @@ def _build_v3_release_metrics(
             affected_ids=quarantine_ids,
         ),
     }
+
+
+# mutate4py-manifest-begin
+# {"version":1,"tested_at":"2026-08-26T09:03:15Z","module_hash":"b8833b08f9d82699c5838702b5625aa31692c7ba5396e6b94fe8c48100de6ddf","source_sha256":"1e442a29c983157f1d2fab58e7429563a01abdd8f80088c424eec91bcf8bd0f0","functions":[{"id":"func/_tree_leaves","name":"_tree_leaves","line":39,"end_line":43,"hash":"1ccfd615517f35a000f5900ab8ef78c9ea92014bb871dcbe4dad36f3c12f677f"},{"id":"func/_projected_ids","name":"_projected_ids","line":46,"end_line":49,"hash":"12045f9e173339b73344ac5c3ed0f7c90a78bf1443f85398fb3b1b4831adac6b"},{"id":"func/_normal_title","name":"_normal_title","line":52,"end_line":53,"hash":"9a584bfd67cfc415809510ac222b630f4fa7c79e21eef23cb3b8bf903ddadef0"},{"id":"func/_title_tokens","name":"_title_tokens","line":56,"end_line":57,"hash":"3f6f0abbadabe20633fabc6c9f27239df90d8494a17202a829866ecfda2e26df"},{"id":"func/_neighbor_map","name":"_neighbor_map","line":60,"end_line":66,"hash":"e88c39be7d407850ad82e104fdf593a24f09644a3d8859b5cc8791661d40b344"},{"id":"func/_unvisited_neighbors","name":"_unvisited_neighbors","line":69,"end_line":77,"hash":"c647647a3820c37f1be5b457ea558bc72c10eb7c93331eeec30c9d5ca4666a29"},{"id":"func/_components","name":"_components","line":80,"end_line":97,"hash":"35cea171efb6615733d718fb5e0200c18bbb328ed298d0725386483074003a19"},{"id":"func/_exact_normalized_groups","name":"_exact_normalized_groups","line":100,"end_line":108,"hash":"5caff2e8842dcbfb4cca521ff7f1d63cfbcf7f2e1fd093c70f0195f063288fb5"},{"id":"func/_title_edge_similarity","name":"_title_edge_similarity","line":111,"end_line":116,"hash":"fe6528adcc84cc3c7d49ec425ef269696750d61fdc674ccb4180cdf6f2b3b328"},{"id":"func/_title_edges","name":"_title_edges","line":119,"end_line":129,"hash":"a9b3e5c35e0a528c3847143cc0e7d1d290c1c93d49212b24fbfe40c4ff2908ae"},{"id":"func/title_duplicate_components","name":"title_duplicate_components","line":132,"end_line":141,"hash":"c76e8f542d5adf8ed52854d133c5eabf85740a815f9201cfd0b55d28b7b52605"},{"id":"func/canonical_entry_point_sets","name":"canonical_entry_point_sets","line":144,"end_line":153,"hash":"66e59a1a7d80c629fd952f4e784bbcc17acf9cb82b3d87e84d3bd45f27b00722"},{"id":"func/inventory_identity_mismatches","name":"inventory_identity_mismatches","line":156,"end_line":162,"hash":"194f6c457f2b0a3c951c0b3ef402598808a43fe4be529255a356d7accbee270d"},{"id":"func/_count_metric","name":"_count_metric","line":165,"end_line":171,"hash":"d052886c62b3800f63d5262c31b3e64452890eb5f3036ab133c5d894480292c8"},{"id":"func/_resolver_orphan_fact","name":"_resolver_orphan_fact","line":174,"end_line":187,"hash":"baa9d4b31b53d2c63022badfd8146ed23c43343dcddb669dbb2e7c41cb7f7d54"},{"id":"func/_decision_evidence_records","name":"_decision_evidence_records","line":190,"end_line":199,"hash":"c1d9228be963f8e87fdbfdbc32e76b35bbe8ff255eb63bcbd9740fa2e1f14ec5"},{"id":"func/_wrong_record_count","name":"_wrong_record_count","line":202,"end_line":204,"hash":"779ac4b754af46792040b98eee3a9ff187b25df89516e4b88c8f5b2c87ff7d6a"},{"id":"func/_unexpected_applicable","name":"_unexpected_applicable","line":207,"end_line":216,"hash":"77a95aba9a31271387cabe35cf8b6caa4bda6670e546bae07a6354348feb903d"},{"id":"func/_not_applicable_gate","name":"_not_applicable_gate","line":219,"end_line":221,"hash":"2372ca2e34e730887fe9a69b3036c40a3db0af4234aa8062928d5deccb0b45ee"},{"id":"func/_malformed_evidence_decision","name":"_malformed_evidence_decision","line":224,"end_line":235,"hash":"fc16eda33517497a9caa3d04e659816848e3d5b13a8f02db9950f1311eb332f9"},{"id":"func/_evidence_outcome","name":"_evidence_outcome","line":238,"end_line":246,"hash":"37cd3b9f1ad30a65ad51f8db53f728062bd3af51b887c7a5917d6d14f2f39e18"},{"id":"func/_record_evidence_outcomes","name":"_record_evidence_outcomes","line":249,"end_line":265,"hash":"cd0fc366a1eb474c83dd467adc47ac239bf223f277c47e1f09a077ec66455a19"},{"id":"func/_admission_evidence_metric","name":"_admission_evidence_metric","line":268,"end_line":308,"hash":"1f4bd2ba58e4ddb2ba8cdc81eb62e4f33efaf83332564d6bd8378bffe4012da0"},{"id":"func/_admission_gate_failure_metrics","name":"_admission_gate_failure_metrics","line":311,"end_line":339,"hash":"da6f34bcb51c113520f20be7cff21311d0e1eb113d3b4a77e50d5ab51b36a25c"},{"id":"func/evaluate_v3_scorecard","name":"evaluate_v3_scorecard","line":342,"end_line":379,"hash":"5daa22333c2a010eaf83531f025fc86730e634968c5e7540a522157bf6887c10"},{"id":"func/_load_v3_scorecard_models","name":"_load_v3_scorecard_models","line":382,"end_line":399,"hash":"82f32bfd71997ee314bfb15ccb60e588fa487e3cd79aac0be4bce359a197109e"},{"id":"func/_check_v3_scenario_schema","name":"_check_v3_scenario_schema","line":402,"end_line":411,"hash":"ca329b3b92ac866f0422ba1fd7169ad4d2effdc34aaab4c9ca79921f9b1832b7"},{"id":"func/_collect_v3_scenario_items","name":"_collect_v3_scenario_items","line":414,"end_line":428,"hash":"b558b7edc4814ac37d9e31e326cfbcf95d4108fd726e1e8aa023a4e26a725736"},{"id":"func/_v3_feature_ids","name":"_v3_feature_ids","line":431,"end_line":435,"hash":"1c697aa49b056498e505b105c1d44b5db51c4ff396467d5daefb632b549e770e"},{"id":"func/_v3_scenario_ids","name":"_v3_scenario_ids","line":438,"end_line":442,"hash":"4f2db55b4a925f221fdaeceeff57f3adf0a2a66ffcdf2acf5c7008d476db21b8"},{"id":"func/_v3_scenario_raws","name":"_v3_scenario_raws","line":445,"end_line":449,"hash":"725dd4a41f000f6466b5772b1fb3a64bb30c13fb42db75d573f42f925a9cd70c"},{"id":"func/_v3_scenario_and_feature_ids","name":"_v3_scenario_and_feature_ids","line":452,"end_line":459,"hash":"b2100b31339d4e53fb035b53f7e990fb956d7ca41265f3e6f8205dfe955276cf"},{"id":"func/_v3_receipt_pair_bad_ids","name":"_v3_receipt_pair_bad_ids","line":462,"end_line":467,"hash":"8fdd26cc47f9df36139dfc2be188eceda0f9632ee78203540eb47e19fda87355"},{"id":"func/_v3_receipt_pair_stats","name":"_v3_receipt_pair_stats","line":470,"end_line":480,"hash":"ce37f9109b22c919bd8719e63b9adea9bfa0edcb0388ed6fc1e2c88680946e5c"},{"id":"func/_build_v3_presence_metrics","name":"_build_v3_presence_metrics","line":483,"end_line":563,"hash":"381f9eabe4ee77ad31704250132f393de0e1206bf824c7f90f341b4388293a0e"},{"id":"func/_accumulate_v3_gate_failures","name":"_accumulate_v3_gate_failures","line":566,"end_line":578,"hash":"72e908cd7c02c6df86b6683b1dfe9f7016c6d58fdb4046db0f431896bd61d644"},{"id":"func/_accumulate_v3_admission_failure","name":"_accumulate_v3_admission_failure","line":581,"end_line":590,"hash":"f7d1ccb69eb5a88e4a1ca015558d024123f3e441c3ef0b2050ef55ca3ebecc08"},{"id":"func/_collect_v3_admission_failures","name":"_collect_v3_admission_failures","line":593,"end_line":601,"hash":"751df6ca244d3bc336500cc8193eb055b9838182cee150795c46bc887cf76fff"},{"id":"func/_collect_v3_quarantine_reasons","name":"_collect_v3_quarantine_reasons","line":604,"end_line":616,"hash":"f55e6d65aad4473f00e6bf7755bf4058908ad69068d42b3e8ad8c668951663d6"},{"id":"func/_build_v3_validity_metrics","name":"_build_v3_validity_metrics","line":619,"end_line":656,"hash":"b758e561fe8f3dd982321bdef34b8f82899acb64474ac8e2254989934b467827"},{"id":"func/_v3_admitted_by_candidate","name":"_v3_admitted_by_candidate","line":659,"end_line":667,"hash":"a8e7d0a01151328dbd67f0bed895bc3375efa960bedf427e2633a95876bf3846"},{"id":"func/_v3_plan_choices","name":"_v3_plan_choices","line":670,"end_line":676,"hash":"83a6b3b89f1b12b48e13ba97cc11f7bcb71d7db62ee42ac0af29b6d282e75d85"},{"id":"func/_v3_selected_step_ids","name":"_v3_selected_step_ids","line":704,"end_line":707,"hash":"57445e77e072b05aad206c5c27a4b075857786f946560c72ec63e8f10bb05081"},{"id":"func/_v3_conditional_step_ids","name":"_v3_conditional_step_ids","line":710,"end_line":718,"hash":"1028beed0dd3034214a1264d1638701758e9b67df7c157e412aa773eeabe5b4d"},{"id":"func/_v3_condition_result_step_ids","name":"_v3_condition_result_step_ids","line":721,"end_line":728,"hash":"3268ec9a075ac593935fdef3fbf6bf7c3223141e9e2288676c7e95f300fcfa5c"},{"id":"func/_accumulate_v3_conditional_stats","name":"_accumulate_v3_conditional_stats","line":731,"end_line":742,"hash":"00cc216d9a4a83abc7fabe39c0ef192229470782cd71b348d89a9820c40c868f"},{"id":"func/_accumulate_v3_projection_recall","name":"_accumulate_v3_projection_recall","line":745,"end_line":764,"hash":"360f359c68e93d0bfa806b974a170cd31593ee394cb9c4ea1cca3e528a7ba059"},{"id":"func/_v3_scenario_classifications","name":"_v3_scenario_classifications","line":767,"end_line":775,"hash":"0a14f3fb520f46283080d93e30959fc800c073dd6f4dd19460199139e340626c"},{"id":"func/_accumulate_v3_pinned_stats","name":"_accumulate_v3_pinned_stats","line":778,"end_line":791,"hash":"c8a82d602327ff8b3616664b67ff8aa18db80d72166789c177b0ca29ad498403"},{"id":"func/_accumulate_v3_projection_mappings","name":"_accumulate_v3_projection_mappings","line":794,"end_line":801,"hash":"a10a106fcb31ab73abf9a1b9f7aa5c0cce1abf2bc0363b7a72a8c11393bf95a0"},{"id":"func/_v3_narrative_zones","name":"_v3_narrative_zones","line":804,"end_line":810,"hash":"565fc55d91ff1e2df53dd4608e330fa1e8d7acfd128e3c68c706dec003878280"},{"id":"func/_v3_tree_zones","name":"_v3_tree_zones","line":813,"end_line":819,"hash":"754f01f2272f3085becd413899d94130f7feba8ff72eb5e9b6a219d630e414a9"},{"id":"func/_accumulate_v3_zone_differences","name":"_accumulate_v3_zone_differences","line":822,"end_line":831,"hash":"95808956234924eff2a1fbd54fbf66cd2931cc54568cafd329915e9686d08464"},{"id":"func/_accumulate_v3_scenario_counters","name":"_accumulate_v3_scenario_counters","line":834,"end_line":852,"hash":"65bf5b1606ccc7430683117f1628f0570c375ea37fe5c0fd86eb5e081cb1de46"},{"id":"func/_collect_v3_scenario_counters","name":"_collect_v3_scenario_counters","line":855,"end_line":868,"hash":"ad79961eb189b9bd98b7dd1750b059315e891ff47299e0a82511e0ff18bd8501"},{"id":"func/_build_v3_agreement_metrics","name":"_build_v3_agreement_metrics","line":871,"end_line":934,"hash":"1b99b01fb865e67e162f98e02a610f730e8ed75ed59b6f85c05bae0136463b04"},{"id":"func/_v3_structural_signature_match","name":"_v3_structural_signature_match","line":937,"end_line":944,"hash":"45f485370b1c10b5eba22ade8c41356ca24ad2d3fd739616326cb8b169f7fa55"},{"id":"func/_v3_structural_edges","name":"_v3_structural_edges","line":947,"end_line":957,"hash":"0468f2898d3639df4016ac40d7f42bde9756611834e9889fa31e9b31d4d3395b"},{"id":"func/_v3_structural_components","name":"_v3_structural_components","line":960,"end_line":965,"hash":"ff79dcfa15f53030ff32f5e49340553a95f98f59121e306ec11426dee54d122d"},{"id":"func/_v3_group_affected","name":"_v3_group_affected","line":968,"end_line":970,"hash":"d0ae65f6d90f9748d49c5a54cef9c3853f1957670e6c575e08d3cae68fff6cb5"},{"id":"func/_build_v3_diagnostics","name":"_build_v3_diagnostics","line":973,"end_line":1042,"hash":"71bb0f5493c69c8dc11abf294ae6042166728621ebe6f3a776d61a8a3c94ff10"},{"id":"func/_v3_quarantine_ids","name":"_v3_quarantine_ids","line":1045,"end_line":1047,"hash":"af461916dbd2c40eedc76119906fae500a794d5ac6737f6ec8a03cf8d8a8dbaa"},{"id":"func/_v3_evaluated_candidate_ids","name":"_v3_evaluated_candidate_ids","line":1050,"end_line":1058,"hash":"466d7a3bb6821b288137f6e26bcf56ea579b7e460cb3a62a83dad6b68e309e29"},{"id":"func/_v3_profile_completeness_flags","name":"_v3_profile_completeness_flags","line":1061,"end_line":1071,"hash":"799b66de57d03649594e621e3c158495f798fdc07b7eaa97f2ef0ae243776fe6"},{"id":"func/_build_v3_release_metrics","name":"_build_v3_release_metrics","line":1074,"end_line":1168,"hash":"6302a0fc3ff794c255a42b7d18cb9f98ce75c86a5add4a819e24da95b4b50dc5"}]}
+# mutate4py-manifest-end

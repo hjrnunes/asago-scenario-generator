@@ -54,6 +54,18 @@ def _h_pipeline_env_unset(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+def _h_pipeline_env_observed(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Verify an outline's expected opt-in value reached the environment."""
+    match = re.search(r'live-LLM opt-in value is observed as "([^"]+)"', text)
+    if match is None:
+        return False, f"Could not parse expected pipeline opt-in value: {text}"
+    actual = os.environ.get("ASAGO_SCENARIO_GENERATOR_QA_PIPELINE")
+    expected = match.group(1)
+    return actual == expected, f"expected opt-in value {expected!r}, got {actual!r}"
+
+
 def _h_endpoint_configured(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Configure harmless endpoint values for the isolated fixture."""
     os.environ["ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL"] = "http://127.0.0.1:9/v1"
@@ -306,6 +318,10 @@ def register(api: object) -> None:
     api.register(
         r"ASAGO_SCENARIO_GENERATOR_QA_PIPELINE is unset",
         _h_pipeline_env_unset,
+    )
+    api.register(
+        r'live-LLM opt-in value is observed as "([^"]+)"',
+        _h_pipeline_env_observed,
     )
     api.register(r"live LLM endpoint variables are configured", _h_endpoint_configured)
     api.register(r"live LLM endpoint variables are unset", _h_endpoint_unset)
