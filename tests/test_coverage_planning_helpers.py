@@ -23,7 +23,7 @@ from asago_scenario_generator.models.capability_profile import (
     InventoryCompleteness,
 )
 from asago_scenario_generator.models.scenario import RiskCardRef
-from asago_scenario_generator.pipeline.candidates import (
+from asago_scenario_generator.pipeline.candidate_models import (
     CandidateOrigin,
     FilteredSeed,
     RejectionRecord,
@@ -77,7 +77,7 @@ from asago_scenario_generator.pipeline.coverage_planning import (
     _verify_outer_identity,
     _verify_seed_ingress_agreement,
 )
-from asago_scenario_generator.pipeline.projection import ProjectedCandidate
+from asago_scenario_generator.pipeline.projection_contracts import ProjectedCandidate
 from tests.helpers.projection_factory import get_projected_candidate
 
 _REAL_PC = get_projected_candidate()

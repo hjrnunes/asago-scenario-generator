@@ -768,7 +768,7 @@ def _build_raw_yaml_sections(
     ]
 
 
-def _build_table_rows(rows_data: list[tuple], cell_count: int) -> str:
+def _build_table_rows(rows_data: list[tuple]) -> str:
     """Build ``<tr>`` elements from a list of tuples."""
     return "\n".join(
         "      <tr>" + "".join(f"<td>{_esc(cell)}</td>" for cell in row) + "</tr>"
@@ -797,8 +797,7 @@ def _build_losses_table(losses: list[dict]) -> str:
         [
             (loss["id"], loss["description"], loss.get("provenance", ""))
             for loss in losses
-        ],
-        3,
+        ]
     )
     return _build_data_table(["ID", "Description", "Provenance"], rows)
 
@@ -807,10 +806,7 @@ def _build_hazards_table(hazards: list) -> str:
     """Build the hazards data table, or empty string if no hazards."""
     if not hazards:
         return ""
-    rows = _build_table_rows(
-        [(h.hazard_id, h.description) for h in hazards],
-        2,
-    )
+    rows = _build_table_rows([(h.hazard_id, h.description) for h in hazards])
     return _build_data_table(["Hazard ID", "Description"], rows)
 
 
@@ -818,10 +814,7 @@ def _build_constraints_table(constraints: list) -> str:
     """Build the constraints data table, or empty string if no constraints."""
     if not constraints:
         return ""
-    rows = _build_table_rows(
-        [(sc.constraint_id, sc.description) for sc in constraints],
-        2,
-    )
+    rows = _build_table_rows([(sc.constraint_id, sc.description) for sc in constraints])
     return _build_data_table(["Constraint ID", "Description"], rows)
 
 
@@ -888,8 +881,7 @@ def _build_sp1_control_section(control_structure: Any) -> str:
     parts.append('  <div class="subsection-title">Control Structure</div>')
     if control_structure.responsibilities:
         rows = _build_table_rows(
-            [(r.resp_id, r.description) for r in control_structure.responsibilities],
-            2,
+            [(r.resp_id, r.description) for r in control_structure.responsibilities]
         )
         parts.append(_build_data_table(["Responsibility", "Description"], rows))
     parts.append("</div>")

@@ -38,21 +38,45 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from collections import Counter, deque
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
 
-from asago_scenario_generator.models.capability_profile import (
-    CapabilityProfile,
-    EntryPoint,
-    is_attacker_accessible_ingress,
-)
 from asago_scenario_generator.pipeline.candidate_models import (
     CandidateOrigin,
     FilteredSeed,
     RejectionRecord,
+)
+
+# Re-export these helpers for compatibility with existing planner consumers.
+from asago_scenario_generator.pipeline.coverage_planning_flow import (  # noqa: F401
+    _add_pattern_sink_edges,
+    _add_target_pattern_edges,
+    _augment_path,
+    _best_candidate_per_target_pattern,
+    _build_flow_network,
+    _collect_pattern_index,
+    _convex_pattern_cost,
+    _extract_assignment,
+    _flowing_pattern_edge,
+    _relax_node,
+    _solve_min_cost_assignment,
+    _spfa_shortest_path,
+    add_edge,
+)
+from asago_scenario_generator.pipeline.coverage_planning_universe import (  # noqa: F401
+    CoverageCompleteness,
+    CoverageExclusionReason,
+    CoverageTarget,
+    CoverageUniverse,
+    ExcludedTarget,
+    _classify_exclusion,
+    _exclusion_from_entry,
+    _target_from_entry,
+    _universe_completeness,
+    build_coverage_universe,
 )
 from asago_scenario_generator.pipeline.projection_contracts import ProjectedCandidate
 
@@ -70,211 +94,6 @@ class GenerationMode(str, Enum):
 
     EXHAUSTIVE = "exhaustive"
     COVERAGE = "coverage"
-
-
-# ---------------------------------------------------------------------------
-# Coverage universe
-# ---------------------------------------------------------------------------
-
-
-class CoverageExclusionReason(str, Enum):
-    """Typed reason for excluding an entry point from the coverage universe."""
-
-    OUTPUT_ONLY = "output_only"
-    SYSTEM_CONTROLLED = "system_controlled"
-    INACTIVE_ZONE = "inactive_zone"
-    NO_INGRESS_ZONE = "no_ingress_zone"
-
-
-class CoverageCompleteness(str, Enum):
-    """Whether the entry-point inventory is known to be complete.
-
-    Derived from :attr:`CapabilityProfile.is_entry_point_inventory_complete`:
-    ``confirmed_complete`` only when the operator has confirmed the inventory
-    is exhaustive with evidence; ``not_applicable`` otherwise (inferred-partial
-    inventory — completeness cannot be claimed).
-    """
-
-    NOT_APPLICABLE = "not_applicable"
-    CONFIRMED_COMPLETE = "confirmed_complete"
-
-
-@dataclass(frozen=True)
-class CoverageTarget:
-    """A feasible coverage target — an attacker-accessible ingress entry point.
-
-    Carries the canonical ``entry_point_id``, display name, direction, and
-    effective controllability.  Direction is always ``input`` or
-    ``bidirectional``; controllability is always ``direct`` or ``indirect``.
-    """
-
-    entry_point_id: str
-    name: str
-    direction: str
-    controllability: str
-
-
-@dataclass(frozen=True)
-class ExcludedTarget:
-    """An entry point excluded from the coverage universe with a typed reason."""
-
-    entry_point_id: str
-    name: str
-    direction: str
-    controllability: str
-    reason: CoverageExclusionReason
-
-
-@dataclass
-class CoverageUniverse:
-    """The complete coverage universe: feasible targets plus typed exclusions.
-
-    ``completeness`` is derived from the profile's
-    ``is_entry_point_inventory_complete`` property — never from free-form
-    input.  ``evidence_refs`` carries the operator-confirmed evidence sources
-    when completeness is ``confirmed_complete``.
-    """
-
-    feasible_targets: list[CoverageTarget] = field(default_factory=list)
-    excluded_targets: list[ExcludedTarget] = field(default_factory=list)
-    completeness: CoverageCompleteness = CoverageCompleteness.NOT_APPLICABLE
-    evidence_refs: list[str] = field(default_factory=list)
-
-    @property
-    def feasible_target_ids(self) -> set[str]:
-        """Set of entry_point_ids for all feasible targets."""
-        return {t.entry_point_id for t in self.feasible_targets}
-
-    def to_dict(self) -> dict:
-        return {
-            "feasible_targets": [
-                {
-                    "entry_point_id": t.entry_point_id,
-                    "name": t.name,
-                    "direction": t.direction,
-                    "controllability": t.controllability,
-                }
-                for t in self.feasible_targets
-            ],
-            "excluded_targets": [
-                {
-                    "entry_point_id": e.entry_point_id,
-                    "name": e.name,
-                    "direction": e.direction,
-                    "controllability": e.controllability,
-                    "reason": e.reason.value,
-                }
-                for e in self.excluded_targets
-            ],
-            "completeness": self.completeness.value,
-            "evidence_refs": list(self.evidence_refs),
-        }
-
-
-def _classify_exclusion(
-    ep: EntryPoint,
-    active_zones: set[str],
-) -> CoverageExclusionReason | None:
-    """Return the typed exclusion reason for a non-feasible entry point, or None if feasible."""
-    if ep.direction == "output":
-        return CoverageExclusionReason.OUTPUT_ONLY
-    if ep.effective_controllability == "system":
-        return CoverageExclusionReason.SYSTEM_CONTROLLED
-    zone = ep.effective_ingress_zone
-    if zone is None:
-        return CoverageExclusionReason.NO_INGRESS_ZONE
-    if zone not in active_zones:
-        return CoverageExclusionReason.INACTIVE_ZONE
-    return None
-
-
-def _target_from_entry(ep: EntryPoint) -> CoverageTarget:
-    """Build a feasible :class:`CoverageTarget` from a profile entry point."""
-    return CoverageTarget(
-        entry_point_id=ep.entry_point_id,
-        name=ep.name,
-        direction=ep.direction,
-        controllability=ep.effective_controllability,
-    )
-
-
-def _exclusion_from_entry(
-    ep: EntryPoint, reason: CoverageExclusionReason
-) -> ExcludedTarget:
-    """Build a typed :class:`ExcludedTarget` from a profile entry point."""
-    return ExcludedTarget(
-        entry_point_id=ep.entry_point_id,
-        name=ep.name,
-        direction=ep.direction,
-        controllability=ep.effective_controllability,
-        reason=reason,
-    )
-
-
-def _universe_completeness(
-    profile: CapabilityProfile,
-) -> tuple[CoverageCompleteness, list[str]]:
-    """Derive completeness and evidence refs from the profile.
-
-    ``confirmed_complete`` only when the operator confirmed the inventory
-    with evidence; otherwise ``not_applicable`` with no evidence refs.
-    """
-    if profile.is_entry_point_inventory_complete:
-        evidence = [e for e in profile.entry_point_evidence if e and e.strip()]
-        return CoverageCompleteness.CONFIRMED_COMPLETE, evidence
-    return CoverageCompleteness.NOT_APPLICABLE, []
-
-
-def build_coverage_universe(
-    profile: CapabilityProfile,
-) -> CoverageUniverse:
-    """Build the coverage universe from the capability profile.
-
-    Iterates every entry point in the profile.  Entry points with direction
-    ``input`` or ``bidirectional`` and effective controllability ``direct``
-    or ``indirect`` in an active zone are feasible targets.  All others are
-    excluded with a typed reason.
-
-    Completeness is derived from
-    :attr:`CapabilityProfile.is_entry_point_inventory_complete` — the
-    operator-confirmed property.  Free-form enum input is not accepted; an
-    inferred profile cannot claim confirmed completeness.
-
-    Args:
-        profile: The capability profile from Stage 1.
-
-    Returns:
-        A :class:`CoverageUniverse` with feasible targets, typed
-        exclusions, and profile-derived completeness.
-    """
-    active_zones = set(profile.zones_active) if profile.zones_active else set()
-    feasible: list[CoverageTarget] = []
-    excluded: list[ExcludedTarget] = []
-
-    for ep in profile.entry_points:
-        if is_attacker_accessible_ingress(ep, active_zones):
-            feasible.append(_target_from_entry(ep))
-        else:
-            reason = _classify_exclusion(ep, active_zones)
-            if reason is None:
-                reason = CoverageExclusionReason.NO_INGRESS_ZONE
-            excluded.append(_exclusion_from_entry(ep, reason))
-
-    completeness, evidence_refs = _universe_completeness(profile)
-
-    universe = CoverageUniverse(
-        feasible_targets=feasible,
-        excluded_targets=excluded,
-        completeness=completeness,
-        evidence_refs=evidence_refs,
-    )
-    logger.info(
-        "Coverage universe: %d feasible target(s), %d excluded, completeness=%s",
-        len(feasible),
-        len(excluded),
-        completeness.value,
-    )
-    return universe
 
 
 # ---------------------------------------------------------------------------
@@ -815,266 +634,6 @@ class SelectionResult:
     selection_limitation_target_ids: list[str] = field(default_factory=list)
 
 
-def add_edge(graph: list[list[list[int]]], u: int, v: int, cap: int, cost: int) -> None:
-    """Add a directed edge with capacity and cost, plus its reverse edge."""
-    graph[u].append([v, cap, cost, len(graph[v])])
-    graph[v].append([u, 0, -cost, len(graph[u]) - 1])
-
-
-def _collect_pattern_index(
-    target_choices_map: dict[str, list[QualifiedCandidate]],
-) -> tuple[list[str], dict[str, int]]:
-    """Collect the sorted unique pattern IDs and their node offsets."""
-    all_patterns = sorted(
-        {qc.pattern_id for choices in target_choices_map.values() for qc in choices}
-    )
-    pattern_idx = {p: i for i, p in enumerate(all_patterns)}
-    return all_patterns, pattern_idx
-
-
-def _best_candidate_per_target_pattern(
-    target_ids: list[str],
-    target_choices_map: dict[str, list[QualifiedCandidate]],
-) -> dict[tuple[str, str], QualifiedCandidate]:
-    """For each (target, pattern) pair, pick the lowest candidate_id candidate."""
-    best_per_tp: dict[tuple[str, str], QualifiedCandidate] = {}
-    for t_id in target_ids:
-        for qc in target_choices_map[t_id]:
-            key = (t_id, qc.pattern_id)
-            if (
-                key not in best_per_tp
-                or qc.candidate_id < best_per_tp[key].candidate_id
-            ):
-                best_per_tp[key] = qc
-    return best_per_tp
-
-
-def _convex_pattern_cost(
-    k: int,
-    max_per_pattern: int | None,
-    concentration_scale: int,
-    cap_overflow_penalty: int,
-) -> int:
-    """Cost of the k-th flow unit into one pattern.
-
-    The k-th unit (0-indexed) costs ``k * concentration_scale``, plus
-    ``cap_overflow_penalty * concentration_scale`` when the per-pattern
-    cap is exceeded — minimizing concentration, then cap overflow.
-    """
-    base_cost = k * concentration_scale
-    if max_per_pattern is not None and k >= max_per_pattern:
-        base_cost += cap_overflow_penalty * concentration_scale
-    return base_cost
-
-
-def _add_target_pattern_edges(
-    graph: list[list[list[int]]],
-    target_ids: list[str],
-    target_choices_map: dict[str, list[QualifiedCandidate]],
-    best_per_tp: dict[tuple[str, str], QualifiedCandidate],
-    pattern_idx: dict[str, int],
-    N: int,
-) -> None:
-    """Connect each target to its patterns with candidate-ID tie-break ranks."""
-    for i, t_id in enumerate(target_ids):
-        target_patterns = sorted(
-            {qc.pattern_id for qc in target_choices_map[t_id]},
-            key=lambda p: best_per_tp[(t_id, p)].candidate_id,
-        )
-        for rank, p_id in enumerate(target_patterns):
-            pi = pattern_idx[p_id]
-            add_edge(graph, 1 + i, 1 + N + pi, 1, rank)
-
-
-def _add_pattern_sink_edges(
-    graph: list[list[list[int]]],
-    N: int,
-    M: int,
-    sink: int,
-    max_per_pattern: int | None,
-    concentration_scale: int,
-    cap_overflow_penalty: int,
-) -> None:
-    """Connect each pattern to the sink with convex per-unit costs."""
-    for pi in range(M):
-        for k in range(N):
-            cost = _convex_pattern_cost(
-                k, max_per_pattern, concentration_scale, cap_overflow_penalty
-            )
-            add_edge(graph, 1 + N + pi, sink, 1, cost)
-
-
-def _build_flow_network(
-    target_ids: list[str],
-    target_choices_map: dict[str, list[QualifiedCandidate]],
-    best_per_tp: dict[tuple[str, str], QualifiedCandidate],
-    pattern_idx: dict[str, int],
-    max_per_pattern: int | None,
-    N: int,
-    M: int,
-) -> tuple[list[list[list[int]]], int, int]:
-    """Build the bipartite min-cost flow network.
-
-    Nodes: 0=source, 1..N=targets, N+1..N+M=patterns, N+M+1=sink.
-    Edge shape: ``[to, capacity, cost, rev_index]``.
-    """
-    source = 0
-    sink = N + M + 1
-    graph: list[list[list[int]]] = [[] for _ in range(N + M + 2)]
-
-    for i in range(N):
-        add_edge(graph, source, 1 + i, 1, 0)
-    _add_target_pattern_edges(
-        graph, target_ids, target_choices_map, best_per_tp, pattern_idx, N
-    )
-    concentration_scale = 2 * N + 1  # > max total candidate tie-break (2*N)
-    cap_overflow_penalty = N * N + 1  # > max total concentration (N*(N-1)/2)
-    _add_pattern_sink_edges(
-        graph, N, M, sink, max_per_pattern, concentration_scale, cap_overflow_penalty
-    )
-    return graph, source, sink
-
-
-def _relax_node(
-    graph: list[list[list[int]]],
-    u: int,
-    dist: list[float],
-    in_queue: list[bool],
-    queue: deque[int],
-    parent_node: list[int],
-    parent_edge_idx: list[int],
-) -> None:
-    """Relax every residual edge leaving node ``u`` (one SPFA step)."""
-    for ei, edge in enumerate(graph[u]):
-        v, cap, cost, _ = edge
-        if cap > 0 and dist[u] + cost < dist[v]:
-            dist[v] = dist[u] + cost
-            parent_node[v] = u
-            parent_edge_idx[v] = ei
-            if not in_queue[v]:
-                queue.append(v)
-                in_queue[v] = True
-
-
-def _spfa_shortest_path(
-    graph: list[list[list[int]]],
-    source: int,
-    sink: int,
-    num_nodes: int,
-) -> tuple[list[int], list[int]] | None:
-    """Shortest augmenting path from source to sink (SPFA / Bellman-Ford).
-
-    Returns ``(parent_node, parent_edge_idx)``, or None when the sink is
-    unreachable through residual edges.
-    """
-    dist = [float("inf")] * num_nodes
-    dist[source] = 0
-    in_queue = [False] * num_nodes
-    in_queue[source] = True
-    queue: deque[int] = deque([source])
-    parent_node = [-1] * num_nodes
-    parent_edge_idx = [-1] * num_nodes
-
-    while queue:
-        u = queue.popleft()
-        in_queue[u] = False
-        _relax_node(graph, u, dist, in_queue, queue, parent_node, parent_edge_idx)
-
-    if dist[sink] == float("inf"):
-        return None
-    return parent_node, parent_edge_idx
-
-
-def _augment_path(
-    graph: list[list[list[int]]],
-    source: int,
-    sink: int,
-    parent_node: list[int],
-    parent_edge_idx: list[int],
-) -> None:
-    """Push one unit of flow along the recorded parent path."""
-    v = sink
-    while v != source:
-        u = parent_node[v]
-        ei = parent_edge_idx[v]
-        graph[u][ei][1] -= 1  # reduce forward capacity
-        rev_i = graph[u][ei][3]
-        graph[v][rev_i][1] += 1  # increase reverse capacity
-        v = u
-
-
-def _flowing_pattern_edge(edge: list[int], N: int, M: int) -> bool:
-    """True when a target edge carries flow into a pattern node."""
-    v = edge[0]
-    return 1 + N <= v <= N + M and edge[1] == 0
-
-
-def _extract_assignment(
-    graph: list[list[list[int]]],
-    N: int,
-    M: int,
-    target_ids: list[str],
-    all_patterns: list[str],
-    best_per_tp: dict[tuple[str, str], QualifiedCandidate],
-) -> dict[str, QualifiedCandidate]:
-    """Extract the assignment from target→pattern forward edges with flow."""
-    assignment: dict[str, QualifiedCandidate] = {}
-    for i, t_id in enumerate(target_ids):
-        for edge in graph[1 + i]:
-            if _flowing_pattern_edge(edge, N, M):
-                pi = edge[0] - 1 - N
-                p_id = all_patterns[pi]
-                assignment[t_id] = best_per_tp[(t_id, p_id)]
-                break
-    return assignment
-
-
-def _solve_min_cost_assignment(
-    target_ids: list[str],
-    target_choices_map: dict[str, list[QualifiedCandidate]],
-    max_per_pattern: int | None,
-) -> dict[str, QualifiedCandidate]:
-    """Solve global primary assignment via min-cost flow (successive shortest paths).
-
-    Builds a bipartite flow network: source → targets → patterns → sink.
-    Pattern→sink edges have convex costs so that the k-th unit (0-indexed)
-    to a pattern costs ``k * CONCENTRATION_SCALE``, plus
-    ``CAP_OVERFLOW_PENALTY * CONCENTRATION_SCALE`` if ``k >= max_per_pattern``.
-    This minimizes concentration (spreads assignments across patterns) and
-    cap overflow.
-
-    Target→pattern edges have cost = candidate rank (0-indexed position in
-    the sorted-by-candidate_id list of patterns for that target), providing
-    canonical candidate-ID tie-breaking at lower priority than concentration.
-
-    Complexity: O(N² · (N+M) · E) where N = targets, M = patterns,
-    E = edges.  Polynomial and feasible for ~49 targets.
-
-    Returns mapping from target_id to the assigned QualifiedCandidate.
-    """
-    N = len(target_ids)
-    if N == 0:
-        return {}
-
-    all_patterns, pattern_idx = _collect_pattern_index(target_choices_map)
-    M = len(all_patterns)
-    best_per_tp = _best_candidate_per_target_pattern(target_ids, target_choices_map)
-    graph, source, sink = _build_flow_network(
-        target_ids, target_choices_map, best_per_tp, pattern_idx, max_per_pattern, N, M
-    )
-
-    total_flow = 0
-    while total_flow < N:
-        path = _spfa_shortest_path(graph, source, sink, N + M + 2)
-        if path is None:
-            break  # No more augmenting paths.
-        parent_node, parent_edge_idx = path
-        _augment_path(graph, source, sink, parent_node, parent_edge_idx)
-        total_flow += 1
-
-    return _extract_assignment(graph, N, M, target_ids, all_patterns, best_per_tp)
-
-
 def _target_choice_lists(
     sorted_targets: Sequence[CoverageTarget],
     fallback_queues: dict[str, TargetFallbackQueue],
@@ -1145,8 +704,7 @@ def _derive_selection_limitations(
 
     limitations: list[str] = []
     for ep_ids in targets_by_pattern.values():
-        if len(ep_ids) > max_per_pattern:
-            limitations.extend(ep_ids[max_per_pattern:])
+        limitations.extend(ep_ids[max_per_pattern:])
     return limitations
 
 
@@ -1909,7 +1467,7 @@ def _expected_authoritative_pin(
 ) -> str:
     """Resolve the authoritative catalog pin, computing it when not supplied."""
     if expected_catalog_pin is None:
-        from asago_scenario_generator.pipeline.projection import (
+        from asago_scenario_generator.pipeline.projection_qualification import (
             compute_authoritative_catalog_pin,
         )
 
@@ -2292,3 +1850,8 @@ def emit_quality_gaps(
     )
 
     return gaps, summary
+
+
+# mutate4py-manifest-begin
+# {"version":1,"tested_at":"2026-08-26T14:10:29Z","module_hash":"bb1a920966654c2651c84b3efc3b4a0ac5c866af778129183ea51b0fe7c49ff8","source_sha256":"a81e4589e8f9aca7e5c42aa0c22eedfe597715d5b86f1e138fdc3ccc77b476b3","functions":[{"id":"func/AcceptedFilterRecord.to_dict","name":"to_dict","line":122,"end_line":136,"hash":"895c66083476a212fadeb09518b84a26e0ae3519db5c4667c48e1840061f19af"},{"id":"func/AcceptedFilterRecord.from_dict","name":"from_dict","line":139,"end_line":161,"hash":"b6a979ed71eae2a7edf1be233bfd3919aa20c7e08dbdf494d8faa0960131ad9b"},{"id":"func/AcceptedFilterRecord.from_seed","name":"from_seed","line":164,"end_line":175,"hash":"fb8daaa34c6c9a52434e0476ed334ccfc3c95ba1922423adceb36322149fbfa7"},{"id":"func/QualifiedCandidate.entry_point_id","name":"entry_point_id","line":196,"end_line":198,"hash":"4c90d31a9d298a8baaf7fc82170135af98ce4028d757e868ee79b7ddecdc76eb"},{"id":"func/QualifiedCandidate.candidate_id","name":"candidate_id","line":201,"end_line":203,"hash":"18359a0930acf8fbb2e5f5da638cf9dbf7ffd606f29e97b4f0e34d15caaa6b66"},{"id":"func/QualifiedCandidate.pattern_id","name":"pattern_id","line":206,"end_line":208,"hash":"f9858e04e831cdb2fc527797de20d7e3f5a3d3cf62d5ef40e735f9c7dc5dd7d9"},{"id":"func/QualifiedCandidate._sorted_filters","name":"_sorted_filters","line":211,"end_line":213,"hash":"986d63b88eb3308099fcb9c65f4a87fd13aa309d1c88f2a3ed39f3bc0c31b266"},{"id":"func/QualifiedCandidate.generation_seed","name":"generation_seed","line":216,"end_line":227,"hash":"93bf3fb72f4f29dfda038cce99bbff5de503babdd8b70b7252e5809e87836c8a"},{"id":"func/QualifiedCandidate.filtered_seed","name":"filtered_seed","line":230,"end_line":232,"hash":"29412d2a45c73f25b60c51c3d033e6a978884e8a492ec5af5573bb7efe588d5e"},{"id":"func/QualifiedCandidate.filter_candidate_id","name":"filter_candidate_id","line":235,"end_line":239,"hash":"ff0eb7961ec54757d721462a0d62f68022031c2a683d563e13e091b649ff09b0"},{"id":"func/QualifiedCandidate.accepted_rationale","name":"accepted_rationale","line":242,"end_line":246,"hash":"f495537fc4cdd36a5d19a34b495e13a7f625c7a034d3d8c462f2655e64001560"},{"id":"func/QualifiedCandidate.merged_origins","name":"merged_origins","line":249,"end_line":251,"hash":"dafbd89fa87db1ff680e8e207435c906860f7a872542b9c6465b5b4ad13b83b8"},{"id":"func/QualifiedCandidate.origins","name":"origins","line":254,"end_line":256,"hash":"f3c85e0ff1397fd4f57bf0be33693d33d74c8cb99ace792ae6101b3b6aa494e7"},{"id":"func/QualifiedCandidate.merged_rejection_rationales","name":"merged_rejection_rationales","line":259,"end_line":263,"hash":"83de3691d488b8cc856bc42339d805ed54e821d51318b8139633ee1f20edce7b"},{"id":"func/QualifiedCandidate.rejection_rationales","name":"rejection_rationales","line":266,"end_line":268,"hash":"ccfbff24bce2de425f29648d607739b15c56df574cd7de07a55ceb73099c1f46"},{"id":"func/QualifiedCandidate.to_plan_ref","name":"to_plan_ref","line":270,"end_line":292,"hash":"f3fb7f7859301982da1fba0b2a324e614a4f33c513f12c6283131481eeca2954"},{"id":"func/_merge_deduped","name":"_merge_deduped","line":295,"end_line":312,"hash":"909659007686a168778f90d8d8caa1b632b253cb93b1d97fedd7d7c3ff18b4ec"},{"id":"func/_first_filter_summary","name":"_first_filter_summary","line":315,"end_line":328,"hash":"62cba3766d3eaff5f740280ad787e70bee0c16dfdd25de263995cd4e2768eb2e"},{"id":"func/_qualified_sort_key","name":"_qualified_sort_key","line":331,"end_line":338,"hash":"df1baca948bd8c9e6c48a0deccd9d678137a9bc6e7f5550254303eac49bb3bd3"},{"id":"func/build_qualified_candidates","name":"build_qualified_candidates","line":341,"end_line":407,"hash":"2545eba90fdcd1a76d2977be2108b8a33fc9ec90113edbd70a339fcede69091b"},{"id":"func/StageEvent.to_dict","name":"to_dict","line":453,"end_line":463,"hash":"e2a5b4444d12358339efb39cdac5ff7e5a0454edb737bcc74e5ae1205d47ad81"},{"id":"func/StageLedger.record","name":"record","line":478,"end_line":498,"hash":"444ee5f32bf36ade8a90c479a8860983b5f92caa2f220e21435b578a41193a29"},{"id":"func/StageLedger.events_for","name":"events_for","line":500,"end_line":502,"hash":"0c93b9a78873af3c000fb4a37dbc09819e28afbea6f498efd3ed69bf547678fa"},{"id":"func/StageLedger.furthest_event","name":"furthest_event","line":504,"end_line":516,"hash":"ae4dfc4530524204475ae1acf158d9bf0bb0eb6dbefa6d0206dadb964710984b"},{"id":"func/StageLedger.candidate_ids_for_stage","name":"candidate_ids_for_stage","line":518,"end_line":524,"hash":"f487a6d1bece2665a92c0f1d16f4f8fd2def99b7a4df32c50c301f1efe8f5d2b"},{"id":"func/StageLedger.to_dict","name":"to_dict","line":526,"end_line":527,"hash":"300590329a744def24b69e38174bb2955cd7f3224b3897ed5be73de3a4dd33bb"},{"id":"func/TargetFallbackQueue.is_empty","name":"is_empty","line":549,"end_line":550,"hash":"39c0891c73589c9c021cb596ddf65b829cda2f870e922e82a5324de5e46c0511"},{"id":"func/TargetFallbackQueue.first_choice","name":"first_choice","line":553,"end_line":555,"hash":"80ad13ea46f0256c1b064caaf207cb42ea094cfa98981062ad88f4cc3a197176"},{"id":"func/TargetFallbackQueue.remaining_choices","name":"remaining_choices","line":558,"end_line":560,"hash":"cbf725ef10bf996d7b4840ca1b742c5c5a98a73e43d5c850afc0e490bbbe6dda"},{"id":"func/TargetFallbackQueue.candidate_ids","name":"candidate_ids","line":562,"end_line":564,"hash":"60222c61689c9151f1a42ce423af1748322e8114a3ab5d39dc4418df4dfc8f3e"},{"id":"func/build_fallback_queues","name":"build_fallback_queues","line":567,"end_line":606,"hash":"8ca33366c11ddcb3b94b30da0e21ac19fcaed1379761d351c2a5cb9a62c5adb3"},{"id":"func/_target_choice_lists","name":"_target_choice_lists","line":637,"end_line":649,"hash":"982c9009332f208972fdfecc762e9847ba4fdf5cdb64cd259c69705d5af68a17"},{"id":"func/_no_candidate_selection","name":"_no_candidate_selection","line":652,"end_line":664,"hash":"3267529214fb6c316ad9353939bf6a5de33a463b73b57324861977ea843c5fd5"},{"id":"func/_build_primary_selection","name":"_build_primary_selection","line":667,"end_line":685,"hash":"0278aa2f1f3579ccbc9aa53080130927a63ad740e0db8f4a5313c3ea0f0ded1d"},{"id":"func/_derive_selection_limitations","name":"_derive_selection_limitations","line":688,"end_line":708,"hash":"5d596c8b0d7c0d3a726bedc7822a1681592698597d56f9cac9f2eb5619d16832"},{"id":"func/_uncovered_target_ids","name":"_uncovered_target_ids","line":711,"end_line":718,"hash":"f5f5a985caacb5eb59f87c10a0b86d758e10255d399c190ffa41d88ea5695d08"},{"id":"func/select_with_coverage_priority","name":"select_with_coverage_priority","line":721,"end_line":800,"hash":"77bcd67018ac6baf0873d51695891111897d4695e7ae6e99d34c7709b1948efb"},{"id":"func/CoveragePlanEntry.effective_target_id","name":"effective_target_id","line":828,"end_line":830,"hash":"5a28b604819144ec116c6495f11d346b53ba77014577000aa0a6b52a7a1ed486"},{"id":"func/CoveragePlanEntry.to_dict","name":"to_dict","line":832,"end_line":841,"hash":"a10fb6781e7fd1e2367fa32e424785b92f594e4f46c24efee2bc9cc5816f69dd"},{"id":"func/CoveragePlan.to_dict","name":"to_dict","line":862,"end_line":871,"hash":"d77ea2bc0713d2b5b9ff51e0308010ab2819d15677275c5a4613e3ce680aa573"},{"id":"func/_plan_entry_for_target","name":"_plan_entry_for_target","line":874,"end_line":906,"hash":"6a54f48330d24069d626753ff4b572953e0b7abf8f8ad1169c557c90f0cc5b3e"},{"id":"func/build_coverage_plan","name":"build_coverage_plan","line":909,"end_line":956,"hash":"7b2cf5908867e175b376242d844db7d1ea21aea7aec7a8b74341bf35258aaeb5"},{"id":"func/_exhaustive_target_id","name":"_exhaustive_target_id","line":976,"end_line":979,"hash":"d1c920280ff5607a0799ee9a814e8f2af248fdd78ca7f26f2b1f7a4aee234b5f"},{"id":"func/_group_ranked_by_pattern_and_ingress","name":"_group_ranked_by_pattern_and_ingress","line":982,"end_line":991,"hash":"4f42bf8e89afee2e673488b7d650a67b6fcff06ec967bfdf617bc11a672f32d5"},{"id":"func/_round_robin_within_pattern","name":"_round_robin_within_pattern","line":994,"end_line":1018,"hash":"00b2a2d1cbcab85fb98a1aa098e1cdb0f466f0b4d76af36793094053ba5d785c"},{"id":"func/_select_exhaustive_candidates","name":"_select_exhaustive_candidates","line":1021,"end_line":1043,"hash":"f37276daaf7904b90613cd8bc2ad58a805e3d00a50e35a7675dd992d5d6aff38"},{"id":"func/_exhaustive_target_entries","name":"_exhaustive_target_entries","line":1046,"end_line":1076,"hash":"63b42e2906878eb23fcceb4a7b48fdacbb6524b2caf85912ce598c27d58eb832"},{"id":"func/_uncovered_exhaustive_entries","name":"_uncovered_exhaustive_entries","line":1079,"end_line":1106,"hash":"cd2c9fafc6f09333166ab07fc3860606b9319592598ada38f4f5bc6db20b4e23"},{"id":"func/_cap_limited_target_ids","name":"_cap_limited_target_ids","line":1109,"end_line":1118,"hash":"368c5f683a32744b2dbbffebaa408bea2cf48084d15be45c973b7d8a7b5d0740"},{"id":"func/_plan_coverage_generation","name":"_plan_coverage_generation","line":1121,"end_line":1135,"hash":"c35432aec291015bb9f67a8a3de801e13b117cb1af1c9c61f027e3a57b4d9175"},{"id":"func/_plan_exhaustive_generation","name":"_plan_exhaustive_generation","line":1138,"end_line":1186,"hash":"8f23eddfbe883be0bbc072b24db8f3f420d5c38282bb6b01fdf8ea466535d387"},{"id":"func/plan_generation","name":"plan_generation","line":1189,"end_line":1227,"hash":"20598bcf90b77cc15a1e474921e28c278e316a4b58f62884d03c259bcb315597"},{"id":"func/deserialize_plan_ref","name":"deserialize_plan_ref","line":1230,"end_line":1249,"hash":"bb33aeaa351b556dc5e39b4cce5089bccad153826a889cf2004fa72f1328441f"},{"id":"func/DeserializedPlanRef.candidate_id","name":"candidate_id","line":1268,"end_line":1269,"hash":"392222ebf0e61dfcdfcc4cf321374447c03fd07b3f1a8f0475b1e54102abe62d"},{"id":"func/DeserializedPlanRef.pattern_id","name":"pattern_id","line":1272,"end_line":1273,"hash":"6fb84a6f533ad80b48ef35b4a8ab0e0ddfbe36efb578fd04aada1b243a172998"},{"id":"func/DeserializedPlanRef.entry_point_id","name":"entry_point_id","line":1276,"end_line":1277,"hash":"ae338b92ecd9bade36d5d7e2beb434cf53b913154fd53abc7fe0ffb8c0f347ca"},{"id":"func/DeserializedPlanRef.generation_seed","name":"generation_seed","line":1280,"end_line":1291,"hash":"663824fd0cd8bb764885156913d637011e7abde214a2dff947a257a587c590eb"},{"id":"func/_verify_outer_identity","name":"_verify_outer_identity","line":1294,"end_line":1314,"hash":"1c56a4978d230833fcab990d566e1d9a4856404bfbb8a19a2bbd48dcf7798055"},{"id":"func/_deserialize_filter_records","name":"_deserialize_filter_records","line":1317,"end_line":1341,"hash":"e4ba48bec034586b53933f8f6809c8113b9492d2828478039e24ee4067847ade"},{"id":"func/_verify_canonical_filter_ids","name":"_verify_canonical_filter_ids","line":1344,"end_line":1357,"hash":"5248d63157037babf20676d98209441a1d3a3507d6b31e7fbb63eabcae1295a6"},{"id":"func/_verify_seed_ingress_agreement","name":"_verify_seed_ingress_agreement","line":1360,"end_line":1373,"hash":"05393a1864cb4a4e6102d3ba084721cca79872547cea4aa1e0ecd87fab5229f5"},{"id":"func/_verify_outer_summaries","name":"_verify_outer_summaries","line":1376,"end_line":1404,"hash":"1a4245661b90d19424a82b96f78b4793dd89f720ea2425e5eae07ea6cc913cd0"},{"id":"func/deserialize_qualified_candidate","name":"deserialize_qualified_candidate","line":1407,"end_line":1450,"hash":"b6329f191a64c2c16b7525220c379be7b9df4505551a73cbc66133ee9f246edf"},{"id":"func/_find_trusted_record","name":"_find_trusted_record","line":1453,"end_line":1460,"hash":"8a8e51b57787cdd7697481bdaf7a897953769d9540126ec2f5d0ce777d35bdbe"},{"id":"func/_expected_authoritative_pin","name":"_expected_authoritative_pin","line":1463,"end_line":1475,"hash":"454a28dbfb9979479e09313204e5b6395da289b5835cc80fa24ba92ad7adced1"},{"id":"func/revalidate_qualified_candidate","name":"revalidate_qualified_candidate","line":1478,"end_line":1541,"hash":"02863e50719ff9d52e34d6e21c22f5cf0fddf0e9cdc1de0a29375c9d852ed943"},{"id":"func/QualityGap.to_dict","name":"to_dict","line":1590,"end_line":1597,"hash":"f6b9f0414ddeb37f67ac935ffe72648495b040c0b7006de9c819eeaa4d900df7"},{"id":"func/CoverageSummary.to_dict","name":"to_dict","line":1623,"end_line":1632,"hash":"ade445b7ff3d39de97a0cb7accec152355d101be15138c10f24139760572026d"},{"id":"func/_quarantine_gap","name":"_quarantine_gap","line":1635,"end_line":1648,"hash":"6b0170a94c628b1ff568533839c433dd3734afe147c7f6855b24c9f3ae6daf7f"},{"id":"func/_projection_limitation_gap","name":"_projection_limitation_gap","line":1651,"end_line":1659,"hash":"83e24c65630eff6b62ee0e2e5d9de3ab387d6dcda133b07e5f5efaf7e5782779"},{"id":"func/_furthest_stage_gap","name":"_furthest_stage_gap","line":1662,"end_line":1678,"hash":"ad6491bee659579686e8206d0a480e80281c9f19eb31ff282cb71cb80f10c641"},{"id":"func/_no_evidence_gap","name":"_no_evidence_gap","line":1681,"end_line":1694,"hash":"76327e914178e5a25a7be6521e5ac68c8c1b9659797cc0189438ccc8bd1a4f82"},{"id":"func/_categorize_furthest_gap","name":"_categorize_furthest_gap","line":1697,"end_line":1713,"hash":"f141c0dc9a305a0c9ef639836a971f932089d1c889632d9c4e23e8a37c840b8c"},{"id":"func/_policy_exclusion_dicts","name":"_policy_exclusion_dicts","line":1716,"end_line":1725,"hash":"5dbc2b1bd4a832b7a0db2bd096b4f2d9c04afcb7503380e9e512015c7846d4f5"},{"id":"func/_normalize_gap_sets","name":"_normalize_gap_sets","line":1728,"end_line":1738,"hash":"78aae975757c4a8225b38e1d48487a32e910489b45e1b4548caecac539641314"},{"id":"func/_record_ledger_gap","name":"_record_ledger_gap","line":1741,"end_line":1768,"hash":"e0c62e361703a9651870003ef47f4dc91aafd1b2e2b6eddf9ebe2b8339dd471a"},{"id":"func/emit_quality_gaps","name":"emit_quality_gaps","line":1771,"end_line":1852,"hash":"10ba372f468c8136a799ef08021e7d60d3f7bbe995bb5c2d8d64bd6c2fded60f"}]}
+# mutate4py-manifest-end

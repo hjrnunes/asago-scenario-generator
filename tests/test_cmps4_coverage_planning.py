@@ -48,7 +48,7 @@ from asago_scenario_generator.pipeline.coverage_planning import (
     revalidate_qualified_candidate,
     select_with_coverage_priority,
 )
-from asago_scenario_generator.pipeline.projection import ProjectedCandidate
+from asago_scenario_generator.pipeline.projection_contracts import ProjectedCandidate
 from tests.helpers.projection_factory import get_projected_candidate
 
 

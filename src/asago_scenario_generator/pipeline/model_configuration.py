@@ -11,7 +11,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from asago_scenario_generator.stpa.infra.model_profiles import load_profile
+from asago_scenario_generator.model_profiles import load_profile
 
 DEFAULT_PROFILES_FILE = Path("config/model-profiles.yaml")
 DEFAULT_MODEL = "gemma-3n-e4b-it"

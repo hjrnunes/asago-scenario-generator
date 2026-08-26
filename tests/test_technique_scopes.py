@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from asago_scenario_generator.models.attack_pattern import ExactMapping
 from asago_scenario_generator.models.scenario import TechniqueScopeEvidence
-from asago_scenario_generator.pipeline.projection import ProjectedMapping
+from asago_scenario_generator.pipeline.projection_contracts import ProjectedMapping
 from asago_scenario_generator.pipeline.technique_scopes import (
     _narrative_reference_texts,
     _step_reference_texts,
