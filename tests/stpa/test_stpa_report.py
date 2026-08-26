@@ -68,9 +68,7 @@ from asago_scenario_generator.stpa.report.template import (
     _gherkin_decorative_row,
     _gherkin_keyword_class,
     _gherkin_keyword_row,
-    _gherkin_plain_row,
     _gherkin_row_html,
-    _gherkin_step_row,
     _has_tree_content,
     _highlight_gherkin,
     _highlight_yaml,
@@ -660,17 +658,17 @@ class TestBuildRawYamlSection:
 
 class TestBuildTableRows:
     def test_single_row(self):
-        result = _build_table_rows([("a", "b")], 2)
+        result = _build_table_rows([("a", "b")])
         assert "<td>a</td>" in result
         assert "<td>b</td>" in result
 
     def test_multiple_rows(self):
-        result = _build_table_rows([("1", "2"), ("3", "4")], 2)
+        result = _build_table_rows([("1", "2"), ("3", "4")])
         assert "<td>1</td>" in result
         assert "<td>4</td>" in result
 
     def test_empty_list(self):
-        assert _build_table_rows([], 2) == ""
+        assert _build_table_rows([]) == ""
 
 
 class TestBuildDataTable:

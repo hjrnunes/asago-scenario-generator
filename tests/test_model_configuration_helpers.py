@@ -15,7 +15,9 @@ from asago_scenario_generator.pipeline.model_configuration import (
     _config_from_values,
     _has_env_value,
     _is_string_string_mapping,
+    _optional_float,
     _optional_float_value,
+    _optional_int,
     _optional_str,
     _profile_value,
     _resolution_specs,
@@ -121,7 +123,9 @@ class TestResolutionSpecs:
     """The per-field resolution table."""
 
     def test_resolution_specs_cover_all_fields(self) -> None:
-        specs = _resolution_specs(None, None, None, None, None, None, None, None, None, None)
+        specs = _resolution_specs(
+            None, None, None, None, None, None, None, None, None, None
+        )
         assert set(specs) == {
             "base_url",
             "api_key",
@@ -136,7 +140,9 @@ class TestResolutionSpecs:
         }
 
     def test_resolution_specs_carry_env_names(self) -> None:
-        specs = _resolution_specs(None, None, None, None, None, None, None, None, None, None)
+        specs = _resolution_specs(
+            None, None, None, None, None, None, None, None, None, None
+        )
         assert specs["model"][1] == "ASAGO_SCENARIO_GENERATOR_MODEL_NAME"
         assert specs["api_key"][2] == "unused"
         assert specs["temperature"][2] == 0.4
@@ -151,9 +157,7 @@ class TestResolveValues:
             "b": (None, "ENV_B", "default-b"),
             "c": (None, "ENV_C", "default-c"),
         }
-        values, sources = _resolve_values(
-            specs, {"b": "profile-b"}, {"ENV_C": "env-c"}
-        )
+        values, sources = _resolve_values(specs, {"b": "profile-b"}, {"ENV_C": "env-c"})
         assert values == {"a": "explicit", "b": "profile-b", "c": "env-c"}
         assert sources == {
             "a": ConfigSource.cli,
@@ -217,6 +221,22 @@ class TestConfigFromValues:
 
 class TestOptionalCoercions:
     """Small optional-value coercions."""
+
+    @pytest.mark.parametrize(
+        ("coercer", "value", "expected"),
+        [(_optional_int, "10", 10), (_optional_float, "0.5", 0.5)],
+    )
+    def test_positive_values_are_coerced(self, coercer, value, expected) -> None:
+        assert coercer(value, "field") == expected
+
+    @pytest.mark.parametrize("coercer", [_optional_int, _optional_float])
+    def test_none_remains_none(self, coercer) -> None:
+        assert coercer(None, "field") is None
+
+    @pytest.mark.parametrize("value", [0, -1])
+    def test_non_positive_values_are_rejected(self, value) -> None:
+        with pytest.raises(ValueError, match="field must be positive"):
+            _optional_int(value, "field")
 
     def test_optional_str(self) -> None:
         assert _optional_str("v") == "v"
