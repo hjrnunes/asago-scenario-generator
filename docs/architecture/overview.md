@@ -24,8 +24,9 @@ envelope model imports the same contract leaf rather than the projection
 façade, so persistence validation does not pull implementation modules.
 
 Finalization lifecycle types, retry budgets, and choice-queue policy live in
-`pipeline.finalization_contracts`. Admission, gates, and persistence adapters
-depend inward on that leaf instead of the `pipeline.finalization` controller.
+`pipeline.finalization_contracts`. Admission, gate contracts, snapshots,
+parsimony, prebehavior checks, and persistence adapters depend inward on that
+leaf instead of the `pipeline.finalization` controller.
 Durable encoding uses `projection_contracts.canonical_json_bytes`; inventory
 validation depends on persistence record modules rather than the persistence
 façade.
@@ -41,6 +42,21 @@ Authoritative attack-pattern models are split by responsibility
 `models.attack_pattern` façade. Catalog-lineage source-catalog pinning lives
 in `data.catalog_lineage_snapshot` so normal lineage validation does not
 consult the mutable live catalog.
+
+Scenario validation is split by responsibility (`validation_common`,
+structure, phantom, insider, provenance, parsimony, goal, and semantic
+leaves) behind the historical `pipeline.validation` façade. Those leaves
+do not import the façade or IO-near modules. Narrative access-realization
+and step-bound checks live in `pipeline.generate.narrative_access`;
+projection-envelope sidecars are built by `pipeline.projection_block`.
+Validation, pre-behavior gates, and assembly consume those leaves instead
+of the IO-near `generate.narrative` and `generate.assembly` façades.
+
+Deterministic evaluation metrics (`consistency`, `diversity`, `gherkin`,
+`grounding`, `plausibility`, `scorecard`, `versioned_metrics`) stay off
+the persistence and finalization façades. Authoritative v3 scorecards
+consume `persistence_plan`, `persistence_journal`, and
+`finalization_gate_contracts`.
 
 The taxonomy/risk workflow uses a semantic-author/compiler seam. The model
 authors actor intent, narrative causality, attack-tree AND topology, and
