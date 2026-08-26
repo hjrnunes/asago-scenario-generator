@@ -491,8 +491,7 @@ def test_kc6_gate_drops_gated_techniques_only_without_kc6(fixture: SurfaceFixtur
 @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 @given(fixture=surface_fixtures())
 def test_atlas_and_asi_lists_preserve_source_order(fixture: SurfaceFixture):
-    """Each threat's own ATLAS/ASI order survives as a subsequence of the
-    entry's union (relative first-seen ordering)."""
+    """Each source contributes its not-yet-seen IDs in source order."""
     surface, _ = _derive(fixture)
     gate_off = _kc6_gate_off(fixture)
     asi_by_threat: dict[str, list[str]] = {}
@@ -500,19 +499,28 @@ def test_atlas_and_asi_lists_preserve_source_order(fixture: SurfaceFixture):
         asi_by_threat.setdefault(threat, []).append(asi)
 
     for entry in surface.entries:
+        seen_atlas: set[str] = set()
+        seen_asi: set[str] = set()
         for threat in entry.agentic_threat_ids:
             atlas_source = fixture.t_to_atlas.get(threat, [])
             if gate_off:
                 atlas_source = [
                     a for a in atlas_source if a not in _KC6_GATED_TECHNIQUES
                 ]
+            new_atlas = [a for a in atlas_source if a not in seen_atlas]
             restricted = [
-                a for a in entry.atlas_technique_ids if a in set(atlas_source)
+                a for a in entry.atlas_technique_ids if a in set(new_atlas)
             ]
-            assert restricted == _first_seen_union([atlas_source])
+            assert restricted == new_atlas
+            seen_atlas.update(atlas_source)
+
             asi_source = asi_by_threat.get(threat, [])
-            restricted_asi = [a for a in entry.owasp_asi_ids if a in set(asi_source)]
-            assert restricted_asi == _first_seen_union([asi_source])
+            new_asi = [a for a in asi_source if a not in seen_asi]
+            restricted_asi = [
+                a for a in entry.owasp_asi_ids if a in set(new_asi)
+            ]
+            assert restricted_asi == new_asi
+            seen_asi.update(asi_source)
 
 
 @settings(max_examples=25, deadline=None, suppress_health_check=[HealthCheck.too_slow])
