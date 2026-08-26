@@ -330,8 +330,10 @@ def test_write_facts_template_writes_unknown_template_and_refuses_overwrite(
 
     write_facts_template(outcome, target)
 
-    written = yaml.safe_load(target.read_text(encoding="utf-8"))
+    written_text = target.read_text(encoding="utf-8")
+    written = yaml.safe_load(written_text)
     assert written["schema_version"] == "1"
+    assert written_text.index("schema_version:") < written_text.index("facts:")
     assert [item["fact"]["fact_id"] for item in written["facts"]] == [
         item.fact.fact_id for item in outcome.facts_template
     ]

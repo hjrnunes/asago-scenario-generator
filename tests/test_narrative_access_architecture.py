@@ -53,8 +53,43 @@ class TestNarrativeAccessLeaf:
             )
         ]
         assert not violations, (
-            "narrative_access imports IO-near modules: "
-            f"{sorted(violations)}"
+            f"narrative_access imports IO-near modules: {sorted(violations)}"
+        )
+
+
+class TestNarrativeSemanticsLeaf:
+    """Semantic draft compilation stays off the narrative façade."""
+
+    _ALLOWED_GENERATE_SIBLINGS = {
+        "asago_scenario_generator.pipeline.generate.canonical_projection",
+        "asago_scenario_generator.pipeline.generate.narrative_access",
+    }
+
+    def test_leaf_does_not_import_io_near_modules(self) -> None:
+        """Narrative draft contracts stay inward and offline."""
+        imports = _imported_modules(GENERATE_DIR / "narrative_semantics.py")
+        violations = [
+            imp
+            for imp in imports
+            if any(
+                imp == forbidden or imp.startswith(forbidden + ".")
+                for forbidden in _FORBIDDEN_IO_NEAR_PREFIXES
+            )
+        ]
+        assert not violations, (
+            f"narrative_semantics imports IO-near modules: {sorted(violations)}"
+        )
+
+    def test_leaf_reaches_only_inward_generate_siblings(self) -> None:
+        """The compiler may couple to access bounds and projection semantics."""
+        imports = _imported_modules(GENERATE_DIR / "narrative_semantics.py")
+        siblings = {
+            imp
+            for imp in imports
+            if imp.startswith("asago_scenario_generator.pipeline.generate.")
+        }
+        assert siblings <= self._ALLOWED_GENERATE_SIBLINGS, (
+            f"narrative_semantics reaches orchestration siblings: {sorted(siblings)}"
         )
 
 
@@ -75,6 +110,5 @@ class TestProjectionBlockLeaf:
             )
         ]
         assert not violations, (
-            "projection_block imports IO-near modules: "
-            f"{sorted(violations)}"
+            f"projection_block imports IO-near modules: {sorted(violations)}"
         )

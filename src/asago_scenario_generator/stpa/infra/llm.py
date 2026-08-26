@@ -82,10 +82,13 @@ def _inject_openrouter_headers(merged: dict[str, str], base_url: str | None) -> 
 
 
 def _prompt_messages(system_prompt: str, user_prompt: str) -> list[dict[str, str]]:
-    """The standard system + user message pair for one completion."""
+    """Build the standard system + user message pair for one completion."""
     return [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
+        dict(role=role, content=content)
+        for role, content in (
+            ("system", system_prompt),
+            ("user", user_prompt),
+        )
     ]
 
 

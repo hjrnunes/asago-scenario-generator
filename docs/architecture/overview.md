@@ -8,7 +8,12 @@ workflows.
 Pydantic models define capability profiles, taxonomy evidence, projected
 attack chains, attack trees, behavior specifications, scenario envelopes, and
 run manifests. Shared LLM adapters, deterministic validators, evaluation, and
-reporting sit around those contracts.
+reporting sit around those contracts. Named model-profile loading lives in
+`model_profiles` so generation configuration and STPA infrastructure both
+depend inward on that leaf. The historical `stpa.infra.model_profiles`
+import path remains a façade. Taxonomy prompt-message construction lives in
+`llm.messages`. STPA keeps a structurally distinct local helper so the
+clean-copy boundary stays intact.
 
 Generation lifecycle contracts (retry directives, causal provider controls,
 stage call evidence, and typed attempt failures) live in
@@ -20,8 +25,10 @@ Authoritative projection contracts (candidate-v2 identity, digest helpers,
 capability-fact snapshots, and slot-matching policy) live in
 `pipeline.projection_contracts`. Resource matching, qualification, allocation,
 and the public `pipeline.projection` façade depend inward on that leaf. The
-envelope model imports the same contract leaf rather than the projection
-façade, so persistence validation does not pull implementation modules.
+envelope model and generate-stage orchestration import the same contract
+leaf rather than the projection façade, so persistence validation and
+stage adapters do not pull implementation modules. Projection drift,
+realization, and semantic checks stay off that façade as well.
 
 Finalization lifecycle types, retry budgets, and choice-queue policy live in
 `pipeline.finalization_contracts`. Admission, gate contracts, snapshots,
@@ -33,7 +40,11 @@ façade.
 
 Candidate identity and filter wire models live in `pipeline.candidate_models`.
 Expansion, rules, capping, coverage planning, and pipeline IO consume that
-leaf rather than the `pipeline.candidates` façade.
+leaf rather than the `pipeline.candidates` façade. Coverage-universe
+construction and min-cost assignment live in
+`pipeline.coverage_planning_universe` and `pipeline.coverage_planning_flow`;
+those leaves stay off the candidates and projection façades. Queue
+construction and plan persistence remain in `pipeline.coverage_planning`.
 
 Authoritative attack-pattern models are split by responsibility
 (`attack_pattern_contracts`, `attack_pattern_chain`,
@@ -48,9 +59,18 @@ structure, phantom, insider, provenance, parsimony, goal, and semantic
 leaves) behind the historical `pipeline.validation` façade. Those leaves
 do not import the façade or IO-near modules. Narrative access-realization
 and step-bound checks live in `pipeline.generate.narrative_access`;
-projection-envelope sidecars are built by `pipeline.projection_block`.
-Validation, pre-behavior gates, and assembly consume those leaves instead
-of the IO-near `generate.narrative` and `generate.assembly` façades.
+narrative semantic draft contracts and compilation live in
+`pipeline.generate.narrative_semantics`; actor draft compilation lives in
+`pipeline.generate.actor_semantics`. Attack-tree transport, zone
+enforcement, name resolution, and diversity helpers live in
+`pipeline.generate.tree_transport`, `tree_validation`, `zones`, `names`,
+and `diversity`; those leaves stay off the IO-near `generate.tree`
+façade. Scenario versus projected-step ATLAS identity lives in
+`pipeline.technique_scopes`. Projection-envelope sidecars are
+built by `pipeline.projection_block`. Validation, pre-behavior gates,
+stage orchestration, and assembly consume those leaves instead of the
+IO-near `generate.narrative`, `generate.actor`, and `generate.assembly`
+façades.
 
 Deterministic evaluation metrics (`consistency`, `diversity`, `gherkin`,
 `grounding`, `plausibility`, `scorecard`, `versioned_metrics`) stay off
