@@ -41,6 +41,16 @@ def projected_step_mapping_ids(block: ProjectionEnvelopeBlock) -> list[str]:
     )
 
 
+def _mapping_targets_selected_step(projected: Any, selected: set[str]) -> bool:
+    """Whether a projected mapping targets a selected step with exact ATLAS identity."""
+    return (
+        projected.scope == "step"
+        and projected.step_id in selected
+        and projected.mapping.taxonomy == "ATLAS"
+        and projected.mapping.decision == "exact"
+    )
+
+
 def projected_step_mapping_ids_by_step(
     block: ProjectionEnvelopeBlock,
 ) -> dict[str, frozenset[str]]:
@@ -48,31 +58,38 @@ def projected_step_mapping_ids_by_step(
     selected = set(block.selected_step_ids)
     result = {step_id: set() for step_id in block.selected_step_ids}
     for projected in block.projected_mappings:
-        if (
-            projected.scope != "step"
-            or projected.step_id not in selected
-            or projected.mapping.taxonomy != "ATLAS"
-            or projected.mapping.decision != "exact"
-        ):
+        if not _mapping_targets_selected_step(projected, selected):
             continue
         result[projected.step_id].update(projected.mapping.ids)
     return {step_id: frozenset(ids) for step_id, ids in result.items()}
 
 
-def narrative_reference_ids(narrative: Any) -> list[str]:
-    """Extract stable ATLAS references from provider-authored narrative text."""
+def _step_reference_texts(step: Any) -> list[str]:
+    """Collect action/effect text from one narrative step."""
+    texts: list[str] = []
+    for field_name in ("action", "effect"):
+        value = getattr(step, field_name, None)
+        if value:
+            texts.append(str(value))
+    return texts
+
+
+def _narrative_reference_texts(narrative: Any) -> list[str]:
+    """Collect summary/action/effect text for ATLAS reference extraction."""
     texts: list[str] = []
     summary = getattr(narrative, "summary", None)
     if summary:
         texts.append(str(summary))
     for step in getattr(narrative, "steps", ()):
-        for field_name in ("action", "effect"):
-            value = getattr(step, field_name, None)
-            if value:
-                texts.append(str(value))
+        texts.extend(_step_reference_texts(step))
+    return texts
+
+
+def narrative_reference_ids(narrative: Any) -> list[str]:
+    """Extract stable ATLAS references from provider-authored narrative text."""
     return stable_unique(
         match.group(1)
-        for text in texts
+        for text in _narrative_reference_texts(narrative)
         for match in _NARRATIVE_TECHNIQUE_RE.finditer(text)
     )
 

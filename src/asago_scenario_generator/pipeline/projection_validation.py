@@ -187,14 +187,12 @@ def validate_projection_traceability(
 # ---------------------------------------------------------------------------#
 
 
-def _check_ingress_identity(
+def _envelope_ingress_mismatch(
     envelope: ScenarioEnvelope,
-    block: ProjectionEnvelopeBlock,
-) -> list[ProjectionTraceabilityViolation]:
-    violations: list[ProjectionTraceabilityViolation] = []
-    expected = block.canonical_ingress.entry_point_id
-
-    # Envelope-level initial_entry_point_id.
+    expected: str,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Flag an envelope initial_entry_point_id that disagrees with the projection."""
     if envelope.initial_entry_point_id != expected:
         violations.append(
             ProjectionTraceabilityViolation(
@@ -209,8 +207,13 @@ def _check_ingress_identity(
             )
         )
 
-    # Actor access provenance.
-    actor = envelope.actor_profile
+
+def _actor_access_ingress_mismatch(
+    actor: Any,
+    expected: str,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Flag actor access provenance that disagrees with the projection ingress."""
     if (
         actor is not None
         and actor.access is not None
@@ -229,8 +232,13 @@ def _check_ingress_identity(
             )
         )
 
-    # Narrative access realization.
-    narrative = envelope.narrative
+
+def _narrative_access_ingress_mismatch(
+    narrative: Any,
+    expected: str,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Flag narrative access realization that disagrees with the projection ingress."""
     if (
         narrative.access_realization is not None
         and narrative.access_realization.initial_entry_point_id != expected
@@ -248,28 +256,59 @@ def _check_ingress_identity(
             )
         )
 
-    # Attack tree initial_ingress leaves.
-    tree = envelope.attack_tree
-    if tree is not None:
-        for leaf in _iter_leaves(tree.root):
-            if (
-                leaf.action is not None
-                and isinstance(leaf.action, InitialIngressAction)
-                and leaf.action.entry_point_id != expected
-            ):
-                violations.append(
-                    ProjectionTraceabilityViolation(
-                        code=ProjectionTraceabilityViolationCode.ingress_identity_mismatch,
-                        stage=ProjectionTraceabilityStage.attack_tree,
-                        detail=(
-                            f"tree leaf '{leaf.id}' initial_ingress "
-                            f"entry_point_id '{leaf.action.entry_point_id}' "
-                            f"does not match projection canonical_ingress "
-                            f"'{expected}'"
-                        ),
-                        element_id=leaf.id,
-                    )
+
+def _ingress_leaf_mismatch(leaf: Any, expected: str) -> bool:
+    """True when an initial_ingress leaf binds a different entry point."""
+    if leaf.action is None:
+        return False
+    if not isinstance(leaf.action, InitialIngressAction):
+        return False
+    return leaf.action.entry_point_id != expected
+
+
+def _check_tree_ingress_leaves(
+    tree: Any,
+    expected: str,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Flag initial_ingress tree leaves that disagree with the projection ingress."""
+    if tree is None:
+        return
+    for leaf in _iter_leaves(tree.root):
+        if _ingress_leaf_mismatch(leaf, expected):
+            violations.append(
+                ProjectionTraceabilityViolation(
+                    code=ProjectionTraceabilityViolationCode.ingress_identity_mismatch,
+                    stage=ProjectionTraceabilityStage.attack_tree,
+                    detail=(
+                        f"tree leaf '{leaf.id}' initial_ingress "
+                        f"entry_point_id '{leaf.action.entry_point_id}' "
+                        f"does not match projection canonical_ingress "
+                        f"'{expected}'"
+                    ),
+                    element_id=leaf.id,
                 )
+            )
+
+
+def _check_ingress_identity(
+    envelope: ScenarioEnvelope,
+    block: ProjectionEnvelopeBlock,
+) -> list[ProjectionTraceabilityViolation]:
+    violations: list[ProjectionTraceabilityViolation] = []
+    expected = block.canonical_ingress.entry_point_id
+
+    # Envelope-level initial_entry_point_id.
+    _envelope_ingress_mismatch(envelope, expected, violations)
+
+    # Actor access provenance.
+    _actor_access_ingress_mismatch(envelope.actor_profile, expected, violations)
+
+    # Narrative access realization.
+    _narrative_access_ingress_mismatch(envelope.narrative, expected, violations)
+
+    # Attack tree initial_ingress leaves.
+    _check_tree_ingress_leaves(envelope.attack_tree, expected, violations)
 
     return violations
 
