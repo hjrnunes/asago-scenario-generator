@@ -10,6 +10,10 @@ import pytest
 from asago_scenario_generator.models.attack_pattern import EntryPointResourceReference
 from asago_scenario_generator.models.projection_envelope import (
     ProjectionEnvelopeBlock,
+    ProjectionTraceabilityResult,
+    ProjectionTraceabilityStage,
+    ProjectionTraceabilityViolation,
+    ProjectionTraceabilityViolationCode,
     _ingress_binding,
     _is_entry_point_binding,
     _matches_canonical_ingress,
@@ -96,3 +100,76 @@ class TestIngressMatchesProjection:
         block = _fake_block(_ep(), canonical_ingress=_ep(_OTHER_EP))
         with pytest.raises(ValueError, match="does not match the projection"):
             ProjectionEnvelopeBlock._ingress_matches_projection(block)
+
+
+class TestPostconditionAccessors:
+    """Postcondition accessors retain selected-step and security boundaries."""
+
+    @staticmethod
+    def _block() -> SimpleNamespace:
+        return SimpleNamespace(
+            projection=SimpleNamespace(
+                source_chain=SimpleNamespace(
+                    steps=(
+                        SimpleNamespace(
+                            step_id="s1",
+                            observable_postconditions=(
+                                SimpleNamespace(
+                                    postcondition_id="pc1",
+                                    security_relevant=True,
+                                ),
+                                SimpleNamespace(
+                                    postcondition_id="pc2",
+                                    security_relevant=False,
+                                ),
+                            ),
+                        ),
+                        SimpleNamespace(
+                            step_id="s2",
+                            observable_postconditions=(
+                                SimpleNamespace(
+                                    postcondition_id="pc3",
+                                    security_relevant=True,
+                                ),
+                            ),
+                        ),
+                    )
+                ),
+                selected_step_ids=("s1", "s2"),
+            )
+        )
+
+    def test_postconditions_for_step_returns_owned_ids(self) -> None:
+        block = self._block()
+
+        assert ProjectionEnvelopeBlock.postconditions_for_step(block, "s1") == (
+            "pc1",
+            "pc2",
+        )
+        assert ProjectionEnvelopeBlock.postconditions_for_step(block, "missing") == ()
+
+    def test_security_relevant_postconditions_excludes_unselected_steps(self) -> None:
+        block = self._block()
+        block.projection.selected_step_ids = ("s1",)
+
+        assert ProjectionEnvelopeBlock.security_relevant_postconditions(block) == {
+            "s1": ["pc1"]
+        }
+
+
+class TestTraceabilityValidity:
+    """Traceability validity is forced false whenever violations are present."""
+
+    def test_violations_override_true_valid_flag(self) -> None:
+        violation = ProjectionTraceabilityViolation(
+            code=ProjectionTraceabilityViolationCode.omitted_projected_step,
+            stage=ProjectionTraceabilityStage.narrative,
+            detail="projected step was omitted",
+        )
+
+        result = ProjectionTraceabilityResult(valid=True, violations=[violation])
+
+        assert result.valid is False
+
+    def test_explicit_false_without_violations_remains_false(self) -> None:
+        assert ProjectionTraceabilityResult(valid=False).valid is False
