@@ -124,3 +124,8 @@ def _behavior_realization_mappings(
                 )
             )
     return behavior_realizations, assertion_realizations
+
+
+# mutate4py-manifest-begin
+# {"version":1,"tested_at":"2026-08-26T08:34:44Z","module_hash":"867a787b057ac8de53fa3aeae6f96114e194f5799b3c1b0ba353fb2ad833320e","source_sha256":"60e8fa228e87c5cb16486de3caa0afbb5c5422c1c5b0b0fb08dc5a3b773ce94f","functions":[{"id":"func/_build_projection_block","name":"_build_projection_block","line":27,"end_line":65,"hash":"7c6a6bb65e6fe66ab4c43a0e4f1d4d11085924a18e08d23efdec08028fc968e0"},{"id":"func/_narrative_realization_mappings","name":"_narrative_realization_mappings","line":68,"end_line":82,"hash":"b4cb3bfcd8cfb9bf5b990fed6973e6671c8b150c51e541775476b4c1c5bc74c5"},{"id":"func/_tree_realization_mappings","name":"_tree_realization_mappings","line":85,"end_line":100,"hash":"832910fd462644a43d75761de6def474d65c06635af8e60b3b89fdaf5bee96e8"},{"id":"func/_behavior_realization_mappings","name":"_behavior_realization_mappings","line":103,"end_line":126,"hash":"c3c6c7f8a260e4dabe99f4b3cadc2841cc0adf9bc8161197518f3c26bc230522"}]}
+# mutate4py-manifest-end
