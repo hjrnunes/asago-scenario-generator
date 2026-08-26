@@ -188,9 +188,8 @@ def _spfa_shortest_path(
     unreachable through residual edges.
     """
     distances = [float("inf")] * node_count
-    distances[source] = 0
+    distances[source] = 0.0
     in_queue = [False] * node_count
-    in_queue[source] = True
     queue: deque[int] = deque([source])
     parent_node = [-1] * node_count
     parent_edge_idx = [-1] * node_count
@@ -309,3 +308,8 @@ def _solve_min_cost_assignment(
         all_patterns,
         best_per_tp,
     )
+
+
+# mutate4py-manifest-begin
+# {"version":1,"tested_at":"2026-08-26T13:49:23Z","module_hash":"4f89f079cfb9961b106efebcae5f7e22847a2b9b9be1c1a4de06c1858a2e8c61","source_sha256":"9e71e54b48f5ec6bbcdec9654061e134a9ac3713782ab8b743c9fd12a0cca13b","functions":[{"id":"func/add_edge","name":"add_edge","line":12,"end_line":15,"hash":"7b4d0a9b1032f745758e638504d061c79988891ab8f3354114fa7da289be4828"},{"id":"func/_collect_pattern_index","name":"_collect_pattern_index","line":18,"end_line":26,"hash":"8e93ffefd351b081b1a3bac7b968a162e285550d18ad061469611a69ec883efe"},{"id":"func/_best_candidate_per_target_pattern","name":"_best_candidate_per_target_pattern","line":29,"end_line":43,"hash":"987dfa10754a1e89e6041da60274ad63b9297ab990247846175e52f2548910bd"},{"id":"func/_convex_pattern_cost","name":"_convex_pattern_cost","line":46,"end_line":61,"hash":"b9cb63dc8f84c07624bb2c2982d75e1ba02571381eb411bd5959fe5856da8ef2"},{"id":"func/_add_target_pattern_edges","name":"_add_target_pattern_edges","line":64,"end_line":86,"hash":"19a4e9b7794f9233c546e642addbd7ed5485d3e3ff610a9baa13bc133ec88bb8"},{"id":"func/_add_pattern_sink_edges","name":"_add_pattern_sink_edges","line":89,"end_line":113,"hash":"bfd842296e4d8bdeea7602d8ccc907de112efdd59d0bfd082457a821afb2e3d7"},{"id":"func/_build_flow_network","name":"_build_flow_network","line":116,"end_line":155,"hash":"46a79ddd32d926ec7bcc7cf14e22761b7bcc2513c11db47886495e056def3131"},{"id":"func/_relax_node","name":"_relax_node","line":158,"end_line":176,"hash":"d9c1dae17d393330ae38aaa54cf88a5193c2339f7defb8960d8de8e80ecb2b3a"},{"id":"func/_spfa_shortest_path","name":"_spfa_shortest_path","line":179,"end_line":212,"hash":"67f4127a7623c86efb7b38eac8ca8d0af8d8543b1f5dcf262b33c962f869dcc6"},{"id":"func/_augment_path","name":"_augment_path","line":215,"end_line":230,"hash":"208d88cb4f24560bcf799e1c524085b339d6546199c617c0b2a0769f9e10a360"},{"id":"func/_flowing_pattern_edge","name":"_flowing_pattern_edge","line":233,"end_line":238,"hash":"03d18156a3ffffe2906dc7e8224843cf2987199ef4d4270d40f5b6289eecbef4"},{"id":"func/_extract_assignment","name":"_extract_assignment","line":241,"end_line":258,"hash":"73c6851bb59a211387c023eed3189525da0e0a671d8862544bbe7814782a320c"},{"id":"func/_solve_min_cost_assignment","name":"_solve_min_cost_assignment","line":261,"end_line":310,"hash":"746a62ae483127701064f2f99aaba3ec8bc20fc7ec8bce52bd6e1e43f88c4ec5"}]}
+# mutate4py-manifest-end
