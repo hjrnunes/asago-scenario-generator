@@ -75,7 +75,10 @@ narrative semantic draft contracts and compilation live in
 enforcement, name resolution, and diversity helpers live in
 `pipeline.generate.tree_transport`, `tree_validation`, `zones`, `names`,
 and `diversity`; those leaves stay off the IO-near `generate.tree`
-façade. Scenario versus projected-step ATLAS identity lives in
+façade. Path enumeration, tool-execution grounding, and transport
+normalization are imported from those leaves by tests and acceptance
+rather than re-exported through `generate.tree`. Scenario versus
+projected-step ATLAS identity lives in
 `pipeline.technique_scopes`. Projection-envelope sidecars are
 built by `pipeline.projection_block`. Validation, pre-behavior gates,
 stage orchestration, and assembly consume those leaves instead of the

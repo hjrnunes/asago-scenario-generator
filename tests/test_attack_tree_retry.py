@@ -27,7 +27,7 @@ from asago_scenario_generator.pipeline.generate import (
     _call_attack_tree,
     _call_attack_tree_once,
 )
-from asago_scenario_generator.pipeline.generate.tree import _parse_attack_tree_yaml
+from asago_scenario_generator.pipeline.generate.tree_transport import _parse_attack_tree_yaml
 from asago_scenario_generator.pipeline.generate.tree_semantics import (
     AttackTreeDraftNode,
     AttackTreeDraftV2,
@@ -487,7 +487,7 @@ class TestSingleChildGateRejection:
 
     def test_single_child_gate_not_mutated(self) -> None:
         """The raw dict is not mutated by repair before validation."""
-        from asago_scenario_generator.pipeline.generate.tree import (
+        from asago_scenario_generator.pipeline.generate.tree_transport import (
             _parse_attack_tree_yaml,
         )
 
