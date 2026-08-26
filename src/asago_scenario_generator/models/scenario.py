@@ -13,6 +13,7 @@ Plus priority signals and generation metadata.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any, Literal
@@ -28,10 +29,31 @@ from asago_scenario_generator.models.complexity import (
 from asago_scenario_generator.models.projection_envelope import (
     ProjectionEnvelopeBlock,
 )
-from asago_scenario_generator.models.realization import ProjectedStepRealization
+from asago_scenario_generator.models.realization import (
+    ProjectedStepRealization,
+    _realization_cover_error,
+)
 from asago_scenario_generator.models.source_influence_provenance import (
     SourceInfluenceProvenanceBlock,
 )
+
+# ---------------------------------------------------------------------------
+# Shared model helpers
+# ---------------------------------------------------------------------------
+
+
+def _invalid_projected_step_id(step_ids: Sequence[str]) -> str | None:
+    """First projected step ID that violates the canonical pattern, else None."""
+    for sid in step_ids:
+        if not sid or not sid[0].isalnum():
+            return sid
+    return None
+
+
+def _has_duplicate_items(items: Sequence[str]) -> bool:
+    """Whether any item appears more than once."""
+    return len(set(items)) != len(items)
+
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -147,41 +169,26 @@ class NarrativeStep(BaseModel):
     @model_validator(mode="after")
     def _validate_projected_step_ids(self) -> NarrativeStep:
         """Each projected step ID must match the canonical pattern."""
-        for sid in self.projected_step_ids:
-            if not sid or not sid[0].isalnum():
-                raise ValueError(
-                    f"projected_step_ids contains invalid ID '{sid}': "
-                    f"must start with alphanumeric"
-                )
-        if len(set(self.projected_step_ids)) != len(self.projected_step_ids):
+        invalid = _invalid_projected_step_id(self.projected_step_ids)
+        if invalid is not None:
+            raise ValueError(
+                f"projected_step_ids contains invalid ID '{invalid}': "
+                f"must start with alphanumeric"
+            )
+        if _has_duplicate_items(self.projected_step_ids):
             raise ValueError(
                 f"narrative step {self.step_number} has duplicate projected_step_ids"
             )
         # Realizations must cover exactly the projected_step_ids.
         # model_construct may not set realizations; skip check if absent.
         if self.realizations:
-            realization_ids_list = [r.projected_step_id for r in self.realizations]
-            projected_ids = set(self.projected_step_ids)
-            if len(set(realization_ids_list)) != len(realization_ids_list):
-                raise ValueError(
-                    f"narrative step {self.step_number} has duplicate "
-                    f"realization records (same projected_step_id appears "
-                    f"more than once)"
-                )
-            if len(realization_ids_list) != len(projected_ids):
-                raise ValueError(
-                    f"narrative step {self.step_number} has "
-                    f"{len(realization_ids_list)} realization records but "
-                    f"{len(projected_ids)} projected_step_ids — exactly one "
-                    f"record per projected_step_id is required"
-                )
-            realization_ids = set(realization_ids_list)
-            if realization_ids != projected_ids:
-                raise ValueError(
-                    f"narrative step {self.step_number} realization IDs "
-                    f"{realization_ids} do not match projected_step_ids "
-                    f"{projected_ids}"
-                )
+            cover_error = _realization_cover_error(
+                self.realizations,
+                self.projected_step_ids,
+                f"narrative step {self.step_number}",
+            )
+            if cover_error is not None:
+                raise ValueError(cover_error)
         return self
 
 
@@ -742,38 +749,57 @@ class CorpusClaimApplicability(BaseModel):
 
     @model_validator(mode="after")
     def _validate_status_payload(self) -> CorpusClaimApplicability:
-        if self.status == CorpusClaimStatus.applicable:
-            if self.reason is not None:
-                raise ValueError(
-                    f"applicable corpus claim for category "
-                    f"'{self.category.value}' must not carry a reason."
-                )
-            if not self.evidence:
-                raise ValueError(
-                    f"applicable corpus claim for category "
-                    f"'{self.category.value}' requires at least one "
-                    f"nonblank evidence item."
-                )
-            blank_evidence = [e for e in self.evidence if not e.strip()]
-            if blank_evidence:
-                raise ValueError(
-                    f"applicable corpus claim for category "
-                    f"'{self.category.value}' has blank/whitespace-only "
-                    f"evidence item(s): {blank_evidence}. Every evidence "
-                    f"item must be nonblank."
-                )
-        elif self.status == CorpusClaimStatus.not_applicable:
-            if self.reason is None or not self.reason.strip():
-                raise ValueError(
-                    f"not_applicable corpus claim for category "
-                    f"'{self.category.value}' requires a nonblank reason."
-                )
-            if self.evidence:
-                raise ValueError(
-                    f"not_applicable corpus claim for category "
-                    f"'{self.category.value}' must not carry evidence."
-                )
+        error = (
+            _applicable_claim_error(self.category.value, self.reason, self.evidence)
+            if self.status == CorpusClaimStatus.applicable
+            else _not_applicable_claim_error(
+                self.category.value, self.reason, self.evidence
+            )
+        )
+        if error is not None:
+            raise ValueError(error)
         return self
+
+
+def _applicable_claim_error(
+    category: str, reason: str | None, evidence: Sequence[str]
+) -> str | None:
+    """Payload error for an ``applicable`` claim, or None when coherent."""
+    if reason is not None:
+        return (
+            f"applicable corpus claim for category '{category}' "
+            f"must not carry a reason."
+        )
+    if not evidence:
+        return (
+            f"applicable corpus claim for category '{category}' requires "
+            f"at least one nonblank evidence item."
+        )
+    blank_evidence = [e for e in evidence if not e.strip()]
+    if blank_evidence:
+        return (
+            f"applicable corpus claim for category '{category}' has "
+            f"blank/whitespace-only evidence item(s): {blank_evidence}. "
+            f"Every evidence item must be nonblank."
+        )
+    return None
+
+
+def _not_applicable_claim_error(
+    category: str, reason: str | None, evidence: Sequence[str]
+) -> str | None:
+    """Payload error for a ``not_applicable`` claim, or None when coherent."""
+    if reason is None or not reason.strip():
+        return (
+            f"not_applicable corpus claim for category '{category}' "
+            f"requires a nonblank reason."
+        )
+    if evidence:
+        return (
+            f"not_applicable corpus claim for category '{category}' "
+            f"must not carry evidence."
+        )
+    return None
 
 
 class SemanticValidation(BaseModel):
@@ -818,36 +844,73 @@ class SemanticValidation(BaseModel):
         record — no empty, missing, or duplicate categories (cmps.9 third
         review correction 1).
         """
-        categories = [r.category for r in self.corpus_claim_applicability]
-        cat_counts: dict[str, int] = {}
-        for c in categories:
-            cat_counts[c.value] = cat_counts.get(c.value, 0) + 1
-        required = {
-            CorpusClaimCategory.entry_points.value,
-            CorpusClaimCategory.tool_inventory.value,
-        }
-        missing = required - set(cat_counts)
-        if missing:
-            raise ValueError(
-                f"corpus_claim_applicability is missing required "
-                f"category record(s): {sorted(missing)}. Exactly one "
-                f"entry_points and one tool_inventory record are required."
-            )
-        duplicates = {c: n for c, n in cat_counts.items() if n > 1}
-        if duplicates:
-            raise ValueError(
-                f"corpus_claim_applicability has duplicate category "
-                f"record(s): {duplicates}. Exactly one entry_points and "
-                f"one tool_inventory record are required."
-            )
-        extra = set(cat_counts) - required
-        if extra:
-            raise ValueError(
-                f"corpus_claim_applicability has unexpected category "
-                f"record(s): {sorted(extra)}. Only entry_points and "
-                f"tool_inventory are valid categories."
-            )
+        counts = _category_counts(self.corpus_claim_applicability)
+        error = _missing_category_error(counts, _REQUIRED_CLAIM_CATEGORIES)
+        if error is not None:
+            raise ValueError(error)
+        error = _duplicate_category_error(counts)
+        if error is not None:
+            raise ValueError(error)
+        error = _extra_category_error(counts, _REQUIRED_CLAIM_CATEGORIES)
+        if error is not None:
+            raise ValueError(error)
         return self
+
+
+_REQUIRED_CLAIM_CATEGORIES: frozenset[str] = frozenset(
+    {
+        CorpusClaimCategory.entry_points.value,
+        CorpusClaimCategory.tool_inventory.value,
+    }
+)
+
+
+def _category_counts(claims: Sequence[CorpusClaimApplicability]) -> dict[str, int]:
+    """Number of corpus claim records per category value."""
+    counts: dict[str, int] = {}
+    for claim in claims:
+        counts[claim.category.value] = counts.get(claim.category.value, 0) + 1
+    return counts
+
+
+def _missing_category_error(
+    counts: dict[str, int], required: frozenset[str]
+) -> str | None:
+    """Error when a required category record is absent, or None."""
+    missing = required - set(counts)
+    if missing:
+        return (
+            f"corpus_claim_applicability is missing required "
+            f"category record(s): {sorted(missing)}. Exactly one "
+            f"entry_points and one tool_inventory record are required."
+        )
+    return None
+
+
+def _duplicate_category_error(counts: dict[str, int]) -> str | None:
+    """Error when a category has more than one record, or None."""
+    duplicates = {c: n for c, n in counts.items() if n > 1}
+    if duplicates:
+        return (
+            f"corpus_claim_applicability has duplicate category "
+            f"record(s): {duplicates}. Exactly one entry_points and "
+            f"one tool_inventory record are required."
+        )
+    return None
+
+
+def _extra_category_error(
+    counts: dict[str, int], required: frozenset[str]
+) -> str | None:
+    """Error when a record uses a category outside the closed set, or None."""
+    extra = set(counts) - required
+    if extra:
+        return (
+            f"corpus_claim_applicability has unexpected category "
+            f"record(s): {sorted(extra)}. Only entry_points and "
+            f"tool_inventory are valid categories."
+        )
+    return None
 
 
 class ValidationBlock(BaseModel):
@@ -919,36 +982,21 @@ class BehaviorAction(BaseModel):
 
     @model_validator(mode="after")
     def _validate_projected_step_ids(self) -> BehaviorAction:
-        for sid in self.projected_step_ids:
-            if not sid or not sid[0].isalnum():
-                raise ValueError(f"projected_step_ids contains invalid ID '{sid}'")
-        if len(set(self.projected_step_ids)) != len(self.projected_step_ids):
+        invalid = _invalid_projected_step_id(self.projected_step_ids)
+        if invalid is not None:
+            raise ValueError(f"projected_step_ids contains invalid ID '{invalid}'")
+        if _has_duplicate_items(self.projected_step_ids):
             raise ValueError(
                 f"behavior action '{self.action_id}' has duplicate projected_step_ids"
             )
         if self.realizations:
-            realization_ids_list = [r.projected_step_id for r in self.realizations]
-            projected_ids = set(self.projected_step_ids)
-            if len(set(realization_ids_list)) != len(realization_ids_list):
-                raise ValueError(
-                    f"behavior action '{self.action_id}' has duplicate "
-                    f"realization records (same projected_step_id appears "
-                    f"more than once)"
-                )
-            if len(realization_ids_list) != len(projected_ids):
-                raise ValueError(
-                    f"behavior action '{self.action_id}' has "
-                    f"{len(realization_ids_list)} realization records but "
-                    f"{len(projected_ids)} projected_step_ids — exactly one "
-                    f"record per projected_step_id is required"
-                )
-            realization_ids = set(realization_ids_list)
-            if realization_ids != projected_ids:
-                raise ValueError(
-                    f"behavior action '{self.action_id}' realization IDs "
-                    f"{realization_ids} do not match projected_step_ids "
-                    f"{projected_ids}"
-                )
+            cover_error = _realization_cover_error(
+                self.realizations,
+                self.projected_step_ids,
+                f"behavior action '{self.action_id}'",
+            )
+            if cover_error is not None:
+                raise ValueError(cover_error)
         return self
 
 
@@ -1059,30 +1107,66 @@ class BehaviorSpec(BaseModel):
     def _validate_scenario_grouping(self) -> BehaviorSpec:
         if not self.scenarios:
             return self
-        action_ids = tuple(item.action_id for item in self.actions)
-        assertion_ids = tuple(item.assertion_id for item in self.assertions)
-        known = set(action_ids) | set(assertion_ids)
-        grouped = tuple(
-            step_id for scenario in self.scenarios for step_id in scenario.step_ids
+        grouping_error = _scenario_grouping_error(
+            self.scenarios, self.actions, self.assertions
         )
-        unknown = set(grouped) - known
-        if unknown:
-            raise ValueError(
-                f"behavior scenarios reference unknown step IDs: {sorted(unknown)}"
-            )
-        if len(set(grouped)) != len(grouped):
-            raise ValueError("behavior scenarios must place every step ID exactly once")
-        missing = known - set(grouped)
-        if missing:
-            raise ValueError(
-                f"behavior scenarios omit canonical step IDs: {sorted(missing)}"
-            )
-        grouped_actions = tuple(step_id for step_id in grouped if step_id in action_ids)
-        if grouped_actions != action_ids:
-            raise ValueError(
-                "behavior scenario grouping must preserve canonical action order"
-            )
+        if grouping_error is not None:
+            raise ValueError(grouping_error)
         return self
+
+
+def _grouped_step_ids(scenarios: Sequence[BehaviorScenario]) -> tuple[str, ...]:
+    """All scenario step IDs flattened in grouping order."""
+    return tuple(step_id for scenario in scenarios for step_id in scenario.step_ids)
+
+
+def _known_step_ids(
+    actions: Sequence[BehaviorAction],
+    assertions: Sequence[BehaviorAssertion],
+) -> tuple[set[str], tuple[str, ...]]:
+    """(all canonical step IDs, canonical action IDs in order)."""
+    action_ids = tuple(item.action_id for item in actions)
+    assertion_ids = tuple(item.assertion_id for item in assertions)
+    return set(action_ids) | set(assertion_ids), action_ids
+
+
+def _unknown_grouped_ids(grouped: Sequence[str], known: set[str]) -> set[str]:
+    """Step IDs referenced by scenarios but unknown to the spec."""
+    return set(grouped) - known
+
+
+def _missing_grouped_ids(grouped: Sequence[str], known: set[str]) -> set[str]:
+    """Canonical step IDs never placed in any scenario."""
+    return known - set(grouped)
+
+
+def _actions_in_grouping_order(
+    grouped: Sequence[str], action_ids: tuple[str, ...]
+) -> bool:
+    """Whether scenario grouping preserves canonical action order."""
+    grouped_actions = tuple(step_id for step_id in grouped if step_id in action_ids)
+    return grouped_actions == action_ids
+
+
+def _scenario_grouping_error(
+    scenarios: Sequence[BehaviorScenario],
+    actions: Sequence[BehaviorAction],
+    assertions: Sequence[BehaviorAssertion],
+) -> str | None:
+    """First scenario-grouping violation message, or None when valid."""
+    grouped = _grouped_step_ids(scenarios)
+    known, action_ids = _known_step_ids(actions, assertions)
+    unknown = _unknown_grouped_ids(grouped, known)
+    if unknown:
+        return f"behavior scenarios reference unknown step IDs: {sorted(unknown)}"
+    if _has_duplicate_items(grouped):
+        return "behavior scenarios must place every step ID exactly once"
+    missing = _missing_grouped_ids(grouped, known)
+    if missing:
+        return f"behavior scenarios omit canonical step IDs: {sorted(missing)}"
+    if not _actions_in_grouping_order(grouped, action_ids):
+        return "behavior scenario grouping must preserve canonical action order"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -1123,17 +1207,9 @@ class ScenarioEnvelope(BaseModel):
         """Validate that candidate_id follows cand:v2:<32-char lowercase hex> format."""
         if not v or not v.startswith("cand:v2:"):
             raise ValueError("candidate_id must follow 'cand:v2:<32-char hex>' format")
-        hex_part = v[len("cand:v2:") :]
-        if len(hex_part) != 32:
-            raise ValueError(
-                f"candidate_id hex part must be 32 chars, got {len(hex_part)}"
-            )
-        if hex_part != hex_part.lower():
-            raise ValueError("candidate_id hex part must be lowercase")
-        try:
-            int(hex_part, 16)
-        except ValueError:
-            raise ValueError("candidate_id hex part must be valid hex") from None
+        error = _candidate_hex_error(v[len("cand:v2:") :])
+        if error is not None:
+            raise ValueError(error)
         return v
 
     @field_validator("scenario_id")
@@ -1327,3 +1403,16 @@ class ScenarioEnvelope(BaseModel):
                 and self.validation.semantic.valid
             )
         return self
+
+
+def _candidate_hex_error(hex_part: str) -> str | None:
+    """Candidate hex-part validation error, or None when valid."""
+    if len(hex_part) != 32:
+        return f"candidate_id hex part must be 32 chars, got {len(hex_part)}"
+    if hex_part != hex_part.lower():
+        return "candidate_id hex part must be lowercase"
+    try:
+        int(hex_part, 16)
+    except ValueError:
+        return "candidate_id hex part must be valid hex"
+    return None
