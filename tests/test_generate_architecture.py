@@ -193,6 +193,69 @@ class TestActorSemanticLeafBoundaries:
             )
 
 
+class TestStagesDependInwardOnDraftLeaves:
+    """Stage orchestration consumes draft contracts, not IO-near façades."""
+
+    def test_stages_import_semantic_leaves_not_actor_or_narrative_facades(
+        self,
+    ) -> None:
+        """Accepted-draft evidence stays on the compiler leaves."""
+        imports = _imported_modules(GENERATE_DIR / "stages.py")
+        assert "asago_scenario_generator.pipeline.generate.actor_semantics" in imports
+        assert (
+            "asago_scenario_generator.pipeline.generate.narrative_semantics" in imports
+        )
+        assert "asago_scenario_generator.pipeline.generate.actor" not in imports
+        assert "asago_scenario_generator.pipeline.generate.narrative" not in imports
+
+    def test_stages_import_projection_contracts_not_projection_facade(self) -> None:
+        """Generation stages consume candidate identity from the contract leaf."""
+        imports = _imported_modules(GENERATE_DIR / "stages.py")
+        assert "asago_scenario_generator.pipeline.projection_contracts" in imports
+        assert "asago_scenario_generator.pipeline.projection" not in imports
+
+
+class TestGenerateSupportLeavesStayOffTheTreeFacade:
+    """Tree, zone, name, and diversity helpers stay off the IO-near tree façade."""
+
+    _MODULES = (
+        "tree_transport.py",
+        "tree_validation.py",
+        "zones.py",
+        "names.py",
+        "diversity.py",
+    )
+    _FORBIDDEN_IO_NEAR_PREFIXES = (
+        "asago_scenario_generator.llm",
+        "asago_scenario_generator.prompts",
+        "asago_scenario_generator.manifest",
+        "asago_scenario_generator.report",
+        "asago_scenario_generator.cli",
+        "asago_scenario_generator.stpa",
+        "asago_scenario_generator.pipeline.generate.tree",
+        "asago_scenario_generator.pipeline.generate.narrative",
+        "asago_scenario_generator.pipeline.generate.assembly",
+        "asago_scenario_generator.pipeline.generate.actor",
+        "asago_scenario_generator.pipeline.projection",
+    )
+
+    def test_support_leaves_do_not_import_io_near_or_facade_modules(self) -> None:
+        """These helpers stay free of prompts, LLM, and generate façades."""
+        for module in self._MODULES:
+            imports = _imported_modules(GENERATE_DIR / module)
+            violations = [
+                imp
+                for imp in imports
+                if any(
+                    imp == forbidden or imp.startswith(forbidden + ".")
+                    for forbidden in self._FORBIDDEN_IO_NEAR_PREFIXES
+                )
+            ]
+            assert not violations, (
+                f"{module} imports forbidden modules: {sorted(violations)}"
+            )
+
+
 class TestBehaviorCompilerBoundary:
     """The deterministic behavior compiler is a pure, dependency-inward leaf."""
 

@@ -13,6 +13,8 @@ from typing import Any
 from openai import LengthFinishReasonError, OpenAI
 from pydantic import BaseModel, Field
 
+_DEFAULT_TEMPERATURE = 0.4
+
 
 class CompletionLengthError(RuntimeError):
     """Project-owned typed evidence for a completion-length exhaustion.
@@ -116,23 +118,43 @@ def _usage_counts(usage: Any) -> tuple[int, int]:
     )
 
 
+def _is_plain_scalar(value: Any) -> bool:
+    """Whether *value* is already a JSON-compatible scalar."""
+    if value is None:
+        return True
+    return isinstance(value, (str, int, float, bool))
+
+
+def _plain_mapping(value: Mapping) -> dict[str, Any]:
+    return {str(key): _plain_value(item) for key, item in value.items()}
+
+
+def _plain_sequence(value: Any) -> list[Any]:
+    return [_plain_value(item) for item in value]
+
+
+def _plain_object(value: Any) -> Any:
+    """Convert an arbitrary object via its ``__dict__``, skipping privates."""
+    if not hasattr(value, "__dict__"):
+        return str(value)
+    return {
+        str(key): _plain_value(item)
+        for key, item in vars(value).items()
+        if not key.startswith("_")
+    }
+
+
 def _plain_value(value: Any) -> Any:
     """Convert SDK/Pydantic telemetry objects into JSON-compatible values."""
-    if value is None or isinstance(value, (str, int, float, bool)):
+    if _is_plain_scalar(value):
         return value
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
     if isinstance(value, Mapping):
-        return {str(key): _plain_value(item) for key, item in value.items()}
+        return _plain_mapping(value)
     if isinstance(value, (list, tuple)):
-        return [_plain_value(item) for item in value]
-    if hasattr(value, "__dict__"):
-        return {
-            str(key): _plain_value(item)
-            for key, item in vars(value).items()
-            if not key.startswith("_")
-        }
-    return str(value)
+        return _plain_sequence(value)
+    return _plain_object(value)
 
 
 def _usage_details(usage: Any) -> dict[str, Any]:
@@ -187,6 +209,40 @@ def _response_schema_label(response_format: type[BaseModel] | None) -> str | Non
     )
 
 
+def _is_pydantic_model_schema(response_format: type[BaseModel]) -> bool:
+    """Whether the response format is a Pydantic model class usable as a schema."""
+    try:
+        return issubclass(response_format, BaseModel)
+    except TypeError:
+        return False
+
+
+def _decoded_json_value(stripped: str) -> tuple[Any, int] | None:
+    """Decode one leading JSON value, or None when the text is not a JSON value."""
+    try:
+        value, end = json.JSONDecoder().raw_decode(stripped)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return value, end
+
+
+def _validated_recovered(
+    value: Any, response_format: type[BaseModel]
+) -> BaseModel | None:
+    """Validate a decoded value against the schema, or None when invalid."""
+    try:
+        return response_format.model_validate(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _recoverable_input(content: Any, response_format: type[BaseModel] | None) -> bool:
+    """Whether the input can be a recoverable structured partial."""
+    if not isinstance(content, str) or response_format is None:
+        return False
+    return _is_pydantic_model_schema(response_format)
+
+
 def _recover_complete_structured_partial(
     content: Any,
     response_format: type[BaseModel] | None,
@@ -199,24 +255,16 @@ def _recover_complete_structured_partial(
     deliberately narrower than JSON repair: incomplete values, additional
     values, non-whitespace suffixes, and schema-invalid values all fail closed.
     """
-    if not isinstance(content, str) or response_format is None:
-        return None
-    try:
-        if not issubclass(response_format, BaseModel):
-            return None
-    except TypeError:
+    if not _recoverable_input(content, response_format):
         return None
     stripped = content.lstrip()
-    try:
-        value, end = json.JSONDecoder().raw_decode(stripped)
-    except (TypeError, ValueError, json.JSONDecodeError):
+    decoded = _decoded_json_value(stripped)
+    if decoded is None:
         return None
+    value, end = decoded
     if stripped[end:].strip():
         return None
-    try:
-        return response_format.model_validate(value)
-    except (TypeError, ValueError):
-        return None
+    return _validated_recovered(value, response_format)
 
 
 class LLMResult(BaseModel):
@@ -234,10 +282,192 @@ class LLMResult(BaseModel):
     )
 
 
+def _resolve_base_url_arg(explicit: str | None) -> str | None:
+    """Resolve base_url from the explicit argument or environment."""
+    return explicit or os.environ.get("ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL") or None
+
+
+def _resolve_api_key_arg(explicit: str | None) -> str:
+    """Resolve the API key from the explicit argument or environment."""
+    return explicit or os.environ.get("ASAGO_SCENARIO_GENERATOR_API_KEY", "unused")
+
+
+def _resolve_model_arg(explicit: str | None) -> str:
+    """Resolve the model name from the explicit argument or environment."""
+    return explicit or os.environ.get(
+        "ASAGO_SCENARIO_GENERATOR_MODEL_NAME", "gemma-3n-e4b-it"
+    )
+
+
+def _resolve_max_tokens_arg(explicit: int | None) -> int | None:
+    """Resolve max completion tokens, falling back to the environment."""
+    env_val = os.environ.get("ASAGO_SCENARIO_GENERATOR_MAX_COMPLETION_TOKENS")
+    return explicit or (int(env_val) if env_val else None)
+
+
+def _resolve_temperature_arg(explicit: float | None) -> float:
+    """Resolve the temperature from the explicit argument, env, or default."""
+    if explicit is not None:
+        return explicit
+    env_temp = os.environ.get("ASAGO_SCENARIO_GENERATOR_TEMPERATURE")
+    if env_temp is not None:
+        return float(env_temp)
+    return _DEFAULT_TEMPERATURE
+
+
+def _require_base_url(base_url: str | None) -> None:
+    """Fail fast when no endpoint is configured."""
+    if not base_url:
+        raise ValueError(
+            "No LLM endpoint configured."
+            " Set ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL or pass --base-url."
+        )
+
+
+def _openai_client(
+    base_url: str,
+    api_key: str,
+    extra_headers: dict[str, str] | None,
+    timeout: float | None,
+) -> OpenAI:
+    """Build the OpenAI SDK client with optional timeout."""
+    openai_kwargs: dict[str, Any] = dict(
+        base_url=base_url,
+        api_key=api_key,
+        default_headers=extra_headers or None,
+    )
+    if timeout is not None:
+        openai_kwargs["timeout"] = timeout
+    return OpenAI(**openai_kwargs)
+
+
+def _json_env_headers(env_name: str) -> dict[str, str]:
+    """Parse a JSON-encoded headers environment variable, defaulting to empty."""
+    env_raw = os.environ.get(env_name)
+    return json.loads(env_raw) if env_raw else {}
+
+
+def _inject_openrouter_defaults(
+    merged: dict[str, str],
+    base_url: str | None,
+    defaults: Mapping[str, str],
+) -> None:
+    """Fill missing keys with OpenRouter defaults when the URL is OpenRouter."""
+    if base_url and "openrouter.ai" in base_url:
+        for key, default in defaults.items():
+            merged.setdefault(key, default)
+
+
+def _effective_temperature(explicit: float | None, fallback: float) -> float:
+    """The effective temperature: explicit value, else the client default."""
+    return explicit if explicit is not None else fallback
+
+
+def _prompt_messages(system_prompt: str, user_prompt: str) -> list[dict[str, str]]:
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+
+def _completion_extra_kwargs(
+    effective_max: int | None,
+    effective_temp: float,
+    top_p: float | None,
+    top_k: int | None,
+) -> dict[str, Any]:
+    """Build the provider-facing kwargs for one completion request."""
+    extra_kwargs: dict[str, Any] = {"temperature": effective_temp}
+    if effective_max is not None:
+        extra_kwargs["max_completion_tokens"] = effective_max
+    if top_p is not None:
+        extra_kwargs["top_p"] = top_p
+    if top_k is not None:
+        extra_kwargs["extra_body"] = {"top_k": top_k}
+    return extra_kwargs
+
+
+def _request_completion(
+    client: OpenAI,
+    model: str,
+    messages: list[dict[str, Any]],
+    response_format: type[BaseModel] | None,
+    extra_kwargs: dict[str, Any],
+) -> tuple[Any, Any]:
+    """Run one provider request, returning ``(response, content)``."""
+    if response_format is not None:
+        response = client.beta.chat.completions.parse(
+            model=model,
+            messages=messages,
+            response_format=response_format,
+            **extra_kwargs,
+        )
+        content = response.choices[0].message.parsed
+    else:
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            **extra_kwargs,
+        )
+        content = response.choices[0].message.content
+    return response, content
+
+
+def _recover_length_failure(
+    exc: LengthFinishReasonError,
+    response_format: type[BaseModel] | None,
+) -> tuple[Any, Any, bool]:
+    """Normalize a structured SDK length failure into recovery or a typed error."""
+    completion = exc.completion
+    partial_content = _choice_content(completion)
+    recovered = _recover_complete_structured_partial(partial_content, response_format)
+    if recovered is not None:
+        return completion, recovered, True
+    raise CompletionLengthError.from_usage(
+        completion.usage,
+        response=completion,
+        partial_content=partial_content,
+    ) from exc
+
+
+def _raise_if_unstructured_length(
+    response: Any, response_format: type[BaseModel] | None
+) -> None:
+    """Raise a typed length error when an unstructured choice finished early."""
+    finish_reason = getattr(response.choices[0], "finish_reason", None)
+    if response_format is None and str(finish_reason) == "length":
+        raise CompletionLengthError.from_usage(
+            response.usage,
+            response=response,
+            partial_content=_choice_content(response),
+        )
+
+
+def _request_controls(
+    response_format: type[BaseModel] | None,
+    effective_max: int | None,
+    transport_token_cap: int | None,
+    effective_temp: float,
+    top_p: float | None,
+    top_k: int | None,
+    recovered_whitespace: bool,
+) -> dict[str, Any]:
+    """The request_controls telemetry dict for one completion result."""
+    return {
+        "response_schema": _response_schema_label(response_format),
+        "max_completion_tokens": effective_max,
+        "transport_token_cap": transport_token_cap,
+        "temperature": effective_temp,
+        "top_p": top_p,
+        "top_k": top_k,
+        "structured_whitespace_recovered": recovered_whitespace,
+    }
+
+
 class LLMClient:
     """Thin wrapper around the OpenAI SDK for structured and unstructured completions."""
 
-    DEFAULT_TEMPERATURE: float = 0.4
+    DEFAULT_TEMPERATURE: float = _DEFAULT_TEMPERATURE
 
     _OPENROUTER_DEFAULT_HEADERS: dict[str, str] = {
         "HTTP-Referer": "https://github.com/asago-ai/asago-scenario-generator",
@@ -257,28 +487,11 @@ class LLMClient:
         use_guided_decoding: bool = False,
         timeout: float | None = None,
     ) -> None:
-        self.base_url = (
-            base_url
-            or os.environ.get("ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL")
-            or None
-        )
-        self.api_key = api_key or os.environ.get(
-            "ASAGO_SCENARIO_GENERATOR_API_KEY", "unused"
-        )
-        self.model = model or os.environ.get(
-            "ASAGO_SCENARIO_GENERATOR_MODEL_NAME", "gemma-3n-e4b-it"
-        )
-        env_val = os.environ.get("ASAGO_SCENARIO_GENERATOR_MAX_COMPLETION_TOKENS")
-        self.max_completion_tokens = max_completion_tokens or (
-            int(env_val) if env_val else None
-        )
-        env_temp = os.environ.get("ASAGO_SCENARIO_GENERATOR_TEMPERATURE")
-        if temperature is not None:
-            self.temperature = temperature
-        elif env_temp is not None:
-            self.temperature = float(env_temp)
-        else:
-            self.temperature = self.DEFAULT_TEMPERATURE
+        self.base_url = _resolve_base_url_arg(base_url)
+        self.api_key = _resolve_api_key_arg(api_key)
+        self.model = _resolve_model_arg(model)
+        self.max_completion_tokens = _resolve_max_tokens_arg(max_completion_tokens)
+        self.temperature = _resolve_temperature_arg(temperature)
         self.top_p = top_p
         self.top_k = top_k
         self.use_guided_decoding = use_guided_decoding
@@ -287,36 +500,20 @@ class LLMClient:
         # --- extra headers resolution ---
         self.extra_headers = self._resolve_extra_headers(extra_headers)
 
-        if not self.base_url:
-            raise ValueError(
-                "No LLM endpoint configured."
-                " Set ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL or pass --base-url."
-            )
-        openai_kwargs: dict[str, Any] = dict(
-            base_url=self.base_url,
-            api_key=self.api_key,
-            default_headers=self.extra_headers or None,
+        _require_base_url(self.base_url)
+        self._client = _openai_client(
+            self.base_url, self.api_key, self.extra_headers, timeout
         )
-        if timeout is not None:
-            openai_kwargs["timeout"] = timeout
-        self._client = OpenAI(**openai_kwargs)
 
     def _resolve_extra_headers(
         self, explicit: dict[str, str] | None
     ) -> dict[str, str] | None:
         """Merge explicit headers, env-var headers, and OpenRouter defaults."""
-        # 1. Start with env-var headers (if any).
-        env_raw = os.environ.get("ASAGO_SCENARIO_GENERATOR_EXTRA_HEADERS")
-        env_headers: dict[str, str] = json.loads(env_raw) if env_raw else {}
-
-        # 2. Explicit constructor arg wins over env var.
+        env_headers = _json_env_headers("ASAGO_SCENARIO_GENERATOR_EXTRA_HEADERS")
         merged: dict[str, str] = {**env_headers, **(explicit or {})}
-
-        # 3. Auto-inject OpenRouter defaults for missing keys.
-        if self.base_url and "openrouter.ai" in self.base_url:
-            for key, default in self._OPENROUTER_DEFAULT_HEADERS.items():
-                merged.setdefault(key, default)
-
+        _inject_openrouter_defaults(
+            merged, self.base_url, self._OPENROUTER_DEFAULT_HEADERS
+        )
         return merged if merged else None
 
     def complete(
@@ -329,22 +526,14 @@ class LLMClient:
     ) -> LLMResult:
         transport_token_cap = getattr(self, "max_completion_tokens", None)
         effective_max = max_completion_tokens or transport_token_cap
-        effective_temp = temperature if temperature is not None else self.temperature
+        effective_temp = _effective_temperature(temperature, self.temperature)
         top_p = getattr(self, "top_p", None)
         top_k = getattr(self, "top_k", None)
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
-
-        extra_kwargs: dict[str, Any] = {"temperature": effective_temp}
-        if effective_max is not None:
-            extra_kwargs["max_completion_tokens"] = effective_max
-        if top_p is not None:
-            extra_kwargs["top_p"] = top_p
-        if top_k is not None:
-            extra_kwargs["extra_body"] = {"top_k": top_k}
+        messages = _prompt_messages(system_prompt, user_prompt)
+        extra_kwargs = _completion_extra_kwargs(
+            effective_max, effective_temp, top_p, top_k
+        )
 
         t0 = time.perf_counter_ns()
         try:
@@ -364,15 +553,15 @@ class LLMClient:
             duration_ms=duration_ms,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            request_controls={
-                "response_schema": (_response_schema_label(response_format)),
-                "max_completion_tokens": effective_max,
-                "transport_token_cap": transport_token_cap,
-                "temperature": effective_temp,
-                "top_p": top_p,
-                "top_k": top_k,
-                "structured_whitespace_recovered": recovered_whitespace,
-            },
+            request_controls=_request_controls(
+                response_format,
+                effective_max,
+                transport_token_cap,
+                effective_temp,
+                top_p,
+                top_k,
+                recovered_whitespace,
+            ),
         )
 
     def _complete(
@@ -389,44 +578,12 @@ class LLMClient:
         ``CompletionLengthError`` carrying usage evidence.
         """
         try:
-            if response_format is not None:
-                response = self._client.beta.chat.completions.parse(
-                    model=self.model,
-                    messages=messages,
-                    response_format=response_format,
-                    **extra_kwargs,
-                )
-                content = response.choices[0].message.parsed
-            else:
-                response = self._client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    **extra_kwargs,
-                )
-                content = response.choices[0].message.content
+            response, content = _request_completion(
+                self._client, self.model, messages, response_format, extra_kwargs
+            )
         except LengthFinishReasonError as exc:
-            completion = exc.completion
-            partial_content = _choice_content(completion)
-            recovered = _recover_complete_structured_partial(
-                partial_content, response_format
-            )
-            if recovered is not None:
-                return completion, recovered, True
-            raise CompletionLengthError.from_usage(
-                completion.usage,
-                response=completion,
-                partial_content=partial_content,
-            ) from exc
-
-        finish_reason = getattr(response.choices[0], "finish_reason", None)
-        if response_format is None and str(finish_reason) == "length":
-            # Unstructured length exhaustion: a completed response whose
-            # choice ended for length is still a length failure.
-            raise CompletionLengthError.from_usage(
-                response.usage,
-                response=response,
-                partial_content=_choice_content(response),
-            )
+            return _recover_length_failure(exc, response_format)
+        _raise_if_unstructured_length(response, response_format)
         return response, content, False
 
 

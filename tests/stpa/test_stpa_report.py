@@ -25,6 +25,7 @@ from asago_scenario_generator.stpa.report.generator import (
     _resolve_output_path,
 )
 from asago_scenario_generator.stpa.report.template import (
+    _advance_docstring_state,
     _apply_gherkin_keyword_highlight,
     _attr_list,
     _average_rate_fields,
@@ -53,17 +54,29 @@ from asago_scenario_generator.stpa.report.template import (
     _build_sp2_enrichment_section,
     _build_sp2_ica_section,
     _build_sticky_nav,
+    _build_tab_bar,
+    _build_tab_panels,
     _build_table_rows,
     _build_tree_branch_node,
+    _docstring_opening,
+    _docstring_row_html,
+    _envelope_gherkin_text,
+    _envelope_has_gherkin,
     _esc,
+    _feature_text_section,
     _gauge_color,
+    _gherkin_decorative_row,
     _gherkin_keyword_class,
+    _gherkin_keyword_row,
+    _gherkin_row_html,
     _has_tree_content,
     _highlight_gherkin,
     _highlight_yaml,
     _highlight_yaml_value,
     _is_quoted_string,
     _is_valid_hashes,
+    _kc_item_html,
+    _kc_item_rows,
     _loss_analysis_losses,
     _loss_to_dict,
     _parse_tree_dict,
@@ -72,6 +85,12 @@ from asago_scenario_generator.stpa.report.template import (
     _resolve_model_name,
     _safe_float,
     _safe_floats,
+    _scenario_tab_contents,
+    _tab_active,
+    _tree_branch_rows,
+    _tree_leaf_markup,
+    _tree_leaf_rows,
+    _tree_root_markup,
     _yaml_value_class,
     build_html,
     build_llm_call_inspector,
@@ -639,17 +658,17 @@ class TestBuildRawYamlSection:
 
 class TestBuildTableRows:
     def test_single_row(self):
-        result = _build_table_rows([("a", "b")], 2)
+        result = _build_table_rows([("a", "b")])
         assert "<td>a</td>" in result
         assert "<td>b</td>" in result
 
     def test_multiple_rows(self):
-        result = _build_table_rows([("1", "2"), ("3", "4")], 2)
+        result = _build_table_rows([("1", "2"), ("3", "4")])
         assert "<td>1</td>" in result
         assert "<td>4</td>" in result
 
     def test_empty_list(self):
-        assert _build_table_rows([], 2) == ""
+        assert _build_table_rows([]) == ""
 
 
 class TestBuildDataTable:
@@ -1837,3 +1856,189 @@ class TestGenerateReport:
         assert result.exists()
         html = result.read_text(encoding="utf-8")
         assert "<html" in html
+
+
+class TestGherkinLineHelpers:
+    """Decomposed Gherkin highlighting helpers."""
+
+    def test_gherkin_keyword_row_step(self):
+        """_gherkin_keyword_row extracts step keywords."""
+        assert _gherkin_keyword_row("Given the system") == ("Given", "the system", "step-given")
+        assert _gherkin_keyword_row("* a bullet") == ("*", "a bullet", "step-star")
+
+    def test_gherkin_keyword_row_header(self):
+        """_gherkin_keyword_row normalizes header keywords."""
+        assert _gherkin_keyword_row("Scenario Outline: demo") == (
+            "Scenario Outline",
+            "demo",
+            "",
+        )
+
+    def test_gherkin_keyword_row_plain(self):
+        """_gherkin_keyword_row returns None for plain lines."""
+        assert _gherkin_keyword_row("just prose") is None
+
+    def test_gherkin_decorative_row_tag_and_comment(self):
+        """_gherkin_decorative_row renders tags and comments."""
+        assert 'gherkin-tag-line' in _gherkin_decorative_row("@tag")
+        assert 'gherkin-comment-line' in _gherkin_decorative_row("# note")
+        assert _gherkin_decorative_row("plain") is None
+
+    def test_gherkin_row_html_skips_empty(self):
+        """_gherkin_row_html returns None for empty lines."""
+        assert _gherkin_row_html("") is None
+
+    def test_gherkin_row_html_plain_and_step(self):
+        """_gherkin_row_html renders plain, step, and header rows."""
+        assert "feature-step step-when" in _gherkin_row_html("When x happens")
+        assert "font-size:13px" in _gherkin_row_html("unstructured text")
+        assert 'Scenario:</span>' in _gherkin_row_html("Scenario: demo")
+
+    def test_docstring_opening(self):
+        """_docstring_opening collects the opening remainder."""
+        assert _docstring_opening('"""') == []
+        assert _docstring_opening('"""line one') == ["line one"]
+        assert _docstring_opening("not a docstring") is None
+
+    def test_docstring_row_html_closes(self):
+        """_docstring_row_html renders the closing docstring row."""
+        html = _docstring_row_html('"""', ["line one", "line two"])
+        assert "line one\nline two" in html
+        assert 'step-docstring' in html
+
+    def test_advance_docstring_state_lifecycle(self):
+        """_advance_docstring_state tracks open and close transitions."""
+        result: list[str] = []
+        state, lines = _advance_docstring_state('"""', False, [], result)
+        assert state is True
+        assert lines == []
+        state, lines = _advance_docstring_state("content", True, lines, result)
+        assert state is True
+        assert lines == ["content"]
+        state, lines = _advance_docstring_state('"""', True, lines, result)
+        assert state is False
+        assert lines == []
+        assert len(result) == 1
+        assert "content" in result[0]
+
+    def test_highlight_gherkin_docstring_roundtrip(self):
+        """_highlight_gherkin renders a docstring block end to end."""
+        html = _highlight_gherkin('Scenario: s\n"""\nbody text\n"""')
+        assert 'step-docstring' in html
+        assert "body text" in html
+
+
+class TestTabHelpers:
+    """Scenario tab bar and panel helpers."""
+
+    def test_tab_active_only_first(self):
+        """_tab_active marks only the first tab."""
+        assert _tab_active(0) == " active"
+        assert _tab_active(1) == ""
+
+    def test_build_tab_bar_and_panels(self):
+        """_build_tab_bar and _build_tab_panels render matching rows."""
+        contents = [("narrative", "n"), ("gherkin", "g")]
+        bar = _build_tab_bar(contents, {"narrative": "Narrative", "gherkin": "Gherkin"})
+        panels = _build_tab_panels(contents)
+        assert bar[0].startswith('          <div class="scenario-tab active"')
+        assert "Narrative" in bar[0]
+        assert panels[0].startswith('        <div class="scenario-tab-content active"')
+        assert 'data-tab-content="gherkin"' in panels[1]
+        assert "g" in panels[1]
+
+    def test_envelope_gherkin_text_prefers_spec(self):
+        """_envelope_gherkin_text uses the structured spec's feature text."""
+        spec = SimpleNamespace(to_feature_text=lambda: "Feature: from spec", feature="x")
+        envelope = SimpleNamespace(gherkin_spec=spec, gherkin_raw="raw")
+        assert _envelope_gherkin_text(envelope) == "Feature: from spec"
+
+    def test_envelope_gherkin_text_falls_back_to_raw(self):
+        """_envelope_gherkin_text falls back to the raw response."""
+        envelope = SimpleNamespace(
+            gherkin_spec=SimpleNamespace(feature="", to_feature_text=lambda: ""),
+            gherkin_raw="raw text",
+        )
+        assert _envelope_gherkin_text(envelope) == "raw text"
+        envelope2 = SimpleNamespace(gherkin_spec=None, gherkin_raw=None)
+        assert _envelope_gherkin_text(envelope2) == ""
+
+    def test_scenario_tab_contents_always_has_attack_tree(self):
+        """_scenario_tab_contents collects narrative, tree, and gherkin tabs."""
+        envelope = SimpleNamespace(
+            scenario_spec=None,
+            narrative="story",
+            attack_tree={"root": "r", "branches": [], "leaves": ["l"]},
+            gherkin_spec=None,
+            gherkin_raw="Given x",
+        )
+        contents = _scenario_tab_contents(envelope)
+        ids = [tab_id for tab_id, _ in contents]
+        assert ids == ["narrative", "attack_tree", "gherkin"]
+
+    def test_envelope_has_gherkin(self):
+        """_envelope_has_gherkin detects raw or structured Gherkin."""
+        assert _envelope_has_gherkin(SimpleNamespace(gherkin_raw="x", gherkin_spec=None)) is True
+        assert _envelope_has_gherkin(SimpleNamespace(gherkin_raw=None, gherkin_spec=object())) is True
+        assert _envelope_has_gherkin(SimpleNamespace(gherkin_raw=None, gherkin_spec=None)) is False
+        assert _envelope_has_gherkin(None) is False
+
+    def test_feature_text_section(self):
+        """_feature_text_section renders the standalone Gherkin section."""
+        parts = _feature_text_section("Given x")
+        assert any("Gherkin Spec" in p for p in parts)
+        assert any('gherkin-block' in p for p in parts)
+
+
+class TestCapabilityKcHelpers:
+    """Capability key-code row helpers."""
+
+    def test_kc_item_html_with_label(self):
+        """_kc_item_html includes the display label when distinct."""
+        html = _kc_item_html("KC1", "Key Code One")
+        assert "KC1" in html
+        assert "Key Code One" in html
+
+    def test_kc_item_html_without_label(self):
+        """_kc_item_html omits the label when absent or identical."""
+        assert "dup" not in _kc_item_html("KC1", "KC1")
+        assert "label" not in _kc_item_html("KC1", "")
+
+    def test_kc_item_rows(self):
+        """_kc_item_rows builds one row per key code."""
+        rows = _kc_item_rows(["KC1", "KC2"], {"KC1": "One"})
+        assert len(rows) == 2
+        assert "One" in rows[0]
+        assert "KC2" in rows[1]
+
+
+class TestTreeHelpers:
+    """Attack tree visual decomposition helpers."""
+
+    def test_tree_root_markup(self):
+        """_tree_root_markup returns open/close details rows."""
+        opening, closing = _tree_root_markup("root goal")
+        assert "gate-or" in opening
+        assert "root goal" in opening
+        assert closing == "  </details>"
+
+    def test_tree_leaf_markup(self):
+        """_tree_leaf_markup renders one leaf row."""
+        html = _tree_leaf_markup("leaf")
+        assert "gate-leaf" in html
+        assert "leaf" in html
+
+    def test_tree_branch_rows(self):
+        """_tree_branch_rows renders every branch node."""
+        rows = _tree_branch_rows(
+            [{"category": "path_side", "label": "b1", "children": []}]
+        )
+        assert any("b1" in row for row in rows)
+        assert "cat-badge path_side" in "".join(rows)
+
+    def test_tree_leaf_rows(self):
+        """_tree_leaf_rows renders every flat leaf."""
+        rows = _tree_leaf_rows(["l1", "l2"])
+        assert len(rows) == 2
+        assert "l1" in rows[0]
+        assert "l2" in rows[1]

@@ -36,16 +36,26 @@ from asago_scenario_generator.pipeline.projection_snapshot import (
 )
 
 
-def _check_projection_drift(
-    block: ProjectionEnvelopeBlock,
-    *,
+def _authoritative_inputs_available(
     authoritative_pattern: dict[str, Any] | None,
     taxonomy_resolver: TaxonomyResolver | None,
     capability_snapshot: CapabilityFactSnapshot | None,
     expected_catalog_pin: str | None,
-) -> list[ProjectionTraceabilityViolation]:
-    violations: list[ProjectionTraceabilityViolation] = []
+) -> bool:
+    """Whether all authoritative source inputs were supplied for qualification."""
+    return (
+        authoritative_pattern is not None
+        and taxonomy_resolver is not None
+        and capability_snapshot is not None
+        and expected_catalog_pin is not None
+    )
 
+
+def _verify_projection_digest(
+    block: ProjectionEnvelopeBlock,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Re-validate the snapshot digest by re-serializing (nested mutation)."""
     # The ProjectionSnapshot is self-validating on construction.  But we
     # must detect nested mutation of the *already-persisted* block.  We
     # re-validate the snapshot's digest by re-serializing and checking
@@ -78,9 +88,14 @@ def _check_projection_drift(
             )
         )
 
-    # Recompute execution requirements digest.  Handle both model instances
-    # and plain dicts (model_construct bypass may produce dicts for
-    # discriminated-union fields).
+
+def _verify_requirements_digest(
+    block: ProjectionEnvelopeBlock,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Recompute the execution-requirements digest and compare to the stored one."""
+    # Handle both model instances and plain dicts (model_construct bypass may
+    # produce dicts for discriminated-union fields).
     expected_req_digest = compute_execution_requirements_digest(
         block.execution_requirements
     )
@@ -96,15 +111,12 @@ def _check_projection_drift(
             )
         )
 
-    # --- Standalone recomputation from embedded evidence (422o.4 blocker #2-#3) ---
-    # Derive controllability from the embedded CapabilityFactSnapshot, NOT
-    # from the persisted ingress_controllability field (which is self-signed).
-    # This prevents a caller from flipping controllability and re-signing
-    # arbitrary requirements.
-    chain = block.projection.source_chain
-    pattern_id = chain.pattern_id
 
-    # Step 1: Verify snapshot integrity (detect nested mutation of evidence).
+def _verify_snapshot_integrity(
+    block: ProjectionEnvelopeBlock,
+    violations: list[ProjectionTraceabilityViolation],
+) -> bool:
+    """Verify embedded capability snapshot integrity; False if corrupted."""
     snapshot = block.capability_snapshot
     try:
         snapshot.assert_integrity()
@@ -116,9 +128,16 @@ def _check_projection_drift(
                 detail=(f"embedded capability snapshot integrity check failed: {exc}"),
             )
         )
-        return violations  # Cannot proceed with corrupted evidence.
+        return False  # Cannot proceed with corrupted evidence.
+    return True
 
-    # Step 2: Verify snapshot digest matches the projection pin.
+
+def _verify_snapshot_digest_match(
+    block: ProjectionEnvelopeBlock,
+    violations: list[ProjectionTraceabilityViolation],
+) -> bool:
+    """Verify the snapshot digest matches the projection pin; False if not."""
+    snapshot = block.capability_snapshot
     if snapshot.snapshot_digest != block.projection.capability_fact_snapshot_digest:
         violations.append(
             ProjectionTraceabilityViolation(
@@ -131,9 +150,16 @@ def _check_projection_drift(
                 ),
             )
         )
-        return violations
+        return False
+    return True
 
-    # Step 3: Derive controllability from evidence.
+
+def _derive_controllability_from_evidence(
+    block: ProjectionEnvelopeBlock,
+    violations: list[ProjectionTraceabilityViolation],
+) -> str | None:
+    """Derive ingress controllability from the embedded evidence, or None."""
+    snapshot = block.capability_snapshot
     try:
         ep = snapshot.profile.resolve_entry_point(
             block.canonical_ingress.entry_point_id
@@ -149,8 +175,8 @@ def _check_projection_drift(
                     ),
                 )
             )
-            return violations
-        derived_controllability = ep.effective_controllability
+            return None
+        return ep.effective_controllability
     except (ValueError, TypeError, AttributeError) as exc:
         violations.append(
             ProjectionTraceabilityViolation(
@@ -159,9 +185,15 @@ def _check_projection_drift(
                 detail=f"failed to derive controllability from evidence: {exc}",
             )
         )
-        return violations
+        return None
 
-    # Step 4: Verify persisted controllability matches derived.
+
+def _check_controllability_match(
+    derived_controllability: str,
+    block: ProjectionEnvelopeBlock,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Flag persisted controllability that disagrees with the derived value."""
     if derived_controllability != block.ingress_controllability:
         violations.append(
             ProjectionTraceabilityViolation(
@@ -176,8 +208,17 @@ def _check_projection_drift(
             )
         )
 
-    # Step 5: Recompute execution requirements from embedded projection +
-    # derived controllability (NOT persisted controllability).
+
+def _recompute_requirements_from_evidence(
+    block: ProjectionEnvelopeBlock,
+    pattern_id: str,
+    chain: Any,
+    derived_controllability: str,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Recompute execution requirements from embedded projection + derived control."""
+    # Recompute from embedded projection + derived controllability
+    # (NOT persisted controllability).
     recomputed_reqs, req_issue = _derive_execution_requirements_core(
         pattern_id, chain, block.projection, derived_controllability
     )
@@ -206,7 +247,14 @@ def _check_projection_drift(
             )
         )
 
-    # Step 6: Verify derivation context digest using derived controllability.
+
+def _verify_derivation_context_digest(
+    block: ProjectionEnvelopeBlock,
+    pattern_id: str,
+    derived_controllability: str,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Verify the derivation context digest with evidence-derived controllability."""
     expected_ctx_digest = compute_derivation_context_digest(
         block.projection.projection_digest,
         pattern_id,
@@ -225,7 +273,13 @@ def _check_projection_drift(
             )
         )
 
-    # Recompute projected_mappings from embedded source chain + selected IDs.
+
+def _verify_projected_mappings(
+    block: ProjectionEnvelopeBlock,
+    chain: Any,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Recompute projected_mappings from the embedded source chain + selected IDs."""
     expected_mappings = _projected_mappings(chain, block.projection.selected_step_ids)
     if expected_mappings != block.projected_mappings:
         violations.append(
@@ -239,13 +293,65 @@ def _check_projection_drift(
             )
         )
 
+
+def _check_projection_drift(
+    block: ProjectionEnvelopeBlock,
+    *,
+    authoritative_pattern: dict[str, Any] | None,
+    taxonomy_resolver: TaxonomyResolver | None,
+    capability_snapshot: CapabilityFactSnapshot | None,
+    expected_catalog_pin: str | None,
+) -> list[ProjectionTraceabilityViolation]:
+    violations: list[ProjectionTraceabilityViolation] = []
+
+    _verify_projection_digest(block, violations)
+    _verify_requirements_digest(block, violations)
+
+    # --- Standalone recomputation from embedded evidence (422o.4 blocker #2-#3) ---
+    # Derive controllability from the embedded CapabilityFactSnapshot, NOT
+    # from the persisted ingress_controllability field (which is self-signed).
+    # This prevents a caller from flipping controllability and re-signing
+    # arbitrary requirements.
+    chain = block.projection.source_chain
+    pattern_id = chain.pattern_id
+
+    # Step 1: Verify snapshot integrity (detect nested mutation of evidence).
+    if not _verify_snapshot_integrity(block, violations):
+        return violations
+
+    # Step 2: Verify snapshot digest matches the projection pin.
+    if not _verify_snapshot_digest_match(block, violations):
+        return violations
+
+    # Step 3: Derive controllability from evidence.
+    derived_controllability = _derive_controllability_from_evidence(block, violations)
+    if derived_controllability is None:
+        return violations
+
+    # Step 4: Verify persisted controllability matches derived.
+    _check_controllability_match(derived_controllability, block, violations)
+
+    # Step 5: Recompute execution requirements from embedded projection +
+    # derived controllability (NOT persisted controllability).
+    _recompute_requirements_from_evidence(
+        block, pattern_id, chain, derived_controllability, violations
+    )
+
+    # Step 6: Verify derivation context digest using derived controllability.
+    _verify_derivation_context_digest(
+        block, pattern_id, derived_controllability, violations
+    )
+
+    # Recompute projected_mappings from embedded source chain + selected IDs.
+    _verify_projected_mappings(block, chain, violations)
+
     # When authoritative source inputs are available, recompute and compare
     # as additional qualification (not the only semantic check).
-    if (
-        authoritative_pattern is not None
-        and taxonomy_resolver is not None
-        and capability_snapshot is not None
-        and expected_catalog_pin is not None
+    if _authoritative_inputs_available(
+        authoritative_pattern,
+        taxonomy_resolver,
+        capability_snapshot,
+        expected_catalog_pin,
     ):
         violations.extend(
             _recompute_and_compare(
@@ -260,15 +366,12 @@ def _check_projection_drift(
     return violations
 
 
-def _recompute_and_compare(
-    block: ProjectionEnvelopeBlock,
+def _validate_authoritative_pattern(
     authoritative_pattern: dict[str, Any],
     taxonomy_resolver: TaxonomyResolver,
-    capability_snapshot: CapabilityFactSnapshot,
-    expected_catalog_pin: str,
-) -> list[ProjectionTraceabilityViolation]:
-    violations: list[ProjectionTraceabilityViolation] = []
-
+    violations: list[ProjectionTraceabilityViolation],
+) -> AttackPattern | None:
+    """Validate and normalize the authoritative pattern, or None on failure."""
     try:
         pattern = validate_attack_pattern(authoritative_pattern, taxonomy_resolver)
         pattern = AttackPattern.model_validate(
@@ -282,12 +385,16 @@ def _recompute_and_compare(
                 detail=f"authoritative pattern qualification failed: {exc}",
             )
         )
-        return violations
+        return None
+    return pattern
 
-    chain = pattern.canonical_chain
-    projection = block.projection
 
-    # Compare source chain.
+def _compare_source_chain(
+    projection: Any,
+    chain: Any,
+    violations: list[ProjectionTraceabilityViolation],
+) -> bool:
+    """Compare the persisted source chain to the authoritative chain; True if equal."""
     if projection.source_chain != chain:
         violations.append(
             ProjectionTraceabilityViolation(
@@ -296,9 +403,18 @@ def _recompute_and_compare(
                 detail="persisted source chain does not match authoritative pattern",
             )
         )
-        return violations
+        return False
+    return True
 
-    # Compare pins.
+
+def _compare_projection_pins(
+    projection: Any,
+    pattern: AttackPattern,
+    expected_catalog_pin: str,
+    capability_snapshot: CapabilityFactSnapshot,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Compare the pattern pin, catalog pin, and snapshot digest pins."""
     pattern_pin = _pattern_pin(pattern)
     if projection.pattern_pin != pattern_pin:
         violations.append(
@@ -328,7 +444,15 @@ def _recompute_and_compare(
             )
         )
 
-    # Recompute execution requirements from the projection.
+
+def _compare_recomputed_requirements(
+    projection: Any,
+    pattern: AttackPattern,
+    block: ProjectionEnvelopeBlock,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Recompute execution requirements from the projection and compare."""
+    chain = pattern.canonical_chain
     reqs, issue = _derive_execution_requirements_core(
         pattern.id, chain, projection, block.ingress_controllability
     )
@@ -350,7 +474,14 @@ def _recompute_and_compare(
             )
         )
 
-    # Recompute projected mappings.
+
+def _compare_recomputed_mappings(
+    projection: Any,
+    chain: Any,
+    block: ProjectionEnvelopeBlock,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Recompute projected mappings and compare to the persisted ones."""
     expected_mappings = _projected_mappings(chain, projection.selected_step_ids)
     if expected_mappings != block.projected_mappings:
         violations.append(
@@ -360,5 +491,39 @@ def _recompute_and_compare(
                 detail="recomputed projected mappings do not match persisted",
             )
         )
+
+
+def _recompute_and_compare(
+    block: ProjectionEnvelopeBlock,
+    authoritative_pattern: dict[str, Any],
+    taxonomy_resolver: TaxonomyResolver,
+    capability_snapshot: CapabilityFactSnapshot,
+    expected_catalog_pin: str,
+) -> list[ProjectionTraceabilityViolation]:
+    violations: list[ProjectionTraceabilityViolation] = []
+
+    pattern = _validate_authoritative_pattern(
+        authoritative_pattern, taxonomy_resolver, violations
+    )
+    if pattern is None:
+        return violations
+
+    chain = pattern.canonical_chain
+    projection = block.projection
+
+    # Compare source chain.
+    if not _compare_source_chain(projection, chain, violations):
+        return violations
+
+    # Compare pins.
+    _compare_projection_pins(
+        projection, pattern, expected_catalog_pin, capability_snapshot, violations
+    )
+
+    # Recompute execution requirements from the projection.
+    _compare_recomputed_requirements(projection, pattern, block, violations)
+
+    # Recompute projected mappings.
+    _compare_recomputed_mappings(projection, chain, block, violations)
 
     return violations

@@ -92,6 +92,8 @@ class TestCandidateAdaptersDependInward:
             "candidate_filter.py",
             "candidate_rules.py",
             "coverage_planning.py",
+            "coverage_planning_flow.py",
+            "coverage_planning_universe.py",
             "io.py",
         ),
     )
