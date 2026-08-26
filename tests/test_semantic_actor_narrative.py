@@ -24,7 +24,8 @@ from asago_scenario_generator.pipeline.generate.actor import (
     _compile_projected_actor_draft,
     _derive_canonical_actor_access,
 )
-from asago_scenario_generator.pipeline.generate.narrative import (
+from asago_scenario_generator.pipeline.generate.narrative import _call_narrative
+from asago_scenario_generator.pipeline.generate.narrative_semantics import (
     NarrativeDraftContext,
     NarrativeDraftV2,
     NarrativeDraftV3,
@@ -33,7 +34,6 @@ from asago_scenario_generator.pipeline.generate.narrative import (
     compile_narrative_draft,
     create_narrative_draft_model,
     create_narrative_draft_v3_model,
-    _call_narrative,
 )
 
 
