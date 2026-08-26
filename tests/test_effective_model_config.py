@@ -135,3 +135,27 @@ def test_offline_provenance_accepts_an_absent_base_url() -> None:
     config = ModelConfig(model="fixture", base_url=None, temperature=0.4)
 
     assert config.base_url is None
+
+
+def test_explicit_environment_mapping_is_used_instead_of_process_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_MODEL_NAME", "process-model")
+
+    effective = resolve_effective_model_config(
+        environ={"ASAGO_SCENARIO_GENERATOR_MODEL_NAME": "call-model"}
+    )
+
+    assert effective.model == "call-model"
+    assert effective.sources["model"] is ConfigSource.environment
+
+
+def test_missing_environment_mapping_reads_process_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_MODEL_NAME", "process-model")
+
+    effective = resolve_effective_model_config()
+
+    assert effective.model == "process-model"
+    assert effective.sources["model"] is ConfigSource.environment
