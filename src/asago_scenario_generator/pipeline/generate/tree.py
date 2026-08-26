@@ -123,6 +123,30 @@ def _warn_dominant_threat_id_crossref(
 # ---------------------------------------------------------------------------
 
 
+def _match_zone_for_technique(
+    narrative: NarrativeLayer,
+    tid: str,
+    tname: str,
+    fallback_zone: str,
+) -> str:
+    """Zone of the first narrative step mentioning the technique, else fallback."""
+    tid_lower = tid.lower()
+    tname_lower = tname.lower()
+    for step in narrative.steps:
+        haystack = f"{step.action} {step.effect}".lower()
+        if tid_lower in haystack or tname_lower in haystack:
+            return step.zone
+    return fallback_zone
+
+
+def _constrain_zone_to_technique(zone: str, tid: str) -> str:
+    """Pick the first valid zone when the narrative-derived zone is invalid."""
+    valid_zones = TECHNIQUE_ZONE_CONSTRAINTS.get(tid)
+    if valid_zones is not None and zone not in valid_zones:
+        return min(valid_zones)
+    return zone
+
+
 def _build_tree_skeleton(
     narrative: NarrativeLayer,
     pinned_technique_ids: list[str],
@@ -151,24 +175,8 @@ def _build_tree_skeleton(
     for idx, (tid, tname) in enumerate(
         zip(pinned_technique_ids, pinned_technique_names), start=1
     ):
-        # Match technique against narrative steps by ID or name
-        matched_zone: str | None = None
-        tid_lower = tid.lower()
-        tname_lower = tname.lower()
-        for step in narrative.steps:
-            haystack = f"{step.action} {step.effect}".lower()
-            if tid_lower in haystack or tname_lower in haystack:
-                matched_zone = step.zone
-                break
-
-        zone = matched_zone if matched_zone is not None else fallback_zone
-
-        # Validate zone against technique-zone semantic constraints.
-        # If the narrative-derived zone is invalid for this technique,
-        # pick the first valid zone from the constraint set.
-        valid_zones = TECHNIQUE_ZONE_CONSTRAINTS.get(tid)
-        if valid_zones is not None and zone not in valid_zones:
-            zone = min(valid_zones)
+        matched_zone = _match_zone_for_technique(narrative, tid, tname, fallback_zone)
+        zone = _constrain_zone_to_technique(matched_zone, tid)
 
         leaves.append(
             {
@@ -240,6 +248,195 @@ def _validate_mandatory_leaves(
 # ---------------------------------------------------------------------------
 
 
+def _technique_constraint_text(
+    tech_ids_for_tree: list[str],
+    pinned_technique_ids: list[str] | None,
+) -> str:
+    """Prompt constraint text for the ATLAS technique ID policy."""
+    if not tech_ids_for_tree:
+        return (
+            "\n## ATLAS Technique Constraint\n"
+            "No ATLAS technique IDs are available for this seed. "
+            "Do NOT add technique_id to any node.\n"
+        )
+    allowed_ids = ", ".join(tech_ids_for_tree)
+    if pinned_technique_ids:
+        return (
+            "\n## ATLAS Technique Constraint\n"
+            f"You MUST use this ATLAS technique: {allowed_ids}\n\n"
+            "Only assign a technique_id to a node if the technique's "
+            "description semantically matches the attack action described "
+            "in the node's label.\n"
+            "Use ONLY this technique ID on leaf nodes. "
+            "Do NOT invent or hallucinate new technique IDs. "
+            "If the ID does not fit a particular node, omit technique_id "
+            "from that node rather than inventing one.\n"
+        )
+    return (
+        "\n## ATLAS Technique Constraint\n"
+        f"Allowed technique_id values: {allowed_ids}\n\n"
+        "Only assign a technique_id to a node if the technique's "
+        "description semantically matches the attack action described "
+        "in the node's label. For example, 'AI Agent Tool Invocation' "
+        "should only be used for nodes that involve invoking or "
+        "manipulating tools, not for prompt injection or hallucination "
+        "steps.\n"
+        "Use ONLY these technique IDs on leaf nodes. "
+        "Do NOT invent or hallucinate new technique IDs. "
+        "If none of these IDs fit a particular node, omit technique_id "
+        "from that node rather than inventing one.\n"
+    )
+
+
+def _architecture_section_text(profile: CapabilityProfile | None) -> str:
+    """Optional target-system architecture section for Call 2."""
+    if profile is None:
+        return ""
+    entry_point_names = [ep.name for ep in profile.entry_points]
+    return (
+        "\n## Target System Architecture\n"
+        "Every node's zone must be drawn from these active zones.\n"
+        f"- Active zones: {profile.zones_active}\n"
+        f"- Entry points: {entry_point_names}\n"
+    )
+
+
+def _actor_section_text(actor_profile: ActorProfile | None) -> str:
+    """Optional actor profile section for Call 2."""
+    if actor_profile is None:
+        return ""
+    return (
+        "\n## Actor Profile\n"
+        "The tree's depth and complexity must be commensurate with "
+        "the actor's capability level.\n"
+        f"- Actor type: {actor_profile.actor_type}\n"
+        f"- Capability level: {actor_profile.capability_level}\n"
+    )
+
+
+def _access_provenance_block_text(
+    actor_profile: ActorProfile | None,
+    profile: CapabilityProfile | None,
+) -> str:
+    """Structured access provenance block (cmps.6) using names (Phase 3)."""
+    if actor_profile is None or actor_profile.access is None:
+        return ""
+    if profile is None:
+        return ""
+    from asago_scenario_generator.pipeline.generate.names import (
+        access_provenance_block_with_names,
+    )
+
+    return access_provenance_block_with_names(actor_profile.access, profile)
+
+
+def _skeleton_and_section(
+    narrative: NarrativeLayer,
+    pinned_technique_ids: list[str] | None,
+    pinned_technique_names: list[str] | None,
+) -> tuple[list[dict[str, str]], str]:
+    """Skeleton leaf specs and their YAML prompt section."""
+    skeleton: list[dict[str, str]] = []
+    if pinned_technique_ids and pinned_technique_names:
+        skeleton = _build_tree_skeleton(
+            narrative, pinned_technique_ids, pinned_technique_names
+        )
+    return skeleton, _format_skeleton_yaml(skeleton)
+
+
+def _ontology_context_for(
+    profile: CapabilityProfile | None,
+    narrative: NarrativeLayer,
+    tech_ids_for_tree: list[str],
+) -> dict[str, Any]:
+    """Focused ontology context block for this seed."""
+    # Use narrative.entry_point for the entry point (it was pinned upstream)
+    _tree_ep_direction = (
+        _lookup_entry_point_direction(profile, narrative.entry_point)
+        if profile
+        else None
+    )
+    _tree_ep_controllability = (
+        _lookup_entry_point_controllability(profile, narrative.entry_point)
+        if profile
+        else None
+    )
+    return _build_ontology_context(
+        entry_point_name=narrative.entry_point or "",
+        entry_point_direction=_tree_ep_direction,
+        zones=profile.zones_active if profile else [],
+        technique_ids=list(tech_ids_for_tree) if tech_ids_for_tree else [],
+        entry_point_controllability=_tree_ep_controllability,
+    )
+
+
+def _ensure_accessible_pinned_entry(
+    profile: CapabilityProfile | None,
+    entry_points: list[Any],
+    pinned_entry_point_id: str,
+) -> None:
+    """Reject pinned entry points that are not attacker-accessible (cmps.9)."""
+    if profile is None or len(entry_points) != 1:
+        return
+    active_zones = set(profile.zones_active) if profile.zones_active else set()
+    if not is_attacker_accessible_ingress(entry_points[0], active_zones):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            GenerationError,
+        )
+
+        raise GenerationError(
+            f"Pinned entry point '{pinned_entry_point_id}' "
+            f"('{entry_points[0].name}') is not an attacker-accessible "
+            f"ingress route (output-only, system-controlled, or "
+            f"inactive ingress zone)."
+        )
+
+
+def _entry_points_for_template(
+    profile: CapabilityProfile | None,
+    pinned_entry_point_id: str | None,
+) -> list[Any]:
+    """Entry points for the template, filtered to the pinned one."""
+    entry_points = (profile.entry_points if profile else None) or []
+    if pinned_entry_point_id is None:
+        return entry_points
+    filtered = [
+        entry_point
+        for entry_point in entry_points
+        if entry_point.entry_point_id == pinned_entry_point_id
+    ]
+    # Defense-in-depth: reject inaccessible pinned entry points before
+    # exposing them to the LLM (cmps.9 third review correction 2).
+    _ensure_accessible_pinned_entry(profile, filtered, pinned_entry_point_id)
+    return filtered
+
+
+def _pinned_entry_point_name_value(
+    pinned_entry_point_id: str | None,
+    profile: CapabilityProfile | None,
+) -> str | None:
+    """Convert the pinned entry point ID to a name for the template (Phase 3)."""
+    from asago_scenario_generator.pipeline.generate.names import (
+        pinned_entry_point_name_from_id,
+    )
+
+    return pinned_entry_point_name_from_id(pinned_entry_point_id, profile)
+
+
+def _humanized_projection_value(
+    projection_context: dict[str, Any] | None,
+    profile: CapabilityProfile | None,
+) -> dict[str, Any] | None:
+    """Humanize the projection context for the template (Phase 3)."""
+    if projection_context is not None and profile is not None:
+        from asago_scenario_generator.pipeline.generate.names import (
+            humanize_projection_context,
+        )
+
+        return humanize_projection_context(projection_context, profile)
+    return projection_context
+
+
 def build_call2_context(
     seed: ScenarioSeed,
     narrative: NarrativeLayer,
@@ -262,156 +459,39 @@ def build_call2_context(
         includes ``skeleton`` (the raw leaf-node spec list) for use in
         post-generation validation.
     """
-    # Build shared technique context + Call 2-specific constraint rules
     # Pin to specific techniques if set
     tech_ids_for_tree = (
         pinned_technique_ids if pinned_technique_ids else seed.atlas_technique_ids
     )
     technique_context = _build_technique_context_block(tech_ids_for_tree)
-    if tech_ids_for_tree:
-        allowed_ids = ", ".join(tech_ids_for_tree)
-        if pinned_technique_ids:
-            technique_constraint = (
-                "\n## ATLAS Technique Constraint\n"
-                f"You MUST use this ATLAS technique: {allowed_ids}\n\n"
-                "Only assign a technique_id to a node if the technique's "
-                "description semantically matches the attack action described "
-                "in the node's label.\n"
-                "Use ONLY this technique ID on leaf nodes. "
-                "Do NOT invent or hallucinate new technique IDs. "
-                "If the ID does not fit a particular node, omit technique_id "
-                "from that node rather than inventing one.\n"
-            )
-        else:
-            technique_constraint = (
-                "\n## ATLAS Technique Constraint\n"
-                f"Allowed technique_id values: {allowed_ids}\n\n"
-                "Only assign a technique_id to a node if the technique's "
-                "description semantically matches the attack action described "
-                "in the node's label. For example, 'AI Agent Tool Invocation' "
-                "should only be used for nodes that involve invoking or "
-                "manipulating tools, not for prompt injection or hallucination "
-                "steps.\n"
-                "Use ONLY these technique IDs on leaf nodes. "
-                "Do NOT invent or hallucinate new technique IDs. "
-                "If none of these IDs fit a particular node, omit technique_id "
-                "from that node rather than inventing one.\n"
-            )
-    else:
-        technique_constraint = (
-            "\n## ATLAS Technique Constraint\n"
-            "No ATLAS technique IDs are available for this seed. "
-            "Do NOT add technique_id to any node.\n"
-        )
+    technique_constraint = _technique_constraint_text(
+        tech_ids_for_tree, pinned_technique_ids
+    )
 
     # Build optional architecture and actor profile sections for Call 2
-    arch_section = ""
-    if profile is not None:
-        entry_point_names = [ep.name for ep in profile.entry_points]
-        arch_section = (
-            "\n## Target System Architecture\n"
-            "Every node's zone must be drawn from these active zones.\n"
-            f"- Active zones: {profile.zones_active}\n"
-            f"- Entry points: {entry_point_names}\n"
-        )
-
-    actor_section = ""
-    if actor_profile is not None:
-        actor_section = (
-            "\n## Actor Profile\n"
-            "The tree's depth and complexity must be commensurate with "
-            "the actor's capability level.\n"
-            f"- Actor type: {actor_profile.actor_type}\n"
-            f"- Capability level: {actor_profile.capability_level}\n"
-        )
-
-    # Build structured access provenance block (cmps.6) — using names (Phase 3)
-    access_provenance_block = ""
-    if actor_profile is not None and actor_profile.access is not None:
-        from asago_scenario_generator.pipeline.generate.names import (
-            access_provenance_block_with_names,
-        )
-
-        access_provenance_block = (
-            access_provenance_block_with_names(
-                actor_profile.access,
-                profile,
-            )
-            if profile is not None
-            else ""
-        )
+    arch_section = _architecture_section_text(profile)
+    actor_section = _actor_section_text(actor_profile)
+    access_provenance_block = _access_provenance_block_text(actor_profile, profile)
 
     # Compute concrete leaf budget so the LLM sees the exact number
-    technique_count = len(tech_ids_for_tree) if tech_ids_for_tree else 0
+    technique_count = _technique_count_for(tech_ids_for_tree)
     leaf_budget = compute_leaf_budget(technique_count)
 
     # Build tree skeleton from pinned techniques (tree-anchored flow)
-    skeleton: list[dict[str, str]] = []
-    if pinned_technique_ids and pinned_technique_names:
-        skeleton = _build_tree_skeleton(
-            narrative, pinned_technique_ids, pinned_technique_names
-        )
-    skeleton_section = _format_skeleton_yaml(skeleton)
+    skeleton, skeleton_section = _skeleton_and_section(
+        narrative, pinned_technique_ids, pinned_technique_names
+    )
 
     # Build focused ontology context block for this seed
-    # Use narrative.entry_point for the entry point (it was pinned upstream)
-    _tree_ep_direction = (
-        _lookup_entry_point_direction(profile, narrative.entry_point)
-        if profile
-        else None
-    )
-    _tree_ep_controllability = (
-        _lookup_entry_point_controllability(profile, narrative.entry_point)
-        if profile
-        else None
-    )
-    ontology_context = _build_ontology_context(
-        entry_point_name=narrative.entry_point or "",
-        entry_point_direction=_tree_ep_direction,
-        zones=profile.zones_active if profile else [],
-        technique_ids=list(tech_ids_for_tree) if tech_ids_for_tree else [],
-        entry_point_controllability=_tree_ep_controllability,
-    )
+    ontology_context = _ontology_context_for(profile, narrative, tech_ids_for_tree)
 
-    entry_points = (profile.entry_points if profile else None) or []
-    if pinned_entry_point_id is not None:
-        entry_points = [
-            entry_point
-            for entry_point in entry_points
-            if entry_point.entry_point_id == pinned_entry_point_id
-        ]
-        # Defense-in-depth: reject inaccessible pinned entry points before
-        # exposing them to the LLM (cmps.9 third review correction 2).
-        if profile is not None and len(entry_points) == 1:
-            active_zones = set(profile.zones_active) if profile.zones_active else set()
-            if not is_attacker_accessible_ingress(entry_points[0], active_zones):
-                from asago_scenario_generator.pipeline.generate.assembly import (
-                    GenerationError,
-                )
-
-                raise GenerationError(
-                    f"Pinned entry point '{pinned_entry_point_id}' "
-                    f"('{entry_points[0].name}') is not an attacker-accessible "
-                    f"ingress route (output-only, system-controlled, or "
-                    f"inactive ingress zone)."
-                )
-
-    # Convert pinned_entry_point_id to name for the template (Phase 3)
-    from asago_scenario_generator.pipeline.generate.names import (
-        humanize_projection_context,
-        pinned_entry_point_name_from_id,
-    )
-
-    pinned_entry_point_name = pinned_entry_point_name_from_id(
+    entry_points = _entry_points_for_template(profile, pinned_entry_point_id)
+    pinned_entry_point_name = _pinned_entry_point_name_value(
         pinned_entry_point_id, profile
     )
 
     # Humanize projection context for the template (Phase 3)
-    humanized_projection = (
-        humanize_projection_context(projection_context, profile)
-        if projection_context is not None and profile is not None
-        else projection_context
-    )
+    humanized_projection = _humanized_projection_value(projection_context, profile)
 
     # Validator-derived compact alignment table (one row per selected step).
     alignment_rows = derive_projection_alignment_rows_from_context(humanized_projection)
@@ -429,9 +509,8 @@ def build_call2_context(
         "leaf_budget": leaf_budget,
         "skeleton_section": skeleton_section,
         "ontology_context": ontology_context,
-        "tool_inventory": (profile.tool_inventory if profile else None) or [],
-        "external_integrations": (profile.external_integrations if profile else None)
-        or [],
+        "tool_inventory": _tool_inventory_for(profile),
+        "external_integrations": _external_integrations_for(profile),
         "entry_points": entry_points,
         "pinned_entry_point_name": pinned_entry_point_name,
         "kill_chain": seed.kill_chain,
@@ -446,6 +525,45 @@ def build_call2_context(
 # ---------------------------------------------------------------------------
 # Post-processing: deterministic realization derivation for tree leaves
 # ---------------------------------------------------------------------------
+
+
+def _derive_leaf_realizations(
+    node: AttackTreeNode,
+    step_data_by_id: dict[str, dict[str, Any]],
+) -> tuple[Any, ...]:
+    """Derive canonical realization records for one leaf's projected steps."""
+    from asago_scenario_generator.models.realization import ProjectedStepRealization
+
+    realizations: list[ProjectedStepRealization] = []
+    for psid in node.projected_step_ids:
+        sd = step_data_by_id.get(psid)
+        if sd is None:
+            logger.warning(
+                "Tree leaf '%s' references unknown projected step "
+                "'%s' — cannot derive realization",
+                node.id,
+                psid,
+            )
+            continue
+        realizations.append(ProjectedStepRealization.model_validate(sd["realization"]))
+    return tuple(realizations)
+
+
+def _fill_realization_node(
+    node: AttackTreeNode,
+    step_data_by_id: dict[str, dict[str, Any]],
+) -> None:
+    """Set realizations on one node and recurse into its children."""
+    if node.gate == GateType.LEAF:
+        if not node.projected_step_ids:
+            # External preconditions and unmapped leaves stay empty.
+            node.realizations = ()
+            return
+        node.realizations = _derive_leaf_realizations(node, step_data_by_id)
+        return
+    if node.children:
+        for child in node.children:
+            _fill_realization_node(child, step_data_by_id)
 
 
 def _fill_tree_realizations(
@@ -463,38 +581,11 @@ def _fill_tree_realizations(
     if projection_context is None:
         return
 
-    from asago_scenario_generator.models.realization import ProjectedStepRealization
-
     step_data_by_id: dict[str, dict[str, Any]] = {
         sd["step_id"]: sd for sd in projection_context.get("selected_steps", [])
     }
 
-    def _fill_node(node: AttackTreeNode) -> None:
-        if node.gate == GateType.LEAF:
-            if not node.projected_step_ids:
-                # External preconditions and unmapped leaves stay empty.
-                node.realizations = ()
-                return
-            realizations: list[ProjectedStepRealization] = []
-            for psid in node.projected_step_ids:
-                sd = step_data_by_id.get(psid)
-                if sd is None:
-                    logger.warning(
-                        "Tree leaf '%s' references unknown projected step "
-                        "'%s' — cannot derive realization",
-                        node.id,
-                        psid,
-                    )
-                    continue
-                realizations.append(
-                    ProjectedStepRealization.model_validate(sd["realization"])
-                )
-            node.realizations = tuple(realizations)
-        elif node.children:
-            for child in node.children:
-                _fill_node(child)
-
-    _fill_node(tree.root)
+    _fill_realization_node(tree.root, step_data_by_id)
 
 
 def _validate_and_postprocess_tree(
@@ -535,6 +626,235 @@ def _validate_and_postprocess_tree(
     return tree
 
 
+def _tool_inventory_for(profile: CapabilityProfile | None) -> list[Any]:
+    """Tool inventory for the template, or an empty list."""
+    return (profile.tool_inventory if profile else None) or []
+
+
+def _external_integrations_for(profile: CapabilityProfile | None) -> list[Any]:
+    """External integrations for the template, or an empty list."""
+    return (profile.external_integrations if profile else None) or []
+
+
+def _technique_count_for(tech_ids_for_tree: list[str]) -> int:
+    """Number of pinned techniques for the leaf budget."""
+    return len(tech_ids_for_tree) if tech_ids_for_tree else 0
+
+
+def _semantic_user_prompt(
+    use_case: str,
+    seed: ScenarioSeed,
+    narrative: NarrativeLayer,
+    inventory: list[dict[str, Any]],
+    consistency_feedback: str | None,
+) -> str:
+    """User prompt for the semantic grouping flow."""
+    user_prompt = (
+        f"Use case:\n{use_case}\n\n"
+        f"Attack goal: {seed.attack_pattern_name}\n"
+        f"Narrative title: {narrative.title}\n"
+        f"Narrative summary: {narrative.summary}\n\n"
+        "Canonical leaf inventory (respond with handles only):\n"
+        f"{json.dumps(inventory, ensure_ascii=False, indent=2)}\n"
+    )
+    if consistency_feedback:
+        user_prompt += f"\nCorrection required:\n{consistency_feedback}\n"
+    return user_prompt
+
+
+def _semantic_draft_flow(
+    seed: ScenarioSeed,
+    narrative: NarrativeLayer,
+    use_case: str,
+    consistency_feedback: str | None,
+    projection_context: dict[str, Any],
+    profile: CapabilityProfile,
+) -> tuple[Any, Any, list[dict[str, str]], str, str] | None:
+    """Build the semantic grouping prompt flow, or None when unavailable."""
+    if projection_context is None or profile is None:
+        return None
+    from asago_scenario_generator.pipeline.generate.tree_semantics import (
+        build_attack_tree_draft_response_model,
+        derive_canonical_leaf_specs,
+    )
+
+    semantic_leaf_specs = derive_canonical_leaf_specs(
+        projection_context, narrative, profile
+    )
+    response_format = build_attack_tree_draft_response_model(
+        [spec.leaf_handle for spec in semantic_leaf_specs]
+    )
+    system_prompt = (
+        "You author the semantic grouping of one concrete attack tree. "
+        "Return only the structured response. Partition every supplied "
+        "leaf handle into one or more ordered groups, use every handle "
+        "exactly once, and preserve the listed order across groups. You "
+        "control the root and group labels and descriptions. Never emit "
+        "nested nodes, canonical IDs, actions, zones, "
+        "techniques, or realizations; the compiler owns them."
+    )
+    inventory = [
+        {
+            "handle": spec.leaf_handle,
+            "meaning": spec.label,
+            "action_kind": spec.action.kind,
+            "position": index,
+        }
+        for index, spec in enumerate(semantic_leaf_specs)
+    ]
+    user_prompt = _semantic_user_prompt(
+        use_case, seed, narrative, inventory, consistency_feedback
+    )
+    return semantic_leaf_specs, response_format, [], system_prompt, user_prompt
+
+
+def _legacy_prompt_flow(
+    seed: ScenarioSeed,
+    narrative: NarrativeLayer,
+    use_case: str,
+    profile: CapabilityProfile | None,
+    actor_profile: ActorProfile | None,
+    pinned_technique_ids: list[str] | None,
+    pinned_technique_names: list[str] | None,
+    consistency_feedback: str | None,
+    pinned_entry_point_id: str | None,
+    projection_context: dict[str, Any] | None,
+) -> tuple[list[dict[str, str]], str, str]:
+    """Build the compatibility prompt flow variables."""
+    ctx = build_call2_context(
+        seed=seed,
+        narrative=narrative,
+        use_case=use_case,
+        profile=profile,
+        actor_profile=actor_profile,
+        pinned_technique_ids=pinned_technique_ids,
+        pinned_technique_names=pinned_technique_names,
+        consistency_feedback=consistency_feedback,
+        pinned_entry_point_id=pinned_entry_point_id,
+        projection_context=projection_context,
+    )
+    skeleton = ctx["skeleton"]
+    system_prompt = render_prompt(
+        "call2_system.j2",
+        zones_active=profile.zones_active if profile else [],
+        tool_inventory=ctx["tool_inventory"],
+        external_integrations=ctx["external_integrations"],
+        entry_points=ctx["entry_points"],
+        pinned_entry_point_name=ctx.get("pinned_entry_point_name"),
+    )
+    user_prompt = render_prompt("call2_user.j2", **ctx)
+    return skeleton, system_prompt, user_prompt
+
+
+def _compile_tree_response(
+    content: Any,
+    semantic_leaf_specs: Any,
+    seed: ScenarioSeed,
+    projection_context: dict[str, Any] | None,
+) -> AttackTree:
+    """Compile an LLM response into an attack tree."""
+    if semantic_leaf_specs is not None and not isinstance(content, str):
+        from asago_scenario_generator.pipeline.generate.tree_semantics import (
+            AttackTreeDraftV2,
+            AttackTreeDraftV3,
+            compile_flat_attack_tree_draft,
+            compile_attack_tree_draft,
+        )
+
+        if isinstance(content, AttackTreeDraftV3):
+            return compile_flat_attack_tree_draft(
+                seed_id=seed.seed_id,
+                goal=seed.attack_pattern_name,
+                draft=content,
+                leaf_specs=semantic_leaf_specs,
+                threat_id=seed.threat_id,
+            )
+        draft = (
+            content
+            if isinstance(content, AttackTreeDraftV2)
+            else AttackTreeDraftV2.model_validate(content)
+        )
+        return compile_attack_tree_draft(
+            seed_id=seed.seed_id,
+            goal=seed.attack_pattern_name,
+            draft=draft,
+            leaf_specs=semantic_leaf_specs,
+            threat_id=seed.threat_id,
+        )
+    # Compatibility for recorded/scripted legacy YAML responses. New
+    # provider requests always use AttackTreeDraftV2 when projection
+    # context is available.
+    return _parse_attack_tree_yaml(content, seed, projection_context)
+
+
+def _invoke_attack_tree(
+    client: LLMClient,
+    system_prompt: str,
+    user_prompt: str,
+    response_format: Any,
+    temperature: float | None,
+    max_completion_tokens: int | None,
+) -> LLMResult:
+    """Perform exactly one LLM invocation for an attack-tree attempt."""
+    try:
+        return client.complete(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_format=response_format,
+            temperature=temperature,
+            max_completion_tokens=max_completion_tokens,
+        )
+    except Exception as exc:
+        from asago_scenario_generator.pipeline.generate.stages import (
+            stage_attempt_failure,
+        )
+
+        raise stage_attempt_failure(
+            CallName.attack_tree,
+            exc,
+            phase="invocation",
+            invoked=True,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+        ) from exc
+
+
+def _postprocess_attack_tree_response(
+    result: LLMResult,
+    semantic_leaf_specs: Any,
+    seed: ScenarioSeed,
+    projection_context: dict[str, Any] | None,
+    profile: CapabilityProfile | None,
+    pinned_entry_point_id: str | None,
+    skeleton: list[dict[str, str]],
+    system_prompt: str,
+    user_prompt: str,
+) -> AttackTree:
+    """Compile and validate the attack tree from one LLM response."""
+    try:
+        tree = _compile_tree_response(
+            result.content, semantic_leaf_specs, seed, projection_context
+        )
+        return _validate_and_postprocess_tree(
+            tree, profile, pinned_entry_point_id, skeleton, seed, projection_context
+        )
+    except Exception as exc:
+        from asago_scenario_generator.pipeline.generate.stages import (
+            stage_attempt_failure,
+        )
+
+        raise stage_attempt_failure(
+            CallName.attack_tree,
+            exc,
+            phase="post_response",
+            invoked=True,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            result=result,
+            raw_response=result.content,
+        ) from exc
+
+
 def _call_attack_tree_once(
     seed: ScenarioSeed,
     narrative: NarrativeLayer,
@@ -561,146 +881,52 @@ def _call_attack_tree_once(
     """
     semantic_leaf_specs = None
     response_format: Any = None
+    skeleton: list[dict[str, str]] = []
     if projection_context is not None and profile is not None:
-        from asago_scenario_generator.pipeline.generate.tree_semantics import (
-            build_attack_tree_draft_response_model,
-            derive_canonical_leaf_specs,
+        semantic_leaf_specs, response_format, skeleton, system_prompt, user_prompt = (
+            _semantic_draft_flow(
+                seed,
+                narrative,
+                use_case,
+                consistency_feedback,
+                projection_context,
+                profile,
+            )
         )
-
-        semantic_leaf_specs = derive_canonical_leaf_specs(
-            projection_context, narrative, profile
-        )
-        response_format = build_attack_tree_draft_response_model(
-            [spec.leaf_handle for spec in semantic_leaf_specs]
-        )
-        skeleton: list[dict[str, str]] = []
-        system_prompt = (
-            "You author the semantic grouping of one concrete attack tree. "
-            "Return only the structured response. Partition every supplied "
-            "leaf handle into one or more ordered groups, use every handle "
-            "exactly once, and preserve the listed order across groups. You "
-            "control the root and group labels and descriptions. Never emit "
-            "nested nodes, canonical IDs, actions, zones, "
-            "techniques, or realizations; the compiler owns them."
-        )
-        inventory = [
-            {
-                "handle": spec.leaf_handle,
-                "meaning": spec.label,
-                "action_kind": spec.action.kind,
-                "position": index,
-            }
-            for index, spec in enumerate(semantic_leaf_specs)
-        ]
-        user_prompt = (
-            f"Use case:\n{use_case}\n\n"
-            f"Attack goal: {seed.attack_pattern_name}\n"
-            f"Narrative title: {narrative.title}\n"
-            f"Narrative summary: {narrative.summary}\n\n"
-            "Canonical leaf inventory (respond with handles only):\n"
-            f"{json.dumps(inventory, ensure_ascii=False, indent=2)}\n"
-        )
-        if consistency_feedback:
-            user_prompt += f"\nCorrection required:\n{consistency_feedback}\n"
     else:
-        ctx = build_call2_context(
-            seed=seed,
-            narrative=narrative,
-            use_case=use_case,
-            profile=profile,
-            actor_profile=actor_profile,
-            pinned_technique_ids=pinned_technique_ids,
-            pinned_technique_names=pinned_technique_names,
-            consistency_feedback=consistency_feedback,
-            pinned_entry_point_id=pinned_entry_point_id,
-            projection_context=projection_context,
+        skeleton, system_prompt, user_prompt = _legacy_prompt_flow(
+            seed,
+            narrative,
+            use_case,
+            profile,
+            actor_profile,
+            pinned_technique_ids,
+            pinned_technique_names,
+            consistency_feedback,
+            pinned_entry_point_id,
+            projection_context,
         )
-        skeleton = ctx["skeleton"]
-        system_prompt = render_prompt(
-            "call2_system.j2",
-            zones_active=profile.zones_active if profile else [],
-            tool_inventory=ctx["tool_inventory"],
-            external_integrations=ctx["external_integrations"],
-            entry_points=ctx["entry_points"],
-            pinned_entry_point_name=ctx.get("pinned_entry_point_name"),
-        )
-        user_prompt = render_prompt("call2_user.j2", **ctx)
     if completion_length_feedback:
         user_prompt = f"{user_prompt}{completion_length_feedback}"
-    try:
-        result = client.complete(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_format=response_format,
-            temperature=temperature,
-            max_completion_tokens=max_completion_tokens,
-        )
-    except Exception as exc:
-        from asago_scenario_generator.pipeline.generate.stages import (
-            stage_attempt_failure,
-        )
-
-        raise stage_attempt_failure(
-            CallName.attack_tree,
-            exc,
-            phase="invocation",
-            invoked=True,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-        ) from exc
-    try:
-        if semantic_leaf_specs is not None and not isinstance(result.content, str):
-            from asago_scenario_generator.pipeline.generate.tree_semantics import (
-                AttackTreeDraftV2,
-                AttackTreeDraftV3,
-                compile_flat_attack_tree_draft,
-                compile_attack_tree_draft,
-            )
-
-            if isinstance(result.content, AttackTreeDraftV3):
-                tree = compile_flat_attack_tree_draft(
-                    seed_id=seed.seed_id,
-                    goal=seed.attack_pattern_name,
-                    draft=result.content,
-                    leaf_specs=semantic_leaf_specs,
-                    threat_id=seed.threat_id,
-                )
-            else:
-                draft = (
-                    result.content
-                    if isinstance(result.content, AttackTreeDraftV2)
-                    else AttackTreeDraftV2.model_validate(result.content)
-                )
-                tree = compile_attack_tree_draft(
-                    seed_id=seed.seed_id,
-                    goal=seed.attack_pattern_name,
-                    draft=draft,
-                    leaf_specs=semantic_leaf_specs,
-                    threat_id=seed.threat_id,
-                )
-        else:
-            # Compatibility for recorded/scripted legacy YAML responses. New
-            # provider requests always use AttackTreeDraftV2 when projection
-            # context is available.
-            tree = _parse_attack_tree_yaml(result.content, seed, projection_context)
-        tree = _validate_and_postprocess_tree(
-            tree, profile, pinned_entry_point_id, skeleton, seed, projection_context
-        )
-    except Exception as exc:
-        from asago_scenario_generator.pipeline.generate.stages import (
-            stage_attempt_failure,
-        )
-
-        raise stage_attempt_failure(
-            CallName.attack_tree,
-            exc,
-            phase="post_response",
-            invoked=True,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            result=result,
-            raw_response=result.content,
-        ) from exc
+    result = _invoke_attack_tree(
+        client,
+        system_prompt,
+        user_prompt,
+        response_format,
+        temperature,
+        max_completion_tokens,
+    )
+    tree = _postprocess_attack_tree_response(
+        result,
+        semantic_leaf_specs,
+        seed,
+        projection_context,
+        profile,
+        pinned_entry_point_id,
+        skeleton,
+        system_prompt,
+        user_prompt,
+    )
     return tree, result
 
 
@@ -824,93 +1050,138 @@ def _call_attack_tree(
 # ---------------------------------------------------------------------------
 
 
+def _resolve_initial_ingress_action(
+    node: AttackTreeNode,
+    action: Any,
+    profile: CapabilityProfile,
+    violations: list[str],
+) -> None:
+    """Resolve and validate an initial_ingress action's entry point ID."""
+    from asago_scenario_generator.pipeline.generate.names import (
+        resolve_name_to_entry_point_id,
+    )
+
+    # Resolve name → hex ID
+    resolved_id = resolve_name_to_entry_point_id(action.entry_point_id, profile)
+    if resolved_id is not None:
+        action.entry_point_id = resolved_id
+    # Validate
+    ep = profile.resolve_entry_point(action.entry_point_id)
+    if ep is None:
+        violations.append(
+            f"unresolved-entry-point-id: leaf '{node.id}' has "
+            f"initial_ingress action with entry_point_id "
+            f"'{action.entry_point_id}' that does not resolve to "
+            f"any entry point in the capability profile."
+        )
+
+
+def _resolve_tool_invocation_integration(
+    node: AttackTreeNode,
+    action: Any,
+    profile: CapabilityProfile,
+    violations: list[str],
+) -> None:
+    """Resolve and validate a tool_invocation action's integration ID."""
+    if action.integration_id is not None:
+        from asago_scenario_generator.pipeline.generate.names import (
+            resolve_name_to_integration_id,
+        )
+
+        resolved_int = resolve_name_to_integration_id(action.integration_id, profile)
+        if resolved_int is not None:
+            action.integration_id = resolved_int
+        integ = profile.resolve_integration(action.integration_id)
+        if integ is None:
+            violations.append(
+                f"unresolved-integration-id: leaf '{node.id}' has "
+                f"tool_invocation action with integration_id "
+                f"'{action.integration_id}' that does not resolve "
+                f"to any integration in the capability profile."
+            )
+
+
+def _resolve_tool_invocation_action(
+    node: AttackTreeNode,
+    action: Any,
+    profile: CapabilityProfile,
+    violations: list[str],
+) -> None:
+    """Resolve and validate a tool_invocation action's tool and integration."""
+    from asago_scenario_generator.pipeline.generate.names import (
+        resolve_name_to_tool_id,
+    )
+
+    # Resolve name → hex ID
+    resolved_tool = resolve_name_to_tool_id(action.tool_id, profile)
+    if resolved_tool is not None:
+        action.tool_id = resolved_tool
+    # Validate
+    tool = profile.resolve_tool(action.tool_id)
+    if tool is None:
+        violations.append(
+            f"unresolved-tool-id: leaf '{node.id}' has "
+            f"tool_invocation action with tool_id "
+            f"'{action.tool_id}' that does not resolve to "
+            f"any tool in the capability profile."
+        )
+    _resolve_tool_invocation_integration(node, action, profile, violations)
+
+
+def _resolve_integration_interaction_action(
+    node: AttackTreeNode,
+    action: Any,
+    profile: CapabilityProfile,
+    violations: list[str],
+) -> None:
+    """Resolve and validate an integration_interaction action."""
+    from asago_scenario_generator.pipeline.generate.names import (
+        resolve_name_to_integration_id,
+    )
+
+    # Resolve name → hex ID
+    resolved_int = resolve_name_to_integration_id(action.integration_id, profile)
+    if resolved_int is not None:
+        action.integration_id = resolved_int
+    # Validate
+    integ = profile.resolve_integration(action.integration_id)
+    if integ is None:
+        violations.append(
+            f"unresolved-integration-id: leaf '{node.id}' has "
+            f"integration_interaction action with integration_id "
+            f"'{action.integration_id}' that does not resolve "
+            f"to any integration in the capability profile."
+        )
+
+
 def _resolve_action_ids_node(
     node: AttackTreeNode,
     profile: CapabilityProfile,
     violations: list[str],
 ) -> None:
-    """Resolve human-readable names to canonical hex IDs, then validate.
+    """Resolve one node's human-readable names to canonical hex IDs."""
+    if node.gate != GateType.LEAF or node.action is None:
+        return
+    action = node.action
+    kind = action.kind
+    if kind == "initial_ingress":
+        _resolve_initial_ingress_action(node, action, profile, violations)
+    elif kind == "tool_invocation":
+        _resolve_tool_invocation_action(node, action, profile, violations)
+    elif kind == "integration_interaction":
+        _resolve_integration_interaction_action(node, action, profile, violations)
 
-    Phase 3: The LLM outputs names (e.g. "process_refund") instead of
-    hex IDs (e.g. "tool:v1:abc123...").  This function resolves names
-    to canonical IDs in place, then validates that all IDs resolve to
-    profile resources.  If a name doesn't match any resource, it's
-    recorded as a violation.
-    """
-    from asago_scenario_generator.pipeline.generate.names import (
-        resolve_name_to_entry_point_id,
-        resolve_name_to_integration_id,
-        resolve_name_to_tool_id,
-    )
 
-    if node.gate == GateType.LEAF and node.action is not None:
-        action = node.action
-        kind = action.kind
-
-        if kind == "initial_ingress":
-            # Resolve name → hex ID
-            resolved_id = resolve_name_to_entry_point_id(action.entry_point_id, profile)
-            if resolved_id is not None:
-                action.entry_point_id = resolved_id
-            # Validate
-            ep = profile.resolve_entry_point(action.entry_point_id)
-            if ep is None:
-                violations.append(
-                    f"unresolved-entry-point-id: leaf '{node.id}' has "
-                    f"initial_ingress action with entry_point_id "
-                    f"'{action.entry_point_id}' that does not resolve to "
-                    f"any entry point in the capability profile."
-                )
-
-        elif kind == "tool_invocation":
-            # Resolve name → hex ID
-            resolved_tool = resolve_name_to_tool_id(action.tool_id, profile)
-            if resolved_tool is not None:
-                action.tool_id = resolved_tool
-            # Validate
-            tool = profile.resolve_tool(action.tool_id)
-            if tool is None:
-                violations.append(
-                    f"unresolved-tool-id: leaf '{node.id}' has "
-                    f"tool_invocation action with tool_id "
-                    f"'{action.tool_id}' that does not resolve to "
-                    f"any tool in the capability profile."
-                )
-            if action.integration_id is not None:
-                resolved_int = resolve_name_to_integration_id(
-                    action.integration_id, profile
-                )
-                if resolved_int is not None:
-                    action.integration_id = resolved_int
-                integ = profile.resolve_integration(action.integration_id)
-                if integ is None:
-                    violations.append(
-                        f"unresolved-integration-id: leaf '{node.id}' has "
-                        f"tool_invocation action with integration_id "
-                        f"'{action.integration_id}' that does not resolve "
-                        f"to any integration in the capability profile."
-                    )
-
-        elif kind == "integration_interaction":
-            # Resolve name → hex ID
-            resolved_int = resolve_name_to_integration_id(
-                action.integration_id, profile
-            )
-            if resolved_int is not None:
-                action.integration_id = resolved_int
-            # Validate
-            integ = profile.resolve_integration(action.integration_id)
-            if integ is None:
-                violations.append(
-                    f"unresolved-integration-id: leaf '{node.id}' has "
-                    f"integration_interaction action with integration_id "
-                    f"'{action.integration_id}' that does not resolve "
-                    f"to any integration in the capability profile."
-                )
-
+def _resolve_tree_action_ids(
+    node: AttackTreeNode,
+    profile: CapabilityProfile,
+    violations: list[str],
+) -> None:
+    """Resolve action IDs for a node and all of its descendants."""
+    _resolve_action_ids_node(node, profile, violations)
     if node.children:
         for child in node.children:
-            _resolve_action_ids_node(child, profile, violations)
+            _resolve_tree_action_ids(child, profile, violations)
 
 
 def resolve_action_ids(
@@ -924,5 +1195,5 @@ def resolve_action_ids(
     Returns a list of violation descriptions (empty if all IDs resolve).
     """
     violations: list[str] = []
-    _resolve_action_ids_node(tree.root, profile, violations)
+    _resolve_tree_action_ids(tree.root, profile, violations)
     return violations
