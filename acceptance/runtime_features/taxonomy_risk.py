@@ -23,7 +23,7 @@ from asago_scenario_generator.pipeline.finalization import (
     GeneratedStage,
     MAX_OWNER_RETRIES,
 )
-from asago_scenario_generator.pipeline.generate.narrative import (
+from asago_scenario_generator.pipeline.generate.narrative_access import (
     MAX_NARRATIVE_STEPS,
     NARRATIVE_CONNECTOR_STEPS,
 )
@@ -3326,7 +3326,7 @@ def _h_candidate_bound_present_before_request(
 def _h_import_grounding_helper(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    from asago_scenario_generator.pipeline.generate.tree import (
+    from asago_scenario_generator.pipeline.generate.tree_validation import (
         _check_tool_execution_leaf_grounding,
     )
 
@@ -4171,7 +4171,7 @@ def _h_derive_zone_sequence(
 ) -> tuple[bool, str]:
     from types import SimpleNamespace
 
-    from asago_scenario_generator.pipeline.generate.narrative import (
+    from asago_scenario_generator.pipeline.generate.narrative_semantics import (
         _derive_zone_sequence,
     )
 

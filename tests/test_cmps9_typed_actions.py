@@ -39,10 +39,10 @@ from asago_scenario_generator.pipeline.generate.gherkin import (
     _build_gherkin_template,
     _leaf_step_kind,
 )
-from asago_scenario_generator.pipeline.generate.tree import (
+from asago_scenario_generator.pipeline.generate.tree import resolve_action_ids
+from asago_scenario_generator.pipeline.generate.tree_validation import (
     _enumerate_root_to_leaf_paths,
     _validate_pinned_ingress,
-    resolve_action_ids,
 )
 from asago_scenario_generator.report.template import _build_attack_tree_node
 from tests.helpers.realization_helper import make_realizations
@@ -1621,7 +1621,7 @@ class TestIngressZoneValidation:
         point's canonical ingress_zone must produce a violation, not be
         silently repaired."""
         from asago_scenario_generator.models.capability_profile import EntryPoint
-        from asago_scenario_generator.pipeline.generate.tree import _validate_pinned_ingress
+        from asago_scenario_generator.pipeline.generate.tree_validation import _validate_pinned_ingress
 
         ep = EntryPoint(
             name="user chat",
@@ -1676,7 +1676,7 @@ class TestIngressZoneValidation:
     def test_ingress_zone_match_no_violation(self):
         """An initial_ingress leaf with the correct zone produces no violation."""
         from asago_scenario_generator.models.capability_profile import EntryPoint
-        from asago_scenario_generator.pipeline.generate.tree import _validate_pinned_ingress
+        from asago_scenario_generator.pipeline.generate.tree_validation import _validate_pinned_ingress
 
         ep = EntryPoint(
             name="user chat",
@@ -1730,7 +1730,7 @@ class TestIngressZoneValidation:
     def test_adversarial_label_does_not_affect_ingress_zone(self):
         """A label containing 'reasoning' does not change the canonical ingress zone."""
         from asago_scenario_generator.models.capability_profile import EntryPoint
-        from asago_scenario_generator.pipeline.generate.tree import _validate_pinned_ingress
+        from asago_scenario_generator.pipeline.generate.tree_validation import _validate_pinned_ingress
 
         ep = EntryPoint(
             name="user chat",
@@ -2046,7 +2046,7 @@ class TestIngressZoneActiveAdmission:
         """An initial_ingress leaf whose canonical ingress zone is not active
         in the profile produces a violation."""
         from asago_scenario_generator.models.capability_profile import EntryPoint
-        from asago_scenario_generator.pipeline.generate.tree import _validate_pinned_ingress
+        from asago_scenario_generator.pipeline.generate.tree_validation import _validate_pinned_ingress
 
         ep = EntryPoint(
             name="tool API gateway",
@@ -2095,7 +2095,7 @@ class TestIngressZoneActiveAdmission:
         """An initial_ingress leaf whose canonical ingress zone is active
         in the profile produces no violation."""
         from asago_scenario_generator.models.capability_profile import EntryPoint
-        from asago_scenario_generator.pipeline.generate.tree import _validate_pinned_ingress
+        from asago_scenario_generator.pipeline.generate.tree_validation import _validate_pinned_ingress
 
         ep = EntryPoint(
             name="user chat",
@@ -3034,7 +3034,7 @@ class TestAttackerAccessibleIngressPredicate:
             AttackTreeNode,
             InitialIngressAction,
         )
-        from asago_scenario_generator.pipeline.generate.tree import _validate_pinned_ingress
+        from asago_scenario_generator.pipeline.generate.tree_validation import _validate_pinned_ingress
 
         profile = self._make_profile_with_mixed_entry_points()
         system_ep = next(ep for ep in profile.entry_points if ep.name == "backend API")
@@ -3130,7 +3130,7 @@ class TestToolExecutionZonePromptParity:
             ExternalIntegration,
             ToolInventoryEntry,
         )
-        from asago_scenario_generator.pipeline.generate.tree import (
+        from asago_scenario_generator.pipeline.generate.tree_validation import (
             _check_tool_execution_leaf_grounding,
         )
 

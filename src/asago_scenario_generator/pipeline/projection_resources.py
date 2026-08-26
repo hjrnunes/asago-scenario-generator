@@ -6,15 +6,15 @@ from collections.abc import Iterable
 from itertools import product
 from typing import Any
 
-from asago_scenario_generator.models.attack_pattern import (
+from asago_scenario_generator.models.attack_pattern_chain import ResourceSlot
+from asago_scenario_generator.models.attack_pattern_projection import (
     AgentInternalResourceReference,
     CanonicalResourceReference,
     EntryPointResourceReference,
     IntegrationResourceReference,
-    ResourceSlot,
-    TrustBoundaryResourceReference,
-    ToolResourceReference,
     OutputSurfaceResourceReference,
+    ToolResourceReference,
+    TrustBoundaryResourceReference,
 )
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,

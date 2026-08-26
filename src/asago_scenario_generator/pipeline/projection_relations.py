@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from asago_scenario_generator.models.attack_pattern import (
-    CanonicalAttackChain,
+from asago_scenario_generator.models.attack_pattern_chain import CanonicalAttackChain
+from asago_scenario_generator.models.attack_pattern_contracts import SourceInfluencePath
+from asago_scenario_generator.models.attack_pattern_projection import (
     EntryPointResourceReference,
     IntegrationResourceReference,
-    SourceInfluencePath,
     TrustBoundaryResourceReference,
 )
 from asago_scenario_generator.models.capability_profile import (

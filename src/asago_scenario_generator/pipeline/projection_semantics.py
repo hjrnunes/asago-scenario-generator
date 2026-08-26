@@ -384,7 +384,7 @@ def _check_leaf_tool_binding(
         and link.role in ("tool_fixture", "tool")
     ):
         return
-    from asago_scenario_generator.models.attack_pattern import (
+    from asago_scenario_generator.models.attack_pattern_projection import (
         ToolResourceReference,
     )
 
@@ -409,7 +409,7 @@ def _check_leaf_tool_binding(
 
 def _resource_ref_integration_mismatch(ref: Any, integration_id: str) -> bool:
     """True when a resource reference binds a different integration."""
-    from asago_scenario_generator.models.attack_pattern import (
+    from asago_scenario_generator.models.attack_pattern_projection import (
         IntegrationResourceReference,
     )
 
