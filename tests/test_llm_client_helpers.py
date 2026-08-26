@@ -93,7 +93,9 @@ class TestResolveArgs:
         assert _resolve_max_tokens_arg(None) == 2000
 
     def test_max_tokens_none_when_unset(self, monkeypatch) -> None:
-        monkeypatch.delenv("ASAGO_SCENARIO_GENERATOR_MAX_COMPLETION_TOKENS", raising=False)
+        monkeypatch.delenv(
+            "ASAGO_SCENARIO_GENERATOR_MAX_COMPLETION_TOKENS", raising=False
+        )
         assert _resolve_max_tokens_arg(None) is None
 
     def test_temperature_explicit_wins_over_env(self, monkeypatch) -> None:
@@ -160,12 +162,16 @@ class TestHeaders:
 
     def test_inject_openrouter_defaults_fills_missing_keys(self) -> None:
         merged = {"X-A": "1"}
-        _inject_openrouter_defaults(merged, "https://openrouter.ai/api/v1", {"X-B": "2"})
+        _inject_openrouter_defaults(
+            merged, "https://openrouter.ai/api/v1", {"X-B": "2"}
+        )
         assert merged == {"X-A": "1", "X-B": "2"}
 
     def test_inject_openrouter_defaults_keeps_explicit(self) -> None:
         merged = {"X-B": "explicit"}
-        _inject_openrouter_defaults(merged, "https://openrouter.ai/api/v1", {"X-B": "2"})
+        _inject_openrouter_defaults(
+            merged, "https://openrouter.ai/api/v1", {"X-B": "2"}
+        )
         assert merged == {"X-B": "explicit"}
 
     def test_inject_openrouter_defaults_skips_non_openrouter(self) -> None:
@@ -304,9 +310,7 @@ class TestRequestHelpers:
         assert _completion_extra_kwargs(None, 0.7, None, None) == {"temperature": 0.7}
 
     def test_request_controls_reports_recovery(self) -> None:
-        controls = _request_controls(
-            _FixtureModel, 4096, 8192, 0.4, 0.9, 40, True
-        )
+        controls = _request_controls(_FixtureModel, 4096, 8192, 0.4, 0.9, 40, True)
         assert controls["response_schema"] == "standard"
         assert controls["max_completion_tokens"] == 4096
         assert controls["transport_token_cap"] == 8192
@@ -321,9 +325,7 @@ class TestRequestHelpers:
         client.beta.chat.completions.parse.return_value = SimpleNamespace(
             choices=[SimpleNamespace(message=SimpleNamespace(parsed=parsed))]
         )
-        response, content = _request_completion(
-            client, "model", [], _FixtureModel, {}
-        )
+        response, content = _request_completion(client, "model", [], _FixtureModel, {})
         assert content is parsed
         assert client.chat.completions.create.call_count == 0
 

@@ -24,7 +24,9 @@ class TestInfraLLMClient:
 
     def test_llm_01_resolves_base_url_from_env(self, monkeypatch):
         """InfraLLM-01: base_url resolved from ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL."""
-        monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL", "http://test:8080")
+        monkeypatch.setenv(
+            "ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL", "http://test:8080"
+        )
         monkeypatch.delenv("ASAGO_SCENARIO_GENERATOR_API_KEY", raising=False)
         client = LLMClient()
         assert client.base_url == "http://test:8080"
@@ -76,7 +78,9 @@ class TestInfraLLMClient:
 
     def test_llm_06c_max_tokens_none_when_unspecified(self, monkeypatch):
         """InfraLLM-06c: max_completion_tokens is None when not specified."""
-        monkeypatch.delenv("ASAGO_SCENARIO_GENERATOR_MAX_COMPLETION_TOKENS", raising=False)
+        monkeypatch.delenv(
+            "ASAGO_SCENARIO_GENERATOR_MAX_COMPLETION_TOKENS", raising=False
+        )
         client = LLMClient(base_url="http://test:8080")
         assert client.max_completion_tokens is None
 
@@ -101,9 +105,14 @@ class TestInfraLLMResult:
 class TestInfraLLMComplete:
     """LLMClient.complete method with mocked OpenAI client."""
 
-    def _make_mock_client(self, content="response", parsed=None,
-                          prompt_tokens=100, completion_tokens=50,
-                          usage="default"):
+    def _make_mock_client(
+        self,
+        content="response",
+        parsed=None,
+        prompt_tokens=100,
+        completion_tokens=50,
+        usage="default",
+    ):
         """Build a mock OpenAI client with a canned response."""
         client = LLMClient(base_url="http://test:8080", model="test-model")
 
@@ -221,6 +230,7 @@ class TestInfraLLMHelpers:
 
     def test_guided_json_enabled_requires_all_three(self):
         """_guided_json_enabled needs decoding, unvalidated, and a schema."""
+
         class _Model(BaseModel):
             val: int
 
@@ -265,6 +275,7 @@ class TestInfraLLMHelpers:
 
     def test_guided_json_extra_body(self):
         """_guided_json_extra_body embeds the schema for guided decoding."""
+
         class _Model(BaseModel):
             val: int
 
