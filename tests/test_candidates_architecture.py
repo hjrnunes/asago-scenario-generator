@@ -60,8 +60,7 @@ class TestCandidateModelsLeaf:
         imports = _imported_modules(PIPELINE_DIR / "candidate_models.py")
         violations = sorted(imports & _IMPLEMENTATION_MODULES)
         assert not violations, (
-            "candidate_models imports implementation modules: "
-            f"{violations}"
+            f"candidate_models imports implementation modules: {violations}"
         )
 
     def test_models_do_not_import_io_near_modules(self) -> None:
@@ -76,8 +75,7 @@ class TestCandidateModelsLeaf:
             )
         ]
         assert not violations, (
-            "candidate_models imports IO-near modules: "
-            f"{sorted(violations)}"
+            f"candidate_models imports IO-near modules: {sorted(violations)}"
         )
 
 
@@ -97,9 +95,7 @@ class TestCandidateAdaptersDependInward:
             "io.py",
         ),
     )
-    def test_adapter_does_not_import_candidates_facade(
-        self, module_name: str
-    ) -> None:
+    def test_adapter_does_not_import_candidates_facade(self, module_name: str) -> None:
         """Adapters must not import the public candidates façade."""
         imports = _imported_modules(PIPELINE_DIR / module_name)
         assert _FACADE_MODULE not in imports, (
@@ -121,6 +117,36 @@ class TestCandidateAdaptersDependInward:
     def test_adapter_imports_models_leaf(self, module_name: str) -> None:
         """Each adapter reaches shared types through the models leaf."""
         imports = _imported_modules(PIPELINE_DIR / module_name)
-        assert _MODELS_MODULE in imports, (
-            f"{module_name} must import {_MODELS_MODULE}"
+        assert _MODELS_MODULE in imports, f"{module_name} must import {_MODELS_MODULE}"
+
+
+class TestCandidateCappingDependsInward:
+    """Capping consumes origin helpers from the models leaf, not expansion."""
+
+    def test_capping_does_not_import_expansion_privates(self) -> None:
+        """Filtered-seed merge stays off expansion implementation helpers."""
+        imports = _imported_modules(PIPELINE_DIR / "candidate_capping.py")
+        assert "asago_scenario_generator.pipeline.candidate_expansion" not in imports
+        assert _MODELS_MODULE in imports
+
+
+class TestRunnerAndPreflightDependInward:
+    """Orchestration consumes candidate leaves, not the public façade."""
+
+    @pytest.mark.parametrize(
+        "module_name",
+        (
+            "preflight.py",
+            "runner.py",
+            "runner_run.py",
+        ),
+    )
+    def test_orchestrator_does_not_import_candidates_facade(
+        self, module_name: str
+    ) -> None:
+        """Preflight and runner reach identity through inward leaves."""
+        imports = _imported_modules(PIPELINE_DIR / module_name)
+        assert _FACADE_MODULE not in imports, (
+            f"{module_name} must not import the public candidates façade"
         )
+        assert not any(imp.startswith(_FACADE_MODULE + ".") for imp in imports)

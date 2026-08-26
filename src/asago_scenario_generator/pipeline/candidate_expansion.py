@@ -4,11 +4,8 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from collections.abc import Sequence
 from itertools import combinations
 from typing import Any
-
-from pydantic import BaseModel
 
 from asago_scenario_generator.data.atlas import (
     ATLAS_TECHNIQUE_DESCRIPTIONS,
@@ -22,6 +19,8 @@ from asago_scenario_generator.pipeline.candidate_models import (
     CandidateOrigin,
     CandidateTriple,
     StageRecord,
+    _canonicalize_and_dedup_origins,
+    _non_provenance_conflicts,
     compute_candidate_id,
 )
 from asago_scenario_generator.pipeline.seeds import ScenarioSeed
@@ -417,88 +416,6 @@ def _aligned_metadata(
     return sorted_ids, sorted_names, sorted_descs
 
 
-def _canonicalize_origin(origin: CandidateOrigin) -> CandidateOrigin:
-    """Return a canonicalized copy of a CandidateOrigin.
-
-    Sorts ``original_technique_ids``, ``removed_technique_ids``, and
-    ``removal_decisions`` so that the origin serializes identically
-    regardless of input ordering.  ``removal_reasons`` are re-aligned
-    to the sorted ``removed_technique_ids`` order.
-    """
-    sorted_original = tuple(sorted(origin.original_technique_ids))
-    sorted_removed = tuple(sorted(origin.removed_technique_ids))
-    sorted_decisions = tuple(
-        sorted(
-            origin.removal_decisions,
-            key=lambda d: (d.technique_id, d.rule, d.reason),
-        )
-    )
-    # Re-align removal_reasons to sorted removed_technique_ids order.
-    if origin.removed_technique_ids and origin.removal_reasons:
-        tid_to_reason = dict(zip(origin.removed_technique_ids, origin.removal_reasons))
-        sorted_reasons = tuple(tid_to_reason.get(tid, "") for tid in sorted_removed)
-    else:
-        sorted_reasons = origin.removal_reasons
-    return CandidateOrigin(
-        source_candidate_id=origin.source_candidate_id,
-        original_technique_ids=sorted_original,
-        applied_rule=origin.applied_rule,
-        removed_technique_ids=sorted_removed,
-        removal_reasons=sorted_reasons,
-        removal_decisions=sorted_decisions,
-        transform_stage=origin.transform_stage,
-    )
-
-
-def _canonicalize_and_dedup_origins(
-    all_origins: list[CandidateOrigin],
-) -> list[CandidateOrigin]:
-    """Canonicalize, deduplicate, and sort origins deterministically."""
-    canonicalized = [_canonicalize_origin(o) for o in all_origins]
-    return _dedup_canonical_origins(canonicalized)
-
-
-def _origin_key(origin: CandidateOrigin) -> tuple:
-    """Dedup identity for one canonicalized origin."""
-    return (
-        origin.source_candidate_id,
-        origin.transform_stage,
-        origin.original_technique_ids,
-        origin.removed_technique_ids,
-        origin.applied_rule,
-        origin.removal_reasons,
-        tuple((d.technique_id, d.rule, d.reason) for d in origin.removal_decisions),
-    )
-
-
-def _origin_sort_key(origin: CandidateOrigin) -> tuple:
-    """Deterministic sort key for one canonicalized origin."""
-    return (
-        origin.source_candidate_id,
-        origin.transform_stage,
-        origin.original_technique_ids,
-        origin.removed_technique_ids,
-        origin.applied_rule or "",
-        origin.removal_reasons,
-        tuple((d.technique_id, d.rule, d.reason) for d in origin.removal_decisions),
-    )
-
-
-def _dedup_canonical_origins(
-    canonicalized: list[CandidateOrigin],
-) -> list[CandidateOrigin]:
-    """First-seen dedup by origin key, then deterministic sort."""
-    seen: set[tuple] = set()
-    unique: list[CandidateOrigin] = []
-    for origin in canonicalized:
-        key = _origin_key(origin)
-        if key not in seen:
-            seen.add(key)
-            unique.append(origin)
-    unique.sort(key=_origin_sort_key)
-    return unique
-
-
 def _check_converged_technique_metadata(
     group: list[CandidateTriple],
 ) -> None:
@@ -695,26 +612,3 @@ _CONVERGED_NON_PROV_FIELDS = (
     "owasp_llm_ids",
     "controllability",
 )
-
-
-def _non_provenance_conflicts(
-    template: BaseModel,
-    others: Sequence[BaseModel],
-    fields: Sequence[str],
-) -> None:
-    """Reject conflicting non-provenance metadata across converged records.
-
-    All records with the same canonical identity must agree on metadata
-    fields.
-    """
-    for c in others:
-        for field_name in fields:
-            tval = getattr(template, field_name)
-            cval = getattr(c, field_name)
-            if tval != cval:
-                raise ValueError(
-                    f"Conflicting non-provenance metadata for "
-                    f"converged candidate '{template.candidate_id}': "
-                    f"field '{field_name}' differs "
-                    f"({tval!r} vs {cval!r})"
-                )
