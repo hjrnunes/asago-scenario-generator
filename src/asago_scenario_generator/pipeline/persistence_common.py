@@ -18,7 +18,7 @@ MAX_TARGET_CHOICES = 3
 
 def canonical_json_bytes(value: Any) -> bytes:
     """Use the projection encoder without importing the projection module eagerly."""
-    from asago_scenario_generator.pipeline.projection import (
+    from asago_scenario_generator.pipeline.projection_contracts import (
         canonical_json_bytes as encode,
     )
 

@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import JsonValue
 
-from asago_scenario_generator.pipeline.finalization import (
+from asago_scenario_generator.pipeline.finalization_contracts import (
     GeneratedStage,
 )
 from asago_scenario_generator.pipeline.generation_contracts import (

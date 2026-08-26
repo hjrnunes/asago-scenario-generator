@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import Field, JsonValue, model_validator
 
-from asago_scenario_generator.pipeline.finalization import (
+from asago_scenario_generator.pipeline.finalization_contracts import (
     MAX_COMPLETION_LENGTH_RETRIES,
     MAX_OWNER_RETRIES,
     GeneratedStage,

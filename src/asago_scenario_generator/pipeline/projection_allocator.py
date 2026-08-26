@@ -7,27 +7,23 @@ from typing import Any
 from asago_scenario_generator.models.attack_pattern import (
     CanonicalResourceReference,
 )
-from asago_scenario_generator.pipeline.projection import (
+from asago_scenario_generator.pipeline.projection_contracts import (
     ProjectedCandidate,
     ProjectionBudget,
     ProjectionIssue,
     ProjectionLimitation,
-    _PatternProjectionState,
 )
 from asago_scenario_generator.pipeline.projection_allocation import (
+    _PatternProjectionState,
     _ingress_slot_index,
     _target_ingress_reference,
+)
+from asago_scenario_generator.pipeline.projection_candidates import (
+    _build_candidate_from_combination,
 )
 from asago_scenario_generator.pipeline.projection_resources import (
     _iter_compatible_combinations,
 )
-
-
-def _build_candidate_from_combination(*args: Any) -> Any:
-    """Resolve the façade seam used to build one candidate."""
-    from asago_scenario_generator.pipeline import projection
-
-    return projection._build_candidate_from_combination(*args)
 
 
 class _AuthoritativeCandidateAllocator:

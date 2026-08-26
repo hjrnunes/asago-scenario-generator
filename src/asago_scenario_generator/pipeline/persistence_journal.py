@@ -10,7 +10,7 @@ import yaml
 from pydantic import Field, JsonValue, field_validator, model_validator
 
 from asago_scenario_generator.manifest import ArtifactRole
-from asago_scenario_generator.pipeline.finalization import (
+from asago_scenario_generator.pipeline.finalization_contracts import (
     GeneratedStage,
 )
 from asago_scenario_generator.pipeline.finalization_admission import (

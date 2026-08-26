@@ -14,7 +14,7 @@ from asago_scenario_generator.models.attack_pattern import (
 from asago_scenario_generator.models.capability_profile import (
     is_attacker_accessible_ingress,
 )
-from asago_scenario_generator.pipeline.projection import (
+from asago_scenario_generator.pipeline.projection_contracts import (
     CapabilityFactSnapshot,
     ProjectedCandidate,
     ProjectionIssue,

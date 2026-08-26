@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from asago_scenario_generator.manifest import ManifestIntegrityError
-from asago_scenario_generator.pipeline.finalization import (
+from asago_scenario_generator.pipeline.finalization_contracts import (
     CandidateTerminalResult,
     GeneratedStage,
     LifecycleState,

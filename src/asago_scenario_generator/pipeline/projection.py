@@ -9,295 +9,74 @@ this boundary.
 
 from __future__ import annotations
 
-import hashlib
-import json
-import unicodedata
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field
-from typing import Annotated, Any, Callable, Literal
-
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from typing import Any
 
 from asago_scenario_generator.models.attack_pattern import (
-    AgentInternalResourceReference,
-    AllCondition,
-    AnyCondition,
     AttackPattern,
     AuthoritativeFactReference,
-    CanonicalAttackChain,
-    CanonicalResourceReference,
     Condition,
-    ConditionEvaluationResult,
-    EntryPointResourceReference,
-    EvaluatedFactEvidence,
-    ExecutionRequirement,
-    IntegrationResourceReference,
-    MappingDecision,
-    NotCondition,
-    OutputSurfaceResourceReference,
-    ProjectionSnapshot,
-    StepOmission,
     TaxonomyResolver,
-    ToolResourceReference,
-    TrustBoundaryResourceReference,
-    evaluate_condition,
     validate_attack_pattern,
     validate_projection_snapshot,
 )
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 
-Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
-
-
-class ProjectionModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-def canonical_json_bytes(value: Any) -> bytes:
-    """Encode values using the projection digest contract's canonical JSON.
-
-    Mapping keys and string values are recursively normalized to Unicode NFC;
-    keys are sorted, separators are compact, non-ASCII text remains UTF-8,
-    and non-finite floats are rejected.
-    """
-    if isinstance(value, BaseModel):
-        value = value.model_dump(mode="json")
-    value = _normalize_unicode(value)
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
-
-
-def _canonical_json(value: Any) -> str:
-    return canonical_json_bytes(value).decode("utf-8")
-
-
-def _normalize_unicode(value: Any) -> Any:
-    """Apply the canonical contract's NFC rule to values and mapping keys."""
-    if isinstance(value, str):
-        return unicodedata.normalize("NFC", value)
-    if isinstance(value, dict):
-        return _normalized_mapping(value)
-    if isinstance(value, (list, tuple)):
-        normalized = _normalized_sequence(value)
-        return normalized if isinstance(value, list) else tuple(normalized)
-    return value
-
-
-def _normalized_sequence(
-    value: list[Any] | tuple[Any, ...],
-) -> list[Any]:
-    """Normalize every item of a sequence under the canonical NFC rule."""
-    return [_normalize_unicode(item) for item in value]
-
-
-def _normalized_mapping(value: dict[str, Any]) -> dict[str, Any]:
-    """Normalize mapping keys and values under the canonical NFC rule."""
-    normalized: dict[str, Any] = {}
-    for key, item in value.items():
-        if not isinstance(key, str):
-            raise TypeError("canonical JSON mapping keys must be strings")
-        normalized_key = unicodedata.normalize("NFC", key)
-        if normalized_key in normalized:
-            raise ValueError(
-                "canonical JSON mapping keys collide after NFC normalization"
-            )
-        normalized[normalized_key] = _normalize_unicode(item)
-    return normalized
-
-
-def _digest(domain: str, value: Any) -> str:
-    payload = domain.encode() + b"\0" + _canonical_json(value).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
-
-
-#: Domain separator for execution-requirements digest computation.
-EXECUTION_REQUIREMENTS_DIGEST_DOMAIN = (
-    "asago-scenario-generator:execution-requirements:v1"
+from asago_scenario_generator.pipeline.projection_contracts import (  # noqa: F401
+    CandidateComplexityInputs,
+    Digest,
+    PreconditionEvaluationResult,
+    ProjectedCandidate,
+    ProjectedMapping,
+    ProjectionBatch,
+    ProjectionBudget,
+    ProjectionIssue,
+    ProjectionLimitation,
+    ProjectionModel,
+    _canonical_json,
+    _condition_facts,
+    _condition_fact_items,
+    _dedupe_sorted_facts,
+    _digest,
+    _evaluate_preconditions,
+    _evaluate_projection_conditions,
+    _fact_key,
+    _normalize_semantic_order,
+    _normalize_unicode,
+    _normalized_mapping,
+    _normalized_sequence,
+    _pattern_pin,
+    _resource_contained,
+    _resource_id,
+    _resource_key,
+    _require_unique_requirement_ids,
+    _selected_steps_for_projection,
+    _verify_candidate_identity,
+    _verify_canonical_ingress,
+    _verify_chain_identity,
+    _verify_complexity_inputs,
+    _verify_execution_requirements_digest,
+    _verify_precondition_results,
+    _verify_precondition_true,
+    _verify_projected_mappings,
+    _expected_complexity_inputs,
+    _expected_precondition_key_map,
+    _candidate_v2_id,
+    _chain_atlas_mappings,
+    _content_pin,
+    _entry_point_matches_slot,
+    _integration_matches_slot,
+    _projected_mappings,
+    _resource_id_allowed,
+    _restriction_blocks,
+    _slot_reference_compatible,
+    _step_atlas_mappings,
+    _trust_boundary_matches_slot,
+    canonical_json_bytes,
+    compute_derivation_context_digest,
+    compute_execution_requirements_digest,
 )
-
-#: Domain separator for derivation context digest computation.
-DERIVATION_CONTEXT_DIGEST_DOMAIN = "asago-scenario-generator:derivation-context:v1"
-
-
-def compute_execution_requirements_digest(
-    requirements: Any,
-) -> str:
-    """Compute the canonical digest for a sequence of execution requirements.
-
-    Accepts model instances (with ``model_dump``) or pre-serialized dicts.
-    """
-    payloads: list[Any] = []
-    for item in requirements:
-        if hasattr(item, "model_dump"):
-            payloads.append(item.model_dump(mode="json"))
-        else:
-            payloads.append(item)
-    return _digest(EXECUTION_REQUIREMENTS_DIGEST_DOMAIN, payloads)
-
-
-def compute_derivation_context_digest(
-    projection_digest: str,
-    pattern_id: str,
-    ingress_controllability: str,
-) -> str:
-    """Compute the derivation context digest binding controllability.
-
-    Binds projection_digest + pattern_id + ingress_controllability into a
-    verified immutable digest so a caller cannot flip controllability and
-    re-sign arbitrary requirements.
-    """
-    return _digest(
-        DERIVATION_CONTEXT_DIGEST_DOMAIN,
-        {
-            "projection_digest": projection_digest,
-            "pattern_id": pattern_id,
-            "ingress_controllability": ingress_controllability,
-        },
-    )
-
-
-def _fact_key(reference: AuthoritativeFactReference) -> str:
-    return _canonical_json(reference.model_dump(mode="json"))
-
-
-def _resource_key(reference: CanonicalResourceReference) -> str:
-    return _canonical_json(reference.model_dump(mode="json"))
-
-
-def _requirement_id(prefix: str, *components: str) -> str:
-    """Generate an injective, stable requirement ID from components.
-
-    Composite requirement IDs must be collision-free even when individual
-    components contain dots (e.g. step ``a`` + slot ``b.c`` vs step ``a.b``
-    + slot ``c``).  Dot concatenation is ambiguous; hashing is not
-    guaranteed injective.  Instead, each component is encoded as its full
-    UTF-8 hexadecimal representation, and the encoded components are joined
-    with ``:`` — a character that never appears in hexadecimal output.
-    This makes the mapping ``(prefix, *components) → ID`` injective: the
-    component list can be recovered by splitting on ``:`` and hex-decoding
-    each segment, so distinct inputs always produce distinct IDs.
-
-    IDs are **unbounded in length**: hex encoding doubles each component's
-    byte length, so long step IDs or slot IDs produce long requirement IDs.
-    Downstream persistence must use unbounded text columns or establish a
-    future explicit bound.  No bounded consumer exists in candidate-v2.
-    """
-    encoded = ":".join(c.encode("utf-8").hex() for c in components)
-    return f"{prefix}.{encoded}"
-
-
-_SEMANTICALLY_UNORDERED_FIELDS = {
-    "allowed_entry_point_controllability",
-    "allowed_entry_point_directions",
-    "allowed_entry_point_ingress_zones",
-    "allowed_entry_point_types",
-    "allowed_integration_types",
-    "allowed_trust_boundary_from_zones",
-    "allowed_trust_boundary_to_zones",
-    "bindings",
-    "condition_results",
-    "consumed",
-    "distinct_from_slot_ids",
-    "evidence",
-    "ids",
-    "mappings",
-    "min_zones",
-    "observable_postconditions",
-    "observable_outcome_links",
-    "omissions",
-    "operands",
-    "preconditions",
-    "produced",
-    "references",
-    "resource_links",
-    "resource_slots",
-    "values",
-}
-
-
-def _resource_checker_for(
-    reference: CanonicalResourceReference,
-    checkers: tuple[tuple[type, Callable], ...],
-) -> Callable | None:
-    """Return the first checker whose reference type matches the instance."""
-    for ref_type, checker in checkers:
-        if isinstance(reference, ref_type):
-            return checker
-    return None
-
-
-def _entry_point_contained(
-    reference: EntryPointResourceReference, profile: CapabilityProfile
-) -> bool:
-    """True when the entry point reference resolves in the profile."""
-    return profile.resolve_entry_point(reference.entry_point_id) is not None
-
-
-def _tool_contained(
-    reference: ToolResourceReference, profile: CapabilityProfile
-) -> bool:
-    """True when the tool reference resolves in the profile."""
-    return profile.resolve_tool(reference.tool_id) is not None
-
-
-def _integration_contained(
-    reference: IntegrationResourceReference, profile: CapabilityProfile
-) -> bool:
-    """True when the integration reference resolves in the profile."""
-    return profile.resolve_integration(reference.integration_id) is not None
-
-
-def _trust_boundary_contained(
-    reference: TrustBoundaryResourceReference, profile: CapabilityProfile
-) -> bool:
-    """True when the trust-boundary reference resolves in the profile."""
-    return profile.resolve_trust_boundary(reference.trust_boundary_id) is not None
-
-
-def _output_surface_contained(
-    reference: OutputSurfaceResourceReference, profile: CapabilityProfile
-) -> bool:
-    """True when the output-surface entry point resolves in the profile."""
-    return profile.resolve_output_surface(reference.entry_point_id) is not None
-
-
-def _agent_internal_contained(
-    reference: AgentInternalResourceReference, profile: CapabilityProfile
-) -> bool:
-    """True when the profiled agent exposes its intrinsic working state.
-
-    Every validated capability profile has the reasoning zone and therefore
-    exactly one intrinsic agent working-state resource.  This remains a
-    distinct typed binding: it is never substituted with a tool, integration,
-    entry point, or trust boundary.
-    """
-    return "reasoning" in profile.zones_active
-
-
-_RESOURCE_CONTAINED_CHECKERS: tuple[tuple[type, Callable], ...] = (
-    (EntryPointResourceReference, _entry_point_contained),
-    (ToolResourceReference, _tool_contained),
-    (IntegrationResourceReference, _integration_contained),
-    (TrustBoundaryResourceReference, _trust_boundary_contained),
-    (OutputSurfaceResourceReference, _output_surface_contained),
-    (AgentInternalResourceReference, _agent_internal_contained),
-)
-
-
-def _resource_contained(
-    reference: CanonicalResourceReference, profile: CapabilityProfile
-) -> bool:
-    """Resolve whether the typed resource exists in the capability profile."""
-    checker = _resource_checker_for(reference, _RESOURCE_CONTAINED_CHECKERS)
-    return False if checker is None else checker(reference, profile)
-
-
-from asago_scenario_generator.pipeline.projection_snapshot import (  # noqa: E402, F401
+from asago_scenario_generator.pipeline.projection_snapshot import (  # noqa: F401
     CapabilityFactSnapshot,
     _assert_snapshot_facts_uniquely_sorted,
     _compute_snapshot_digest,
@@ -306,389 +85,6 @@ from asago_scenario_generator.pipeline.projection_snapshot import (  # noqa: E40
     _sorted_canonical,
     capture_capability_snapshot,
 )
-
-
-def _normalize_semantic_order(value: Any, field_name: str | None = None) -> Any:
-    value = _normalize_unicode(value)
-    if isinstance(value, dict):
-        return {
-            key: _normalize_semantic_order(item, key) for key, item in value.items()
-        }
-    if isinstance(value, list):
-        items = [_normalize_semantic_order(item) for item in value]
-        if field_name in _SEMANTICALLY_UNORDERED_FIELDS:
-            items.sort(key=_canonical_json)
-        return items
-    return value
-
-
-class ProjectionBudget(ProjectionModel):
-    """Explicit global expansion bound."""
-
-    max_candidates: int = Field(default=256, gt=0)
-    max_derivation_work: int = Field(default=4096, gt=0)
-
-
-class PreconditionEvaluationResult(ProjectionModel):
-    step_id: str
-    condition_id: str
-    result: Literal["true", "false", "unknown"]
-    evidence: tuple[EvaluatedFactEvidence, ...] = Field(min_length=1)
-
-
-class ProjectionIssue(ProjectionModel):
-    code: Literal[
-        "unresolved_condition",
-        "precondition_not_satisfied",
-        "missing_compatible_resource",
-        "incompatible_profile",
-        "unsupported_requirement_derivation",
-        "inapplicable_projection",
-        "source_influence_relation_infeasible",
-    ]
-    pattern_id: str
-    detail: str
-    step_id: str | None = None
-    slot_id: str | None = None
-    condition_results: tuple[ConditionEvaluationResult, ...] = ()
-    precondition_results: tuple[PreconditionEvaluationResult, ...] = ()
-    source_id: str | None = None
-    boundary_id: str | None = None
-    target_ingress_id: str | None = None
-    canonical_ingress_id: str | None = None
-    expected_target_zone: str | None = None
-    actual_boundary_zones: str | None = None
-    expected_source_kind: str | None = None
-    actual_binding_kind: str | None = None
-    guidance: str | None = None
-
-
-class ProjectionLimitation(ProjectionModel):
-    code: Literal["candidate_budget_exhausted", "derivation_work_exhausted"]
-    pattern_id: str
-    total_compatible_bindings: int = Field(ge=0)
-    emitted_bindings: int = Field(ge=0)
-
-
-class ProjectedMapping(ProjectionModel):
-    scope: Literal["chain", "step"]
-    step_id: str | None = None
-    mapping: MappingDecision
-
-    @model_validator(mode="after")
-    def scope_matches_step(self) -> ProjectedMapping:
-        if (self.scope == "step") != (self.step_id is not None):
-            raise ValueError("step mappings require step_id; chain mappings forbid it")
-        return self
-
-
-class CandidateComplexityInputs(ProjectionModel):
-    """Policy-free inputs reserved for the future cmps.7 complexity policy."""
-
-    selected_step_count: int = Field(ge=1)
-    attacker_controlled_step_count: int = Field(ge=1)
-    boundary_crossing_step_count: int = Field(ge=0)
-    selected_conditional_step_count: int = Field(ge=0)
-    concrete_binding_count: int = Field(ge=1)
-    execution_requirement_count: int = Field(ge=1)
-
-
-class ProjectedCandidate(ProjectionModel):
-    """Sole candidate-v2 contract intended for future generation stages."""
-
-    candidate_id: str = Field(pattern=r"^cand:v2:[0-9a-f]{32}$")
-    pattern_id: str
-    chain_id: str
-    chain_semantic_revision: int = Field(gt=0)
-    chain_semantic_digest: Digest
-    projection: ProjectionSnapshot
-    canonical_ingress: EntryPointResourceReference
-    ingress_controllability: Literal["direct", "indirect"]
-    projected_mappings: tuple[ProjectedMapping, ...]
-    precondition_results: tuple[PreconditionEvaluationResult, ...]
-    execution_requirements: tuple[ExecutionRequirement, ...]
-    requirement_derivation_version: Literal["1"]
-    execution_requirements_digest: Digest
-    complexity_inputs: CandidateComplexityInputs
-
-    @model_validator(mode="after")
-    def verifiable_identity_and_derivation(self) -> ProjectedCandidate:
-        chain = self.projection.source_chain
-        _require_unique_requirement_ids(self.execution_requirements)
-        _verify_chain_identity(
-            self.pattern_id,
-            self.chain_id,
-            self.chain_semantic_revision,
-            self.chain_semantic_digest,
-            chain,
-        )
-        _verify_canonical_ingress(self.projection, chain, self.canonical_ingress)
-        _verify_execution_requirements_digest(
-            self.execution_requirements, self.execution_requirements_digest
-        )
-        _verify_candidate_identity(self.candidate_id, self.pattern_id, self.projection)
-        expected_preconditions = _expected_precondition_key_map(
-            chain, self.projection.selected_step_ids
-        )
-        _verify_precondition_results(expected_preconditions, self.precondition_results)
-        _verify_projected_mappings(
-            self.projected_mappings, chain, self.projection.selected_step_ids
-        )
-        _verify_complexity_inputs(
-            self.complexity_inputs, chain, self.projection, self.execution_requirements
-        )
-        return self
-
-
-def _require_unique_requirement_ids(
-    execution_requirements: tuple[ExecutionRequirement, ...],
-) -> None:
-    """Require unique execution requirement IDs on the candidate."""
-    req_ids = [item.requirement_id for item in execution_requirements]
-    if len(req_ids) != len(set(req_ids)):
-        raise ValueError("execution requirement IDs must be unique")
-
-
-def _verify_chain_identity(
-    pattern_id: str,
-    chain_id: str,
-    chain_semantic_revision: int,
-    chain_semantic_digest: str,
-    chain: CanonicalAttackChain,
-) -> None:
-    """Require the candidate chain identity to match its projection."""
-    if (
-        pattern_id != chain.pattern_id
-        or chain_id != chain.chain_id
-        or chain_semantic_revision != chain.semantic_revision
-        or chain_semantic_digest != chain.semantic_digest
-    ):
-        raise ValueError("candidate chain identity does not match its projection")
-
-
-def _verify_canonical_ingress(
-    projection: ProjectionSnapshot,
-    chain: CanonicalAttackChain,
-    canonical_ingress: EntryPointResourceReference,
-) -> None:
-    """Require the canonical ingress to match the projection binding."""
-    ingress = next(
-        binding.resource_ref
-        for binding in projection.bindings
-        if binding.slot_id == chain.initial_ingress_slot_id
-    )
-    if ingress != canonical_ingress:
-        raise ValueError("canonical_ingress does not match the projection binding")
-
-
-def _verify_execution_requirements_digest(
-    execution_requirements: tuple[ExecutionRequirement, ...],
-    execution_requirements_digest: str,
-) -> None:
-    """Require the digest to match the execution requirements."""
-    expected_requirements_digest = compute_execution_requirements_digest(
-        execution_requirements
-    )
-    if execution_requirements_digest != expected_requirements_digest:
-        raise ValueError("execution_requirements_digest does not match requirements")
-
-
-def _verify_candidate_identity(
-    candidate_id: str, pattern_id: str, projection: ProjectionSnapshot
-) -> None:
-    """Require the candidate ID to match its candidate-v2 identity inputs."""
-    if candidate_id != _candidate_v2_id(pattern_id, projection):
-        raise ValueError("candidate_id does not match candidate-v2 identity inputs")
-
-
-def _expected_precondition_key_map(
-    chain: CanonicalAttackChain, selected_step_ids: tuple[str, ...]
-) -> dict[tuple[str, str], Condition]:
-    """Build the expected precondition key map for the selected steps."""
-    selected = set(selected_step_ids)
-    return {
-        (step.step_id, precondition.condition_id): precondition.condition
-        for step in chain.steps
-        if step.step_id in selected
-        for precondition in step.preconditions
-    }
-
-
-def _verify_precondition_true(condition: Condition, supplied: Any) -> None:
-    """Require one supplied precondition result to evaluate true."""
-    if (
-        supplied.result != "true"
-        or evaluate_condition(condition, supplied.evidence) != "true"
-    ):
-        raise ValueError("projected candidate preconditions must evaluate true")
-
-
-def _verify_precondition_results(
-    expected_preconditions: dict[tuple[str, str], Condition],
-    precondition_results: tuple[PreconditionEvaluationResult, ...],
-) -> None:
-    """Require unique, exactly-covering, true precondition results."""
-    supplied_preconditions = {
-        (item.step_id, item.condition_id): item for item in precondition_results
-    }
-    if len(supplied_preconditions) != len(precondition_results):
-        raise ValueError("precondition result keys must be unique")
-    if set(expected_preconditions) != set(supplied_preconditions):
-        raise ValueError("precondition results must exactly cover selected steps")
-    for key, condition in expected_preconditions.items():
-        _verify_precondition_true(condition, supplied_preconditions[key])
-
-
-def _verify_projected_mappings(
-    projected_mappings: tuple[ProjectedMapping, ...],
-    chain: CanonicalAttackChain,
-    selected_step_ids: tuple[str, ...],
-) -> None:
-    """Require the projected mappings to match the authoritative chain."""
-    if projected_mappings != _projected_mappings(chain, selected_step_ids):
-        raise ValueError("projected mappings are incomplete or non-authoritative")
-
-
-def _selected_steps_for_projection(
-    chain: CanonicalAttackChain, selected_step_ids: tuple[str, ...]
-) -> list[Any]:
-    """Collect the chain steps selected by the projection."""
-    selected = set(selected_step_ids)
-    return [step for step in chain.steps if step.step_id in selected]
-
-
-def _expected_complexity_inputs(
-    selected_steps: list[Any],
-    projection: ProjectionSnapshot,
-    execution_requirements: tuple[ExecutionRequirement, ...],
-) -> CandidateComplexityInputs:
-    """Compute the complexity inputs a candidate must carry."""
-    return CandidateComplexityInputs(
-        selected_step_count=len(selected_steps),
-        attacker_controlled_step_count=sum(
-            step.attacker_controlled for step in selected_steps
-        ),
-        boundary_crossing_step_count=sum(
-            step.boundary_position == "crossing" for step in selected_steps
-        ),
-        selected_conditional_step_count=sum(
-            step.requirement == "conditional" for step in selected_steps
-        ),
-        concrete_binding_count=len(projection.bindings),
-        execution_requirement_count=len(execution_requirements),
-    )
-
-
-def _verify_complexity_inputs(
-    complexity_inputs: CandidateComplexityInputs,
-    chain: CanonicalAttackChain,
-    projection: ProjectionSnapshot,
-    execution_requirements: tuple[ExecutionRequirement, ...],
-) -> None:
-    """Require the complexity inputs to match the projected candidate."""
-    selected_steps = _selected_steps_for_projection(chain, projection.selected_step_ids)
-    expected_complexity = _expected_complexity_inputs(
-        selected_steps, projection, execution_requirements
-    )
-    if complexity_inputs != expected_complexity:
-        raise ValueError("complexity inputs do not match projected candidate")
-
-
-def _entry_point_resource_id(reference: EntryPointResourceReference) -> str:
-    """Extract the entry point id from an entry point reference."""
-    return reference.entry_point_id
-
-
-def _integration_resource_id(reference: IntegrationResourceReference) -> str:
-    """Extract the integration id from an integration reference."""
-    return reference.integration_id
-
-
-def _trust_boundary_resource_id(
-    reference: TrustBoundaryResourceReference,
-) -> str:
-    """Extract the trust-boundary id from a trust-boundary reference."""
-    return reference.trust_boundary_id
-
-
-def _tool_resource_id(reference: ToolResourceReference) -> str:
-    """Extract the tool id from a tool reference."""
-    return reference.tool_id
-
-
-def _output_surface_resource_id(reference: OutputSurfaceResourceReference) -> str:
-    """Extract the entry point id from an output-surface reference."""
-    return reference.entry_point_id
-
-
-def _agent_internal_resource_id(
-    reference: AgentInternalResourceReference,
-) -> str:
-    """Return the intrinsic id of the agent working-state singleton."""
-    return "agent_internal:reasoning"
-
-
-_RESOURCE_ID_EXTRACTORS: tuple[tuple[type, Callable], ...] = (
-    (EntryPointResourceReference, _entry_point_resource_id),
-    (IntegrationResourceReference, _integration_resource_id),
-    (TrustBoundaryResourceReference, _trust_boundary_resource_id),
-    (ToolResourceReference, _tool_resource_id),
-    (OutputSurfaceResourceReference, _output_surface_resource_id),
-    (AgentInternalResourceReference, _agent_internal_resource_id),
-)
-
-
-def _resource_id(reference: CanonicalResourceReference) -> str:
-    extractor = _resource_checker_for(reference, _RESOURCE_ID_EXTRACTORS)
-    if extractor is None:
-        raise TypeError(f"unsupported canonical resource reference: {reference!r}")
-    return extractor(reference)
-
-
-class ProjectionBatch(ProjectionModel):
-    """Complete deterministic result, including typed non-candidate outcomes."""
-
-    capability_fact_snapshot_digest: Digest
-    candidates: tuple[ProjectedCandidate, ...]
-    infeasibilities: tuple[ProjectionIssue, ...]
-    limitations: tuple[ProjectionLimitation, ...]
-    # Coverage targets that could not be reserved due to budget exhaustion
-    # (cmps.4 blocker 3).  Empty when coverage_target_ids is not provided.
-    unreserved_coverage_targets: tuple[str, ...] = ()
-    # Coverage targets with no compatible projection at all (structural
-    # infeasibility — distinct from budget-omitted).  Empty when
-    # coverage_target_ids is not provided (cmps.4 blocker 3).
-    infeasible_coverage_targets: tuple[str, ...] = ()
-
-
-def _condition_facts(
-    condition: Condition,
-) -> tuple[AuthoritativeFactReference, ...]:
-    """Flatten a condition tree into its uniquely sorted fact references."""
-    return _dedupe_sorted_facts(_condition_fact_items(condition))
-
-
-def _condition_fact_items(condition: Condition) -> list[AuthoritativeFactReference]:
-    """Flatten a condition tree into fact references in traversal order."""
-    if isinstance(condition, (AllCondition, AnyCondition)):
-        return [
-            fact
-            for operand in condition.operands
-            for fact in _condition_fact_items(operand)
-        ]
-    if isinstance(condition, NotCondition):
-        return list(_condition_fact_items(condition.operand))
-    return [condition.fact]
-
-
-def _dedupe_sorted_facts(
-    items: list[AuthoritativeFactReference] | tuple[AuthoritativeFactReference, ...],
-) -> tuple[AuthoritativeFactReference, ...]:
-    """Deduplicate fact references by key and order them canonically."""
-    return tuple(
-        {_fact_key(item): item for item in items}[key]
-        for key in sorted({_fact_key(item): item for item in items})
-    )
 
 
 class ProjectionReadinessReport(ProjectionModel):
@@ -848,69 +244,6 @@ def ensure_projection_readiness(
     return report
 
 
-def _evaluate_projection_conditions(
-    pattern: AttackPattern, snapshot: CapabilityFactSnapshot
-) -> tuple[ConditionEvaluationResult, ...]:
-    results: list[ConditionEvaluationResult] = []
-    for step in pattern.canonical_chain.steps:
-        if step.condition is None:
-            continue
-        evidence = tuple(
-            snapshot.fact(reference)
-            or EvaluatedFactEvidence(fact=reference, status="unknown", value=None)
-            for reference in _condition_facts(step.condition)
-        )
-        results.append(
-            ConditionEvaluationResult(
-                condition_step_id=step.step_id,
-                result=evaluate_condition(step.condition, evidence),
-                evidence=evidence,
-            )
-        )
-    return tuple(results)
-
-
-def _evaluate_preconditions(
-    pattern: AttackPattern,
-    selected_step_ids: tuple[str, ...],
-    snapshot: CapabilityFactSnapshot,
-) -> tuple[PreconditionEvaluationResult, ...]:
-    selected = set(selected_step_ids)
-    return tuple(
-        result
-        for step in pattern.canonical_chain.steps
-        if step.step_id in selected
-        for result in _evaluate_step_preconditions(step, snapshot)
-    )
-
-
-def _evaluate_step_preconditions(
-    step: Any, snapshot: CapabilityFactSnapshot
-) -> tuple[PreconditionEvaluationResult, ...]:
-    """Evaluate every precondition declared by one selected step."""
-    return tuple(
-        _evaluate_precondition(step, precondition, snapshot)
-        for precondition in step.preconditions
-    )
-
-
-def _evaluate_precondition(
-    step: Any, precondition: Any, snapshot: CapabilityFactSnapshot
-) -> PreconditionEvaluationResult:
-    """Evaluate one precondition against the immutable fact snapshot."""
-    evidence = tuple(
-        snapshot.fact(reference)
-        or EvaluatedFactEvidence(fact=reference, status="unknown", value=None)
-        for reference in _condition_facts(precondition.condition)
-    )
-    return PreconditionEvaluationResult(
-        step_id=step.step_id,
-        condition_id=precondition.condition_id,
-        result=evaluate_condition(precondition.condition, evidence),
-        evidence=evidence,
-    )
-
-
 from asago_scenario_generator.pipeline.projection_resources import (  # noqa: E402, F401
     _assignment_conflicts,
     _cartesian_fill,
@@ -922,10 +255,8 @@ from asago_scenario_generator.pipeline.projection_resources import (  # noqa: E4
     _count_compatible_combinations,
     _count_component_assignments,
     _distinctness_edges,
-    _entry_point_matches_slot,
     _entry_point_reference_allowed,
     _entry_point_references,
-    _integration_matches_slot,
     _integration_references,
     _iter_compatible_combinations,
     _iter_coverage_first_combinations,
@@ -934,11 +265,7 @@ from asago_scenario_generator.pipeline.projection_resources import (  # noqa: E4
     _output_surface_references,
     _references_for_kind,
     _references_for_slot,
-    _resource_id_allowed,
-    _restriction_blocks,
-    _slot_reference_compatible,
     _tool_references,
-    _trust_boundary_matches_slot,
     _trust_boundary_references,
     _unconstrained_product,
     _variant_combinations,
@@ -946,10 +273,10 @@ from asago_scenario_generator.pipeline.projection_resources import (  # noqa: E4
 )
 
 
+from asago_scenario_generator.pipeline.projection_allocation import (  # noqa: E402, F401
+    _PatternProjectionState,
+)
 from asago_scenario_generator.pipeline.projection_requirements import (  # noqa: E402, F401
-    _candidate_v2_id,
-    _chain_atlas_mappings,
-    _content_pin,
     _derive_execution_requirements,
     _derive_execution_requirements_core,
     _fail_closed_if_no_requirements,
@@ -957,13 +284,12 @@ from asago_scenario_generator.pipeline.projection_requirements import (  # noqa:
     _link_role_requirement,
     _linked_postcondition_ids,
     _observation_requirements,
-    _projected_mappings,
+    _require_unique_requirement_ids_or_issue,
+    _requirement_id,
     _resolve_ingress_controllability,
     _security_outcome_requirements,
     _selected_ingress_links,
     _source_identity_kind_for_link,
-    _step_atlas_mappings,
-    _require_unique_requirement_ids_or_issue,
 )
 
 from asago_scenario_generator.pipeline.projection_relations import (  # noqa: E402, F401
@@ -1132,124 +458,6 @@ def _validate_derived_requirements(
     )
     if issue is not None or requirements != candidate.execution_requirements:
         raise ValueError("candidate execution requirements do not match derivation")
-
-
-def _pattern_pin(pattern: AttackPattern) -> str:
-    prerequisites = pattern.prerequisite_capabilities
-    return _content_pin(
-        "asago-scenario-generator:authoritative-pattern:v1",
-        {
-            "id": pattern.id,
-            "threat_id": pattern.threat_id,
-            "name": pattern.name,
-            "description": pattern.description,
-            "nist_classification": (
-                pattern.nist_classification.model_dump(mode="json")
-                if pattern.nist_classification
-                else None
-            ),
-            "min_zones": sorted(set(prerequisites.min_zones)),
-            "kc_requires": {
-                "all": sorted(set(prerequisites.kc_requires.all)),
-                "any": sorted(set(prerequisites.kc_requires.any)),
-            }
-            if prerequisites.kc_requires
-            else None,
-            "chain_semantic_digest": pattern.canonical_chain.semantic_digest,
-        },
-    )
-
-
-@dataclass
-class _PatternProjectionState:
-    """Lazy per-pattern projection state for bounded candidate generation.
-
-    Stores the pattern metadata and a lazy combination iterator so that
-    candidates are built on demand during reservation and fill — never
-    eagerly materializing the full Cartesian product.
-
-    Attributes:
-        pattern_id: The attack pattern ID.
-        chain: The canonical attack chain.
-        selected: Tuple of selected step IDs.
-        condition_results: Projection condition evaluation results.
-        omissions: Step omissions for conditional-false steps.
-        option_sets: Tuple of per-slot resource options.
-        total_bindings: Total Cartesian product size (for limitation
-            accounting — never materialized).
-        catalog_pin: Catalog content pin.
-        pattern_pin: Pattern content pin.
-        precondition_results: Precondition evaluation results.
-        combination_iter: Lazy iterator over coverage-first combinations.
-        snapshot: The capability fact snapshot.
-        generated: List of candidates built so far (in iterator order).
-        iterator_exhausted: True when the lazy iterator has been fully
-            consumed (no more feasible combinations).
-    """
-
-    pattern_id: str
-    chain: CanonicalAttackChain
-    selected: tuple[str, ...]
-    condition_results: tuple[ConditionEvaluationResult, ...]
-    omissions: tuple[StepOmission, ...]
-    option_sets: tuple[tuple[CanonicalResourceReference, ...], ...]
-    total_bindings: int
-    catalog_pin: str
-    pattern_pin: str
-    precondition_results: tuple[PreconditionEvaluationResult, ...]
-    combination_iter: Iterable[tuple[CanonicalResourceReference, ...]]
-    snapshot: CapabilityFactSnapshot
-    generated: list[ProjectedCandidate] = field(default_factory=list)
-    iterator_exhausted: bool = False
-    _iter: Any = field(default=None, repr=False)
-
-    def __post_init__(self) -> None:
-        if self._iter is None:
-            object.__setattr__(self, "_iter", iter(self.combination_iter))
-
-    def next_candidate(self, issues: list | None = None) -> ProjectedCandidate | None:
-        """Lazily build the next feasible candidate from the iterator.
-
-        Returns None when the iterator is exhausted.  Combinations that
-        fail execution requirements derivation are skipped; if an
-        ``issues`` list is provided, the structural issue is appended to
-        it.  The full Cartesian product is never materialized — only one
-        combination is consumed per call.
-        """
-        if self.iterator_exhausted:
-            return None
-        for resources in self._iter:
-            candidate, issue = _build_candidate_from_combination(
-                self.pattern_id,
-                self.chain,
-                self.selected,
-                self.condition_results,
-                self.omissions,
-                resources,
-                self.catalog_pin,
-                self.pattern_pin,
-                self.precondition_results,
-                self.snapshot,
-            )
-            if issue is not None and issues is not None:
-                issues.append(issue)
-            if candidate is not None:
-                self.generated.append(candidate)
-                return candidate
-            # issue — skip this combination, continue iterating.
-        # Iterator exhausted.
-        self.iterator_exhausted = True
-        return None
-
-    @property
-    def emitted(self) -> int:
-        """Number of candidates built so far."""
-        return len(self.generated)
-
-    @property
-    def feasible_remaining(self) -> bool:
-        """True if the iterator may still yield more feasible candidates."""
-        return not self.iterator_exhausted
 
 
 from asago_scenario_generator.pipeline.projection_candidates import (  # noqa: E402, F401

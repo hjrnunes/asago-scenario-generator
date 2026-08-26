@@ -16,6 +16,32 @@ stage call evidence, and typed attempt failures) live in
 persistence consume that boundary without importing one another's
 implementation modules.
 
+Authoritative projection contracts (candidate-v2 identity, digest helpers,
+capability-fact snapshots, and slot-matching policy) live in
+`pipeline.projection_contracts`. Resource matching, qualification, allocation,
+and the public `pipeline.projection` façade depend inward on that leaf. The
+envelope model imports the same contract leaf rather than the projection
+façade, so persistence validation does not pull implementation modules.
+
+Finalization lifecycle types, retry budgets, and choice-queue policy live in
+`pipeline.finalization_contracts`. Admission, gates, and persistence adapters
+depend inward on that leaf instead of the `pipeline.finalization` controller.
+Durable encoding uses `projection_contracts.canonical_json_bytes`; inventory
+validation depends on persistence record modules rather than the persistence
+façade.
+
+Candidate identity and filter wire models live in `pipeline.candidate_models`.
+Expansion, rules, capping, coverage planning, and pipeline IO consume that
+leaf rather than the `pipeline.candidates` façade.
+
+Authoritative attack-pattern models are split by responsibility
+(`attack_pattern_contracts`, `attack_pattern_chain`,
+`attack_pattern_projection`, `attack_pattern_digests`,
+`attack_pattern_validation`) behind the historical
+`models.attack_pattern` façade. Catalog-lineage source-catalog pinning lives
+in `data.catalog_lineage_snapshot` so normal lineage validation does not
+consult the mutable live catalog.
+
 The taxonomy/risk workflow uses a semantic-author/compiler seam. The model
 authors actor intent, narrative causality, attack-tree AND topology, and
 concrete behavior interactions through request-local handles. Pure compilers

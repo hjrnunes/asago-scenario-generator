@@ -5,7 +5,9 @@ from __future__ import annotations
 
 from pydantic import Field, model_validator
 
-from asago_scenario_generator.pipeline.finalization import CandidateTerminalStatus
+from asago_scenario_generator.pipeline.finalization_contracts import (
+    CandidateTerminalStatus,
+)
 from .persistence_artifacts import (
     ArtifactReceipt,
     _admitted_canonical_evidence,

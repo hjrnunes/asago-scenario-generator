@@ -20,10 +20,13 @@ from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     is_attacker_accessible_ingress,
 )
-from asago_scenario_generator.pipeline.projection import (
-    CapabilityFactSnapshot,
-    _resource_id,
+from asago_scenario_generator.pipeline.projection_contracts import (
+    _resource_id_allowed,
     _resource_key,
+    _slot_reference_compatible,
+)
+from asago_scenario_generator.pipeline.projection_snapshot import (
+    CapabilityFactSnapshot,
 )
 
 
@@ -149,87 +152,6 @@ def _references_for_kind(
     else:
         refs = builder(profile)
     return tuple(sorted(refs, key=_resource_key))
-
-
-def _restriction_blocks(value: str, allowed_values: tuple[str, ...]) -> bool:
-    """True when a slot restriction excludes the concrete value."""
-    if not allowed_values:
-        return False
-    return value not in allowed_values
-
-
-def _resource_id_allowed(
-    reference: CanonicalResourceReference, allowed_resource_ids: set[str]
-) -> bool:
-    """True when the reference id passes the slot's id allow-list."""
-    if not allowed_resource_ids:
-        return True
-    return _resource_id(reference) in allowed_resource_ids
-
-
-def _integration_matches_slot(
-    reference: IntegrationResourceReference,
-    slot: ResourceSlot,
-    snapshot: CapabilityFactSnapshot,
-) -> bool:
-    """True when the integration satisfies the slot's typed constraints."""
-    integration = snapshot.profile.resolve_integration(reference.integration_id)
-    if integration is None:  # pragma: no cover - built from this snapshot
-        return False
-    return not _restriction_blocks(
-        integration.integration_type.value, slot.allowed_integration_types
-    )
-
-
-def _entry_point_matches_slot(
-    reference: EntryPointResourceReference,
-    slot: ResourceSlot,
-    snapshot: CapabilityFactSnapshot,
-) -> bool:
-    """True when the entry point satisfies the slot's typed constraints."""
-    entry_point = snapshot.profile.resolve_entry_point(reference.entry_point_id)
-    if entry_point is None:  # pragma: no cover - built from this snapshot
-        return False
-    constraints = (
-        (entry_point.entry_point_type, slot.allowed_entry_point_types),
-        (entry_point.direction, slot.allowed_entry_point_directions),
-        (entry_point.controllability, slot.allowed_entry_point_controllability),
-        (entry_point.effective_ingress_zone, slot.allowed_entry_point_ingress_zones),
-    )
-    return all(
-        not _restriction_blocks(value, allowed) for value, allowed in constraints
-    )
-
-
-def _trust_boundary_matches_slot(
-    reference: TrustBoundaryResourceReference,
-    slot: ResourceSlot,
-    snapshot: CapabilityFactSnapshot,
-) -> bool:
-    """True when the trust boundary satisfies the slot's typed constraints."""
-    boundary = snapshot.profile.resolve_trust_boundary(reference.trust_boundary_id)
-    if boundary is None:  # pragma: no cover - built from this snapshot
-        return False
-    if _restriction_blocks(boundary.from_zone, slot.allowed_trust_boundary_from_zones):
-        return False
-    if _restriction_blocks(boundary.to_zone, slot.allowed_trust_boundary_to_zones):
-        return False
-    return True
-
-
-def _slot_reference_compatible(
-    reference: CanonicalResourceReference,
-    slot: ResourceSlot,
-    snapshot: CapabilityFactSnapshot,
-) -> bool:
-    """True when the reference satisfies the slot's typed constraints."""
-    if isinstance(reference, IntegrationResourceReference):
-        return _integration_matches_slot(reference, slot, snapshot)
-    if isinstance(reference, EntryPointResourceReference):
-        return _entry_point_matches_slot(reference, slot, snapshot)
-    if isinstance(reference, TrustBoundaryResourceReference):
-        return _trust_boundary_matches_slot(reference, slot, snapshot)
-    return True
 
 
 def _references_for_slot(

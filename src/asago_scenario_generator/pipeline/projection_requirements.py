@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from typing import Any, Literal
 
 from asago_scenario_generator.models.attack_pattern import (
@@ -18,21 +17,35 @@ from asago_scenario_generator.models.attack_pattern import (
     StateChangingToolFixtureRequirement,
     UpstreamSourceInfluenceRequirement,
 )
-from asago_scenario_generator.pipeline.projection import (
-    CapabilityFactSnapshot,
-    ProjectedMapping,
+from asago_scenario_generator.pipeline.projection_contracts import (
     ProjectionIssue,
-    _canonical_json,
-    _digest,
     _selected_steps_for_projection,
+)
+from asago_scenario_generator.pipeline.projection_snapshot import (
+    CapabilityFactSnapshot,
 )
 
 
 def _requirement_id(prefix: str, *components: str) -> str:
-    """Resolve the façade's requirement-ID seam at call time."""
-    from asago_scenario_generator.pipeline import projection
+    """Generate an injective, stable requirement ID from components.
 
-    return projection._requirement_id(prefix, *components)
+    Composite requirement IDs must be collision-free even when individual
+    components contain dots (e.g. step ``a`` + slot ``b.c`` vs step ``a.b``
+    + slot ``c``).  Dot concatenation is ambiguous; hashing is not
+    guaranteed injective.  Instead, each component is encoded as its full
+    UTF-8 hexadecimal representation, and the encoded components are joined
+    with ``:`` — a character that never appears in hexadecimal output.
+    This makes the mapping ``(prefix, *components) → ID`` injective: the
+    component list can be recovered by splitting on ``:`` and hex-decoding
+    each segment, so distinct inputs always produce distinct IDs.
+
+    IDs are **unbounded in length**: hex encoding doubles each component's
+    byte length, so long step IDs or slot IDs produce long requirement IDs.
+    Downstream persistence must use unbounded text columns or establish a
+    future explicit bound.  No bounded consumer exists in candidate-v2.
+    """
+    encoded = ":".join(c.encode("utf-8").hex() for c in components)
+    return f"{prefix}.{encoded}"
 
 
 def _derive_execution_requirements_core(
@@ -291,65 +304,3 @@ def _resolve_ingress_controllability(
     for link in _selected_ingress_links(chain, projection):
         return _ingress_controllability_for_link(bindings, link, snapshot)
     return "indirect"
-
-
-def _projected_mappings(
-    chain: CanonicalAttackChain, selected_step_ids: tuple[str, ...]
-) -> tuple[ProjectedMapping, ...]:
-    """Project the chain and selected-step ATLAS mappings."""
-    mappings = list(_chain_atlas_mappings(chain))
-    selected = set(selected_step_ids)
-    for step in chain.steps:
-        if step.step_id in selected:
-            mappings.extend(_step_atlas_mappings(step))
-    return tuple(mappings)
-
-
-def _chain_atlas_mappings(
-    chain: CanonicalAttackChain,
-) -> Iterable[ProjectedMapping]:
-    """Project the chain-level ATLAS mappings of the authoritative chain."""
-    return (
-        ProjectedMapping(scope="chain", mapping=mapping)
-        for mapping in chain.mappings
-        if mapping.taxonomy == "ATLAS"
-    )
-
-
-def _step_atlas_mappings(step: Any) -> Iterable[ProjectedMapping]:
-    """Project the ATLAS mappings declared on one selected step."""
-    return (
-        ProjectedMapping(scope="step", step_id=step.step_id, mapping=mapping)
-        for mapping in step.mappings
-        if mapping.taxonomy == "ATLAS"
-    )
-
-
-def _candidate_v2_id(pattern_id: str, projection: ProjectionSnapshot) -> str:
-    """Compute the stable candidate identity from projection content."""
-    chain = projection.source_chain
-    bindings = sorted(
-        (item.model_dump(mode="json") for item in projection.bindings),
-        key=lambda item: (item["slot_id"], _canonical_json(item["resource_ref"])),
-    )
-    ingress = next(
-        item["resource_ref"]
-        for item in bindings
-        if item["slot_id"] == chain.initial_ingress_slot_id
-    )
-    identity = {
-        "pattern_id": pattern_id,
-        "chain_id": chain.chain_id,
-        "chain_semantic_revision": chain.semantic_revision,
-        "chain_semantic_digest": chain.semantic_digest,
-        "projection_digest": projection.projection_digest,
-        "taxonomy_context": chain.taxonomy_context.model_dump(mode="json"),
-        "canonical_ingress": ingress,
-        "bindings": bindings,
-    }
-    return f"cand:v2:{_digest('asago-scenario-generator:candidate:v2', identity)[:32]}"
-
-
-def _content_pin(domain: str, value: Any) -> str:
-    """Compute a domain-separated content digest."""
-    return _digest(domain, value)

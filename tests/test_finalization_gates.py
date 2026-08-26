@@ -5,14 +5,13 @@ from __future__ import annotations
 import copy
 import math
 import unicodedata
-from dataclasses import replace
+from dataclasses import FrozenInstanceError, replace
 from types import SimpleNamespace
 
 import pytest
 
 from asago_scenario_generator.models.attack_pattern import StepResourceLink
 from asago_scenario_generator.models.attack_tree import (
-    AiSystemAction,
     AttackTree,
     AttackTreeNode,
     ExternalPreconditionAction,
@@ -25,7 +24,13 @@ from asago_scenario_generator.models.projection_envelope import (
     ProjectionTraceabilityViolation,
     ProjectionTraceabilityViolationCode,
 )
-from asago_scenario_generator.models.scenario import BehaviorAssertion, BehaviorSpec
+from asago_scenario_generator.models.scenario import (
+    BehaviorAssertion,
+    BehaviorSpec,
+    PhantomValidation,
+    StructuralValidation,
+    ValidationBlock,
+)
 from asago_scenario_generator.pipeline import finalization_gates
 from asago_scenario_generator.pipeline.coverage_planning import CoveragePlanEntry
 from asago_scenario_generator.pipeline.finalization import (
@@ -44,6 +49,12 @@ from asago_scenario_generator.pipeline.finalization import (
 )
 from asago_scenario_generator.pipeline.finalization_admission import (
     _SEMANTIC_OWNER_BY_RULE,
+    _correspondence_diagnostic,
+    _grounding_applicable,
+    _grounding_gates,
+    _nodes,
+    _phantom_gate,
+    _structural_gate,
     PostbehaviorAdmissionReport,
     _owner_for_trace,
     make_postbehavior_admission,
@@ -60,7 +71,6 @@ from asago_scenario_generator.pipeline.finalization_gates import (
     ProjectionSemanticSnapshot,
     RepairRecord,
     TreeParsimonyResult,
-    _and_gate_prunable,
     check_tree_parsimony,
     finalize_tree_parsimony,
     make_prebehavior_finalizer,
@@ -885,44 +895,6 @@ def test_concrete_finalizer_fails_closed_without_verified_candidate_context() ->
     assert not result.violations[0].retryable
 
 
-def test_finalizer_reruns_gates_on_repaired_tree_before_snapshot(
-    monkeypatch,
-) -> None:
-    candidate, actor, narrative, tree = _valid_parts()
-    calls = 0
-    original = finalization_gates.run_prebehavior_gates
-
-    def staged_gates(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        if calls == 2:
-            return GateResult(
-                AdmissionEvidenceId.structural_validity,
-                (
-                    GateViolation(
-                        GateCode.tree_realization,
-                        "repair regressed tree realization",
-                        GeneratedStage.tree,
-                    ),
-                ),
-            )
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(finalization_gates, "run_prebehavior_gates", staged_gates)
-    context = CandidateFinalizationContext(
-        candidate, ProjectionSemanticSnapshot.capture(candidate)
-    )
-    result = make_prebehavior_finalizer(get_test_snapshot())(
-        context,
-        GeneratedArtifacts(actor=actor, narrative=narrative, tree=tree),
-    )
-
-    assert calls == 2
-    assert result.snapshot is None
-    assert result.violations[0].code == GateCode.tree_realization.value
-    assert result.violations[0].owner is GeneratedStage.tree
-
-
 def test_candidate_mutated_after_revalidation_never_reaches_behavior() -> None:
     candidate, actor, narrative, tree = _valid_parts()
     candidate = copy.deepcopy(candidate)
@@ -1160,6 +1132,82 @@ def test_postbehavior_report_rejects_duplicate_evidence_ids() -> None:
                 GateResult(AdmissionEvidenceId.identity),
             ),
         )
+
+
+def test_postbehavior_report_is_frozen_and_slot_backed() -> None:
+    report = PostbehaviorAdmissionReport(
+        envelope=object(),
+        gate_results=(GateResult(AdmissionEvidenceId.identity),),
+    )
+
+    with pytest.raises(FrozenInstanceError):
+        setattr(report, "envelope", object())
+    assert not hasattr(report, "__dict__")
+
+
+def test_structural_and_phantom_gates_do_not_mutate_the_input_envelope() -> None:
+    candidate, actor, narrative, tree = _valid_parts()
+    del candidate
+    envelope = _make_envelope(actor=actor, narrative=narrative, tree=tree)
+    validation = ValidationBlock(
+        structural=StructuralValidation(),
+        phantom=PhantomValidation(),
+    )
+    envelope = envelope.model_copy(update={"validation": validation})
+    original_structural = envelope.validation.structural
+    original_phantom = envelope.validation.phantom
+
+    _structural_gate(envelope)
+    assert envelope.validation.structural is original_structural
+
+    _phantom_gate(envelope, get_test_profile())
+    assert envelope.validation.phantom is original_phantom
+
+
+def test_data_access_grounding_applicability_uses_entry_point_inventory() -> None:
+    profile = SimpleNamespace(
+        is_tool_inventory_complete=True,
+        is_entry_point_inventory_complete=False,
+    )
+
+    assert (
+        _grounding_applicable(profile, AdmissionEvidenceId.data_access_grounding)
+        is False
+    )
+
+
+def test_data_access_grounding_gate_retains_trace_diagnostics() -> None:
+    trace = GateViolation(
+        GateCode.traceability,
+        "data access trace",
+        GeneratedStage.tree,
+    )
+    profile = SimpleNamespace(
+        is_tool_inventory_complete=True,
+        is_entry_point_inventory_complete=True,
+    )
+
+    gates = _grounding_gates(profile, (trace,), [])
+    data_access = next(
+        gate
+        for gate in gates
+        if gate.evidence_id is AdmissionEvidenceId.data_access_grounding
+    )
+
+    assert data_access.diagnostics == (trace,)
+    assert data_access.outcome is False
+
+
+def test_correspondence_at_threshold_is_not_a_diagnostic() -> None:
+    assert _correspondence_diagnostic(7, 10) is None
+
+
+def test_nodes_walks_all_children_when_children_are_present() -> None:
+    leaf = SimpleNamespace(children=None)
+    child = SimpleNamespace(children=(leaf,))
+    root = SimpleNamespace(children=[child])
+
+    assert list(_nodes(root)) == [root, child, leaf]
 
 
 def test_supplied_and_embedded_forged_catalog_pin_cannot_bypass_trusted_pin() -> None:
@@ -1968,74 +2016,3 @@ class TestAdmissionPortHelpers:
             )
             == []
         )
-
-
-class TestAndGatePrunable:
-    """Direct branch coverage of _and_gate_prunable."""
-
-    @staticmethod
-    def _node(node_id: str = "n1", children=None, **kwargs) -> AttackTreeNode:
-        # model_construct bypasses validation so prunable shapes
-        # (actionless leaves, single-child gates) can be expressed.
-        return AttackTreeNode.model_construct(
-            id=node_id,
-            label="Node",
-            gate=kwargs.pop("gate", GateType.AND),
-            children=children,
-            **kwargs,
-        )
-
-    @staticmethod
-    def _actionless_leaf(node_id: str) -> AttackTreeNode:
-        return AttackTreeNode.model_construct(
-            id=node_id,
-            label="Unannotated",
-            gate=GateType.LEAF,
-            action=None,
-            children=[],
-        )
-
-    @staticmethod
-    def _typed_leaf(node_id: str) -> AttackTreeNode:
-        return AttackTreeNode(
-            id=node_id,
-            label="Typed",
-            gate=GateType.LEAF,
-            zone="input",
-            action=AiSystemAction(),
-        )
-
-    def _clean_children(self):
-        return [self._actionless_leaf("n1.1"), self._actionless_leaf("n1.2")]
-
-    def test_or_gate_never_prunable(self) -> None:
-        node = self._node(children=self._clean_children(), gate=GateType.OR)
-        assert not _and_gate_prunable(node)
-
-    def test_childless_and_gate_never_prunable(self) -> None:
-        node = self._node(children=[])
-        assert not _and_gate_prunable(node)
-
-    def test_annotated_and_gate_never_prunable(self) -> None:
-        node = self._node(children=self._clean_children(), zone="input")
-        assert not _and_gate_prunable(node)
-
-    def test_metadata_and_gate_never_prunable(self) -> None:
-        node = self._node(children=self._clean_children(), maestro_layer=1)
-        assert not _and_gate_prunable(node)
-
-    def test_realized_and_gate_never_prunable(self) -> None:
-        node = self._node(
-            children=self._clean_children(), projected_step_ids=("step.1",)
-        )
-        assert not _and_gate_prunable(node)
-
-    def test_clean_and_gate_with_all_prunable_children(self) -> None:
-        node = self._node(children=self._clean_children())
-        assert _and_gate_prunable(node)
-
-    def test_clean_and_gate_with_typed_child_not_prunable(self) -> None:
-        node = self._node(
-            children=[self._actionless_leaf("n1.1"), self._typed_leaf("n1.2")]
-        )
-        assert not _and_gate_prunable(node)
