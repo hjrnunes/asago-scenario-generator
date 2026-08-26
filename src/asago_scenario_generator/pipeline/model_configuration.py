@@ -95,6 +95,20 @@ class EffectiveModelConfig:
         }
 
 
+def _profile_value(profile: Mapping[str, Any], profile_field: str) -> Any:
+    """Return a profile field value, or None when the key is absent."""
+    if profile_field in profile:
+        return profile[profile_field]
+    return None
+
+
+def _has_env_value(environ: Mapping[str, str], env_field: str) -> bool:
+    """Whether the environment has a non-empty value for *env_field*."""
+    if env_field not in environ:
+        return False
+    return environ[env_field] != ""
+
+
 def _choose(
     explicit: Any,
     profile: Mapping[str, Any],
@@ -105,9 +119,10 @@ def _choose(
 ) -> tuple[Any, ConfigSource]:
     if explicit is not None:
         return explicit, ConfigSource.cli
-    if profile_field in profile and profile[profile_field] is not None:
-        return profile[profile_field], ConfigSource.profile
-    if env_field in environ and environ[env_field] != "":
+    profile_value = _profile_value(profile, profile_field)
+    if profile_value is not None:
+        return profile_value, ConfigSource.profile
+    if _has_env_value(environ, env_field):
         return environ[env_field], ConfigSource.environment
     return default, ConfigSource.application_default
 
@@ -130,14 +145,34 @@ def _optional_float(value: Any, field: str) -> float | None:
     return _coerce_positive(value, field, float)
 
 
+def _bool_string_value(value: Any) -> bool | None:
+    """Return the boolean meaning of a string literal, or None when it is not one."""
+    if not isinstance(value, str):
+        return None
+    lowered = value.lower()
+    if lowered in {"true", "1", "yes"}:
+        return True
+    if lowered in {"false", "0", "no"}:
+        return False
+    return None
+
+
 def _bool(value: Any, field: str) -> bool:
     if isinstance(value, bool):
         return value
-    if isinstance(value, str) and value.lower() in {"true", "1", "yes"}:
-        return True
-    if isinstance(value, str) and value.lower() in {"false", "0", "no"}:
-        return False
+    parsed = _bool_string_value(value)
+    if parsed is not None:
+        return parsed
     raise ValueError(f"{field} must be a boolean")
+
+
+def _is_string_string_mapping(value: Any) -> bool:
+    """Whether *value* is a mapping whose keys and values are all strings."""
+    if not isinstance(value, Mapping):
+        return False
+    return all(
+        isinstance(key, str) and isinstance(item, str) for key, item in value.items()
+    )
 
 
 def _headers(value: Any) -> Mapping[str, str] | None:
@@ -145,34 +180,25 @@ def _headers(value: Any) -> Mapping[str, str] | None:
         return None
     if isinstance(value, str):
         value = json.loads(value)
-    if not isinstance(value, Mapping) or not all(
-        isinstance(key, str) and isinstance(item, str) for key, item in value.items()
-    ):
+    if not _is_string_string_mapping(value):
         raise ValueError("headers must be a string-to-string mapping")
     return MappingProxyType(dict(value))
 
 
-def resolve_effective_model_config(
-    *,
-    model_profile: str | None = None,
-    profiles_file: Path | str = DEFAULT_PROFILES_FILE,
-    base_url: str | None = None,
-    api_key: str | None = None,
-    model: str | None = None,
-    max_completion_tokens: int | None = None,
-    temperature: float | None = None,
-    timeout: float | None = None,
-    top_p: float | None = None,
-    top_k: int | None = None,
-    use_guided_decoding: bool | None = None,
-    extra_headers: Mapping[str, str] | None = None,
-    environ: Mapping[str, str] | None = None,
-) -> EffectiveModelConfig:
-    """Resolve CLI overrides, then a named profile, environment, and defaults."""
-    environment = os.environ if environ is None else environ
-    profile_path = Path(profiles_file)
-    profile = load_profile(profile_path, model_profile) if model_profile else {}
-    specs = {
+def _resolution_specs(
+    base_url: str | None,
+    api_key: str | None,
+    model: str | None,
+    max_completion_tokens: int | None,
+    temperature: float | None,
+    timeout: float | None,
+    top_p: float | None,
+    top_k: int | None,
+    use_guided_decoding: bool | None,
+    extra_headers: Mapping[str, str] | None,
+) -> dict[str, tuple[Any, str, Any]]:
+    """The per-field (explicit, env-var, default) resolution table."""
+    return {
         "base_url": (base_url, "ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL", None),
         "api_key": (api_key, "ASAGO_SCENARIO_GENERATOR_API_KEY", "unused"),
         "model": (model, "ASAGO_SCENARIO_GENERATOR_MODEL_NAME", DEFAULT_MODEL),
@@ -200,23 +226,48 @@ def resolve_effective_model_config(
             None,
         ),
     }
+
+
+def _resolve_values(
+    specs: dict[str, tuple[Any, str, Any]],
+    profile: Mapping[str, Any],
+    environment: Mapping[str, str],
+) -> tuple[dict[str, Any], dict[str, ConfigSource]]:
+    """Resolve every spec field through the CLI → profile → env → default chain."""
     values: dict[str, Any] = {}
     sources: dict[str, ConfigSource] = {}
     for field, (explicit, env_field, default) in specs.items():
         values[field], sources[field] = _choose(
             explicit, profile, field, environment, env_field, default
         )
+    return values, sources
 
+
+def _optional_str(value: Any) -> str | None:
+    return str(value) if value is not None else None
+
+
+def _optional_float_value(value: Any) -> float | None:
+    return float(value) if value is not None else None
+
+
+def _config_from_values(
+    values: dict[str, Any],
+    sources: dict[str, ConfigSource],
+    model_profile: str | None,
+    profile_path: Path,
+) -> EffectiveModelConfig:
+    """Build the effective config from resolved values with type coercion."""
     return EffectiveModelConfig(
         model=str(values["model"]),
-        base_url=str(values["base_url"]) if values["base_url"] is not None else None,
+        base_url=_optional_str(values["base_url"]),
         api_key=str(values["api_key"]),
         max_completion_tokens=_optional_int(
             values["max_completion_tokens"], "max_completion_tokens"
         ),
         temperature=float(values["temperature"]),
         timeout=_optional_float(values["timeout"], "timeout"),
-        top_p=(float(values["top_p"]) if values["top_p"] is not None else None),
+        top_p=_optional_float_value(values["top_p"]),
         top_k=_optional_int(values["top_k"], "top_k"),
         use_guided_decoding=_bool(values["use_guided_decoding"], "use_guided_decoding"),
         extra_headers=_headers(values["headers"]),
@@ -224,3 +275,39 @@ def resolve_effective_model_config(
         profiles_file=profile_path if model_profile else None,
         sources=MappingProxyType(sources),
     )
+
+
+def resolve_effective_model_config(
+    *,
+    model_profile: str | None = None,
+    profiles_file: Path | str = DEFAULT_PROFILES_FILE,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
+    max_completion_tokens: int | None = None,
+    temperature: float | None = None,
+    timeout: float | None = None,
+    top_p: float | None = None,
+    top_k: int | None = None,
+    use_guided_decoding: bool | None = None,
+    extra_headers: Mapping[str, str] | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> EffectiveModelConfig:
+    """Resolve CLI overrides, then a named profile, environment, and defaults."""
+    environment = os.environ if environ is None else environ
+    profile_path = Path(profiles_file)
+    profile = load_profile(profile_path, model_profile) if model_profile else {}
+    specs = _resolution_specs(
+        base_url,
+        api_key,
+        model,
+        max_completion_tokens,
+        temperature,
+        timeout,
+        top_p,
+        top_k,
+        use_guided_decoding,
+        extra_headers,
+    )
+    values, sources = _resolve_values(specs, profile, environment)
+    return _config_from_values(values, sources, model_profile, profile_path)
