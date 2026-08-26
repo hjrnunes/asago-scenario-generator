@@ -105,18 +105,12 @@ def _greedy_coverage_selection(
     remaining_indices: list[int] = list(range(len(group)))
 
     while len(selected) < max_per_pattern and remaining_indices:
-        best_idx: int | None = None
-        best_score: tuple[int, int, int] = (-1, -1, -1)
-
-        for idx in remaining_indices:
-            score = _marginal_score(
+        best_idx = max(
+            remaining_indices,
+            key=lambda idx: _marginal_score(
                 group[idx], covered_techniques, seen_entry_points, idx
-            )
-            if score > best_score:
-                best_score = score
-                best_idx = idx
-
-        assert best_idx is not None  # remaining_indices is non-empty
+            ),
+        )
         chosen = group[best_idx]
         selected.append(chosen)
         covered_techniques.update(chosen.pinned_technique_ids)
@@ -185,8 +179,8 @@ def _merged_filtered_seed(group: list[FilteredSeed]) -> FilteredSeed:
     for fs in group:
         all_origins.extend(fs.origins)
     unique_origins = _canonicalize_and_dedup_origins(all_origins)
-    template = group[0]
-    _non_provenance_conflicts(template, group[1:], _FILTERED_NON_PROV_FIELDS)
+    template, *others = group
+    _non_provenance_conflicts(template, others, _FILTERED_NON_PROV_FIELDS)
     return template.model_copy(update={"origins": unique_origins})
 
 
@@ -201,3 +195,8 @@ _FILTERED_NON_PROV_FIELDS = (
     "owasp_llm_ids",
     "agentic_threat_ids",
 )
+
+
+# mutate4py-manifest-begin
+# {"version":1,"tested_at":"2026-08-26T20:57:36Z","module_hash":"8599b9c4c52badb6fc56bf3cb10adb36433c2ebd06d0e155b89fa7dd819e1d62","source_sha256":"f056a42ba84fc313400a182af2f70ac72c69133c7254a60a04a831624162d006","functions":[{"id":"func/cap_scenarios_per_pattern","name":"cap_scenarios_per_pattern","line":24,"end_line":95,"hash":"83c6d7e338873295ab4b2bafc84532cee06e6fb0568a00861af3e2172831054a"},{"id":"func/_greedy_coverage_selection","name":"_greedy_coverage_selection","line":98,"end_line":120,"hash":"d96c993ad22db57b7be4f87000be0b5b08a1f9a4d1fb3d2ad86ecdb70b3b2156"},{"id":"func/_marginal_score","name":"_marginal_score","line":123,"end_line":137,"hash":"7d61f929f1a7ae24e2e70992080ffa13ced969736b9b6e2ef456b34b9d9a10ea"},{"id":"func/_dedup_filtered_seeds","name":"_dedup_filtered_seeds","line":140,"end_line":164,"hash":"5aac85a792c474d656183673cdb405815951415df6d3380e06dbd82792962c56"},{"id":"func/_filtered_seed_key","name":"_filtered_seed_key","line":167,"end_line":173,"hash":"7b9560358e188f7e90a20ebda4c3847952092fc8ca4c654acc99f9ccd01d8800"},{"id":"func/_merged_filtered_seed","name":"_merged_filtered_seed","line":176,"end_line":184,"hash":"6431558cc6a7576aaafd90d607768bded97b169be7eae76d28fb6c679cd96243"}]}
+# mutate4py-manifest-end
