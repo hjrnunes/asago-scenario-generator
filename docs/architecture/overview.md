@@ -8,7 +8,10 @@ workflows.
 Pydantic models define capability profiles, taxonomy evidence, projected
 attack chains, attack trees, behavior specifications, scenario envelopes, and
 run manifests. Shared LLM adapters, deterministic validators, evaluation, and
-reporting sit around those contracts.
+reporting sit around those contracts. Named model-profile loading lives in
+`model_profiles` so generation configuration and STPA infrastructure both
+depend inward on that leaf. The historical `stpa.infra.model_profiles`
+import path remains a façade.
 
 Generation lifecycle contracts (retry directives, causal provider controls,
 stage call evidence, and typed attempt failures) live in
