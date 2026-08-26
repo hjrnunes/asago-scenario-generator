@@ -1046,3 +1046,346 @@ def _make_filtered_seed(
         entry_point_id=ep_id,
         candidate_id=cand_id,
     )
+
+
+# ---------------------------------------------------------------------------
+# Direct branch tests for the decomposed coverage-analysis helpers
+# ---------------------------------------------------------------------------
+
+
+class TestBuildEntryPointNameLookup:
+    """Branch tests for _build_entry_point_name_lookup."""
+
+    def test_includes_attacker_accessible_only(self) -> None:
+        from asago_scenario_generator.models.capability_profile import EntryPoint
+        from asago_scenario_generator.pipeline.coverage import (
+            _build_entry_point_name_lookup,
+        )
+
+        profile = CapabilityProfile(
+            zones_active=["input", "reasoning"],
+            entry_points=[
+                EntryPoint(
+                    name="user prompts (zone 1)",
+                    direction="input",
+                    controllability="direct",
+                ),
+                EntryPoint(
+                    name="logs (output)",
+                    direction="output",
+                    controllability="system",
+                ),
+            ],
+            confidence="high",
+            kc_subcodes=["KC1.1"],
+        )
+        lookup = _build_entry_point_name_lookup(
+            profile, set(profile.zones_active)
+        )
+        assert "logs (output)" not in lookup
+        assert "user prompts (zone 1)" in lookup
+
+    def test_normalized_name_groups_entry_points(self) -> None:
+        from asago_scenario_generator.pipeline.coverage import (
+            _build_entry_point_name_lookup,
+        )
+
+        profile = _make_profile(entry_points=["User Prompts (Zone 1)"])
+        lookup = _build_entry_point_name_lookup(profile, {"input", "reasoning"})
+        assert lookup == {"user prompts (zone 1)": {profile.entry_points[0].entry_point_id}}
+
+
+class TestRecordScenarioUsage:
+    """Branch tests for _record_scenario_usage."""
+
+    def test_candidate_filter_entry_point_id_credited(self) -> None:
+        from asago_scenario_generator.pipeline.coverage import _record_scenario_usage
+
+        envelope = _make_envelope(
+            entry_point="user prompts (zone 1)",
+            zone_sequence=["input", "reasoning"],
+            agentic_threat_ids=["T1"],
+        ).model_copy(
+            update={"candidate_filter": {"entry_point_id": "ep:v1:direct-canonical"}}
+        )
+        used: set[str] = set()
+        zones: set[str] = set()
+        threats: set[str] = set()
+        patterns: set[str] = set()
+        _record_scenario_usage(envelope, {}, used, zones, threats, patterns)
+        assert used == {"ep:v1:direct-canonical"}
+        assert zones == {"input", "reasoning"}
+        assert threats == {"T1"}
+        assert patterns == {"AP-T1-01"}
+
+    def test_narrative_fallback_unique_name_credited(self) -> None:
+        from asago_scenario_generator.pipeline.coverage import _record_scenario_usage
+
+        envelope = _make_envelope(entry_point="user prompts (zone 1)")
+        lookup = {"user prompts (zone 1)": {"ep:v1:canonical"}}
+        used: set[str] = set()
+        _record_scenario_usage(envelope, lookup, used, set(), set(), set())
+        assert used == {"ep:v1:canonical"}
+
+    def test_ambiguous_name_not_credited(self) -> None:
+        from asago_scenario_generator.pipeline.coverage import _record_scenario_usage
+
+        envelope = _make_envelope(entry_point="ambiguous name")
+        lookup = {"ambiguous name": {"ep:v1:one", "ep:v1:two"}}
+        used: set[str] = set()
+        _record_scenario_usage(envelope, lookup, used, set(), set(), set())
+        assert used == set()
+
+    def test_unknown_name_not_credited(self) -> None:
+        from asago_scenario_generator.pipeline.coverage import _record_scenario_usage
+
+        envelope = _make_envelope(entry_point="totally unknown name")
+        used: set[str] = set()
+        _record_scenario_usage(envelope, {}, used, set(), set(), set())
+        assert used == set()
+
+
+class TestUncoveredAttackerEntryPoints:
+    def test_reports_uncovered_accessible_and_skips_inaccessible(self) -> None:
+        from asago_scenario_generator.models.capability_profile import EntryPoint
+        from asago_scenario_generator.pipeline.coverage import (
+            _uncovered_attacker_entry_points,
+        )
+
+        profile = CapabilityProfile(
+            zones_active=["input", "reasoning"],
+            entry_points=[
+                EntryPoint(
+                    name="ep-a (zone 1)",
+                    direction="input",
+                    controllability="direct",
+                ),
+                EntryPoint(
+                    name="ep-out (output)",
+                    direction="output",
+                    controllability="system",
+                ),
+            ],
+            confidence="high",
+            kc_subcodes=["KC1.1"],
+        )
+        gaps = _uncovered_attacker_entry_points(
+            profile, {"input", "reasoning"}, set()
+        )
+        assert [g.name for g in gaps] == ["ep-a (zone 1)"]
+
+    def test_covered_ids_not_reported(self) -> None:
+        from asago_scenario_generator.pipeline.coverage import (
+            _uncovered_attacker_entry_points,
+        )
+
+        profile = _make_profile(entry_points=["ep-a (zone 1)"])
+        ep_id = profile.entry_points[0].entry_point_id
+        assert _uncovered_attacker_entry_points(
+            profile, {"input", "reasoning"}, {ep_id}
+        ) == []
+
+
+class TestInScopeAndUncoveredSets:
+    def test_in_scope_attack_ids(self) -> None:
+        from asago_scenario_generator.pipeline.coverage import _in_scope_attack_ids
+
+        surface = _make_threat_surface(
+            [["T1"], ["T2"]],
+            attack_pattern_ids=[["AP-T1-01"], ["AP-T2-01", "AP-T2-02"]],
+        )
+        threats, patterns = _in_scope_attack_ids(surface)
+        assert threats == {"T1", "T2"}
+        assert patterns == {"AP-T1-01", "AP-T2-01", "AP-T2-02"}
+
+    def test_sorted_uncovered(self) -> None:
+        from asago_scenario_generator.pipeline.coverage import _sorted_uncovered
+
+        assert _sorted_uncovered({"T2", "T1", "T3"}, {"T2"}) == ["T1", "T3"]
+        assert _sorted_uncovered({"T1"}, {"T1"}) == []
+
+
+class TestLogCoverageGapWarnings:
+    def test_logs_all_four_categories(self, caplog) -> None:
+        from asago_scenario_generator.pipeline.coverage import (
+            CoverageGaps,
+            _log_coverage_gap_warnings,
+        )
+
+        with caplog.at_level("WARNING", logger="asago_scenario_generator.pipeline.coverage"):
+            _log_coverage_gap_warnings(
+                CoverageGaps(
+                    uncovered_entry_points=[EntryPointGap("ep-a", "ep-a")],
+                    uncovered_zones=["input"],
+                    uncovered_threats=["T1"],
+                    uncovered_attack_patterns=["AP-T1-01"],
+                )
+            )
+        assert "entry point(s)" in caplog.text
+        assert "active zone(s)" in caplog.text
+        assert "in-scope threat(s)" in caplog.text
+        assert "attack pattern(s)" in caplog.text
+
+    def test_no_warnings_when_covered(self, caplog) -> None:
+        from asago_scenario_generator.pipeline.coverage import (
+            CoverageGaps,
+            _log_coverage_gap_warnings,
+        )
+
+        with caplog.at_level("WARNING", logger="asago_scenario_generator.pipeline.coverage"):
+            _log_coverage_gap_warnings(CoverageGaps())
+        assert caplog.text == ""
+
+
+class TestActorProfileHelpers:
+    def test_actor_type_of_with_and_without_profile(self) -> None:
+        from asago_scenario_generator.pipeline.coverage import _actor_type_of
+
+        assert _actor_type_of(_make_envelope(actor_type="cybercriminal")) == (
+            "cybercriminal"
+        )
+        assert _actor_type_of(_make_envelope(actor_type=None)) == "unknown"
+
+    def test_goal_category_of_with_and_without_parent(self) -> None:
+        from asago_scenario_generator.pipeline.coverage import _goal_category_of
+
+        envelope = _make_envelope(actor_type="cybercriminal")
+        assert _goal_category_of(envelope) == "uncategorized"
+        with_parent = envelope.model_copy(
+            update={
+                "actor_profile": envelope.actor_profile.model_copy(
+                    update={"goal_category_parent": "exfiltration"}
+                )
+            }
+        )
+        assert _goal_category_of(with_parent) == "exfiltration"
+
+    def test_count_actor_profiles(self) -> None:
+        from asago_scenario_generator.pipeline.coverage import _count_actor_profiles
+
+        scenarios = [
+            _make_envelope(actor_type="cybercriminal"),
+            _make_envelope(actor_type="cybercriminal"),
+            _make_envelope(actor_type=None),
+        ]
+        models, goals = _count_actor_profiles(scenarios)
+        assert models == {"cybercriminal": 2, "unknown": 1}
+        assert goals == {"uncategorized": 3}
+
+
+class TestReportPayloadHelpers:
+    def test_coverage_plan_payload_model_dump_branch(self) -> None:
+        from asago_scenario_generator.pipeline.coverage import (
+            _coverage_plan_payload,
+        )
+
+        payload = _coverage_plan_payload(_make_risk_card_ref())
+        assert payload["risk_id"] == "test-risk"
+
+    def test_coverage_plan_payload_to_dict_branch(self) -> None:
+        from asago_scenario_generator.pipeline.coverage import (
+            _coverage_plan_payload,
+        )
+
+        class _PlainPlan:
+            def to_dict(self) -> dict:
+                return {"schema_version": "1"}
+
+        assert _coverage_plan_payload(_PlainPlan()) == {"schema_version": "1"}
+
+    def test_finalization_payload(self) -> None:
+        from asago_scenario_generator.pipeline.coverage import _finalization_payload
+
+        payload = _finalization_payload(_make_risk_card_ref())
+        assert payload["risk_id"] == "test-risk"
+
+    def test_stage_ledger_payload(self) -> None:
+        from asago_scenario_generator.pipeline.coverage import _stage_ledger_payload
+        from asago_scenario_generator.pipeline.coverage_planning import (
+            STAGE_FILTER,
+            StageLedger,
+        )
+
+        assert _stage_ledger_payload(None) is None
+        assert _stage_ledger_payload(StageLedger()) is None
+        ledger = StageLedger()
+        ledger.record("ep-a", "c1", STAGE_FILTER, "rejected")
+        assert _stage_ledger_payload(ledger)["events"][0]["candidate_id"] == "c1"
+
+    def test_add_optional(self) -> None:
+        from asago_scenario_generator.pipeline.coverage import _add_optional
+
+        report: dict = {}
+        _add_optional(report, "key", "value")
+        assert report == {"key": "value"}
+        _add_optional(report, "absent", None)
+        assert report == {"key": "value"}
+
+    def test_attacker_diversity_payload(self) -> None:
+        from asago_scenario_generator.pipeline.coverage import (
+            AttackerDiversityResult,
+            _attacker_diversity_payload,
+        )
+
+        diversity = AttackerDiversityResult(
+            model_counts={"cybercriminal": 1},
+            goal_counts={"exfiltration": 1},
+            dominant_model="cybercriminal",
+            dominant_fraction=1.0,
+            is_flagged=False,
+        )
+        assert _attacker_diversity_payload(diversity)["model_counts"] == {
+            "cybercriminal": 1
+        }
+        assert _attacker_diversity_payload(None) is None
+
+    def test_coverage_universe_payload(self) -> None:
+        from asago_scenario_generator.pipeline.coverage import (
+            _coverage_universe_payload,
+        )
+        from asago_scenario_generator.pipeline.coverage_planning import (
+            CoverageUniverse,
+        )
+
+        universe = CoverageUniverse()
+        assert _coverage_universe_payload(universe)["feasible_targets"] == []
+        assert _coverage_universe_payload(None) is None
+
+    def test_quality_gaps_payload(self) -> None:
+        from asago_scenario_generator.pipeline.coverage import (
+            _quality_gaps_payload,
+        )
+        from asago_scenario_generator.pipeline.coverage_planning import (
+            CoverageGapReason,
+            QualityGap,
+        )
+
+        gap = QualityGap(
+            entry_point_id="ep-a",
+            entry_point_name="Target A",
+            reason=CoverageGapReason.NO_SEED,
+        )
+        payload = _quality_gaps_payload([gap])
+        assert payload == [gap.to_dict()]
+        assert _quality_gaps_payload([]) is None
+        assert _quality_gaps_payload(None) is None
+
+    def test_coverage_summary_payload(self) -> None:
+        from asago_scenario_generator.pipeline.coverage import (
+            _coverage_summary_payload,
+        )
+        from asago_scenario_generator.pipeline.coverage_planning import (
+            CoverageSummary,
+        )
+
+        summary = CoverageSummary(
+            covered_feasible=["ep-a"],
+            policy_exclusions=[],
+            structural_gaps=[],
+            selection_limitations=[],
+            runtime_generation_gaps=[],
+            quarantine_admission_failures=[],
+            projection_limitations=[],
+        )
+        assert _coverage_summary_payload(summary)["covered_feasible"] == ["ep-a"]
+        assert _coverage_summary_payload(None) is None
