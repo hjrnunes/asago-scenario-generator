@@ -25,7 +25,7 @@ from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     inject_kc_subcodes_display,
 )
-from asago_scenario_generator.pipeline.candidates import FilterSeedQuarantine
+from asago_scenario_generator.pipeline.candidate_models import FilterSeedQuarantine
 from asago_scenario_generator.pipeline.jsonl import append_jsonl
 
 logger = logging.getLogger(__name__)

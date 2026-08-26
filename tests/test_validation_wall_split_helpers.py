@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from asago_scenario_generator.eval.versioned_metrics import _load_v3_scorecard_models
 from asago_scenario_generator.llm.client import LLMResult
@@ -23,6 +24,8 @@ from asago_scenario_generator.manifest import (
     ArtifactRole,
     ManifestInventoryResolver,
     ManifestIntegrityError,
+    InputHashes,
+    Provenance,
     RunManifest,
     RunStatus,
     _check_completed_scenario_pairing,
@@ -56,6 +59,7 @@ from asago_scenario_generator.models.projection_envelope import (
     ProjectionTraceabilityViolationCode,
 )
 from asago_scenario_generator.models.scenario import CallMetadata, CallName
+from asago_scenario_generator.pipeline import runner as runner_module
 from asago_scenario_generator.pipeline import runner_run as runner_run_module
 from asago_scenario_generator.pipeline.runner_run import (
     _expansion_record,
@@ -95,8 +99,12 @@ from asago_scenario_generator.pipeline.runner import (
     PipelineResult,
     QualificationFactsV1,
     _apply_zone_filter,
+    _authoritative_second_pass,
     _authoritative_products_ready,
+    _finalize_run_manifest,
     _ordinary_completion_succeeded,
+    _provisional_eval_product,
+    _provisional_report_product,
     _readable_evidence_file,
     _rule_rejection_reasons,
     _scorecard_qualification_passed,
@@ -1500,6 +1508,155 @@ class TestRunnerCompletionPredicates:
         assert _readable_evidence_file(regular) is True
         assert _readable_evidence_file(tmp_path) is False
         assert _readable_evidence_file(tmp_path / "missing") is False
+
+
+class TestRunnerProductFinalization:
+    def test_qualification_facts_are_frozen(self) -> None:
+        facts = QualificationFactsV1(facts=())
+
+        with pytest.raises(ValidationError):
+            facts.schema_version = "1"
+
+    def test_disabled_eval_does_not_run_the_eval_product(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        import asago_scenario_generator.eval.runner as eval_runner
+
+        monkeypatch.setattr(
+            eval_runner,
+            "run_evaluation",
+            lambda **_kwargs: {"qualification": {"status": "pass"}},
+        )
+        monkeypatch.setattr(
+            runner_module, "_provisional_manifest", lambda *_args, **_kwargs: object()
+        )
+        monkeypatch.setattr(
+            runner_module, "build_in_memory_resolver", lambda *_args: object()
+        )
+        monkeypatch.setattr(
+            runner_module, "write_eval_scorecard", lambda *_args: None
+        )
+
+        assert (
+            _provisional_eval_product(
+                tmp_path,
+                "run",
+                "start",
+                None,
+                object(),
+                False,
+                None,
+            )
+            == (False, False)
+        )
+
+    def test_eval_failure_is_non_authoritative(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        def fail(*_args, **_kwargs):
+            raise RuntimeError("eval failed")
+
+        monkeypatch.setattr(runner_module, "_provisional_manifest", fail)
+
+        assert (
+            _provisional_eval_product(
+                tmp_path,
+                "run",
+                "start",
+                None,
+                object(),
+                True,
+                None,
+            )
+            == (False, False)
+        )
+
+    def test_report_failure_is_non_authoritative(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        def fail(*_args, **_kwargs):
+            raise RuntimeError("report failed")
+
+        monkeypatch.setattr(runner_module, "_provisional_manifest", fail)
+
+        assert (
+            _provisional_report_product(
+                tmp_path,
+                "run",
+                "start",
+                None,
+                object(),
+                False,
+            )
+            is False
+        )
+
+    def test_authoritative_product_failure_clears_all_success_flags(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        def fail(*_args, **_kwargs):
+            raise RuntimeError("strict product failure")
+
+        monkeypatch.setattr(runner_module, "_strict_authoritative_manifest", fail)
+
+        assert (
+            _authoritative_second_pass(
+                tmp_path,
+                "run",
+                "start",
+                None,
+                object(),
+                None,
+            )
+            == (False, False, False)
+        )
+
+    def test_finalize_manifest_closes_supplied_provenance(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        import asago_scenario_generator.pipeline.runner_finalization as finalization
+
+        monkeypatch.setattr(
+            finalization, "build_v3_inventory", lambda *_args, **_kwargs: []
+        )
+        monkeypatch.setattr(
+            runner_module,
+            "select_final_run_status",
+            lambda *_args: RunStatus.FAILED,
+        )
+        monkeypatch.setattr(
+            runner_module, "compute_file_sha256", lambda _path: "profile-hash"
+        )
+        monkeypatch.setattr(
+            runner_module,
+            "ManifestInventoryResolver",
+            lambda *_args, **_kwargs: None,
+        )
+        monkeypatch.setattr(runner_module, "finalize_manifest", lambda *_args: None)
+
+        (tmp_path / "capability-profile.yaml").write_text("profile")
+        provenance = Provenance(
+            run_id="run",
+            timestamp_start="start",
+            input_hashes=InputHashes(),
+        )
+
+        _finalize_run_manifest(
+            tmp_path,
+            "run",
+            "start",
+            provenance,
+            object(),
+            [],
+            {},
+            False,
+            False,
+            False,
+            False,
+        )
+
+        assert provenance.timestamp_end is not None
+        assert provenance.input_hashes.effective_profile_hash == "profile-hash"
 
 
 class TestPipelineResultDefaults:

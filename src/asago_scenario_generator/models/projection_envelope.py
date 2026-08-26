@@ -38,11 +38,13 @@ from asago_scenario_generator.models.attack_pattern import (
     ExecutionRequirement,
     ProjectionSnapshot,
 )
-from asago_scenario_generator.pipeline.projection import (
+from asago_scenario_generator.pipeline.projection_contracts import (
     CapabilityFactSnapshot,
     Digest,
     ProjectedMapping,
     ProjectionModel,
+    compute_derivation_context_digest,
+    compute_execution_requirements_digest,
 )
 
 # ---------------------------------------------------------------------------#
@@ -272,10 +274,6 @@ class ProjectionEnvelopeBlock(ProjectionModel):
     @model_validator(mode="after")
     def _execution_requirements_digest_matches(self) -> ProjectionEnvelopeBlock:
         """Reject tampered execution requirements (nested mutation defense)."""
-        from asago_scenario_generator.pipeline.projection import (
-            compute_execution_requirements_digest,
-        )
-
         expected = compute_execution_requirements_digest(self.execution_requirements)
         if expected != self.execution_requirements_digest:
             raise ValueError(
@@ -292,10 +290,6 @@ class ProjectionEnvelopeBlock(ProjectionModel):
         arbitrary requirements.  The derivation context digest binds
         projection_digest + pattern_id + ingress_controllability.
         """
-        from asago_scenario_generator.pipeline.projection import (
-            compute_derivation_context_digest,
-        )
-
         expected = compute_derivation_context_digest(
             self.projection.projection_digest,
             self.projection.source_chain.pattern_id,

@@ -402,6 +402,8 @@ class TestRunnerFinalizationHelpers:
         assert _authorized_length_retry(GeneratedStage.narrative, record) == 0
         assert _authorized_length_retry(GeneratedStage.actor, None) == 0
         assert (
-            _authorized_length_retry(GeneratedStage.actor, _stage_record(GeneratedStage.actor, "other"))
+            _authorized_length_retry(
+                GeneratedStage.actor, _stage_record(GeneratedStage.actor, "other")
+            )
             == 0
         )

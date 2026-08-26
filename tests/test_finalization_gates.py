@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import math
 import unicodedata
-from dataclasses import replace
+from dataclasses import FrozenInstanceError, replace
 from types import SimpleNamespace
 
 import pytest
@@ -25,7 +25,13 @@ from asago_scenario_generator.models.projection_envelope import (
     ProjectionTraceabilityViolation,
     ProjectionTraceabilityViolationCode,
 )
-from asago_scenario_generator.models.scenario import BehaviorAssertion, BehaviorSpec
+from asago_scenario_generator.models.scenario import (
+    BehaviorAssertion,
+    BehaviorSpec,
+    PhantomValidation,
+    StructuralValidation,
+    ValidationBlock,
+)
 from asago_scenario_generator.pipeline import finalization_gates
 from asago_scenario_generator.pipeline.coverage_planning import CoveragePlanEntry
 from asago_scenario_generator.pipeline.finalization import (
@@ -44,6 +50,12 @@ from asago_scenario_generator.pipeline.finalization import (
 )
 from asago_scenario_generator.pipeline.finalization_admission import (
     _SEMANTIC_OWNER_BY_RULE,
+    _correspondence_diagnostic,
+    _grounding_applicable,
+    _grounding_gates,
+    _nodes,
+    _phantom_gate,
+    _structural_gate,
     PostbehaviorAdmissionReport,
     _owner_for_trace,
     make_postbehavior_admission,
@@ -1162,6 +1174,82 @@ def test_postbehavior_report_rejects_duplicate_evidence_ids() -> None:
         )
 
 
+def test_postbehavior_report_is_frozen_and_slot_backed() -> None:
+    report = PostbehaviorAdmissionReport(
+        envelope=object(),
+        gate_results=(GateResult(AdmissionEvidenceId.identity),),
+    )
+
+    with pytest.raises(FrozenInstanceError):
+        setattr(report, "envelope", object())
+    assert not hasattr(report, "__dict__")
+
+
+def test_structural_and_phantom_gates_do_not_mutate_the_input_envelope() -> None:
+    candidate, actor, narrative, tree = _valid_parts()
+    del candidate
+    envelope = _make_envelope(actor=actor, narrative=narrative, tree=tree)
+    validation = ValidationBlock(
+        structural=StructuralValidation(),
+        phantom=PhantomValidation(),
+    )
+    envelope = envelope.model_copy(update={"validation": validation})
+    original_structural = envelope.validation.structural
+    original_phantom = envelope.validation.phantom
+
+    _structural_gate(envelope)
+    assert envelope.validation.structural is original_structural
+
+    _phantom_gate(envelope, get_test_profile())
+    assert envelope.validation.phantom is original_phantom
+
+
+def test_data_access_grounding_applicability_uses_entry_point_inventory() -> None:
+    profile = SimpleNamespace(
+        is_tool_inventory_complete=True,
+        is_entry_point_inventory_complete=False,
+    )
+
+    assert (
+        _grounding_applicable(profile, AdmissionEvidenceId.data_access_grounding)
+        is False
+    )
+
+
+def test_data_access_grounding_gate_retains_trace_diagnostics() -> None:
+    trace = GateViolation(
+        GateCode.traceability,
+        "data access trace",
+        GeneratedStage.tree,
+    )
+    profile = SimpleNamespace(
+        is_tool_inventory_complete=True,
+        is_entry_point_inventory_complete=True,
+    )
+
+    gates = _grounding_gates(profile, (trace,), [])
+    data_access = next(
+        gate
+        for gate in gates
+        if gate.evidence_id is AdmissionEvidenceId.data_access_grounding
+    )
+
+    assert data_access.diagnostics == (trace,)
+    assert data_access.outcome is False
+
+
+def test_correspondence_at_threshold_is_not_a_diagnostic() -> None:
+    assert _correspondence_diagnostic(7, 10) is None
+
+
+def test_nodes_walks_all_children_when_children_are_present() -> None:
+    leaf = SimpleNamespace(children=None)
+    child = SimpleNamespace(children=(leaf,))
+    root = SimpleNamespace(children=[child])
+
+    assert list(_nodes(root)) == [root, child, leaf]
+
+
 def test_supplied_and_embedded_forged_catalog_pin_cannot_bypass_trusted_pin() -> None:
     candidate, _, _, tree = _valid_parts()
     behavior = _phase3b_behavior(candidate, tree)
@@ -1839,6 +1927,70 @@ class TestAdmissionPortHelpers:
         assert low is not None
         assert low.code is GateCode.heuristic_correspondence
         assert low.owner is GeneratedStage.tree
+
+    def test_narrative_tree_diagnostics_reports_low_correspondence(self):
+        from asago_scenario_generator.pipeline.finalization_admission import (
+            _narrative_tree_diagnostics,
+        )
+
+        leaf = SimpleNamespace(gate=GateType.LEAF, zone="input")
+        tree = SimpleNamespace(
+            root=SimpleNamespace(
+                gate=GateType.AND,
+                children=tuple(leaf for _ in range(5)),
+            )
+        )
+        envelope = SimpleNamespace(
+            narrative=SimpleNamespace(
+                steps=(SimpleNamespace(zone="input"),),
+            )
+        )
+
+        result = _narrative_tree_diagnostics(envelope, tree)
+
+        assert [item.code for item in result.diagnostics] == [
+            GateCode.heuristic_correspondence
+        ]
+
+    def test_postcondition_owners_skip_unselected_and_reject_ambiguous(self):
+        from asago_scenario_generator.pipeline.finalization_admission import (
+            _postcondition_owners,
+        )
+
+        postcondition = SimpleNamespace(
+            postcondition_id="post.1",
+            security_relevant=True,
+        )
+        projection = SimpleNamespace(
+            selected_step_ids=("step.1", "step.2"),
+            projection=SimpleNamespace(
+                source_chain=SimpleNamespace(
+                    steps=(
+                        SimpleNamespace(
+                            step_id="omitted",
+                            observable_postconditions=(postcondition,),
+                        ),
+                        SimpleNamespace(
+                            step_id="step.1",
+                            observable_postconditions=(postcondition,),
+                        ),
+                        SimpleNamespace(
+                            step_id="step.2",
+                            observable_postconditions=(postcondition,),
+                        ),
+                    )
+                )
+            ),
+        )
+        violations = []
+
+        owners, required, ambiguous = _postcondition_owners(projection, violations)
+
+        assert owners == {"post.1": "step.1"}
+        assert required == {("step.1", "post.1")}
+        assert ambiguous == {"post.1"}
+        assert len(violations) == 1
+        assert violations[0].code is GateCode.candidate_identity
 
     def test_or_tree_gate(self):
         from asago_scenario_generator.pipeline.finalization_admission import (

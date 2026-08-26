@@ -30,9 +30,11 @@ from asago_scenario_generator.pipeline.compatibility import (
     EXECUTOR_ROLE_TO_LEAF_COMPAT,
     STEP_TO_LEAF_ACTION_COMPAT,
 )
-from asago_scenario_generator.pipeline.projection import (
-    CapabilityFactSnapshot,
+from asago_scenario_generator.pipeline.projection_contracts import (
     _candidate_v2_id,
+)
+from asago_scenario_generator.pipeline.projection_snapshot import (
+    CapabilityFactSnapshot,
 )
 from asago_scenario_generator.pipeline.projection_drift import (
     _check_projection_drift,
