@@ -196,3 +196,8 @@ def build_coverage_universe(
         completeness.value,
     )
     return universe
+
+
+# mutate4py-manifest-begin
+# {"version":1,"tested_at":"2026-08-26T11:32:57Z","module_hash":"84c81ee8ea6e3102cc8d3a37aa75c81f0a360bdc545bca549af6a0a5effedaa7","source_sha256":"e05f579d65679d32ceba1393414e2f2d24e3b91808eeed75937a281a850892f5","functions":[{"id":"func/CoverageUniverse.feasible_target_ids","name":"feasible_target_ids","line":82,"end_line":84,"hash":"50fbd6bd79b6baca47bd8c216a4fc6fa6d3a59b5a3f5eb164a8e42309eadf0b3"},{"id":"func/CoverageUniverse.to_dict","name":"to_dict","line":86,"end_line":109,"hash":"4b4fbd0d64f28333b7de678ed61f184874b275fef8c7c40f61161a258b875768"},{"id":"func/_classify_exclusion","name":"_classify_exclusion","line":112,"end_line":126,"hash":"0cf0c2783350b64b88af3fb5f78377f071a0c2202e986b123b556a40ba00e8e5"},{"id":"func/_target_from_entry","name":"_target_from_entry","line":129,"end_line":136,"hash":"0b5a9d07c865179b6dc3a832d36a6ada56d570d117d9de849c221cd13552f5c2"},{"id":"func/_exclusion_from_entry","name":"_exclusion_from_entry","line":139,"end_line":150,"hash":"8f51ae36305e56f2bd319670214fc80c7fd67c1ad15b7c5ae2bf09edb2e41d86"},{"id":"func/_universe_completeness","name":"_universe_completeness","line":153,"end_line":160,"hash":"75d4476c08942a786fa19cdf000cb0aead4b789ef25a918f6d6424fc2c239817"},{"id":"func/build_coverage_universe","name":"build_coverage_universe","line":163,"end_line":198,"hash":"11b2142345cfbe243dae2bc6d28535285473deec6ef2cd5f8cb9d5ffef35e9dd"}]}
+# mutate4py-manifest-end

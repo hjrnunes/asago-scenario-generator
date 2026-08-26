@@ -224,12 +224,9 @@ class TestStagesDependInwardOnDraftLeaves:
     ) -> None:
         """Accepted-draft evidence stays on the compiler leaves."""
         imports = _imported_modules(GENERATE_DIR / "stages.py")
+        assert "asago_scenario_generator.pipeline.generate.actor_semantics" in imports
         assert (
-            "asago_scenario_generator.pipeline.generate.actor_semantics" in imports
-        )
-        assert (
-            "asago_scenario_generator.pipeline.generate.narrative_semantics"
-            in imports
+            "asago_scenario_generator.pipeline.generate.narrative_semantics" in imports
         )
         assert "asago_scenario_generator.pipeline.generate.actor" not in imports
         assert "asago_scenario_generator.pipeline.generate.narrative" not in imports

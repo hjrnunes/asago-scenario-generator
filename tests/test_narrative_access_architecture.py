@@ -85,8 +85,7 @@ class TestNarrativeAccessLeaf:
             )
         ]
         assert not violations, (
-            "narrative_access imports IO-near modules: "
-            f"{sorted(violations)}"
+            f"narrative_access imports IO-near modules: {sorted(violations)}"
         )
 
 
@@ -110,8 +109,7 @@ class TestNarrativeSemanticsLeaf:
             )
         ]
         assert not violations, (
-            "narrative_semantics imports IO-near modules: "
-            f"{sorted(violations)}"
+            f"narrative_semantics imports IO-near modules: {sorted(violations)}"
         )
 
     def test_leaf_reaches_only_inward_generate_siblings(self) -> None:
@@ -123,8 +121,7 @@ class TestNarrativeSemanticsLeaf:
             if imp.startswith("asago_scenario_generator.pipeline.generate.")
         }
         assert siblings <= self._ALLOWED_GENERATE_SIBLINGS, (
-            "narrative_semantics reaches orchestration siblings: "
-            f"{sorted(siblings)}"
+            f"narrative_semantics reaches orchestration siblings: {sorted(siblings)}"
         )
 
 
@@ -184,6 +181,5 @@ class TestProjectionBlockLeaf:
             )
         ]
         assert not violations, (
-            "projection_block imports IO-near modules: "
-            f"{sorted(violations)}"
+            f"projection_block imports IO-near modules: {sorted(violations)}"
         )
