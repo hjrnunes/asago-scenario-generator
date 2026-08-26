@@ -90,6 +90,7 @@ from asago_scenario_generator.pipeline.projection_validation import (
     _ingress_leaf_mismatch,
     validate_projection_traceability,
 )
+import asago_scenario_generator.pipeline.projection_drift as projection_drift
 from asago_scenario_generator.pipeline.projection_drift import (
     _compare_projection_pins,
     _compare_recomputed_mappings,
@@ -5054,16 +5055,27 @@ class TestProjectionContextSerializers:
 class TestProjectionDriftShortCircuits:
     """The drift orchestrator stops on corrupted or substituted evidence."""
 
-    def test_corrupt_snapshot_stops_drift(self):
+    def test_corrupt_snapshot_stops_drift(self, monkeypatch: pytest.MonkeyPatch):
         """Snapshot integrity failure returns before further recomputation."""
         block = _make_block()
         block.capability_snapshot.profile.zones_active = ["input"]
         envelope = _make_envelope(block)
+
+        def fail_if_recomputed(*_args: Any, **_kwargs: Any) -> None:
+            pytest.fail("snapshot digest check must not run after integrity failure")
+
+        monkeypatch.setattr(
+            projection_drift,
+            "_verify_snapshot_digest_match",
+            fail_if_recomputed,
+        )
         result = validate_projection_traceability(envelope)
         codes = {v.code for v in result.violations}
         assert ProjectionTraceabilityViolationCode.nested_mutation in codes
 
-    def test_substituted_snapshot_digest_stops_drift(self):
+    def test_substituted_snapshot_digest_stops_drift(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
         """A digest pin that does not match the snapshot stops drift checks."""
         envelope = _make_envelope()
         envelope.projection = envelope.projection.model_copy(
@@ -5072,6 +5084,17 @@ class TestProjectionDriftShortCircuits:
                     update={"capability_fact_snapshot_digest": "f" * 64}
                 )
             }
+        )
+
+        def fail_if_recomputed(*_args: Any, **_kwargs: Any) -> None:
+            pytest.fail(
+                "controllability derivation must not run after snapshot pin mismatch"
+            )
+
+        monkeypatch.setattr(
+            projection_drift,
+            "_derive_controllability_from_evidence",
+            fail_if_recomputed,
         )
         result = validate_projection_traceability(envelope)
         codes = {v.code for v in result.violations}

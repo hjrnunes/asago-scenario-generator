@@ -12,12 +12,14 @@ Feature: Taxonomy narrative outside boundaries
     And a narrative step maps projected step ID "<step_id>" with zone "<narrative_zone>"
     When narrative projection zones are enforced
     Then the narrative step is accepted without changing its zone or projected step IDs
+    And the narrative mapping matches expected projected step ID "<expected_step_id>" and zone "<expected_narrative_zone>"
+    And projected step "<expected_step_id>" has expected boundary position "<expected_boundary_position>"
 
     Examples:
-      | step_id           | boundary_position | narrative_zone |
-      | attacker.prepare  | outside           | outside        |
-      | attacker.deliver  | crossing          | input          |
-      | system.transform  | inside            | reasoning      |
+      | step_id           | boundary_position | narrative_zone | expected_step_id  | expected_boundary_position | expected_narrative_zone |
+      | attacker.prepare  | outside           | outside        | attacker.prepare  | outside                    | outside                |
+      | attacker.deliver  | crossing          | input          | attacker.deliver  | crossing                   | input                  |
+      | system.transform  | inside            | reasoning      | system.transform  | inside                     | reasoning              |
 
   # Taxonomy narrative outside boundaries 02 combines only outside projected steps under the outside zone
   Scenario: Taxonomy narrative outside boundaries 02 combines only outside projected steps under the outside zone
@@ -33,15 +35,18 @@ Feature: Taxonomy narrative outside boundaries
     When narrative projection zones are enforced
     Then enforcement rejects the narrative with projection-zone reason "<reason>"
     And no narrative step is removed, renumbered, or remapped
+    And the narrative mapping matches expected projected step IDs "<expected_projected_step_ids>" and zone "<expected_narrative_zone>"
+    And projected step boundaries match expected positions "<expected_boundary_positions>"
+    And enforcement reports exact projection-zone reason "<expected_reason>"
 
     Examples:
-      | projected_step_ids                    | boundary_positions | narrative_zone | reason                  |
-      | attacker.prepare,system.transform     | outside,inside     | outside        | mixed boundary positions |
-      | attacker.prepare,system.transform     | outside,inside     | input          | mixed boundary positions |
-      | system.transform                      | inside             | outside        | inside step outside       |
-      | attacker.deliver                      | crossing           | outside        | crossing step outside     |
-      | attacker.prepare                      | outside            | input          | outside step active zone  |
-      | system.transform                      | inside             | memory         | inactive Schneider zone   |
+      | projected_step_ids                    | boundary_positions | narrative_zone | reason                  | expected_projected_step_ids             | expected_boundary_positions | expected_narrative_zone | expected_reason           |
+      | attacker.prepare,system.transform     | outside,inside     | outside        | mixed boundary positions | attacker.prepare,system.transform      | outside,inside             | outside                | mixed boundary positions |
+      | attacker.prepare,system.transform     | outside,inside     | input          | mixed boundary positions | attacker.prepare,system.transform      | outside,inside             | input                  | mixed boundary positions |
+      | system.transform                      | inside             | outside        | inside step outside       | system.transform                       | inside                     | outside                | inside step outside       |
+      | attacker.deliver                      | crossing           | outside        | crossing step outside     | attacker.deliver                       | crossing                  | outside                | crossing step outside  |
+      | attacker.prepare                      | outside            | input          | outside step active zone  | attacker.prepare                       | outside                   | input                  | outside step active zone |
+      | system.transform                      | inside             | memory         | inactive Schneider zone   | system.transform                       | inside                    | memory                 | inactive Schneider zone |
 
   # Taxonomy narrative outside boundaries 04 preserves outside traversal order
   Scenario: Taxonomy narrative outside boundaries 04 preserves outside traversal order
