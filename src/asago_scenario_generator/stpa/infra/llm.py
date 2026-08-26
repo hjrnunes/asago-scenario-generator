@@ -81,6 +81,58 @@ def _inject_openrouter_headers(merged: dict[str, str], base_url: str | None) -> 
             merged.setdefault(key, default)
 
 
+def _prompt_messages(system_prompt: str, user_prompt: str) -> list[dict[str, str]]:
+    """The standard system + user message pair for one completion."""
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+
+def _guided_json_enabled(
+    use_guided_decoding: bool,
+    allow_unvalidated: bool,
+    response_format: type[BaseModel] | None,
+) -> bool:
+    """Whether vLLM guided_json applies for this request."""
+    return use_guided_decoding and allow_unvalidated and response_format is not None
+
+
+def _apply_legacy_json_fallback(
+    extra_kwargs: dict[str, Any],
+    allow_unvalidated: bool,
+    response_format: type[BaseModel] | None,
+    use_guided_json: bool,
+) -> None:
+    """Fall back to legacy json_object mode for models without guided decoding."""
+    if allow_unvalidated and response_format is not None and not use_guided_json:
+        extra_kwargs["response_format"] = {"type": "json_object"}
+
+
+def _token_usage(response: Any) -> Any:
+    """Normalize a response's usage record to a token-count object."""
+    return (
+        response.usage or type("U", (), {"prompt_tokens": 0, "completion_tokens": 0})()
+    )
+
+
+def _top_k_extra_body(top_k: int | None) -> dict[str, Any]:
+    """The extra_body entries for the top_k control."""
+    if top_k is None:
+        return {}
+    return {"top_k": top_k}
+
+
+def _guided_json_extra_body(
+    use_guided_json: bool,
+    response_format: type[BaseModel] | None,
+) -> dict[str, Any]:
+    """The extra_body entries for vLLM strict JSON schema enforcement."""
+    if use_guided_json and response_format is not None:
+        return {"guided_json": response_format.model_json_schema()}
+    return {}
+
+
 class LLMResult(BaseModel):
     """Wrapper carrying the LLM response plus usage telemetry."""
 
@@ -163,12 +215,10 @@ class LLMClient:
         if self.top_p is not None:
             kwargs["top_p"] = self.top_p
 
-        extra_body: dict[str, Any] = {}
-        if self.top_k is not None:
-            extra_body["top_k"] = self.top_k
-        if use_guided_json and response_format is not None:
-            extra_body["guided_json"] = response_format.model_json_schema()
-
+        extra_body = {
+            **_top_k_extra_body(self.top_k),
+            **_guided_json_extra_body(use_guided_json, response_format),
+        }
         if extra_body:
             kwargs["extra_body"] = extra_body
 
@@ -210,40 +260,29 @@ class LLMClient:
         effective_max = max_completion_tokens or self.max_completion_tokens
         effective_temp = temperature if temperature is not None else self.temperature
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
-
         # Use vLLM guided_json for strict schema enforcement when enabled via profile
         # This enables guided decoding which masks invalid tokens during generation
         # Only enabled when use_guided_decoding=True in model profile
-        use_guided_json = (
-            self.use_guided_decoding
-            and allow_unvalidated
-            and response_format is not None
+        use_guided_json = _guided_json_enabled(
+            self.use_guided_decoding, allow_unvalidated, response_format
         )
         extra_kwargs = self._build_extra_kwargs(
             effective_max, effective_temp, response_format, use_guided_json
         )
-
-        # Fallback to legacy json_object mode for models without guided decoding
-        if allow_unvalidated and response_format is not None and not use_guided_json:
-            extra_kwargs["response_format"] = {"type": "json_object"}
+        _apply_legacy_json_fallback(
+            extra_kwargs, allow_unvalidated, response_format, use_guided_json
+        )
 
         t0 = time.perf_counter_ns()
         response, content = self._request_completion(
-            messages,
+            _prompt_messages(system_prompt, user_prompt),
             response_format,
             extra_kwargs,
             allow_unvalidated,
         )
 
         duration_ms = (time.perf_counter_ns() - t0) // 1_000_000
-        usage = (
-            response.usage
-            or type("U", (), {"prompt_tokens": 0, "completion_tokens": 0})()
-        )
+        usage = _token_usage(response)
 
         return LLMResult(
             content=content,

@@ -143,6 +143,122 @@ def _apply_gherkin_keyword_highlight(escaped: str) -> str:
     return escaped
 
 
+_GHERKIN_ROW_KEYWORDS: list[tuple[str, str]] = [
+    ("Feature:", ""),
+    ("Background:", ""),
+    ("Scenario:", ""),
+    ("Scenario Outline:", ""),
+    ("Given ", "step-given"),
+    ("When ", "step-when"),
+    ("And ", "step-and"),
+    ("Then ", "step-then"),
+    ("But ", "step-but"),
+    ("* ", "step-star"),
+]
+
+_GHERKIN_HEADER_KEYWORDS = frozenset(
+    {"Feature", "Background", "Scenario", "Scenario Outline"}
+)
+
+
+def _docstring_opening(stripped: str) -> list[str] | None:
+    """The first collected docstring line, or None when the line opens none."""
+    if not stripped.startswith('"""'):
+        return None
+    remainder = stripped[3:]
+    return [remainder] if remainder else []
+
+
+def _docstring_row_html(stripped: str, docstring_lines: list[str]) -> str:
+    """The closing docstring row for a completed Gherkin docstring."""
+    remainder = stripped[:-3]
+    if remainder:
+        docstring_lines.append(remainder)
+    ds_text = "\n".join(docstring_lines).strip()
+    return f'<div class="step-docstring">"""\n{_esc(ds_text)}\n"""</div>'
+
+
+def _gherkin_decorative_row(stripped: str) -> str | None:
+    """HTML for tag or comment rows, or None for other lines."""
+    if stripped.startswith("@"):
+        return f'<div class="gherkin-tag-line">{_esc(stripped)}</div>'
+    if stripped.startswith("#"):
+        return f'<div class="gherkin-comment-line">{_esc(stripped)}</div>'
+    return None
+
+
+def _gherkin_keyword_row(stripped: str) -> tuple[str, str, str] | None:
+    """Extract (keyword, step_text, step_class) for a keyword line, or None."""
+    for kw, cls in _GHERKIN_ROW_KEYWORDS:
+        if stripped.startswith(kw):
+            return kw.strip().rstrip(":"), stripped[len(kw) :].strip(), cls
+    return None
+
+
+def _gherkin_header_row(keyword: str, step_text: str) -> str:
+    """HTML for a section-header Gherkin line."""
+    return (
+        '<div style="padding:10px 0 6px;font-size:14px;font-weight:700;color:var(--text-primary);">'
+        f'<span style="color:var(--accent);">{_esc(keyword)}:</span> {_esc(step_text)}</div>'
+    )
+
+
+def _gherkin_step_row(keyword: str, step_text: str, step_class: str) -> str:
+    """HTML for a feature-step Gherkin line."""
+    return (
+        f'<div class="feature-step {step_class}">'
+        f'<span class="step-keyword">{_esc(keyword)}</span> '
+        f'<span class="step-text">{_esc(step_text)}</span>'
+        f"</div>"
+    )
+
+
+def _gherkin_plain_row(stripped: str) -> str:
+    """HTML for a Gherkin line without a recognized keyword."""
+    return (
+        '<div style="padding:4px 14px 4px 70px;font-size:13px;color:var(--text-secondary);">'
+        f"{_esc(stripped)}</div>"
+    )
+
+
+def _gherkin_row_html(stripped: str) -> str | None:
+    """Render one non-docstring Gherkin line, or None when the line is skipped."""
+    if not stripped:
+        return None
+    decorative = _gherkin_decorative_row(stripped)
+    if decorative is not None:
+        return decorative
+    keyword_row = _gherkin_keyword_row(stripped)
+    if keyword_row is not None:
+        keyword, step_text, step_class = keyword_row
+        if keyword in _GHERKIN_HEADER_KEYWORDS:
+            return _gherkin_header_row(keyword, step_text)
+        return _gherkin_step_row(keyword, step_text, step_class)
+    return _gherkin_plain_row(stripped)
+
+
+def _advance_docstring_state(
+    stripped: str,
+    in_docstring: bool,
+    docstring_lines: list[str],
+    result: list[str],
+) -> tuple[bool, list[str]]:
+    """Consume one line against the docstring state, returning the new state."""
+    if in_docstring:
+        if stripped.endswith('"""'):
+            result.append(_docstring_row_html(stripped, docstring_lines))
+            return False, []
+        docstring_lines.append(stripped)
+        return True, docstring_lines
+    opening = _docstring_opening(stripped)
+    if opening is not None:
+        return True, opening
+    row = _gherkin_row_html(stripped)
+    if row is not None:
+        result.append(row)
+    return False, []
+
+
 def _highlight_gherkin(text: str) -> str:
     """Render Gherkin as structured HTML with styled step rows.
 
@@ -151,83 +267,14 @@ def _highlight_gherkin(text: str) -> str:
     """
     if not text:
         return ""
-    lines = text.strip().split("\n")
     result: list[str] = []
     in_docstring = False
     docstring_lines: list[str] = []
 
-    for line in lines:
+    for line in text.strip().split("\n"):
         stripped = line.strip()
-
-        if stripped.startswith('"""') and not in_docstring:
-            in_docstring = True
-            remainder = stripped[3:]
-            docstring_lines = [remainder] if remainder else []
-            continue
-        if in_docstring:
-            if stripped.endswith('"""'):
-                remainder = stripped[:-3]
-                if remainder:
-                    docstring_lines.append(remainder)
-                ds_text = "\n".join(docstring_lines).strip()
-                result.append(
-                    f'<div class="step-docstring">"""\n{_esc(ds_text)}\n"""</div>'
-                )
-                in_docstring = False
-                docstring_lines = []
-            else:
-                docstring_lines.append(stripped)
-            continue
-
-        if stripped.startswith("@"):
-            result.append(f'<div class="gherkin-tag-line">{_esc(stripped)}</div>')
-            continue
-        if stripped.startswith("#"):
-            result.append(f'<div class="gherkin-comment-line">{_esc(stripped)}</div>')
-            continue
-        if not stripped:
-            continue
-
-        keyword = None
-        step_text = stripped
-        step_class = ""
-
-        for kw, cls in [
-            ("Feature:", ""),
-            ("Background:", ""),
-            ("Scenario:", ""),
-            ("Scenario Outline:", ""),
-            ("Given ", "step-given"),
-            ("When ", "step-when"),
-            ("And ", "step-and"),
-            ("Then ", "step-then"),
-            ("But ", "step-but"),
-            ("* ", "step-star"),
-        ]:
-            if stripped.startswith(kw):
-                keyword = kw.strip().rstrip(":")
-                step_text = stripped[len(kw) :].strip()
-                step_class = cls
-                break
-
-        if not keyword:
-            result.append(
-                f'<div style="padding:4px 14px 4px 70px;font-size:13px;color:var(--text-secondary);">{_esc(stripped)}</div>'
-            )
-            continue
-
-        if keyword in ("Feature", "Background", "Scenario", "Scenario Outline"):
-            result.append(
-                f'<div style="padding:10px 0 6px;font-size:14px;font-weight:700;color:var(--text-primary);">'
-                f'<span style="color:var(--accent);">{_esc(keyword)}:</span> {_esc(step_text)}</div>'
-            )
-            continue
-
-        result.append(
-            f'<div class="feature-step {step_class}">'
-            f'<span class="step-keyword">{_esc(keyword)}</span> '
-            f'<span class="step-text">{_esc(step_text)}</span>'
-            f"</div>"
+        in_docstring, docstring_lines = _advance_docstring_state(
+            stripped, in_docstring, docstring_lines, result
         )
 
     return "\n".join(result)
@@ -721,7 +768,7 @@ def _build_raw_yaml_sections(
     ]
 
 
-def _build_table_rows(rows_data: list[tuple], cell_count: int) -> str:
+def _build_table_rows(rows_data: list[tuple]) -> str:
     """Build ``<tr>`` elements from a list of tuples."""
     return "\n".join(
         "      <tr>" + "".join(f"<td>{_esc(cell)}</td>" for cell in row) + "</tr>"
@@ -750,8 +797,7 @@ def _build_losses_table(losses: list[dict]) -> str:
         [
             (loss["id"], loss["description"], loss.get("provenance", ""))
             for loss in losses
-        ],
-        3,
+        ]
     )
     return _build_data_table(["ID", "Description", "Provenance"], rows)
 
@@ -760,10 +806,7 @@ def _build_hazards_table(hazards: list) -> str:
     """Build the hazards data table, or empty string if no hazards."""
     if not hazards:
         return ""
-    rows = _build_table_rows(
-        [(h.hazard_id, h.description) for h in hazards],
-        2,
-    )
+    rows = _build_table_rows([(h.hazard_id, h.description) for h in hazards])
     return _build_data_table(["Hazard ID", "Description"], rows)
 
 
@@ -771,10 +814,7 @@ def _build_constraints_table(constraints: list) -> str:
     """Build the constraints data table, or empty string if no constraints."""
     if not constraints:
         return ""
-    rows = _build_table_rows(
-        [(sc.constraint_id, sc.description) for sc in constraints],
-        2,
-    )
+    rows = _build_table_rows([(sc.constraint_id, sc.description) for sc in constraints])
     return _build_data_table(["Constraint ID", "Description"], rows)
 
 
@@ -795,6 +835,27 @@ def _build_sp1_losses_section(loss_analysis: Any) -> str:
     return "\n".join(parts)
 
 
+def _kc_item_html(kc: str, label: str) -> str:
+    """One capability key-code row with its display label."""
+    if label and label != kc:
+        return (
+            f'      <div class="kc-item" style="margin-bottom:4px;">'
+            f'<code style="color:var(--accent);font-weight:600;">{_esc(kc)}</code>'
+            f' — <span style="color:var(--text-secondary);font-size:12px;">{_esc(label)}</span>'
+            f"</div>"
+        )
+    return (
+        f'      <div class="kc-item" style="margin-bottom:4px;">'
+        f'<code style="color:var(--accent);font-weight:600;">{_esc(kc)}</code>'
+        f"</div>"
+    )
+
+
+def _kc_item_rows(kcs: list, kc_display: dict[str, str] | None) -> list[str]:
+    """The capability key-code item rows."""
+    return [_kc_item_html(kc, (kc_display or {}).get(kc, "")) for kc in kcs]
+
+
 def _build_sp1_capability_section(
     capability_profile: Any, kc_display: dict[str, str] | None = None
 ) -> str:
@@ -808,21 +869,7 @@ def _build_sp1_capability_section(
     kcs = getattr(capability_profile, "kc_subcodes", [])
     if kcs:
         parts.append('    <div class="kc-list" style="margin-top:12px;">')
-        for kc in kcs:
-            label = (kc_display or {}).get(kc, "")
-            if label and label != kc:
-                parts.append(
-                    f'      <div class="kc-item" style="margin-bottom:4px;">'
-                    f'<code style="color:var(--accent);font-weight:600;">{_esc(kc)}</code>'
-                    f' — <span style="color:var(--text-secondary);font-size:12px;">{_esc(label)}</span>'
-                    f"</div>"
-                )
-            else:
-                parts.append(
-                    f'      <div class="kc-item" style="margin-bottom:4px;">'
-                    f'<code style="color:var(--accent);font-weight:600;">{_esc(kc)}</code>'
-                    f"</div>"
-                )
+        parts.extend(_kc_item_rows(kcs, kc_display))
         parts.append("    </div>")
     parts.append("</div>")
     return "\n".join(parts)
@@ -834,8 +881,7 @@ def _build_sp1_control_section(control_structure: Any) -> str:
     parts.append('  <div class="subsection-title">Control Structure</div>')
     if control_structure.responsibilities:
         rows = _build_table_rows(
-            [(r.resp_id, r.description) for r in control_structure.responsibilities],
-            2,
+            [(r.resp_id, r.description) for r in control_structure.responsibilities]
         )
         parts.append(_build_data_table(["Responsibility", "Description"], rows))
     parts.append("</div>")
@@ -997,6 +1043,42 @@ def _has_tree_content(root: str, branches: list, leaves: list) -> bool:
     return bool(root or branches or leaves)
 
 
+_EMPTY_TREE_HTML = '<div class="tree-empty">No attack tree data available.</div>'
+
+
+def _tree_root_markup(root: str) -> tuple[str, str]:
+    """(opening, closing) details markup for the expandable tree root."""
+    return (
+        "  <details open><summary>"
+        f'<span class="gate-badge gate-or">&or;</span>'
+        f'<span class="tree-node-label">{_esc(root)}</span>'
+        f"</summary>",
+        "  </details>",
+    )
+
+
+def _tree_leaf_markup(leaf: str) -> str:
+    """One flat leaf row of the attack tree."""
+    return (
+        '  <div class="tree-leaf">'
+        f'<span class="gate-badge gate-leaf">&bull;</span>'
+        f'<span class="tree-node-label">{_esc(leaf)}</span></div>'
+    )
+
+
+def _tree_branch_rows(branches: list) -> list[str]:
+    """HTML rows for every branch node, in order."""
+    rows: list[str] = []
+    for branch in branches:
+        rows.extend(_build_tree_branch_node(branch))
+    return rows
+
+
+def _tree_leaf_rows(leaves: list) -> list[str]:
+    """HTML rows for every flat leaf, in order."""
+    return [_tree_leaf_markup(leaf) for leaf in leaves]
+
+
 def _build_attack_tree_visual(tree_dict: dict | None) -> str:
     """Build a visual attack tree using expandable details nodes.
 
@@ -1006,35 +1088,24 @@ def _build_attack_tree_visual(tree_dict: dict | None) -> str:
       - leaves: list of str
     """
     if not tree_dict:
-        return '<div class="tree-empty">No attack tree data available.</div>'
+        return _EMPTY_TREE_HTML
 
     root, branches, leaves = _parse_tree_dict(tree_dict)
 
     if not _has_tree_content(root, branches, leaves):
-        return '<div class="tree-empty">No attack tree data available.</div>'
+        return _EMPTY_TREE_HTML
 
     parts: list[str] = ['<div class="attack-tree">']
 
     if root:
-        parts.append(
-            f"  <details open><summary>"
-            f'<span class="gate-badge gate-or">&or;</span>'
-            f'<span class="tree-node-label">{_esc(root)}</span>'
-            f"</summary>"
-        )
+        root_open, root_close = _tree_root_markup(root)
+        parts.append(root_open)
 
-    for branch in branches:
-        parts.extend(_build_tree_branch_node(branch))
-
-    for leaf in leaves:
-        parts.append(
-            f'  <div class="tree-leaf">'
-            f'<span class="gate-badge gate-leaf">&bull;</span>'
-            f'<span class="tree-node-label">{_esc(leaf)}</span></div>'
-        )
+    parts.extend(_tree_branch_rows(branches))
+    parts.extend(_tree_leaf_rows(leaves))
 
     if root:
-        parts.append("  </details>")
+        parts.append(root_close)
 
     parts.append("</div>")
     return "\n".join(parts)
@@ -1251,17 +1322,51 @@ def _build_consumer_hints_section(hints: Any) -> list[str]:
     return parts
 
 
-def _build_scenario_envelope_body(envelope: Any) -> list[str]:
-    """Build the HTML body parts from a scenario envelope's attributes."""
-    parts: list[str] = []
-    spec = getattr(envelope, "scenario_spec", None)
+_SCENARIO_TAB_LABELS: dict[str, str] = {
+    "narrative": "Narrative",
+    "attack_tree": "Attack Tree",
+    "gherkin": "Gherkin",
+}
 
-    # BDI section (always visible above tabs)
-    if spec is not None:
-        parts.append(_build_bdi_section(spec))
 
-    # Collect tab content
-    tab_contents: list[tuple[str, str]] = []  # (tab_id, html_content)
+def _tab_active(index: int) -> str:
+    """The active CSS class for the first tab."""
+    return " active" if index == 0 else ""
+
+
+def _build_tab_bar(
+    tab_contents: list[tuple[str, str]], labels: dict[str, str]
+) -> list[str]:
+    """The scenario tab bar rows."""
+    rows: list[str] = []
+    for i, (tab_id, _) in enumerate(tab_contents):
+        rows.append(
+            f'          <div class="scenario-tab{_tab_active(i)}" data-tab="{tab_id}">{labels.get(tab_id, tab_id)}</div>'
+        )
+    return rows
+
+
+def _build_tab_panels(tab_contents: list[tuple[str, str]]) -> list[str]:
+    """The scenario tab content panel rows."""
+    rows: list[str] = []
+    for i, (tab_id, content_html) in enumerate(tab_contents):
+        rows.append(
+            f'        <div class="scenario-tab-content{_tab_active(i)}" data-tab-content="{tab_id}">{content_html}</div>'
+        )
+    return rows
+
+
+def _envelope_gherkin_text(envelope: Any) -> str:
+    """The envelope's canonical Gherkin text, falling back to the raw response."""
+    gs = getattr(envelope, "gherkin_spec", None)
+    if gs is not None and hasattr(gs, "to_feature_text") and getattr(gs, "feature", ""):
+        return gs.to_feature_text()
+    return getattr(envelope, "gherkin_raw", None) or ""
+
+
+def _scenario_tab_contents(envelope: Any) -> list[tuple[str, str]]:
+    """Collect (tab_id, html) pairs in display order for one envelope."""
+    tab_contents: list[tuple[str, str]] = []
 
     # Narrative tab
     narrative = getattr(envelope, "narrative", "") or ""
@@ -1277,38 +1382,34 @@ def _build_scenario_envelope_body(envelope: Any) -> list[str]:
     # Gherkin tab — prefer the structured spec's rendered feature text
     # (guaranteed valid Gherkin syntax); gherkin_raw is the raw LLM
     # response (often YAML), used only when the spec failed to parse.
-    gherkin_text = ""
-    gs = getattr(envelope, "gherkin_spec", None)
-    if gs is not None and hasattr(gs, "to_feature_text") and getattr(gs, "feature", ""):
-        gherkin_text = gs.to_feature_text()
-    if not gherkin_text:
-        gherkin_text = getattr(envelope, "gherkin_raw", None) or ""
+    gherkin_text = _envelope_gherkin_text(envelope)
     if gherkin_text:
         highlighted = _highlight_gherkin(gherkin_text)
         tab_contents.append(
             ("gherkin", f'<div class="gherkin-block">{highlighted}</div>')
         )
+    return tab_contents
+
+
+def _build_scenario_envelope_body(envelope: Any) -> list[str]:
+    """Build the HTML body parts from a scenario envelope's attributes."""
+    parts: list[str] = []
+    spec = getattr(envelope, "scenario_spec", None)
+
+    # BDI section (always visible above tabs)
+    if spec is not None:
+        parts.append(_build_bdi_section(spec))
+
+    # Collect tab content
+    tab_contents = _scenario_tab_contents(envelope)
 
     # Build tab bar + content panels
     if tab_contents:
-        tab_labels = {
-            "narrative": "Narrative",
-            "attack_tree": "Attack Tree",
-            "gherkin": "Gherkin",
-        }
         parts.append('      <div class="scenario-tabs-container">')
         parts.append('        <div class="scenario-tabs">')
-        for i, (tab_id, _) in enumerate(tab_contents):
-            active = " active" if i == 0 else ""
-            parts.append(
-                f'          <div class="scenario-tab{active}" data-tab="{tab_id}">{tab_labels.get(tab_id, tab_id)}</div>'
-            )
+        parts.extend(_build_tab_bar(tab_contents, _SCENARIO_TAB_LABELS))
         parts.append("        </div>")
-        for i, (tab_id, content_html) in enumerate(tab_contents):
-            active = " active" if i == 0 else ""
-            parts.append(
-                f'        <div class="scenario-tab-content{active}" data-tab-content="{tab_id}">{content_html}</div>'
-            )
+        parts.extend(_build_tab_panels(tab_contents))
         parts.append("      </div>")
 
     # System Context section (enrichment, below tabs)
@@ -1324,6 +1425,27 @@ def _build_scenario_envelope_body(envelope: Any) -> list[str]:
     return parts
 
 
+def _envelope_has_gherkin(envelope: Any | None) -> bool:
+    """Whether the envelope already carries Gherkin content in its tabs."""
+    if envelope is None:
+        return False
+    return bool(
+        getattr(envelope, "gherkin_raw", None)
+        or (hasattr(envelope, "gherkin_spec") and envelope.gherkin_spec is not None)
+    )
+
+
+def _feature_text_section(feature_text: str) -> list[str]:
+    """The standalone Gherkin Spec section rows for a scenario card."""
+    highlighted = _highlight_gherkin(feature_text)
+    return [
+        '      <div class="scenario-section">',
+        '        <div class="scenario-section-title">Gherkin Spec</div>',
+        f'        <div class="gherkin-block">{highlighted}</div>',
+        "      </div>",
+    ]
+
+
 def _build_scenario_card(
     scenario_id: str,
     envelope: Any | None,
@@ -1337,24 +1459,8 @@ def _build_scenario_card(
 
     # If feature_text is provided separately (from .feature file on disk),
     # and the envelope didn't already include Gherkin in tabs, add it.
-    if feature_text:
-        has_gherkin_in_tabs = False
-        if envelope is not None:
-            has_gherkin_in_tabs = bool(
-                getattr(envelope, "gherkin_raw", None)
-                or (
-                    hasattr(envelope, "gherkin_spec")
-                    and envelope.gherkin_spec is not None
-                )
-            )
-        if not has_gherkin_in_tabs:
-            highlighted = _highlight_gherkin(feature_text)
-            body_parts.append('      <div class="scenario-section">')
-            body_parts.append(
-                '        <div class="scenario-section-title">Gherkin Spec</div>'
-            )
-            body_parts.append(f'        <div class="gherkin-block">{highlighted}</div>')
-            body_parts.append("      </div>")
+    if feature_text and not _envelope_has_gherkin(envelope):
+        body_parts.extend(_feature_text_section(feature_text))
 
     body = "\n".join(body_parts)
     return (
