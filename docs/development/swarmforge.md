@@ -91,27 +91,39 @@ Update a pin in a dedicated pull request that records upstream changes and runs
 the affected quality gate. Harness-specific role prompts, handoff files,
 dashboards, Beads state, and local tool clones are not repository content.
 
-## Local orchestrators
+## Local orchestrator
 
-The supported local installations both use the six-pack order above and the
-commands in `config/swarmforge.env`:
+The local installation uses the fork `hjrnunes/swarm-forge` (pinned in
+`config/swarmforge.env`) with the six-pack order above and the commands in
+`config/swarmforge.env`:
 
-- Upstream SwarmForge uses the pinned `six-pack` configuration under ignored
-  `swarmforge/`, runtime under `.swarmforge/`, and role worktrees under
-  `.worktrees/`. It uses Codex for all six roles. Launch it from a feature
-  branch with `./swarm`; stop it with `./close-swarm` or by closing its first
-  terminal window.
-- SwarmForge-Droid uses ignored role prompts and helpers under `.factory/` and
-  an isolated runtime under `.swarmforge-droid/`. Configure the six-pack
-  without the scaffolder, set `SWARMFORGE_BEADS=false`,
-  `SWARMFORGE_COMMIT_BYLINE=false`, and
-  `SWARMFORGE_MANAGE_AGENT_INSTRUCTIONS=false`, then ask Droid to implement an
-  approved issue.
+- Shared launcher scripts come from the fork's `main` branch and live under
+  ignored `swarmforge/scripts/`; the fork carries the project's committed
+  patches (droid agent backend, auto-approval of every handoff, and the
+  project-name dashboard title). The `./swarm` wrapper archives the local
+  fork checkout first and falls back to the fork's GitHub tarball.
+- The `six-pack` configuration lives under ignored `swarmforge/`:
+  `swarmforge/swarmforge.conf` runs all six roles on the droid agent backend
+  in invisible tmux windows (`window-invisible`), role prompts are the
+  auto-approve-adapted six-pack prompts under `swarmforge/roles/`, and
+  `apply-droid-patch.sh` re-applies the fork patches if scripts were ever
+  re-fetched from upstream instead of the fork.
+- Model selection is harness-local: each role prompt has a sibling
+  `roles/<role>.settings.json` passed to the droid CLI with `--settings`,
+  e.g. specifier/QA on `grok-4.6`, coder on `deepseek-v4-flash-0731`,
+  architect on `deepseek-v4-pro`, cleaner/hardender on `gpt-5.6-luna`, with
+  matching reasoning effort. These files are ignored, not repository content;
+  the reference copies live in `intendente` (`swarmforge/roles/`).
+- Runtime stays under `.swarmforge/`, role worktrees under `.worktrees/`.
+  Launch from a feature branch with `./swarm`; stop with `./close-swarm` or
+  by closing its first terminal window. Handoffs are auto-approved and
+  delivered via `ready_for_next.sh` / `done_with_current.sh`.
 
 The scaffolder is intentionally absent because the portable acceptance
-pipeline is already committed. Both installations use ordinary project commit
-messages without agent-role bylines. Never run the two orchestrators against
-the same feature branch concurrently.
+pipeline is already committed. The project uses ordinary commit messages
+without agent-role bylines. The retired SwarmForge-Droid installation (role
+prompts and helpers under `.factory/`, runtime under `.swarmforge-droid/`)
+is no longer used; do not launch it against a feature branch.
 
 ## Completion
 
