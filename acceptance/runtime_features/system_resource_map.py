@@ -177,12 +177,18 @@ def _deserialize_map(text: str, fmt: str) -> SystemResourceMap:
     return SystemResourceMap.from_json(text)
 
 
-def _require_result(state: dict[str, Any]) -> tuple[Any, None] | tuple[None, str]:
-    """Return the validation result, or a failure message when it is missing."""
-    result = state["validation_result"]
-    if result is None:
-        return None, "Validation result is missing"
-    return result, None
+def _require_result(
+    state: dict[str, Any], world: World | None = None
+) -> tuple[Any, None] | tuple[None, str]:
+    """Return the validation or reconciliation result, or a failure message when it is missing."""
+    result = state.get("validation_result")
+    if result is not None:
+        return result, None
+    if world is not None:
+        corr_state = getattr(world, "correspondence_state", None)
+        if corr_state and corr_state.get("reconciliation_result") is not None:
+            return corr_state["reconciliation_result"], None
+    return None, "Validation result is missing"
 
 
 def _make_issue_code_checker(list_key: str, label: str, example_key: str):
@@ -192,12 +198,15 @@ def _make_issue_code_checker(list_key: str, label: str, example_key: str):
         world: World, text: str, examples: dict
     ) -> tuple[bool, str]:
         state = _get_srm_state(world)
-        result, failure = _require_result(state)
+        result, failure = _require_result(state, world)
         if failure:
             return False, failure
         match = re.search(rf'the result contains {label} code "([^"]*)"', text)
         code = match.group(1) if match else examples.get(example_key, "")
-        codes = [e.code for e in getattr(result, list_key)]
+        codes = [
+            getattr(e, "code", getattr(e, "error_code", ""))
+            for e in getattr(result, list_key)
+        ]
         if code not in codes:
             return False, f"{label.capitalize()} code '{code}' not in {codes}"
         return True, ""
@@ -210,13 +219,18 @@ def _make_issue_identifier_checker(list_key: str, label: str, example_key: str):
 
     def _issue_identifies(world: World, text: str, examples: dict) -> tuple[bool, str]:
         state = _get_srm_state(world)
-        result, failure = _require_result(state)
+        result, failure = _require_result(state, world)
         if failure:
             return False, failure
         match = re.search(rf'the {label} identifies "([^"]*)"', text)
         element_id = match.group(1) if match else examples.get(example_key, "")
         issues = getattr(result, list_key)
-        matched = [e for e in issues if e.element_id == element_id]
+        matched = [
+            e
+            for e in issues
+            if getattr(e, "element_id", None) == element_id
+            or getattr(e, "proposal_id", None) == element_id
+        ]
         if not matched:
             return (
                 False,
@@ -505,6 +519,10 @@ def _h_resource_map_pins_versions(
     )
     srm = _make_representative_map(stpa_version=map_stpa, taxonomy_version=map_taxonomy)
     state["resource_map"] = srm
+    corr_state = getattr(world, "correspondence_state", None)
+    if corr_state is not None and corr_state.get("resource_map") is not None:
+        corr_state["resource_map"].stpa_version = map_stpa
+        corr_state["resource_map"].taxonomy_version = map_taxonomy
     return True, ""
 
 
@@ -1076,7 +1094,11 @@ def _h_two_artifacts_byte_identical(
     state = _get_srm_state(world)
     texts = state["serialized_texts"]
     if len(texts) != 2:
-        return False, "Did not serialize twice"
+        corr_state = getattr(world, "correspondence_state", None)
+        if corr_state and len(corr_state.get("serialized_twice", [])) == 2:
+            texts = corr_state["serialized_twice"]
+        else:
+            return False, "Did not serialize twice"
     if texts[0].encode("utf-8") != texts[1].encode("utf-8"):
         return False, "Serialized texts are not byte-identical"
     return True, ""

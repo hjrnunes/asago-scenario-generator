@@ -302,6 +302,11 @@ def _h_canonically_equivalent(
             if map_state["serialized_a"] != map_state["serialized_b"]:
                 return False, "Serialized SRM artifacts not equivalent"
             return True, ""
+        corr_state = getattr(world, "correspondence_state", None)
+        if corr_state and corr_state.get("serialized_a") is not None:
+            if corr_state["serialized_a"] != corr_state["serialized_b"]:
+                return False, "Serialized correspondence artifacts not equivalent"
+            return True, ""
         return False, "No plan_a in planner state"
     if state["plan_a"].to_json() != state["plan_b"].to_json():
         return False, "JSON serialization is not canonically equivalent"
@@ -448,6 +453,12 @@ def _h_byte_identical(world: World, text: str, examples: dict) -> tuple[bool, st
         if map_state and len(map_state.get("serialized_texts", [])) == 2:
             map_texts = map_state["serialized_texts"]
             if map_texts[0] == map_texts[1]:
+                return True, ""
+            return False, "Serialized texts are not byte-identical"
+        corr_state = getattr(world, "correspondence_state", None)
+        if corr_state and len(corr_state.get("serialized_twice", [])) == 2:
+            corr_texts = corr_state["serialized_twice"]
+            if corr_texts[0] == corr_texts[1]:
                 return True, ""
             return False, "Serialized texts are not byte-identical"
         return False, "Serialized texts are not byte-identical"
