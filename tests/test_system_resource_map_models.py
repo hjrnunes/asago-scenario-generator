@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+
+import yaml
+
 from asago_scenario_generator.models.system_resource_map import (
     ActorControllerEntry,
     ControlActionEntry,
@@ -131,6 +135,18 @@ def test_system_resource_map_yaml_round_trip() -> None:
     assert restored.use_case_facts[1].resolution_status == "absent"
 
 
+def test_system_resource_map_json_is_sorted_and_deterministic() -> None:
+    srm = _make_sample_map()
+    json_text = srm.to_json()
+
+    parsed = json.loads(json_text)
+    top_keys = list(parsed)
+    assert top_keys == sorted(top_keys)
+    # Keys are emitted in sorted order, so re-dumping the parsed payload is
+    # byte-identical: no serialization detail depends on field order.
+    assert json.dumps(parsed, indent=2, sort_keys=True) + "\n" == json_text
+
+
 def test_system_resource_map_json_round_trip() -> None:
     srm = _make_sample_map()
     json_text = srm.to_json()
@@ -142,6 +158,46 @@ def test_system_resource_map_json_round_trip() -> None:
     assert restored.taxonomy_version == srm.taxonomy_version
     assert len(restored.control_actions) == len(srm.control_actions)
     assert restored.control_actions[0].element_id == srm.control_actions[0].element_id
+
+
+def test_system_resource_map_yaml_is_block_style_with_sorted_keys() -> None:
+    srm = _make_sample_map()
+    text = srm.to_yaml()
+
+    parsed = yaml.safe_load(text)
+    top_keys = list(parsed)
+    assert top_keys == sorted(top_keys)
+    # Keys are emitted in sorted order: sorting them again is a no-op, so
+    # re-serializing from a dict built in sorted order must be identical.
+    assert yaml.dump(
+        parsed, default_flow_style=False, sort_keys=False, allow_unicode=True,
+        default_style='"',
+    ) == text
+    # Block sequences remain blocks, not inline flow style.
+    assert "\n- " in text or text.startswith("- ")
+    assert "[]" not in text
+
+
+def test_system_resource_map_yaml_preserves_unicode_line_separator() -> None:
+    # PyYAML's plain/single-quoted styles silently corrupt U+0085 (NEL):
+    # the reader treats it as a line break, so a naive dump round trip
+    # loses characters. The double-quoted dumper style escapes it.
+    srm = _make_sample_map()
+    srm.data_flows[0].name = "flow\x85name"
+
+    restored = SystemResourceMap.from_yaml(srm.to_yaml())
+    assert restored.data_flows[0].name == "flow\x85name"
+    assert restored == srm
+
+
+def test_system_resource_map_yaml_keeps_unicode_unescaped() -> None:
+    # allow_unicode=True keeps non-ASCII readable instead of \\u-escaping it.
+    srm = _make_sample_map()
+    srm.data_flows[0].name = "café"
+
+    text = srm.to_yaml()
+    assert "café" in text
+    assert SystemResourceMap.from_yaml(text) == srm
 
 
 def test_system_resource_map_byte_stability() -> None:

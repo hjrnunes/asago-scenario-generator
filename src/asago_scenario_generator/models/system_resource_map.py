@@ -218,11 +218,19 @@ class SystemResourceMap(BaseModel):
     def to_yaml(self) -> str:
         """Serialize resource map to deterministic YAML string."""
         data = self.model_dump(mode="json")
+        # Double-quoted style is required for losslessness: PyYAML's plain,
+        # single-quoted, and literal styles silently corrupt U+0085 (NEL)
+        # values, which its reader treats as a line break.
+        block_style = False
+        sort_keys = True
+        allow_unicode = True
+        default_style = '"'
         return yaml.dump(
             data,
-            default_flow_style=False,
-            sort_keys=True,
-            allow_unicode=True,
+            default_flow_style=block_style,
+            sort_keys=sort_keys,
+            allow_unicode=allow_unicode,
+            default_style=default_style,
         )
 
     @classmethod
@@ -250,3 +258,8 @@ class SystemResourceMap(BaseModel):
                 entries = getattr(self, attribute)
                 break
         return [entry.model_dump(mode="json") for entry in entries]
+
+
+# mutate4py-manifest-begin
+# {"version":1,"tested_at":"2026-08-27T22:30:24Z","module_hash":"f9b56fc8aabbba5df8ad179a39485a9e90479351b6c23c6a88b16b07fc02f365","source_sha256":"c069640fb1f558ebdf04919dcf3bc4a3d29fbc22a135d22091e36668f074d0b8","functions":[{"id":"func/SystemResourceMap.to_yaml","name":"to_yaml","line":218,"end_line":234,"hash":"0fa413f815d62c7af1f8977bdad78376158fe46a682bf820acb54813f734f23b"},{"id":"func/SystemResourceMap.from_yaml","name":"from_yaml","line":237,"end_line":240,"hash":"c5794ac41833d3e0c00a28daf7355b3a13b3da710e4b7ca5b98b659fc25c102b"},{"id":"func/SystemResourceMap.to_json","name":"to_json","line":242,"end_line":245,"hash":"bbe1d0d5c111b9268abbdde28aac53719cabc504419ddbe363778022600db3af"},{"id":"func/SystemResourceMap.from_json","name":"from_json","line":248,"end_line":251,"hash":"cfa22da71398bcde730c41af92e9b19c2da45e1346ede7fa3e97a9000ecb7044"},{"id":"func/SystemResourceMap.get_family","name":"get_family","line":253,"end_line":260,"hash":"97d3b7c7d1bb67847f1568865fe22c30fb2c8da07428cfb7871bce427866d149"}]}
+# mutate4py-manifest-end
