@@ -33,22 +33,15 @@ from typing import Any, Literal
 import yaml
 
 from asago_scenario_generator.data.canonical import _canonical_json, _nfc
+from asago_scenario_generator.data.paths import DATA_ROOT
 
 from asago_scenario_generator.models.attack_pattern_contracts import (
     TaxonomyContext,
     TaxonomyPin,
 )
 
-_DEFAULT_ATLAS_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "data"
-    / "taxonomies"
-    / "atlas"
-    / "ATLAS-2026.05.yaml"
-)
-_DEFAULT_MAPPING_SET_DIR = (
-    Path(__file__).resolve().parents[3] / "data" / "taxonomies" / "attack-patterns"
-)
+_DEFAULT_ATLAS_PATH = DATA_ROOT / "taxonomies" / "atlas" / "ATLAS-2026.05.yaml"
+_DEFAULT_MAPPING_SET_DIR = DATA_ROOT / "taxonomies" / "attack-patterns"
 _MAPPING_SET_GLOB = "attack-patterns*.sssom.tsv"
 _EXPECTED_MAPPING_SET_FILES = frozenset(
     {

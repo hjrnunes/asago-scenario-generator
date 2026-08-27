@@ -132,19 +132,26 @@ class TestClientConstruction:
             base_url="http://endpoint",
             api_key="key",
             default_headers={"X-A": "1"},
+            timeout=300.0,
+            max_retries=0,
         )
 
     def test_openai_client_omits_headers_when_none(self) -> None:
         with patch("asago_scenario_generator.llm.client.OpenAI") as factory:
             _openai_client("http://endpoint", "key", None, None)
         factory.assert_called_once_with(
-            base_url="http://endpoint", api_key="key", default_headers=None
+            base_url="http://endpoint",
+            api_key="key",
+            default_headers=None,
+            timeout=300.0,
+            max_retries=0,
         )
 
     def test_openai_client_forwards_timeout(self) -> None:
         with patch("asago_scenario_generator.llm.client.OpenAI") as factory:
             _openai_client("http://endpoint", "key", None, 30.0)
         assert factory.call_args.kwargs["timeout"] == 30.0
+        assert factory.call_args.kwargs["max_retries"] == 0
 
 
 class TestHeaders:

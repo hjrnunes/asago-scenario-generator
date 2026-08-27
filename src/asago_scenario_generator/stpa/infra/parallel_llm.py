@@ -40,6 +40,8 @@ class LLMCallSpec:
         stage: Pipeline stage identifier (e.g. ``"stage_3"``).
         step: Sub-step within the stage (e.g. ``"slot_a"``).
         temperature: LLM temperature (default 0.4).
+        validation_retries: Number of Pydantic-validation retries (default 0).
+        validation_retry_feedback: Optional text appended only to retry prompts.
     """
 
     system_prompt: str
@@ -48,6 +50,8 @@ class LLMCallSpec:
     stage: str
     step: str
     temperature: float = 0.4
+    validation_retries: int = 0
+    validation_retry_feedback: str | None = None
 
 
 @dataclass
@@ -87,6 +91,8 @@ def _execute_single_call(
         stage=spec.stage,
         step=spec.step,
         temperature=spec.temperature,
+        validation_retries=spec.validation_retries,
+        validation_retry_feedback=spec.validation_retry_feedback,
     )
     if error is not None:
         return LLMCallResult(

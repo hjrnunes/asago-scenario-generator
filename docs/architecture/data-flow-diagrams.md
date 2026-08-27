@@ -389,9 +389,15 @@ All diversity hints are injected into LLM prompts as guidance. The LLM may devia
 | API Key | `ASAGO_SCENARIO_GENERATOR_API_KEY` | — |
 | Model | `ASAGO_SCENARIO_GENERATOR_MODEL_NAME` | `gemma-3n-e4b-it` |
 | Max Tokens | `ASAGO_SCENARIO_GENERATOR_MAX_COMPLETION_TOKENS` | (optional) |
+| Temperature | `ASAGO_SCENARIO_GENERATOR_TEMPERATURE` | `0.4` |
+| Top P | `ASAGO_SCENARIO_GENERATOR_TOP_P` | (optional) |
+| Top K | `ASAGO_SCENARIO_GENERATOR_TOP_K` | (optional) |
+| Guided decoding | `ASAGO_SCENARIO_GENERATOR_USE_GUIDED_DECODING` | `false` |
+| Request timeout | `ASAGO_SCENARIO_GENERATOR_TIMEOUT` | `300` seconds |
 
 - **Structured calls:** `openai.beta.chat.completions.parse(response_format=PydanticModel)`
 - **Unstructured calls:** `openai.chat.completions.create()` returning raw text
+- **Transport retries:** disabled; pipeline-owned retries are explicit and logged
 
 ---
 

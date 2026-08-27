@@ -294,7 +294,8 @@ def _setup_full_run_client(
 
     client = MockLLMClient()
     client.set_response_for(
-        LossAnalysisDraft, [_valid_loss_analysis_dict(), _valid_gap_draft_dict()],
+        LossAnalysisDraft,
+        [_valid_loss_analysis_dict(), _valid_gap_draft_dict()],
     )
     client.set_response_for(Stage1Profile, valid_stage1_profile_dict())
     client.set_response_for(RequirementSet, _valid_requirement_set_dict())
@@ -420,7 +421,9 @@ class TestMergeFallback05FailureLogged:
             run_dir=tmp_path,
         )
         entries = read_calls_jsonl(tmp_path)
-        assemble_entries = [e for e in entries if e["step"] == "assemble_control_structure"]
+        assemble_entries = [
+            e for e in entries if e["step"] == "assemble_control_structure"
+        ]
         assert len(assemble_entries) == 1
         assert assemble_entries[0]["stage"] == "stage_2"
         assert assemble_entries[0]["success"] is False
@@ -429,12 +432,12 @@ class TestMergeFallback05FailureLogged:
 
 
 # ---------------------------------------------------------------------------
-# MergeFallback-06: Assembly failure recorded in run manifest stage_errors
+# MergeFallback-06: Assembly repair recorded in run manifest stage_warnings
 # ---------------------------------------------------------------------------
 
 
 class TestMergeFallback06ManifestStageErrors:
-    """MergeFallback-06: assembly failure appears in run manifest stage_errors."""
+    """MergeFallback-06: repaired assembly appears in manifest warnings."""
 
     def test_merge_fallback_06_manifest_records_assembly_failure(self, tmp_path):
         client = _setup_full_run_client()
@@ -445,8 +448,11 @@ class TestMergeFallback06ManifestStageErrors:
             run_dir=tmp_path,
         )
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
-        assert "stage_errors" in manifest
-        assert any("assemble_control_structure" in e for e in manifest["stage_errors"])
+        assert manifest["stage_errors"] == []
+        assert any(
+            "assemble_control_structure" in warning
+            for warning in manifest["stage_warnings"]
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -500,7 +506,7 @@ class TestMergeFallback08HeuristicsPass:
 
 
 class TestMergeFallback09NoCrashFullRun:
-    """MergeFallback-09: full SP1 run does not crash, fallback used, error in stage_errors."""
+    """MergeFallback-09: full SP1 run preserves usable fallback warnings."""
 
     def test_merge_fallback_09_pipeline_completes_with_fallback(self, tmp_path):
         client = _setup_full_run_client()
@@ -512,7 +518,33 @@ class TestMergeFallback09NoCrashFullRun:
         )
         assert isinstance(result, SP1RunResult)
         assert result.control_structure is not None
-        assert any("assemble_control_structure" in e for e in result.stage_errors)
+        assert result.stage_errors == []
+        assert any(
+            "assemble_control_structure" in warning for warning in result.stage_warnings
+        )
+
+    def test_repaired_assembly_is_warning_not_fatal_stage_error(self, tmp_path):
+        """A validated fallback artifact is usable despite repair diagnostics."""
+        client = _setup_full_run_client()
+
+        result = run_sp1(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=make_risk_cards(),
+            run_dir=tmp_path,
+        )
+
+        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        assert result.control_structure is not None
+        assert result.stage_errors == []
+        assert any(
+            "assemble_control_structure" in warning for warning in result.stage_warnings
+        )
+        assert manifest["stage_errors"] == []
+        assert any(
+            "assemble_control_structure" in warning
+            for warning in manifest["stage_warnings"]
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -545,5 +577,7 @@ class TestMergeFallback10SuccessfulAssembly:
         assert warnings == []
         # No assembly failure logged
         entries = read_calls_jsonl(tmp_path)
-        assemble_entries = [e for e in entries if e["step"] == "assemble_control_structure"]
+        assemble_entries = [
+            e for e in entries if e["step"] == "assemble_control_structure"
+        ]
         assert len(assemble_entries) == 0

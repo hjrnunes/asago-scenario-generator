@@ -55,9 +55,11 @@ def _make_test_control_structure() -> ControlStructure:
         process_model_parts=[ProcessModelPart(pm_id="PM-1-1", description="State")],
         control_actions=[
             ControlAction(
-                ca_id=f"CA-1-{j+1}",
-                description=f"Action {j+1}",
-                target=ElementRef(type=ReferenceType.controlled_process, id=f"CP-{j+1}"),
+                ca_id=f"CA-1-{j + 1}",
+                description=f"Action {j + 1}",
+                target=ElementRef(
+                    type=ReferenceType.controlled_process, id=f"CP-{j + 1}"
+                ),
             )
             for j in range(2)
         ],
@@ -76,9 +78,11 @@ def _make_test_control_structure() -> ControlStructure:
         process_model_parts=[ProcessModelPart(pm_id="PM-2-1", description="State")],
         control_actions=[
             ControlAction(
-                ca_id=f"CA-2-{j+1}",
-                description=f"Action {j+1}",
-                target=ElementRef(type=ReferenceType.controlled_process, id=f"CP-{j+1}"),
+                ca_id=f"CA-2-{j + 1}",
+                description=f"Action {j + 1}",
+                target=ElementRef(
+                    type=ReferenceType.controlled_process, id=f"CP-{j + 1}"
+                ),
             )
             for j in range(2)
         ],
@@ -153,50 +157,56 @@ def _make_valid_slot_fill_result(resp_id: str, ca_ids: list[str]) -> dict:
         for uca_type in UCAType:
             slot_id = f"{resp_id}:{ca_id}:{uca_type.value}"
             if uca_type == UCAType.wrong_duration:
-                filled_slots.append({
-                    "slot_id": slot_id,
-                    "responsibility": resp_id,
-                    "coordination_link": None,
-                    "control_action": ca_id,
-                    "uca_type": uca_type.value,
-                    "is_na": True,
-                    "icas": [],
-                    "na_justification": "Action is atomic with no duration component",
-                })
+                filled_slots.append(
+                    {
+                        "slot_id": slot_id,
+                        "responsibility": resp_id,
+                        "coordination_link": None,
+                        "control_action": ca_id,
+                        "uca_type": uca_type.value,
+                        "is_na": True,
+                        "icas": [],
+                        "na_justification": "Action is atomic with no duration component",
+                    }
+                )
             else:
-                filled_slots.append({
-                    "slot_id": slot_id,
-                    "responsibility": resp_id,
-                    "coordination_link": None,
-                    "control_action": ca_id,
-                    "uca_type": uca_type.value,
-                    "is_na": False,
-                    "icas": [
-                        {
-                            "ica_id": f"{slot_id}:1",
-                            "ica_text": f"Concrete failure for {ca_id} {uca_type.value}",
-                            "hazardous_context": "Attacker context",
-                            "loss_scenario": "Attack chain leading to harm",
-                            "related_hazards": ["H-1"],
-                            "related_constraints": ["SC-1"],
-                        }
-                    ],
-                    "na_justification": None,
-                })
+                filled_slots.append(
+                    {
+                        "slot_id": slot_id,
+                        "responsibility": resp_id,
+                        "coordination_link": None,
+                        "control_action": ca_id,
+                        "uca_type": uca_type.value,
+                        "is_na": False,
+                        "icas": [
+                            {
+                                "ica_id": f"{slot_id}:1",
+                                "ica_text": f"Concrete failure for {ca_id} {uca_type.value}",
+                                "hazardous_context": "Attacker context",
+                                "loss_scenario": "Attack chain leading to harm",
+                                "related_hazards": ["H-1"],
+                                "related_constraints": ["SC-1"],
+                            }
+                        ],
+                        "na_justification": None,
+                    }
+                )
     return {"filled_slots": filled_slots}
 
 
 def _setup_mock_client() -> MockLLMClient:
     """Set up a mock LLM client with valid slot fill results."""
     client = MockLLMClient()
-    client.set_response_queue([
-        ICASlotFillResult.model_validate(
-            _make_valid_slot_fill_result("RESP-1", ["CA-1-1", "CA-1-2"])
-        ),
-        ICASlotFillResult.model_validate(
-            _make_valid_slot_fill_result("RESP-2", ["CA-2-1", "CA-2-2"])
-        ),
-    ])
+    client.set_response_queue(
+        [
+            ICASlotFillResult.model_validate(
+                _make_valid_slot_fill_result("RESP-1", ["CA-1-1", "CA-1-2"])
+            ),
+            ICASlotFillResult.model_validate(
+                _make_valid_slot_fill_result("RESP-2", ["CA-2-1", "CA-2-2"])
+            ),
+        ]
+    )
     return client
 
 
@@ -224,6 +234,23 @@ class TestFullRunProducesArtifacts:
             )
             assert (Path(tmpdir) / "ica-enumeration.yaml").exists()
             assert (Path(tmpdir) / "enriched-threats.yaml").exists()
+
+    def test_resolved_client_temperature_is_used_and_recorded(self):
+        client = _setup_mock_client()
+        client.temperature = 1.0
+
+        with TemporaryDirectory() as tmpdir:
+            run_sp2(
+                llm_client=client,
+                control_structure=_make_test_control_structure(),
+                capability_profile=_make_test_capability_profile(),
+                loss_analysis=_make_test_loss_analysis(),
+                run_dir=Path(tmpdir),
+            )
+            manifest = yaml.safe_load((Path(tmpdir) / "run-manifest.yaml").read_text())
+
+        assert {call.temperature for call in client.calls} == {1.0}
+        assert manifest["model_config"]["temperature"] == 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -312,9 +339,7 @@ class TestInputHashes:
                 loss_analysis=la,
                 run_dir=Path(tmpdir),
             )
-            manifest = yaml.safe_load(
-                (Path(tmpdir) / "run-manifest.yaml").read_text()
-            )
+            manifest = yaml.safe_load((Path(tmpdir) / "run-manifest.yaml").read_text())
             hashes = manifest["input_hashes"]
             assert "control_structure" in hashes
             assert "capability_profile" in hashes
@@ -346,9 +371,7 @@ class TestPromptHashes:
                 loss_analysis=la,
                 run_dir=Path(tmpdir),
             )
-            manifest = yaml.safe_load(
-                (Path(tmpdir) / "run-manifest.yaml").read_text()
-            )
+            manifest = yaml.safe_load((Path(tmpdir) / "run-manifest.yaml").read_text())
             hashes = manifest["prompt_hashes"]
             assert "stage3_system.j2" in hashes
             assert "stage3_user.j2" in hashes
@@ -367,40 +390,49 @@ class TestSlotCountInOutput:
     def test_slot_count_40(self):
         """4 responsibilities × 2 CAs × 4 + 2 links × 4 = 40."""
         # Use the Klarna fixture dimensions: 4 resp × 2 CA, 2 links
-        cps = [ControlledProcess(cp_id=f"CP-{i+1}", description=f"P{i+1}") for i in range(4)]
+        cps = [
+            ControlledProcess(cp_id=f"CP-{i + 1}", description=f"P{i + 1}")
+            for i in range(4)
+        ]
         responsibilities = []
         for i in range(4):
             responsibilities.append(
                 Responsibility(
-                    resp_id=f"RESP-{i+1}",
-                    description=f"R{i+1}",
-                    process_model_parts=[ProcessModelPart(pm_id=f"PM-{i+1}-1", description="S")],
+                    resp_id=f"RESP-{i + 1}",
+                    description=f"R{i + 1}",
+                    process_model_parts=[
+                        ProcessModelPart(pm_id=f"PM-{i + 1}-1", description="S")
+                    ],
                     control_actions=[
                         ControlAction(
-                            ca_id=f"CA-{i+1}-{j+1}",
-                            description=f"A{j+1}",
-                            target=ElementRef(type=ReferenceType.controlled_process, id=f"CP-{j+1}"),
+                            ca_id=f"CA-{i + 1}-{j + 1}",
+                            description=f"A{j + 1}",
+                            target=ElementRef(
+                                type=ReferenceType.controlled_process, id=f"CP-{j + 1}"
+                            ),
                         )
                         for j in range(2)
                     ],
                     feedback_channels=[
                         FeedbackChannel(
-                            fb_id=f"FB-{i+1}-1",
+                            fb_id=f"FB-{i + 1}-1",
                             description="F",
-                            updates=f"PM-{i+1}-1",
-                            source=ElementRef(type=ReferenceType.controlled_process, id=f"CP-{i+1}"),
+                            updates=f"PM-{i + 1}-1",
+                            source=ElementRef(
+                                type=ReferenceType.controlled_process, id=f"CP-{i + 1}"
+                            ),
                         )
                     ],
                 )
             )
         links = [
             CoordinationLink(
-                link_id=f"CL-{k+1}",
+                link_id=f"CL-{k + 1}",
                 source="RESP-1",
                 target="RESP-2",
                 shared_pm="PM-1-1",
                 coordination_mechanism=CoordinationMechanism(
-                    cm_id=f"CM-{k+1}", description="M", payload="data"
+                    cm_id=f"CM-{k + 1}", description="M", payload="data"
                 ),
                 description="L",
             )
@@ -417,10 +449,12 @@ class TestSlotCountInOutput:
         # Build mock responses for 4 responsibilities
         responses = []
         for i in range(4):
-            resp_id = f"RESP-{i+1}"
+            resp_id = f"RESP-{i + 1}"
             responses.append(
                 ICASlotFillResult.model_validate(
-                    _make_valid_slot_fill_result(resp_id, [f"CA-{i+1}-1", f"CA-{i+1}-2"])
+                    _make_valid_slot_fill_result(
+                        resp_id, [f"CA-{i + 1}-1", f"CA-{i + 1}-2"]
+                    )
                 )
             )
         client = MockLLMClient()
@@ -455,25 +489,29 @@ class TestNAQualityGatesInRun:
         for ca_id in ["CA-1-1", "CA-1-2"]:
             for uca_type in UCAType:
                 slot_id = f"RESP-1:{ca_id}:{uca_type.value}"
-                filled_slots.append({
-                    "slot_id": slot_id,
-                    "responsibility": "RESP-1",
-                    "coordination_link": None,
-                    "control_action": ca_id,
-                    "uca_type": uca_type.value,
-                    "is_na": True,
-                    "icas": [],
-                    "na_justification": "no hazard applicable",  # no structural keyword
-                })
+                filled_slots.append(
+                    {
+                        "slot_id": slot_id,
+                        "responsibility": "RESP-1",
+                        "coordination_link": None,
+                        "control_action": ca_id,
+                        "uca_type": uca_type.value,
+                        "is_na": True,
+                        "icas": [],
+                        "na_justification": "no hazard applicable",  # no structural keyword
+                    }
+                )
         resp1_result = {"filled_slots": filled_slots}
 
         client = MockLLMClient()
-        client.set_response_queue([
-            ICASlotFillResult.model_validate(resp1_result),
-            ICASlotFillResult.model_validate(
-                _make_valid_slot_fill_result("RESP-2", ["CA-2-1", "CA-2-2"])
-            ),
-        ])
+        client.set_response_queue(
+            [
+                ICASlotFillResult.model_validate(resp1_result),
+                ICASlotFillResult.model_validate(
+                    _make_valid_slot_fill_result("RESP-2", ["CA-2-1", "CA-2-2"])
+                ),
+            ]
+        )
 
         with TemporaryDirectory() as tmpdir:
             result = run_sp2(
@@ -525,6 +563,7 @@ class TestModuleLayout:
             coverage,
             run,
         )
+
         assert slot_creation is not None
         assert technology_context is not None
         assert slot_filling is not None
@@ -546,6 +585,7 @@ class TestCLIScript:
     def test_cli_help(self):
         import subprocess
         import sys
+
         result = subprocess.run(
             [sys.executable, "scripts/run_sp2.py", "--help"],
             capture_output=True,
@@ -598,23 +638,27 @@ class TestRunMutationHardening:
         for ca_id in ["CA-1-1", "CA-1-2"]:
             for uca_type in UCAType:
                 slot_id = f"RESP-1:{ca_id}:{uca_type.value}"
-                filled_slots.append({
-                    "slot_id": slot_id,
-                    "responsibility": "RESP-1",
-                    "coordination_link": None,
-                    "control_action": ca_id,
-                    "uca_type": uca_type.value,
-                    "is_na": True,
-                    "icas": [],
-                    "na_justification": "Action is atomic with no duration component",
-                })
+                filled_slots.append(
+                    {
+                        "slot_id": slot_id,
+                        "responsibility": "RESP-1",
+                        "coordination_link": None,
+                        "control_action": ca_id,
+                        "uca_type": uca_type.value,
+                        "is_na": True,
+                        "icas": [],
+                        "na_justification": "Action is atomic with no duration component",
+                    }
+                )
         client = MockLLMClient()
-        client.set_response_queue([
-            ICASlotFillResult.model_validate({"filled_slots": filled_slots}),
-            ICASlotFillResult.model_validate(
-                _make_valid_slot_fill_result("RESP-2", ["CA-2-1", "CA-2-2"])
-            ),
-        ])
+        client.set_response_queue(
+            [
+                ICASlotFillResult.model_validate({"filled_slots": filled_slots}),
+                ICASlotFillResult.model_validate(
+                    _make_valid_slot_fill_result("RESP-2", ["CA-2-1", "CA-2-2"])
+                ),
+            ]
+        )
 
         with TemporaryDirectory() as tmpdir:
             run_sp2(
@@ -624,9 +668,7 @@ class TestRunMutationHardening:
                 loss_analysis=la,
                 run_dir=Path(tmpdir),
             )
-            manifest = yaml.safe_load(
-                (Path(tmpdir) / "run-manifest.yaml").read_text()
-            )
+            manifest = yaml.safe_load((Path(tmpdir) / "run-manifest.yaml").read_text())
             # RESP-1 has 8 N/A + RESP-2 has 2 wrong_duration N/A + CL-1 has 4 N/A = 14
             assert manifest["na_count"] == 14
 
@@ -645,9 +687,7 @@ class TestRunMutationHardening:
                 loss_analysis=la,
                 run_dir=Path(tmpdir),
             )
-            manifest = yaml.safe_load(
-                (Path(tmpdir) / "run-manifest.yaml").read_text()
-            )
+            manifest = yaml.safe_load((Path(tmpdir) / "run-manifest.yaml").read_text())
             assert manifest["stage_summary"]["stage_3"]["call_count"] == 2
 
     def test_manifest_stage_summary_total_tokens(self):
@@ -665,9 +705,7 @@ class TestRunMutationHardening:
                 loss_analysis=la,
                 run_dir=Path(tmpdir),
             )
-            manifest = yaml.safe_load(
-                (Path(tmpdir) / "run-manifest.yaml").read_text()
-            )
+            manifest = yaml.safe_load((Path(tmpdir) / "run-manifest.yaml").read_text())
             # total_tokens should be exactly 300 (2 calls × 150 tokens from MockLLMClient)
             # Must be exact to kill 0→1 initialization mutant
             assert manifest["stage_summary"]["stage_3"]["total_tokens"] == 300
@@ -687,9 +725,7 @@ class TestRunMutationHardening:
                 loss_analysis=la,
                 run_dir=Path(tmpdir),
             )
-            manifest = yaml.safe_load(
-                (Path(tmpdir) / "run-manifest.yaml").read_text()
-            )
+            manifest = yaml.safe_load((Path(tmpdir) / "run-manifest.yaml").read_text())
             # 2 resp × 2 CA × 4 + 1 link × 4 = 20 total
             assert manifest["slot_count"] == 20
             # RESP-1: 6 non-N/A + 2 N/A; RESP-2: 6 non-N/A + 2 N/A; CL-1: 4 N/A

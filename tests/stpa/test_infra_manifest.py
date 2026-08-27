@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import importlib
 
+import yaml
 
 from asago_scenario_generator.stpa.infra.manifest import STPARunManifest
+from asago_scenario_generator.stpa.system_model.run import SP1RunResult
 
 
 class TestInfraManifest:
@@ -38,6 +40,8 @@ class TestInfraManifest:
         assert manifest.critic_findings == []
         assert manifest.revised is False
         assert manifest.post_revision_warnings == []
+        assert manifest.stage_errors == []
+        assert manifest.stage_warnings == []
         assert manifest.eval_scorecard_path is None
 
     def test_manifest_02_with_fill_rate_and_counts(self):
@@ -91,3 +95,35 @@ class TestInfraManifest:
         assert "asago_scenario_generator.manifest" not in mod_source
         assert "from asago_scenario_generator.manifest" not in mod_source
         assert "import asago_scenario_generator.manifest" not in mod_source
+
+    def test_combined_manifest_preserves_fatal_and_recoverable_diagnostics(
+        self, tmp_path
+    ):
+        """Later stage manifest writes cannot erase SP1 repair diagnostics."""
+        from asago_scenario_generator.stpa.pipeline.runner import (
+            _persist_pipeline_diagnostics,
+        )
+
+        manifest_path = tmp_path / "run-manifest.yaml"
+        manifest_path.write_text(
+            yaml.safe_dump({"run_id": "later-stage", "stage_errors": []}),
+            encoding="utf-8",
+        )
+        sp1_result = SP1RunResult(
+            revised=True,
+            post_revision_warnings=["revision retained original"],
+            stage_warnings=["normalized CP-5"],
+        )
+
+        _persist_pipeline_diagnostics(
+            tmp_path,
+            sp1_result=sp1_result,
+            stage_errors=["SP3 did not produce required scenarios"],
+            stage_warnings=["normalized CP-5"],
+        )
+
+        persisted = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        assert persisted["stage_errors"] == ["SP3 did not produce required scenarios"]
+        assert persisted["stage_warnings"] == ["normalized CP-5"]
+        assert persisted["revised"] is True
+        assert persisted["post_revision_warnings"] == ["revision retained original"]

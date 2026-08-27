@@ -70,25 +70,14 @@ from asago_scenario_generator.data.catalog_lineage_snapshot import (
     compute_source_catalog_digest as _compute_source_catalog_digest,
     verify_catalog_lineage_source_snapshot as _verify_source_snapshot,
 )
+from asago_scenario_generator.data.paths import DATA_ROOT
 
 _DEFAULT_LINEAGE_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "data"
-    / "taxonomies"
-    / "attack-patterns"
-    / "catalog-lineage.yaml"
+    DATA_ROOT / "taxonomies" / "attack-patterns" / "catalog-lineage.yaml"
 )
-_DEFAULT_SCHEMA_PATH = (
-    Path(__file__).resolve().parents[3] / "data" / "schemas" / "catalog-lineage.yaml"
-)
+_DEFAULT_SCHEMA_PATH = DATA_ROOT / "schemas" / "catalog-lineage.yaml"
 # Pinned ATLAS source; kept in sync with taxonomy_pins._DEFAULT_ATLAS_PATH.
-_DEFAULT_ATLAS_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "data"
-    / "taxonomies"
-    / "atlas"
-    / "ATLAS-2026.05.yaml"
-)
+_DEFAULT_ATLAS_PATH = DATA_ROOT / "taxonomies" / "atlas" / "ATLAS-2026.05.yaml"
 _LINEAGE_DOMAIN = "asago-scenario-generator:catalog-lineage:v1"
 SOURCE_CATALOG_CANONICALIZATION = "asago-scenario-generator:attack-pattern-records:v1"
 _SNAPSHOT_COMPATIBILITY_NAMES = frozenset(

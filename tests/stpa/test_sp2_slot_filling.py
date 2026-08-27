@@ -269,6 +269,75 @@ class TestOneCallPerResponsibility:
             for entry in entries:
                 assert entry["stage"] == "stage_3"
 
+    def test_schema_invalid_slot_response_gets_one_corrective_retry(self):
+        """A contradictory slot is retried once instead of losing the responsibility."""
+        cs = _make_test_control_structure()
+        la = _make_test_loss_analysis()
+        cp = _make_test_capability_profile()
+        slots = [
+            slot
+            for slot in create_slots(cs)
+            if slot.responsibility == "RESP-1"
+        ]
+        invalid = _make_valid_slot_fill_result("RESP-1", ["CA-1-1", "CA-1-2"])
+        invalid["filled_slots"][0]["icas"] = []
+        valid = _make_valid_slot_fill_result("RESP-1", ["CA-1-1", "CA-1-2"])
+
+        client = MockLLMClient()
+        client.set_response_queue([invalid, valid])
+
+        with TemporaryDirectory() as tmpdir:
+            filled = fill_all_slots(
+                llm_client=client,
+                control_structure=cs,
+                loss_analysis=la,
+                capability_profile=cp,
+                slots=slots,
+                run_dir=Path(tmpdir),
+                max_workers=1,
+            )
+            entries = [
+                json.loads(line)
+                for line in (Path(tmpdir) / "calls.jsonl").read_text().splitlines()
+            ]
+
+        assert client.call_count == 2
+        assert [entry["success"] for entry in entries] == [False, True]
+        assert "every slot with is_na=false" in client.calls[1].user_prompt
+        assert any(not slot.is_na and slot.icas for slot in filled)
+
+    def test_schema_invalid_slot_retry_is_bounded(self):
+        """Two contradictory responses produce two logged failures, then stop."""
+        cs = _make_test_control_structure()
+        slots = [
+            slot
+            for slot in create_slots(cs)
+            if slot.responsibility == "RESP-1"
+        ]
+        invalid = _make_valid_slot_fill_result("RESP-1", ["CA-1-1", "CA-1-2"])
+        invalid["filled_slots"][0]["icas"] = []
+        client = MockLLMClient()
+        client.set_response_queue([invalid, invalid])
+
+        with TemporaryDirectory() as tmpdir:
+            filled = fill_all_slots(
+                llm_client=client,
+                control_structure=cs,
+                loss_analysis=_make_test_loss_analysis(),
+                capability_profile=_make_test_capability_profile(),
+                slots=slots,
+                run_dir=Path(tmpdir),
+                max_workers=1,
+            )
+            entries = [
+                json.loads(line)
+                for line in (Path(tmpdir) / "calls.jsonl").read_text().splitlines()
+            ]
+
+        assert client.call_count == 2
+        assert [entry["success"] for entry in entries] == [False, False]
+        assert all(slot.is_na for slot in filled)
+
 
 # ---------------------------------------------------------------------------
 # System prompt defines four ICA types (SP2-FILL-02)

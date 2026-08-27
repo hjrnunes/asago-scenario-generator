@@ -2871,6 +2871,56 @@ def _h_sp3_llm_valid_all_stages(
     return True, ""
 
 
+def _h_sp3_three_stage5_threats(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: queue three independent threats for the Stage 5 circuit test."""
+    threats = [
+        _make_sp3_threat(ica_id=f"RESP-1:CA-1-1:NOT_PROVIDED:{index}")
+        for index in range(1, 4)
+    ]
+    world.enriched_threat_set = _make_sp3_ets(threats=threats)
+    return True, ""
+
+
+def _h_sp3_length_exhausting_llm(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: configure every Stage 5 attempt to reach the length boundary."""
+
+    class LengthFinishReasonError(Exception):
+        pass
+
+    client = _setup_sp3_mock_client(3)
+    client.set_exception_for(
+        BDIGenerationResult,
+        LengthFinishReasonError("structured response reached its length limit"),
+    )
+    world.sp3_llm_client = client
+    return True, ""
+
+
+def _h_sp3_two_stage5_attempts(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: assert one normal and one concise Stage 5 attempt occurred."""
+    client = getattr(world, "sp3_llm_client", None)
+    actual = getattr(client, "call_count", 0)
+    if actual != 2:
+        return False, f"Expected 2 Stage 5 completion attempts, got {actual}"
+    return True, ""
+
+
+def _h_sp3_aborted_remaining_threats(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: assert the circuit-breaker diagnostic reports skipped work."""
+    errors = getattr(getattr(world, "sp3_run_result", None), "stage_errors", [])
+    if not any("aborted 2 remaining threats" in error for error in errors):
+        return False, f"Missing Stage 5 abort diagnostic in {errors!r}"
+    return True, ""
+
+
 def _h_sp3_max_workers(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a max_workers value of N."""
     import re
@@ -6405,6 +6455,16 @@ def register(api: object) -> None:
         _h_sp3_llm_valid_all_stages,
         source_order=19259,
     )
+    api.register(
+        "three structural threats are queued for Stage 5$",
+        _h_sp3_three_stage5_threats,
+        source_order=192591,
+    )
+    api.register(
+        "an LLM whose Stage 5 normal and concise attempts both reach completion length$",
+        _h_sp3_length_exhausting_llm,
+        source_order=192592,
+    )
     api.register("a max_workers value of.*", _h_sp3_max_workers, source_order=19260)
     api.register(
         "an enriched threat set with 10 structural threats$",
@@ -6417,6 +6477,16 @@ def register(api: object) -> None:
         source_order=19264,
     )
     api.register("the full SP3 run is executed", _h_sp3_full_run, source_order=19265)
+    api.register(
+        "exactly 2 Stage 5 completion attempts are recorded$",
+        _h_sp3_two_stage5_attempts,
+        source_order=192651,
+    )
+    api.register(
+        "the Stage 5 diagnostics say 2 remaining threats were aborted$",
+        _h_sp3_aborted_remaining_threats,
+        source_order=192652,
+    )
     api.register(
         "a directory scenarios exists in the run directory",
         _h_sp3_scenarios_dir,

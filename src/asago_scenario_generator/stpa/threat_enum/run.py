@@ -19,7 +19,12 @@ from typing import Any
 import yaml
 
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
-from asago_scenario_generator.stpa.infra.llm import LLMClient
+from asago_scenario_generator.stpa.infra.llm import (
+    DEFAULT_TEMPERATURE as LLM_DEFAULT_TEMPERATURE,
+    LLMClient,
+    effective_model_config,
+    effective_temperature,
+)
 from asago_scenario_generator.stpa.infra.manifest_helpers import (
     count_calls_by_stage,
     hash_model,
@@ -40,7 +45,7 @@ from .na_quality import check_all_na_quality
 from .slot_creation import create_slots
 from .slot_filling import fill_all_slots
 
-DEFAULT_TEMPERATURE = 0.4
+DEFAULT_TEMPERATURE = LLM_DEFAULT_TEMPERATURE
 
 __all__ = ["SP2RunResult", "run_sp2"]
 
@@ -70,7 +75,7 @@ def run_sp2(
     loss_analysis: LossAnalysis,
     run_dir: Path,
     max_workers: int = 1,
-    temperature: float = DEFAULT_TEMPERATURE,
+    temperature: float | None = None,
 ) -> SP2RunResult:
     """Run the full SP2 pipeline: Stage 3 → Stage 4.
 
@@ -81,13 +86,15 @@ def run_sp2(
         loss_analysis: SP1 loss analysis.
         run_dir: Directory for output artifacts.
         max_workers: Maximum parallel workers for LLM calls.
-        temperature: LLM temperature.
+        temperature: Explicit LLM temperature override. When omitted, use the
+            resolved client temperature (default 0.4).
 
     Returns:
         An :class:`SP2RunResult` with artifacts and diagnostics.
     """
     run_dir.mkdir(parents=True, exist_ok=True)
     loader = TemplateLoader(PROMPTS_DIR)
+    temperature = effective_temperature(llm_client, temperature)
 
     stage_errors: list[str] = []
 
@@ -131,6 +138,7 @@ def run_sp2(
         enriched_threat_set=enriched_threat_set,
         na_quality_result=na_quality_result,
         max_workers=max_workers,
+        temperature=temperature,
         stage_errors=stage_errors,
     )
 
@@ -153,6 +161,7 @@ def _write_manifest(
     enriched_threat_set: EnrichedThreatSet,
     na_quality_result: Any,
     max_workers: int,
+    temperature: float,
     stage_errors: list[str],
 ) -> None:
     """Write the run manifest YAML."""
@@ -173,11 +182,10 @@ def _write_manifest(
         "run_id": f"sp2-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
         "run_dir": str(run_dir),
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "model_config": {
-            "model": llm_client.model,
-            "base_url": llm_client.base_url,
-            "temperature": llm_client.temperature,
-        },
+        "model_config": effective_model_config(
+            llm_client,
+            temperature=temperature,
+        ),
         "input_hashes": input_hashes,
         "prompt_hashes": prompt_hashes,
         "stage_summary": stage_summary,

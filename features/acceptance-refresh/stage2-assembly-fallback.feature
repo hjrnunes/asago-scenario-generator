@@ -12,7 +12,8 @@ Feature: Stage 2 Assembly and Coordination Fallback
   Adding Call 3's coordination links is a second step; on failure it logs
   step add_coordination_links and returns the ControlStructure without
   links. Neither failure crashes the pipeline; both are recorded in the run
-  manifest stage_errors. The retired step name merge_connection_set must
+  manifest stage_warnings while stage_errors remains reserved for fatal stage
+  failures. The retired step name merge_connection_set must
   never appear in a call log.
 
   Background:
@@ -84,10 +85,10 @@ Feature: Stage 2 Assembly and Coordination Fallback
     When the full SP1 run is executed
     Then the pipeline does not crash
     And a run manifest is written
-    And the manifest contains a stage_errors field
+    And the manifest contains a stage_warnings field
     And the SP1RunResult control_structure is not None
     And the heuristic result is available
-    And the SP1RunResult stage_errors contains the assemble_control_structure failure
+    And the SP1RunResult stage_warnings contains the assemble_control_structure repair
 
   # stage2-assembly-fallback-08
   Scenario: stage2-assembly-fallback-08 successful assembly produces no warnings
