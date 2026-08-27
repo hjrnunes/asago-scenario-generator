@@ -171,8 +171,18 @@ def plan_obligations(
             )
         )
 
-    # Deterministic canonical sort by risk_id, pattern_id (treating None as empty str), and obligation_id
-    obligations.sort(key=lambda ob: (ob.risk_id, ob.pattern_id or "", ob.obligation_id))
+    # Deterministic canonical sort by semantic identity (risk_id, pattern_id,
+    # obligation_id).  Duplicate canonical ids can still carry distinct
+    # evidence, so the full serialized obligation is the final tiebreaker and
+    # ledger order never depends on snapshot presentation order.
+    obligations.sort(
+        key=lambda ob: (
+            ob.risk_id,
+            ob.pattern_id or "",
+            ob.obligation_id,
+            ob.model_dump_json(),
+        )
+    )
 
     return TaxonomyObligationPlan(
         taxonomy_version=snap.taxonomy_version,

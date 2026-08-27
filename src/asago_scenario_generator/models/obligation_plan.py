@@ -47,8 +47,8 @@ class TaxonomyObligation(BaseModel):
     obligation_id: str
     risk_id: str
     pattern_id: str | None = None
-    scope: str
-    terminal_disposition: str
+    scope: ObligationScope
+    terminal_disposition: ObligationDisposition
     qualification_trace: list[QualificationTraceItem] = Field(default_factory=list)
     accepted_candidates: list[str] = Field(default_factory=list)
     rejected_candidates: list[RejectedCandidateEvidence] = Field(default_factory=list)
