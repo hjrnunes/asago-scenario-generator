@@ -17,7 +17,26 @@ from typing import Any
 from asago_scenario_generator.models.capability_profile import (
     ZONE_NAMES,
     CapabilityProfile,
+    _canonical_entry_point_name,
 )
+
+
+def _entropy_value(counts: Counter, n: int) -> float:
+    """Raw Shannon entropy over counter values."""
+    entropy = 0.0
+    for count in counts.values():
+        p = count / n
+        if p > 0:
+            entropy -= p * math.log2(p)
+    return entropy
+
+
+def _normalized_entropy(entropy: float, n_categories: int) -> float:
+    """Entropy normalized by log2(n_categories)."""
+    max_entropy = math.log2(n_categories)
+    if max_entropy > 0:
+        return entropy / max_entropy
+    return entropy
 
 
 def _shannon_entropy(values: list[str], normalize: bool = True) -> float:
@@ -40,17 +59,10 @@ def _shannon_entropy(values: list[str], normalize: bool = True) -> float:
     if n_categories <= 1:
         return 0.0
 
-    entropy = 0.0
-    for count in counts.values():
-        p = count / n
-        if p > 0:
-            entropy -= p * math.log2(p)
+    entropy = _entropy_value(counts, n)
 
     if normalize:
-        max_entropy = math.log2(n_categories)
-        if max_entropy > 0:
-            entropy /= max_entropy
-
+        return _normalized_entropy(entropy, n_categories)
     return entropy
 
 
@@ -93,6 +105,104 @@ def _extract_domain_stopwords(titles: list[str], threshold: float = 0.5) -> set[
     return {word for word, count in word_counts.items() if count / n > threshold}
 
 
+def _entry_point_id_lookup(
+    profile: CapabilityProfile | None,
+) -> dict[str, set[str]]:
+    """Normalized display name to canonical ingress ID set, when a profile is given."""
+    if profile is None:
+        return {}
+    # Only attacker-accessible EPs are in the coverage universe
+    # (cmps.9 third review correction 2).
+    from asago_scenario_generator.models.capability_profile import (
+        _canonical_entry_point_name,
+        is_attacker_accessible_ingress,
+    )
+
+    active_zones = set(profile.zones_active) if profile.zones_active else set()
+    ep_name_to_ids: dict[str, set[str]] = {}
+    for ep in profile.entry_points:
+        if not is_attacker_accessible_ingress(ep, active_zones):
+            continue
+        key = _canonical_entry_point_name(ep.name)
+        ep_name_to_ids.setdefault(key, set()).add(ep.entry_point_id)
+    return ep_name_to_ids
+
+
+def _unique_match_id(matched_ids: set[str] | None) -> str | None:
+    """The single canonical id behind a name match, or None when ambiguous."""
+    if matched_ids and len(matched_ids) == 1:
+        return next(iter(matched_ids))
+    return None
+
+
+def _name_fallback(ep: str, profile: CapabilityProfile | None) -> str | None:
+    """Identity for an unresolved display name, without inflating coverage."""
+    if profile is None:
+        # No profile — fall back to canonical name as identity.
+        return _canonical_entry_point_name(ep)
+    # Ambiguous or unknown with profile — do not inflate coverage.
+    return None
+
+
+def _scenario_entry_point_identity(
+    scenario: dict[str, Any],
+    ep_name_to_ids: dict[str, set[str]],
+    profile: CapabilityProfile | None,
+) -> str | None:
+    """Canonical entry-point identity for one scenario, or None."""
+    cf = scenario.get("candidate_filter") or {}
+    ep_id = cf.get("entry_point_id")
+    if ep_id:
+        return ep_id
+    ep = scenario.get("narrative", {}).get("entry_point", "")
+    if not ep:
+        return None
+
+    # Resolve display name to canonical ID(s) when possible.
+    # Unique match: credit the single ID.
+    # Ambiguous match (multiple IDs): unresolved — credit none.
+    # Unknown name without profile: use canonical name as identity.
+    matched_ids = ep_name_to_ids.get(_canonical_entry_point_name(ep))
+    unique_id = _unique_match_id(matched_ids)
+    if unique_id is not None:
+        return unique_id
+    return _name_fallback(ep, profile)
+
+
+def _expected_entry_point_ids(profile: CapabilityProfile) -> set[str]:
+    """Attacker-accessible canonical ingress entry-point IDs from the profile."""
+    from asago_scenario_generator.models.capability_profile import (
+        is_attacker_accessible_ingress,
+    )
+
+    active_zones = set(profile.zones_active) if profile.zones_active else set()
+    return {
+        ep.entry_point_id
+        for ep in profile.entry_points
+        if is_attacker_accessible_ingress(ep, active_zones)
+    }
+
+
+def _entry_point_coverage_ratio(
+    used_ids: set[str],
+    entry_point_list: list[str],
+    expected_entry_points: int,
+    profile: CapabilityProfile | None,
+) -> float:
+    """Raw entry-point coverage ratio in [0, 1]."""
+    if profile is not None:
+        # Exact canonical set arithmetic — only attacker-accessible EPs
+        # (cmps.9 third review correction 2).  Only count IDs that are in
+        # the expected set — unknown IDs must not inflate coverage.
+        expected_ids = _expected_entry_point_ids(profile)
+        if expected_ids:
+            return len(used_ids & expected_ids) / len(expected_ids)
+        return 0.0
+    if expected_entry_points > 0:
+        return len(set(entry_point_list)) / expected_entry_points
+    return 0.0
+
+
 def entry_point_entropy(
     scenarios: list[dict[str, Any]],
     expected_entry_points: int | None = None,
@@ -124,99 +234,62 @@ def entry_point_entropy(
         float (entropy) when expected_entry_points is None, otherwise a dict
         with 'entropy' and 'entry_point_coverage'.
     """
-    # Build a normalized-name → set-of-entry_point_ids lookup from the
-    # profile for fallback resolution of narrative display names.  Using
-    # a set per name avoids collapsing same-name entry points with
-    # different canonical identities.  Normalization uses the same
-    # canonical name function as entry_point_id computation.
-    from asago_scenario_generator.models.capability_profile import (
-        _canonical_entry_point_name,
-    )
-
-    ep_name_to_ids: dict[str, set[str]] = {}
-    if profile is not None:
-        # Only attacker-accessible EPs are in the coverage universe
-        # (cmps.9 third review correction 2).
-        from asago_scenario_generator.models.capability_profile import (
-            is_attacker_accessible_ingress,
-        )
-
-        active_zones_div = set(profile.zones_active) if profile.zones_active else set()
-        for ep in profile.entry_points:
-            if not is_attacker_accessible_ingress(ep, active_zones_div):
-                continue
-            key = _canonical_entry_point_name(ep.name)
-            ep_name_to_ids.setdefault(key, set()).add(ep.entry_point_id)
-
+    ep_name_to_ids = _entry_point_id_lookup(profile)
     used_ids: set[str] = set()
     entry_point_list: list[str] = []
     for s in scenarios:
-        # Prefer canonical entry_point_id from provenance.
-        cf = s.get("candidate_filter") or {}
-        ep_id = cf.get("entry_point_id")
-        if ep_id:
-            used_ids.add(ep_id)
-            entry_point_list.append(ep_id)
-        else:
-            ep = s.get("narrative", {}).get("entry_point", "")
-            if ep:
-                # Resolve display name to canonical ID(s) when possible.
-                # Unique match: credit the single ID.
-                # Ambiguous match (multiple IDs): unresolved — credit none.
-                # Unknown name without profile: use canonical name as identity.
-                matched_ids = ep_name_to_ids.get(_canonical_entry_point_name(ep))
-                if matched_ids and len(matched_ids) == 1:
-                    resolved = next(iter(matched_ids))
-                    used_ids.add(resolved)
-                    entry_point_list.append(resolved)
-                elif profile is None:
-                    # No profile — fall back to canonical name as identity.
-                    canonical = _canonical_entry_point_name(ep)
-                    used_ids.add(canonical)
-                    entry_point_list.append(canonical)
-                # Ambiguous or unknown with profile — do not inflate coverage.
+        identity = _scenario_entry_point_identity(s, ep_name_to_ids, profile)
+        if identity is not None:
+            used_ids.add(identity)
+            entry_point_list.append(identity)
 
     entropy = round(_shannon_entropy(entry_point_list), 4)
 
     if expected_entry_points is None:
         return entropy
 
-    if profile is not None:
-        # Exact canonical set arithmetic — only attacker-accessible EPs
-        # (cmps.9 third review correction 2).
-        expected_ids = {
-            ep.entry_point_id
-            for ep in profile.entry_points
-            if is_attacker_accessible_ingress(ep, active_zones_div)
-        }
-        # Only count IDs that are in the expected set — unknown IDs
-        # must not inflate coverage.
-        covered_ids = used_ids & expected_ids
-        covered = len(covered_ids)
-        raw_coverage = covered / len(expected_ids) if expected_ids else 0.0
-    else:
-        actual_unique = len(set(entry_point_list))
-        raw_coverage = (
-            actual_unique / expected_entry_points if expected_entry_points > 0 else 0.0
-        )
-
+    raw_coverage = _entry_point_coverage_ratio(
+        used_ids, entry_point_list, expected_entry_points, profile
+    )
     coverage = round(min(1.0, max(0.0, raw_coverage)), 4)
     result: dict[str, Any] = {
         "entropy": entropy,
         "entry_point_coverage": coverage,
     }
     if profile is not None:
-        expected_ids = {
-            ep.entry_point_id
-            for ep in profile.entry_points
-            if is_attacker_accessible_ingress(ep, active_zones_div)
-        }
+        expected_ids = _expected_entry_point_ids(profile)
         covered_ids = used_ids & expected_ids
         result["covered_entry_point_count"] = len(covered_ids)
         result["expected_entry_point_count"] = len(expected_ids)
         result["covered_entry_point_ids"] = sorted(covered_ids)
         result["expected_entry_point_ids"] = sorted(expected_ids)
     return result
+
+
+def _out_of_scope_violation(
+    scenario: dict[str, Any], active_zones: set[str]
+) -> dict[str, Any] | None:
+    """Out-of-scope zone violation record for one scenario, or None."""
+    zones = {str(z) for z in scenario.get("narrative", {}).get("zone_sequence", [])}
+    out_of_scope = zones - active_zones
+    if not out_of_scope:
+        return None
+    return {
+        "scenario_id": scenario.get("scenario_id", "unknown"),
+        "out_of_scope_zones": sorted(out_of_scope),
+    }
+
+
+def _zone_coverage_violations(
+    scenarios: list[dict[str, Any]], active_zones: set[str]
+) -> list[dict[str, Any]]:
+    """Out-of-scope violation records across scenarios."""
+    violations: list[dict[str, Any]] = []
+    for scenario in scenarios:
+        violation = _out_of_scope_violation(scenario, active_zones)
+        if violation is not None:
+            violations.append(violation)
+    return violations
 
 
 def zone_coverage(
@@ -253,24 +326,12 @@ def zone_coverage(
         round(len(covered_active) / len(active_zones), 4) if active_zones else 0.0
     )
 
-    # Find scenarios referencing zones outside the active set
-    violations: list[dict[str, Any]] = []
-    for s in scenarios:
-        scenario_id = s.get("scenario_id", "unknown")
-        zones = {str(z) for z in s.get("narrative", {}).get("zone_sequence", [])}
-        out_of_scope = zones - active_zones
-        if out_of_scope:
-            violations.append(
-                {
-                    "scenario_id": scenario_id,
-                    "out_of_scope_zones": sorted(out_of_scope),
-                }
-            )
-
     return {
         "raw_coverage": raw_coverage,
         "active_zone_coverage": active_coverage,
-        "out_of_scope_zone_violations": violations,
+        "out_of_scope_zone_violations": _zone_coverage_violations(
+            scenarios, active_zones
+        ),
     }
 
 

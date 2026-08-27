@@ -49,6 +49,27 @@ def _collect_tree_leaves(node: dict[str, Any]) -> list[dict[str, Any]]:
     return leaves
 
 
+_INT_TO_ZONE_NAME = dict(enumerate(ZONE_NAMES, 1))
+_ZONE_NAME_SET = frozenset(ZONE_NAMES)
+
+
+def _zone_display_name_for_token(token: str) -> str | None:
+    """Canonical zone whose display label contains the token, if any."""
+    for zone_name, display in ZONE_DISPLAY_NAMES.items():
+        if token.lower() in display.lower():
+            return zone_name
+    return None
+
+
+def _zone_from_annotation_token(token: str) -> str | None:
+    """Canonical zone name for one annotation token, or None."""
+    if token.isdigit():
+        return _INT_TO_ZONE_NAME.get(int(token))
+    if token in _ZONE_NAME_SET:
+        return token
+    return _zone_display_name_for_token(token)
+
+
 def _extract_gherkin_zones(gherkin_text: str) -> set[str]:
     """Extract zone annotations from Gherkin text.
 
@@ -56,24 +77,12 @@ def _extract_gherkin_zones(gherkin_text: str) -> set[str]:
     string zone names (e.g. ``# Zone reasoning``).  Legacy integers are
     mapped to the canonical string name via ``ZONE_NAMES``.
     """
-    _INT_TO_NAME = dict(enumerate(ZONE_NAMES, 1))
     zones: set[str] = set()
     # Match "# Zone <word_or_number>"
     for match in re.finditer(r"#\s*[Zz]one\s+(\S+)", gherkin_text):
-        token = match.group(1)
-        # Legacy integer form
-        if token.isdigit():
-            name = _INT_TO_NAME.get(int(token))
-            if name:
-                zones.add(name)
-        elif token in set(ZONE_NAMES):
-            zones.add(token)
-        # Also accept display names written as-is (e.g. "Input")
-        else:
-            for zn, display in ZONE_DISPLAY_NAMES.items():
-                if token.lower() in display.lower():
-                    zones.add(zn)
-                    break
+        name = _zone_from_annotation_token(match.group(1))
+        if name is not None:
+            zones.add(name)
     return zones
 
 
@@ -112,6 +121,27 @@ def zone_alignment(
     return sum(pairs) / len(pairs) if pairs else 1.0
 
 
+def _tokens_overlap_threshold(a: str, b: str, threshold: float = 0.4) -> bool:
+    """True when at least *threshold* of a's tokens also appear in b."""
+    tokens_a = set(a.split())
+    tokens_b = set(b.split())
+    if not tokens_a:
+        return False
+    return len(tokens_a & tokens_b) >= len(tokens_a) * threshold
+
+
+def _gherkin_background_text(gherkin_text: str | None) -> str | None:
+    """Background section text when the Gherkin has one, else None."""
+    if not gherkin_text:
+        return None
+    bg_match = re.search(
+        r"Background:.*?(?=Scenario|$)", gherkin_text, re.DOTALL | re.IGNORECASE
+    )
+    if not bg_match:
+        return None
+    return bg_match.group()
+
+
 def entry_point_agreement(
     scenario: dict[str, Any],
     gherkin_text: str | None = None,
@@ -132,55 +162,24 @@ def entry_point_agreement(
     root_label = _normalize_entry_point(tree_root.get("label", ""))
     root_desc = _normalize_entry_point(tree_root.get("description", "") or "")
 
-    # Check if entry point keywords appear in root
-    ep_tokens = set(ep_norm.split())
-    root_tokens = set(root_label.split()) | set(root_desc.split())
-
-    # At least half the entry point tokens should appear
-    if ep_tokens and len(ep_tokens & root_tokens) >= len(ep_tokens) * 0.4:
+    # Check if entry point keywords appear in root (at least 40% of tokens)
+    root_text = " ".join((root_label, root_desc))
+    if _tokens_overlap_threshold(ep_norm, root_text):
         return 1
 
     # Check Gherkin Background
-    if gherkin_text:
-        bg_match = re.search(
-            r"Background:.*?(?=Scenario|$)", gherkin_text, re.DOTALL | re.IGNORECASE
-        )
-        if bg_match:
-            bg_norm = _normalize_entry_point(bg_match.group())
-            bg_tokens = set(bg_norm.split())
-            if ep_tokens and len(ep_tokens & bg_tokens) >= len(ep_tokens) * 0.4:
-                return 1
+    bg_text = _gherkin_background_text(gherkin_text)
+    if bg_text is not None and _tokens_overlap_threshold(
+        ep_norm, _normalize_entry_point(bg_text)
+    ):
+        return 1
 
     return 0
 
 
-def step_node_correspondence(scenario: dict[str, Any]) -> float:
-    """Ratio of narrative steps with a plausible mapping to attack tree leaves.
-
-    A narrative step is considered mapped if a leaf node exists in the same zone
-    and shares at least one significant word with the step action.
-    """
-    narrative = scenario.get("narrative", {})
-    steps = narrative.get("steps", [])
-    if not steps:
-        return 0.0
-
-    tree_root = scenario.get("attack_tree", {}).get("root", {})
-    leaves = _collect_tree_leaves(tree_root)
-
-    # Build a mapping of zone -> set of leaf label tokens
-    zone_leaf_tokens: dict[str, set[str]] = {}
-    for leaf in leaves:
-        z = leaf.get("zone")
-        if z is not None:
-            label_tokens = set(_normalize_entry_point(leaf.get("label", "")).split())
-            desc_tokens = set(
-                _normalize_entry_point(leaf.get("description", "") or "").split()
-            )
-            zone_leaf_tokens.setdefault(z, set()).update(label_tokens | desc_tokens)
-
-    # Stopwords to exclude from matching
-    stopwords = {
+# Stopwords to exclude from step/leaf matching
+_STEP_MATCH_STOPWORDS = frozenset(
+    {
         "the",
         "a",
         "an",
@@ -201,17 +200,60 @@ def step_node_correspondence(scenario: dict[str, Any]) -> float:
         "it",
         "as",
     }
+)
+
+
+def _zone_leaf_token_map(leaves: list[dict[str, Any]]) -> dict[str, set[str]]:
+    """Map zone to the union of leaf label/description tokens in that zone."""
+    zone_leaf_tokens: dict[str, set[str]] = {}
+    for leaf in leaves:
+        z = leaf.get("zone")
+        if z is not None:
+            label_tokens = set(_normalize_entry_point(leaf.get("label", "")).split())
+            desc_tokens = set(
+                _normalize_entry_point(leaf.get("description", "") or "").split()
+            )
+            zone_leaf_tokens.setdefault(z, set()).update(label_tokens | desc_tokens)
+    return zone_leaf_tokens
+
+
+def _step_mapped(
+    step: dict[str, Any],
+    zone_leaf_tokens: dict[str, set[str]],
+    stopwords: frozenset[str],
+) -> bool:
+    """True when a narrative step shares a significant word with a leaf."""
+    step_zone = step.get("zone")
+    step_action = _normalize_entry_point(step.get("action", ""))
+    step_tokens = set(step_action.split()) - stopwords
+
+    if step_zone not in zone_leaf_tokens:
+        return False
+    leaf_tokens = zone_leaf_tokens[step_zone] - stopwords
+    return bool(step_tokens) and bool(leaf_tokens) and bool(step_tokens & leaf_tokens)
+
+
+def step_node_correspondence(scenario: dict[str, Any]) -> float:
+    """Ratio of narrative steps with a plausible mapping to attack tree leaves.
+
+    A narrative step is considered mapped if a leaf node exists in the same zone
+    and shares at least one significant word with the step action.
+    """
+    narrative = scenario.get("narrative", {})
+    steps = narrative.get("steps", [])
+    if not steps:
+        return 0.0
+
+    tree_root = scenario.get("attack_tree", {}).get("root", {})
+    leaves = _collect_tree_leaves(tree_root)
+
+    # Build a mapping of zone -> set of leaf label tokens
+    zone_leaf_tokens = _zone_leaf_token_map(leaves)
 
     mapped = 0
     for step in steps:
-        step_zone = step.get("zone")
-        step_action = _normalize_entry_point(step.get("action", ""))
-        step_tokens = set(step_action.split()) - stopwords
-
-        if step_zone in zone_leaf_tokens:
-            leaf_tokens = zone_leaf_tokens[step_zone] - stopwords
-            if step_tokens and leaf_tokens and (step_tokens & leaf_tokens):
-                mapped += 1
+        if _step_mapped(step, zone_leaf_tokens, _STEP_MATCH_STOPWORDS):
+            mapped += 1
 
     return mapped / len(steps)
 

@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from asago_scenario_generator.eval.versioned_metrics import _load_v3_scorecard_models
 from asago_scenario_generator.llm.client import LLMResult
@@ -23,12 +24,20 @@ from asago_scenario_generator.manifest import (
     ArtifactRole,
     ManifestInventoryResolver,
     ManifestIntegrityError,
+    InputHashes,
+    Provenance,
     RunManifest,
     RunStatus,
     _check_completed_scenario_pairing,
     _check_completed_scorecard_counts,
+    _check_completed_attempt_equations,
+    _check_completed_duplicate_singletons,
+    _scorecard_entry_verifiable,
+    _strict_resolver_for_completed,
     _v3_scorecard_counts,
     build_artifact_entry,
+    validate_completed_inventory,
+    validate_v3_resolver_policy,
 )
 from asago_scenario_generator.models.attack_pattern import (
     EntryPointResourceReference,
@@ -50,6 +59,7 @@ from asago_scenario_generator.models.projection_envelope import (
     ProjectionTraceabilityViolationCode,
 )
 from asago_scenario_generator.models.scenario import CallMetadata, CallName
+from asago_scenario_generator.pipeline import runner as runner_module
 from asago_scenario_generator.pipeline import runner_run as runner_run_module
 from asago_scenario_generator.pipeline.runner_run import (
     _expansion_record,
@@ -89,8 +99,12 @@ from asago_scenario_generator.pipeline.runner import (
     PipelineResult,
     QualificationFactsV1,
     _apply_zone_filter,
+    _authoritative_second_pass,
     _authoritative_products_ready,
+    _finalize_run_manifest,
     _ordinary_completion_succeeded,
+    _provisional_eval_product,
+    _provisional_report_product,
     _readable_evidence_file,
     _rule_rejection_reasons,
     _scorecard_qualification_passed,
@@ -534,6 +548,131 @@ class TestCheckCompletedScenarioPairing:
         _check_completed_scenario_pairing(manifest)
 
 
+class TestCompletedInventoryDispatch:
+    @staticmethod
+    def _manifest(version: str) -> SimpleNamespace:
+        return SimpleNamespace(manifest_version=version)
+
+    def test_v3_policy_requires_both_resolver_and_version(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import asago_scenario_generator.manifest_completion as completion
+
+        for helper in (
+            "_check_completed_singleton_roles",
+            "_check_completed_duplicate_singletons",
+            "_check_completed_scenario_pairing",
+            "_check_completed_attempt_equations",
+            "_check_completed_inventory_identity",
+        ):
+            monkeypatch.setattr(completion, helper, lambda *args: None)
+
+        resolved = object()
+        monkeypatch.setattr(
+            completion,
+            "_strict_resolver_for_completed",
+            lambda _manifest, _run_dir: resolved,
+        )
+        calls: list[object] = []
+        monkeypatch.setattr(
+            completion,
+            "validate_v3_resolver_policy",
+            lambda resolver: calls.append(resolver),
+        )
+
+        validate_completed_inventory(
+            self._manifest(MANIFEST_V3), eval_enabled=False, run_dir=Path("run")
+        )
+        assert calls == [resolved]
+
+        calls.clear()
+        monkeypatch.setattr(
+            completion,
+            "_strict_resolver_for_completed",
+            lambda _manifest, _run_dir: resolved,
+        )
+        validate_completed_inventory(
+            self._manifest("2"), eval_enabled=False, run_dir=Path("run")
+        )
+        assert calls == []
+
+        calls.clear()
+        monkeypatch.setattr(
+            completion,
+            "_strict_resolver_for_completed",
+            lambda _manifest, _run_dir: None,
+        )
+        validate_completed_inventory(
+            self._manifest(MANIFEST_V3), eval_enabled=False, run_dir=None
+        )
+        assert calls == []
+
+
+class TestV3ResolverPolicy:
+    def test_missing_semantic_summary_is_ignored(self) -> None:
+        validate_v3_resolver_policy(
+            SimpleNamespace(
+                manifest=SimpleNamespace(semantic_generation=None),
+            )
+        )
+
+
+class TestStrictCompletedResolver:
+    @staticmethod
+    def _manifest(version: str) -> SimpleNamespace:
+        return SimpleNamespace(manifest_version=version)
+
+    def test_strict_completed_resolver_checks_orphans(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import asago_scenario_generator.manifest_completion as completion
+
+        calls: list[bool] = []
+
+        class FakeResolver:
+            def __init__(
+                self,
+                _run_dir: Path,
+                _manifest: object,
+                *,
+                check_orphans: bool,
+            ) -> None:
+                calls.append(check_orphans)
+
+        monkeypatch.setattr(completion, "ManifestInventoryResolver", FakeResolver)
+        result = _strict_resolver_for_completed(self._manifest(MANIFEST_V3), tmp_path)
+        assert isinstance(result, FakeResolver)
+        assert calls == [True]
+
+
+class TestCompletedDuplicateSingletons:
+    def test_one_singleton_passes_and_two_fail(self) -> None:
+        entry = SimpleNamespace(role=ArtifactRole.USE_CASE)
+        _check_completed_duplicate_singletons(SimpleNamespace(inventory=[entry]))
+        with pytest.raises(ManifestIntegrityError, match="Duplicate singleton"):
+            _check_completed_duplicate_singletons(
+                SimpleNamespace(inventory=[entry, entry])
+            )
+
+
+class TestCompletedAttemptEquations:
+    def test_v3_does_not_use_legacy_equations(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import asago_scenario_generator.manifest_completion as completion
+
+        calls: list[object] = []
+        monkeypatch.setattr(
+            completion,
+            "validate_attempt_equations",
+            lambda manifest: calls.append(manifest),
+        )
+        _check_completed_attempt_equations(
+            SimpleNamespace(manifest_version=MANIFEST_V3)
+        )
+        assert calls == []
+
+
 class TestV3ScorecardCounts:
     @staticmethod
     def _scorecard_raw() -> dict[str, Any]:
@@ -574,6 +713,13 @@ class TestV3ScorecardCounts:
 
 
 class TestCheckCompletedScorecardCounts:
+    def test_scorecard_is_verifiable_only_with_both_inputs(self) -> None:
+        entry = SimpleNamespace()
+        resolver = object()
+        assert _scorecard_entry_verifiable(entry, resolver)
+        assert not _scorecard_entry_verifiable(entry, None)
+        assert not _scorecard_entry_verifiable(None, resolver)
+
     def test_count_mismatch_raises(self, tmp_path: Path) -> None:
         manifest = _manifest(tmp_path, yaml_ids=("a",))
         with pytest.raises(
@@ -614,6 +760,33 @@ class TestLoadV3ScorecardModels:
         resolver = SimpleNamespace(
             manifest=SimpleNamespace(manifest_version="3"),
             entry_by_role=lambda role: None,
+        )
+        with pytest.raises(
+            ValueError, match="requires plan, finalization, and profile"
+        ):
+            _load_v3_scorecard_models(resolver)
+
+    def test_requires_finalization_entry(self) -> None:
+        resolver = SimpleNamespace(
+            manifest=SimpleNamespace(manifest_version="3"),
+            entry_by_role=lambda role: (
+                SimpleNamespace() if role is ArtifactRole.COVERAGE_PLAN else None
+            ),
+        )
+        with pytest.raises(
+            ValueError, match="requires plan, finalization, and profile"
+        ):
+            _load_v3_scorecard_models(resolver)
+
+    def test_requires_profile_entry(self) -> None:
+        resolver = SimpleNamespace(
+            manifest=SimpleNamespace(manifest_version="3"),
+            entry_by_role=lambda role: (
+                SimpleNamespace()
+                if role
+                in (ArtifactRole.COVERAGE_PLAN, ArtifactRole.FINALIZATION_INVENTORY)
+                else None
+            ),
         )
         with pytest.raises(
             ValueError, match="requires plan, finalization, and profile"
@@ -1031,6 +1204,12 @@ class TestCheckV3CompletedStatus:
         resolver = SimpleNamespace(manifest=SimpleNamespace(status=RunStatus.COMPLETED))
         _check_v3_completed_status(resolver, set())
 
+    def test_completed_with_warnings_without_quarantine_passes(self) -> None:
+        resolver = SimpleNamespace(
+            manifest=SimpleNamespace(status=RunStatus.COMPLETED_WITH_WARNINGS)
+        )
+        _check_v3_completed_status(resolver, set())
+
 
 class TestCheckGateViolationsMatchTerminal:
     @staticmethod
@@ -1335,6 +1514,155 @@ class TestRunnerCompletionPredicates:
         assert _readable_evidence_file(regular) is True
         assert _readable_evidence_file(tmp_path) is False
         assert _readable_evidence_file(tmp_path / "missing") is False
+
+
+class TestRunnerProductFinalization:
+    def test_qualification_facts_are_frozen(self) -> None:
+        facts = QualificationFactsV1(facts=())
+
+        with pytest.raises(ValidationError):
+            facts.schema_version = "1"
+
+    def test_disabled_eval_does_not_run_the_eval_product(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        import asago_scenario_generator.eval.runner as eval_runner
+
+        monkeypatch.setattr(
+            eval_runner,
+            "run_evaluation",
+            lambda **_kwargs: {"qualification": {"status": "pass"}},
+        )
+        monkeypatch.setattr(
+            runner_module, "_provisional_manifest", lambda *_args, **_kwargs: object()
+        )
+        monkeypatch.setattr(
+            runner_module, "build_in_memory_resolver", lambda *_args: object()
+        )
+        monkeypatch.setattr(
+            runner_module, "write_eval_scorecard", lambda *_args: None
+        )
+
+        assert (
+            _provisional_eval_product(
+                tmp_path,
+                "run",
+                "start",
+                None,
+                object(),
+                False,
+                None,
+            )
+            == (False, False)
+        )
+
+    def test_eval_failure_is_non_authoritative(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        def fail(*_args, **_kwargs):
+            raise RuntimeError("eval failed")
+
+        monkeypatch.setattr(runner_module, "_provisional_manifest", fail)
+
+        assert (
+            _provisional_eval_product(
+                tmp_path,
+                "run",
+                "start",
+                None,
+                object(),
+                True,
+                None,
+            )
+            == (False, False)
+        )
+
+    def test_report_failure_is_non_authoritative(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        def fail(*_args, **_kwargs):
+            raise RuntimeError("report failed")
+
+        monkeypatch.setattr(runner_module, "_provisional_manifest", fail)
+
+        assert (
+            _provisional_report_product(
+                tmp_path,
+                "run",
+                "start",
+                None,
+                object(),
+                False,
+            )
+            is False
+        )
+
+    def test_authoritative_product_failure_clears_all_success_flags(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        def fail(*_args, **_kwargs):
+            raise RuntimeError("strict product failure")
+
+        monkeypatch.setattr(runner_module, "_strict_authoritative_manifest", fail)
+
+        assert (
+            _authoritative_second_pass(
+                tmp_path,
+                "run",
+                "start",
+                None,
+                object(),
+                None,
+            )
+            == (False, False, False)
+        )
+
+    def test_finalize_manifest_closes_supplied_provenance(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        import asago_scenario_generator.pipeline.runner_finalization as finalization
+
+        monkeypatch.setattr(
+            finalization, "build_v3_inventory", lambda *_args, **_kwargs: []
+        )
+        monkeypatch.setattr(
+            runner_module,
+            "select_final_run_status",
+            lambda *_args: RunStatus.FAILED,
+        )
+        monkeypatch.setattr(
+            runner_module, "compute_file_sha256", lambda _path: "profile-hash"
+        )
+        monkeypatch.setattr(
+            runner_module,
+            "ManifestInventoryResolver",
+            lambda *_args, **_kwargs: None,
+        )
+        monkeypatch.setattr(runner_module, "finalize_manifest", lambda *_args: None)
+
+        (tmp_path / "capability-profile.yaml").write_text("profile")
+        provenance = Provenance(
+            run_id="run",
+            timestamp_start="start",
+            input_hashes=InputHashes(),
+        )
+
+        _finalize_run_manifest(
+            tmp_path,
+            "run",
+            "start",
+            provenance,
+            object(),
+            [],
+            {},
+            False,
+            False,
+            False,
+            False,
+        )
+
+        assert provenance.timestamp_end is not None
+        assert provenance.input_hashes.effective_profile_hash == "profile-hash"
 
 
 class TestPipelineResultDefaults:

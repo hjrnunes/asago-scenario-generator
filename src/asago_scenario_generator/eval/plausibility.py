@@ -17,6 +17,26 @@ _SOPHISTICATED_ACTORS = {"nation-state", "supply-chain-actor"}
 _HIGH_SKILL_LEVELS = {"advanced", "expert"}
 
 
+def _sophisticated_actor_violation(
+    actor_type: str, capability_level: str
+) -> str | None:
+    """Skill-floor violation for sophisticated actor types, or None."""
+    if actor_type == "nation-state" and capability_level not in _HIGH_SKILL_LEVELS:
+        return (
+            f"nation-state actor has capability_level '{capability_level}'"
+            f" (expected advanced or expert)"
+        )
+    if (
+        actor_type == "supply-chain-actor"
+        and capability_level not in _HIGH_SKILL_LEVELS
+    ):
+        return (
+            f"supply-chain-actor has capability_level '{capability_level}'"
+            f" (expected advanced or expert)"
+        )
+    return None
+
+
 def capability_complexity_violations(scenario: dict[str, Any]) -> list[str]:
     """Check for implausible capability-complexity combinations.
 
@@ -41,22 +61,10 @@ def capability_complexity_violations(scenario: dict[str, Any]) -> list[str]:
     signals = priority.get("signals", {})
     attack_complexity = signals.get("attack_complexity", "")
 
-    # Rule 1: nation-state actors should be advanced or expert
-    if actor_type == "nation-state" and capability_level not in _HIGH_SKILL_LEVELS:
-        violations.append(
-            f"nation-state actor has capability_level '{capability_level}'"
-            f" (expected advanced or expert)"
-        )
-
-    # Rule 2: supply-chain-actor should be advanced or expert
-    if (
-        actor_type == "supply-chain-actor"
-        and capability_level not in _HIGH_SKILL_LEVELS
-    ):
-        violations.append(
-            f"supply-chain-actor has capability_level '{capability_level}'"
-            f" (expected advanced or expert)"
-        )
+    # Rules 1 & 2: sophisticated actors should be advanced or expert
+    actor_violation = _sophisticated_actor_violation(actor_type, capability_level)
+    if actor_violation is not None:
+        violations.append(actor_violation)
 
     # Rule 3: novice actors should not have high attack_complexity
     if capability_level == "novice" and attack_complexity == "high":
