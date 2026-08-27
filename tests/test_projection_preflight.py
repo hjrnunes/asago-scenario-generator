@@ -330,8 +330,10 @@ def test_write_facts_template_writes_unknown_template_and_refuses_overwrite(
 
     write_facts_template(outcome, target)
 
-    written = yaml.safe_load(target.read_text(encoding="utf-8"))
+    written_text = target.read_text(encoding="utf-8")
+    written = yaml.safe_load(written_text)
     assert written["schema_version"] == "1"
+    assert written_text.index("schema_version:") < written_text.index("facts:")
     assert [item["fact"]["fact_id"] for item in written["facts"]] == [
         item.fact.fact_id for item in outcome.facts_template
     ]
@@ -339,3 +341,87 @@ def test_write_facts_template_writes_unknown_template_and_refuses_overwrite(
 
     with pytest.raises(FileExistsError, match="already exists"):
         write_facts_template(outcome, target)
+
+
+# ---------------------------------------------------------------------------#
+# Direct branch tests for the decomposed fact-classification helpers
+# ---------------------------------------------------------------------------#
+
+
+class TestGroupSuppliedReadings:
+    """Branch tests for _group_supplied_readings."""
+
+    def test_groups_by_fact_key_and_collapses_identical_duplicates(self) -> None:
+        from asago_scenario_generator.pipeline.preflight import (
+            _fact_key,
+            _group_supplied_readings,
+        )
+
+        reference = _fact("capabilities.code_interpreter")
+        reading = EvaluatedFactEvidence(fact=reference, status="present", value=True)
+        other = EvaluatedFactEvidence(fact=reference, status="present", value=False)
+
+        grouped = _group_supplied_readings((reading, reading, other))
+        assert grouped == {_fact_key(reference): [reading, other]}
+
+
+class TestStateForRequired:
+    """Branch tests for _state_for_required."""
+
+    def test_absent_without_readings(self) -> None:
+        from asago_scenario_generator.pipeline.preflight import _state_for_required
+
+        reference = _fact("capabilities.code_interpreter")
+        state = _state_for_required(reference, ())
+        assert state.status == "absent"
+        assert state.required is True
+        assert state.value is None
+
+    def test_contradictory_with_multiple_readings(self) -> None:
+        from asago_scenario_generator.pipeline.preflight import _state_for_required
+
+        reference = _fact("capabilities.code_interpreter")
+        readings = (
+            EvaluatedFactEvidence(fact=reference, status="present", value=True),
+            EvaluatedFactEvidence(fact=reference, status="present", value=False),
+        )
+        state = _state_for_required(reference, readings)
+        assert state.status == "contradictory"
+        assert len(state.readings) == 2
+
+    def test_single_reading_status_and_value(self) -> None:
+        from asago_scenario_generator.pipeline.preflight import _state_for_required
+
+        reference = _fact("capabilities.code_interpreter")
+        reading = EvaluatedFactEvidence(fact=reference, status="unknown")
+        state = _state_for_required(reference, (reading,))
+        assert state.status == "unknown"
+        assert state.value is None
+        assert state.readings == (reading,)
+
+
+class TestStateForObsolete:
+    """Branch tests for _state_for_obsolete."""
+
+    def test_single_reading_is_stale(self) -> None:
+        from asago_scenario_generator.pipeline.preflight import _state_for_obsolete
+
+        reference = _fact("capabilities.retired_switch")
+        reading = EvaluatedFactEvidence(fact=reference, status="present", value=True)
+        state = _state_for_obsolete((reading,))
+        assert state.status == "stale"
+        assert state.value is True
+        assert state.required is False
+
+    def test_multiple_readings_are_contradictory(self) -> None:
+        from asago_scenario_generator.pipeline.preflight import _state_for_obsolete
+
+        reference = _fact("capabilities.retired_switch")
+        readings = (
+            EvaluatedFactEvidence(fact=reference, status="present", value=True),
+            EvaluatedFactEvidence(fact=reference, status="present", value=False),
+        )
+        state = _state_for_obsolete(readings)
+        assert state.status == "contradictory"
+        assert state.value is None
+        assert len(state.readings) == 2

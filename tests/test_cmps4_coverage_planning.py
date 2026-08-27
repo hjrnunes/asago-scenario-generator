@@ -48,7 +48,7 @@ from asago_scenario_generator.pipeline.coverage_planning import (
     revalidate_qualified_candidate,
     select_with_coverage_priority,
 )
-from asago_scenario_generator.pipeline.projection import ProjectedCandidate
+from asago_scenario_generator.pipeline.projection_contracts import ProjectedCandidate
 from tests.helpers.projection_factory import get_projected_candidate
 
 
@@ -709,6 +709,7 @@ class TestNoRawSeedGeneration:
     ) -> None:
         from asago_scenario_generator.pipeline.runner import (
             _complete_v3_run,
+            _coverage_gap_analysis,
             run_pipeline,
         )
 
@@ -719,7 +720,9 @@ class TestNoRawSeedGeneration:
             "plan_generation(",
         ):
             assert call in planning_source
-        completion_source = inspect.getsource(_complete_v3_run)
+        completion_source = inspect.getsource(_complete_v3_run) + inspect.getsource(
+            _coverage_gap_analysis
+        )
         assert "emit_quality_gaps(" in completion_source
         assert "_remediate_coverage_gaps(" not in planning_source + completion_source
 
