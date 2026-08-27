@@ -124,6 +124,26 @@ def _h_ar_control_element_set(
     return True, ""
 
 
+def _h_ar_object_shaped_feedback_update(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Configure the object-shaped invalid update observed in a live run."""
+    from asago_scenario_generator.stpa.infra.unvalidated_decode import (
+        construct_model_unvalidated,
+    )
+
+    response = _sp1_valid_control_element_set_dict()
+    response["feedback_channels"][0]["updates"] = {
+        "type": "responsibility",
+        "id": "RESP-1",
+    }
+    world.sp1_control_element_set = construct_model_unvalidated(
+        response,
+        _SP1ControlElementSet,
+    )
+    return True, ""
+
+
 def _h_ar_stage2_calls_ready(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:

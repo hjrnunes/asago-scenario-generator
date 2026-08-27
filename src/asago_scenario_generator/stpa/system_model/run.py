@@ -12,14 +12,18 @@ import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     inject_kc_subcodes_display,
 )
 from asago_scenario_generator.models.risk_card import RiskCard
-from asago_scenario_generator.stpa.infra.llm import LLMClient
+from asago_scenario_generator.stpa.infra.llm import (
+    DEFAULT_TEMPERATURE as LLM_DEFAULT_TEMPERATURE,
+    LLMClient,
+    effective_model_config,
+    effective_temperature,
+)
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.infra.manifest import STPARunManifest
 from asago_scenario_generator.stpa.infra.parallel_llm import (  # noqa: F401 — imported for patchability
@@ -54,7 +58,7 @@ from asago_scenario_generator.stpa.system_model.profile import (
     load_capability_profile,
 )
 
-DEFAULT_TEMPERATURE = 0.4
+DEFAULT_TEMPERATURE = LLM_DEFAULT_TEMPERATURE
 
 
 @dataclass
@@ -76,6 +80,7 @@ class SP1RunResult:
     post_revision_warnings: list[str] = field(default_factory=list)
     revised: bool = False
     stage_errors: list[str] = field(default_factory=list)
+    stage_warnings: list[str] = field(default_factory=list)
 
 
 def run_sp1(
@@ -85,7 +90,7 @@ def run_sp1(
     risk_cards: list[RiskCard],
     run_dir: Path,
     profile_path: Path | None = None,
-    temperature: float = DEFAULT_TEMPERATURE,
+    temperature: float | None = None,
     profile_name: str | None = None,
     max_workers: int = 1,
 ) -> SP1RunResult:
@@ -103,7 +108,8 @@ def run_sp1(
         run_dir: Directory for output artifacts.
         profile_path: Optional path to a pre-built capability-profile.yaml.
             When provided, Stage 1b LLM call is skipped.
-        temperature: LLM temperature (default 0.4).
+        temperature: Explicit LLM temperature override. When omitted, use the
+            resolved client temperature (default 0.4).
         profile_name: Optional model profile name for manifest recording.
         max_workers: Maximum parallel workers for LLM calls (default 1 =
             sequential, backwards compatible). SP1's sequential stages do
@@ -117,8 +123,10 @@ def run_sp1(
     """
     run_dir.mkdir(parents=True, exist_ok=True)
     loader = TemplateLoader(PROMPTS_DIR)
+    temperature = effective_temperature(llm_client, temperature)
 
     stage_errors: list[str] = []
+    stage_warnings: list[str] = []
 
     # --- Stage 1b: Capability Profile (runs BEFORE Stage 1a) ---
     capability_profile = _try_derive_capability_profile(
@@ -153,6 +161,7 @@ def run_sp1(
         loader,
         temperature,
         stage_errors,
+        stage_warnings,
     )
 
     # Write run manifest (always, even on partial failure)
@@ -169,6 +178,7 @@ def run_sp1(
         temperature=temperature,
         profile_skipped=_profile_skipped,
         stage_errors=stage_errors,
+        stage_warnings=stage_warnings,
         profile_name=profile_name,
         max_workers=max_workers,
     )
@@ -184,6 +194,7 @@ def run_sp1(
         post_revision_warnings=stage2_result.post_revision_warnings,
         revised=stage2_result.revised,
         stage_errors=stage_errors,
+        stage_warnings=stage_warnings,
     )
 
 
@@ -266,6 +277,7 @@ def _run_stage_2_block(
     loader: TemplateLoader,
     temperature: float,
     stage_errors: list[str],
+    stage_warnings: list[str] | None = None,
 ) -> _Stage2Result:
     """Run Stage 2: control structure derivation, heuristics, critic, and revision.
 
@@ -273,6 +285,8 @@ def _run_stage_2_block(
     """
     if loss_analysis is None or capability_profile is None:
         return _Stage2Result()
+
+    stage_warnings = [] if stage_warnings is None else stage_warnings
 
     try:
         control_structure, merge_warnings = derive_control_structure(
@@ -284,7 +298,7 @@ def _run_stage_2_block(
             template_loader=loader,
             temperature=temperature,
         )
-        stage_errors.extend(merge_warnings)
+        stage_warnings.extend(merge_warnings)
     except StageError as exc:
         stage_errors.append(str(exc))
         return _Stage2Result()
@@ -377,6 +391,7 @@ def _write_manifest(
     temperature: float,
     profile_skipped: bool,
     stage_errors: list[str] | None = None,
+    stage_warnings: list[str] | None = None,
     profile_name: str | None = None,
     max_workers: int = 1,
 ) -> None:
@@ -388,12 +403,8 @@ def _write_manifest(
     _stage_1a_call_count = 2
     _stage_2_call_count = STAGE_2_CALL_COUNT
 
-    model_config_dict: dict[str, Any] = {
-        "model": llm_client.model,
-        "base_url": llm_client.base_url,
-        "temperature": temperature,
-        "max_workers": max_workers,
-    }
+    model_config_dict = effective_model_config(llm_client, temperature=temperature)
+    model_config_dict["max_workers"] = max_workers
     if profile_name is not None:
         model_config_dict["profile"] = profile_name
 
@@ -414,6 +425,7 @@ def _write_manifest(
         critic_findings=critic_summary,
         revised=revised,
         post_revision_warnings=post_revision_warnings or [],
+        stage_warnings=stage_warnings or [],
     )
     if stage_errors:
         manifest.stage_errors = stage_errors

@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 from typing import Any, Literal, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.stpa.infra.llm import LLMClient
@@ -23,6 +23,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     log_llm_call_failure,
     safe_llm_call,
 )
+from asago_scenario_generator.stpa.infra.unvalidated_decode import raw_model_data
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.control_structure import (
@@ -43,7 +44,14 @@ from asago_scenario_generator.stpa.system_model.id_normalization import (
 
 STAGE = "stage_2"
 STAGE_2_CALL_COUNT = 4
+JSON_DECODE_RETRIES = 1
 DEFAULT_TEMPERATURE = 0.4
+_INTERMEDIATE_VALIDATION_RETRY_FEEDBACK = (
+    "\n\nThe prior response was semantically empty or invalid. Return a concise "
+    "schema-matching response and populate every required collection. In "
+    "particular, requirements and responsibilities must contain at least one "
+    "item when the requested schema includes them."
+)
 
 
 def _assembly_source_id_maps(
@@ -53,11 +61,10 @@ def _assembly_source_id_maps(
     """Capture source-ID maps before the assembled structure is canonicalized."""
     raw_payload = {
         "responsibilities": [
-            resp.model_dump(mode="python", exclude_none=False)
-            for resp in responsibility_set.responsibilities
+            raw_model_data(resp) for resp in responsibility_set.responsibilities
         ],
         "controlled_processes": [
-            process.model_dump(mode="python", exclude_none=False)
+            raw_model_data(process)
             for process in control_element_set.controlled_processes
         ],
         "coordination_links": [],
@@ -80,19 +87,19 @@ class Requirement(BaseModel):
 
 
 class RequirementSet(BaseModel):
-    """A set of requirements derived from security constraints."""
+    """A non-empty set of requirements derived from security constraints."""
 
-    requirements: list[Requirement]
+    requirements: list[Requirement] = Field(min_length=1)
 
 
 class ResponsibilitySet(BaseModel):
-    """Call 2a output: responsibilities with RCs and PM parts only.
+    """Call 2a output: one or more responsibilities with RCs and PM parts.
 
     No control actions, feedback channels, or controlled processes —
     those are derived in Call 2b.
     """
 
-    responsibilities: list[Responsibility]
+    responsibilities: list[Responsibility] = Field(min_length=1)
 
 
 class ControlElementSet(BaseModel):
@@ -108,6 +115,21 @@ class CoordinationAnalysis(BaseModel):
 
     coordination_links: list[CoordinationLink] = []
     integrity_findings: list[str] = []
+
+
+def _validate_stage2_intermediate(model: BaseModel) -> None:
+    """Reject semantically empty Stage 2 inputs after tolerant decoding.
+
+    Calls 2a and 2b use tolerant decoding so malformed nested references can
+    be repaired deterministically. That path intentionally bypasses Pydantic
+    validators, including ``Field(min_length=1)``. Keep the semantic
+    cardinality checks at the shared LLM boundary so an empty set cannot reach
+    control-structure assembly while preserving tolerant nested decoding.
+    """
+    if isinstance(model, RequirementSet) and not model.requirements:
+        raise ValueError("requirements must contain at least one item")
+    if isinstance(model, ResponsibilitySet) and not model.responsibilities:
+        raise ValueError("responsibilities must contain at least one item")
 
 
 # ---------------------------------------------------------------------------
@@ -240,13 +262,9 @@ def _control_structure_payload(
 ) -> dict[str, Any]:
     """Build a dictionary payload from assembled control-structure elements."""
     return {
-        "responsibilities": [
-            resp.model_dump(mode="python", exclude_none=False)
-            for resp in responsibilities
-        ],
+        "responsibilities": [raw_model_data(resp) for resp in responsibilities],
         "controlled_processes": [
-            process.model_dump(mode="python", exclude_none=False)
-            for process in controlled_processes
+            raw_model_data(process) for process in controlled_processes
         ],
         "coordination_links": [],
     }
@@ -319,7 +337,8 @@ def _drop_invalid_feedback_updates(resp: Responsibility) -> list[str]:
     valid_channels: list[FeedbackChannel] = []
     warnings: list[str] = []
     for channel in resp.feedback_channels:
-        if channel.updates in pm_ids:
+        update_id = channel.updates
+        if isinstance(update_id, str) and update_id in pm_ids:
             valid_channels.append(channel)
             continue
         warnings.append(
@@ -475,6 +494,9 @@ def _assemble_with_fallback(
     On assembly failure (invalid cross-references in the ControlElementSet),
     the failure is logged to ``calls.jsonl`` and a fallback ControlStructure
     is built from the ResponsibilitySet alone (without coordination links).
+    If both fallback tiers fail validation, a ``StageError`` is raised so the
+    SP1 runner can preserve the partial artifacts and record a fatal stage
+    diagnostic instead of leaking a raw Pydantic exception.
 
     Before falling back, the Call 2b control actions and feedback channels
     are assigned onto the Call 2a responsibilities via
@@ -525,16 +547,26 @@ def _assemble_with_fallback(
         # and PM parts). The enriched list is built once and reused for both
         # tiers; each tier deep-copies it internally, so there is no risk of
         # cross-tier mutation.
-        enriched_resps = _enrich_responsibilities(
-            responsibility_set,
-            control_element_set,
-            normalize_ids=normalize_ids,
-        )
-        fallback, fallback_warnings = _fallback_control_structure(
-            enriched_resps,
-            control_element_set.controlled_processes,
-            normalize_ids=normalize_ids,
-        )
+        try:
+            enriched_resps = _enrich_responsibilities(
+                responsibility_set,
+                control_element_set,
+                normalize_ids=normalize_ids,
+            )
+            fallback, fallback_warnings = _fallback_control_structure(
+                enriched_resps,
+                control_element_set.controlled_processes,
+                normalize_ids=normalize_ids,
+            )
+        except Exception as fallback_exc:
+            fallback_error = f"{type(fallback_exc).__name__}: {fallback_exc}"
+            raise StageError(
+                stage=STAGE,
+                step="assemble_control_structure",
+                message=(
+                    f"{error_msg}; fallback construction failed: {fallback_error}"
+                ),
+            ) from fallback_exc
         warnings.extend(fallback_warnings)
         return fallback, warnings
 
@@ -888,6 +920,10 @@ def _run_stage2_llm_call(
         step=step,
         temperature=temperature,
         allow_unvalidated=allow_unvalidated,
+        result_validator=_validate_stage2_intermediate,
+        json_decode_retries=JSON_DECODE_RETRIES,
+        validation_retries=1,
+        validation_retry_feedback=_INTERMEDIATE_VALIDATION_RETRY_FEEDBACK,
     )
     if error_msg is not None:
         raise StageError(stage=STAGE, step=step, message=error_msg)

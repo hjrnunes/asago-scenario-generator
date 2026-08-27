@@ -138,6 +138,14 @@ Feature: SP3 — Run orchestration
     When the full SP3 run is executed with max_workers 2
     Then Stage 6 calls are parallelized across scenarios
 
+  # SP3-RUN-21
+  Scenario: SP3-RUN-21 exhausted structured length retry aborts remaining threats
+    Given three structural threats are queued for Stage 5
+    And an LLM whose Stage 5 normal and concise attempts both reach completion length
+    When the full SP3 run is executed
+    Then exactly 2 Stage 5 completion attempts are recorded
+    And the Stage 5 diagnostics say 2 remaining threats were aborted
+
   # SP3-RUN-14
   Scenario: SP3-RUN-14 coverage gaps are written to coverage-gaps.json
     Given an LLM that returns valid results for all stages

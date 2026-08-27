@@ -16,6 +16,7 @@ from asago_scenario_generator.data.loaders import (
     load_attack_patterns,
     load_yaml_strict,
 )
+from asago_scenario_generator.data.paths import DATA_ROOT
 from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
 from asago_scenario_generator.llm.client import LLMClient, LLMResult
 from asago_scenario_generator.manifest import (
@@ -81,11 +82,7 @@ from asago_scenario_generator.pipeline.seeds import ScenarioSeed
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CROSS_TAXONOMY_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "data"
-    / "taxonomies"
-    / "mappings"
-    / "cross-taxonomy-mappings.yaml"
+    DATA_ROOT / "taxonomies" / "mappings" / "cross-taxonomy-mappings.yaml"
 )
 
 
@@ -1005,7 +1002,7 @@ def _capture_input_hashes(
     effective_threats = threats_path or _DEFAULT_THREATS_PATH
 
     # Bundled data paths
-    data_root = Path(__file__).resolve().parents[3] / "data" / "taxonomies"
+    data_root = DATA_ROOT / "taxonomies"
     attack_patterns_dir = data_root / "attack-patterns"
 
     # Hash every file actually loaded by the attack-patterns*.yaml and

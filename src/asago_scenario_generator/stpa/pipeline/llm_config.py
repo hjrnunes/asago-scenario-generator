@@ -43,7 +43,8 @@ def resolve_llm_client_from_profile(
         top_p=profile.get("top_p"),
         top_k=profile.get("top_k"),
         extra_headers=profile.get("headers"),
-        use_guided_decoding=profile.get("use_guided_decoding", False),
+        use_guided_decoding=profile.get("use_guided_decoding"),
+        timeout=profile.get("timeout"),
     )
     return client, profile_name
 
@@ -92,13 +93,10 @@ def _looks_like_path_reference(content: str) -> bool:
     detecting a use-case file that contains a path to the real
     use-case file instead of actual content.
     """
+    if "\n" in content or "\r" in content:
+        return False
     reference = content.strip()
-    return (
-        len(reference) < 200
-        and "\n" not in content
-        and "\r" not in content
-        and reference.endswith((".txt", ".md"))
-    )
+    return len(reference) < 200 and reference.endswith((".txt", ".md"))
 
 
 def _resolve_reference_path(reference: str, source_file: Path) -> Path:

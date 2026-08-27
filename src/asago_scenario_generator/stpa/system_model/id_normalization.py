@@ -100,10 +100,27 @@ class ControlStructureNormalization:
         return self.mapping
 
 
+def _raw_payload_data(value: Any) -> Any:
+    """Copy a tolerant model graph without invoking typed serialization."""
+    if isinstance(value, BaseModel):
+        return _raw_payload_data(value.__dict__)
+    if isinstance(value, Mapping):
+        return {
+            key: _raw_payload_data(field_value) for key, field_value in value.items()
+        }
+    if isinstance(value, list):
+        return [_raw_payload_data(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_raw_payload_data(item) for item in value)
+    if isinstance(value, set):
+        return {_raw_payload_data(item) for item in value}
+    return copy.deepcopy(value)
+
+
 def _payload_dict(payload: Mapping[str, Any] | BaseModel) -> dict[str, Any]:
     """Return a deep-copied dictionary for a decoded payload."""
     if isinstance(payload, BaseModel):
-        value = _raw_model_value(payload)
+        value = _raw_payload_data(payload)
     elif isinstance(payload, Mapping):
         value = payload
     else:
@@ -111,36 +128,7 @@ def _payload_dict(payload: Mapping[str, Any] | BaseModel) -> dict[str, Any]:
             "Control-structure payload must be a mapping or Pydantic model, "
             f"got {type(payload).__name__}."
         )
-    return copy.deepcopy(dict(value))
-
-
-def _raw_model_value(value: Any) -> Any:
-    """Read a decoded model graph without invoking Pydantic serialization.
-
-    Tolerant decoding deliberately constructs model graphs with
-    ``model_construct``. Calling ``model_dump`` on such a graph can emit
-    serializer warnings for malformed shapes that this normalizer repairs.
-    """
-    if isinstance(value, BaseModel):
-        return _raw_model_mapping(value.__dict__)
-    if isinstance(value, Mapping):
-        return _raw_model_mapping(value)
-    if isinstance(value, (list, tuple)):
-        return _raw_model_sequence(value)
-    return copy.deepcopy(value)
-
-
-def _raw_model_mapping(value: Mapping[Any, Any]) -> dict[Any, Any]:
-    """Copy a mapping while recursively reading nested model values."""
-    return {key: _raw_model_value(field_value) for key, field_value in value.items()}
-
-
-def _raw_model_sequence(
-    value: list[Any] | tuple[Any, ...],
-) -> list[Any] | tuple[Any, ...]:
-    """Copy a list or tuple while recursively reading nested model values."""
-    converted = [_raw_model_value(item) for item in value]
-    return tuple(converted) if isinstance(value, tuple) else converted
+    return _raw_payload_data(dict(value))
 
 
 def _empty_namespace_entries() -> NamespaceEntries:
@@ -449,9 +437,17 @@ def _fix_type(
     reference_type = _reference_type_value(reference.get("type"))
     if reference_type in _TYPED_REFERENCE_NAMESPACES:
         return
+    source_namespace = _source_namespace(reference_type, namespace_maps)
+    reference_id = reference.get("id")
+    if (
+        (not isinstance(reference_id, str) or not reference_id)
+        and reference_type is not None
+        and (_prefix_type(reference_type) is not None or source_namespace is not None)
+    ):
+        reference["id"] = reference_type
     inferred_type = _prefix_type(reference.get("id"))
     if inferred_type is None:
-        inferred_type = _source_namespace(reference.get("type"), namespace_maps)
+        inferred_type = source_namespace
     if inferred_type is not None:
         reference["type"] = inferred_type
 

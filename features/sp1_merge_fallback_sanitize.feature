@@ -133,3 +133,12 @@ Feature: SP1 — Sanitize invalid ElementRefs in assembly fallback path
       | element_type    | element_id | ref_field |
       | ControlAction   | CA-1-1     | target    |
       | FeedbackChannel | FB-1-1     | source    |
+
+  # Sanitize-12
+  Scenario: Sanitize-12 fallback drops an unresolvable object-shaped feedback update
+    Given a valid ResponsibilitySet from Call 2a with responsibility RESP-1
+    And a ControlElementSet from Call 2b whose feedback channel FB-1-1 updates {type: responsibility, id: RESP-1}
+    When the Stage 2 assembly with fallback is executed
+    Then a ControlStructure model is produced
+    And the warnings list includes a warning about the stripped updates for FB-1-1
+    And the pipeline does not crash

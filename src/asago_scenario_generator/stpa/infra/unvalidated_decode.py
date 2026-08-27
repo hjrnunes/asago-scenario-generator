@@ -9,6 +9,8 @@ required field whose name ends in ``_id``.  Other fields never read
 
 from __future__ import annotations
 
+import copy
+from collections.abc import Mapping
 from enum import Enum
 from typing import Annotated, Any, TypeVar, Union, get_args, get_origin
 
@@ -22,6 +24,27 @@ _EMPTY_COLLECTION_FACTORIES = {
     set: set,
     dict: dict,
 }
+
+
+def raw_model_data(value: Any) -> Any:
+    """Copy a tolerant model graph without invoking Pydantic serialization.
+
+    ``model_construct`` may retain schema-adjacent values until a later
+    normalization pass.  Calling ``model_dump`` on those intermediate models
+    emits serializer warnings, so tolerant boundaries must inspect ``__dict__``
+    recursively instead.
+    """
+    if isinstance(value, BaseModel):
+        return raw_model_data(value.__dict__)
+    if isinstance(value, Mapping):
+        return {key: raw_model_data(field_value) for key, field_value in value.items()}
+    if isinstance(value, list):
+        return [raw_model_data(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(raw_model_data(item) for item in value)
+    if isinstance(value, set):
+        return {raw_model_data(item) for item in value}
+    return copy.deepcopy(value)
 
 
 def _construct_collection(

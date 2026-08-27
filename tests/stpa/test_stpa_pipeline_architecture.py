@@ -124,19 +124,19 @@ class TestPipelineDependencyDirection:
         """runner.py imports only from allowed lower-level modules."""
         imports = _extract_imports(RUNNER_PATH)
         violations = [
-            imp for imp in imports
+            imp
+            for imp in imports
             if imp.startswith("asago_scenario_generator.")
             and not imp.startswith(self._ALLOWED_PREFIXES)
         ]
-        assert not violations, (
-            f"runner.py imports from forbidden modules: {violations}"
-        )
+        assert not violations, f"runner.py imports from forbidden modules: {violations}"
 
     def test_llm_config_imports_allowed_modules_only(self):
         """llm_config.py imports only from allowed lower-level modules."""
         imports = _extract_imports(LLM_CONFIG_PATH)
         violations = [
-            imp for imp in imports
+            imp
+            for imp in imports
             if imp.startswith("asago_scenario_generator.")
             and not imp.startswith(self._ALLOWED_PREFIXES)
         ]
@@ -149,8 +149,7 @@ class TestPipelineDependencyDirection:
         for py_file in _python_files_in_dir(PIPELINE_DIR):
             imports = _extract_imports(py_file)
             violations = [
-                imp for imp in imports
-                if imp.startswith("asago_scenario_generator.cli")
+                imp for imp in imports if imp.startswith("asago_scenario_generator.cli")
             ]
             assert not violations, (
                 f"{py_file.name} imports from cli (forbidden): {violations}"
@@ -161,7 +160,8 @@ class TestPipelineDependencyDirection:
         for py_file in _all_python_files_in_stpa_subdir("system_model"):
             imports = _extract_imports(py_file)
             violations = [
-                imp for imp in imports
+                imp
+                for imp in imports
                 if "asago_scenario_generator.stpa.pipeline" in imp
             ]
             assert not violations, (
@@ -173,7 +173,8 @@ class TestPipelineDependencyDirection:
         for py_file in _all_python_files_in_stpa_subdir("threat_enum"):
             imports = _extract_imports(py_file)
             violations = [
-                imp for imp in imports
+                imp
+                for imp in imports
                 if "asago_scenario_generator.stpa.pipeline" in imp
             ]
             assert not violations, (
@@ -185,7 +186,8 @@ class TestPipelineDependencyDirection:
         for py_file in _all_python_files_in_stpa_subdir("scenario_prod"):
             imports = _extract_imports(py_file)
             violations = [
-                imp for imp in imports
+                imp
+                for imp in imports
                 if "asago_scenario_generator.stpa.pipeline" in imp
             ]
             assert not violations, (
@@ -197,7 +199,8 @@ class TestPipelineDependencyDirection:
         for py_file in _all_python_files_in_stpa_subdir("report"):
             imports = _extract_imports(py_file)
             violations = [
-                imp for imp in imports
+                imp
+                for imp in imports
                 if "asago_scenario_generator.stpa.pipeline" in imp
             ]
             assert not violations, (
@@ -209,7 +212,8 @@ class TestPipelineDependencyDirection:
         for py_file in _all_python_files_in_stpa_subdir("infra"):
             imports = _extract_imports(py_file)
             violations = [
-                imp for imp in imports
+                imp
+                for imp in imports
                 if "asago_scenario_generator.stpa.pipeline" in imp
             ]
             assert not violations, (
@@ -224,7 +228,8 @@ class TestIntraPackageDependencyDirection:
         """llm_config.py has zero imports from runner.py."""
         imports = _extract_imports(LLM_CONFIG_PATH)
         violations = [
-            imp for imp in imports
+            imp
+            for imp in imports
             if "asago_scenario_generator.stpa.pipeline.runner" in imp
         ]
         assert not violations, (
@@ -235,7 +240,8 @@ class TestIntraPackageDependencyDirection:
         """runner.py imports from llm_config.py (correct direction)."""
         imports = _extract_imports(RUNNER_PATH)
         assert any(
-            "asago_scenario_generator.stpa.pipeline.llm_config" in imp for imp in imports
+            "asago_scenario_generator.stpa.pipeline.llm_config" in imp
+            for imp in imports
         ), "runner.py should import from llm_config.py"
 
 
@@ -298,7 +304,9 @@ class TestNoImportCycles:
 
     def test_import_llm_config(self):
         """Importing llm_config.py succeeds."""
-        mod = importlib.import_module("asago_scenario_generator.stpa.pipeline.llm_config")
+        mod = importlib.import_module(
+            "asago_scenario_generator.stpa.pipeline.llm_config"
+        )
         assert hasattr(mod, "resolve_llm_client")
 
 
@@ -316,21 +324,24 @@ class TestScriptsUseExtractedLlmConfig:
         """run_sp1.py imports resolve_llm_client functions from llm_config."""
         imports = _extract_imports(self.SCRIPTS_DIR / "run_sp1.py")
         assert any(
-            "asago_scenario_generator.stpa.pipeline.llm_config" in imp for imp in imports
+            "asago_scenario_generator.stpa.pipeline.llm_config" in imp
+            for imp in imports
         ), "run_sp1.py should import from llm_config"
 
     def test_run_sp2_imports_from_llm_config(self):
         """run_sp2.py imports resolve_llm_client functions from llm_config."""
         imports = _extract_imports(self.SCRIPTS_DIR / "run_sp2.py")
         assert any(
-            "asago_scenario_generator.stpa.pipeline.llm_config" in imp for imp in imports
+            "asago_scenario_generator.stpa.pipeline.llm_config" in imp
+            for imp in imports
         ), "run_sp2.py should import from llm_config"
 
     def test_run_sp3_imports_from_llm_config(self):
         """run_sp3.py imports resolve_llm_client functions from llm_config."""
         imports = _extract_imports(self.SCRIPTS_DIR / "run_sp3.py")
         assert any(
-            "asago_scenario_generator.stpa.pipeline.llm_config" in imp for imp in imports
+            "asago_scenario_generator.stpa.pipeline.llm_config" in imp
+            for imp in imports
         ), "run_sp3.py should import from llm_config"
 
     def test_run_sp1_does_not_define_resolve_llm_client(self):
@@ -448,13 +459,19 @@ class TestResumeDeterminism:
         (scenarios_dir / "s.yaml").write_text("dummy")
 
         skip_sp1 = _maybe_skip_stage(
-            True, _sp1_artifacts_exist(tmp_path), "SP1",
+            True,
+            _sp1_artifacts_exist(tmp_path),
+            "SP1",
         )
         skip_sp2 = _maybe_skip_stage(
-            True, _sp2_artifacts_exist(tmp_path), "SP2",
+            True,
+            _sp2_artifacts_exist(tmp_path),
+            "SP2",
         )
         skip_sp3 = _maybe_skip_stage(
-            True, _sp3_artifacts_exist(tmp_path), "SP3",
+            True,
+            _sp3_artifacts_exist(tmp_path),
+            "SP3",
         )
 
         assert skip_sp1 is True
@@ -463,15 +480,30 @@ class TestResumeDeterminism:
 
     def test_resume_no_artifacts_skips_nothing(self, tmp_path):
         """When no artifacts exist, resume skips nothing."""
-        assert _maybe_skip_stage(
-            True, _sp1_artifacts_exist(tmp_path), "SP1",
-        ) is False
-        assert _maybe_skip_stage(
-            True, _sp2_artifacts_exist(tmp_path), "SP2",
-        ) is False
-        assert _maybe_skip_stage(
-            True, _sp3_artifacts_exist(tmp_path), "SP3",
-        ) is False
+        assert (
+            _maybe_skip_stage(
+                True,
+                _sp1_artifacts_exist(tmp_path),
+                "SP1",
+            )
+            is False
+        )
+        assert (
+            _maybe_skip_stage(
+                True,
+                _sp2_artifacts_exist(tmp_path),
+                "SP2",
+            )
+            is False
+        )
+        assert (
+            _maybe_skip_stage(
+                True,
+                _sp3_artifacts_exist(tmp_path),
+                "SP3",
+            )
+            is False
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -501,7 +533,16 @@ class TestSTPARunResultDefaults:
         r1 = STPARunResult()
         r2 = STPARunResult()
         r1.stage_errors.append("error1")
-        assert r2.stage_errors == [], "stage_errors must not be shared between instances"
+        assert r2.stage_errors == [], (
+            "stage_errors must not be shared between instances"
+        )
+
+    def test_default_stage_warnings_is_independent_empty_list(self):
+        """Each result owns an empty recoverable-warning collection."""
+        first = STPARunResult()
+        second = STPARunResult()
+        first.stage_warnings.append("repaired")
+        assert second.stage_warnings == []
 
     def test_has_expected_fields(self):
         """STPARunResult has exactly the expected fields."""
@@ -512,6 +553,7 @@ class TestSTPARunResultDefaults:
             "sp3_result",
             "report_path",
             "stage_errors",
+            "stage_warnings",
         }
 
     def test_can_set_all_fields(self):
@@ -521,18 +563,21 @@ class TestSTPARunResultDefaults:
         sp3 = MagicMock()
         report_path = Path("/tmp/report.html")
         errors = ["err1", "err2"]
+        warnings = ["repaired"]
         result = STPARunResult(
             sp1_result=sp1,
             sp2_result=sp2,
             sp3_result=sp3,
             report_path=report_path,
             stage_errors=errors,
+            stage_warnings=warnings,
         )
         assert result.sp1_result is sp1
         assert result.sp2_result is sp2
         assert result.sp3_result is sp3
         assert result.report_path == report_path
         assert result.stage_errors == errors
+        assert result.stage_warnings == warnings
 
 
 # ---------------------------------------------------------------------------
@@ -564,10 +609,22 @@ class TestErrorHandlingPreservesStageErrors:
         stage_errors: list[str] = []
         mock_llm = MagicMock()
         with (
-            patch("asago_scenario_generator.stpa.pipeline.runner.resolve_llm_client", return_value=(mock_llm, None)),
-            patch("asago_scenario_generator.stpa.pipeline.runner.read_use_case", return_value="test"),
-            patch("asago_scenario_generator.stpa.pipeline.runner.load_risk_extraction", return_value=[]),
-            patch("asago_scenario_generator.stpa.pipeline.runner.run_sp1", return_value=fake_result),
+            patch(
+                "asago_scenario_generator.stpa.pipeline.runner.resolve_llm_client",
+                return_value=(mock_llm, None),
+            ),
+            patch(
+                "asago_scenario_generator.stpa.pipeline.runner.read_use_case",
+                return_value="test",
+            ),
+            patch(
+                "asago_scenario_generator.stpa.pipeline.runner.load_risk_extraction",
+                return_value=[],
+            ),
+            patch(
+                "asago_scenario_generator.stpa.pipeline.runner.run_sp1",
+                return_value=fake_result,
+            ),
         ):
             result = _run_sp1_stage(
                 skip=False,
@@ -586,9 +643,59 @@ class TestErrorHandlingPreservesStageErrors:
         assert "SP1 error A" in stage_errors
         assert "SP1 error B" in stage_errors
 
+    def test_sp1_repair_diagnostics_propagate_only_to_stage_warnings(self, tmp_path):
+        """A usable SP1 artifact does not become fatal during aggregation."""
+        from asago_scenario_generator.stpa.pipeline.runner import _run_sp1_stage
+        from asago_scenario_generator.stpa.system_model.run import SP1RunResult
+
+        fake_result = SP1RunResult(
+            control_structure=MagicMock(),
+            stage_warnings=["SP1 repaired an ElementRef"],
+        )
+        stage_errors: list[str] = []
+        stage_warnings: list[str] = []
+        mock_llm = MagicMock()
+        with (
+            patch(
+                "asago_scenario_generator.stpa.pipeline.runner.resolve_llm_client",
+                return_value=(mock_llm, None),
+            ),
+            patch(
+                "asago_scenario_generator.stpa.pipeline.runner.read_use_case",
+                return_value="test",
+            ),
+            patch(
+                "asago_scenario_generator.stpa.pipeline.runner.load_risk_extraction",
+                return_value=[],
+            ),
+            patch(
+                "asago_scenario_generator.stpa.pipeline.runner.run_sp1",
+                return_value=fake_result,
+            ),
+        ):
+            _run_sp1_stage(
+                skip=False,
+                use_case_path="test.txt",
+                risk_extraction_path="test.json",
+                output_dir=tmp_path,
+                profile=None,
+                sp1_profile=None,
+                profiles_file="config/model-profiles.yaml",
+                capability_profile_path=None,
+                max_workers=1,
+                stage_errors=stage_errors,
+                stage_warnings=stage_warnings,
+            )
+
+        assert stage_errors == []
+        assert stage_warnings == ["SP1 repaired an ElementRef"]
+
     def test_multiple_stage_errors_accumulate(self, tmp_path):
         """Errors from SP1 and SP2 both appear in stage_errors."""
-        from asago_scenario_generator.stpa.pipeline.runner import _run_sp1_stage, _run_sp2_stage
+        from asago_scenario_generator.stpa.pipeline.runner import (
+            _run_sp1_stage,
+            _run_sp2_stage,
+        )
         from asago_scenario_generator.stpa.system_model.run import SP1RunResult
         from asago_scenario_generator.stpa.threat_enum.run import SP2RunResult
 
@@ -614,10 +721,22 @@ class TestErrorHandlingPreservesStageErrors:
         stage_errors: list[str] = []
         mock_llm = MagicMock()
         with (
-            patch("asago_scenario_generator.stpa.pipeline.runner.resolve_llm_client", return_value=(mock_llm, None)),
-            patch("asago_scenario_generator.stpa.pipeline.runner.read_use_case", return_value="test"),
-            patch("asago_scenario_generator.stpa.pipeline.runner.load_risk_extraction", return_value=[]),
-            patch("asago_scenario_generator.stpa.pipeline.runner.run_sp1", return_value=sp1_result),
+            patch(
+                "asago_scenario_generator.stpa.pipeline.runner.resolve_llm_client",
+                return_value=(mock_llm, None),
+            ),
+            patch(
+                "asago_scenario_generator.stpa.pipeline.runner.read_use_case",
+                return_value="test",
+            ),
+            patch(
+                "asago_scenario_generator.stpa.pipeline.runner.load_risk_extraction",
+                return_value=[],
+            ),
+            patch(
+                "asago_scenario_generator.stpa.pipeline.runner.run_sp1",
+                return_value=sp1_result,
+            ),
         ):
             _run_sp1_stage(
                 skip=False,
@@ -633,8 +752,14 @@ class TestErrorHandlingPreservesStageErrors:
             )
 
         with (
-            patch("asago_scenario_generator.stpa.pipeline.runner.resolve_llm_client", return_value=(mock_llm, None)),
-            patch("asago_scenario_generator.stpa.pipeline.runner.run_sp2", return_value=sp2_result),
+            patch(
+                "asago_scenario_generator.stpa.pipeline.runner.resolve_llm_client",
+                return_value=(mock_llm, None),
+            ),
+            patch(
+                "asago_scenario_generator.stpa.pipeline.runner.run_sp2",
+                return_value=sp2_result,
+            ),
         ):
             _run_sp2_stage(
                 skip=False,
@@ -713,8 +838,14 @@ class TestErrorHandlingPreservesStageErrors:
 class TestSummaryOutputWellFormedness:
     """The summary output must contain expected section headers."""
 
-    def _capture_summary(self, sp1_result=None, sp2_result=None, sp3_result=None,
-                         stage_errors=None):
+    def _capture_summary(
+        self,
+        sp1_result=None,
+        sp2_result=None,
+        sp3_result=None,
+        stage_errors=None,
+        stage_warnings=None,
+    ):
         """Run _print_summary and capture stdout."""
         from asago_scenario_generator.stpa.pipeline.runner import _print_summary
 
@@ -729,6 +860,7 @@ class TestSummaryOutputWellFormedness:
                 report_path=Path("/tmp/report.html"),
                 output_dir=Path("/tmp"),
                 stage_errors=stage_errors or [],
+                stage_warnings=stage_warnings or [],
             )
         finally:
             sys.stdout = old_stdout
@@ -780,6 +912,14 @@ class TestSummaryOutputWellFormedness:
     def test_summary_no_stage_errors_section_when_empty(self):
         """Summary omits stage errors section when there are no errors."""
         output = self._capture_summary(stage_errors=[])
+        assert "Stage Errors:" not in output
+
+    def test_summary_labels_recoverable_warnings_separately(self):
+        output = self._capture_summary(
+            stage_warnings=["normalized CP-5", "repaired PM update"]
+        )
+        assert "Stage Warnings: 2" in output
+        assert "normalized CP-5" in output
         assert "Stage Errors:" not in output
 
     def test_summary_with_sp1_result_shows_metrics(self):

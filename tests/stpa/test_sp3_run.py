@@ -30,7 +30,9 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     SecurityConstraint,
 )
 from asago_scenario_generator.stpa.models.scenario_envelope import ScenarioEnvelope
-from asago_scenario_generator.stpa.scenario_prod.bdi_generation import BDIGenerationResult
+from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+    BDIGenerationResult,
+)
 from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
 
 from tests.stpa.sp1_helpers import MockLLMClient, read_calls_jsonl
@@ -41,15 +43,29 @@ def _make_cs() -> ControlStructure:
     return ControlStructure(
         responsibilities=[
             Responsibility(
-                resp_id="RESP-1", description="R1",
-                process_model_parts=[ProcessModelPart(pm_id="PM-1-1", description="State")],
+                resp_id="RESP-1",
+                description="R1",
+                process_model_parts=[
+                    ProcessModelPart(pm_id="PM-1-1", description="State")
+                ],
                 control_actions=[
-                    ControlAction(ca_id="CA-1-1", description="Action",
-                                  target=ElementRef(type=ReferenceType.controlled_process, id="CP-1")),
+                    ControlAction(
+                        ca_id="CA-1-1",
+                        description="Action",
+                        target=ElementRef(
+                            type=ReferenceType.controlled_process, id="CP-1"
+                        ),
+                    ),
                 ],
                 feedback_channels=[
-                    FeedbackChannel(fb_id="FB-1-1", description="Feedback", updates="PM-1-1",
-                                   source=ElementRef(type=ReferenceType.controlled_process, id="CP-1")),
+                    FeedbackChannel(
+                        fb_id="FB-1-1",
+                        description="Feedback",
+                        updates="PM-1-1",
+                        source=ElementRef(
+                            type=ReferenceType.controlled_process, id="CP-1"
+                        ),
+                    ),
                 ],
             ),
         ],
@@ -60,12 +76,21 @@ def _make_cs() -> ControlStructure:
 def _make_loss_analysis() -> LossAnalysis:
     return LossAnalysis(
         risk_card_losses=[
-            Loss(loss_id="L-1", description="Loss", provenance=LossProvenance.risk_card, source_risk_cards=["r1"]),
+            Loss(
+                loss_id="L-1",
+                description="Loss",
+                provenance=LossProvenance.risk_card,
+                source_risk_cards=["r1"],
+            ),
         ],
         use_case_losses=[],
         hazards=[Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"])],
         security_constraints=[
-            SecurityConstraint(constraint_id="SC-1", description="Must validate", related_hazards=["H-1"]),
+            SecurityConstraint(
+                constraint_id="SC-1",
+                description="Must validate",
+                related_hazards=["H-1"],
+            ),
         ],
     )
 
@@ -73,19 +98,26 @@ def _make_loss_analysis() -> LossAnalysis:
 def _make_ets(num_threats: int = 2) -> EnrichedThreatSet:
     threats = []
     for i in range(num_threats):
-        threats.append(StructuralThreat(
-            ica_slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
-            ica_id=f"RESP-1:CA-1-1:NOT_PROVIDED:{i+1}",
-            ica_text=f"ICA text {i+1}",
-            hazardous_context="Context",
-            loss_scenario="Loss scenario",
-            related_hazards=["H-1"],
-            related_constraints=["SC-1"],
-        ))
+        threats.append(
+            StructuralThreat(
+                ica_slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
+                ica_id=f"RESP-1:CA-1-1:NOT_PROVIDED:{i + 1}",
+                ica_text=f"ICA text {i + 1}",
+                hazardous_context="Context",
+                loss_scenario="Loss scenario",
+                related_hazards=["H-1"],
+                related_constraints=["SC-1"],
+            )
+        )
     return EnrichedThreatSet(
         structural_threats=threats,
         coverage_analysis=CoverageAnalysis(
-            structural_coverage={"total_slots": 4, "non_na": 2, "na": 2, "coverage_rate": 0.5},
+            structural_coverage={
+                "total_slots": 4,
+                "non_na": 2,
+                "na": 2,
+                "coverage_rate": 0.5,
+            },
             structural_consideration={"total_slots": 4, "considered": 4, "rate": 1.0},
             na_quality={"na_count": 2, "quality_count": 2, "quality_rate": 1.0},
         ),
@@ -99,14 +131,19 @@ def _setup_mock_client(num_threats: int = 2) -> MockLLMClient:
     # Stage 5 responses — one per threat
     bdi_responses = []
     for i in range(num_threats):
-        bdi_responses.append(BDIGenerationResult(
-            defender_vulnerabilities={"PM-1-1": f"vulnerability {i+1}"},
-            attacker_bdi=__import__("asago_scenario_generator.stpa.models.scenario_spec", fromlist=["AttackerBDI"]).AttackerBDI(
-                beliefs=[f"attacker belief {i+1}"],
-                desires=["induce ICA"],
-                intentions=["poison PM-1-1 via FB-1-1"],
-            ),
-        ))
+        bdi_responses.append(
+            BDIGenerationResult(
+                defender_vulnerabilities={"PM-1-1": f"vulnerability {i + 1}"},
+                attacker_bdi=__import__(
+                    "asago_scenario_generator.stpa.models.scenario_spec",
+                    fromlist=["AttackerBDI"],
+                ).AttackerBDI(
+                    beliefs=[f"attacker belief {i + 1}"],
+                    desires=["induce ICA"],
+                    intentions=["poison PM-1-1 via FB-1-1"],
+                ),
+            )
+        )
 
     # Stage 6 responses — 3 per scenario (narrative, attack_tree, gherkin)
     # We use None response_format for raw text calls
@@ -124,18 +161,30 @@ def _setup_mock_client(num_threats: int = 2) -> MockLLMClient:
             "Step 7: The loss follows.\n"
         )
         # Attack tree (JSON string)
-        stage6_responses.append(json.dumps({
-            "root": "Induce ICA NOT_PROVIDED on CA-1-1",
-            "branches": [
-                {"category": "controller_side", "label": "Corrupt PM-1-1 via FB-1-1", "children": []},
-                {"category": "path_side", "label": "Tool fails", "children": []},
-            ],
-            "leaves": ["Poison PM-1-1 via FB-1-1", "Tool fails"],
-        }))
+        stage6_responses.append(
+            json.dumps(
+                {
+                    "root": "Induce ICA NOT_PROVIDED on CA-1-1",
+                    "branches": [
+                        {
+                            "category": "controller_side",
+                            "label": "Corrupt PM-1-1 via FB-1-1",
+                            "children": [],
+                        },
+                        {
+                            "category": "path_side",
+                            "label": "Tool fails",
+                            "children": [],
+                        },
+                    ],
+                    "leaves": ["Poison PM-1-1 via FB-1-1", "Tool fails"],
+                }
+            )
+        )
         # Gherkin (YAML format)
         stage6_responses.append(
             "feature: Attack scenario\n"
-            f"scenario: Attack scenario {i+1}\n"
+            f"scenario: Attack scenario {i + 1}\n"
             "given:\n"
             "  - Given PM-1-1 is in a valid state\n"
             "when:\n"
@@ -173,6 +222,23 @@ class TestFullRun:
             )
             assert len(result.scenario_envelopes) == 1
             assert run_dir.exists()
+
+    def test_resolved_client_temperature_is_used_and_recorded(self):
+        client = _setup_mock_client(1)
+        client.temperature = 1.0
+
+        with TemporaryDirectory() as tmpdir:
+            run_sp3(
+                llm_client=client,
+                enriched_threat_set=_make_ets(num_threats=1),
+                control_structure=_make_cs(),
+                loss_analysis=_make_loss_analysis(),
+                run_dir=Path(tmpdir),
+            )
+            manifest = yaml.safe_load((Path(tmpdir) / "run-manifest.yaml").read_text())
+
+        assert {call.temperature for call in client.calls} == {1.0}
+        assert manifest["model_config"]["temperature"] == 1.0
 
     def test_pre_existing_dirs_handled(self):
         """run_sp3 must not fail when run_dir and scenarios/ already exist."""
@@ -314,6 +380,7 @@ class TestFullRun:
                 run_dir=Path(tmpdir),
             )
             from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
+
             for yaml_file in Path(tmpdir).glob("scenarios/*.yaml"):
                 env = read_yaml(yaml_file, ScenarioEnvelope)
                 assert env.scenario_id is not None
@@ -377,11 +444,16 @@ class TestPromptTemplatesExist:
 
     def test_all_template_files_exist(self):
         from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
+
         templates = [
-            "stage5_system.j2", "stage5_user.j2",
-            "stage6a_narrative_system.j2", "stage6a_narrative_user.j2",
-            "stage6b_tree_system.j2", "stage6b_tree_user.j2",
-            "stage6c_gherkin_system.j2", "stage6c_gherkin_user.j2",
+            "stage5_system.j2",
+            "stage5_user.j2",
+            "stage6a_narrative_system.j2",
+            "stage6a_narrative_user.j2",
+            "stage6b_tree_system.j2",
+            "stage6b_tree_user.j2",
+            "stage6c_gherkin_system.j2",
+            "stage6c_gherkin_user.j2",
         ]
         for t in templates:
             assert (PROMPTS_DIR / t).exists(), f"Missing template: {t}"
@@ -402,6 +474,7 @@ class TestModuleLayout:
             assembly,
             run,
         )
+
         assert bdi_generation is not None
         assert narrative is not None
         assert attack_tree is not None
@@ -419,9 +492,11 @@ class TestCLIScript:
     def test_cli_help(self):
         import subprocess
         import sys
+
         result = subprocess.run(
             [sys.executable, "scripts/run_sp3.py", "--help"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
             cwd=str(Path(__file__).resolve().parents[2]),
         )
         assert result.returncode == 0
@@ -437,7 +512,10 @@ class TestErrorPaths:
 
     def test_stage5_invalid_responsibility_skipped(self):
         """A threat with an invalid responsibility ID is skipped with an error."""
-        from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
+        from asago_scenario_generator.stpa.models.enriched_threat_set import (
+            StructuralThreat,
+        )
+
         cs = _make_cs()
         la = _make_loss_analysis()
         ets = EnrichedThreatSet(
@@ -445,12 +523,20 @@ class TestErrorPaths:
                 StructuralThreat(
                     ica_slot_id="RESP-99:CA-1-1:NOT_PROVIDED",
                     ica_id="RESP-99:CA-1-1:NOT_PROVIDED:1",
-                    ica_text="t", hazardous_context="c", loss_scenario="l",
-                    related_hazards=["H-1"], related_constraints=["SC-1"],
+                    ica_text="t",
+                    hazardous_context="c",
+                    loss_scenario="l",
+                    related_hazards=["H-1"],
+                    related_constraints=["SC-1"],
                 ),
             ],
             coverage_analysis=CoverageAnalysis(
-                structural_coverage={"total_slots": 1, "non_na": 1, "na": 0, "coverage_rate": 1.0},
+                structural_coverage={
+                    "total_slots": 1,
+                    "non_na": 1,
+                    "na": 0,
+                    "coverage_rate": 1.0,
+                },
             ),
         )
         client = MockLLMClient()
@@ -489,7 +575,40 @@ class TestErrorPaths:
                 run_dir=Path(tmpdir),
             )
             assert len(result.scenario_envelopes) == 0
-            assert any("Stage 5 BDI generation failed" in e for e in result.stage_errors)
+            assert any(
+                "Stage 5 BDI generation failed" in e for e in result.stage_errors
+            )
+
+    def test_repeated_structured_length_failure_aborts_remaining_threats(self):
+        """An exhausted length retry opens the circuit before later threats run."""
+
+        class LengthFinishReasonError(Exception):
+            pass
+
+        cs = _make_cs()
+        la = _make_loss_analysis()
+        ets = _make_ets(num_threats=3)
+        client = MockLLMClient()
+        client.set_exception_for(
+            BDIGenerationResult,
+            LengthFinishReasonError("structured response reached its length limit"),
+        )
+
+        with TemporaryDirectory() as tmpdir:
+            result = run_sp3(
+                llm_client=client,
+                enriched_threat_set=ets,
+                control_structure=cs,
+                loss_analysis=la,
+                run_dir=Path(tmpdir),
+            )
+
+        assert client.call_count == 2
+        assert any(
+            "aborted 2 remaining threats" in error
+            and "structured-output" in error
+            for error in result.stage_errors
+        )
 
     def test_stage6_llm_failure_uses_fallbacks(self):
         """Stage 6 LLM failures produce envelopes with fallback empty artifacts."""
@@ -505,7 +624,9 @@ class TestErrorPaths:
                 "asago_scenario_generator.stpa.models.scenario_spec",
                 fromlist=["AttackerBDI"],
             ).AttackerBDI(
-                beliefs=["b"], desires=["d"], intentions=["i"],
+                beliefs=["b"],
+                desires=["d"],
+                intentions=["i"],
             ),
         )
         client.set_response_queue([bdi])

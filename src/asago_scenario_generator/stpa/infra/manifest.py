@@ -53,6 +53,12 @@ class STPARunManifest(BaseModel):
         default_factory=list,
         description="Stage failures that occurred during the run (partial failure).",
     )
+    stage_warnings: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Recoverable stage diagnostics that did not prevent validated artifacts."
+        ),
+    )
     eval_scorecard_path: str | None = None
 
 

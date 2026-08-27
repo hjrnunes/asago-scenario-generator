@@ -188,9 +188,9 @@ def _h_ar_sp1_assembly_error(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     result = world.gd_run_result or world.sp1_run_result
-    errors = getattr(result, "stage_errors", []) if result is not None else []
-    if not any("assemble_control_structure" in error for error in errors):
-        return False, f"No assemble_control_structure error in {errors}"
+    warnings = getattr(result, "stage_warnings", []) if result is not None else []
+    if not any("assemble_control_structure" in warning for warning in warnings):
+        return False, f"No assemble_control_structure warning in {warnings}"
     return True, ""
 
 

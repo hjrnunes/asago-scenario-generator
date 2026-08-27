@@ -100,3 +100,18 @@ Feature: SP1 Stage 1a — Loss Analysis derivation
     Given an LLM that returns a loss analysis with constraint SC-1 referencing H-1 and constraint SC-2 referencing H-2
     When Stage 1a loss analysis is run
     Then the loss analysis passes foundation validation
+
+  # SP1-LA-13
+  Scenario: SP1-LA-13 dangling Stage 1a reference is repaired with one retry
+    Given an LLM that returns a Stage 1a draft with a dangling reference followed by a corrected draft
+    When Stage 1a loss analysis is run
+    Then Stage 1a loss analysis succeeds after one reference retry
+    And the Stage 1a retry includes validation feedback
+    And the Stage 1a attempts are logged with one failure and two successes
+
+  # SP1-LA-14
+  Scenario: SP1-LA-14 repeated dangling Stage 1a reference fails after one retry
+    Given an LLM that returns a Stage 1a draft with the same dangling reference twice
+    When Stage 1a loss analysis is run
+    Then Stage 1a validation fails after one reference retry
+    And the Stage 1a attempts are logged as two failures
