@@ -136,9 +136,10 @@ per-attempt evidence. The HTML report renders those stage outcomes and identifie
 presentation fallback separately.
 
 Useful companion commands include `projection-preflight`, `plan-obligations`,
-`profile`, `resume`, `eval`, `report`, `qualify-catalog`,
-`validate-catalog-qualification`, and `validate-stpa-projection`. Run
-`asago-scenario-generator --help` for the complete interface.
+`validate-resource-map`, `profile`, `resume`, `eval`, `report`,
+`qualify-catalog`, `validate-catalog-qualification`, and
+`validate-stpa-projection`. Run `asago-scenario-generator --help` for the
+complete interface.
 
 Publish a deterministic obligation ledger from a pinned snapshot without
 contacting an LLM endpoint:
@@ -147,6 +148,16 @@ contacting an LLM endpoint:
 asago-scenario-generator plan-obligations \
   --snapshot obligation-snapshot.yaml \
   --output-dir output/obligation-plan
+```
+
+Validate an analyst-authored system resource map against a pinned snapshot
+without contacting an LLM endpoint:
+
+```bash
+asago-scenario-generator validate-resource-map \
+  --snapshot resource-map-snapshot.yaml \
+  --map resource-map.yaml \
+  --output-dir output/resource-map
 ```
 
 ## STPA-based generation

@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
+import yaml
+from typer.testing import CliRunner
+
+from asago_scenario_generator.cli import app
 from asago_scenario_generator.models.system_resource_map import (
     ActorControllerEntry,
     ControlActionEntry,
@@ -17,6 +24,8 @@ from asago_scenario_generator.models.system_resource_map import (
     UseCaseFactEntry,
 )
 from asago_scenario_generator.pipeline.system_resource_map import validate_resource_map
+
+runner = CliRunner()
 
 
 def _make_snapshot() -> ResourceMapSnapshot:
@@ -266,9 +275,7 @@ def test_control_action_endpoint_resolves_via_seen_map_entries() -> None:
     srm.control_actions[1].process_id = "CP-99"
     res = validate_resource_map(srm, snap)
     assert not res.is_valid
-    err = next(
-        (e for e in res.errors if e.code == "dangling_reference"), None
-    )
+    err = next((e for e in res.errors if e.code == "dangling_reference"), None)
     assert err is not None
     assert err.element_id == "CP-99"
 
@@ -293,9 +300,7 @@ def test_feedback_path_endpoint_resolves_via_seen_map_entries() -> None:
     srm.feedback_paths[1].controller_id = "RESP-99"
     res = validate_resource_map(srm, snap)
     assert not res.is_valid
-    err = next(
-        (e for e in res.errors if e.code == "dangling_reference"), None
-    )
+    err = next((e for e in res.errors if e.code == "dangling_reference"), None)
     assert err is not None
     assert err.element_id == "RESP-99"
 
@@ -323,8 +328,12 @@ def test_canonical_map_orders_duplicate_element_ids_by_content() -> None:
     # Empty element ids are exempt from duplicate detection, so several can
     # share the same key; canonical order must then break ties by content.
     srm.assertions = [
-        ResourceAssertionEntry(element_id="", description="zeta", provenance_kind="analyst"),
-        ResourceAssertionEntry(element_id="", description="alpha", provenance_kind="analyst"),
+        ResourceAssertionEntry(
+            element_id="", description="zeta", provenance_kind="analyst"
+        ),
+        ResourceAssertionEntry(
+            element_id="", description="alpha", provenance_kind="analyst"
+        ),
     ]
 
     res = validate_resource_map(srm, snap)
@@ -381,6 +390,236 @@ def test_missing_optional_provenance_is_warning() -> None:
     res = validate_resource_map(srm, snap)
     assert res.is_valid
     assert len(res.errors) == 0
-    warn = next((w for w in res.warnings if w.code == "missing_optional_provenance"), None)
+    warn = next(
+        (w for w in res.warnings if w.code == "missing_optional_provenance"), None
+    )
     assert warn is not None
     assert warn.element_id == "A-3"
+
+
+def test_validate_resource_map_cli_writes_yaml_and_json(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "snapshot.yaml"
+    snapshot_path.write_text(
+        yaml.safe_dump(_make_snapshot().model_dump(mode="json")), encoding="utf-8"
+    )
+    map_path = tmp_path / "resource-map.yaml"
+    map_path.write_text(
+        yaml.safe_dump(_make_valid_map().model_dump(mode="json")), encoding="utf-8"
+    )
+    output_dir = tmp_path / "out"
+
+    result = runner.invoke(
+        app,
+        [
+            "validate-resource-map",
+            "--snapshot",
+            str(snapshot_path),
+            "--map",
+            str(map_path),
+            "--output-dir",
+            str(output_dir),
+        ],
+    )
+
+    assert result.exit_code == 0, result.stderr
+    validation = yaml.safe_load(
+        (output_dir / "resource-map-validation.yaml").read_text(encoding="utf-8")
+    )
+    assert validation["is_valid"] is True
+    assert validation["errors"] == []
+    assert validation["network_calls"] == 0
+    assert validation["model_calls"] == 0
+    assert (output_dir / "resource-map.yaml").is_file()
+    assert (output_dir / "resource-map.json").is_file()
+    assert "Network calls: 0" in result.stdout
+    assert "Model calls:   0" in result.stdout
+
+
+def test_validate_resource_map_cli_rejects_invalid_map(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "snapshot.yaml"
+    snapshot_path.write_text(
+        yaml.safe_dump(_make_snapshot().model_dump(mode="json")), encoding="utf-8"
+    )
+    invalid = _make_valid_map()
+    invalid.system_resources.append(
+        SystemResourceEntry(element_id="SR-1", name="Duplicate")
+    )
+    map_path = tmp_path / "resource-map.yaml"
+    map_path.write_text(
+        yaml.safe_dump(invalid.model_dump(mode="json")), encoding="utf-8"
+    )
+    output_dir = tmp_path / "out"
+
+    result = runner.invoke(
+        app,
+        [
+            "validate-resource-map",
+            "--snapshot",
+            str(snapshot_path),
+            "--map",
+            str(map_path),
+            "--output-dir",
+            str(output_dir),
+            "--format",
+            "yaml",
+        ],
+    )
+
+    assert result.exit_code == 1
+    validation = yaml.safe_load(
+        (output_dir / "resource-map-validation.yaml").read_text(encoding="utf-8")
+    )
+    assert validation["is_valid"] is False
+    assert any(
+        error["code"] == "duplicate_identifier" for error in validation["errors"]
+    )
+    assert not (output_dir / "resource-map.yaml").exists()
+
+
+def test_validate_resource_map_cli_rejects_missing_snapshot(tmp_path: Path) -> None:
+    missing = tmp_path / "missing" / "snapshot.yaml"
+    map_path = tmp_path / "resource-map.yaml"
+    map_path.write_text("schema_version: '1'\n", encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "validate-resource-map",
+            "--snapshot",
+            str(missing),
+            "--map",
+            str(map_path),
+            "--output-dir",
+            str(tmp_path / "out"),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert f"Error: resource-map snapshot not found: {missing}" in result.stderr
+
+
+def test_validate_resource_map_cli_writes_json_only(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(
+        json.dumps(_make_snapshot().model_dump(mode="json")), encoding="utf-8"
+    )
+    map_path = tmp_path / "resource-map.json"
+    map_path.write_text(
+        json.dumps(_make_valid_map().model_dump(mode="json")), encoding="utf-8"
+    )
+    output_dir = tmp_path / "out"
+
+    result = runner.invoke(
+        app,
+        [
+            "validate-resource-map",
+            "--snapshot",
+            str(snapshot_path),
+            "--map",
+            str(map_path),
+            "--output-dir",
+            str(output_dir),
+            "--format",
+            "json",
+            "--context-hint",
+            "   ",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stderr
+    validation = json.loads(
+        (output_dir / "resource-map-validation.json").read_text(encoding="utf-8")
+    )
+    assert validation["is_valid"] is True
+    assert (output_dir / "resource-map.json").is_file()
+    assert not (output_dir / "resource-map.yaml").exists()
+    assert not (output_dir / "resource-map-validation.yaml").exists()
+
+
+def test_validate_resource_map_cli_rejects_invalid_format(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "snapshot.yaml"
+    snapshot_path.write_text(
+        yaml.safe_dump(_make_snapshot().model_dump(mode="json")), encoding="utf-8"
+    )
+    map_path = tmp_path / "resource-map.yaml"
+    map_path.write_text(
+        yaml.safe_dump(_make_valid_map().model_dump(mode="json")), encoding="utf-8"
+    )
+    result = runner.invoke(
+        app,
+        [
+            "validate-resource-map",
+            "--snapshot",
+            str(snapshot_path),
+            "--map",
+            str(map_path),
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--format",
+            "xml",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "yaml" in result.stderr.lower() or "yaml" in result.stdout.lower()
+
+
+def test_validate_resource_map_cli_rejects_non_object_payload(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "snapshot.yaml"
+    snapshot_path.write_text("- not-an-object\n", encoding="utf-8")
+    map_path = tmp_path / "resource-map.yaml"
+    map_path.write_text(
+        yaml.safe_dump(_make_valid_map().model_dump(mode="json")), encoding="utf-8"
+    )
+    result = runner.invoke(
+        app,
+        [
+            "validate-resource-map",
+            "--snapshot",
+            str(snapshot_path),
+            "--map",
+            str(map_path),
+            "--output-dir",
+            str(tmp_path / "out"),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "JSON or YAML object" in result.stderr
+
+
+def test_validate_resource_map_cli_applies_context_hint(tmp_path: Path) -> None:
+    snapshot_path = tmp_path / "snapshot.yaml"
+    snapshot_path.write_text(
+        yaml.safe_dump(_make_snapshot().model_dump(mode="json")), encoding="utf-8"
+    )
+    invalid = _make_valid_map()
+    invalid.loss_links[0].loss_id = "L-99"
+    map_path = tmp_path / "resource-map.yaml"
+    map_path.write_text(
+        yaml.safe_dump(invalid.model_dump(mode="json")), encoding="utf-8"
+    )
+    output_dir = tmp_path / "out"
+
+    result = runner.invoke(
+        app,
+        [
+            "validate-resource-map",
+            "--snapshot",
+            str(snapshot_path),
+            "--map",
+            str(map_path),
+            "--output-dir",
+            str(output_dir),
+            "--format",
+            "json",
+            "--context-hint",
+            "dangling_reference",
+        ],
+    )
+
+    assert result.exit_code == 1
+    validation = json.loads(
+        (output_dir / "resource-map-validation.json").read_text(encoding="utf-8")
+    )
+    assert any(error["code"] == "dangling_reference" for error in validation["errors"])
+    assert not (output_dir / "resource-map.json").exists()
