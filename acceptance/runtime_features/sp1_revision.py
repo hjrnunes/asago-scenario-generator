@@ -541,13 +541,14 @@ def _h_gd_partial_returned(world: World, text: str, examples: dict) -> tuple[boo
 def _h_gd_manifest_has_stage_errors(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the manifest contains a stage_errors field."""
+    """Handle: the manifest contains a stage_errors or stage_warnings field."""
     run_dir = world.sp1_run_dir
     if run_dir is None:
         return False, "No run dir"
     manifest = _gd_yaml.safe_load((run_dir / "run-manifest.yaml").read_text())
-    if "stage_errors" not in manifest:
-        return False, "manifest has no stage_errors field"
+    field_name = "stage_warnings" if "stage_warnings" in text else "stage_errors"
+    if field_name not in manifest:
+        return False, f"manifest has no {field_name} field"
     return True, ""
 
 
@@ -6531,7 +6532,7 @@ def register(api: object) -> None:
         "a partial SP1RunResult is returned", _h_gd_partial_returned, source_order=7541
     )
     api.register(
-        "the manifest contains a stage_errors field",
+        "the manifest contains a (?:stage_errors|stage_warnings) field",
         _h_gd_manifest_has_stage_errors,
         source_order=7542,
     )

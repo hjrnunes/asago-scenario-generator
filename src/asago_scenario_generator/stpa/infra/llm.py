@@ -15,7 +15,16 @@ from typing import Any
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
+from asago_scenario_generator.model_profiles import DEFAULT_REQUEST_TIMEOUT_SECONDS
+
 DEFAULT_TEMPERATURE: float = 0.4
+
+_ENV_MAX_COMPLETION_TOKENS = "ASAGO_SCENARIO_GENERATOR_MAX_COMPLETION_TOKENS"
+_ENV_TEMPERATURE = "ASAGO_SCENARIO_GENERATOR_TEMPERATURE"
+_ENV_TOP_P = "ASAGO_SCENARIO_GENERATOR_TOP_P"
+_ENV_TOP_K = "ASAGO_SCENARIO_GENERATOR_TOP_K"
+_ENV_USE_GUIDED_DECODING = "ASAGO_SCENARIO_GENERATOR_USE_GUIDED_DECODING"
+_ENV_TIMEOUT = "ASAGO_SCENARIO_GENERATOR_TIMEOUT"
 
 _OPENROUTER_DEFAULT_HEADERS: dict[str, str] = {
     "HTTP-Referer": "https://github.com/asago-ai/asago-scenario-generator",
@@ -29,9 +38,9 @@ def _resolve_temperature(
 ) -> float:
     """Resolve the effective temperature from explicit arg or env var."""
     if explicit is not None:
-        return explicit
+        return _validated_float(explicit, "temperature", minimum=0.0)
     if env_var is not None:
-        return float(env_var)
+        return _validated_float(env_var, _ENV_TEMPERATURE, minimum=0.0)
     return DEFAULT_TEMPERATURE
 
 
@@ -41,8 +50,104 @@ def _resolve_max_tokens(
 ) -> int | None:
     """Resolve the effective max_completion_tokens from explicit arg or env var."""
     if explicit is not None:
+        return _validated_int(explicit, "max_completion_tokens", minimum=1)
+    if not env_var:
+        return None
+    return _validated_int(env_var, _ENV_MAX_COMPLETION_TOKENS, minimum=1)
+
+
+def _resolve_timeout(explicit: float | None, env_var: str | None) -> float:
+    """Resolve a positive request deadline from explicit, env, or default."""
+    if explicit is not None:
+        return _validated_float(explicit, "timeout", minimum=0.000001)
+    if env_var is not None:
+        return _validated_float(env_var, _ENV_TIMEOUT, minimum=0.000001)
+    return DEFAULT_REQUEST_TIMEOUT_SECONDS
+
+
+def _validated_float(
+    value: float | str,
+    name: str,
+    *,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> float:
+    """Parse and range-check a floating-point sampling setting."""
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a number, got {value!r}") from exc
+    if minimum is not None and parsed < minimum:
+        raise ValueError(f"{name} must be at least {minimum}, got {parsed}")
+    if maximum is not None and parsed > maximum:
+        raise ValueError(f"{name} must be at most {maximum}, got {parsed}")
+    return parsed
+
+
+def _validated_int(value: int | str, name: str, *, minimum: int) -> int:
+    """Parse and range-check an integer sampling setting."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer, got {value!r}") from exc
+    if parsed < minimum:
+        raise ValueError(f"{name} must be at least {minimum}, got {parsed}")
+    return parsed
+
+
+def _resolve_optional_float(
+    explicit: float | None,
+    env_name: str,
+    *,
+    minimum: float,
+    maximum: float | None = None,
+) -> float | None:
+    """Resolve an optional float using explicit → environment precedence."""
+    if explicit is not None:
+        return _validated_float(
+            explicit,
+            env_name.removeprefix("ASAGO_SCENARIO_GENERATOR_").lower(),
+            minimum=minimum,
+            maximum=maximum,
+        )
+    raw = os.environ.get(env_name)
+    if raw is None:
+        return None
+    return _validated_float(raw, env_name, minimum=minimum, maximum=maximum)
+
+
+def _resolve_optional_int(
+    explicit: int | None,
+    env_name: str,
+    *,
+    minimum: int,
+) -> int | None:
+    """Resolve an optional integer using explicit → environment precedence."""
+    if explicit is not None:
+        return _validated_int(
+            explicit,
+            env_name.removeprefix("ASAGO_SCENARIO_GENERATOR_").lower(),
+            minimum=minimum,
+        )
+    raw = os.environ.get(env_name)
+    if raw is None:
+        return None
+    return _validated_int(raw, env_name, minimum=minimum)
+
+
+def _resolve_bool(explicit: bool | None, env_name: str, default: bool) -> bool:
+    """Resolve a boolean using explicit → environment → default precedence."""
+    if explicit is not None:
         return explicit
-    return int(env_var) if env_var else None
+    raw = os.environ.get(env_name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{env_name} must be a boolean (true/false), got {raw!r}")
 
 
 def _resolve_base_url(explicit: str | None) -> str | None:
@@ -164,26 +269,37 @@ class LLMClient:
         extra_headers: dict[str, str] | None = None,
         top_p: float | None = None,
         top_k: int | None = None,
-        use_guided_decoding: bool = False,
+        use_guided_decoding: bool | None = None,
+        timeout: float | None = None,
     ) -> None:
         self.base_url = _resolve_base_url(base_url)
         self.api_key = _resolve_api_key(api_key)
         self.model = _resolve_model(model)
         self.max_completion_tokens = _resolve_max_tokens(
             max_completion_tokens,
-            os.environ.get("ASAGO_SCENARIO_GENERATOR_MAX_COMPLETION_TOKENS"),
+            os.environ.get(_ENV_MAX_COMPLETION_TOKENS),
         )
         self.temperature = _resolve_temperature(
-            temperature, os.environ.get("ASAGO_SCENARIO_GENERATOR_TEMPERATURE")
+            temperature, os.environ.get(_ENV_TEMPERATURE)
         )
         self.extra_headers = _resolve_extra_headers(
             self.base_url,
             extra_headers,
             os.environ.get("ASAGO_SCENARIO_GENERATOR_EXTRA_HEADERS"),
         )
-        self.top_p = top_p
-        self.top_k = top_k
-        self.use_guided_decoding = use_guided_decoding
+        self.top_p = _resolve_optional_float(
+            top_p,
+            _ENV_TOP_P,
+            minimum=0.0,
+            maximum=1.0,
+        )
+        self.top_k = _resolve_optional_int(top_k, _ENV_TOP_K, minimum=1)
+        self.use_guided_decoding = _resolve_bool(
+            use_guided_decoding,
+            _ENV_USE_GUIDED_DECODING,
+            False,
+        )
+        self.timeout = _resolve_timeout(timeout, os.environ.get(_ENV_TIMEOUT))
 
         if not self.base_url:
             raise ValueError(
@@ -194,6 +310,8 @@ class LLMClient:
             base_url=self.base_url,
             api_key=self.api_key,
             default_headers=self.extra_headers or None,
+            timeout=self.timeout,
+            max_retries=0,
         )
 
     def _build_extra_kwargs(
@@ -295,6 +413,37 @@ class LLMClient:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
         )
+
+
+def effective_model_config(
+    client: LLMClient,
+    *,
+    temperature: float | None = None,
+) -> dict[str, Any]:
+    """Return effective non-secret settings suitable for run manifests."""
+    return {
+        "model": client.model,
+        "base_url": client.base_url,
+        "max_completion_tokens": getattr(client, "max_completion_tokens", None),
+        "temperature": effective_temperature(client, temperature),
+        "top_p": getattr(client, "top_p", None),
+        "top_k": getattr(client, "top_k", None),
+        "use_guided_decoding": getattr(client, "use_guided_decoding", False),
+        "timeout": getattr(client, "timeout", DEFAULT_REQUEST_TIMEOUT_SECONDS),
+    }
+
+
+def effective_temperature(
+    client: LLMClient,
+    explicit: float | None = None,
+) -> float:
+    """Resolve a stage override, client value, or the shared legacy default."""
+    configured = getattr(client, "temperature", DEFAULT_TEMPERATURE)
+    return _validated_float(
+        configured if explicit is None else explicit,
+        "temperature",
+        minimum=0.0,
+    )
 
 
 # mutate4py-manifest-begin

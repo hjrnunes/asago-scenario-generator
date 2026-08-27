@@ -7,6 +7,9 @@ cross-reference validity, and call-log recording.
 from __future__ import annotations
 
 import json
+import warnings
+
+import yaml
 
 import pytest
 from pydantic import ValidationError
@@ -23,10 +26,12 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossProvenance,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis import derive_loss_analysis
+from asago_scenario_generator.stpa.system_model.run import run_sp1
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
     valid_gap_draft_dict,
     valid_risk_draft_dict,
+    valid_stage1_profile_dict,
 )
 
 
@@ -52,6 +57,49 @@ def _make_capability_profile() -> CapabilityProfile:
         kc_subcodes=["KC1.1", "KC5.1", "KC6.1.1"],
         tool_inventory=[{"name": "tool1", "description": "A tool"}],
     ).to_capability_profile()
+
+
+def _observed_invalid_risk_draft() -> dict:
+    """Return the sanitized run-3 risk draft shape."""
+    draft = valid_risk_draft_dict()
+    draft["security_constraints"] = [
+        {
+            "constraint_id": f"SC-{index}",
+            "description": f"Constraint {index}",
+            "related_hazards": [f"H-{index + 1}"],
+        }
+        for index in range(1, 7)
+    ]
+    # The observed response declared only H-1 while the constraints referred
+    # to H-2 through H-7.
+    return draft
+
+
+def _corrected_risk_draft() -> dict:
+    """Return a corrected risk draft without dropping constraints."""
+    draft = _observed_invalid_risk_draft()
+    draft["hazards"] = [
+        {
+            "hazard_id": f"H-{index}",
+            "description": f"Hazard {index}",
+            "related_losses": ["L-1"],
+        }
+        for index in range(1, 8)
+    ]
+    return draft
+
+
+def _gap_draft_with_existing_references() -> dict:
+    """Return a gap draft referencing both existing and new IDs."""
+    draft = valid_gap_draft_dict()
+    draft["hazards"][0].update(
+        {
+            "hazard_id": "H-8",
+            "related_losses": ["L-1", "L-2"],
+        }
+    )
+    draft["security_constraints"][0]["related_hazards"] = ["H-8", "H-1"]
+    return draft
 
 
 class TestStage1aLossAnalysis:
@@ -115,7 +163,7 @@ class TestStage1aLossAnalysis:
         client = MockLLMClient()
         client.set_response_for(
             LossAnalysisDraft,
-            [bad_risk, valid_gap_draft_dict()],
+            [bad_risk, bad_risk],
         )
         with pytest.raises((ValidationError, ValueError, StageError), match="related_losses"):
             derive_loss_analysis(
@@ -132,7 +180,7 @@ class TestStage1aLossAnalysis:
         client = MockLLMClient()
         client.set_response_for(
             LossAnalysisDraft,
-            [bad_risk, valid_gap_draft_dict()],
+            [bad_risk, bad_risk],
         )
         with pytest.raises((ValidationError, ValueError, StageError), match="related_hazards"):
             derive_loss_analysis(
@@ -202,7 +250,7 @@ class TestStage1aLossAnalysis:
         )
         # After renumbering: L-1, L-2 / H-1, H-2 / SC-1, SC-2
         all_losses = result.risk_card_losses + result.use_case_losses
-        assert [l.loss_id for l in all_losses] == ["L-1", "L-2"]
+        assert [loss.loss_id for loss in all_losses] == ["L-1", "L-2"]
         assert [h.hazard_id for h in result.hazards] == ["H-1", "H-2"]
         assert [sc.constraint_id for sc in result.security_constraints] == ["SC-1", "SC-2"]
         # Cross-references updated
@@ -259,7 +307,7 @@ class TestStage1aLossAnalysis:
         risk_draft = valid_risk_draft_dict()
         risk_draft["risk_card_losses"].append(
             {
-                "loss_id": "L-2",
+                "loss_id": "L-10",
                 "description": "Data exposure",
                 "provenance": "risk_card",
                 "source_risk_cards": ["atlas-002"],
@@ -268,7 +316,7 @@ class TestStage1aLossAnalysis:
         gap_draft = valid_gap_draft_dict()
         gap_draft["use_case_losses"].append(
             {
-                "loss_id": "L-3",
+                "loss_id": "L-11",
                 "description": "Regulatory non-compliance",
                 "provenance": "use_case",
                 "source_risk_cards": [],
@@ -342,7 +390,7 @@ class TestStage1aLossAnalysis:
             run_dir=tmp_path,
         )
         all_losses = result.risk_card_losses + result.use_case_losses
-        loss_ids = [l.loss_id for l in all_losses]
+        loss_ids = [loss.loss_id for loss in all_losses]
         assert loss_ids == ["L-1", "L-2"]
 
         hazard_ids = [h.hazard_id for h in result.hazards]
@@ -413,3 +461,312 @@ class TestStage1aLossAnalysis:
         gap_hazard = result.hazards[1]
         assert "L-1" in gap_hazard.related_losses
         assert "L-2" in gap_hazard.related_losses
+
+    def test_la_17_observed_misplaced_loss_containers_are_normalized(self, tmp_path):
+        """Losses are classified by provenance, even in the wrong draft field.
+
+        This is a sanitized reproduction of the Gemma response shape from
+        the Klarna run: risk-card losses were returned in ``use_case_losses``
+        and gap losses were returned in both containers.
+        """
+        risk_losses = [
+            {
+                "loss_id": f"L-{index}",
+                "description": f"Risk loss {index}",
+                "provenance": "risk_card",
+                "source_risk_cards": [f"atlas-{index:03d}"],
+            }
+            for index in range(1, 6)
+        ]
+        gap_losses = [
+            {
+                "loss_id": f"L-{index}",
+                "description": f"Use-case loss {index}",
+                "provenance": "use_case",
+                "source_risk_cards": [],
+            }
+            for index in range(6, 9)
+        ]
+        risk = {
+            "risk_card_losses": [],
+            "use_case_losses": risk_losses,
+            "hazards": [
+                {
+                    "hazard_id": "H-1",
+                    "description": "Risk hazard",
+                    "related_losses": ["L-3", "L-4"],
+                }
+            ],
+            "security_constraints": [
+                {
+                    "constraint_id": "SC-1",
+                    "description": "Risk constraint",
+                    "related_hazards": ["H-1"],
+                }
+            ],
+        }
+        gap = {
+            "risk_card_losses": [loss.copy() for loss in gap_losses],
+            "use_case_losses": [loss.copy() for loss in gap_losses],
+            "hazards": [
+                {
+                    "hazard_id": "H-2",
+                    "description": "Gap hazard",
+                    "related_losses": ["L-6", "L-8"],
+                }
+            ],
+            "security_constraints": [
+                {
+                    "constraint_id": "SC-2",
+                    "description": "Gap constraint",
+                    "related_hazards": ["H-2"],
+                }
+            ],
+        }
+        client = MockLLMClient()
+        client.set_response_for(LossAnalysisDraft, [risk, gap])
+
+        result = derive_loss_analysis(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=_make_risk_cards(),
+            run_dir=tmp_path,
+        )
+
+        assert [loss.loss_id for loss in result.risk_card_losses] == [
+            f"L-{index}" for index in range(1, 6)
+        ]
+        assert [loss.loss_id for loss in result.use_case_losses] == [
+            f"L-{index}" for index in range(6, 9)
+        ]
+        assert len(result.risk_card_losses) == 5
+        assert len(result.use_case_losses) == 3
+        all_loss_ids = {
+            loss.loss_id
+            for loss in result.risk_card_losses + result.use_case_losses
+        }
+        assert all(
+            ref in all_loss_ids
+            for hazard in result.hazards
+            for ref in hazard.related_losses
+        )
+
+        # The final graph is fully typed before serialization; the warning is
+        # promoted to an error so tolerated intermediate shapes cannot leak.
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            serialized = result.model_dump(mode="json")
+        assert len(serialized["risk_card_losses"]) == 5
+        assert len(serialized["use_case_losses"]) == 3
+
+    def test_la_18_identical_duplicate_loss_is_deduplicated(self, tmp_path):
+        """Identical duplicate loss records are emitted only once."""
+        risk = valid_risk_draft_dict()
+        gap = valid_gap_draft_dict()
+        duplicate = risk["risk_card_losses"][0].copy()
+        gap["risk_card_losses"] = [duplicate]
+        gap["use_case_losses"] = [
+            {
+                "loss_id": "L-2",
+                "description": "Loss of trust",
+                "provenance": "use_case",
+                "source_risk_cards": [],
+            }
+        ]
+
+        client = MockLLMClient()
+        client.set_response_for(LossAnalysisDraft, [risk, gap])
+        result = derive_loss_analysis(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=_make_risk_cards(),
+            run_dir=tmp_path,
+        )
+
+        all_losses = result.risk_card_losses + result.use_case_losses
+        assert len(all_losses) == 2
+        assert [loss.loss_id for loss in all_losses] == ["L-1", "L-2"]
+
+    def test_la_19_conflicting_duplicate_loss_id_is_a_stage_error(self, tmp_path):
+        """Conflicting duplicate IDs fail deterministically at the stage boundary."""
+        risk = valid_risk_draft_dict()
+        gap = valid_gap_draft_dict()
+        gap["use_case_losses"][0].update(
+            {
+                "loss_id": "L-1",
+                "description": "Conflicting loss payload",
+            }
+        )
+        gap["hazards"][0]["related_losses"] = ["L-1"]
+
+        client = MockLLMClient()
+        client.set_response_for(LossAnalysisDraft, [risk, gap])
+        with pytest.raises(StageError, match="conflicting duplicate loss ID 'L-1'"):
+            derive_loss_analysis(
+                llm_client=client,
+                use_case_text="Test use case",
+                risk_cards=_make_risk_cards(),
+                run_dir=tmp_path,
+            )
+
+    def test_la_20_merge_validation_failure_is_a_stage_error(self, tmp_path):
+        """Final merge validation never exposes a raw Pydantic exception."""
+        bad_risk = valid_risk_draft_dict()
+        bad_risk["risk_card_losses"][0]["source_risk_cards"] = []
+        client = MockLLMClient()
+        client.set_response_for(
+            LossAnalysisDraft,
+            [bad_risk, valid_gap_draft_dict()],
+        )
+
+        with pytest.raises(StageError, match="stage_1a") as exc_info:
+            derive_loss_analysis(
+                llm_client=client,
+                use_case_text="Test use case",
+                risk_cards=_make_risk_cards(),
+                run_dir=tmp_path,
+            )
+        assert "source_risk_cards" in str(exc_info.value)
+
+    def test_la_21_sp1_merge_failure_is_partial_and_manifested(self, tmp_path):
+        """SP1 contains merge failures and persists the existing diagnostic schema."""
+        bad_risk = valid_risk_draft_dict()
+        bad_risk["risk_card_losses"][0]["source_risk_cards"] = []
+        client = MockLLMClient()
+        client.set_response_for(
+            Stage1Profile,
+            valid_stage1_profile_dict(),
+        )
+        client.set_response_for(
+            LossAnalysisDraft,
+            [bad_risk, valid_gap_draft_dict()],
+        )
+
+        # No ValidationError escapes the public SP1 seam.
+        result = run_sp1(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=_make_risk_cards(),
+            run_dir=tmp_path,
+        )
+
+        assert result.loss_analysis is None
+        assert result.capability_profile is not None
+        assert result.control_structure is None
+        assert any(error.startswith("stage_1a/merge:") for error in result.stage_errors)
+
+        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        assert manifest["stage_errors"] == result.stage_errors
+        assert any(
+            error.startswith("stage_1a/merge:") for error in manifest["stage_errors"]
+        )
+
+    def test_la_22_invalid_risk_references_retry_without_dropping_constraints(
+        self, tmp_path
+    ):
+        """Invalid risk references get one corrective retry before the gap call."""
+        client = MockLLMClient()
+        client.set_response_for(
+            LossAnalysisDraft,
+            [
+                _observed_invalid_risk_draft(),
+                _corrected_risk_draft(),
+                _gap_draft_with_existing_references(),
+            ],
+        )
+
+        result = derive_loss_analysis(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=_make_risk_cards(),
+            run_dir=tmp_path,
+        )
+
+        assert len(result.hazards) == 8
+        assert len(result.security_constraints) == 7
+        all_loss_ids = {
+            loss.loss_id
+            for loss in result.risk_card_losses + result.use_case_losses
+        }
+        all_hazard_ids = {hazard.hazard_id for hazard in result.hazards}
+        assert all(
+            reference in all_loss_ids
+            for hazard in result.hazards
+            for reference in hazard.related_losses
+        )
+        assert all(
+            reference in all_hazard_ids
+            for constraint in result.security_constraints
+            for reference in constraint.related_hazards
+        )
+
+        entries = [
+            json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
+        ]
+        stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
+        assert [entry["success"] for entry in stage1a_entries] == [False, True, True]
+        assert stage1a_entries[0]["step"] == "risk_derivation"
+        assert "related_hazards" in stage1a_entries[0]["error"]
+        assert "validation" in stage1a_entries[0]["error"].lower()
+        assert "validation feedback" in stage1a_entries[1]["user_prompt_text"].lower()
+
+    def test_la_23_invalid_risk_references_fail_after_one_retry(self, tmp_path):
+        """Retry exhaustion is a structural StageError and preserves call logs."""
+        invalid = _observed_invalid_risk_draft()
+        client = MockLLMClient()
+        client.set_response_for(LossAnalysisDraft, [invalid, invalid])
+
+        with pytest.raises(StageError, match="stage_1a/risk_derivation") as exc_info:
+            derive_loss_analysis(
+                llm_client=client,
+                use_case_text="Test use case",
+                risk_cards=_make_risk_cards(),
+                run_dir=tmp_path,
+            )
+
+        assert "related_hazards" in str(exc_info.value)
+        entries = [
+            json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
+        ]
+        assert len(entries) == 2
+        assert all(not entry["success"] for entry in entries)
+        assert not (tmp_path / "loss-analysis.yaml").exists()
+
+    def test_la_24_invalid_gap_references_retry_with_existing_and_local_ids(
+        self, tmp_path
+    ):
+        """Gap references are validated against risk and corrected local IDs."""
+        invalid_gap = _gap_draft_with_existing_references()
+        invalid_gap["hazards"][0]["related_losses"] = ["L-1", "L-99"]
+        corrected_gap = _gap_draft_with_existing_references()
+        client = MockLLMClient()
+        client.set_response_for(
+            LossAnalysisDraft,
+            [valid_risk_draft_dict(), invalid_gap, corrected_gap],
+        )
+
+        result = derive_loss_analysis(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=_make_risk_cards(),
+            run_dir=tmp_path,
+        )
+
+        assert len(result.hazards) == 2
+        assert len(result.security_constraints) == 2
+        assert {loss.loss_id for loss in result.use_case_losses} == {"L-2"}
+        assert {hazard.hazard_id for hazard in result.hazards} == {"H-1", "H-2"}
+
+        entries = [
+            json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
+        ]
+        stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
+        assert len(stage1a_entries) == 3
+        assert [entry["success"] for entry in stage1a_entries] == [True, False, True]
+        assert [entry["step"] for entry in stage1a_entries] == [
+            "risk_derivation",
+            "gap_analysis",
+            "gap_analysis",
+        ]
+        assert "related_losses" in stage1a_entries[1]["error"]
+        assert "validation feedback" in stage1a_entries[2]["user_prompt_text"].lower()

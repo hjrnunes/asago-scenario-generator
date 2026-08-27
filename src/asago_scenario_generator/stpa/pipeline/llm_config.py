@@ -43,7 +43,8 @@ def resolve_llm_client_from_profile(
         top_p=profile.get("top_p"),
         top_k=profile.get("top_k"),
         extra_headers=profile.get("headers"),
-        use_guided_decoding=profile.get("use_guided_decoding", False),
+        use_guided_decoding=profile.get("use_guided_decoding"),
+        timeout=profile.get("timeout"),
     )
     return client, profile_name
 

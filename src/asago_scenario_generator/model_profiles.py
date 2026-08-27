@@ -13,6 +13,8 @@ from typing import Any
 
 import yaml
 
+DEFAULT_REQUEST_TIMEOUT_SECONDS: float = 300.0
+
 REQUIRED_FIELDS: tuple[str, ...] = ("base_url", "model", "api_key")
 OPTIONAL_FIELDS: tuple[str, ...] = (
     "max_completion_tokens",
@@ -89,7 +91,7 @@ def load_profile(profiles_path: Path | str, profile_name: str) -> dict[str, Any]
     Returns:
         A dict with keys ``base_url``, ``model``, ``api_key`` and any
         optional fields present (``max_completion_tokens``, ``temperature``,
-        ``top_p``, ``top_k``, ``headers``, ``use_guided_decoding``).
+        ``top_p``, ``top_k``, ``headers``, ``use_guided_decoding``, ``timeout``).
 
     Raises:
         FileNotFoundError: If the profiles file does not exist.

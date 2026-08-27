@@ -129,6 +129,11 @@ def stpa_run_cmd(
         False,
         help="Skip completed stages if artifacts exist.",
     ),
+    temperature: float | None = typer.Option(
+        None,
+        help="Override the resolved sampling temperature for every STPA stage. "
+        "Defaults to the selected profile or environment value, then 0.4.",
+    ),
 ) -> None:
     """Run the full STPA pipeline: SP1 → SP2 → SP3 → report."""
     from asago_scenario_generator.stpa.pipeline import run_stpa_pipeline
@@ -146,6 +151,7 @@ def stpa_run_cmd(
             capability_profile_path=capability_profile,
             max_workers=max_workers,
             resume=resume,
+            temperature=temperature,
         )
     except FileNotFoundError as exc:
         _abort(exc)

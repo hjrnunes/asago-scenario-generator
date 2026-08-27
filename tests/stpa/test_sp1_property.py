@@ -19,6 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from hypothesis import HealthCheck, given, settings, strategies as st
+import pytest
 
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
@@ -87,7 +88,7 @@ class TestRequirementSetYamlRoundTrip:
     """RequirementSet round-trips through YAML without loss."""
 
     @given(
-        n_reqs=st.integers(min_value=0, max_value=5),
+        n_reqs=st.integers(min_value=1, max_value=5),
         descriptions=st.lists(st_text, min_size=0, max_size=5),
         classifications=st.lists(st_classification, min_size=0, max_size=5),
     )
@@ -188,12 +189,12 @@ class TestCriticFindingsYamlRoundTrip:
 
 
 class TestEmptyModelInvariants:
-    """Empty/default models are valid and satisfy invariants."""
+    """Empty/default models are valid where their stage contract permits it."""
 
-    def test_empty_requirement_set_valid(self):
-        """RequirementSet with no requirements is valid."""
-        rs = RequirementSet(requirements=[])
-        assert rs.requirements == []
+    def test_empty_requirement_set_rejected(self):
+        """RequirementSet must contain a requirement before Stage 2 continues."""
+        with pytest.raises(ValueError, match="requirements"):
+            RequirementSet(requirements=[])
 
     def test_empty_critic_findings_valid(self):
         """CriticFindings with no gaps is valid."""

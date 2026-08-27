@@ -36,6 +36,12 @@ __all__ = [
     "build_slot_filling_prompts",
 ]
 
+_SLOT_VALIDATION_RETRY_FEEDBACK = (
+    "\n\nThe prior response violated the slot schema. Ensure every slot with "
+    "is_na=false contains at least one ICA. Ensure every slot with is_na=true "
+    "contains no ICAs and includes a non-empty na_justification."
+)
+
 
 class ICASlotFillResult(BaseModel):
     """LLM response model: a list of filled ICA slots.
@@ -155,6 +161,8 @@ def fill_slots_for_responsibility(
         stage=stage,
         step=f"slot_fill_{resp_id}",
         temperature=temperature,
+        validation_retries=1,
+        validation_retry_feedback=_SLOT_VALIDATION_RETRY_FEEDBACK,
     )
 
     if error is not None:
@@ -267,6 +275,8 @@ def _build_slot_fill_call_specs(
                 stage="stage_3",
                 step=f"slot_fill_{resp_id}",
                 temperature=temperature,
+                validation_retries=1,
+                validation_retry_feedback=_SLOT_VALIDATION_RETRY_FEEDBACK,
             )
         )
     return call_specs

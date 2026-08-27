@@ -17,12 +17,12 @@ from asago_scenario_generator.data.loaders import (
     load_attack_pattern_provenance,
     load_attack_patterns,
 )
+from asago_scenario_generator.data.paths import DATA_ROOT
 from asago_scenario_generator.models import ThreatSurface, ThreatSurfaceEntry
 from asago_scenario_generator.models.scenario import RiskCardRef
 
 _DEFAULT_THREATS_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "data"
+    DATA_ROOT
     / "taxonomies"
     / "owasp-agentic-threats"
     / "owasp-agentic-threats-v1.1.yaml"

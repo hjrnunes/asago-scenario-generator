@@ -51,3 +51,57 @@ Feature: LLM helper failure defenses
     Examples:
       | prompt_tokens | completion_tokens | duration_ms |
       | 17            | 4                 | 230         |
+
+  # LLM-HELPER-FAILURE-DEFENSES-05
+  Scenario: LLM-HELPER-FAILURE-DEFENSES-05 retries malformed JSON once and logs both attempts
+    Given an LLM client returns malformed JSON followed by a valid structured response
+    When a safe structured LLM call is made with one JSON-decode retry
+    Then the completion attempt count is 2
+    And the safe call outcome is recovered
+    And the call log contains one failed and one successful attempt
+    And every retry attempt records prompt_tokens 17, completion_tokens 4, and duration_ms 230
+
+  # LLM-HELPER-FAILURE-DEFENSES-06
+  Scenario: LLM-HELPER-FAILURE-DEFENSES-06 stops after two malformed JSON responses
+    Given an LLM client returns two malformed JSON responses
+    When a safe structured LLM call is made with one JSON-decode retry
+    Then the completion attempt count is 2
+    And the safe call outcome is failed
+    And the call log contains two failed attempts
+
+  # LLM-HELPER-FAILURE-DEFENSES-07
+  Scenario: LLM-HELPER-FAILURE-DEFENSES-07 does not retry a semantic response failure
+    Given an LLM client returns a semantically invalid structured response
+    When a safe structured LLM call is made with one JSON-decode retry
+    Then the completion attempt count is 1
+    And the safe call outcome is failed
+
+  # LLM-HELPER-FAILURE-DEFENSES-08
+  Scenario: LLM-HELPER-FAILURE-DEFENSES-08 does not retry a client authentication failure
+    Given an LLM client raises RuntimeError "authentication failed"
+    When a safe structured LLM call is made with one JSON-decode retry
+    Then the completion attempt count is 1
+    And the safe call outcome is failed
+
+  # LLM-HELPER-FAILURE-DEFENSES-09
+  Scenario: LLM-HELPER-FAILURE-DEFENSES-09 retries schema validation only when requested
+    Given an LLM client returns a semantically invalid response followed by a valid structured response
+    When a safe structured LLM call is made with one validation retry and corrective feedback
+    Then the completion attempt count is 2
+    And the safe call outcome is recovered
+    And the second completion attempt includes corrective feedback
+    And the call log contains one failed and one successful attempt
+
+  # LLM-HELPER-FAILURE-DEFENSES-10
+  Scenario: LLM-HELPER-FAILURE-DEFENSES-10 gives model calls a bounded default deadline
+    When effective model configuration is resolved without a timeout override
+    Then the effective request timeout is 300 seconds from the application default
+
+  # LLM-HELPER-FAILURE-DEFENSES-11
+  Scenario: LLM-HELPER-FAILURE-DEFENSES-11 retries explicit result validation only when requested
+    Given an LLM client returns a result-validator rejection followed by a valid structured response
+    When a safe structured LLM call is made with one result-validation retry and corrective feedback
+    Then the completion attempt count is 2
+    And the safe call outcome is recovered
+    And the second completion attempt includes corrective feedback
+    And the call log contains one failed and one successful attempt

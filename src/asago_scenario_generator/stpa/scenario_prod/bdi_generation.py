@@ -55,6 +55,9 @@ _LENGTH_RETRY_PROMPT = (
     "\n\nThe prior response was truncated. Return only a concise "
     "schema-matching response with no explanation."
 )
+_LENGTH_RETRY_EXHAUSTED_PREFIX = (
+    "BDI generation retry exhausted after LengthFinishReasonError:"
+)
 
 
 class CausalFactorDeclaration(BaseModel):
@@ -249,8 +252,7 @@ def generate_bdi(
             return retry_result, None
         return (
             None,
-            "BDI generation retry exhausted after "
-            f"LengthFinishReasonError: {retry_error}",
+            f"{_LENGTH_RETRY_EXHAUSTED_PREFIX} {retry_error}",
         )
 
     if error is not None:
@@ -264,6 +266,11 @@ def _is_length_finish_reason_error(error: str | None) -> bool:
         return False
     error_type, _, _message = error.partition(":")
     return error_type == "LengthFinishReasonError"
+
+
+def is_bdi_length_retry_exhausted(error: str | None) -> bool:
+    """Return whether both bounded structured-output length attempts failed."""
+    return bool(error and error.startswith(_LENGTH_RETRY_EXHAUSTED_PREFIX))
 
 
 def build_bdi_prompts(

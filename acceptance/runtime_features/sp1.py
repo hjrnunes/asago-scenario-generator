@@ -223,17 +223,47 @@ def _h_sp1_la_invalid_ref(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+def _sp1_la_dangling_ref_dict() -> dict:
+    """Return a valid draft with one deliberately dangling loss reference."""
+    content = _sp1_valid_la_dict()
+    content["hazards"][0]["related_losses"] = ["L-99"]
+    return content
+
+
+def _h_sp1_la_retry_setup(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Handle a dangling Stage 1a draft followed by a corrected response."""
+    world.sp1_llm_content = [
+        _sp1_la_dangling_ref_dict(),
+        _sp1_valid_la_dict(),
+        _sp1_valid_la_dict(),
+    ]
+    return True, ""
+
+
+def _h_sp1_la_retry_exhaustion_setup(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle two consecutive dangling Stage 1a drafts."""
+    world.sp1_llm_content = [
+        _sp1_la_dangling_ref_dict(),
+        _sp1_la_dangling_ref_dict(),
+    ]
+    return True, ""
+
+
 def _h_sp1_stage1a_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: Stage 1a loss analysis is run (full execution with mock LLM)."""
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_la_"))
     world.sp1_run_dir = run_dir
     client = _SP1MockLLM()
-    content = (
-        world.sp1_llm_content
-        if isinstance(world.sp1_llm_content, dict)
-        else _sp1_valid_la_dict()
-    )
-    client.set_response_for(_SP1LossAnalysisDraft, content)
+    content = world.sp1_llm_content
+    if isinstance(content, list):
+        client.set_response_queue(content)
+    else:
+        client.set_response_for(
+            _SP1LossAnalysisDraft,
+            content if isinstance(content, dict) else _sp1_valid_la_dict(),
+        )
     world.sp1_mock_client = client
     try:
         world.loss_analysis = _sp1_derive_loss_analysis(
@@ -244,6 +274,93 @@ def _h_sp1_stage1a_run(world: World, text: str, examples: dict) -> tuple[bool, s
         )
     except (ValidationError, ValueError, _GDStageError) as e:
         world.validation_error = e
+    return True, ""
+
+
+def _sp1_stage1a_call_entries(world: World) -> list[dict] | None:
+    """Read only the structured Stage 1a call metadata for acceptance checks."""
+    run_dir = world.sp1_run_dir
+    if run_dir is None:
+        return None
+    calls_path = run_dir / "calls.jsonl"
+    if not calls_path.exists():
+        return None
+    return [
+        json.loads(line)
+        for line in calls_path.read_text().splitlines()
+        if json.loads(line).get("stage") == "stage_1a"
+    ]
+
+
+def _h_sp1_la_retry_succeeds(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Verify corrected Stage 1a output succeeds after one reference retry."""
+    if world.validation_error is not None:
+        return False, f"Unexpected Stage 1a error: {world.validation_error}"
+    if world.loss_analysis is None:
+        return False, "No loss analysis was produced after the reference retry"
+    return True, ""
+
+
+def _h_sp1_la_retry_feedback(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Verify the bounded retry prompt carries deterministic validation feedback."""
+    entries = _sp1_stage1a_call_entries(world)
+    if entries is None or len(entries) < 2:
+        return False, "Expected a logged Stage 1a retry"
+    retry_prompt = entries[1].get("user_prompt_text", "")
+    if "Validation feedback:" not in retry_prompt:
+        return False, "Stage 1a retry did not include validation feedback"
+    return True, ""
+
+
+def _h_sp1_la_retry_success_log(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Verify failed risk attempt and successful retry/gap calls are logged."""
+    entries = _sp1_stage1a_call_entries(world)
+    expected = [
+        ("risk_derivation", False),
+        ("risk_derivation", True),
+        ("gap_analysis", True),
+    ]
+    actual = (
+        [(entry.get("step"), entry.get("success")) for entry in entries]
+        if entries is not None
+        else []
+    )
+    if actual != expected:
+        return False, f"Expected Stage 1a call outcomes {expected}, got {actual}"
+    return True, ""
+
+
+def _h_sp1_la_retry_fails(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Verify retry exhaustion is contained as a structured StageError."""
+    if not isinstance(world.validation_error, _GDStageError):
+        return False, (
+            "Expected StageError after the bounded Stage 1a retry, got "
+            f"{world.validation_error!r}"
+        )
+    if world.loss_analysis is not None:
+        return False, "Exhausted Stage 1a retry unexpectedly produced a loss analysis"
+    return True, ""
+
+
+def _h_sp1_la_retry_failure_log(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Verify both failed Stage 1a risk attempts are logged and no extra call runs."""
+    entries = _sp1_stage1a_call_entries(world)
+    actual = (
+        [(entry.get("step"), entry.get("success")) for entry in entries]
+        if entries is not None
+        else []
+    )
+    expected = [("risk_derivation", False), ("risk_derivation", False)]
+    if actual != expected:
+        return False, f"Expected exactly one failed retry, got {actual}"
     return True, ""
 
 
@@ -638,6 +755,9 @@ def _h_sp1_la_duplicate(world: World, text: str, examples: dict) -> tuple[bool, 
     """Handle: an LLM that returns a loss analysis with duplicate loss_id L-1."""
     d = _sp1_valid_la_dict()
     d["risk_card_losses"][1]["loss_id"] = "L-1"
+    # Keep the fixture's references valid so the duplicate-ID diagnostic is
+    # the first deterministic failure observed by Stage 1a validation.
+    d["hazards"][1]["related_losses"] = ["L-1"]
     world.sp1_llm_content = d
     return True, ""
 
@@ -5921,6 +6041,16 @@ def register(api: object) -> None:
         source_order=4440,
     )
     api.register(
+        "an LLM that returns a Stage 1a draft with a dangling reference followed by a corrected draft",
+        _h_sp1_la_retry_setup,
+        source_order=4441,
+    )
+    api.register(
+        "an LLM that returns a Stage 1a draft with the same dangling reference twice",
+        _h_sp1_la_retry_exhaustion_setup,
+        source_order=4442,
+    )
+    api.register(
         "an LLM that returns a loss analysis where .* references non-existent",
         _h_sp1_la_invalid_ref,
         source_order=4443,
@@ -5930,6 +6060,31 @@ def register(api: object) -> None:
         "post-call validation fails with error containing",
         _h_sp1_post_call_fails,
         source_order=4445,
+    )
+    api.register(
+        "Stage 1a loss analysis succeeds after one reference retry",
+        _h_sp1_la_retry_succeeds,
+        source_order=4446,
+    )
+    api.register(
+        "the Stage 1a retry includes validation feedback",
+        _h_sp1_la_retry_feedback,
+        source_order=4447,
+    )
+    api.register(
+        "the Stage 1a attempts are logged with one failure and two successes",
+        _h_sp1_la_retry_success_log,
+        source_order=4452,
+    )
+    api.register(
+        "Stage 1a validation fails after one reference retry",
+        _h_sp1_la_retry_fails,
+        source_order=4453,
+    )
+    api.register(
+        "the Stage 1a attempts are logged as two failures",
+        _h_sp1_la_retry_failure_log,
+        source_order=4456,
     )
     api.register(
         "a responsibility RESP-1 with description containing",
@@ -5999,8 +6154,8 @@ def register(api: object) -> None:
         _h_sp1_la_use_case_with_source,
         source_order=6795,
     )
-    api.register(
-        "an LLM that returns a loss analysis with duplicate loss_id",
+    api.register_first(
+        "an LLM that returns a loss analysis with duplicate loss_id L-1$",
         _h_sp1_la_duplicate,
         source_order=6796,
     )

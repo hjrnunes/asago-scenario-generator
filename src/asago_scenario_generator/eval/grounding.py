@@ -13,6 +13,7 @@ from typing import Any
 
 import yaml
 
+from asago_scenario_generator.data.paths import DATA_ROOT
 
 # Regex for technique IDs: ATLAS like [AML.T0054] or LAAF like [S1], [M2]
 _TECHNIQUE_RE = re.compile(r"\[(?:AML\.T\d{4}(?:\.\d{3})?|[SML]\d+)\]")
@@ -20,8 +21,7 @@ _TECHNIQUE_RE = re.compile(r"\[(?:AML\.T\d{4}(?:\.\d{3})?|[SML]\d+)\]")
 
 # Default path to bundled OWASP agentic threats data
 _DEFAULT_THREATS_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "data"
+    DATA_ROOT
     / "taxonomies"
     / "owasp-agentic-threats"
     / "owasp-agentic-threats-v1.1.yaml"

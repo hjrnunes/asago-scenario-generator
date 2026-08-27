@@ -15,6 +15,12 @@ import path remains a façade. Taxonomy prompt-message construction lives in
 `llm.messages`. STPA keeps a structurally distinct local helper so the
 clean-copy boundary stays intact.
 
+The capability profile's computed boolean fields (`has_persistent_memory`,
+`multi_agent`, `hitl`) follow the contract in
+[capability-profile-contract.md](capability-profile-contract.md): they are
+derived from `kc_subcodes`, included in serialized output, and legacy input
+values warn only when they conflict with the derived result.
+
 Generation lifecycle contracts (retry directives, causal provider controls,
 stage call evidence, and typed attempt failures) live in
 `pipeline.generation_contracts`. Stage adapters, lifecycle policy, and
@@ -150,6 +156,34 @@ control structure, enumerates unsafe control actions and threats, and produces
 scenario, evaluation, and reporting artifacts. Its stages reuse shared
 capability and infrastructure contracts while retaining STPA-specific models
 and orchestration.
+
+Tolerant SP1 response graphs remain raw until deterministic ID/reference
+normalization produces valid typed artifacts; invalid intermediate Pydantic
+objects are never serialized. Stage 1a classifies losses from either
+intermediate container by typed provenance, deduplicates identical repeats,
+and reports conflicting IDs as fatal stage errors. Stage 2 rejects empty
+requirement/responsibility sets, and an exhausted fallback is fatal. The
+STPA retry contract is bounded: Stage 2 retries a JSON-decoding failure or a
+semantically empty requirement/responsibility result once, while Stage 1a
+retries semantic dangling hazard/loss references once with concise validation
+feedback. Each attempt is logged separately in
+`calls.jsonl`; these retries do not change the manifest/result schemas or
+logical stage call counts, and exhaustion remains fatal.
+Stage 3 likewise retries a Pydantic-invalid slot response once with explicit
+slot-consistency feedback. Stage 5 retains one concise retry for an isolated
+completion-length failure; if that retry is also exhausted, the stage records a
+fatal diagnostic and stops processing the remaining threats because repeating
+the same structured-output deployment failure cannot improve the run.
+public SP1 result and run-manifest schemas are unchanged: fatal diagnostics
+use the existing `stage_errors` fields, while recoverable assembly repairs
+remain in `stage_warnings`. STPA sampling resolves explicit arguments before
+profile/environment values and defaults, and manifests persist the effective
+non-secret settings.
+
+Both workflows apply a 300-second request deadline by default, configurable via
+the named-profile `timeout` field or `ASAGO_SCENARIO_GENERATOR_TIMEOUT`. Hidden
+OpenAI SDK retries are disabled; all retry policy therefore remains explicit,
+bounded, and observable in pipeline evidence.
 
 Post-SP3 execution projection exposes a platform-neutral
 `CandidateExecutionEnvelope` for one unsafe control action. Its canonical

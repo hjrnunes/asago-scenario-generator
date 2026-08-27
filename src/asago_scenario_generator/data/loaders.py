@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 import yaml
 
+from asago_scenario_generator.data.paths import DATA_ROOT
 from asago_scenario_generator.data.sssom import SSSOMMapping, load_sssom
 from asago_scenario_generator.models import EvidenceSpan, MitigationRef, RiskCard
 
@@ -87,11 +88,7 @@ def load_cross_taxonomy_mappings(path: str | Path) -> dict[str, Any]:
 
 
 _DEFAULT_KC_THREAT_MAPPING_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "data"
-    / "taxonomies"
-    / "mappings"
-    / "kc-threat-mapping.yaml"
+    DATA_ROOT / "taxonomies" / "mappings" / "kc-threat-mapping.yaml"
 )
 
 
@@ -201,9 +198,7 @@ def load_risk_extraction(path: str | Path) -> list[RiskCard]:
     ]
 
 
-_DEFAULT_ATTACK_PATTERNS_DIR = (
-    Path(__file__).resolve().parents[3] / "data" / "taxonomies" / "attack-patterns"
-)
+_DEFAULT_ATTACK_PATTERNS_DIR = DATA_ROOT / "taxonomies" / "attack-patterns"
 
 _DEFAULT_ATTACK_PATTERNS_PATH = _DEFAULT_ATTACK_PATTERNS_DIR / "attack-patterns.yaml"
 
@@ -341,11 +336,7 @@ def build_pattern_provenance_index(
 # ---------------------------------------------------------------------------
 
 _ATTACK_GOALS_TAXONOMY_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "data"
-    / "taxonomies"
-    / "attack-goals"
-    / "attack-goals.json"
+    DATA_ROOT / "taxonomies" / "attack-goals" / "attack-goals.json"
 )
 
 
@@ -367,11 +358,7 @@ def load_attack_goals_taxonomy(
 # ---------------------------------------------------------------------------
 
 _THREAT_GOAL_AFFINITY_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "data"
-    / "taxonomies"
-    / "attack-goals"
-    / "threat-goal-affinity.yaml"
+    DATA_ROOT / "taxonomies" / "attack-goals" / "threat-goal-affinity.yaml"
 )
 
 

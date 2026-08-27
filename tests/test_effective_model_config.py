@@ -75,6 +75,13 @@ def test_cli_overrides_profile_which_overrides_environment_and_defaults(
     assert effective.public_controls()["header_names"] == ["Authorization"]
 
 
+def test_request_timeout_is_bounded_by_default() -> None:
+    effective = resolve_effective_model_config(environ={})
+
+    assert effective.timeout == 300.0
+    assert effective.sources["timeout"] is ConfigSource.application_default
+
+
 @pytest.mark.parametrize(
     ("generation_mode_args", "expected_generation_mode"),
     [([], "exhaustive"), (["--generation-mode", "coverage"], "coverage")],

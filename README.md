@@ -36,13 +36,24 @@ variables:
 - `ASAGO_SCENARIO_GENERATOR_MODEL_NAME`
 - `ASAGO_SCENARIO_GENERATOR_MAX_COMPLETION_TOKENS`
 - `ASAGO_SCENARIO_GENERATOR_TEMPERATURE`
+- `ASAGO_SCENARIO_GENERATOR_TOP_P`
+- `ASAGO_SCENARIO_GENERATOR_TOP_K`
+- `ASAGO_SCENARIO_GENERATOR_USE_GUIDED_DECODING`
+- `ASAGO_SCENARIO_GENERATOR_TIMEOUT`
 - `ASAGO_SCENARIO_GENERATOR_EXTRA_HEADERS`
 
 For named model profiles, copy
 `config/model-profiles.example.yaml` to `config/model-profiles.yaml`. The real
 file is ignored because it may contain credentials. Both `generate` and
-`stpa-run` accept named profiles; explicit endpoint/model options override the
-selected profile.
+`stpa-run` accept named profiles. STPA sampling values use the same precedence
+through both routes: an explicit Python/CLI argument, then the selected profile
+or environment value, then the client default. The CLI currently exposes
+`--temperature` as the run-wide explicit sampling override. Invalid numeric or
+boolean environment values fail before the first model call.
+Requests have a 300-second application default deadline. Named-profile
+`timeout` and `ASAGO_SCENARIO_GENERATOR_TIMEOUT` values override that default.
+The SDK's implicit retries are disabled so retry decisions remain bounded and
+visible in pipeline evidence.
 
 Gemma 4 deployments used for structured generation need a compact JSON grammar
 configuration to avoid valid-prefix responses stalling on whitespace. See the
@@ -139,6 +150,42 @@ asago-scenario-generator stpa-run \
   --output-dir output/my-system-stpa \
   --profile gemma4-local
 ```
+
+The same Gemma sampling behavior can be configured without a profile:
+
+```bash
+export ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL=https://your-endpoint.example.com/v1
+export ASAGO_SCENARIO_GENERATOR_MODEL_NAME=gemma-4-26b-a4b-it
+export ASAGO_SCENARIO_GENERATOR_API_KEY=unused
+export ASAGO_SCENARIO_GENERATOR_MAX_COMPLETION_TOKENS=16384
+export ASAGO_SCENARIO_GENERATOR_TEMPERATURE=1.0
+export ASAGO_SCENARIO_GENERATOR_TOP_P=0.95
+export ASAGO_SCENARIO_GENERATOR_TOP_K=64
+export ASAGO_SCENARIO_GENERATOR_USE_GUIDED_DECODING=false
+export ASAGO_SCENARIO_GENERATOR_TIMEOUT=300
+
+asago-scenario-generator stpa-run \
+  --use-case use-case.txt \
+  --risk-extraction risk-extraction.json \
+  --output-dir output/my-system-stpa
+```
+
+The STPA run manifest records effective model name, base URL, token limit,
+temperature, `top_p`, `top_k`, guided-decoding state, and request timeout. API
+keys and header values are never included.
+
+Stage 2 retries a semantically empty requirement or responsibility response
+once with corrective feedback. Stage 3 likewise retries a schema-invalid slot
+response once.
+If Stage 5 reaches the completion-length limit on both its normal and concise
+retry attempts, it records a fatal diagnostic and aborts the remaining threats
+instead of repeating a likely deployment-level structured-output failure.
+
+STPA result and manifest diagnostics retain `stage_errors` for fatal stage
+failures and add `stage_warnings` for recoverable normalization, stitching, and
+repair diagnostics. This is an additive schema change. Existing consumers may
+continue reading `stage_errors`, but successfully repaired SP1 diagnostics that
+were historically misclassified there now appear only in `stage_warnings`.
 
 The STPA pipeline runs SP1 through SP3 and writes the combined report. A report
 can also be regenerated independently:
