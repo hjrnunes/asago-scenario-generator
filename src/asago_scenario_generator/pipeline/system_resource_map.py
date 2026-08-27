@@ -366,8 +366,13 @@ def validate_resource_map(
     canonical = None
     if len(errors) == 0:
         canonical = SystemResourceMap.model_validate(srm.model_dump(mode="json"))
+        # Entries with empty element ids are exempt from duplicate detection,
+        # so the sort key alone is not total; the serialized entry is the
+        # final tiebreaker and canonical order never depends on presentation.
         for collection in _CANONICAL_COLLECTIONS:
-            getattr(canonical, collection).sort(key=lambda x: x.element_id)
+            getattr(canonical, collection).sort(
+                key=lambda x: (x.element_id, x.model_dump_json())
+            )
 
     return ResourceMapValidationResult(
         is_valid=(len(errors) == 0),
