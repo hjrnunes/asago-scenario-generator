@@ -20,6 +20,7 @@ from asago_scenario_generator.pipeline.finalization import (
     AdmissionDecision,
     CandidateTerminalStatus,
     CandidateValidation,
+    GeneratedArtifacts,
     GeneratedStage,
     GeneratedStageResult,
     LifecycleState,
@@ -27,6 +28,7 @@ from asago_scenario_generator.pipeline.finalization import (
     PrebehaviorFinalizationResult,
     StageInvocation,
     TargetFinalizationMachine,
+    _CandidateCursor,
     earliest_generated_owner,
     fallback_candidates_for_target,
     ordered_target_choice_refs,
@@ -49,6 +51,7 @@ class PersistenceFake:
         self.transitions = []
         self.stage_results = []
         self.candidate_results = []
+        self.repairs = []
 
     def record_transition(self, transition) -> None:
         self.transitions.append(transition)
@@ -58,6 +61,9 @@ class PersistenceFake:
 
     def record_candidate_result(self, candidate_id, decision) -> None:
         self.candidate_results.append((candidate_id, decision))
+
+    def record_repair(self, candidate_id, record) -> None:
+        self.repairs.append((candidate_id, record))
 
 
 def _ref(candidate_id: str) -> dict:
@@ -335,6 +341,28 @@ def test_prebehavior_finalization_is_reachable_and_precedes_behavior() -> None:
     machine.run()
 
     assert events == ["actor", "narrative", "tree", "finalize", "behavior"]
+
+
+def test_prebehavior_retry_restarts_at_the_declared_owner() -> None:
+    finalization_count = 0
+
+    def finalize(candidate, artifacts):
+        nonlocal finalization_count
+        finalization_count += 1
+        if finalization_count == 1:
+            return PrebehaviorFinalizationResult(
+                None,
+                (LifecycleViolation("tree needs retry", owner=GeneratedStage.tree),),
+            )
+        return PrebehaviorFinalizationResult(Snapshot(artifacts.tree))
+
+    machine, calls, _ = _machine(finalize=finalize)
+
+    result = machine.run()
+
+    assert result.state is LifecycleState.admitted
+    assert finalization_count == 2
+    assert calls.count(GeneratedStage.tree) == 2
 
 
 def test_stage_retry_exhaustion_records_terminal_before_fallback() -> None:
@@ -881,3 +909,474 @@ class TestFallbackCandidatesForTarget:
         )
 
         assert [c.candidate_id for c in candidates] == ["primary", "f1"]
+
+
+class TestFinalizationMachineHelpers:
+    """Direct coverage for the decomposed finalization machine helpers."""
+
+    def test_default_transition_and_invocation_indexes_start_at_zero(self):
+        machine, _calls, persistence = _machine()
+        machine._transition(LifecycleState.revalidating_candidate, "c", "test")
+
+        observed = []
+
+        def callback(candidate, invocation):
+            observed.append(invocation)
+            return GeneratedStageResult("actor")
+
+        machine.stage_callbacks[GeneratedStage.actor] = callback
+        machine._invoke_stage(Candidate("c"), "c", GeneratedStage.actor)
+
+        assert persistence.transitions[0].transition_index == 0
+        assert observed[0].invocation_index == 0
+
+    def test_primary_choice_ref_and_unique_choice_refs(self):
+        from asago_scenario_generator.pipeline.finalization import (
+            MAX_TARGET_CHOICES,
+            _primary_choice_ref,
+            _unique_choice_refs,
+        )
+
+        refs = [{"candidate_id": "a"}, {"candidate_id": "b"}]
+        assert _primary_choice_ref(refs, "b") == {"candidate_id": "b"}
+        assert _primary_choice_ref(refs, "missing") is None
+        assert _unique_choice_refs(refs) == refs
+        dupes = [
+            {"candidate_id": "a"},
+            {"candidate_id": "a"},
+            {"candidate_id": "b"},
+        ]
+        assert _unique_choice_refs(dupes) == [
+            {"candidate_id": "a"},
+            {"candidate_id": "b"},
+        ]
+        many = [{"candidate_id": f"c{i}"} for i in range(5)]
+        assert len(_unique_choice_refs(many)) == MAX_TARGET_CHOICES
+
+    def test_stage_visible_artifacts_behavior_tree_injection(self):
+        machine, _calls, _persistence = _machine()
+
+        visible, tree = machine._stage_visible_artifacts(GeneratedStage.actor, None)
+        assert tree is None
+        assert visible is machine.artifacts
+
+        snapshot = Snapshot("tree-value")
+        visible, tree = machine._stage_visible_artifacts(
+            GeneratedStage.behavior, snapshot
+        )
+        assert tree == "tree-value"
+        assert visible is not machine.artifacts
+        assert visible.tree == "tree-value"
+
+        visible, tree = machine._stage_visible_artifacts(
+            GeneratedStage.actor, snapshot
+        )
+        assert tree is None
+        assert visible is machine.artifacts
+
+    def test_invoke_stage_exposes_verified_tree_and_default_index(self):
+        machine, _calls, persistence = _machine()
+        observed = []
+
+        def callback(candidate, invocation):
+            observed.append(invocation)
+            return GeneratedStageResult("behavior")
+
+        machine.stage_callbacks[GeneratedStage.behavior] = callback
+        machine._invoke_stage(
+            Candidate("c"), "c", GeneratedStage.behavior, Snapshot("tree-value")
+        )
+
+        invocation = observed[0]
+        assert invocation.invocation_index == 0
+        assert invocation.final_tree_digest == "digest"
+        assert invocation.artifacts.tree == "tree-value"
+        assert persistence.stage_results[0][1].artifact == "behavior"
+
+    def test_unexpected_stage_failure_is_not_marked_invoked(self):
+        machine, _calls, persistence = _machine()
+
+        def callback(candidate, invocation):
+            raise RuntimeError("unexpected")
+
+        machine.stage_callbacks[GeneratedStage.actor] = callback
+        machine._invoke_stage(Candidate("c"), "c", GeneratedStage.actor)
+
+        result = persistence.stage_results[0][1]
+        assert result.evidence.invoked is False
+
+    def test_stage_attempt_failure_result_length_and_budget(self):
+        machine, _calls, _persistence = _machine()
+
+        exc = StageAttemptFailure(
+            call_name=CallName.narrative,
+            exception=RuntimeError("len"),
+            phase="post_response",
+            invoked=True,
+            code=StageAttemptFailure.COMPLETION_LENGTH_CODE,
+        )
+        result = machine._stage_attempt_failure_result(GeneratedStage.narrative, exc)
+        assert result.evidence is exc
+        assert result.violations[0].code == StageAttemptFailure.COMPLETION_LENGTH_CODE
+        assert result.violations[0].retryable is True
+
+        machine.length_retry_counts[GeneratedStage.narrative] = (
+            MAX_COMPLETION_LENGTH_RETRIES
+        )
+        exhausted = StageAttemptFailure(
+            call_name=CallName.narrative,
+            exception=RuntimeError("len"),
+            phase="post_response",
+            invoked=True,
+            code=StageAttemptFailure.COMPLETION_LENGTH_CODE,
+        )
+        result = machine._stage_attempt_failure_result(
+            GeneratedStage.narrative, exhausted
+        )
+        assert (
+            result.violations[0].code == StageAttemptFailure.SEMANTIC_DRAFT_LENGTH_CODE
+        )
+        assert result.violations[0].retryable is False
+
+    def test_completion_length_retry_route_stops_at_budget(self):
+        machine, _calls, _persistence = _machine()
+        machine.length_retry_counts[GeneratedStage.actor] = (
+            MAX_COMPLETION_LENGTH_RETRIES
+        )
+
+        assert machine._route_completion_length_retry(GeneratedStage.actor) is None
+        assert machine.length_retry_counts[GeneratedStage.actor] == (
+            MAX_COMPLETION_LENGTH_RETRIES
+        )
+
+    def test_finalize_prebehavior_proceed_and_repair(self):
+        machine, _calls, persistence = _machine()
+        repair = {"repair": 1}
+        machine.prebehavior_finalizer = lambda candidate, artifacts: (
+            PrebehaviorFinalizationResult(
+                Snapshot(artifacts.tree), repair_record=repair
+            )
+        )
+
+        prepared = machine._finalize_prebehavior(
+            Candidate("c"), "c", Snapshot("v"), False
+        )
+
+        assert prepared.action == "proceed"
+        assert prepared.snapshot.tree == machine.artifacts.tree
+        assert prepared.authority.repair_record is repair
+        assert persistence.repairs == [("c", repair)]
+        assert (
+            persistence.transitions[-1].current is LifecycleState.finalizing_prebehavior
+        )
+
+    def test_finalize_prebehavior_retry_and_terminal(self):
+        machine, _calls, _persistence = _machine()
+
+        machine.prebehavior_finalizer = lambda candidate, artifacts: (
+            PrebehaviorFinalizationResult(
+                None,
+                violations=(LifecycleViolation("retry", owner=GeneratedStage.tree),),
+            )
+        )
+        prepared = machine._finalize_prebehavior(
+            Candidate("c"), "c", Snapshot("v"), False
+        )
+        assert prepared.action == "retry"
+        assert prepared.owner is GeneratedStage.tree
+
+        machine.prebehavior_finalizer = lambda candidate, artifacts: (
+            PrebehaviorFinalizationResult(
+                None, violations=(LifecycleViolation("hard", retryable=False),)
+            )
+        )
+        prepared = machine._finalize_prebehavior(
+            Candidate("c"), "c", Snapshot("v"), True
+        )
+        assert prepared.action == "terminal"
+        assert (
+            prepared.result.status
+            is CandidateTerminalStatus.generation_or_finalization_failed
+        )
+
+        machine.prebehavior_finalizer = lambda candidate, artifacts: (
+            PrebehaviorFinalizationResult(None)
+        )
+        prepared = machine._finalize_prebehavior(
+            Candidate("c"), "c", Snapshot("v"), True
+        )
+        assert prepared.action == "terminal"
+        assert prepared.result.violations[0].code == "missing_final_tree_snapshot"
+        assert prepared.result.violations[0].retryable is False
+
+    def test_admit_candidate_admitted_and_rejected_retry(self):
+        machine, _calls, _persistence = _machine()
+        machine.artifacts.set(GeneratedStage.actor, "actor-artifact")
+
+        cursor = _CandidateCursor(
+            next_stage=GeneratedStage.behavior, snapshot=Snapshot("t")
+        )
+        outcome = machine._admit_candidate(Candidate("c"), "c", cursor)
+        assert outcome == "terminal"
+        assert cursor.terminal.status is CandidateTerminalStatus.admitted
+        assert cursor.terminal.admission.admitted is True
+
+        def reject(candidate, artifacts, snapshot):
+            return AdmissionDecision(
+                False,
+                (LifecycleViolation("retry", owner=GeneratedStage.tree),),
+            )
+
+        machine.admission_callback = reject
+        cursor = _CandidateCursor(
+            next_stage=GeneratedStage.behavior, snapshot=Snapshot("t")
+        )
+        outcome = machine._admit_candidate(Candidate("c"), "c", cursor)
+        assert outcome == "retry"
+        assert cursor.next_stage is GeneratedStage.tree
+
+    def test_admission_views_transition_and_preserve_behavior_owner_state(self):
+        machine, _calls, persistence = _machine()
+        cursor = _CandidateCursor(snapshot=Snapshot("tree"))
+
+        _candidate, artifacts = machine._admission_views(Candidate("c"), "c", cursor)
+
+        assert persistence.transitions[-1].current is LifecycleState.admitting
+        assert artifacts.tree == "tree"
+
+        cursor.finalized_authority = object()
+        outcome = machine._route_admission_violations(
+            "c",
+            cursor,
+            AdmissionDecision(
+                False,
+                (LifecycleViolation("behavior retry", owner=GeneratedStage.behavior),),
+            ),
+        )
+        assert outcome == "retry"
+        assert cursor.snapshot is not None
+        assert cursor.finalized_authority is not None
+
+    def test_invoke_stage_outcome_ok_retry_terminal(self):
+        machine, calls, persistence = _machine()
+        cursor = _CandidateCursor()
+
+        outcome = machine._invoke_stage_outcome(
+            GeneratedStage.actor, Candidate("c"), "c", cursor
+        )
+        assert outcome == "ok"
+        assert calls == [GeneratedStage.actor]
+
+        def flaky(candidate, invocation):
+            raise StageAttemptFailure(
+                call_name=CallName.actor_profile,
+                exception=RuntimeError("x"),
+                phase="invocation",
+                invoked=True,
+                retryable=True,
+            )
+
+        machine.stage_callbacks[GeneratedStage.actor] = flaky
+        outcome = machine._invoke_stage_outcome(
+            GeneratedStage.actor, Candidate("c"), "c", cursor
+        )
+        assert outcome == "retry"
+        assert cursor.next_stage is GeneratedStage.actor
+
+        def hard(candidate, invocation):
+            raise StageAttemptFailure(
+                call_name=CallName.actor_profile,
+                exception=RuntimeError("x"),
+                phase="invocation",
+                invoked=True,
+                retryable=False,
+            )
+
+        machine.stage_callbacks[GeneratedStage.actor] = hard
+        outcome = machine._invoke_stage_outcome(
+            GeneratedStage.actor, Candidate("c"), "c", cursor
+        )
+        assert outcome == "terminal"
+        assert (
+            cursor.terminal.status
+            is CandidateTerminalStatus.generation_or_finalization_failed
+        )
+
+        machine, _calls, _persistence = _machine()
+        cursor = _CandidateCursor(snapshot=Snapshot("tree"))
+        machine.stage_callbacks[GeneratedStage.actor] = lambda candidate, invocation: (
+            GeneratedStageResult(
+                None,
+                violations=(
+                    LifecycleViolation(
+                        "behavior retry", owner=GeneratedStage.behavior
+                    ),
+                ),
+            )
+        )
+        outcome = machine._invoke_stage_outcome(
+            GeneratedStage.actor, Candidate("c"), "c", cursor
+        )
+        assert outcome == "retry"
+        assert cursor.snapshot is not None
+
+    def test_advance_stage_reuses_durable_behavior(self):
+        machine, calls, _persistence = _machine()
+        machine.artifacts.set(GeneratedStage.behavior, "durable-behavior")
+        cursor = _CandidateCursor(snapshot=Snapshot("t"))
+
+        outcome = machine._advance_stage(
+            GeneratedStage.behavior, Candidate("c"), "c", Snapshot("v"), cursor
+        )
+
+        assert outcome == "ok"
+        assert calls == []
+
+        machine, _calls, _persistence = _machine()
+        cursor = _CandidateCursor(suppress_durable_boundary=True)
+        outcome = machine._advance_stage(
+            GeneratedStage.behavior, Candidate("c"), "c", Snapshot("v"), cursor
+        )
+        assert outcome == "ok"
+        assert cursor.suppress_durable_boundary is False
+
+    def test_prepare_candidate_attempt_and_reset_local_state(self):
+        machine, _calls, _persistence = _machine()
+        machine.resume_invocation_counts = {GeneratedStage.actor: 3}
+
+        machine._prepare_candidate_attempt("c", resuming=True)
+        assert machine.invocation_counts == {GeneratedStage.actor: 3}
+
+        machine._prepare_candidate_attempt("c", resuming=False)
+        assert machine.invocation_counts == {}
+        assert machine.state is LifecycleState.revalidating_candidate
+        assert "c" in machine.attempted_candidate_ids
+
+        machine._reset_candidate_local_state()
+        assert machine.artifacts.get(GeneratedStage.actor) is None
+        assert machine.owner_retry_counts == {}
+        assert machine.length_retry_counts == {}
+        assert machine.retry_reasons == {}
+
+    def test_validate_candidate_attempt_paths(self):
+        machine, _calls, _persistence = _machine()
+
+        terminal = machine._validate_candidate_attempt(
+            CandidateValidation(
+                None, (LifecycleViolation("invalid", retryable=False),)
+            ),
+            "c",
+            False,
+        )
+        assert terminal.status is CandidateTerminalStatus.rejected
+        assert terminal.violations[0].code == "invalid"
+
+        terminal = machine._validate_candidate_attempt(
+            CandidateValidation(Candidate("other")), "c", False
+        )
+        assert terminal.status is CandidateTerminalStatus.rejected
+        assert terminal.violations[0].code == "candidate_identity_mismatch"
+
+        terminal = machine._validate_candidate_attempt(
+            CandidateValidation(Candidate("c")), "c", False
+        )
+        assert terminal.status is CandidateTerminalStatus.admitted
+
+    def test_failure_helpers_mark_terminal_violations_nonretryable(self):
+        machine, _calls, _persistence = _machine()
+
+        terminal = machine._revalidation_exception_result("c", RuntimeError("boom"))
+        assert terminal.violations[0].retryable is False
+
+        terminal = machine._revalidation_failure_result(
+            "c", CandidateValidation(None), None
+        )
+        assert terminal.violations[0].retryable is False
+
+        terminal = machine._snapshot_failure_result("c", RuntimeError("boom"))
+        assert terminal.violations[0].retryable is False
+
+    def test_run_candidate_exception_result_admitting_and_other(self):
+        machine, _calls, _persistence = _machine()
+
+        machine.state = LifecycleState.admitting
+        terminal = machine._run_candidate_exception_result("c", RuntimeError("boom"))
+        assert terminal.status is CandidateTerminalStatus.rejected
+        assert terminal.admission is not None
+        assert terminal.admission.value is not None
+        assert terminal.admission.admitted is False
+
+        machine.state = LifecycleState.generating_actor
+        terminal = machine._run_candidate_exception_result("c", RuntimeError("boom"))
+        assert (
+            terminal.status is CandidateTerminalStatus.generation_or_finalization_failed
+        )
+        assert terminal.admission is None
+        assert terminal.violations[0].code == "lifecycle_callback_exception"
+        assert terminal.violations[0].retryable is False
+
+    def test_candidate_identity_violation_helper(self):
+        from asago_scenario_generator.pipeline.finalization import (
+            _candidate_identity_violation,
+        )
+
+        assert _candidate_identity_violation("c", "c") is None
+        assert _candidate_identity_violation("c", None) is None
+        violation = _candidate_identity_violation("c", "other")
+        assert violation is not None
+        assert violation.code == "candidate_identity_mismatch"
+
+    def test_record_terminal_and_result(self):
+        from asago_scenario_generator.pipeline.finalization import (
+            CandidateTerminalResult,
+        )
+
+        machine, _calls, persistence = _machine()
+        terminal = CandidateTerminalResult("c", CandidateTerminalStatus.admitted)
+
+        machine._record_terminal("c", terminal, LifecycleState.admitted)
+
+        assert machine.state is LifecycleState.admitted
+        assert len(persistence.candidate_results) == 1
+        result = machine._result("c", None)
+        assert result.candidate_id == "c"
+        assert result.transitions
+        exhausted = machine._result(None, None)
+        assert exhausted.candidate_id is None
+
+    def test_resume_state_defaults_and_stage_selection(self):
+        machine, _calls, _persistence = _machine()
+        machine._resume_candidate_state()
+        assert isinstance(machine.artifacts, GeneratedArtifacts)
+
+        restored = GeneratedArtifacts(actor="restored")
+        machine.resume_artifacts = restored
+        machine._resume_candidate_state()
+        assert machine.artifacts is restored
+
+        machine.resume_next_stage = GeneratedStage.tree
+        assert machine._resume_next_stage(True) is GeneratedStage.tree
+        assert machine._resume_next_stage(False) is GeneratedStage.actor
+        machine.resume_next_stage = None
+        assert machine._resume_next_stage(True) is GeneratedStage.actor
+
+    def test_suppress_durable_boundary_requires_matching_resumed_active_state(self):
+        machine, _calls, _persistence = _machine()
+        machine.resume_candidate_id = "c"
+        machine.state = LifecycleState.generating_behavior
+        assert machine._suppress_durable_boundary("c") is True
+
+        machine.resume_candidate_id = "other"
+        assert machine._suppress_durable_boundary("c") is False
+        machine.resume_candidate_id = "c"
+        machine.state = LifecycleState.pending
+        assert machine._suppress_durable_boundary("c") is False
+
+    def test_run_stops_after_first_admitted_candidate(self):
+        machine, calls, persistence = _machine()
+
+        result = machine.run()
+
+        assert result.state is LifecycleState.admitted
+        assert calls == list(GENERATION_ORDER)
+        assert len(persistence.candidate_results) == 1

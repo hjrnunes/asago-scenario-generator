@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import math
 import unicodedata
-from dataclasses import replace
+from dataclasses import FrozenInstanceError, replace
 from types import SimpleNamespace
 
 import pytest
@@ -24,7 +24,13 @@ from asago_scenario_generator.models.projection_envelope import (
     ProjectionTraceabilityViolation,
     ProjectionTraceabilityViolationCode,
 )
-from asago_scenario_generator.models.scenario import BehaviorAssertion, BehaviorSpec
+from asago_scenario_generator.models.scenario import (
+    BehaviorAssertion,
+    BehaviorSpec,
+    PhantomValidation,
+    StructuralValidation,
+    ValidationBlock,
+)
 from asago_scenario_generator.pipeline import finalization_gates
 from asago_scenario_generator.pipeline.coverage_planning import CoveragePlanEntry
 from asago_scenario_generator.pipeline.finalization import (
@@ -43,6 +49,12 @@ from asago_scenario_generator.pipeline.finalization import (
 )
 from asago_scenario_generator.pipeline.finalization_admission import (
     _SEMANTIC_OWNER_BY_RULE,
+    _correspondence_diagnostic,
+    _grounding_applicable,
+    _grounding_gates,
+    _nodes,
+    _phantom_gate,
+    _structural_gate,
     PostbehaviorAdmissionReport,
     _owner_for_trace,
     make_postbehavior_admission,
@@ -708,8 +720,7 @@ def _tree_with_required_preconditions() -> AttackTree:
 def test_default_leaf_budget_respects_projected_step_floor() -> None:
     _, _, _, tree = _valid_parts()
     children = [
-        child.model_copy(update={"technique_id": None})
-        for child in tree.root.children
+        child.model_copy(update={"technique_id": None}) for child in tree.root.children
     ]
     children[0] = children[0].model_copy(update={"technique_id": "AML.T0051"})
     for index in (4, 5):
@@ -1082,9 +1093,9 @@ def test_positive_complete_postbehavior_admission_is_verify_only() -> None:
     assert all(result.valid for result in decision.value.gate_results)
     assert decision.value.envelope.validation is not None
     assert decision.value.envelope.validation.semantic is not None
-    assert len(
-        decision.value.envelope.validation.semantic.corpus_claim_applicability
-    ) == 2
+    assert (
+        len(decision.value.envelope.validation.semantic.corpus_claim_applicability) == 2
+    )
     assert decision.value.envelope.validation_passed
     evidence_ids = [result.evidence_id for result in decision.value.gate_results]
     assert len(evidence_ids) == len(set(evidence_ids))
@@ -1121,6 +1132,82 @@ def test_postbehavior_report_rejects_duplicate_evidence_ids() -> None:
                 GateResult(AdmissionEvidenceId.identity),
             ),
         )
+
+
+def test_postbehavior_report_is_frozen_and_slot_backed() -> None:
+    report = PostbehaviorAdmissionReport(
+        envelope=object(),
+        gate_results=(GateResult(AdmissionEvidenceId.identity),),
+    )
+
+    with pytest.raises(FrozenInstanceError):
+        setattr(report, "envelope", object())
+    assert not hasattr(report, "__dict__")
+
+
+def test_structural_and_phantom_gates_do_not_mutate_the_input_envelope() -> None:
+    candidate, actor, narrative, tree = _valid_parts()
+    del candidate
+    envelope = _make_envelope(actor=actor, narrative=narrative, tree=tree)
+    validation = ValidationBlock(
+        structural=StructuralValidation(),
+        phantom=PhantomValidation(),
+    )
+    envelope = envelope.model_copy(update={"validation": validation})
+    original_structural = envelope.validation.structural
+    original_phantom = envelope.validation.phantom
+
+    _structural_gate(envelope)
+    assert envelope.validation.structural is original_structural
+
+    _phantom_gate(envelope, get_test_profile())
+    assert envelope.validation.phantom is original_phantom
+
+
+def test_data_access_grounding_applicability_uses_entry_point_inventory() -> None:
+    profile = SimpleNamespace(
+        is_tool_inventory_complete=True,
+        is_entry_point_inventory_complete=False,
+    )
+
+    assert (
+        _grounding_applicable(profile, AdmissionEvidenceId.data_access_grounding)
+        is False
+    )
+
+
+def test_data_access_grounding_gate_retains_trace_diagnostics() -> None:
+    trace = GateViolation(
+        GateCode.traceability,
+        "data access trace",
+        GeneratedStage.tree,
+    )
+    profile = SimpleNamespace(
+        is_tool_inventory_complete=True,
+        is_entry_point_inventory_complete=True,
+    )
+
+    gates = _grounding_gates(profile, (trace,), [])
+    data_access = next(
+        gate
+        for gate in gates
+        if gate.evidence_id is AdmissionEvidenceId.data_access_grounding
+    )
+
+    assert data_access.diagnostics == (trace,)
+    assert data_access.outcome is False
+
+
+def test_correspondence_at_threshold_is_not_a_diagnostic() -> None:
+    assert _correspondence_diagnostic(7, 10) is None
+
+
+def test_nodes_walks_all_children_when_children_are_present() -> None:
+    leaf = SimpleNamespace(children=None)
+    child = SimpleNamespace(children=(leaf,))
+    root = SimpleNamespace(children=[child])
+
+    assert list(_nodes(root)) == [root, child, leaf]
 
 
 def test_supplied_and_embedded_forged_catalog_pin_cannot_bypass_trusted_pin() -> None:
@@ -1420,7 +1507,8 @@ def test_full_concrete_phase3b_finalization_composition(monkeypatch) -> None:
         return SimpleNamespace(artifact=behavior, evidence={"call": 3})
 
     monkeypatch.setattr(
-        "asago_scenario_generator.pipeline.generate.stages.generate_behavior_stage", call3
+        "asago_scenario_generator.pipeline.generate.stages.generate_behavior_stage",
+        call3,
     )
 
     def generated_stage(_candidate, invocation):
@@ -1598,3 +1686,333 @@ def test_postbehavior_empty_tree_and_actions_never_pass() -> None:
         and violation.owner is GeneratedStage.tree
         for violation in decision.violations
     )
+
+
+class TestAdmissionPortHelpers:
+    """Direct coverage for the decomposed postbehavior admission helpers."""
+
+    def test_report_unique_evidence_helpers(self):
+        from asago_scenario_generator.pipeline.finalization_admission import (
+            _require_singleton_exceptional,
+            _require_unique_evidence_ids,
+        )
+
+        _require_unique_evidence_ids(("a", "b"))
+        with pytest.raises(ValueError, match="unique"):
+            _require_unique_evidence_ids(("a", "a"))
+        _require_singleton_exceptional((), None)
+        _require_singleton_exceptional((AdmissionEvidenceId.admission_exception,), None)
+        with pytest.raises(ValueError, match="singleton"):
+            _require_singleton_exceptional(
+                (
+                    AdmissionEvidenceId.admission_exception,
+                    AdmissionEvidenceId.identity,
+                ),
+                None,
+            )
+        with pytest.raises(ValueError, match="singleton"):
+            _require_singleton_exceptional(
+                (AdmissionEvidenceId.admission_exception,), "envelope"
+            )
+
+    def test_require_diagnostic_copy_matches_authoritative(self):
+        from asago_scenario_generator.pipeline.finalization_admission import (
+            _require_diagnostic_copy,
+        )
+
+        authoritative = GateViolation(GateCode.structural, "issue", None)
+        copied = GateViolation(GateCode.structural, "issue", None)
+        structural_gate = GateResult(
+            AdmissionEvidenceId.structural_validity, violations=(authoritative,)
+        )
+        good = GateResult(
+            AdmissionEvidenceId.resource_binding_validity,
+            diagnostics=(copied,),
+            outcome=False,
+        )
+        _require_diagnostic_copy((structural_gate, good))
+        stray = GateViolation(GateCode.semantic, "stray", None)
+        bad = GateResult(
+            AdmissionEvidenceId.resource_binding_validity,
+            diagnostics=(stray,),
+            outcome=False,
+        )
+        with pytest.raises(ValueError, match="diagnostic"):
+            _require_diagnostic_copy((structural_gate, bad))
+
+    def test_catalog_pattern_and_missing_pattern_gates(self):
+        from asago_scenario_generator.pipeline.finalization_admission import (
+            _catalog_pattern,
+            _missing_pattern_gates,
+        )
+
+        catalog = [{"id": "AP-T1-01"}, {"id": "AP-T1-02"}]
+        assert _catalog_pattern(catalog, "AP-T1-02") == {"id": "AP-T1-02"}
+        assert _catalog_pattern(catalog, "absent") is None
+
+        gates = _missing_pattern_gates(SimpleNamespace(pattern_id="AP-X"))
+        assert [g.evidence_id for g in gates] == [
+            AdmissionEvidenceId.projection_traceability,
+            AdmissionEvidenceId.catalog_taxonomy_pin_validity,
+        ]
+        assert gates[1].outcome is False
+
+    def test_trace_violation_gate_helpers(self):
+        from asago_scenario_generator.pipeline.finalization_admission import (
+            _all_trace_gates,
+            _forged_identifier_diagnostics,
+            _trace_gates_for_code,
+            _trace_gates_for_codes,
+        )
+
+        violations = (
+            SimpleNamespace(
+                code=ProjectionTraceabilityViolationCode.incorrect_resource_binding,
+                detail="binding",
+                stage=ProjectionTraceabilityStage.narrative,
+                element_id="x",
+            ),
+            SimpleNamespace(
+                code=ProjectionTraceabilityViolationCode.forged_opaque_id,
+                detail="forged",
+                stage=ProjectionTraceabilityStage.attack_tree,
+                element_id="x",
+            ),
+            SimpleNamespace(
+                code=ProjectionTraceabilityViolationCode.ingress_identity_mismatch,
+                detail="ingress",
+                stage=ProjectionTraceabilityStage.narrative,
+                element_id="x",
+            ),
+        )
+        codes = {
+            ProjectionTraceabilityViolationCode.incorrect_resource_binding,
+        }
+        assert [g.detail for g in _trace_gates_for_codes(violations, codes)] == [
+            "binding"
+        ]
+        assert [
+            g.detail
+            for g in _trace_gates_for_code(
+                violations, ProjectionTraceabilityViolationCode.forged_opaque_id
+            )
+        ] == ["forged"]
+        assert len(_all_trace_gates(violations)) == 3
+        assert len(_forged_identifier_diagnostics(violations)) == 1
+        assert all(
+            g.code is GateCode.traceability for g in _all_trace_gates(violations)
+        )
+
+    def test_phantom_owner_and_violations(self):
+        from asago_scenario_generator.pipeline.finalization_admission import (
+            _phantom_owner,
+            _phantom_violations,
+        )
+
+        assert _phantom_owner("behavior_spec") is GeneratedStage.behavior
+        assert _phantom_owner("attack_tree") is GeneratedStage.tree
+        assert _phantom_owner("narrative") is GeneratedStage.narrative
+        result = SimpleNamespace(
+            flagged_scenarios=(
+                (
+                    "s1",
+                    (
+                        SimpleNamespace(field="behavior_spec", reason="phantom-b"),
+                        SimpleNamespace(field="narrative", reason="phantom-n"),
+                    ),
+                ),
+            )
+        )
+        violations = _phantom_violations(result)
+        assert [v.detail for v in violations] == ["phantom-b", "phantom-n"]
+        assert violations[0].owner is GeneratedStage.behavior
+        assert violations[1].owner is GeneratedStage.narrative
+
+    def test_semantic_violations_classify_hard_and_diagnostic(self):
+        from asago_scenario_generator.pipeline.finalization_admission import (
+            _SEMANTIC_DIAGNOSTIC_RULES,
+            _semantic_violations,
+        )
+
+        diagnostic_rule = next(iter(_SEMANTIC_DIAGNOSTIC_RULES))
+        semantic = SimpleNamespace(
+            violations=(
+                SimpleNamespace(rule="initial_entry_point_id_mismatch", message="dup"),
+                SimpleNamespace(rule=diagnostic_rule, message="diag"),
+                SimpleNamespace(rule="other", message="hard"),
+            )
+        )
+        hard, diagnostics = _semantic_violations(semantic)
+        assert [rule for rule, _ in hard] == ["other"]
+        assert [v.detail for v in diagnostics] == ["diag"]
+
+    def test_grounding_gates_and_applicability(self):
+        from asago_scenario_generator.pipeline.finalization_admission import (
+            _grounding_applicable,
+            _grounding_gates,
+        )
+
+        profile = SimpleNamespace(
+            is_tool_inventory_complete=False,
+            is_entry_point_inventory_complete=True,
+        )
+        assert (
+            _grounding_applicable(
+                profile, AdmissionEvidenceId.tool_integration_grounding
+            )
+            is False
+        )
+        assert (
+            _grounding_applicable(profile, AdmissionEvidenceId.data_access_grounding)
+            is True
+        )
+        assert _grounding_applicable(profile, AdmissionEvidenceId.semantic_validity)
+
+        hard = [("untyped-tool-execution", GateViolation(GateCode.semantic, "t", None))]
+        gates = _grounding_gates(profile, (), hard)
+        by_id = {g.evidence_id: g for g in gates}
+        assert by_id[AdmissionEvidenceId.tool_integration_grounding].outcome is False
+        assert by_id[AdmissionEvidenceId.capability_grounding].outcome is True
+        assert by_id[AdmissionEvidenceId.data_access_grounding].applicable is True
+
+    def test_correspondence_diagnostic(self):
+        from asago_scenario_generator.pipeline.finalization_admission import (
+            _correspondence_diagnostic,
+        )
+
+        assert _correspondence_diagnostic(0, 5) is None
+        assert _correspondence_diagnostic(5, 0) is None
+        assert _correspondence_diagnostic(3, 3) is None
+        low = _correspondence_diagnostic(1, 5)
+        assert low is not None
+        assert low.code is GateCode.heuristic_correspondence
+        assert low.owner is GeneratedStage.tree
+
+    def test_narrative_tree_diagnostics_reports_low_correspondence(self):
+        from asago_scenario_generator.pipeline.finalization_admission import (
+            _narrative_tree_diagnostics,
+        )
+
+        leaf = SimpleNamespace(gate=GateType.LEAF, zone="input")
+        tree = SimpleNamespace(
+            root=SimpleNamespace(
+                gate=GateType.AND,
+                children=tuple(leaf for _ in range(5)),
+            )
+        )
+        envelope = SimpleNamespace(
+            narrative=SimpleNamespace(
+                steps=(SimpleNamespace(zone="input"),),
+            )
+        )
+
+        result = _narrative_tree_diagnostics(envelope, tree)
+
+        assert [item.code for item in result.diagnostics] == [
+            GateCode.heuristic_correspondence
+        ]
+
+    def test_postcondition_owners_skip_unselected_and_reject_ambiguous(self):
+        from asago_scenario_generator.pipeline.finalization_admission import (
+            _postcondition_owners,
+        )
+
+        postcondition = SimpleNamespace(
+            postcondition_id="post.1",
+            security_relevant=True,
+        )
+        projection = SimpleNamespace(
+            selected_step_ids=("step.1", "step.2"),
+            projection=SimpleNamespace(
+                source_chain=SimpleNamespace(
+                    steps=(
+                        SimpleNamespace(
+                            step_id="omitted",
+                            observable_postconditions=(postcondition,),
+                        ),
+                        SimpleNamespace(
+                            step_id="step.1",
+                            observable_postconditions=(postcondition,),
+                        ),
+                        SimpleNamespace(
+                            step_id="step.2",
+                            observable_postconditions=(postcondition,),
+                        ),
+                    )
+                )
+            ),
+        )
+        violations = []
+
+        owners, required, ambiguous = _postcondition_owners(projection, violations)
+
+        assert owners == {"post.1": "step.1"}
+        assert required == {("step.1", "post.1")}
+        assert ambiguous == {"post.1"}
+        assert len(violations) == 1
+        assert violations[0].code is GateCode.candidate_identity
+
+    def test_or_tree_gate(self):
+        from asago_scenario_generator.pipeline.finalization_admission import (
+            _or_tree_gate,
+        )
+
+        gate = _or_tree_gate(
+            SimpleNamespace(root=SimpleNamespace(gate=GateType.OR, children=()))
+        )
+        assert gate.evidence_id is AdmissionEvidenceId.or_tree_prohibition
+        assert len(gate.violations) == 1
+        assert gate.violations[0].code is GateCode.or_tree
+        ok = _or_tree_gate(
+            SimpleNamespace(root=SimpleNamespace(gate=GateType.AND, children=()))
+        )
+        assert ok.violations == ()
+
+    def test_behavior_mismatch_helpers(self):
+        from asago_scenario_generator.models.attack_tree import (
+            ExternalPreconditionAction,
+        )
+        from asago_scenario_generator.pipeline.finalization_admission import (
+            _action_leaf_mismatch,
+            _cardinality_violations,
+            _no_security_action_violation,
+            _projected_leaves,
+            _security_leaves,
+        )
+
+        leaf = SimpleNamespace(
+            id="leaf-1",
+            projected_step_ids=("s1",),
+            realizations=(),
+            action=SimpleNamespace(kind="attacker_action"),
+        )
+        action = SimpleNamespace(
+            action_id="ba-leaf-1",
+            source_leaf_id="leaf-1",
+            projected_step_ids=("s1",),
+            gherkin_keyword="When",
+            realizations=(),
+        )
+        assert _action_leaf_mismatch(leaf, action) is False
+        assert (
+            _action_leaf_mismatch(
+                leaf, SimpleNamespace(**{**action.__dict__, "action_id": "other"})
+            )
+            is True
+        )
+        assert _cardinality_violations((leaf,), ()) != []
+        assert _cardinality_violations((leaf,), (action,)) == []
+        no_security = _no_security_action_violation([])
+        assert no_security is not None
+        assert no_security.code is GateCode.no_realized_security_actions
+        assert _no_security_action_violation((leaf,)) is None
+        external = SimpleNamespace(
+            id="leaf-2", projected_step_ids=("s2",), action=ExternalPreconditionAction()
+        )
+        assert _security_leaves((leaf, external)) == [leaf]
+        assert (
+            _projected_leaves(
+                SimpleNamespace(root=SimpleNamespace(gate=GateType.AND, children=()))
+            )
+            == []
+        )

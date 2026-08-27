@@ -41,6 +41,7 @@ from asago_scenario_generator.manifest import (
     capture_provenance,
     compute_config_digest,
     compute_file_sha256,
+    derive_funnel_from_attempts,
     finalize_manifest,
     find_run_dir,
     generate_sortable_run_id,
@@ -56,6 +57,42 @@ from asago_scenario_generator.manifest import (
     validate_run_id,
     write_failed_manifest,
     write_manifest_sentinel,
+    write_started_manifest,
+)
+from asago_scenario_generator.manifest import (
+    _attempt_tallies,
+    _check_duplicate_candidate_ids,
+    _check_paired_stem,
+    _check_paired_stems,
+    _check_yaml_feature_pairing,
+    _is_v3_completed_status,
+    _pairing_parts,
+    _parse_scenario_yaml,
+    _require_serialized_ids,
+    _validate_legacy_role_support,
+    _validate_stem_candidate_id,
+    _validate_stem_feature_pair,
+    _validate_stem_filename,
+    _validate_stem_inventory_ids,
+    _validate_v3_legacy_authority,
+    _validate_v3_required_artifacts,
+    _check_funnel_aggregate_equations,
+    _check_main_funnel_equations,
+    _check_qualified_capacity,
+    _check_remediation_funnel_equations,
+    _check_total_failed_equation,
+    _disposition_tally,
+    _duplicate_attempt_keys,
+    _hashed_untracked_content,
+    _phase_attempted,
+    _require_funnel_lifecycle_keys,
+    _resolve_persisted_artifacts,
+    _resolve_qualified_count,
+    _run_git,
+    _source_diff_digest,
+    _untracked_files,
+    _validate_attempt_evidence,
+    _validate_zero_attempt_funnel,
 )
 from tests.manifest_helpers import build_test_run_dir
 
@@ -109,6 +146,11 @@ class TestImmutableTwoRun:
         assert is_sortable_run_id(run_id_2)
         assert run_dir_1.parent == collection
         assert run_dir_2.parent == collection
+
+    def test_nested_collection_directory_is_created(self, tmp_path: Path):
+        collection = tmp_path / "nested" / "output"
+        run_dir, _run_id = resolve_run_dir(collection)
+        assert run_dir.parent == collection
 
     def test_first_run_unchanged_after_second(self, tmp_path: Path):
         collection = tmp_path / "output"
@@ -201,6 +243,11 @@ class TestRunLocalLogging:
 class TestManifestSentinel:
     """Versioned manifest sentinel survives every exit path."""
 
+    def test_atomic_yaml_write_creates_nested_parent(self, tmp_path: Path):
+        path = tmp_path / "nested" / "directory" / "manifest.yaml"
+        atomic_write_yaml(path, {"status": "started"})
+        assert yaml.safe_load(path.read_text()) == {"status": "started"}
+
     def test_sentinel_written_before_pipeline_work(self, tmp_path: Path):
         collection = tmp_path / "output"
         run_dir, run_id = resolve_run_dir(collection)
@@ -240,7 +287,45 @@ class TestManifestSentinel:
         assert loaded.status == RunStatus.FAILED
         assert loaded.run_id == run_id
         assert loaded.error == "Something went wrong"
+        assert loaded.timestamp_end is not None
         assert len(loaded.attempts) == 1
+        raw_failed = yaml.safe_load(
+            (run_dir / MANIFEST_FILENAME).read_text(encoding="utf-8")
+        )
+        assert "provenance" not in raw_failed
+
+    def test_failed_manifest_preserves_existing_end_timestamp(self, tmp_path: Path):
+        run_dir, run_id = resolve_run_dir(tmp_path / "output")
+        manifest = RunManifest(
+            status=RunStatus.STARTED,
+            run_id=run_id,
+            timestamp_start="2026-01-01T00:00:00+00:00",
+            timestamp_end="2026-01-02T00:00:00+00:00",
+        )
+        write_failed_manifest(run_dir, manifest)
+        assert load_manifest(run_dir).timestamp_end == "2026-01-02T00:00:00+00:00"
+
+    def test_manifest_writers_omit_none_fields(self, tmp_path: Path):
+        run_dir, run_id = resolve_run_dir(tmp_path / "output")
+        manifest = RunManifest(
+            status=RunStatus.STARTED,
+            run_id=run_id,
+            timestamp_start="2026-01-01T00:00:00+00:00",
+        )
+
+        write_started_manifest(run_dir, manifest)
+        started = yaml.safe_load(
+            (run_dir / MANIFEST_FILENAME).read_text(encoding="utf-8")
+        )
+        assert "error" not in started
+
+        manifest.status = RunStatus.COMPLETED
+        finalize_manifest(run_dir, manifest)
+        finalized = yaml.safe_load(
+            (run_dir / MANIFEST_FILENAME).read_text(encoding="utf-8")
+        )
+        assert "error" not in finalized
+
 
     def test_finalize_requires_final_status(self, tmp_path: Path):
         collection = tmp_path / "output"
@@ -3301,7 +3386,6 @@ class TestFourthReviewEmptyEvidence:
 def test_record_stage_result_writes_to_calls_jsonl(tmp_path):
     import json
     from unittest.mock import MagicMock
-    from pathlib import Path
     from asago_scenario_generator.pipeline.persistence import (
         FinalizationPersistenceAdapter,
     )
@@ -3545,3 +3629,1387 @@ def test_record_stage_result_redacts_and_preserves_completion_length_diagnostics
     assert entry["partial_preview_suffix"] == "BEGIN [REDACTED] END"
     assert entry["elapsed_ms"] == 3
     assert "SECRET=fixture-customer@example.invalid" not in json.dumps(entry)
+
+
+# --------------------------------------------------------------------------- #
+# CRAP-decomposition helper coverage: loaders and status gates
+# --------------------------------------------------------------------------- #
+
+
+class TestManifestLoadHelpers:
+    """Branch-level coverage for load_manifest decomposition helpers."""
+
+    def test_read_manifest_dict_missing_file_raises(self, tmp_path: Path):
+        from asago_scenario_generator.manifest import _read_manifest_dict
+
+        with pytest.raises(ManifestIntegrityError, match="No manifest found"):
+            _read_manifest_dict(tmp_path / MANIFEST_FILENAME)
+
+    def test_read_manifest_dict_rejects_non_dict(self, tmp_path: Path):
+        from asago_scenario_generator.manifest import _read_manifest_dict
+
+        path = tmp_path / MANIFEST_FILENAME
+        path.write_text("- not\n- a dict\n")
+        with pytest.raises(ManifestIntegrityError, match="not a dict"):
+            _read_manifest_dict(path)
+
+    def test_read_manifest_dict_accepts_empty_dict(self, tmp_path: Path):
+        from asago_scenario_generator.manifest import _read_manifest_dict
+
+        path = tmp_path / MANIFEST_FILENAME
+        path.write_text("manifest_version: '2'\n")
+        assert _read_manifest_dict(path) == {"manifest_version": "2"}
+
+    def test_validate_manifest_version_accepts_supported(self):
+        from asago_scenario_generator.manifest import _validate_manifest_version
+
+        _validate_manifest_version("2", None)
+        _validate_manifest_version("3", None)
+        _validate_manifest_version("3", "3")
+
+    def test_validate_manifest_version_rejects_request_mismatch(self):
+        from asago_scenario_generator.manifest import _validate_manifest_version
+
+        with pytest.raises(ManifestIntegrityError, match="explicitly requested"):
+            _validate_manifest_version("2", "3")
+
+    def test_validate_manifest_version_rejects_unsupported(self):
+        from asago_scenario_generator.manifest import _validate_manifest_version
+
+        with pytest.raises(ManifestIntegrityError, match="supported versions"):
+            _validate_manifest_version("1", None)
+
+
+class TestFindRunDirHelpers:
+    """Branch-level coverage for find_run_dir decomposition helpers."""
+
+    def test_runs_in_collection_filters_and_sorts(self, tmp_path: Path):
+        from asago_scenario_generator.manifest import _runs_in_collection
+
+        collection = tmp_path / "output"
+        build_test_run_dir(
+            collection / "20260102T000000_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        )
+        (collection / "plain-dir").mkdir(parents=True)
+        build_test_run_dir(
+            collection / "20260101T000000_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        )
+        runs = _runs_in_collection(collection)
+        assert [d.name for d in runs] == [
+            "20260101T000000_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "20260102T000000_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        ]
+
+    def test_single_run_in_collection(self, tmp_path: Path):
+        from asago_scenario_generator.manifest import _single_run_in_collection
+
+        collection = tmp_path / "output"
+        run_dir = build_test_run_dir(
+            collection / "20260101T000000_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        )
+        assert _single_run_in_collection(collection, [run_dir]) == run_dir
+
+    def test_single_run_in_collection_empty_raises(self, tmp_path: Path):
+        from asago_scenario_generator.manifest import _single_run_in_collection
+
+        collection = tmp_path / "output"
+        collection.mkdir()
+        with pytest.raises(ManifestIntegrityError, match="No run directory found"):
+            _single_run_in_collection(collection, [])
+
+    def test_single_run_in_collection_many_raises(self, tmp_path: Path):
+        from asago_scenario_generator.manifest import _single_run_in_collection
+
+        collection = tmp_path / "output"
+        first = build_test_run_dir(
+            collection / "20260101T000000_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        )
+        second = build_test_run_dir(
+            collection / "20260102T000000_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        )
+        with pytest.raises(ManifestIntegrityError, match="contains 2 runs"):
+            _single_run_in_collection(collection, [first, second])
+
+
+class TestStrictResolverStatusGates:
+    """Branch-level coverage for load_strict_resolver status gates."""
+
+    @staticmethod
+    def _manifest(status: str) -> RunManifest:
+        return RunManifest(
+            status=RunStatus(status),
+            run_id=_VALID_RUN_ID,
+            timestamp_start="2026-01-01T00:00:00+00:00",
+        )
+
+    def test_require_final_status_gate(self, tmp_path: Path):
+        from asago_scenario_generator.manifest import _require_final_status
+
+        _require_final_status(self._manifest("completed"), tmp_path, require_final=True)
+        _require_final_status(self._manifest("started"), tmp_path, require_final=False)
+        with pytest.raises(ManifestIntegrityError, match="status is not final"):
+            _require_final_status(
+                self._manifest("started"), tmp_path, require_final=True
+            )
+
+    def test_require_authoritative_status_gate(self, tmp_path: Path):
+        from asago_scenario_generator.manifest import _require_authoritative_status
+
+        _require_authoritative_status(
+            self._manifest("completed"), tmp_path, require_authoritative=True
+        )
+        _require_authoritative_status(
+            self._manifest("failed"), tmp_path, require_authoritative=False
+        )
+        with pytest.raises(ManifestIntegrityError, match="not authoritative"):
+            _require_authoritative_status(
+                self._manifest("failed"), tmp_path, require_authoritative=True
+            )
+
+
+# --------------------------------------------------------------------------- #
+# CRAP-decomposition helper coverage: funnel tallies, equations, git helpers
+# --------------------------------------------------------------------------- #
+
+
+class TestFunnelTallyHelpers:
+    """Branch-level coverage for _attempt_tallies decomposition helpers."""
+
+    @staticmethod
+    def _mixed_attempts() -> list[AttemptRecord]:
+        return [
+            AttemptRecord(
+                candidate_id="c1",
+                scenario_id="s1",
+                disposition=AttemptDisposition.ADMITTED,
+                phase=AttemptPhase.MAIN,
+            ),
+            AttemptRecord(
+                candidate_id="c2",
+                scenario_id="s2",
+                disposition=AttemptDisposition.QUARANTINED,
+                phase=AttemptPhase.MAIN,
+                failure_evidence="quarantined",
+            ),
+            AttemptRecord(
+                candidate_id="c3",
+                scenario_id="s3",
+                disposition=AttemptDisposition.FAILED,
+                phase=AttemptPhase.MAIN,
+                failure_evidence="failed",
+            ),
+            AttemptRecord(
+                candidate_id="c4",
+                scenario_id="s4",
+                disposition=AttemptDisposition.ADMITTED,
+                phase=AttemptPhase.REMEDIATION,
+            ),
+            AttemptRecord(
+                candidate_id="c5",
+                scenario_id="s5",
+                disposition=AttemptDisposition.FAILED,
+                phase=AttemptPhase.REMEDIATION,
+                failure_evidence="failed",
+            ),
+        ]
+
+    def test_phase_attempted_counts_by_phase(self):
+        attempts = self._mixed_attempts()
+        assert _phase_attempted(attempts, AttemptPhase.MAIN) == 3
+        assert _phase_attempted(attempts, AttemptPhase.REMEDIATION) == 2
+
+    def test_disposition_tally_matches_phase_and_disposition(self):
+        attempts = self._mixed_attempts()
+        assert (
+            _disposition_tally(attempts, AttemptPhase.MAIN, AttemptDisposition.ADMITTED)
+            == 1
+        )
+        assert (
+            _disposition_tally(
+                attempts, AttemptPhase.MAIN, AttemptDisposition.QUARANTINED
+            )
+            == 1
+        )
+        assert (
+            _disposition_tally(attempts, AttemptPhase.MAIN, AttemptDisposition.FAILED)
+            == 1
+        )
+        assert (
+            _disposition_tally(
+                attempts, AttemptPhase.REMEDIATION, AttemptDisposition.ADMITTED
+            )
+            == 1
+        )
+        assert (
+            _disposition_tally(
+                attempts, AttemptPhase.REMEDIATION, AttemptDisposition.FAILED
+            )
+            == 1
+        )
+
+    def test_attempt_tallies_aggregates_all_counts(self):
+        tallies = _attempt_tallies(self._mixed_attempts())
+        assert tallies == {
+            "main_attempted": 3,
+            "main_admitted": 1,
+            "main_quarantined": 1,
+            "main_failed": 1,
+            "remediation_attempted": 2,
+            "remediation_admitted": 1,
+            "remediation_quarantined": 0,
+            "remediation_failed": 1,
+        }
+
+
+class TestFunnelDeriveHelpers:
+    """Branch-level coverage for derive_funnel_from_attempts helpers."""
+
+    @pytest.mark.parametrize(
+        ("selected", "qualified", "projection_rejected", "expected"),
+        [
+            (2, 0, 0, 2),  # qualification never reached -> derive from selected
+            (2, 3, 0, 3),  # actual qualified preserved
+            (2, 0, 1, 0),  # projection rejection happened -> keep qualified
+            (0, 0, 0, 0),  # nothing selected, nothing qualified
+        ],
+    )
+    def test_resolve_qualified_count(
+        self, selected, qualified, projection_rejected, expected
+    ):
+        assert (
+            _resolve_qualified_count(selected, qualified, projection_rejected)
+            == expected
+        )
+
+    def test_check_qualified_capacity_accepts_equal(self):
+        _check_qualified_capacity(2, 2)
+
+    def test_check_qualified_capacity_rejects_excess_selected(self):
+        with pytest.raises(ManifestIntegrityError, match="exceeds qualified"):
+            _check_qualified_capacity(3, 2)
+
+    def test_resolve_persisted_artifacts_derives_when_zero(self):
+        assert _resolve_persisted_artifacts(3, 2, 0) == 5
+
+    def test_resolve_persisted_artifacts_preserves_supplied(self):
+        assert _resolve_persisted_artifacts(3, 2, 7) == 7
+
+    def test_derive_funnel_from_attempts_zero_attempts(self):
+        result = derive_funnel_from_attempts([], selected=0)
+        assert result["selected"] == 0
+        assert result["qualified"] == 0
+        assert result["attempted"] == 0
+        assert result["admitted"] == 0
+
+    def test_derive_funnel_from_attempts_mixed(self):
+        result = derive_funnel_from_attempts(
+            TestFunnelTallyHelpers._mixed_attempts(),
+            qualified=3,
+            persisted_artifacts=9,
+        )
+        assert result["selected"] == 3
+        assert result["qualified"] == 3
+        assert result["main_attempted"] == 3
+        assert result["main_admitted"] == 2
+        assert result["generation_failed"] == 1
+        assert result["remediation_attempted"] == 2
+        assert result["remediation_admitted"] == 1
+        assert result["remediation_failed"] == 1
+        assert result["attempted"] == 5
+        assert result["admitted"] == 3
+        assert result["quarantined"] == 1
+        assert result["persisted_artifacts"] == 9
+
+
+class TestAttemptEquationHelpers:
+    """Branch-level coverage for validate_attempt_equations helpers."""
+
+    @staticmethod
+    def _blank_evidence_attempt(candidate, scenario, disposition, evidence):
+        """Build an attempt, then mutate evidence in-place to bypass the model
+        validator — mirroring _finalize_attempt's bypass path that terminal
+        validation must catch."""
+        rec = AttemptRecord(
+            candidate_id=candidate,
+            scenario_id=scenario,
+            disposition=disposition,
+            phase=AttemptPhase.MAIN,
+            failure_evidence="placeholder",
+        )
+        object.__setattr__(rec, "failure_evidence", evidence)
+        return rec
+
+    @staticmethod
+    def _attempt(candidate, scenario, disposition, phase=AttemptPhase.MAIN):
+        evidence = (
+            "generation error" if disposition != AttemptDisposition.ADMITTED else None
+        )
+        return AttemptRecord(
+            candidate_id=candidate,
+            scenario_id=scenario,
+            disposition=disposition,
+            phase=phase,
+            failure_evidence=evidence,
+        )
+
+    def test_duplicate_attempt_keys_accepts_unique(self):
+        _duplicate_attempt_keys(
+            [
+                self._attempt("c1", "s1", AttemptDisposition.ADMITTED),
+                self._attempt("c1", "s2", AttemptDisposition.ADMITTED),
+            ]
+        )
+
+    def test_duplicate_attempt_keys_rejects_duplicate(self):
+        with pytest.raises(ManifestIntegrityError, match="Duplicate attempt key"):
+            _duplicate_attempt_keys(
+                [
+                    self._attempt("c1", "s1", AttemptDisposition.ADMITTED),
+                    self._attempt("c1", "s1", AttemptDisposition.ADMITTED),
+                ]
+            )
+
+    def test_validate_attempt_evidence_accepts_evidence(self):
+        _validate_attempt_evidence(
+            [
+                self._attempt("c1", "s1", AttemptDisposition.ADMITTED),
+                self._attempt("c2", "s2", AttemptDisposition.FAILED),
+                self._attempt(
+                    "c3", "s3", AttemptDisposition.QUARANTINED, AttemptPhase.REMEDIATION
+                ),
+            ]
+        )
+
+    def test_validate_attempt_evidence_rejects_blank_failed(self):
+        with pytest.raises(ManifestIntegrityError, match="blank failure_evidence"):
+            _validate_attempt_evidence(
+                [
+                    self._blank_evidence_attempt(
+                        "c1",
+                        "s1",
+                        AttemptDisposition.FAILED,
+                        "   ",
+                    )
+                ]
+            )
+
+    def test_validate_attempt_evidence_rejects_blank_quarantined(self):
+        with pytest.raises(ManifestIntegrityError, match="blank failure_evidence"):
+            _validate_attempt_evidence(
+                [
+                    self._blank_evidence_attempt(
+                        "c1",
+                        "s1",
+                        AttemptDisposition.QUARANTINED,
+                        "",
+                    )
+                ]
+            )
+
+    def test_validate_zero_attempt_funnel_accepts_empty(self):
+        _validate_zero_attempt_funnel({})
+
+    def test_validate_zero_attempt_funnel_accepts_pre_attempt_fields(self):
+        _validate_zero_attempt_funnel({"expanded_instances": 5, "selected": 0})
+
+    def test_validate_zero_attempt_funnel_rejects_nonzero_lifecycle(self):
+        with pytest.raises(ManifestIntegrityError, match="zero attempts exist"):
+            _validate_zero_attempt_funnel({"selected": 1})
+
+    def test_require_funnel_lifecycle_keys_accepts_complete(self):
+        funnel = {
+            "attempted": 1,
+            "admitted": 1,
+            "quarantined": 0,
+            "main_attempted": 1,
+            "main_admitted": 1,
+            "generation_failed": 0,
+            "remediation_attempted": 0,
+            "remediation_admitted": 0,
+            "remediation_failed": 0,
+        }
+        _require_funnel_lifecycle_keys(funnel)
+
+    def test_require_funnel_lifecycle_keys_rejects_missing(self):
+        with pytest.raises(
+            ManifestIntegrityError, match="missing required lifecycle keys"
+        ):
+            _require_funnel_lifecycle_keys({"attempted": 1})
+
+    def test_check_funnel_aggregate_equations_accepts(self):
+        _check_funnel_aggregate_equations(
+            2, {"attempted": 2, "admitted": 3, "quarantined": 1}, 2, 1
+        )
+
+    def test_check_funnel_aggregate_equations_attempted_mismatch(self):
+        with pytest.raises(ManifestIntegrityError, match="attempted mismatch"):
+            _check_funnel_aggregate_equations(
+                3, {"attempted": 2, "admitted": 3, "quarantined": 1}, 2, 1
+            )
+
+    def test_check_funnel_aggregate_equations_admitted_mismatch(self):
+        with pytest.raises(ManifestIntegrityError, match="admitted mismatch"):
+            _check_funnel_aggregate_equations(
+                2, {"attempted": 2, "admitted": 4, "quarantined": 1}, 2, 1
+            )
+
+    def test_check_funnel_aggregate_equations_quarantined_mismatch(self):
+        with pytest.raises(ManifestIntegrityError, match="quarantined mismatch"):
+            _check_funnel_aggregate_equations(
+                2, {"attempted": 2, "admitted": 3, "quarantined": 2}, 2, 1
+            )
+
+    def test_check_main_funnel_equations_accepts(self):
+        _check_main_funnel_equations(
+            2,
+            1,
+            1,
+            1,
+            {
+                "main_attempted": 2,
+                "main_admitted": 2,
+                "generation_failed": 1,
+            },
+        )
+
+    def test_check_main_funnel_equations_attempted_mismatch(self):
+        with pytest.raises(ManifestIntegrityError, match="main_attempted mismatch"):
+            _check_main_funnel_equations(
+                1,
+                1,
+                1,
+                1,
+                {"main_attempted": 2, "main_admitted": 2, "generation_failed": 1},
+            )
+
+    def test_check_main_funnel_equations_admitted_mismatch(self):
+        with pytest.raises(ManifestIntegrityError, match="main_admitted mismatch"):
+            _check_main_funnel_equations(
+                2,
+                1,
+                1,
+                1,
+                {"main_attempted": 2, "main_admitted": 3, "generation_failed": 1},
+            )
+
+    def test_check_main_funnel_equations_failed_mismatch(self):
+        with pytest.raises(ManifestIntegrityError, match="generation_failed mismatch"):
+            _check_main_funnel_equations(
+                2,
+                1,
+                1,
+                1,
+                {"main_attempted": 2, "main_admitted": 2, "generation_failed": 2},
+            )
+
+    def test_check_remediation_funnel_equations_accepts(self):
+        _check_remediation_funnel_equations(
+            2,
+            1,
+            1,
+            1,
+            {
+                "remediation_attempted": 2,
+                "remediation_admitted": 2,
+                "remediation_failed": 1,
+            },
+        )
+
+    def test_check_remediation_funnel_equations_attempted_mismatch(self):
+        with pytest.raises(
+            ManifestIntegrityError, match="remediation_attempted mismatch"
+        ):
+            _check_remediation_funnel_equations(
+                1,
+                1,
+                1,
+                1,
+                {
+                    "remediation_attempted": 2,
+                    "remediation_admitted": 2,
+                    "remediation_failed": 1,
+                },
+            )
+
+    def test_check_remediation_funnel_equations_admitted_mismatch(self):
+        with pytest.raises(
+            ManifestIntegrityError, match="remediation_admitted mismatch"
+        ):
+            _check_remediation_funnel_equations(
+                2,
+                1,
+                1,
+                1,
+                {
+                    "remediation_attempted": 2,
+                    "remediation_admitted": 3,
+                    "remediation_failed": 1,
+                },
+            )
+
+    def test_check_remediation_funnel_equations_failed_mismatch(self):
+        with pytest.raises(ManifestIntegrityError, match="remediation_failed mismatch"):
+            _check_remediation_funnel_equations(
+                2,
+                1,
+                1,
+                1,
+                {
+                    "remediation_attempted": 2,
+                    "remediation_admitted": 2,
+                    "remediation_failed": 2,
+                },
+            )
+
+    def test_check_total_failed_equation_accepts(self):
+        _check_total_failed_equation(3, 2, 1)
+
+    def test_check_total_failed_equation_mismatch(self):
+        with pytest.raises(ManifestIntegrityError, match="total failed mismatch"):
+            _check_total_failed_equation(4, 2, 1)
+
+
+class TestGitHelperUnits:
+    """Branch-level coverage for capture_git_provenance decomposition."""
+
+    def test_run_git_returns_none_on_subprocess_error(self, tmp_path, monkeypatch):
+        def _boom(*args, **kwargs):
+            raise OSError("no git binary")
+
+        monkeypatch.setattr("asago_scenario_generator.manifest.subprocess.run", _boom)
+        assert _run_git(tmp_path, "rev-parse", "HEAD") is None
+
+    def test_untracked_files_empty(self):
+        assert _untracked_files(None) == []
+        assert _untracked_files("") == []
+
+    def test_untracked_files_sorts_lines(self):
+        assert _untracked_files("b.txt\na.txt\n\n") == ["a.txt", "b.txt"]
+
+    def test_hashed_untracked_content_missing_file(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        assert _hashed_untracked_content(repo, "missing.txt") == b""
+
+    def test_hashed_untracked_content_reads_file(self, tmp_path):
+        repo = tmp_path / "repo"
+        fpath = repo / "note.txt"
+        fpath.parent.mkdir(parents=True)
+        fpath.write_text("hello")
+        digest = hashlib.sha256(b"hello").hexdigest().encode()
+        assert _hashed_untracked_content(repo, "note.txt") == digest + b"\n"
+
+    def test_hashed_untracked_content_unreadable(self, tmp_path, monkeypatch):
+        repo = tmp_path / "repo"
+        fpath = repo / "locked.txt"
+        fpath.parent.mkdir(parents=True)
+        fpath.write_text("secret")
+
+        original = Path.read_bytes
+
+        def _raise_for_target(self):
+            if self == fpath:
+                raise OSError("permission denied")
+            return original(self)
+
+        monkeypatch.setattr(Path, "read_bytes", _raise_for_target)
+        assert _hashed_untracked_content(repo, "locked.txt") == b"<unreadable>\n"
+
+    def test_source_diff_digest_no_diff_no_untracked(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        digest = _source_diff_digest(repo, None, [])
+        assert isinstance(digest, str) and len(digest) == 64
+
+    def test_source_diff_digest_changes_with_diff(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        plain = _source_diff_digest(repo, None, [])
+        with_diff = _source_diff_digest(repo, "--- a/x\n+++ b/x\n", [])
+        assert with_diff != plain
+
+    def test_source_diff_digest_changes_with_untracked_content(self, tmp_path):
+        repo = tmp_path / "repo"
+        fpath = repo / "u.txt"
+        fpath.parent.mkdir(parents=True)
+        fpath.write_text("v1")
+        first = _source_diff_digest(repo, None, ["u.txt"])
+        fpath.write_text("v2")
+        second = _source_diff_digest(repo, None, ["u.txt"])
+        assert first != second
+
+
+# --------------------------------------------------------------------------- #
+# CRAP-decomposition helper coverage: resolver validation helpers
+# --------------------------------------------------------------------------- #
+
+
+def _entry(**kwargs) -> ArtifactEntry:
+    """Build a minimal ArtifactEntry with safe defaults."""
+    defaults = {
+        "role": ArtifactRole.USE_CASE,
+        "path": "use-case.txt",
+        "sha256": hashlib.sha256(b"x").hexdigest(),
+        "media_type": "text/plain",
+    }
+    defaults.update(kwargs)
+    return ArtifactEntry(**defaults)
+
+
+class TestResolverPathHelpers:
+    """Branch-level coverage for per-entry path validation helpers."""
+
+    @staticmethod
+    def _resolver(manifest=None):
+        return ManifestInventoryResolver.__new__(ManifestInventoryResolver)
+
+    def test_entry_role_accepts_valid(self):
+        resolver = self._resolver()
+        entry = _entry()
+        assert resolver._entry_role(entry) is ArtifactRole.USE_CASE
+
+    def test_entry_role_rejects_invalid(self):
+        resolver = self._resolver()
+
+        class _RaisingRole:
+            @property
+            def role(self):
+                raise ValueError("unknown role")
+
+        with pytest.raises(ManifestIntegrityError, match="Invalid or unknown"):
+            resolver._entry_role(_RaisingRole())
+
+    def test_validate_path_form_accepts_clean(self):
+        resolver = self._resolver()
+        resolver._validate_path_form(Path("scenarios/s1.yaml"), "scenarios/s1.yaml")
+
+    def test_validate_path_form_rejects_absolute(self):
+        resolver = self._resolver()
+        with pytest.raises(ManifestIntegrityError, match="path is absolute"):
+            resolver._validate_path_form(Path("/etc/passwd"), "/etc/passwd")
+
+    def test_validate_path_form_rejects_backslash(self):
+        resolver = self._resolver()
+        with pytest.raises(ManifestIntegrityError, match="contains backslash"):
+            resolver._validate_path_form(Path("a\\b.txt"), "a\\b.txt")
+
+    def test_validate_path_form_rejects_non_canonical(self):
+        resolver = self._resolver()
+        with pytest.raises(ManifestIntegrityError, match="not canonical"):
+            resolver._validate_path_form(Path("a//b.txt"), "a//b.txt")
+
+    def test_validate_path_components_accepts_clean(self):
+        resolver = self._resolver()
+        resolver._validate_path_components(
+            Path("scenarios/s1.yaml"), "scenarios/s1.yaml"
+        )
+
+    def test_validate_path_components_rejects_dotdot(self):
+        resolver = self._resolver()
+        with pytest.raises(ManifestIntegrityError, match=r"contains '\.\.'"):
+            resolver._validate_path_components(Path("a/../b.txt"), "a/../b.txt")
+
+    def test_validate_path_components_rejects_dot(self):
+        resolver = self._resolver()
+        with pytest.raises(ManifestIntegrityError, match="dot component"):
+            resolver._validate_path_components(Path("."), ".")
+
+    def test_validate_entry_path_wires_both_checks(self):
+        resolver = self._resolver()
+        resolver._validate_entry_path(_entry(path="scenarios/s1.yaml"))
+        with pytest.raises(ManifestIntegrityError):
+            resolver._validate_entry_path(_entry(path="scenarios/../x.yaml"))
+
+    def test_track_canonical_path_accepts_new(self):
+        resolver = self._resolver()
+        seen: set[str] = set()
+        resolver._track_canonical_path(_entry(path="a.txt"), seen)
+        assert seen == {"a.txt"}
+
+    def test_track_canonical_path_rejects_duplicate(self):
+        resolver = self._resolver()
+        with pytest.raises(
+            ManifestIntegrityError, match="Duplicate artifact canonical"
+        ):
+            resolver._track_canonical_path(_entry(path="a.txt"), {"a.txt"})
+
+    def test_validate_sha256_field_accepts_valid(self):
+        resolver = self._resolver()
+        resolver._validate_sha256_field(_entry())
+
+    def test_validate_sha256_field_rejects_missing(self):
+        resolver = self._resolver()
+        with pytest.raises(ManifestIntegrityError, match="Missing SHA-256"):
+            resolver._validate_sha256_field(_entry(sha256=""))
+
+    def test_validate_sha256_field_rejects_malformed(self):
+        resolver = self._resolver()
+        with pytest.raises(ManifestIntegrityError, match="Malformed SHA-256"):
+            resolver._validate_sha256_field(_entry(sha256="not-a-hash"))
+
+
+class TestResolverRoleMetadataHelpers:
+    """Branch-level coverage for role extension/media/schema validation."""
+
+    @staticmethod
+    def _resolver():
+        return ManifestInventoryResolver.__new__(ManifestInventoryResolver)
+
+    def test_validate_role_metadata_unknown_role_requires_schema(self):
+        resolver = self._resolver()
+        with pytest.raises(ManifestIntegrityError, match="Missing schema_version"):
+            resolver._validate_role_metadata(_entry(schema_version=""), "BOGUS_ROLE")
+
+    def test_validate_role_metadata_unknown_role_with_schema(self):
+        resolver = self._resolver()
+        resolver._validate_role_metadata(_entry(schema_version="1"), "BOGUS_ROLE")
+
+    def test_validate_role_metadata_extension_mismatch(self):
+        resolver = self._resolver()
+        entry = _entry(role=ArtifactRole.USE_CASE, path="use-case.txt.extra")
+        with pytest.raises(ManifestIntegrityError, match="expects extension"):
+            resolver._validate_role_metadata(entry, ArtifactRole.USE_CASE)
+
+    def test_validate_role_metadata_media_type_mismatch(self):
+        resolver = self._resolver()
+        entry = _entry(role=ArtifactRole.USE_CASE, media_type="application/json")
+        with pytest.raises(ManifestIntegrityError, match="expects media_type"):
+            resolver._validate_role_metadata(entry, ArtifactRole.USE_CASE)
+
+    def test_validate_role_metadata_schema_version_missing(self):
+        resolver = self._resolver()
+        entry = _entry(role=ArtifactRole.USE_CASE, schema_version="")
+        with pytest.raises(ManifestIntegrityError, match="Missing schema_version"):
+            resolver._validate_role_metadata(entry, ArtifactRole.USE_CASE)
+
+    def test_validate_role_metadata_schema_version_unsupported(self):
+        resolver = self._resolver()
+        entry = _entry(role=ArtifactRole.USE_CASE, schema_version="99")
+        with pytest.raises(ManifestIntegrityError, match="expects schema_version"):
+            resolver._validate_role_metadata(entry, ArtifactRole.USE_CASE)
+
+    def test_validate_role_metadata_singleton_path_mismatch(self):
+        resolver = self._resolver()
+        entry = _entry(role=ArtifactRole.USE_CASE, path="other.txt")
+        with pytest.raises(ManifestIntegrityError, match="must be at"):
+            resolver._validate_role_metadata(entry, ArtifactRole.USE_CASE)
+
+    def test_validate_role_metadata_all_checks_pass(self):
+        resolver = self._resolver()
+        resolver._validate_role_metadata(
+            _entry(role=ArtifactRole.USE_CASE, path="use-case.txt"),
+            ArtifactRole.USE_CASE,
+        )
+
+    def test_validate_role_schema_version_unsupported(self):
+        resolver = self._resolver()
+        entry = _entry(role=ArtifactRole.USE_CASE, schema_version="2")
+        with pytest.raises(ManifestIntegrityError, match="expects schema_version"):
+            resolver._validate_role_schema_version(
+                entry, ArtifactRole.USE_CASE, {"schema_versions": ["1"]}
+            )
+
+    def test_validate_singleton_path_accepts_expected(self):
+        resolver = self._resolver()
+        resolver._validate_singleton_path(
+            _entry(path="use-case.txt"),
+            ArtifactRole.USE_CASE,
+            {"singleton_path": "use-case.txt"},
+        )
+
+    def test_validate_singleton_path_rejects_moved(self):
+        resolver = self._resolver()
+        with pytest.raises(ManifestIntegrityError, match="must be at"):
+            resolver._validate_singleton_path(
+                _entry(path="elsewhere.txt"),
+                ArtifactRole.USE_CASE,
+                {"singleton_path": "use-case.txt"},
+            )
+
+
+class TestResolverScenarioIdentityHelpers:
+    """Branch-level coverage for scenario/quarantine identity checks."""
+
+    @staticmethod
+    def _resolver():
+        return ManifestInventoryResolver.__new__(ManifestInventoryResolver)
+
+    def test_scenario_identity_requires_scenario_id(self):
+        resolver = self._resolver()
+        entry = _entry(role=ArtifactRole.SCENARIO_YAML, path="scenarios/s1.yaml")
+        with pytest.raises(ManifestIntegrityError, match="requires scenario_id"):
+            resolver._validate_scenario_identity(entry, ArtifactRole.SCENARIO_YAML)
+
+    def test_scenario_identity_requires_candidate_id(self):
+        resolver = self._resolver()
+        entry = _entry(
+            role=ArtifactRole.SCENARIO_FEATURE,
+            path="scenarios/s1.feature",
+            scenario_id="s1",
+        )
+        with pytest.raises(ManifestIntegrityError, match="requires candidate_id"):
+            resolver._validate_scenario_identity(entry, ArtifactRole.SCENARIO_FEATURE)
+
+    def test_scenario_identity_accepts_full_pair(self):
+        resolver = self._resolver()
+        resolver._validate_scenario_identity(
+            _entry(
+                role=ArtifactRole.SCENARIO_YAML,
+                path="scenarios/s1.yaml",
+                scenario_id="s1",
+                candidate_id="c1",
+            ),
+            ArtifactRole.SCENARIO_YAML,
+        )
+
+    def test_quarantine_entry_ignored_for_other_roles(self):
+        resolver = self._resolver()
+        resolver._validate_quarantine_entry(
+            _entry(role=ArtifactRole.USE_CASE), ArtifactRole.USE_CASE
+        )
+
+    def test_quarantine_entry_rejects_scenario_id(self):
+        resolver = self._resolver()
+        entry = _entry(
+            role=ArtifactRole.QUARANTINE_BUNDLE,
+            path="quarantine/c1.jsonl",
+            scenario_id="s1",
+            candidate_id="c1",
+        )
+        with pytest.raises(ManifestIntegrityError, match="must not carry scenario_id"):
+            resolver._validate_quarantine_entry(entry, ArtifactRole.QUARANTINE_BUNDLE)
+
+    def test_quarantine_entry_requires_candidate_id(self):
+        resolver = self._resolver()
+        entry = _entry(role=ArtifactRole.QUARANTINE_BUNDLE, path="quarantine/c1.jsonl")
+        with pytest.raises(ManifestIntegrityError, match="requires candidate_id"):
+            resolver._validate_quarantine_entry(entry, ArtifactRole.QUARANTINE_BUNDLE)
+
+    def test_quarantine_entry_requires_prefix(self):
+        resolver = self._resolver()
+        entry = _entry(
+            role=ArtifactRole.QUARANTINE_BUNDLE,
+            path="elsewhere/c1.jsonl",
+            candidate_id="c1",
+        )
+        with pytest.raises(ManifestIntegrityError, match="must be below"):
+            resolver._validate_quarantine_entry(entry, ArtifactRole.QUARANTINE_BUNDLE)
+
+    def test_quarantine_entry_accepts_valid(self):
+        resolver = self._resolver()
+        entry = _entry(
+            role=ArtifactRole.QUARANTINE_BUNDLE,
+            path="quarantine/c1.jsonl",
+            candidate_id="c1",
+        )
+        resolver._validate_quarantine_entry(entry, ArtifactRole.QUARANTINE_BUNDLE)
+
+
+class TestResolverTrackingHelpers:
+    """Branch-level coverage for singleton/scenario tracking helpers."""
+
+    @staticmethod
+    def _resolver():
+        return ManifestInventoryResolver.__new__(ManifestInventoryResolver)
+
+    def test_track_singleton_counts_and_rejects_duplicate(self):
+        resolver = self._resolver()
+        counts: dict[ArtifactRole, int] = {}
+        resolver._track_singleton(ArtifactRole.USE_CASE, counts)
+        assert counts[ArtifactRole.USE_CASE] == 1
+        with pytest.raises(ManifestIntegrityError, match="Duplicate singleton role"):
+            resolver._track_singleton(ArtifactRole.USE_CASE, counts)
+
+    def test_track_singleton_rejects_duplicate_second(self):
+        resolver = self._resolver()
+        with pytest.raises(ManifestIntegrityError, match="Duplicate singleton role"):
+            resolver._track_singleton(ArtifactRole.USE_CASE, {ArtifactRole.USE_CASE: 1})
+
+    def test_track_singleton_ignores_non_singleton(self):
+        resolver = self._resolver()
+        counts: dict[ArtifactRole, int] = {}
+        resolver._track_singleton(ArtifactRole.SCENARIO_YAML, counts)
+        assert counts == {}
+
+    def test_register_scenario_id_rejects_duplicate(self):
+        resolver = self._resolver()
+        entry = _entry(
+            role=ArtifactRole.SCENARIO_YAML,
+            path="scenarios/s1.yaml",
+            scenario_id="s1",
+            candidate_id="c1",
+        )
+        with pytest.raises(ManifestIntegrityError, match="Duplicate scenario_id"):
+            resolver._register_scenario_id(
+                entry, ArtifactRole.SCENARIO_YAML, {(ArtifactRole.SCENARIO_YAML, "s1")}
+            )
+
+    def test_register_scenario_candidate_rejects_conflict(self):
+        resolver = self._resolver()
+        entry = _entry(
+            role=ArtifactRole.SCENARIO_YAML,
+            path="scenarios/s1.yaml",
+            scenario_id="s1",
+            candidate_id="c2",
+        )
+        with pytest.raises(ManifestIntegrityError, match="Conflicting candidate_id"):
+            resolver._register_scenario_candidate(entry, {"s1": "c1"})
+
+    def test_register_scenario_candidate_accepts_match(self):
+        resolver = self._resolver()
+        entry = _entry(
+            role=ArtifactRole.SCENARIO_YAML,
+            path="scenarios/s1.yaml",
+            scenario_id="s1",
+            candidate_id="c1",
+        )
+        mapping: dict[str, str] = {}
+        resolver._register_scenario_candidate(entry, mapping)
+        assert mapping == {"s1": "c1"}
+
+    def test_track_scenario_ids_skips_without_sid(self):
+        resolver = self._resolver()
+        entry = _entry(role=ArtifactRole.USE_CASE, path="use-case.txt")
+        resolver._track_scenario_ids(
+            entry, ArtifactRole.USE_CASE, set(), {"other": "x"}
+        )
+
+    def test_track_scenario_ids_registers_both(self):
+        resolver = self._resolver()
+        entry = _entry(
+            role=ArtifactRole.SCENARIO_YAML,
+            path="scenarios/s1.yaml",
+            scenario_id="s1",
+            candidate_id="c1",
+        )
+        scenario_ids: set[tuple[ArtifactRole, str]] = set()
+        mapping: dict[str, str] = {}
+        resolver._track_scenario_ids(
+            entry, ArtifactRole.SCENARIO_YAML, scenario_ids, mapping
+        )
+        assert scenario_ids == {(ArtifactRole.SCENARIO_YAML, "s1")}
+        assert mapping == {"s1": "c1"}
+
+
+class TestResolverScenarioCollectors:
+    """Branch-level coverage for YAML/feature collection helpers."""
+
+    @staticmethod
+    def _resolver():
+        return ManifestInventoryResolver.__new__(ManifestInventoryResolver)
+
+    @staticmethod
+    def _yaml_entry(scenario_id="s1", candidate_id="c1", path="scenarios/s1.yaml"):
+        return _entry(
+            role=ArtifactRole.SCENARIO_YAML,
+            path=path,
+            scenario_id=scenario_id,
+            candidate_id=candidate_id,
+        )
+
+    def test_collect_scenario_yaml_accepts(self):
+        resolver = self._resolver()
+        yaml_stems: set[str] = set()
+        yaml_info: dict[str, dict[str, str | None]] = {}
+        content = b"scenario_id: s1\ncandidate_id: c1\n"
+        resolver._collect_scenario_yaml(
+            self._yaml_entry(), content, yaml_stems, yaml_info
+        )
+        assert yaml_stems == {"s1"}
+        assert yaml_info["s1"] == {
+            "inventory": "s1",
+            "serialized": "s1",
+            "serialized_cid": "c1",
+            "inventory_cid": "c1",
+        }
+
+    def test_collect_scenario_yaml_rejects_wrong_path(self):
+        resolver = self._resolver()
+        with pytest.raises(ManifestIntegrityError, match="canonical path"):
+            resolver._collect_scenario_yaml(
+                self._yaml_entry(path="scenarios/wrong.yaml"),
+                b"scenario_id: s1\ncandidate_id: c1\n",
+                set(),
+                {},
+            )
+
+    def test_collect_scenario_feature_accepts(self):
+        resolver = self._resolver()
+        feature_stems: set[str] = set()
+        feature_map: dict[str, str] = {}
+        entry = _entry(
+            role=ArtifactRole.SCENARIO_FEATURE,
+            path="scenarios/s1.feature",
+            scenario_id="s1",
+            candidate_id="c1",
+        )
+        resolver._collect_scenario_feature(entry, feature_stems, feature_map)
+        assert feature_stems == {"s1"}
+        assert feature_map == {"s1": "s1"}
+
+    def test_collect_scenario_feature_rejects_wrong_path(self):
+        resolver = self._resolver()
+        entry = _entry(
+            role=ArtifactRole.SCENARIO_FEATURE,
+            path="scenarios/wrong.feature",
+            scenario_id="s1",
+            candidate_id="c1",
+        )
+        with pytest.raises(ManifestIntegrityError, match="canonical path"):
+            resolver._collect_scenario_feature(entry, set(), {})
+
+    def test_collect_scenario_entry_dispatches_yaml(self):
+        resolver = self._resolver()
+        resolver._collect_scenario_entry(
+            ArtifactRole.SCENARIO_YAML,
+            self._yaml_entry(),
+            b"scenario_id: s1\ncandidate_id: c1\n",
+            set(),
+            {},
+            set(),
+            {},
+        )
+
+    def test_collect_scenario_entry_dispatches_feature(self):
+        resolver = self._resolver()
+        entry = _entry(
+            role=ArtifactRole.SCENARIO_FEATURE,
+            path="scenarios/s1.feature",
+            scenario_id="s1",
+            candidate_id="c1",
+        )
+        resolver._collect_scenario_entry(
+            ArtifactRole.SCENARIO_FEATURE, entry, b"", set(), {}, set(), {}
+        )
+
+
+class TestResolverPostLoopHelpers:
+    """Branch-level coverage for post-loop pairing and v3 helpers."""
+
+    def test_parse_scenario_yaml_accepts_dict(self):
+        entry = _entry(path="scenarios/s1.yaml")
+        data, sid, cid = _parse_scenario_yaml(
+            entry, b"scenario_id: s1\ncandidate_id: c1\n"
+        )
+        assert data == {"scenario_id": "s1", "candidate_id": "c1"}
+        assert sid == "s1"
+        assert cid == "c1"
+
+    def test_parse_scenario_yaml_rejects_non_dict(self):
+        entry = _entry(path="scenarios/s1.yaml")
+        with pytest.raises(ManifestIntegrityError, match="is not a dict"):
+            _parse_scenario_yaml(entry, b"- one\n- two\n")
+
+    def test_parse_scenario_yaml_wraps_parse_errors(self):
+        entry = _entry(path="scenarios/s1.yaml")
+        with pytest.raises(
+            ManifestIntegrityError, match="Failed to read scenario YAML"
+        ):
+            _parse_scenario_yaml(entry, b"{{{{{{{{")
+
+    def test_require_serialized_ids_accepts(self):
+        entry = _entry(path="scenarios/s1.yaml")
+        _require_serialized_ids(entry, "s1", "c1")
+
+    def test_require_serialized_ids_missing_sid(self):
+        entry = _entry(path="scenarios/s1.yaml")
+        with pytest.raises(
+            ManifestIntegrityError, match="missing serialized scenario_id"
+        ):
+            _require_serialized_ids(entry, None, "c1")
+
+    def test_require_serialized_ids_missing_cid(self):
+        entry = _entry(path="scenarios/s1.yaml")
+        with pytest.raises(
+            ManifestIntegrityError, match="missing serialized candidate_id"
+        ):
+            _require_serialized_ids(entry, "s1", None)
+
+    def test_check_duplicate_candidate_ids_accepts_unique(self):
+        _check_duplicate_candidate_ids({"s1": "c1", "s2": "c2"})
+
+    def test_check_duplicate_candidate_ids_rejects_shared(self):
+        with pytest.raises(ManifestIntegrityError, match="Duplicate candidate_id"):
+            _check_duplicate_candidate_ids({"s1": "c1", "s2": "c1"})
+
+    def test_check_yaml_feature_pairing_relaxed_without_complete_inventory(self):
+        _check_yaml_feature_pairing({"s1"}, {"s1", "s2"}, False)
+
+    def test_check_yaml_feature_pairing_accepts_balanced(self):
+        _check_yaml_feature_pairing({"s1"}, {"s1"}, True)
+
+    def test_check_yaml_feature_pairing_rejects_yaml_only(self):
+        with pytest.raises(ManifestIntegrityError, match="YAML without feature"):
+            _check_yaml_feature_pairing({"s1"}, set(), True)
+
+    def test_check_yaml_feature_pairing_rejects_feature_only(self):
+        with pytest.raises(ManifestIntegrityError, match="feature without YAML"):
+            _check_yaml_feature_pairing(set(), {"s1"}, True)
+
+    def test_pairing_parts_both_sides(self):
+        parts = _pairing_parts({"b"}, {"a"})
+        assert len(parts) == 2
+
+    def test_check_paired_stems_skips_missing_info(self):
+        _check_paired_stems({"s1"}, {}, {})
+
+    def test_check_paired_stem_accepts_consistent(self):
+        _check_paired_stem(
+            "s1",
+            {
+                "inventory": "s1",
+                "serialized": "s1",
+                "serialized_cid": "c1",
+                "inventory_cid": "c1",
+            },
+            {"s1": "s1"},
+        )
+
+    def test_validate_stem_inventory_ids_missing(self):
+        with pytest.raises(
+            ManifestIntegrityError, match="missing inventory scenario_id"
+        ):
+            _validate_stem_inventory_ids("s1", "", "s1")
+
+    def test_validate_stem_inventory_ids_mismatch(self):
+        with pytest.raises(ManifestIntegrityError, match="Scenario ID mismatch"):
+            _validate_stem_inventory_ids("s1", "s1", "other")
+
+    def test_validate_stem_filename_mismatch(self):
+        with pytest.raises(ManifestIntegrityError, match="does not match"):
+            _validate_stem_filename("s1", "other")
+
+    def test_validate_stem_candidate_id_mismatch(self):
+        with pytest.raises(ManifestIntegrityError, match="Candidate ID mismatch"):
+            _validate_stem_candidate_id("s1", "c2", "c1")
+
+    def test_validate_stem_feature_pair_mismatch(self):
+        with pytest.raises(
+            ManifestIntegrityError, match="Feature scenario_id mismatch"
+        ):
+            _validate_stem_feature_pair("s1", "other", "s1")
+
+    def test_validate_stem_feature_pair_accepts(self):
+        _validate_stem_feature_pair("s1", "s1", "s1")
+
+    @staticmethod
+    def _manifest(version="2", status=RunStatus.COMPLETED, **kwargs):
+        return RunManifest(
+            manifest_version=version,
+            status=status,
+            run_id=_VALID_RUN_ID,
+            timestamp_start="2026-01-01T00:00:00+00:00",
+            **kwargs,
+        )
+
+    def test_is_v3_completed_status_true(self):
+        assert _is_v3_completed_status(self._manifest("3", RunStatus.COMPLETED))
+        assert _is_v3_completed_status(
+            self._manifest("3", RunStatus.COMPLETED_WITH_ERRORS)
+        )
+
+    def test_is_v3_completed_status_false(self):
+        assert not _is_v3_completed_status(self._manifest("3", RunStatus.FAILED))
+        assert not _is_v3_completed_status(self._manifest("2", RunStatus.COMPLETED))
+
+    def test_validate_v3_legacy_authority_ignores_v2(self):
+        _validate_v3_legacy_authority(
+            self._manifest("2", RunStatus.COMPLETED, attempts=[])
+        )
+
+    def test_validate_v3_legacy_authority_accepts_clean_v3(self):
+        _validate_v3_legacy_authority(
+            self._manifest("3", RunStatus.FAILED, attempts=[])
+        )
+
+    def test_validate_v3_legacy_authority_rejects_populated(self):
+        with pytest.raises(ManifestIntegrityError, match="legacy lifecycle fields"):
+            _validate_v3_legacy_authority(
+                self._manifest(
+                    "3",
+                    RunStatus.FAILED,
+                    attempts=[
+                        AttemptRecord(
+                            candidate_id="c1",
+                            scenario_id="s1",
+                            disposition=AttemptDisposition.ADMITTED,
+                            phase=AttemptPhase.MAIN,
+                        )
+                    ],
+                )
+            )
+
+    def test_validate_v3_required_artifacts_accepts(self):
+        _validate_v3_required_artifacts(
+            {
+                ArtifactRole.PLANNING_CHECKPOINT: 1,
+                ArtifactRole.COVERAGE_PLAN: 1,
+                ArtifactRole.FINALIZATION_INVENTORY: 1,
+            },
+            RunStatus.COMPLETED,
+        )
+
+    def test_validate_v3_required_artifacts_rejects_missing(self):
+        with pytest.raises(ManifestIntegrityError, match="exactly one"):
+            _validate_v3_required_artifacts({}, RunStatus.COMPLETED)
+
+    def test_validate_legacy_role_support_rejects_v3_role_in_v2(self):
+        with pytest.raises(
+            ManifestIntegrityError, match="does not support v3-only role"
+        ):
+            _validate_legacy_role_support("2", ArtifactRole.PLANNING_CHECKPOINT)
+
+    def test_validate_legacy_role_support_accepts_v2_roles(self):
+        _validate_legacy_role_support("2", ArtifactRole.SCENARIO_YAML)
+
+    def test_validate_legacy_role_support_accepts_v3_manifest(self):
+        _validate_legacy_role_support("3", ArtifactRole.PLANNING_CHECKPOINT)
+
+
+class TestRunnerCompletionHelpers:
+    """Direct coverage for the decomposed v3 completion-tail helpers."""
+
+    def test_glob_hash_map_sorted_relative_entries(self, tmp_path: Path):
+        from asago_scenario_generator.pipeline.runner import _glob_hash_map
+
+        data_root = tmp_path / "data"
+        patterns_dir = data_root / "taxonomies" / "attack-patterns"
+        patterns_dir.mkdir(parents=True)
+        (patterns_dir / "attack-patterns.yaml").write_text("a", encoding="utf-8")
+        (patterns_dir / "attack-patterns.b.yaml").write_text("b", encoding="utf-8")
+        result = _glob_hash_map(patterns_dir, "attack-patterns*.yaml", data_root)
+        assert list(result) == [
+            "taxonomies/attack-patterns/attack-patterns.b.yaml",
+            "taxonomies/attack-patterns/attack-patterns.yaml",
+        ]
+        assert (
+            result["taxonomies/attack-patterns/attack-patterns.yaml"]
+            == hashlib.sha256(b"a").hexdigest()
+        )
+        assert _glob_hash_map(data_root / "missing", "*.yaml", data_root) == {}
+
+    def test_collect_presentation_notes_deduplicates(self):
+        from types import SimpleNamespace
+
+        from asago_scenario_generator.pipeline.runner import _collect_presentation_notes
+
+        notes: list[str] = ["existing"]
+        scenarios = (
+            SimpleNamespace(
+                generation=SimpleNamespace(
+                    notes=("presentation_fallback:first", "plain-note")
+                )
+            ),
+            SimpleNamespace(
+                generation=SimpleNamespace(
+                    notes=(
+                        "presentation_fallback:first",
+                        "presentation_fallback:second",
+                    )
+                )
+            ),
+        )
+        _collect_presentation_notes(scenarios, notes)
+        assert notes == [
+            "existing",
+            "presentation_fallback:first",
+            "presentation_fallback:second",
+        ]
+
+    def test_remove_stale_optional_products(self, tmp_path: Path):
+        from asago_scenario_generator.pipeline.runner import (
+            _remove_stale_optional_products,
+        )
+
+        (tmp_path / "eval-scorecard.yaml").write_text("x", encoding="utf-8")
+        (tmp_path / "report.html").write_text("y", encoding="utf-8")
+        (tmp_path / "coverage-gaps.json").write_text("z", encoding="utf-8")
+        _remove_stale_optional_products(tmp_path)
+        assert not (tmp_path / "eval-scorecard.yaml").exists()
+        assert not (tmp_path / "report.html").exists()
+        assert (tmp_path / "coverage-gaps.json").exists()
+
+    def test_pattern_counts(self):
+        from types import SimpleNamespace
+
+        from asago_scenario_generator.pipeline.runner import _pattern_counts
+
+        selected = (
+            SimpleNamespace(pattern_id="a"),
+            SimpleNamespace(pattern_id="b"),
+            SimpleNamespace(pattern_id="a"),
+        )
+        assert _pattern_counts(selected) == {"a": 2, "b": 1}
+
+    def test_restore_selected_absent_candidate_raises(self):
+        from types import SimpleNamespace
+
+        from asago_scenario_generator.pipeline.runner import _restore_selected
+        from asago_scenario_generator.pipeline.runner import ManifestIntegrityError
+
+        planning = SimpleNamespace(selected_candidate_ids=("missing",))
+        with pytest.raises(ManifestIntegrityError, match="absent from plan"):
+            _restore_selected(planning, {})
+
+    def test_failed_artifact_entry_readable_and_missing(self, tmp_path: Path):
+        from asago_scenario_generator.pipeline.runner import (
+            _failed_artifact_entry,
+        )
+
+        (tmp_path / "use-case.txt").write_text("uc", encoding="utf-8")
+        entry = _failed_artifact_entry(tmp_path, ArtifactRole.USE_CASE, "use-case.txt")
+        assert entry is not None
+        assert entry.role is ArtifactRole.USE_CASE
+        assert entry.path == "use-case.txt"
+        assert entry.sha256 == hashlib.sha256(b"uc").hexdigest()
+        assert (
+            _failed_artifact_entry(tmp_path, ArtifactRole.REPORT, "report.html") is None
+        )
+
+    def test_best_effort_artifact_entry_hashes_file(self, tmp_path: Path):
+        from asago_scenario_generator.pipeline.runner import (
+            ARTIFACT_SCHEMA_VERSION,
+            _best_effort_artifact_entry,
+        )
+
+        full = tmp_path / "coverage-plan.json"
+        full.write_text("plan", encoding="utf-8")
+        entry = _best_effort_artifact_entry(
+            full, ArtifactRole.COVERAGE_PLAN, "coverage-plan.json", None, None
+        )
+        assert entry is not None
+        assert entry.role is ArtifactRole.COVERAGE_PLAN
+        assert entry.sha256 == hashlib.sha256(b"plan").hexdigest()
+        assert entry.schema_version == ARTIFACT_SCHEMA_VERSION
+
+    def test_scenario_receipts(self):
+        from asago_scenario_generator.pipeline.runner import _scenario_receipts
+
+        receipts = [
+            {
+                "scenario_id": "s1",
+                "candidate_id": "c1",
+                "yaml_path": "work/s1.yaml",
+                "feature_path": "work/s1.feature",
+            },
+            {"scenario_id": "s2", "candidate_id": "c2", "yaml_path": "w/s2.yaml"},
+        ]
+        entries = _scenario_receipts(receipts)
+        assert entries == [
+            (ArtifactRole.SCENARIO_YAML, "scenarios/s1.yaml", "s1", "c1"),
+            (ArtifactRole.SCENARIO_FEATURE, "scenarios/s1.feature", "s1", "c1"),
+            (ArtifactRole.SCENARIO_YAML, "scenarios/s2.yaml", "s2", "c2"),
+        ]
+
+    def test_finalization_inventory_receipts_missing_and_malformed(
+        self, tmp_path: Path
+    ):
+        from asago_scenario_generator.pipeline.runner import (
+            _finalization_inventory_receipts,
+        )
+
+        assert _finalization_inventory_receipts(tmp_path) == []
+        (tmp_path / "finalization-inventory.json").write_text(
+            "{not json", encoding="utf-8"
+        )
+        assert _finalization_inventory_receipts(tmp_path) == []

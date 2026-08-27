@@ -25,29 +25,37 @@ from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     InventoryCompleteness,
 )
-from asago_scenario_generator.pipeline.finalization import (
+from asago_scenario_generator.pipeline.finalization_contracts import (
     CandidateTerminalStatus,
     GeneratedStage,
     LifecycleState,
 )
 from asago_scenario_generator.pipeline.finalization_gates import AdmissionEvidenceId
-from asago_scenario_generator.pipeline.projection import canonical_json_bytes
-from asago_scenario_generator.pipeline.persistence import (
-    AdmissionDecisionRecord,
-    ArtifactReceipt,
-    CandidateAttemptRecord,
-    CoveragePlanV2,
-    FinalizationInventoryV1,
-    ParsimonyRepairRecord,
-    QuarantineBundleV1,
-    StageAttemptRecord,
-    StrictModel,
-    TargetState,
-    TransitionRecord,
-    ViolationRecord,
-    canonical_sha256,
+from asago_scenario_generator.pipeline.projection_contracts import canonical_json_bytes
+from asago_scenario_generator.pipeline.persistence_artifacts import ArtifactReceipt
+from asago_scenario_generator.pipeline.persistence_checkpoint import (
     read_planning_checkpoint_bytes,
     validate_planning_checkpoint,
+)
+from asago_scenario_generator.pipeline.persistence_common import canonical_sha256
+from asago_scenario_generator.pipeline.persistence_decisions import (
+    AdmissionDecisionRecord,
+)
+from asago_scenario_generator.pipeline.persistence_journal import (
+    FinalizationInventoryV1,
+    QuarantineBundleV1,
+)
+from asago_scenario_generator.pipeline.persistence_models import (
+    CandidateAttemptRecord,
+    ParsimonyRepairRecord,
+    StageAttemptRecord,
+    TransitionRecord,
+    ViolationRecord,
+)
+from asago_scenario_generator.pipeline.persistence_plan import (
+    CoveragePlanV2,
+    StrictModel,
+    TargetState,
 )
 
 
@@ -1940,6 +1948,7 @@ def _check_v3_completed_status(
         )
     if not quarantined and resolver.manifest.status not in {
         RunStatus.COMPLETED,
+        RunStatus.COMPLETED_WITH_WARNINGS,
         RunStatus.COMPLETED_WITH_ERRORS,
     }:
         raise ManifestIntegrityError(
