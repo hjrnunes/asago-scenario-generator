@@ -865,3 +865,529 @@ class TestArtifactFile:
     def test_artifact_round_trips_through_yaml(self):
         raw = yaml.safe_load(_DEFAULT_LINEAGE_PATH.read_text())
         assert compute_catalog_lineage_digest(raw) == raw["release"]["semantic_digest"]
+
+
+class TestLineageValidatorHelpers:
+    """Direct branch coverage for the decomposed lineage gate helpers."""
+
+    def test_taxonomy_pins_valid(self, artifact, resolver):
+        from asago_scenario_generator.data.catalog_lineage import (
+            _taxonomy_pins_valid,
+        )
+
+        assert _taxonomy_pins_valid(artifact, resolver) is None
+        laaf_artifact = _mutate(
+            artifact,
+            lambda a: a["taxonomy_context"].__setitem__("laaf", {"release": "x"}),
+        )
+        with pytest.raises(ValueError, match="laaf must be null"):
+            _taxonomy_pins_valid(laaf_artifact, resolver)
+
+    def test_taxonomy_pin_mismatch(self, artifact, resolver):
+        from asago_scenario_generator.data.catalog_lineage import (
+            _taxonomy_pin_mismatch,
+        )
+
+        expected = resolver.taxonomy_context
+        assert _taxonomy_pin_mismatch(artifact["taxonomy_context"], expected) is False
+        mutated = _mutate(
+            artifact,
+            lambda a: a["taxonomy_context"]["atlas"].__setitem__("release", "x"),
+        )
+        assert _taxonomy_pin_mismatch(mutated["taxonomy_context"], expected) is True
+        mutated = _mutate(
+            artifact,
+            lambda a: a["taxonomy_context"]["atlas"].__setitem__("digest", "x"),
+        )
+        assert _taxonomy_pin_mismatch(mutated["taxonomy_context"], expected) is True
+        mutated = _mutate(
+            artifact,
+            lambda a: a["taxonomy_context"].__setitem__("mapping_set_digest", "x"),
+        )
+        assert _taxonomy_pin_mismatch(mutated["taxonomy_context"], expected) is True
+        assert (
+            _taxonomy_pin_mismatch(
+                artifact["taxonomy_context"],
+                type(expected)(
+                    atlas=expected.atlas,
+                    laaf=expected.atlas,
+                    mapping_set_digest=expected.mapping_set_digest,
+                ),
+            )
+            is True
+        )
+
+    def test_source_catalog_pin_valid(self, artifact):
+        from asago_scenario_generator.data.catalog_lineage import (
+            _source_catalog_pin_valid,
+        )
+
+        pin = artifact["source_catalog_context"]
+        sources = artifact["sources"]
+        assert _source_catalog_pin_valid(pin, sources) is None
+        with pytest.raises(ValueError, match="canonicalization"):
+            _source_catalog_pin_valid(dict(pin, canonicalization="other"), sources)
+        with pytest.raises(ValueError, match="record_count"):
+            _source_catalog_pin_valid(dict(pin, record_count=1), sources)
+        with pytest.raises(ValueError, match="not sorted"):
+            _source_catalog_pin_valid(
+                dict(pin, file_manifest=list(reversed(pin["file_manifest"]))),
+                sources,
+            )
+        undeclared = copy.deepcopy(sources)
+        undeclared[0]["source_file"] = "missing.yaml"
+        with pytest.raises(ValueError, match="not in the source catalog manifest"):
+            _source_catalog_pin_valid(pin, undeclared)
+
+    def test_disposition_vocabulary_valid(self, artifact):
+        from asago_scenario_generator.data.catalog_lineage import (
+            _disposition_vocabulary_valid,
+        )
+
+        assert _disposition_vocabulary_valid(artifact) is None
+        mutant = _mutate(
+            artifact,
+            lambda a: a["disposition_vocabulary"].__setitem__("bogus", "x"),
+        )
+        with pytest.raises(ValueError, match="closed vocabulary"):
+            _disposition_vocabulary_valid(mutant)
+
+    def test_source_ids_unique(self, artifact):
+        from asago_scenario_generator.data.catalog_lineage import (
+            _source_ids_unique,
+        )
+
+        assert len(_source_ids_unique(artifact["sources"])) == 71
+        duplicated = artifact["sources"] + [artifact["sources"][0]]
+        with pytest.raises(ValueError, match="duplicate source_pattern_id"):
+            _source_ids_unique(duplicated)
+
+    def test_overlap_groups_valid(self, artifact):
+        from asago_scenario_generator.data.catalog_lineage import (
+            _overlap_groups_valid,
+        )
+
+        by_id = {entry["source_pattern_id"]: entry for entry in artifact["sources"]}
+        groups = artifact["overlap_groups"]
+        assert _overlap_groups_valid(groups, artifact["sources"], by_id) is None
+        duplicated = copy.deepcopy(groups) + [copy.deepcopy(groups[0])]
+        with pytest.raises(ValueError, match="duplicate overlap group_id"):
+            _overlap_groups_valid(duplicated, artifact["sources"], by_id)
+        unknown_member = copy.deepcopy(groups)
+        unknown_member[0]["members"] = ["AP-T99-99"]
+        with pytest.raises(ValueError, match="is not a source"):
+            _overlap_groups_valid(unknown_member, artifact["sources"], by_id)
+        double_member = copy.deepcopy(groups)
+        double_member[1]["members"].append(double_member[0]["members"][0])
+        with pytest.raises(ValueError, match="more than one group"):
+            _overlap_groups_valid(double_member, artifact["sources"], by_id)
+
+    def test_overlap_entry_references(self, artifact):
+        from asago_scenario_generator.data.catalog_lineage import (
+            _overlap_entry_references,
+        )
+
+        group_ids = {g["group_id"] for g in artifact["overlap_groups"]}
+        member_to_group = {
+            member: g["group_id"]
+            for g in artifact["overlap_groups"]
+            for member in g["members"]
+        }
+        assert (
+            _overlap_entry_references(
+                artifact["sources"][0], group_ids, member_to_group
+            )
+            is None
+        )
+        # A source that references no group but is listed as a member.
+        listed = next(
+            entry
+            for entry in artifact["sources"]
+            if entry["source_pattern_id"] in member_to_group
+        )
+        unlisted = copy.deepcopy(listed)
+        unlisted["overlap_group"] = None
+        with pytest.raises(ValueError, match="references no group"):
+            _overlap_entry_references(unlisted, group_ids, member_to_group)
+        unknown = copy.deepcopy(artifact["sources"][0])
+        unknown["overlap_group"] = "OG-99"
+        with pytest.raises(ValueError, match="unknown overlap group"):
+            _overlap_entry_references(unknown, group_ids, member_to_group)
+        mismatched = copy.deepcopy(listed)
+        other_group = next(g for g in group_ids if g != listed["overlap_group"])
+        mismatched["overlap_group"] = other_group
+        with pytest.raises(ValueError, match="not listed as a member"):
+            _overlap_entry_references(mismatched, group_ids, member_to_group)
+
+    def test_disposition_violation(self, artifact):
+        from asago_scenario_generator.data.catalog_lineage import (
+            _disposition_violation,
+        )
+
+        retired = {
+            "source_pattern_id": "AP-T0-00",
+            "disposition": "retire",
+            "resulting_patterns": [],
+        }
+        assert _disposition_violation(retired) is None
+        with_results = dict(retired, resulting_patterns=[{"pattern_id": "AP-T0-01"}])
+        with pytest.raises(ValueError, match="carries resulting patterns"):
+            _disposition_violation(with_results)
+        retained = {
+            "source_pattern_id": "AP-T0-00",
+            "disposition": "retain",
+            "resulting_patterns": [{"pattern_id": "AP-T0-00"}],
+        }
+        assert _disposition_violation(retained) == retained["resulting_patterns"]
+        wrong_id = {
+            "source_pattern_id": "AP-T0-00",
+            "disposition": "retain",
+            "resulting_patterns": [{"pattern_id": "AP-T0-01"}],
+        }
+        with pytest.raises(ValueError, match="must continue its source id"):
+            _disposition_violation(wrong_id)
+        supersede = {
+            "source_pattern_id": "AP-T0-00",
+            "disposition": "supersede",
+            "resulting_patterns": [{"pattern_id": "AP-T1-99"}],
+        }
+        assert _disposition_violation(supersede) == supersede["resulting_patterns"]
+
+    def test_proposed_atlas_ids_valid(self, artifact, resolver):
+        from asago_scenario_generator.data.catalog_lineage import (
+            _proposed_atlas_ids_valid,
+        )
+
+        record = {
+            "atlas_chain_mappings": [{"id": "AML.T0049"}],
+            "atlas_step_mappings": [],
+        }
+        assert _proposed_atlas_ids_valid(resolver, "AP-T0-00", record) is None
+        unknown = {
+            "atlas_chain_mappings": [{"id": "AML.T9999"}],
+            "atlas_step_mappings": [],
+        }
+        with pytest.raises(ValueError, match="unknown ATLAS id"):
+            _proposed_atlas_ids_valid(resolver, "AP-T0-00", unknown)
+
+    def test_resulting_record_valid(self, artifact, resolver, case_steps):
+        from asago_scenario_generator.data.catalog_lineage import (
+            _resulting_record_valid,
+        )
+
+        entry = artifact["sources"][0]
+        pid = entry["source_pattern_id"]
+        record = {
+            "pattern_id": pid,
+            "source_file": entry["source_file"],
+            "atlas_chain_mappings": [],
+            "atlas_step_mappings": [],
+        }
+        errors: list[str] = []
+        _resulting_record_valid(
+            pid, entry, pid, record, {pid}, resolver, case_steps, errors
+        )
+        assert errors == []
+        colliding = dict(record, pattern_id="AP-T1-02")
+        with pytest.raises(ValueError, match="collides with an existing catalog id"):
+            _resulting_record_valid(
+                pid,
+                entry,
+                "AP-T1-02",
+                colliding,
+                {"AP-T1-02"},
+                resolver,
+                case_steps,
+                errors,
+            )
+        bad_file = dict(record, source_file="unknown.yaml")
+        with pytest.raises(ValueError, match="unknown source_file"):
+            _resulting_record_valid(
+                pid, entry, pid, bad_file, {pid}, resolver, case_steps, errors
+            )
+        other_file = dict(record, source_file="attack-patterns-agentic-only.yaml")
+        with pytest.raises(ValueError, match="owned by"):
+            _resulting_record_valid(
+                pid, entry, pid, other_file, {pid}, resolver, case_steps, errors
+            )
+        # Citation accumulation across both mapping kinds.
+        cited = dict(
+            record,
+            atlas_chain_mappings=[
+                {"id": "AML.T0049", "evidence": "AML.CS0048 S01; AML.CS0048 S99"}
+            ],
+            atlas_step_mappings=[{"id": "AML.T0001", "evidence": "AML.CS0001 S99"}],
+        )
+        errors = []
+        _resulting_record_valid(
+            pid, entry, pid, cited, {pid}, resolver, case_steps, errors
+        )
+        assert len(errors) == 2
+        assert all("absent from" in error for error in errors)
+
+    def test_split_naming_valid(self, artifact, resolver, case_steps):
+        from asago_scenario_generator.data.catalog_lineage import (
+            _split_naming_valid,
+        )
+
+        catalog_ids = {entry["source_pattern_id"] for entry in artifact["sources"]}
+        assert _split_naming_valid(artifact["sources"], catalog_ids) is None
+        split_source = next(
+            entry for entry in artifact["sources"] if entry["disposition"] == "split"
+        )
+        wrong_first = copy.deepcopy(split_source)
+        wrong_first["resulting_patterns"][0]["pattern_id"] = "AP-T9-99"
+        with pytest.raises(ValueError, match="must continue the source id"):
+            _split_naming_valid([wrong_first], catalog_ids)
+        wrong_derived = copy.deepcopy(split_source)
+        if len(wrong_derived["resulting_patterns"]) > 1:
+            wrong_derived["resulting_patterns"][1]["pattern_id"] = "AP-T9-99"
+            with pytest.raises(ValueError, match="lowest unused family id"):
+                _split_naming_valid([wrong_derived], catalog_ids)
+
+    def test_lowest_unused_family_id(self):
+        from asago_scenario_generator.data.catalog_lineage import (
+            _lowest_unused_family_id,
+        )
+
+        assert _lowest_unused_family_id("9", set()) == ("AP-T9-01", 1)
+        assert _lowest_unused_family_id("9", {1, 2}) == ("AP-T9-03", 3)
+        assert _lowest_unused_family_id("9", {1, 3}) == ("AP-T9-02", 2)
+
+    def test_release_digest_valid(self, artifact):
+        from asago_scenario_generator.data.catalog_lineage import (
+            _release_digest_valid,
+        )
+
+        assert _release_digest_valid(artifact) is None
+        mutant = _mutate(
+            artifact,
+            lambda a: a["release"].__setitem__("semantic_digest", "0" * 64),
+        )
+        with pytest.raises(ValueError, match="digest mismatch"):
+            _release_digest_valid(mutant)
+
+    def test_citation_errors_for_match(self, case_steps):
+        from asago_scenario_generator.data.catalog_lineage import (
+            _CASE_STEP_RE,
+            _citation_errors_for_match,
+        )
+
+        match = next(_CASE_STEP_RE.finditer("AML.CS0048 S01"))
+        assert (
+            _citation_errors_for_match(
+                "AP-T3-04", "AML.T0049", match, case_steps, False
+            )
+            == []
+        )
+        assert (
+            _citation_errors_for_match("AP-T3-04", "AML.T0049", match, case_steps, True)
+            == []
+        )
+        missing_case = next(_CASE_STEP_RE.finditer("AML.CS9999 S01"))
+        errors = _citation_errors_for_match("R", "M", missing_case, case_steps, False)
+        assert "absent from the pinned ATLAS relationships" in errors[0]
+        unparseable = next(_CASE_STEP_RE.finditer("AML.CS0048 S01-S05-S09"))
+        errors = _citation_errors_for_match("R", "M", unparseable, case_steps, False)
+        assert "unparseable case-step range" in errors[0]
+        unknown_step = next(_CASE_STEP_RE.finditer("AML.CS0048 S99"))
+        errors = _citation_errors_for_match("R", "M", unknown_step, case_steps, False)
+        assert "absent from" in errors[0]
+        wrong_technique = next(_CASE_STEP_RE.finditer("AML.CS0048 S00"))
+        errors = _citation_errors_for_match(
+            "R", "M", wrong_technique, case_steps, False
+        )
+        assert "unhedged citation" in errors[0]
+        # Hedged citations skip the assignment check.
+        assert (
+            _citation_errors_for_match("R", "M", wrong_technique, case_steps, True)
+            == []
+        )
+
+    def test_normalize_record_branches(self):
+        from datetime import date
+
+        from asago_scenario_generator.data.catalog_lineage import (
+            _normalize_record,
+        )
+
+        assert _normalize_record({"b": "caf\u00e9", "a": [1, None, True]}) == {
+            "b": "caf\u00e9",
+            "a": [1, None, True],
+        }
+        assert _normalize_record("caf\u00e9") == "caf\u00e9"
+        assert _normalize_record(3.5) == 3.5
+        assert _normalize_record(None) is None
+        assert _normalize_record(date(2026, 1, 1)) == "2026-01-01"
+        assert _normalize_record({1: "x"}) == {"1": "x"}
+
+    def test_compute_catalog_lineage_digest_raises(self):
+        from asago_scenario_generator.data.catalog_lineage import (
+            compute_catalog_lineage_digest,
+        )
+
+        with pytest.raises(TypeError, match="must be a mapping"):
+            compute_catalog_lineage_digest([])
+        with pytest.raises(ValueError, match="lacks release.semantic_digest"):
+            compute_catalog_lineage_digest({"release": {"version": "1"}})
+
+    def test_lineage_schema_branches(self):
+        from asago_scenario_generator.data.catalog_lineage import (
+            _lineage_schema,
+            load_catalog_lineage_schema,
+        )
+
+        assert _lineage_schema({"custom": True}) == {"custom": True}
+        assert "properties" in _lineage_schema(None)
+        assert _lineage_schema(None) == load_catalog_lineage_schema()
+
+    def test_resulting_ids_unique_branches(self):
+        from asago_scenario_generator.data.catalog_lineage import (
+            _resulting_ids_unique,
+        )
+
+        assert _resulting_ids_unique(["AP-T1-01", "AP-T1-02"]) is None
+        with pytest.raises(ValueError, match="duplicate resulting pattern id"):
+            _resulting_ids_unique(["AP-T1-01", "AP-T1-01"])
+
+    def test_citation_errors_block_branches(self):
+        from asago_scenario_generator.data.catalog_lineage import (
+            _citation_errors_block,
+        )
+
+        assert _citation_errors_block([]) is None
+        with pytest.raises(ValueError, match="citation inconsistencies"):
+            _citation_errors_block(["R mapping M: problem"])
+
+    def test_compute_source_catalog_digest_raises(self):
+        from asago_scenario_generator.data.catalog_lineage import (
+            compute_source_catalog_digest,
+        )
+
+        patterns = {"AP-T1-01": {"threat_id": "T1"}}
+        owners = {"AP-T1-01": "attack-patterns.yaml"}
+        manifest = ["attack-patterns.yaml"]
+        assert compute_source_catalog_digest(patterns, owners, manifest) != ""
+        with pytest.raises(ValueError, match="without a declaring file"):
+            compute_source_catalog_digest(
+                {"AP-T1-01": {}, "AP-T9-99": {}}, owners, manifest
+            )
+        with pytest.raises(ValueError, match="outside the manifest"):
+            compute_source_catalog_digest(
+                patterns, {"AP-T1-01": "outside.yaml"}, manifest
+            )
+
+    def test_step_employments(self):
+        from asago_scenario_generator.data.catalog_lineage import (
+            _step_employments,
+        )
+
+        bundle = {
+            "employs": [
+                {"step-id": "S01", "target": "AML.T0001"},
+                {"step-id": "S01", "target": "AML.T0002"},
+                {"step-id": None, "target": "AML.T0003"},
+            ]
+        }
+        assert _step_employments(bundle) == {"S01": {"AML.T0001", "AML.T0002"}}
+        assert _step_employments(None) == {}
+        assert _step_employments({"employs": []}) == {}
+
+    def test_load_atlas_case_step_index_filters_non_cases(self, tmp_path):
+        from asago_scenario_generator.data.catalog_lineage import (
+            load_atlas_case_step_index,
+        )
+
+        source = tmp_path / "atlas.yaml"
+        source.write_text(
+            yaml.safe_dump(
+                {
+                    "relationships": {
+                        "AML.CS0001": {
+                            "employs": [{"step-id": "S01", "target": "AML.T0001"}]
+                        },
+                        "AML.TA0001": {
+                            "employs": [{"step-id": "S01", "target": "AML.T0001"}]
+                        },
+                        "CS0002": {
+                            "employs": [{"step-id": "S01", "target": "AML.T0001"}]
+                        },
+                        "AML.CS0002": {"employs": []},
+                    }
+                }
+            )
+        )
+        assert load_atlas_case_step_index(source) == {
+            "AML.CS0001": {"S01": frozenset({"AML.T0001"})}
+        }
+
+    def test_verify_pinned_manifest(self, artifact):
+        from asago_scenario_generator.data.catalog_lineage import (
+            _verify_pinned_manifest,
+        )
+
+        pin = artifact["source_catalog_context"]
+        patterns = {"AP-T1-01": {"threat_id": "T1"}}
+        owners = {"AP-T1-01": "attack-patterns.yaml"}
+        with pytest.raises(
+            ValueError, match="does not match the supplied declaring files"
+        ):
+            _verify_pinned_manifest(
+                dict(pin, file_manifest=["other.yaml"], record_count=1),
+                patterns,
+                owners,
+            )
+        with pytest.raises(ValueError, match="record_count"):
+            _verify_pinned_manifest(
+                dict(pin, file_manifest=["attack-patterns.yaml"], record_count=99),
+                patterns,
+                owners,
+            )
+        assert (
+            _verify_pinned_manifest(
+                dict(pin, file_manifest=["attack-patterns.yaml"], record_count=1),
+                patterns,
+                owners,
+            )
+            is None
+        )
+
+    def test_verify_source_ids_match(self):
+        from asago_scenario_generator.data.catalog_lineage import (
+            _verify_source_ids_match,
+        )
+
+        sources = [{"source_pattern_id": "AP-T1-01"}, {"source_pattern_id": "AP-T1-02"}]
+        patterns = {"AP-T1-01": {}, "AP-T1-02": {}}
+        assert _verify_source_ids_match(sources, patterns) is None
+        with pytest.raises(ValueError, match="duplicate source_pattern_id"):
+            _verify_source_ids_match(sources + sources[:1], patterns)
+        with pytest.raises(ValueError, match="diverge from the supplied catalog"):
+            _verify_source_ids_match(sources, {"AP-T1-01": {}})
+
+    def test_verify_entry_facts_match(self):
+        from asago_scenario_generator.data.catalog_lineage import (
+            _verify_entry_facts_match,
+        )
+
+        entry = {
+            "source_pattern_id": "AP-T1-01",
+            "source_file": "attack-patterns.yaml",
+            "threat_id": "T1",
+            "evidence_tier": "enrichment",
+            "evidence_count": 1,
+            "legacy_kill_chain_steps": 0,
+        }
+        pattern = {
+            "threat_id": "T1",
+            "evidence": [{"type": "enrichment"}],
+            "kill_chain": [],
+        }
+        owners = {"AP-T1-01": "attack-patterns.yaml"}
+        assert _verify_entry_facts_match(entry, "AP-T1-01", pattern, owners) is None
+        drift = dict(entry, evidence_count=2)
+        with pytest.raises(ValueError, match="evidence_count"):
+            _verify_entry_facts_match(drift, "AP-T1-01", pattern, owners)
+        drift = dict(entry, source_file="other.yaml")
+        with pytest.raises(ValueError, match="does not match the declaring file"):
+            _verify_entry_facts_match(drift, "AP-T1-01", pattern, owners)

@@ -150,6 +150,35 @@ def _parse_mitigation(raw: dict) -> MitigationRef:
     )
 
 
+def _risk_extraction_records(data: Any) -> Any:
+    """The risk records of a policy-mapper document (dict or raw list)."""
+    if isinstance(data, dict):
+        return data.get("risks", data)
+    return data
+
+
+def _risk_card_from_raw(r: dict) -> RiskCard:
+    """Convert one policy-mapper risk dict to a RiskCard."""
+    evidence = [_parse_evidence(e) for e in r.get("evidence", [])]
+    mitigations = [_parse_mitigation(m) for m in r.get("mitigations", [])]
+    return RiskCard(
+        risk_id=r["risk_id"],
+        risk_name=r["risk_name"],
+        risk_description=r["risk_description"],
+        taxonomy=r["taxonomy"],
+        confidence=r["confidence"],
+        grounding_confidence=r["grounding_confidence"],
+        evidence=evidence,
+        scores=r.get("scores"),
+        mitigations=mitigations,
+        threat=r.get("threat"),
+        threat_source=r.get("threat_source"),
+        vulnerability=r.get("vulnerability"),
+        consequence=r.get("consequence"),
+        impact=r.get("impact"),
+    )
+
+
 def load_risk_extraction(path: str | Path) -> list[RiskCard]:
     """Load a policy-mapper risk-extraction.json, filtering to IBM Risk Atlas.
 
@@ -164,36 +193,12 @@ def load_risk_extraction(path: str | Path) -> list[RiskCard]:
     """
     with open(path) as f:
         data = json.load(f)
-
-    risks_raw = data.get("risks", data) if isinstance(data, dict) else data
-
-    cards: list[RiskCard] = []
-    for r in risks_raw:
-        if r.get("taxonomy") != "ibm-risk-atlas":
-            continue
-
-        evidence = [_parse_evidence(e) for e in r.get("evidence", [])]
-        mitigations = [_parse_mitigation(m) for m in r.get("mitigations", [])]
-
-        card = RiskCard(
-            risk_id=r["risk_id"],
-            risk_name=r["risk_name"],
-            risk_description=r["risk_description"],
-            taxonomy=r["taxonomy"],
-            confidence=r["confidence"],
-            grounding_confidence=r["grounding_confidence"],
-            evidence=evidence,
-            scores=r.get("scores"),
-            mitigations=mitigations,
-            threat=r.get("threat"),
-            threat_source=r.get("threat_source"),
-            vulnerability=r.get("vulnerability"),
-            consequence=r.get("consequence"),
-            impact=r.get("impact"),
-        )
-        cards.append(card)
-
-    return cards
+    risks_raw = _risk_extraction_records(data)
+    return [
+        _risk_card_from_raw(r)
+        for r in risks_raw
+        if r.get("taxonomy") == "ibm-risk-atlas"
+    ]
 
 
 _DEFAULT_ATTACK_PATTERNS_DIR = (
@@ -236,7 +241,11 @@ def load_attack_patterns(
     if not files:
         # Fallback: try the exact default path (raises FileNotFoundError if missing)
         return _load_single_attack_patterns_file(_DEFAULT_ATTACK_PATTERNS_PATH)
+    return _merge_pattern_files(files)
 
+
+def _merge_pattern_files(files: list[Path]) -> dict[str, dict]:
+    """Merge pattern dicts, failing loudly on duplicate pattern IDs."""
     merged: dict[str, dict] = {}
     origins: dict[str, Path] = {}
     for f in files:
