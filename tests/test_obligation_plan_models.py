@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 
 from asago_scenario_generator.models.obligation_plan import (
     QualificationTraceItem,
@@ -11,13 +12,21 @@ from asago_scenario_generator.models.obligation_plan import (
 )
 
 
+def _make_plan(**overrides: Any) -> TaxonomyObligationPlan:
+    defaults: dict[str, Any] = {
+        "taxonomy_version": "atlas-2026.05",
+        "mapping_version": "sssom-v1",
+        "qualification_ruleset_version": "catalog-qualification-v1",
+        "template_version": "scenario-envelope-v1",
+        "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "obligations": [],
+    }
+    defaults.update(overrides)
+    return TaxonomyObligationPlan(**defaults)
+
+
 def test_obligation_plan_pinned_versions() -> None:
-    plan = TaxonomyObligationPlan(
-        taxonomy_version="atlas-2026.05",
-        mapping_version="sssom-v1",
-        qualification_ruleset_version="catalog-qualification-v1",
-        template_version="scenario-envelope-v1",
-        digest="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    plan = _make_plan(
         obligations=[
             TaxonomyObligation(
                 obligation_id="ob:atlas-prompt-injection:AP-T6-01",
@@ -41,11 +50,7 @@ def test_obligation_plan_pinned_versions() -> None:
 
 
 def test_obligation_plan_yaml_round_trip() -> None:
-    original = TaxonomyObligationPlan(
-        taxonomy_version="atlas-2026.05",
-        mapping_version="sssom-v1",
-        qualification_ruleset_version="catalog-qualification-v1",
-        template_version="scenario-envelope-v1",
+    original = _make_plan(
         digest="abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
         obligations=[
             TaxonomyObligation(
@@ -100,12 +105,7 @@ def test_obligation_plan_yaml_round_trip() -> None:
 
 
 def test_obligation_plan_json_round_trip() -> None:
-    original = TaxonomyObligationPlan(
-        taxonomy_version="atlas-2026.05",
-        mapping_version="sssom-v1",
-        qualification_ruleset_version="catalog-qualification-v1",
-        template_version="scenario-envelope-v1",
-        digest="abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+    original = _make_plan(
         obligations=[
             TaxonomyObligation(
                 obligation_id="ob:atlas-orphan-risk",
@@ -127,12 +127,7 @@ def test_obligation_plan_json_round_trip() -> None:
 
 
 def test_obligation_plan_byte_stability() -> None:
-    plan = TaxonomyObligationPlan(
-        taxonomy_version="atlas-2026.05",
-        mapping_version="sssom-v1",
-        qualification_ruleset_version="catalog-qualification-v1",
-        template_version="scenario-envelope-v1",
-        digest="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    plan = _make_plan(
         obligations=[
             TaxonomyObligation(
                 obligation_id="ob:atlas-prompt-injection:AP-T6-01",

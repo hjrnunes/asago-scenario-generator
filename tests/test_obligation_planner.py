@@ -2,32 +2,47 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from asago_scenario_generator.models.obligation_plan import (
     TaxonomyObligationSnapshot,
 )
 from asago_scenario_generator.pipeline.obligation_planner import plan_obligations
 
 
+def _rel(
+    risk_id: str,
+    pattern_id: str | None = None,
+    *,
+    scope: str = "in-scope",
+    disposition: str = "generated",
+) -> dict[str, Any]:
+    return {
+        "risk_id": risk_id,
+        "pattern_id": pattern_id,
+        "scope": scope,
+        "disposition": disposition,
+    }
+
+
+def _make_snapshot(**overrides: Any) -> TaxonomyObligationSnapshot:
+    defaults: dict[str, Any] = {
+        "taxonomy_version": "atlas-2026.05",
+        "mapping_version": "sssom-v1",
+        "qualification_ruleset_version": "catalog-qualification-v1",
+        "template_version": "scenario-envelope-v1",
+        "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "relationships": [],
+    }
+    defaults.update(overrides)
+    return TaxonomyObligationSnapshot(**defaults)
+
+
 def test_shared_pattern_distinct_risk_scoped_obligations() -> None:
-    snapshot = TaxonomyObligationSnapshot(
-        taxonomy_version="atlas-2026.05",
-        mapping_version="sssom-v1",
-        qualification_ruleset_version="catalog-qualification-v1",
-        template_version="scenario-envelope-v1",
-        digest="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    snapshot = _make_snapshot(
         relationships=[
-            {
-                "risk_id": "atlas-prompt-injection",
-                "pattern_id": "AP-T1-01",
-                "scope": "in-scope",
-                "disposition": "generated",
-            },
-            {
-                "risk_id": "atlas-memory-poisoning",
-                "pattern_id": "AP-T1-01",
-                "scope": "in-scope",
-                "disposition": "missing-template",
-            },
+            _rel("atlas-prompt-injection", "AP-T1-01"),
+            _rel("atlas-memory-poisoning", "AP-T1-01", disposition="missing-template"),
         ],
     )
 
@@ -50,46 +65,16 @@ def test_shared_pattern_distinct_risk_scoped_obligations() -> None:
 
 
 def test_order_independence() -> None:
-    snapshot_a = TaxonomyObligationSnapshot(
-        taxonomy_version="atlas-2026.05",
-        mapping_version="sssom-v1",
-        qualification_ruleset_version="catalog-qualification-v1",
-        template_version="scenario-envelope-v1",
-        digest="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    snapshot_a = _make_snapshot(
         relationships=[
-            {
-                "risk_id": "atlas-prompt-injection",
-                "pattern_id": "AP-T6-01",
-                "scope": "in-scope",
-                "disposition": "generated",
-            },
-            {
-                "risk_id": "atlas-memory-poisoning",
-                "pattern_id": "AP-T1-01",
-                "scope": "in-scope",
-                "disposition": "missing-template",
-            },
+            _rel("atlas-prompt-injection", "AP-T6-01"),
+            _rel("atlas-memory-poisoning", "AP-T1-01", disposition="missing-template"),
         ],
     )
-    snapshot_b = TaxonomyObligationSnapshot(
-        taxonomy_version="atlas-2026.05",
-        mapping_version="sssom-v1",
-        qualification_ruleset_version="catalog-qualification-v1",
-        template_version="scenario-envelope-v1",
-        digest="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    snapshot_b = _make_snapshot(
         relationships=[
-            {
-                "risk_id": "atlas-memory-poisoning",
-                "pattern_id": "AP-T1-01",
-                "scope": "in-scope",
-                "disposition": "missing-template",
-            },
-            {
-                "risk_id": "atlas-prompt-injection",
-                "pattern_id": "AP-T6-01",
-                "scope": "in-scope",
-                "disposition": "generated",
-            },
+            _rel("atlas-memory-poisoning", "AP-T1-01", disposition="missing-template"),
+            _rel("atlas-prompt-injection", "AP-T6-01"),
         ],
     )
 
@@ -104,49 +89,19 @@ def test_order_independence() -> None:
 
 
 def test_scope_and_terminal_dispositions() -> None:
-    snapshot = TaxonomyObligationSnapshot(
-        taxonomy_version="atlas-2026.05",
-        mapping_version="sssom-v1",
-        qualification_ruleset_version="catalog-qualification-v1",
-        template_version="scenario-envelope-v1",
-        digest="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    snapshot = _make_snapshot(
         relationships=[
-            {
-                "risk_id": "atlas-prompt-injection",
-                "pattern_id": "AP-T11-01",
-                "scope": "out-of-scope",
-                "disposition": "gated",
-            },
-            {
-                "risk_id": "atlas-memory-poisoning",
-                "pattern_id": "AP-T1-01",
-                "scope": "in-scope",
-                "disposition": "missing-template",
-            },
-            {
-                "risk_id": "atlas-memory-poisoning",
-                "pattern_id": "AP-T1-02",
-                "scope": "in-scope",
-                "disposition": "infeasible",
-            },
-            {
-                "risk_id": "atlas-memory-poisoning",
-                "pattern_id": "AP-T1-03",
-                "scope": "in-scope",
-                "disposition": "unsupported",
-            },
-            {
-                "risk_id": "atlas-prompt-injection",
-                "pattern_id": "AP-T6-01",
-                "scope": "in-scope",
-                "disposition": "generated",
-            },
-            {
-                "risk_id": "atlas-orphan-risk",
-                "pattern_id": None,
-                "scope": "in-scope",
-                "disposition": "governance-only",
-            },
+            _rel(
+                "atlas-prompt-injection",
+                "AP-T11-01",
+                scope="out-of-scope",
+                disposition="gated",
+            ),
+            _rel("atlas-memory-poisoning", "AP-T1-01", disposition="missing-template"),
+            _rel("atlas-memory-poisoning", "AP-T1-02", disposition="infeasible"),
+            _rel("atlas-memory-poisoning", "AP-T1-03", disposition="unsupported"),
+            _rel("atlas-prompt-injection", "AP-T6-01"),
+            _rel("atlas-orphan-risk", disposition="governance-only"),
         ],
     )
 
@@ -180,20 +135,8 @@ def test_scope_and_terminal_dispositions() -> None:
 
 
 def test_governance_only_risk_without_pattern() -> None:
-    snapshot = TaxonomyObligationSnapshot(
-        taxonomy_version="atlas-2026.05",
-        mapping_version="sssom-v1",
-        qualification_ruleset_version="catalog-qualification-v1",
-        template_version="scenario-envelope-v1",
-        digest="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        relationships=[
-            {
-                "risk_id": "atlas-orphan-risk",
-                "pattern_id": None,
-                "scope": "in-scope",
-                "disposition": "governance-only",
-            }
-        ],
+    snapshot = _make_snapshot(
+        relationships=[_rel("atlas-orphan-risk", disposition="governance-only")],
     )
 
     plan = plan_obligations(snapshot)
@@ -206,22 +149,10 @@ def test_governance_only_risk_without_pattern() -> None:
 
 
 def test_qualification_trace_omits_secrets() -> None:
-    secret_token = "sk-live-token-secret-12345"
-    snapshot = TaxonomyObligationSnapshot(
-        taxonomy_version="atlas-2026.05",
-        mapping_version="sssom-v1",
-        qualification_ruleset_version="catalog-qualification-v1",
-        template_version="scenario-envelope-v1",
-        digest="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    secret_token = "**************************"
+    snapshot = _make_snapshot(
         config={"api_key": secret_token, "custom_secret": secret_token},
-        relationships=[
-            {
-                "risk_id": "atlas-prompt-injection",
-                "pattern_id": "AP-T6-01",
-                "scope": "in-scope",
-                "disposition": "generated",
-            }
-        ],
+        relationships=[_rel("atlas-prompt-injection", "AP-T6-01")],
         qualification_evaluations=[
             {
                 "risk_id": "atlas-prompt-injection",
@@ -251,20 +182,8 @@ def test_qualification_trace_omits_secrets() -> None:
 
 
 def test_candidate_expansion_evidence_retained() -> None:
-    snapshot = TaxonomyObligationSnapshot(
-        taxonomy_version="atlas-2026.05",
-        mapping_version="sssom-v1",
-        qualification_ruleset_version="catalog-qualification-v1",
-        template_version="scenario-envelope-v1",
-        digest="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        relationships=[
-            {
-                "risk_id": "atlas-prompt-injection",
-                "pattern_id": "AP-T6-01",
-                "scope": "in-scope",
-                "disposition": "generated",
-            }
-        ],
+    snapshot = _make_snapshot(
+        relationships=[_rel("atlas-prompt-injection", "AP-T6-01")],
         candidate_expansions=[
             {
                 "risk_id": "atlas-prompt-injection",

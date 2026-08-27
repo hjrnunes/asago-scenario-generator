@@ -9,6 +9,7 @@ from typing import Any
 from runtime_shared import World
 
 from asago_scenario_generator.models.obligation_plan import (
+    TaxonomyObligation,
     TaxonomyObligationPlan,
     TaxonomyObligationSnapshot,
 )
@@ -54,6 +55,166 @@ def _planner_state(world: World) -> dict[str, Any]:
     return state
 
 
+def _rel(
+    risk_id: str, pattern_id: str | None, scope: str, disposition: str
+) -> dict[str, Any]:
+    """Build one risk-to-pattern relationship dict for snapshot fixtures."""
+    return {
+        "risk_id": risk_id,
+        "pattern_id": pattern_id,
+        "scope": scope,
+        "disposition": disposition,
+    }
+
+
+def _ensure_in_scope_relationship(
+    snap: TaxonomyObligationSnapshot, risk_id: str, pattern_id: str | None
+) -> None:
+    """Add an in-scope relationship unless one already exists for the pair."""
+    if not any(
+        r.get("risk_id") == risk_id and r.get("pattern_id") == pattern_id
+        for r in snap.relationships
+    ):
+        snap.relationships.append(_rel(risk_id, pattern_id, "in-scope", "generated"))
+
+
+def _get_or_create_expansion(
+    snap: TaxonomyObligationSnapshot, risk_id: str, pattern_id: str | None
+) -> dict[str, Any]:
+    """Return the candidate-expansion record for a pair, creating one if absent."""
+    exp = next(
+        (
+            e
+            for e in snap.candidate_expansions
+            if e.get("risk_id") == risk_id and e.get("pattern_id") == pattern_id
+        ),
+        None,
+    )
+    if exp is None:
+        exp = {
+            "risk_id": risk_id,
+            "pattern_id": pattern_id,
+            "accepted_candidates": [],
+            "rejected_candidates": [],
+        }
+        snap.candidate_expansions.append(exp)
+    return exp
+
+
+def _obligation_ids(plan: TaxonomyObligationPlan) -> list[str]:
+    """List obligation identifiers in ledger order."""
+    return [o.obligation_id for o in plan.obligations]
+
+
+def _matching_obligations(
+    plan: TaxonomyObligationPlan,
+    risk_id: str | None = None,
+    pattern_id: str | None = None,
+) -> list[TaxonomyObligation]:
+    """List obligations matching the given risk and/or pattern."""
+    return [
+        o
+        for o in plan.obligations
+        if (risk_id is None or o.risk_id == risk_id)
+        and (pattern_id is None or o.pattern_id == pattern_id)
+    ]
+
+
+def _selected_or_first(state: dict[str, Any]) -> TaxonomyObligation:
+    """Return the selected obligation, falling back to the first ledger entry."""
+    return state.get("selected_obligation") or state["plan"].obligations[0]
+
+
+def _requested_format(
+    text: str, examples: dict, step_pattern: str, example_key: str
+) -> str:
+    """Parse the requested serialization format from a step."""
+    match = re.search(step_pattern, text)
+    return (match.group(1) if match else examples.get(example_key, "")).upper()
+
+
+def _serialize_plan(plan: TaxonomyObligationPlan, fmt: str) -> str:
+    """Serialize a plan in the requested format (YAML or JSON)."""
+    if fmt == "YAML":
+        return plan.to_yaml()
+    return plan.to_json()
+
+
+def _deserialize_plan(text_data: str, fmt: str) -> TaxonomyObligationPlan:
+    """Deserialize a plan from the requested format (YAML or JSON)."""
+    if fmt == "YAML":
+        return TaxonomyObligationPlan.from_yaml(text_data)
+    return TaxonomyObligationPlan.from_json(text_data)
+
+
+def _make_records_handler(field: str, step_pattern: str, example_key: str):
+    """Build a handler asserting the plan records one pinned version field."""
+
+    def _records_field(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        state = _planner_state(world)
+        match = re.search(step_pattern, text)
+        expected = match.group(1) if match else examples.get(example_key, "")
+        plan = state["plan"]
+        actual = getattr(plan, field) if plan else None
+        if actual != expected:
+            return False, f"Expected {field} {expected}, got {actual}"
+        return True, ""
+
+    return _records_field
+
+
+def _make_order_handler(state_key: str, example_key: str):
+    """Build a handler capturing one ordered relationship presentation."""
+
+    def _snapshot_order(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        state = _planner_state(world)
+        match = re.search(r'relationships in order "([^"]+)"', text)
+        order = match.group(1) if match else examples.get(example_key, "")
+        snap = _default_snapshot()
+        snap.relationships = _parse_order(order)
+        state[state_key] = snap
+        return True, ""
+
+    return _snapshot_order
+
+
+def _make_mapping_handler(scope: str, disposition: str):
+    """Build a handler appending one risk-to-pattern mapping relationship."""
+
+    def _add_mapping(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        state = _planner_state(world)
+        match = re.search(
+            rf'risk "([^"]+)" has an {scope} mapping to pattern "([^"]+)"', text
+        )
+        if not match:
+            return False, f"Could not parse {scope} mapping: {text}"
+        risk_id, pattern_id = match.group(1), match.group(2)
+        state["snapshot"].relationships.append(
+            _rel(risk_id, pattern_id, scope, disposition)
+        )
+        return True, ""
+
+    return _add_mapping
+
+
+def _make_obligation_field_handler(
+    field: str, label: str, step_pattern: str, example_key: str
+):
+    """Build a handler asserting the selected obligation has a field value."""
+
+    def _obligation_has(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        state = _planner_state(world)
+        match = re.search(step_pattern, text)
+        expected = match.group(1) if match else examples.get(example_key, "")
+        ob = _selected_or_first(state)
+        actual = getattr(ob, field)
+        if actual != expected:
+            return False, f"Expected {label} {expected}, got {actual}"
+        return True, ""
+
+    return _obligation_has
+
+
 def _h_snapshot_available(world: World, text: str, examples: dict) -> tuple[bool, str]:
     state = _planner_state(world)
     state["snapshot"] = _default_snapshot()
@@ -90,120 +251,16 @@ def _h_produce_plan(world: World, text: str, examples: dict) -> tuple[bool, str]
     return True, ""
 
 
-def _h_records_taxonomy_version(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _planner_state(world)
-    match = re.search(r'taxonomy version "([^"]+)"', text)
-    expected = match.group(1) if match else examples.get("taxonomy_version", "")
-    plan = state["plan"]
-    if plan is None or plan.taxonomy_version != expected:
-        return (
-            False,
-            f"Expected taxonomy_version {expected}, got {plan.taxonomy_version if plan else None}",
-        )
-    return True, ""
-
-
-def _h_records_mapping_version(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _planner_state(world)
-    match = re.search(r'mapping version "([^"]+)"', text)
-    expected = match.group(1) if match else examples.get("mapping_version", "")
-    plan = state["plan"]
-    if plan is None or plan.mapping_version != expected:
-        return (
-            False,
-            f"Expected mapping_version {expected}, got {plan.mapping_version if plan else None}",
-        )
-    return True, ""
-
-
-def _h_records_ruleset_version(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _planner_state(world)
-    match = re.search(r'qualification ruleset version "([^"]+)"', text)
-    expected = match.group(1) if match else examples.get("ruleset_version", "")
-    plan = state["plan"]
-    if plan is None or plan.qualification_ruleset_version != expected:
-        return (
-            False,
-            f"Expected qualification_ruleset_version {expected}, got {plan.qualification_ruleset_version if plan else None}",
-        )
-    return True, ""
-
-
-def _h_records_template_version(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _planner_state(world)
-    match = re.search(r'template version "([^"]+)"', text)
-    expected = match.group(1) if match else examples.get("template_version", "")
-    plan = state["plan"]
-    if plan is None or plan.template_version != expected:
-        return (
-            False,
-            f"Expected template_version {expected}, got {plan.template_version if plan else None}",
-        )
-    return True, ""
-
-
-def _h_records_digest(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    state = _planner_state(world)
-    match = re.search(r'digest "([^"]+)"', text)
-    expected = match.group(1) if match else examples.get("digest", "")
-    plan = state["plan"]
-    if plan is None or plan.digest != expected:
-        return False, f"Expected digest {expected}, got {plan.digest if plan else None}"
-    return True, ""
-
-
 def _parse_order(order_str: str) -> list[dict[str, Any]]:
     rels: list[dict[str, Any]] = []
     items = [x.strip() for x in order_str.split(",") if x.strip()]
     for item in items:
         if ":" in item:
             risk_id, pattern_id = item.split(":", 1)
-            rels.append(
-                {
-                    "risk_id": risk_id,
-                    "pattern_id": pattern_id,
-                    "scope": "in-scope",
-                    "disposition": "generated",
-                }
-            )
+            rels.append(_rel(risk_id, pattern_id, "in-scope", "generated"))
         else:
-            rels.append(
-                {
-                    "risk_id": item,
-                    "pattern_id": None,
-                    "scope": "in-scope",
-                    "disposition": "governance-only",
-                }
-            )
+            rels.append(_rel(item, None, "in-scope", "governance-only"))
     return rels
-
-
-def _h_snapshot_order_a(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    state = _planner_state(world)
-    match = re.search(r'relationships in order "([^"]+)"', text)
-    order_a = match.group(1) if match else examples.get("order_a", "")
-    snap = _default_snapshot()
-    snap.relationships = _parse_order(order_a)
-    state["snapshot_a"] = snap
-    return True, ""
-
-
-def _h_snapshot_order_b(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    state = _planner_state(world)
-    match = re.search(r'relationships in order "([^"]+)"', text)
-    order_b = match.group(1) if match else examples.get("order_b", "")
-    snap = _default_snapshot()
-    snap.relationships = _parse_order(order_b)
-    state["snapshot_b"] = snap
-    return True, ""
 
 
 def _h_produce_both_plans(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -217,8 +274,8 @@ def _h_identical_identifiers(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     state = _planner_state(world)
-    ids_a = [o.obligation_id for o in state["plan_a"].obligations]
-    ids_b = [o.obligation_id for o in state["plan_b"].obligations]
+    ids_a = _obligation_ids(state["plan_a"])
+    ids_b = _obligation_ids(state["plan_b"])
     if ids_a != ids_b:
         return False, f"Identifiers mismatch: {ids_a} vs {ids_b}"
     return True, ""
@@ -226,8 +283,8 @@ def _h_identical_identifiers(
 
 def _h_identical_order(world: World, text: str, examples: dict) -> tuple[bool, str]:
     state = _planner_state(world)
-    ids_a = [o.obligation_id for o in state["plan_a"].obligations]
-    ids_b = [o.obligation_id for o in state["plan_b"].obligations]
+    ids_a = _obligation_ids(state["plan_a"])
+    ids_b = _obligation_ids(state["plan_b"])
     if ids_a != ids_b:
         return False, f"Order mismatch: {ids_a} vs {ids_b}"
     return True, ""
@@ -250,18 +307,8 @@ def _h_snapshot_produces_rich_plan(
     state = _planner_state(world)
     snap = _default_snapshot()
     snap.relationships = [
-        {
-            "risk_id": "atlas-prompt-injection",
-            "pattern_id": "AP-T6-01",
-            "scope": "in-scope",
-            "disposition": "generated",
-        },
-        {
-            "risk_id": "atlas-memory-poisoning",
-            "pattern_id": "AP-T1-01",
-            "scope": "in-scope",
-            "disposition": "missing-template",
-        },
+        _rel("atlas-prompt-injection", "AP-T6-01", "in-scope", "generated"),
+        _rel("atlas-memory-poisoning", "AP-T1-01", "in-scope", "missing-template"),
     ]
     snap.qualification_evaluations = [
         {
@@ -295,18 +342,14 @@ def _h_serialize_and_deserialize(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     state = _planner_state(world)
-    match = re.search(r'serialized as "([^"]+)" and deserialized', text)
-    fmt = (match.group(1) if match else examples.get("format", "")).upper()
-    plan = state["plan"]
-    if fmt == "YAML":
-        text_data = plan.to_yaml()
-        deserialized = TaxonomyObligationPlan.from_yaml(text_data)
-    elif fmt == "JSON":
-        text_data = plan.to_json()
-        deserialized = TaxonomyObligationPlan.from_json(text_data)
-    else:
+    fmt = _requested_format(
+        text, examples, r'serialized as "([^"]+)" and deserialized', "format"
+    )
+    if fmt not in ("YAML", "JSON"):
         return False, f"Unknown format: {fmt}"
-    state["deserialized_plan"] = deserialized
+    plan = state["plan"]
+    text_data = _serialize_plan(plan, fmt)
+    state["deserialized_plan"] = _deserialize_plan(text_data, fmt)
     return True, ""
 
 
@@ -314,8 +357,8 @@ def _h_identities_preserved(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     state = _planner_state(world)
-    orig_ids = [o.obligation_id for o in state["plan"].obligations]
-    des_ids = [o.obligation_id for o in state["deserialized_plan"].obligations]
+    orig_ids = _obligation_ids(state["plan"])
+    des_ids = _obligation_ids(state["deserialized_plan"])
     if orig_ids != des_ids:
         return False, f"Identities not preserved: {orig_ids} vs {des_ids}"
     return True, ""
@@ -378,18 +421,11 @@ def _h_evidence_preserved(world: World, text: str, examples: dict) -> tuple[bool
 
 def _h_serialize_twice(world: World, text: str, examples: dict) -> tuple[bool, str]:
     state = _planner_state(world)
-    match = re.search(r'serialized as "([^"]+)" twice', text)
-    fmt = (match.group(1) if match else examples.get("format", "")).upper()
-    plan = state["plan"]
-    if fmt == "YAML":
-        t1 = plan.to_yaml()
-        t2 = plan.to_yaml()
-    elif fmt == "JSON":
-        t1 = plan.to_json()
-        t2 = plan.to_json()
-    else:
+    fmt = _requested_format(text, examples, r'serialized as "([^"]+)" twice', "format")
+    if fmt not in ("YAML", "JSON"):
         return False, f"Unknown format: {fmt}"
-    state["serialized_texts"] = [t1, t2]
+    plan = state["plan"]
+    state["serialized_texts"] = [_serialize_plan(plan, fmt), _serialize_plan(plan, fmt)]
     return True, ""
 
 
@@ -414,18 +450,8 @@ def _h_risk_cards_map_shared_pattern(
     risk_a, risk_b, pattern_id = match.group(1), match.group(2), match.group(3)
     snap = state["snapshot"]
     snap.relationships = [
-        {
-            "risk_id": risk_a,
-            "pattern_id": pattern_id,
-            "scope": "in-scope",
-            "disposition": "generated",
-        },
-        {
-            "risk_id": risk_b,
-            "pattern_id": pattern_id,
-            "scope": "in-scope",
-            "disposition": "generated",
-        },
+        _rel(risk_a, pattern_id, "in-scope", "generated"),
+        _rel(risk_b, pattern_id, "in-scope", "generated"),
     ]
     return True, ""
 
@@ -440,7 +466,7 @@ def _h_ledger_count_for_pattern(
     expected_count = int(match.group(1))
     pattern_id = match.group(2)
     plan = state["plan"]
-    matching = [o for o in plan.obligations if o.pattern_id == pattern_id]
+    matching = _matching_obligations(plan, pattern_id=pattern_id)
     if len(matching) != expected_count:
         return (
             False,
@@ -481,48 +507,6 @@ def _h_retains_risk_identity(
                 False,
                 f"Obligation {ob.obligation_id} does not retain risk {ob.risk_id}",
             )
-    return True, ""
-
-
-def _h_risk_in_scope_mapping(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _planner_state(world)
-    match = re.search(
-        r'risk "([^"]+)" has an in-scope mapping to pattern "([^"]+)"', text
-    )
-    if not match:
-        return False, f"Could not parse in-scope mapping: {text}"
-    risk_id, pattern_id = match.group(1), match.group(2)
-    state["snapshot"].relationships.append(
-        {
-            "risk_id": risk_id,
-            "pattern_id": pattern_id,
-            "scope": "in-scope",
-            "disposition": "generated",
-        }
-    )
-    return True, ""
-
-
-def _h_risk_out_of_scope_mapping(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _planner_state(world)
-    match = re.search(
-        r'risk "([^"]+)" has an out-of-scope mapping to pattern "([^"]+)"', text
-    )
-    if not match:
-        return False, f"Could not parse out-of-scope mapping: {text}"
-    risk_id, pattern_id = match.group(1), match.group(2)
-    state["snapshot"].relationships.append(
-        {
-            "risk_id": risk_id,
-            "pattern_id": pattern_id,
-            "scope": "out-of-scope",
-            "disposition": "gated",
-        }
-    )
     return True, ""
 
 
@@ -573,14 +557,7 @@ def _h_expected_relationships_count(
         disp = dispositions[i % len(dispositions)]
         pattern = f"AP-T{i + 1}-01" if disp != "governance-only" else None
         scope = "out-of-scope" if disp == "gated" else "in-scope"
-        snap.relationships.append(
-            {
-                "risk_id": f"risk-{i + 1}",
-                "pattern_id": pattern,
-                "scope": scope,
-                "disposition": disp,
-            }
-        )
+        snap.relationships.append(_rel(f"risk-{i + 1}", pattern, scope, disp))
     return True, ""
 
 
@@ -655,44 +632,13 @@ def _h_ledger_count_for_risk_pattern(
         return False, f"Could not parse risk/pattern count: {text}"
     count, risk_id, pattern_id = int(match.group(1)), match.group(2), match.group(3)
     plan = state["plan"]
-    matching = [
-        o
-        for o in plan.obligations
-        if o.risk_id == risk_id and o.pattern_id == pattern_id
-    ]
+    matching = _matching_obligations(plan, risk_id=risk_id, pattern_id=pattern_id)
     if len(matching) != count:
         return (
             False,
             f"Expected {count} obligations for {risk_id}/{pattern_id}, got {len(matching)}",
         )
     state["selected_obligation"] = matching[0]
-    return True, ""
-
-
-def _h_obligation_has_disposition(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _planner_state(world)
-    match = re.search(r'terminal disposition "([^"]+)"', text)
-    expected_disp = match.group(1) if match else examples.get("disposition", "")
-    ob = state.get("selected_obligation") or state["plan"].obligations[0]
-    if ob.terminal_disposition != expected_disp:
-        return (
-            False,
-            f"Expected terminal disposition {expected_disp}, got {ob.terminal_disposition}",
-        )
-    return True, ""
-
-
-def _h_obligation_has_scope(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _planner_state(world)
-    match = re.search(r'scope "([^"]+)"', text)
-    expected_scope = match.group(1) if match else examples.get("scope", "")
-    ob = state.get("selected_obligation") or state["plan"].obligations[0]
-    if ob.scope != expected_scope:
-        return False, f"Expected scope {expected_scope}, got {ob.scope}"
     return True, ""
 
 
@@ -705,14 +651,7 @@ def _h_risk_no_actionable_pattern(
         return False, f"Could not parse risk no pattern step: {text}"
     risk_id = match.group(1)
     snap = state["snapshot"]
-    snap.relationships = [
-        {
-            "risk_id": risk_id,
-            "pattern_id": None,
-            "scope": "in-scope",
-            "disposition": "governance-only",
-        }
-    ]
+    snap.relationships = [_rel(risk_id, None, "in-scope", "governance-only")]
     return True, ""
 
 
@@ -725,7 +664,7 @@ def _h_ledger_count_for_risk(
         return False, f"Could not parse risk count step: {text}"
     count, risk_id = int(match.group(1)), match.group(2)
     plan = state["plan"]
-    matching = [o for o in plan.obligations if o.risk_id == risk_id]
+    matching = _matching_obligations(plan, risk_id=risk_id)
     if len(matching) != count:
         return False, f"Expected {count} obligations for {risk_id}, got {len(matching)}"
     state["selected_obligation"] = matching[0]
@@ -736,7 +675,7 @@ def _h_obligation_lists_no_pattern(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     state = _planner_state(world)
-    ob = state.get("selected_obligation") or state["plan"].obligations[0]
+    ob = _selected_or_first(state)
     if ob.pattern_id is not None:
         return False, f"Expected no pattern_id, got {ob.pattern_id}"
     return True, ""
@@ -765,19 +704,7 @@ def _h_qualification_applicable(
     risk_id, pattern_id = match.group(1), match.group(2)
     state["selected_risk_id"] = risk_id
     state["selected_pattern_id"] = pattern_id
-    snap = state["snapshot"]
-    if not any(
-        r.get("risk_id") == risk_id and r.get("pattern_id") == pattern_id
-        for r in snap.relationships
-    ):
-        snap.relationships.append(
-            {
-                "risk_id": risk_id,
-                "pattern_id": pattern_id,
-                "scope": "in-scope",
-                "disposition": "generated",
-            }
-        )
+    _ensure_in_scope_relationship(state["snapshot"], risk_id, pattern_id)
     return True, ""
 
 
@@ -874,19 +801,7 @@ def _h_candidate_expansion_applicable(
     risk_id, pattern_id = match.group(1), match.group(2)
     state["selected_risk_id"] = risk_id
     state["selected_pattern_id"] = pattern_id
-    snap = state["snapshot"]
-    if not any(
-        r.get("risk_id") == risk_id and r.get("pattern_id") == pattern_id
-        for r in snap.relationships
-    ):
-        snap.relationships.append(
-            {
-                "risk_id": risk_id,
-                "pattern_id": pattern_id,
-                "scope": "in-scope",
-                "disposition": "generated",
-            }
-        )
+    _ensure_in_scope_relationship(state["snapshot"], risk_id, pattern_id)
     return True, ""
 
 
@@ -901,22 +816,7 @@ def _h_expansion_produces_accepted(
     risk_id = state.get("selected_risk_id") or "atlas-prompt-injection"
     pattern_id = state.get("selected_pattern_id") or "AP-T6-01"
     snap = state["snapshot"]
-    exp = next(
-        (
-            e
-            for e in snap.candidate_expansions
-            if e.get("risk_id") == risk_id and e.get("pattern_id") == pattern_id
-        ),
-        None,
-    )
-    if exp is None:
-        exp = {
-            "risk_id": risk_id,
-            "pattern_id": pattern_id,
-            "accepted_candidates": [],
-            "rejected_candidates": [],
-        }
-        snap.candidate_expansions.append(exp)
+    exp = _get_or_create_expansion(snap, risk_id, pattern_id)
     exp["accepted_candidates"].append(accepted_id)
     return True, ""
 
@@ -934,22 +834,7 @@ def _h_expansion_produces_rejected(
     risk_id = state.get("selected_risk_id") or "atlas-prompt-injection"
     pattern_id = state.get("selected_pattern_id") or "AP-T6-01"
     snap = state["snapshot"]
-    exp = next(
-        (
-            e
-            for e in snap.candidate_expansions
-            if e.get("risk_id") == risk_id and e.get("pattern_id") == pattern_id
-        ),
-        None,
-    )
-    if exp is None:
-        exp = {
-            "risk_id": risk_id,
-            "pattern_id": pattern_id,
-            "accepted_candidates": [],
-            "rejected_candidates": [],
-        }
-        snap.candidate_expansions.append(exp)
+    exp = _get_or_create_expansion(snap, risk_id, pattern_id)
     exp["rejected_candidates"].append({"candidate_id": rejected_id, "reason": reason})
     return True, ""
 
@@ -1003,18 +888,8 @@ def _h_snapshot_in_and_out_of_scope(
     state = _planner_state(world)
     snap = state["snapshot"]
     snap.relationships = [
-        {
-            "risk_id": "atlas-prompt-injection",
-            "pattern_id": "AP-T6-01",
-            "scope": "in-scope",
-            "disposition": "generated",
-        },
-        {
-            "risk_id": "atlas-memory-poisoning",
-            "pattern_id": "AP-T11-01",
-            "scope": "out-of-scope",
-            "disposition": "gated",
-        },
+        _rel("atlas-prompt-injection", "AP-T6-01", "in-scope", "generated"),
+        _rel("atlas-memory-poisoning", "AP-T11-01", "out-of-scope", "gated"),
     ]
     return True, ""
 
@@ -1112,21 +987,43 @@ def register(api: Any) -> None:
             _h_pins_versions,
         ),
         (r"the obligation plan is produced", _h_produce_plan),
-        (r'the plan records taxonomy version "([^"]+)"', _h_records_taxonomy_version),
-        (r'the plan records mapping version "([^"]+)"', _h_records_mapping_version),
+        (
+            r'the plan records taxonomy version "([^"]+)"',
+            _make_records_handler(
+                "taxonomy_version", r'taxonomy version "([^"]+)"', "taxonomy_version"
+            ),
+        ),
+        (
+            r'the plan records mapping version "([^"]+)"',
+            _make_records_handler(
+                "mapping_version", r'mapping version "([^"]+)"', "mapping_version"
+            ),
+        ),
         (
             r'the plan records qualification ruleset version "([^"]+)"',
-            _h_records_ruleset_version,
+            _make_records_handler(
+                "qualification_ruleset_version",
+                r'qualification ruleset version "([^"]+)"',
+                "ruleset_version",
+            ),
         ),
-        (r'the plan records template version "([^"]+)"', _h_records_template_version),
-        (r'the plan records digest "([^"]+)"', _h_records_digest),
+        (
+            r'the plan records template version "([^"]+)"',
+            _make_records_handler(
+                "template_version", r'template version "([^"]+)"', "template_version"
+            ),
+        ),
+        (
+            r'the plan records digest "([^"]+)"',
+            _make_records_handler("digest", r'digest "([^"]+)"', "digest"),
+        ),
         (
             r'one snapshot presents relationships in order "([^"]+)"',
-            _h_snapshot_order_a,
+            _make_order_handler("snapshot_a", "order_a"),
         ),
         (
             r'another snapshot presents the same relationships in order "([^"]+)"',
-            _h_snapshot_order_b,
+            _make_order_handler("snapshot_b", "order_b"),
         ),
         (
             r"an obligation plan is produced from each presentation",
@@ -1170,11 +1067,11 @@ def register(api: Any) -> None:
         (r"each obligation retains its own risk identity", _h_retains_risk_identity),
         (
             r'risk "([^"]+)" has an in-scope mapping to pattern "([^"]+)"',
-            _h_risk_in_scope_mapping,
+            _make_mapping_handler("in-scope", "generated"),
         ),
         (
             r'risk "([^"]+)" has an out-of-scope mapping to pattern "([^"]+)"',
-            _h_risk_out_of_scope_mapping,
+            _make_mapping_handler("out-of-scope", "gated"),
         ),
         (
             r'the plan records an (in-scope|out-of-scope) decision for risk "([^"]+)" and pattern "([^"]+)"',
@@ -1206,9 +1103,19 @@ def register(api: Any) -> None:
         ),
         (
             r'that obligation has terminal disposition "([^"]+)"',
-            _h_obligation_has_disposition,
+            _make_obligation_field_handler(
+                "terminal_disposition",
+                "terminal disposition",
+                r'terminal disposition "([^"]+)"',
+                "disposition",
+            ),
         ),
-        (r'that obligation has scope "([^"]+)"', _h_obligation_has_scope),
+        (
+            r'that obligation has scope "([^"]+)"',
+            _make_obligation_field_handler(
+                "scope", "scope", r'scope "([^"]+)"', "scope"
+            ),
+        ),
         (
             r'risk card "([^"]+)" has no actionable attack pattern',
             _h_risk_no_actionable_pattern,
