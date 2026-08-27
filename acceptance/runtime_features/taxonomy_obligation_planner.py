@@ -294,6 +294,13 @@ def _h_canonically_equivalent(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     state = _planner_state(world)
+    if state["plan_a"] is None:
+        srm_state = getattr(world, "system_resource_map_state", None)
+        if srm_state and srm_state.get("serialized_a") is not None:
+            if srm_state["serialized_a"] != srm_state["serialized_b"]:
+                return False, "Serialized SRM artifacts not equivalent"
+            return True, ""
+        return False, "No plan_a in planner state"
     if state["plan_a"].to_json() != state["plan_b"].to_json():
         return False, "JSON serialization is not canonically equivalent"
     if state["plan_a"].to_yaml() != state["plan_b"].to_yaml():
@@ -432,7 +439,15 @@ def _h_serialize_twice(world: World, text: str, examples: dict) -> tuple[bool, s
 def _h_byte_identical(world: World, text: str, examples: dict) -> tuple[bool, str]:
     state = _planner_state(world)
     texts = state["serialized_texts"]
-    if len(texts) != 2 or texts[0] != texts[1]:
+    if len(texts) != 2:
+        srm_state = getattr(world, "system_resource_map_state", None)
+        if srm_state and len(srm_state.get("serialized_texts", [])) == 2:
+            srm_texts = srm_state["serialized_texts"]
+            if srm_texts[0] == srm_texts[1]:
+                return True, ""
+            return False, "Serialized texts are not byte-identical"
+        return False, "Serialized texts are not byte-identical"
+    if texts[0] != texts[1]:
         return False, "Serialized texts are not byte-identical"
     return True, ""
 

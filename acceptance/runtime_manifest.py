@@ -40,6 +40,7 @@ MODULES = (
     "taxonomy_report",
     "taxonomy_report_sections",
     "taxonomy_obligation_planner",
+    "system_resource_map",
     "stpa",
 )
 
