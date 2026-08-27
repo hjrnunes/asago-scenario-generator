@@ -209,6 +209,12 @@ def _h_background(world: World, text: str, examples: dict) -> tuple[bool, str]:
     world.trpt_threat_surface: dict[str, Any] = {"entries": [], "governance_only": []}
     world.trpt_ts_entries: dict[str, dict[str, list[str]]] = {}
     world.trpt_scorecard: dict[str, Any] = {}
+    world.trpt_coverage_data: dict[str, Any] = {}
+    world.trpt_manifest_data: dict[str, Any] = {}
+    world.trpt_raw_files: dict[str, str] = {}
+    world.trpt_feature_files: dict[str, str] = {}
+    world.trpt_call_logs: dict[str, list[dict]] = {}
+    world.trpt_pipeline_call_logs: list[dict[str, Any]] = []
     world.trpt_html: str | None = None
     return True, ""
 
@@ -594,7 +600,15 @@ def _h_scorecard_none(world: World, text: str, examples: dict) -> tuple[bool, st
 
 
 def _materialize_threat_surface(world: World) -> dict[str, Any]:
-    """Build threat-surface entries from the declared per-risk-card overrides."""
+    """Build threat-surface data for the report.
+
+    The section-rendering feature registers entries directly on
+    ``trpt_threat_surface`` (including governance-only rows and explicit
+    empty surfaces); the older provenance feature declares per-risk-card
+    overrides on ``trpt_ts_entries`` and the entries are derived here.
+    """
+    if not world.trpt_ts_entries:
+        return dict(world.trpt_threat_surface)
     entries: list[dict[str, Any]] = []
     for risk_id, overrides in world.trpt_ts_entries.items():
         matching = [
@@ -634,7 +648,13 @@ def _h_generate_report(world: World, text: str, examples: dict) -> tuple[bool, s
         profile_data=world.trpt_profile_data,
         threat_surface_data=_materialize_threat_surface(world),
         scenarios=world.trpt_scenarios,
+        feature_files=world.trpt_feature_files,
+        call_logs=world.trpt_call_logs,
+        pipeline_call_logs=world.trpt_pipeline_call_logs,
+        coverage_data=world.trpt_coverage_data,
         scorecard_data=world.trpt_scorecard,
+        manifest_data=world.trpt_manifest_data,
+        raw_files=world.trpt_raw_files,
     )
     try:
         report_path = generate_report(data, world.trpt_tmpdir)

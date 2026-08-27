@@ -50,6 +50,166 @@ class ReportData:
     raw_files: dict[str, str] = field(default_factory=dict)
 
 
+def _resolve_resolver(
+    resolver: ManifestInventoryResolver | None,
+    run_dir: Path | None,
+    allow_non_authoritative: bool,
+) -> ManifestInventoryResolver:
+    """Return the effective manifest resolver for this load.
+
+    Internal (in-pipeline) callers supply a pre-built resolver; standalone
+    callers locate one from *run_dir* and enforce the finalized/authoritative
+    manifest contract.
+    """
+    if resolver is not None:
+        return resolver
+    actual_run_dir = find_run_dir(run_dir)
+    return load_strict_resolver(
+        actual_run_dir,
+        require_final=True,
+        require_authoritative=not allow_non_authoritative,
+    )
+
+
+def _load_yaml_artifact(
+    resolver: ManifestInventoryResolver,
+    role: ArtifactRole,
+    raw_key: str,
+    *,
+    success_log: str,
+    missing_log: str,
+) -> tuple[dict, str | None]:
+    """Read a YAML artifact and record its raw text under *raw_key*."""
+    entry = resolver.entry_by_role(role)
+    if entry is None:
+        logger.warning(missing_log)
+        return {}, None
+    text = resolver.read_text(entry)
+    data = yaml.safe_load(text) or {}
+    logger.info(success_log)
+    return data, text
+
+
+def _load_json_artifact(
+    resolver: ManifestInventoryResolver,
+    role: ArtifactRole,
+    raw_key: str,
+    *,
+    success_log: str,
+    failure_log: str,
+) -> tuple[dict, str | None]:
+    """Read a JSON artifact and record its raw text under *raw_key*."""
+    entry = resolver.entry_by_role(role)
+    if entry is None:
+        return {}, None
+    try:
+        text = resolver.read_text(entry)
+        data = json.loads(text) or {}
+        logger.info(success_log)
+        return data, text
+    except Exception as exc:
+        logger.warning(failure_log, exc)
+        return {}, None
+
+
+def _load_call_log_entry_lines(
+    resolver: ManifestInventoryResolver,
+    role: ArtifactRole,
+    *,
+    success_log: str,
+    failure_log: str,
+) -> list[dict]:
+    """Read one newline-delimited JSON call log into a list of dicts."""
+    entry = resolver.entry_by_role(role)
+    if entry is None:
+        return []
+    try:
+        lines = [
+            json.loads(line) for line in resolver.read_text(entry).strip().splitlines()
+        ]
+        logger.info(success_log, len(lines))
+        return lines
+    except Exception as exc:
+        logger.warning(failure_log, exc)
+        return []
+
+
+def _load_scorecard_artifact(
+    resolver: ManifestInventoryResolver,
+    raw_files: dict[str, str],
+) -> dict:
+    """Read the eval scorecard YAML artifact, tolerating parse failures."""
+    entry = resolver.entry_by_role(ArtifactRole.EVAL_SCORECARD)
+    if entry is None:
+        return {}
+    try:
+        text = resolver.read_text(entry)
+        scorecard_data = yaml.safe_load(text) or {}
+        raw_files["eval-scorecard.yaml"] = text
+        logger.info("Loaded eval scorecard from manifest inventory")
+        return scorecard_data
+    except Exception as exc:
+        logger.warning("Failed to load eval scorecard: %s", exc)
+        return {}
+
+
+def _load_scenario_yamls(
+    resolver: ManifestInventoryResolver,
+    raw_files: dict[str, str],
+) -> list[dict]:
+    """Read and parse every scenario YAML entry from the resolver."""
+    scenarios: list[dict] = []
+    for entry in resolver.scenario_yaml_entries():
+        text = resolver.read_text(entry)
+        data = yaml.safe_load(text)
+        if data and isinstance(data, dict):
+            scenarios.append(data)
+            raw_files[f"scenarios/{Path(entry.path).name}"] = text
+            logger.info("Loaded scenario %s", Path(entry.path).name)
+    return scenarios
+
+
+def _load_feature_files(
+    resolver: ManifestInventoryResolver,
+    raw_files: dict[str, str],
+) -> dict[str, str]:
+    """Read every scenario feature file entry from the resolver."""
+    feature_files: dict[str, str] = {}
+    for entry in resolver.scenario_feature_entries():
+        content = resolver.read_text(entry)
+        scenario_id = entry.scenario_id or Path(entry.path).stem
+        feature_files[scenario_id] = content
+        raw_files[f"scenarios/{Path(entry.path).name}"] = content
+    return feature_files
+
+
+def _load_scenario_artifacts(
+    resolver: ManifestInventoryResolver,
+    raw_files: dict[str, str],
+) -> tuple[list[dict], dict[str, str]]:
+    """Read scenario YAML files and feature files from the resolver entries."""
+    scenarios = _load_scenario_yamls(resolver, raw_files)
+    feature_files = _load_feature_files(resolver, raw_files)
+    logger.info(
+        "Loaded %d scenarios, %d feature files",
+        len(scenarios),
+        len(feature_files),
+    )
+    return scenarios, feature_files
+
+
+def _load_use_case_text(
+    resolver: ManifestInventoryResolver,
+) -> str:
+    """Read the use case description, if present in the manifest inventory."""
+    uc_entry = resolver.entry_by_role(ArtifactRole.USE_CASE)
+    if uc_entry is None:
+        return ""
+    use_case_text = resolver.read_text(uc_entry)
+    logger.info("Loaded use case description from manifest inventory")
+    return use_case_text
+
+
 def load_report_data(
     run_dir: Path | None = None,
     *,
@@ -71,118 +231,68 @@ def load_report_data(
     Missing inventory entries are tolerated (with warnings); the returned
     object will have empty defaults for any artifact not in the manifest.
     """
-    if resolver is not None:
-        actual_run_dir = resolver.run_dir
-    else:
-        actual_run_dir = find_run_dir(run_dir)
-        resolver = load_strict_resolver(
-            actual_run_dir,
-            require_final=True,
-            require_authoritative=not allow_non_authoritative,
-        )
+    resolver = _resolve_resolver(resolver, run_dir, allow_non_authoritative)
 
-    profile_data: dict = {}
-    threat_surface_data: dict = {}
-    scenarios: list[dict] = []
-    feature_files: dict[str, str] = {}
     raw_files: dict[str, str] = {}
-    call_logs: dict[str, list[dict]] = {}
-    pipeline_call_logs: list[dict] = []
-    coverage_data: dict = {}
-    scorecard_data: dict = {}
-    manifest_data: dict = {}
-    use_case_text: str = ""
 
     # --- Capability profile ---
-    cap_entry = resolver.entry_by_role(ArtifactRole.CAPABILITY_PROFILE)
-    if cap_entry is not None:
-        text = resolver.read_text(cap_entry)
-        profile_data = yaml.safe_load(text) or {}
-        raw_files["capability-profile.yaml"] = text
-        logger.info("Loaded capability profile from manifest inventory")
-    else:
-        logger.warning("capability-profile not in manifest inventory")
+    profile_data, profile_text = _load_yaml_artifact(
+        resolver,
+        ArtifactRole.CAPABILITY_PROFILE,
+        "capability-profile.yaml",
+        success_log="Loaded capability profile from manifest inventory",
+        missing_log="capability-profile not in manifest inventory",
+    )
+    if profile_text is not None:
+        raw_files["capability-profile.yaml"] = profile_text
 
     # --- Threat surface ---
-    ts_entry = resolver.entry_by_role(ArtifactRole.THREAT_SURFACE)
-    if ts_entry is not None:
-        text = resolver.read_text(ts_entry)
-        threat_surface_data = yaml.safe_load(text) or {}
-        raw_files["threat-surface.yaml"] = text
-        logger.info("Loaded threat surface from manifest inventory")
-    else:
-        logger.warning("threat-surface not in manifest inventory")
+    threat_surface_data, ts_text = _load_yaml_artifact(
+        resolver,
+        ArtifactRole.THREAT_SURFACE,
+        "threat-surface.yaml",
+        success_log="Loaded threat surface from manifest inventory",
+        missing_log="threat-surface not in manifest inventory",
+    )
+    if ts_text is not None:
+        raw_files["threat-surface.yaml"] = ts_text
 
     # --- Scenarios and feature files ---
-    for entry in resolver.scenario_yaml_entries():
-        text = resolver.read_text(entry)
-        data = yaml.safe_load(text)
-        if data and isinstance(data, dict):
-            scenarios.append(data)
-            raw_files[f"scenarios/{Path(entry.path).name}"] = text
-            logger.info("Loaded scenario %s", Path(entry.path).name)
-
-    for entry in resolver.scenario_feature_entries():
-        content = resolver.read_text(entry)
-        scenario_id = entry.scenario_id or Path(entry.path).stem
-        feature_files[scenario_id] = content
-        raw_files[f"scenarios/{Path(entry.path).name}"] = content
-
-    logger.info(
-        "Loaded %d scenarios, %d feature files",
-        len(scenarios),
-        len(feature_files),
-    )
+    scenarios, feature_files = _load_scenario_artifacts(resolver, raw_files)
 
     # --- Scenario LLM call logs ---
-    calls_entry = resolver.entry_by_role(ArtifactRole.SCENARIO_CALL_LOG)
-    if calls_entry is not None:
-        try:
-            for line in resolver.read_text(calls_entry).strip().splitlines():
-                entry_dict = json.loads(line)
-                sid = entry_dict.get("scenario_id", "")
-                call_logs.setdefault(sid, []).append(entry_dict)
-            logger.info(
-                "Loaded %d call log entries from manifest inventory",
-                sum(len(v) for v in call_logs.values()),
-            )
-        except Exception as exc:
-            logger.warning("Failed to load scenario call log: %s", exc)
+    call_logs: dict[str, list[dict]] = {}
+    scenario_call_lines = _load_call_log_entry_lines(
+        resolver,
+        ArtifactRole.SCENARIO_CALL_LOG,
+        success_log="Loaded %d call log entries from manifest inventory",
+        failure_log="Failed to load scenario call log: %s",
+    )
+    for entry_dict in scenario_call_lines:
+        sid = entry_dict.get("scenario_id", "")
+        call_logs.setdefault(sid, []).append(entry_dict)
 
     # --- Pipeline (non-scenario) LLM call logs ---
-    pipeline_calls_entry = resolver.entry_by_role(ArtifactRole.PIPELINE_CALL_LOG)
-    if pipeline_calls_entry is not None:
-        try:
-            for line in resolver.read_text(pipeline_calls_entry).strip().splitlines():
-                pipeline_call_logs.append(json.loads(line))
-            logger.info(
-                "Loaded %d pipeline call log entries from manifest inventory",
-                len(pipeline_call_logs),
-            )
-        except Exception as exc:
-            logger.warning("Failed to load pipeline call log: %s", exc)
+    pipeline_call_logs = _load_call_log_entry_lines(
+        resolver,
+        ArtifactRole.PIPELINE_CALL_LOG,
+        success_log="Loaded %d pipeline call log entries from manifest inventory",
+        failure_log="Failed to load pipeline call log: %s",
+    )
 
     # --- Coverage gaps ---
-    coverage_entry = resolver.entry_by_role(ArtifactRole.COVERAGE_REPORT)
-    if coverage_entry is not None:
-        try:
-            text = resolver.read_text(coverage_entry)
-            coverage_data = json.loads(text) or {}
-            raw_files["coverage-gaps.json"] = text
-            logger.info("Loaded coverage gaps from manifest inventory")
-        except Exception as exc:
-            logger.warning("Failed to load coverage report: %s", exc)
+    coverage_data, coverage_text = _load_json_artifact(
+        resolver,
+        ArtifactRole.COVERAGE_REPORT,
+        "coverage-gaps.json",
+        success_log="Loaded coverage gaps from manifest inventory",
+        failure_log="Failed to load coverage report: %s",
+    )
+    if coverage_text is not None:
+        raw_files["coverage-gaps.json"] = coverage_text
 
     # --- Eval scorecard ---
-    scorecard_entry = resolver.entry_by_role(ArtifactRole.EVAL_SCORECARD)
-    if scorecard_entry is not None:
-        try:
-            text = resolver.read_text(scorecard_entry)
-            scorecard_data = yaml.safe_load(text) or {}
-            raw_files["eval-scorecard.yaml"] = text
-            logger.info("Loaded eval scorecard from manifest inventory")
-        except Exception as exc:
-            logger.warning("Failed to load eval scorecard: %s", exc)
+    scorecard_data = _load_scorecard_artifact(resolver, raw_files)
 
     # --- Run manifest ---
     # Use the supplied resolver's in-memory manifest rather than reloading
@@ -193,10 +303,7 @@ def load_report_data(
     logger.info("Loaded run manifest from resolver")
 
     # --- Use case description ---
-    uc_entry = resolver.entry_by_role(ArtifactRole.USE_CASE)
-    if uc_entry is not None:
-        use_case_text = resolver.read_text(uc_entry)
-        logger.info("Loaded use case description from manifest inventory")
+    use_case_text = _load_use_case_text(resolver)
 
     return ReportData(
         profile_data=profile_data,

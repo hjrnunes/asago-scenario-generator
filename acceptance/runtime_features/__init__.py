@@ -26,5 +26,6 @@ __all__ = (
     "taxonomy_cli",
     "taxonomy_threat_surface",
     "taxonomy_report",
+    "taxonomy_report_sections",
     "stpa",
 )
