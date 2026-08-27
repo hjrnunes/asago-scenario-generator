@@ -138,7 +138,8 @@ def _make_representative_map(
     )
 
 
-def _srm_state(world: World) -> dict[str, Any]:
+def _get_srm_state(world: World) -> dict[str, Any]:
+    """Return this feature's per-scenario state, initializing it on first use."""
     state = getattr(world, "system_resource_map_state", None)
     if state is None:
         state = {
@@ -162,13 +163,95 @@ def _srm_state(world: World) -> dict[str, Any]:
     return state
 
 
+def _serialize_map(srm: SystemResourceMap, fmt: str) -> str:
+    """Serialize a resource map in the requested format (YAML or JSON)."""
+    if fmt.upper() == "YAML":
+        return srm.to_yaml()
+    return srm.to_json()
+
+
+def _deserialize_map(text: str, fmt: str) -> SystemResourceMap:
+    """Deserialize a resource map from the requested format (YAML or JSON)."""
+    if fmt.upper() == "YAML":
+        return SystemResourceMap.from_yaml(text)
+    return SystemResourceMap.from_json(text)
+
+
+def _require_result(state: dict[str, Any]) -> tuple[Any, None] | tuple[None, str]:
+    """Return the validation result, or a failure message when it is missing."""
+    result = state["validation_result"]
+    if result is None:
+        return None, "Validation result is missing"
+    return result, None
+
+
+def _make_issue_code_checker(list_key: str, label: str, example_key: str):
+    """Build a handler asserting the result contains one issue code."""
+
+    def _result_contains_code(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        state = _get_srm_state(world)
+        result, failure = _require_result(state)
+        if failure:
+            return False, failure
+        match = re.search(rf'the result contains {label} code "([^"]*)"', text)
+        code = match.group(1) if match else examples.get(example_key, "")
+        codes = [e.code for e in getattr(result, list_key)]
+        if code not in codes:
+            return False, f"{label.capitalize()} code '{code}' not in {codes}"
+        return True, ""
+
+    return _result_contains_code
+
+
+def _make_issue_identifier_checker(list_key: str, label: str, example_key: str):
+    """Build a handler asserting one issue identifies an element."""
+
+    def _issue_identifies(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        state = _get_srm_state(world)
+        result, failure = _require_result(state)
+        if failure:
+            return False, failure
+        match = re.search(rf'the {label} identifies "([^"]*)"', text)
+        element_id = match.group(1) if match else examples.get(example_key, "")
+        issues = getattr(result, list_key)
+        matched = [e for e in issues if e.element_id == element_id]
+        if not matched:
+            return (
+                False,
+                f"No {label} identifies '{element_id}'. {label.capitalize()}s: {issues}",
+            )
+        return True, ""
+
+    return _issue_identifies
+
+
+def _make_identifier_appender(snapshot_key: str, step_pattern: str, example_key: str):
+    """Build a handler adding referenced identifiers to a snapshot list."""
+
+    def _append_identifiers(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        state = _get_srm_state(world)
+        match = re.search(step_pattern, text)
+        ids_csv = match.group(1) if match else examples.get(example_key, "")
+        identifier_list = getattr(state["snapshot"], snapshot_key)
+        for i in (x.strip() for x in ids_csv.split(",")):
+            if i and i not in identifier_list:
+                identifier_list.append(i)
+        return True, ""
+
+    return _append_identifiers
+
+
 # -----------------------------------------------------------------------------
 # Background steps
 # -----------------------------------------------------------------------------
 
 
 def _h_snapshot_available(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     state["snapshot"] = _default_snapshot()
     return True, ""
 
@@ -187,41 +270,15 @@ def _h_no_network_or_model_calls(
 def _h_representative_covers_families(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     state["resource_map"] = _make_representative_map()
-    return True, ""
-
-
-def _h_map_references_stpa_ids(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _srm_state(world)
-    match = re.search(r'the map references STPA identifiers "([^"]*)"', text)
-    stpa_ids_csv = match.group(1) if match else examples.get("stpa_ids", "")
-    ids = [x.strip() for x in stpa_ids_csv.split(",") if x.strip()]
-    for i in ids:
-        if i not in state["snapshot"].stpa_identifiers:
-            state["snapshot"].stpa_identifiers.append(i)
-    return True, ""
-
-
-def _h_map_references_taxonomy_ids(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _srm_state(world)
-    match = re.search(r'the map references taxonomy identifiers "([^"]*)"', text)
-    taxonomy_ids_csv = match.group(1) if match else examples.get("taxonomy_ids", "")
-    ids = [x.strip() for x in taxonomy_ids_csv.split(",") if x.strip()]
-    for i in ids:
-        if i not in state["snapshot"].taxonomy_identifiers:
-            state["snapshot"].taxonomy_identifiers.append(i)
     return True, ""
 
 
 def _h_resource_map_validated(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     srm = state["resource_map"]
     if srm is None:
         srm = _make_representative_map()
@@ -236,7 +293,7 @@ def _h_resource_map_validated(
 
 
 def _h_validation_succeeds(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     result = state.get("validation_result")
     if result is not None:
         if not result.is_valid:
@@ -254,7 +311,7 @@ def _h_validation_succeeds(world: World, text: str, examples: dict) -> tuple[boo
 
 
 def _h_validation_fails(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     result = state.get("validation_result")
     if result is not None:
         if result.is_valid:
@@ -268,7 +325,7 @@ def _h_validation_fails(world: World, text: str, examples: dict) -> tuple[bool, 
 def _h_result_contains_error_count(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     result = state["validation_result"]
     if result is None:
         return False, "Validation result is missing"
@@ -285,10 +342,10 @@ def _h_result_contains_error_count(
 def _h_result_no_correspondence_relations(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
-    result = state["validation_result"]
-    if result is None:
-        return False, "Validation result is missing"
+    state = _get_srm_state(world)
+    result, failure = _require_result(state)
+    if failure:
+        return False, failure
     if len(result.correspondence_relations) != 0:
         return (
             False,
@@ -305,7 +362,7 @@ def _h_result_no_correspondence_relations(
 def _h_contains_identifier_defect(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     match = re.search(
         r'a resource map contains identifier defect "([^"]*)" on identifier "([^"]*)"',
         text,
@@ -331,34 +388,6 @@ def _h_contains_identifier_defect(
     return True, ""
 
 
-def _h_result_contains_error_code(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _srm_state(world)
-    result = state["validation_result"]
-    if result is None:
-        return False, "Validation result is missing"
-    match = re.search(r'the result contains error code "([^"]*)"', text)
-    error_code = match.group(1) if match else examples.get("error_code", "")
-    codes = [e.code for e in result.errors]
-    if error_code not in codes:
-        return False, f"Error code '{error_code}' not in {codes}"
-    return True, ""
-
-
-def _h_error_identifies(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    state = _srm_state(world)
-    result = state["validation_result"]
-    if result is None:
-        return False, "Validation result is missing"
-    match = re.search(r'the error identifies "([^"]*)"', text)
-    element_id = match.group(1) if match else examples.get("element_id", "")
-    matched = [e for e in result.errors if e.element_id == element_id]
-    if not matched:
-        return False, f"No error identifies '{element_id}'. Errors: {result.errors}"
-    return True, ""
-
-
 # -----------------------------------------------------------------------------
 # Scenario 03: dangling references
 # -----------------------------------------------------------------------------
@@ -367,7 +396,7 @@ def _h_error_identifies(world: World, text: str, examples: dict) -> tuple[bool, 
 def _h_references_absent_identifier(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     state["context_hint"] = "dangling_reference"
     match = re.search(
         r'a resource map references "([^"]*)" identifier "([^"]*)" that is absent from the snapshot',
@@ -408,7 +437,7 @@ def _h_references_absent_identifier(
 
 
 def _h_sets_field_to_value(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     match = re.search(r'a resource map sets field "([^"]*)" to "([^"]*)"', text)
     field = match.group(1) if match else examples.get("field", "")
     value = match.group(2) if match else examples.get("value", "")
@@ -426,7 +455,7 @@ def _h_sets_field_to_value(world: World, text: str, examples: dict) -> tuple[boo
 def _h_error_identifies_field(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     result = state["validation_result"]
     if result is None:
         return False, "Validation result is missing"
@@ -446,7 +475,7 @@ def _h_error_identifies_field(
 def _h_snapshot_pins_versions(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     match = re.search(
         r'the snapshot pins STPA version "([^"]*)" and taxonomy version "([^"]*)"',
         text,
@@ -465,7 +494,7 @@ def _h_snapshot_pins_versions(
 def _h_resource_map_pins_versions(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     match = re.search(
         r'the resource map pins STPA version "([^"]*)" and taxonomy version "([^"]*)"',
         text,
@@ -487,7 +516,7 @@ def _h_resource_map_pins_versions(
 def _h_control_action_missing_ref(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     match = re.search(
         r'control action "([^"]*)" is missing a valid "([^"]*)" reference', text
     )
@@ -512,7 +541,7 @@ def _h_control_action_missing_ref(
 def _h_link_kind_references_unknown_resource(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     match = re.search(
         r'a "([^"]*)" named "([^"]*)" references unknown resource "([^"]*)"', text
     )
@@ -547,7 +576,7 @@ def _h_link_kind_references_unknown_resource(
 def _h_loss_link_references_unknown_stpa(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     state["context_hint"] = "unknown_loss_link"
     match = re.search(
         r'a loss link named "([^"]*)" references unknown STPA "([^"]*)" "([^"]*)"',
@@ -585,7 +614,7 @@ def _h_loss_link_references_unknown_stpa(
 def _h_alias_bound_to_identifiers(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     match = re.search(r'alias "([^"]*)" is bound to identifiers "([^"]*)"', text)
     element_id = match.group(1) if match else examples.get("element_id", "")
     ids = match.group(2) if match else examples.get("ids", "")
@@ -603,7 +632,7 @@ def _h_alias_bound_to_identifiers(
 def _h_use_case_fact_resolution_status(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     match = re.search(r'use-case fact "([^"]*)" has resolution status "([^"]*)"', text)
     fact_id = match.group(1) if match else examples.get("fact_id", "")
     status = match.group(2) if match else examples.get("status", "")
@@ -629,7 +658,7 @@ def _h_use_case_fact_resolution_status(
 def _h_fact_recorded_as_status(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     srm = state["resource_map"]
     if srm is None:
         return False, "Resource map is missing"
@@ -650,7 +679,7 @@ def _h_fact_recorded_as_status(
 def _h_fact_not_treated_as_status(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     srm = state["resource_map"]
     if srm is None:
         return False, "Resource map is missing"
@@ -673,7 +702,7 @@ def _h_fact_not_treated_as_status(
 def _h_assertion_provenance_kind(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     match = re.search(r'assertion "([^"]*)" has provenance kind "([^"]*)"', text)
     assertion_id = match.group(1) if match else examples.get("assertion_id", "")
     provenance_kind = match.group(2) if match else examples.get("provenance_kind", "")
@@ -698,7 +727,7 @@ def _h_assertion_provenance_kind(
 def _h_assertion_recorded_as_provenance(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     srm = state["resource_map"]
     if srm is None:
         return False, "Resource map is missing"
@@ -719,7 +748,7 @@ def _h_assertion_recorded_as_provenance(
 def _h_assertion_not_recorded_as_provenance(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     srm = state["resource_map"]
     if srm is None:
         return False, "Resource map is missing"
@@ -744,7 +773,7 @@ def _h_assertion_not_recorded_as_provenance(
 def _h_assertion_omits_optional_provenance(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     match = re.search(r'assertion "([^"]*)" omits optional provenance', text)
     assertion_id = match.group(1) if match else examples.get("assertion_id", "A-3")
     srm = _make_representative_map()
@@ -767,37 +796,6 @@ def _h_assertion_is_otherwise_valid(
     return True, ""
 
 
-def _h_result_contains_warning_code(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _srm_state(world)
-    result = state["validation_result"]
-    if result is None:
-        return False, "Validation result is missing"
-    match = re.search(r'the result contains warning code "([^"]*)"', text)
-    warning_code = match.group(1) if match else examples.get("warning_code", "")
-    codes = [w.code for w in result.warnings]
-    if warning_code not in codes:
-        return False, f"Warning code '{warning_code}' not in {codes}"
-    return True, ""
-
-
-def _h_warning_identifies(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    state = _srm_state(world)
-    result = state["validation_result"]
-    if result is None:
-        return False, "Validation result is missing"
-    match = re.search(r'the warning identifies "([^"]*)"', text)
-    assertion_id = match.group(1) if match else examples.get("assertion_id", "")
-    matched = [w for w in result.warnings if w.element_id == assertion_id]
-    if not matched:
-        return (
-            False,
-            f"No warning identifies '{assertion_id}'. Warnings: {result.warnings}",
-        )
-    return True, ""
-
-
 # -----------------------------------------------------------------------------
 # Scenario 13: zero correspondence relations inferred
 # -----------------------------------------------------------------------------
@@ -806,7 +804,7 @@ def _h_warning_identifies(world: World, text: str, examples: dict) -> tuple[bool
 def _h_map_contains_stpa_and_taxonomy_id(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     match = re.search(
         r'the map contains STPA identifier "([^"]*)" and taxonomy identifier "([^"]*)"',
         text,
@@ -831,16 +829,7 @@ def _h_no_analyst_correspondence_assertion(
 def _h_no_lexical_match_recorded(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
-    result = state["validation_result"]
-    if result is None:
-        return False, "Validation result is missing"
-    if len(result.correspondence_relations) != 0:
-        return (
-            False,
-            f"Expected no correspondence relations, got: {result.correspondence_relations}",
-        )
-    return True, ""
+    return _h_result_no_correspondence_relations(world, text, examples)
 
 
 # =============================================================================
@@ -851,7 +840,7 @@ def _h_no_lexical_match_recorded(
 def _h_snapshot_pins_three_versions(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     match = re.search(
         r'the snapshot pins schema version "([^"]*)", STPA version "([^"]*)", and taxonomy version "([^"]*)"',
         text,
@@ -870,7 +859,7 @@ def _h_snapshot_pins_three_versions(
 def _h_valid_resource_map_produced(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     snap = state["snapshot"]
     state["resource_map"] = _make_representative_map(
         stpa_version=snap.stpa_version, taxonomy_version=snap.taxonomy_version
@@ -881,7 +870,7 @@ def _h_valid_resource_map_produced(
 def _h_map_records_schema_version(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     srm = state["resource_map"]
     if srm is None:
         return False, "Resource map is missing"
@@ -898,7 +887,7 @@ def _h_map_records_schema_version(
 def _h_map_records_stpa_version(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     srm = state["resource_map"]
     if srm is None:
         return False, "Resource map is missing"
@@ -915,7 +904,7 @@ def _h_map_records_stpa_version(
 def _h_map_records_taxonomy_version(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     srm = state["resource_map"]
     if srm is None:
         return False, "Resource map is missing"
@@ -934,7 +923,7 @@ def _h_map_records_taxonomy_version(
 def _h_one_map_presents_order(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     state["map_a"] = _make_representative_map()
     return True, ""
 
@@ -942,7 +931,7 @@ def _h_one_map_presents_order(
 def _h_another_map_presents_order(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     state["map_b"] = _make_representative_map()
     return True, ""
 
@@ -950,7 +939,7 @@ def _h_another_map_presents_order(
 def _h_each_map_validated_and_serialized(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     snap = state["snapshot"]
     res_a = validate_resource_map(state["map_a"], snap)
     res_b = validate_resource_map(state["map_b"], snap)
@@ -969,7 +958,7 @@ def _h_each_map_validated_and_serialized(
 def _h_both_maps_identical_identifiers(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     res_a = state["res_a"]
     res_b = state["res_b"]
     ids_a = [x.element_id for x in res_a.canonical_map.system_resources]
@@ -982,7 +971,7 @@ def _h_both_maps_identical_identifiers(
 def _h_both_maps_identical_canonical_order(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     res_a = state["res_a"]
     res_b = state["res_b"]
     order_a = [x.element_id for x in res_a.canonical_map.control_actions]
@@ -995,7 +984,7 @@ def _h_both_maps_identical_canonical_order(
 def _h_both_serialized_canonically_equivalent(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     if state["serialized_a"] != state["serialized_b"]:
         return (
             False,
@@ -1007,7 +996,7 @@ def _h_both_serialized_canonically_equivalent(
 def _h_valid_representative_map(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     state["resource_map"] = _make_representative_map()
     return True, ""
 
@@ -1015,26 +1004,20 @@ def _h_valid_representative_map(
 def _h_serialized_as_format_and_deserialized(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     srm = state["resource_map"]
     match = re.search(r'the map is serialized as "([^"]*)" and deserialized', text)
     fmt = match.group(1) if match else examples.get("format", "YAML")
-    if fmt.upper() == "YAML":
-        t = srm.to_yaml()
-        deserialized = SystemResourceMap.from_yaml(t)
-    elif fmt.upper() == "JSON":
-        t = srm.to_json()
-        deserialized = SystemResourceMap.from_json(t)
-    else:
+    if fmt.upper() not in ("YAML", "JSON"):
         return False, f"Unknown format {fmt}"
-    state["deserialized_map"] = deserialized
+    state["deserialized_map"] = _deserialize_map(_serialize_map(srm, fmt), fmt)
     return True, ""
 
 
 def _h_identifiers_and_crossrefs_preserved(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     orig = state["resource_map"]
     deserialized = state["deserialized_map"]
     if [x.element_id for x in orig.system_resources] != [
@@ -1051,7 +1034,7 @@ def _h_identifiers_and_crossrefs_preserved(
 def _h_provenance_preserved(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     orig = state["resource_map"]
     deserialized = state["deserialized_map"]
     if [x.provenance_kind for x in orig.assertions] != [
@@ -1064,7 +1047,7 @@ def _h_provenance_preserved(
 def _h_unknown_and_absent_preserved(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     orig = state["resource_map"]
     deserialized = state["deserialized_map"]
     if [x.resolution_status for x in orig.use_case_facts] != [
@@ -1077,26 +1060,20 @@ def _h_unknown_and_absent_preserved(
 def _h_serialized_as_format_twice(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     srm = state["resource_map"]
     match = re.search(r'the map is serialized as "([^"]*)" twice', text)
     fmt = match.group(1) if match else examples.get("format", "YAML")
-    if fmt.upper() == "YAML":
-        t1 = srm.to_yaml()
-        t2 = srm.to_yaml()
-    elif fmt.upper() == "JSON":
-        t1 = srm.to_json()
-        t2 = srm.to_json()
-    else:
+    if fmt.upper() not in ("YAML", "JSON"):
         return False, f"Unknown format {fmt}"
-    state["serialized_texts"] = [t1, t2]
+    state["serialized_texts"] = [_serialize_map(srm, fmt), _serialize_map(srm, fmt)]
     return True, ""
 
 
 def _h_two_artifacts_byte_identical(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     texts = state["serialized_texts"]
     if len(texts) != 2:
         return False, "Did not serialize twice"
@@ -1108,25 +1085,22 @@ def _h_two_artifacts_byte_identical(
 def _h_valid_representative_serialized_as_format(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     srm = _make_representative_map()
     match = re.search(
         r'a valid representative resource map serialized as "([^"]*)"', text
     )
     fmt = match.group(1) if match else examples.get("format", "YAML")
-    if fmt.upper() == "YAML":
-        t = srm.to_yaml()
-        state["consumer_map"] = SystemResourceMap.from_yaml(t)
-    elif fmt.upper() == "JSON":
-        t = srm.to_json()
-        state["consumer_map"] = SystemResourceMap.from_json(t)
+    if fmt.upper() not in ("YAML", "JSON"):
+        return False, f"Unknown format {fmt}"
+    state["consumer_map"] = _deserialize_map(_serialize_map(srm, fmt), fmt)
     return True, ""
 
 
 def _h_consumer_reads_domain_contract(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     if state.get("consumer_map") is None:
         return False, "Consumer map is missing"
     return True, ""
@@ -1135,7 +1109,7 @@ def _h_consumer_reads_domain_contract(
 def _h_consumer_can_access_entity_family(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     cmap = state["consumer_map"]
     if cmap is None:
         return False, "Consumer map is missing"
@@ -1173,7 +1147,7 @@ def _h_default_commands_no_flags(
 def _h_deterministic_workflow_fixture(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     match = re.search(r'a deterministic offline "([^"]*)" fixture', text)
     workflow = match.group(1) if match else examples.get("workflow", "")
     state["fixture_workflow"] = workflow
@@ -1183,7 +1157,7 @@ def _h_deterministic_workflow_fixture(
 def _h_default_command_runs(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    state = _srm_state(world)
+    state = _get_srm_state(world)
     match = re.search(r'the default "([^"]*)" runs', text)
     command = match.group(1) if match else examples.get("command", "")
     state["ran_command"] = command
@@ -1239,11 +1213,19 @@ def register(api: Any) -> None:
         ),
         (
             r'^the map references STPA identifiers "([^"]*)"$',
-            _h_map_references_stpa_ids,
+            _make_identifier_appender(
+                "stpa_identifiers",
+                r'^the map references STPA identifiers "([^"]*)"$',
+                "stpa_ids",
+            ),
         ),
         (
             r'^the map references taxonomy identifiers "([^"]*)"$',
-            _h_map_references_taxonomy_ids,
+            _make_identifier_appender(
+                "taxonomy_identifiers",
+                r'^the map references taxonomy identifiers "([^"]*)"$',
+                "taxonomy_ids",
+            ),
         ),
         (
             r"^the resource map is validated against the snapshot$",
@@ -1265,11 +1247,11 @@ def register(api: Any) -> None:
         ),
         (
             r'^the result contains error code "([^"]*)"$',
-            _h_result_contains_error_code,
+            _make_issue_code_checker("errors", "error", "error_code"),
         ),
         (
             r'^the error identifies "([^"]*)"$',
-            _h_error_identifies,
+            _make_issue_identifier_checker("errors", "error", "element_id"),
         ),
         (
             r'^a resource map references "([^"]*)" identifier "([^"]*)" that is absent from the snapshot$',
@@ -1341,11 +1323,11 @@ def register(api: Any) -> None:
         ),
         (
             r'^the result contains warning code "([^"]*)"$',
-            _h_result_contains_warning_code,
+            _make_issue_code_checker("warnings", "warning", "warning_code"),
         ),
         (
             r'^the warning identifies "([^"]*)"$',
-            _h_warning_identifies,
+            _make_issue_identifier_checker("warnings", "warning", "assertion_id"),
         ),
         (
             r'^the map contains STPA identifier "([^"]*)" and taxonomy identifier "([^"]*)"$',

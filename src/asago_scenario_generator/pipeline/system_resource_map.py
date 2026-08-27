@@ -22,10 +22,85 @@ _UNSTABLE_ID_PATTERNS = (
     re.compile(r"^item-\d+", re.IGNORECASE),
 )
 
+# SystemResourceMap collections sorted by element_id in the canonical map.
+_CANONICAL_COLLECTIONS = (
+    "system_resources",
+    "actor_controllers",
+    "controlled_processes",
+    "control_actions",
+    "feedback_paths",
+    "trust_boundaries",
+    "data_flows",
+    "loss_links",
+    "use_case_facts",
+    "assertions",
+)
+
 
 def _is_unstable_id(element_id: str) -> bool:
     """Return True if element_id appears to be a positional or unstable index."""
     return any(p.match(element_id) for p in _UNSTABLE_ID_PATTERNS)
+
+
+def _endpoint_reference_errors(
+    entry: Any,
+    endpoint_field: str,
+    label: str,
+    known_stpa: set[str],
+    seen_ids: set[str],
+) -> list[ResourceMapValidationIssue]:
+    """Collect dangling-reference issues for one endpoint of a linked entry."""
+    endpoint_id = getattr(entry, endpoint_field)
+    if endpoint_id in known_stpa or endpoint_id in seen_ids:
+        return []
+    return [
+        ResourceMapValidationIssue(
+            code="dangling_reference",
+            message=f"{label} reference {endpoint_id} not in snapshot",
+            element_id=endpoint_id,
+        )
+    ]
+
+
+def _missing_endpoint_error(
+    entry: Any,
+    label: str,
+) -> ResourceMapValidationIssue:
+    """Build the issue for a linked entry missing a controller or process ref."""
+    return ResourceMapValidationIssue(
+        code="invalid_control_action_link",
+        message=f"{label} {entry.element_id} missing controller or process reference",
+        element_id=entry.element_id,
+    )
+
+
+def _unknown_stpa_reference_code(context_hint: str | None) -> str:
+    """Resolve the issue code for loss/hazard references outside the snapshot."""
+    return (
+        "dangling_reference"
+        if context_hint == "dangling_reference"
+        else "unknown_loss_link"
+    )
+
+
+def _loss_link_reference_errors(
+    ll: Any,
+    ref_field: str,
+    ref_label: str,
+    known_stpa: set[str],
+    context_hint: str | None,
+) -> list[ResourceMapValidationIssue]:
+    """Collect loss/hazard reference issues for one loss link."""
+    ref_id = getattr(ll, ref_field)
+    if ref_id in known_stpa:
+        return []
+    return [
+        ResourceMapValidationIssue(
+            code=_unknown_stpa_reference_code(context_hint),
+            message=f"Loss link {ll.element_id} references unknown {ref_label} {ref_id}",
+            element_id=ref_id,
+        )
+    ]
 
 
 def validate_resource_map(
@@ -189,58 +264,34 @@ def validate_resource_map(
     # 5. Control actions
     for ca in srm.control_actions:
         if not ca.controller_id or not ca.process_id:
-            errors.append(
-                ResourceMapValidationIssue(
-                    code="invalid_control_action_link",
-                    message=f"Control action {ca.element_id} missing controller or process reference",
-                    element_id=ca.element_id,
+            errors.append(_missing_endpoint_error(ca, "Control action"))
+        else:
+            errors.extend(
+                _endpoint_reference_errors(
+                    ca, "controller_id", "Controller", known_stpa, seen_ids
                 )
             )
-        else:
-            if ca.controller_id not in known_stpa and ca.controller_id not in seen_ids:
-                errors.append(
-                    ResourceMapValidationIssue(
-                        code="dangling_reference",
-                        message=f"Controller reference {ca.controller_id} not in snapshot",
-                        element_id=ca.controller_id,
-                    )
+            errors.extend(
+                _endpoint_reference_errors(
+                    ca, "process_id", "Process", known_stpa, seen_ids
                 )
-            if ca.process_id not in known_stpa and ca.process_id not in seen_ids:
-                errors.append(
-                    ResourceMapValidationIssue(
-                        code="dangling_reference",
-                        message=f"Process reference {ca.process_id} not in snapshot",
-                        element_id=ca.process_id,
-                    )
-                )
+            )
 
     # 6. Feedback paths
     for fb in srm.feedback_paths:
         if not fb.controller_id or not fb.process_id:
-            errors.append(
-                ResourceMapValidationIssue(
-                    code="invalid_control_action_link",
-                    message=f"Feedback path {fb.element_id} missing controller or process reference",
-                    element_id=fb.element_id,
+            errors.append(_missing_endpoint_error(fb, "Feedback path"))
+        else:
+            errors.extend(
+                _endpoint_reference_errors(
+                    fb, "controller_id", "Controller", known_stpa, seen_ids
                 )
             )
-        else:
-            if fb.controller_id not in known_stpa and fb.controller_id not in seen_ids:
-                errors.append(
-                    ResourceMapValidationIssue(
-                        code="dangling_reference",
-                        message=f"Controller reference {fb.controller_id} not in snapshot",
-                        element_id=fb.controller_id,
-                    )
+            errors.extend(
+                _endpoint_reference_errors(
+                    fb, "process_id", "Process", known_stpa, seen_ids
                 )
-            if fb.process_id not in known_stpa and fb.process_id not in seen_ids:
-                errors.append(
-                    ResourceMapValidationIssue(
-                        code="dangling_reference",
-                        message=f"Process reference {fb.process_id} not in snapshot",
-                        element_id=fb.process_id,
-                    )
-                )
+            )
 
     # 7. Trust boundaries
     for tb in srm.trust_boundaries:
@@ -283,32 +334,14 @@ def validate_resource_map(
 
     # 9. Loss links
     for ll in srm.loss_links:
-        if ll.loss_id not in known_stpa:
-            code = (
-                "unknown_loss_link"
-                if context_hint != "dangling_reference"
-                else "dangling_reference"
+        errors.extend(
+            _loss_link_reference_errors(ll, "loss_id", "loss", known_stpa, context_hint)
+        )
+        errors.extend(
+            _loss_link_reference_errors(
+                ll, "hazard_id", "hazard", known_stpa, context_hint
             )
-            errors.append(
-                ResourceMapValidationIssue(
-                    code=code,
-                    message=f"Loss link {ll.element_id} references unknown loss {ll.loss_id}",
-                    element_id=ll.loss_id,
-                )
-            )
-        if ll.hazard_id not in known_stpa:
-            code = (
-                "unknown_loss_link"
-                if context_hint != "dangling_reference"
-                else "dangling_reference"
-            )
-            errors.append(
-                ResourceMapValidationIssue(
-                    code=code,
-                    message=f"Loss link {ll.element_id} references unknown hazard {ll.hazard_id}",
-                    element_id=ll.hazard_id,
-                )
-            )
+        )
 
     # 10. Ambiguous aliases
     for alias_name, targets in srm.aliases.items():
@@ -333,16 +366,8 @@ def validate_resource_map(
     canonical = None
     if len(errors) == 0:
         canonical = SystemResourceMap.model_validate(srm.model_dump(mode="json"))
-        canonical.system_resources.sort(key=lambda x: x.element_id)
-        canonical.actor_controllers.sort(key=lambda x: x.element_id)
-        canonical.controlled_processes.sort(key=lambda x: x.element_id)
-        canonical.control_actions.sort(key=lambda x: x.element_id)
-        canonical.feedback_paths.sort(key=lambda x: x.element_id)
-        canonical.trust_boundaries.sort(key=lambda x: x.element_id)
-        canonical.data_flows.sort(key=lambda x: x.element_id)
-        canonical.loss_links.sort(key=lambda x: x.element_id)
-        canonical.use_case_facts.sort(key=lambda x: x.element_id)
-        canonical.assertions.sort(key=lambda x: x.element_id)
+        for collection in _CANONICAL_COLLECTIONS:
+            getattr(canonical, collection).sort(key=lambda x: x.element_id)
 
     return ResourceMapValidationResult(
         is_valid=(len(errors) == 0),

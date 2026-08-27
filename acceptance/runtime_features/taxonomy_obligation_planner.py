@@ -295,9 +295,11 @@ def _h_canonically_equivalent(
 ) -> tuple[bool, str]:
     state = _planner_state(world)
     if state["plan_a"] is None:
-        srm_state = getattr(world, "system_resource_map_state", None)
-        if srm_state and srm_state.get("serialized_a") is not None:
-            if srm_state["serialized_a"] != srm_state["serialized_b"]:
+        # Shared generated-test registry: this step text is also registered by
+        # the system resource map feature, whose state answers first here.
+        map_state = getattr(world, "system_resource_map_state", None)
+        if map_state and map_state.get("serialized_a") is not None:
+            if map_state["serialized_a"] != map_state["serialized_b"]:
                 return False, "Serialized SRM artifacts not equivalent"
             return True, ""
         return False, "No plan_a in planner state"
@@ -440,10 +442,12 @@ def _h_byte_identical(world: World, text: str, examples: dict) -> tuple[bool, st
     state = _planner_state(world)
     texts = state["serialized_texts"]
     if len(texts) != 2:
-        srm_state = getattr(world, "system_resource_map_state", None)
-        if srm_state and len(srm_state.get("serialized_texts", [])) == 2:
-            srm_texts = srm_state["serialized_texts"]
-            if srm_texts[0] == srm_texts[1]:
+        # Shared generated-test registry: the system resource map feature also
+        # registers this step and may own the serialized texts.
+        map_state = getattr(world, "system_resource_map_state", None)
+        if map_state and len(map_state.get("serialized_texts", [])) == 2:
+            map_texts = map_state["serialized_texts"]
+            if map_texts[0] == map_texts[1]:
                 return True, ""
             return False, "Serialized texts are not byte-identical"
         return False, "Serialized texts are not byte-identical"

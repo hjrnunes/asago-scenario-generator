@@ -26,6 +26,20 @@ VALID_RESOLUTION_STATUSES = frozenset({"unknown", "absent", "present", "resolved
 
 VALID_PROVENANCE_KINDS = frozenset({"analyst", "imported-source"})
 
+# Entity-family name -> SystemResourceMap collection attribute.
+_FAMILY_ATTRIBUTES = (
+    ("system-resource", "system_resources"),
+    ("actor-controller", "actor_controllers"),
+    ("controlled-process", "controlled_processes"),
+    ("control-action", "control_actions"),
+    ("feedback-path", "feedback_paths"),
+    ("trust-boundary", "trust_boundaries"),
+    ("data-flow", "data_flows"),
+    ("loss-link", "loss_links"),
+    ("use-case-fact", "use_case_facts"),
+    ("assertion", "assertions"),
+)
+
 
 class SystemResourceEntry(BaseModel):
     """System resource definition or mapped component."""
@@ -230,17 +244,9 @@ class SystemResourceMap(BaseModel):
 
     def get_family(self, family: str) -> list[dict[str, Any]]:
         """Access entities for a specific entity family."""
-        family_map = {
-            "system-resource": self.system_resources,
-            "actor-controller": self.actor_controllers,
-            "controlled-process": self.controlled_processes,
-            "control-action": self.control_actions,
-            "feedback-path": self.feedback_paths,
-            "trust-boundary": self.trust_boundaries,
-            "data-flow": self.data_flows,
-            "loss-link": self.loss_links,
-            "use-case-fact": self.use_case_facts,
-            "assertion": self.assertions,
-        }
-        entries = family_map.get(family, [])
+        entries: list[Any] = []
+        for family_name, attribute in _FAMILY_ATTRIBUTES:
+            if family_name == family:
+                entries = getattr(self, attribute)
+                break
         return [entry.model_dump(mode="json") for entry in entries]
