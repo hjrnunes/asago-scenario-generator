@@ -27,5 +27,6 @@ __all__ = (
     "taxonomy_threat_surface",
     "taxonomy_report",
     "taxonomy_report_sections",
+    "taxonomy_obligation_planner",
     "stpa",
 )
