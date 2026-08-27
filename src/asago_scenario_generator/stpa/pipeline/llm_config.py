@@ -92,11 +92,11 @@ def _looks_like_path_reference(content: str) -> bool:
     detecting a use-case file that contains a path to the real
     use-case file instead of actual content.
     """
+    if "\n" in content or "\r" in content:
+        return False
     reference = content.strip()
     return (
         len(reference) < 200
-        and "\n" not in reference
-        and "\r" not in reference
         and reference.endswith((".txt", ".md"))
     )
 
@@ -132,7 +132,8 @@ def read_use_case(path: str) -> str:
 
     If the file content itself looks like a path reference (short, no
     newlines, ends with ``.txt`` or ``.md``), resolves and reads the
-    referenced file instead.
+    referenced file instead.  Surrounding whitespace is tolerated because
+    editors commonly terminate one-line path-reference files with a newline.
     """
     if path.startswith("@"):
         path = path[1:]
@@ -141,8 +142,8 @@ def read_use_case(path: str) -> str:
         raise FileNotFoundError(f"Use-case file not found: {path}")
     logger.info("Reading use-case from %s", path)
     content = use_case_path.read_text(encoding="utf-8")
-    if _looks_like_path_reference(content):
-        reference = content.strip()
+    reference = content.strip()
+    if _looks_like_path_reference(content) or _looks_like_path_reference(reference):
         resolved_path = _resolve_reference_path(reference, use_case_path)
         content = resolved_path.read_text(encoding="utf-8")
     logger.info("Loaded use-case text: %s", content[:100])
@@ -150,5 +151,5 @@ def read_use_case(path: str) -> str:
 
 
 # mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-10T17:26:00Z","module_hash":"4be2fe5edad8155a547da53ae30c3f09c9a789001853002182054924a0252115","functions":[{"id":"func/resolve_llm_client_from_profile","name":"resolve_llm_client_from_profile","line":22,"end_line":47,"hash":"934d2bfb618888994141f4c02699037a0f48ab8792ca33ba736dd5b3c21a8a98"},{"id":"func/resolve_llm_client_from_env","name":"resolve_llm_client_from_env","line":50,"end_line":60,"hash":"8df7a0ca3da15ab5e856da48e30d0bc9a99a5dd8fb75734afb5d91f6a54331b4"},{"id":"func/resolve_llm_client","name":"resolve_llm_client","line":63,"end_line":82,"hash":"e093d239a4207901f7c50a08408c177b94885d287a39d70dac702a8c57a0e5a5"},{"id":"func/_looks_like_path_reference","name":"_looks_like_path_reference","line":90,"end_line":104,"hash":"18819db98b3b27efef57f81adea6af6045fee56cd6f6c3dc813e0d13fdaf26e7"},{"id":"func/_resolve_reference_path","name":"_resolve_reference_path","line":107,"end_line":131,"hash":"c97159a13dfa2dfbc0865d6e04b1ec067ab8353245c240636423908dc4709ea5"},{"id":"func/read_use_case","name":"read_use_case","line":134,"end_line":153,"hash":"819d118043e1e716dc3eeac6f278a22beff63e7351a7f3306a9b3f8565450280"}]}
+# {"version":1,"tested_at":"2026-08-26T14:54:04Z","module_hash":"4a91adce7c3defd0e9bf3b0b0635de62f8b29ae29d52155bd663115beda70185","source_sha256":"6685cf28594f1369c1c9707cbcb6fa08dfce363a07050f23db0565255e5af290","functions":[{"id":"func/resolve_llm_client_from_profile","name":"resolve_llm_client_from_profile","line":22,"end_line":48,"hash":"4d68f484021d45d4199ae2753db1d4e9b568bf0063993b83b3725e8a3227608c"},{"id":"func/resolve_llm_client_from_env","name":"resolve_llm_client_from_env","line":51,"end_line":57,"hash":"4ddb057803d1d47fffcb670c4a1df0acca1378f4ff15f76a03d1636389d566d0"},{"id":"func/resolve_llm_client","name":"resolve_llm_client","line":60,"end_line":79,"hash":"e093d239a4207901f7c50a08408c177b94885d287a39d70dac702a8c57a0e5a5"},{"id":"func/_looks_like_path_reference","name":"_looks_like_path_reference","line":87,"end_line":101,"hash":"808f1528133b21d0da120fef55fc6d26c6f52a7664bfd2c26ab9a276459ac803"},{"id":"func/_resolve_reference_path","name":"_resolve_reference_path","line":104,"end_line":127,"hash":"c97159a13dfa2dfbc0865d6e04b1ec067ab8353245c240636423908dc4709ea5"},{"id":"func/read_use_case","name":"read_use_case","line":130,"end_line":150,"hash":"da046cbdcf826d474d71bb64f1a273d3139fec1328fb76985f02e2c30bead1bc"}]}
 # mutate4py-manifest-end

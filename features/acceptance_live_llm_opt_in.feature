@@ -1,3 +1,8 @@
+# mutation-stamp: sha256=4589b76773c1978b03e405d2e79a4966baf69a98ce0ff53dc5bce067cfd4eab4
+# acceptance-mutation-manifest-begin
+# {"version":1,"tested_at":"2026-08-26T17:45:02.810441Z","feature_name":"Acceptance live LLM opt-in","feature_path":"features/acceptance_live_llm_opt_in.feature","background_hash":"2df76b13a166b0749a5c50310574c706464ff8f8b75b483f522da6da676ed971","implementation_hash":"unknown","scenarios":[{"index":2,"name":"Acceptance live LLM opt-in ALO-03 other values do not authorize live work","scenario_hash":"f7951a148df076feaacde894beeb0fba46a9be531783eeb9285ebffb9bd0b743","mutation_count":6,"result":{"Total":6,"Killed":6,"Survived":0,"Errors":0},"tested_at":"2026-08-26T17:45:02.810441Z"}]}
+# acceptance-mutation-manifest-end
+
 Feature: Acceptance live LLM opt-in
   Full-pipeline acceptance scenarios can spend money and require a configured
   live LLM endpoint. They are not authorized merely because endpoint
@@ -31,16 +36,17 @@ Feature: Acceptance live LLM opt-in
   # Acceptance live LLM opt-in ALO-03 other values do not authorize live work
   Scenario Outline: Acceptance live LLM opt-in ALO-03 other values do not authorize live work
     Given ASAGO_SCENARIO_GENERATOR_QA_PIPELINE is "<value>"
+    And the live-LLM opt-in value is observed as "<expected_value>"
     And live LLM endpoint variables are configured
     When the isolated acceptance fixture is executed
     Then the live-LLM scenario is not executed
     And the live-LLM scenario is reported as skipped because ASAGO_SCENARIO_GENERATOR_QA_PIPELINE is not "1"
 
     Examples:
-      | value |
-      | 0     |
-      | true  |
-      | yes   |
+      | value | expected_value |
+      | 0     | 0              |
+      | true  | true           |
+      | yes   | yes            |
 
   # Acceptance live LLM opt-in ALO-04 opt-in without an endpoint fails visibly
   Scenario: Acceptance live LLM opt-in ALO-04 opt-in without an endpoint fails visibly

@@ -10,21 +10,39 @@ import pytest
 
 from asago_scenario_generator.eval.runner import run_evaluation
 from asago_scenario_generator.eval.scorecard import (
+    QUALIFICATION_GATE_PATHS,
+    QUALIFICATION_RATIO_GATE_IDS,
+    QUALIFICATION_ZERO_GATE_IDS,
+    REQUIRED_QUALIFICATION_GATE_IDS,
     MetricResult,
     MetricStatus,
-    QUALIFICATION_GATE_PATHS,
-    REQUIRED_QUALIFICATION_GATE_IDS,
     ScorecardV1,
     aggregate_qualification,
     ratio_metric,
+    validate_qualification_gate_semantics,
 )
 from asago_scenario_generator.eval.versioned_metrics import (
+    _V3ScenarioCounters,
+    _accumulate_v3_conditional_stats,
+    _accumulate_v3_pinned_stats,
+    _accumulate_v3_projection_mappings,
+    _accumulate_v3_projection_recall,
+    _accumulate_v3_scenario_counters,
+    _accumulate_v3_zone_differences,
+    _collect_v3_scenario_items,
+    _load_v3_scorecard_models,
+    _malformed_evidence_decision,
+    _resolver_orphan_fact,
+    _tree_leaves,
     _admission_evidence_metric,
     _admission_gate_failure_metrics,
     canonical_entry_point_sets,
     evaluate_v3_scorecard,
     inventory_identity_mismatches,
     title_duplicate_components,
+    _v3_receipt_pair_bad_ids,
+    _v3_scenario_classifications,
+    _v3_structural_edges,
 )
 from asago_scenario_generator.manifest import ArtifactRole, ManifestIntegrityError
 from asago_scenario_generator.models.capability_profile import (
@@ -157,6 +175,80 @@ def test_metric_values_are_bounded_and_exact() -> None:
         )
 
 
+def test_bounded_value_without_threshold_is_valid() -> None:
+    result = MetricResult(
+        status=MetricStatus.PASS,
+        numerator=1,
+        denominator=2,
+        value=0.5,
+        evidence=["test"],
+        affected_ids=[],
+    )
+    assert result.status is MetricStatus.PASS
+    assert result.value == 0.5
+
+
+def test_value_requires_bounded_fields() -> None:
+    with pytest.raises(ValueError, match="bounded values require"):
+        MetricResult(
+            status=MetricStatus.PASS,
+            numerator=1,
+            value=0.5,
+            evidence=["test"],
+            affected_ids=[],
+        )
+
+
+def _valid_qualification_gates() -> dict[str, MetricResult]:
+    """Minimal canonical gate outcomes accepted by the semantics check."""
+    gates: dict[str, MetricResult] = {}
+    for gate_id in QUALIFICATION_RATIO_GATE_IDS:
+        gates[gate_id] = ratio_metric(1, 1, threshold=1.0, evidence=["x"])
+    for gate_id in QUALIFICATION_ZERO_GATE_IDS:
+        gates[gate_id] = MetricResult(
+            status=MetricStatus.PASS,
+            numerator=0,
+            evidence=["x"],
+            affected_ids=[],
+        )
+    return gates
+
+
+def test_error_ratio_gate_cannot_claim_value() -> None:
+    gates = _valid_qualification_gates()
+    gates["capability_grounding"] = MetricResult(
+        status=MetricStatus.ERROR,
+        numerator=1,
+        evidence=["broken"],
+        affected_ids=[],
+    )
+    with pytest.raises(ValueError, match="cannot claim a value"):
+        validate_qualification_gate_semantics(gates)
+
+
+def test_error_ratio_gate_with_clear_fields_is_allowed() -> None:
+    gates = _valid_qualification_gates()
+    gates["capability_grounding"] = MetricResult(
+        status=MetricStatus.ERROR,
+        evidence=["broken"],
+        affected_ids=[],
+    )
+    validate_qualification_gate_semantics(gates)  # must not raise
+
+
+def test_na_ratio_gate_with_zero_counts_is_valid() -> None:
+    gates = _valid_qualification_gates()
+    gates["capability_grounding"] = MetricResult(
+        status=MetricStatus.NOT_APPLICABLE,
+        threshold=1.0,
+        numerator=0,
+        denominator=0,
+        evidence=["empty projected sets"],
+        affected_ids=[],
+    )
+    validate_qualification_gate_semantics(gates)  # must not raise
+
+
 def test_aggregate_excludes_na_and_surfaces_errors() -> None:
     result = aggregate_qualification(
         {
@@ -235,6 +327,200 @@ def test_exact_title_duplicates_differ_from_near_components() -> None:
     )
     assert exact == [["a", "b"]]
     assert near == [["a", "b", "c"]]
+
+
+def test_tree_leaves_descend_through_nonempty_children() -> None:
+    root = {"children": [{"name": "left"}, {"name": "right"}]}
+
+    assert _tree_leaves(root) == [{"name": "left"}, {"name": "right"}]
+
+
+def test_resolver_orphan_policy_is_explicit() -> None:
+    in_progress = _resolver_orphan_fact(
+        SimpleNamespace(check_orphans=False), evidence="orphan check"
+    )
+    strict = _resolver_orphan_fact(
+        SimpleNamespace(check_orphans=True), evidence="orphan check"
+    )
+
+    assert in_progress.status is MetricStatus.NOT_APPLICABLE
+    assert strict.status is MetricStatus.PASS
+    assert strict.numerator == 0
+
+
+def test_malformed_evidence_rejects_not_applicable_records() -> None:
+    records = {
+        AdmissionEvidenceId.actor_attack_complexity: [SimpleNamespace(applicable=False)]
+    }
+
+    assert _malformed_evidence_decision(records, True) is True
+
+
+def test_v3_model_loading_requires_all_authoritative_roles() -> None:
+    resolver = _Resolver()
+    del resolver.entries[ArtifactRole.COVERAGE_PLAN]
+
+    with pytest.raises(ValueError, match="requires plan, finalization, and profile"):
+        _load_v3_scorecard_models(resolver)  # type: ignore[arg-type]
+
+
+def test_v3_scenario_collection_uses_path_when_id_is_absent() -> None:
+    entry = _Entry(ArtifactRole.SCENARIO_YAML, "scenarios/example.yaml")
+    resolver = SimpleNamespace(
+        scenario_yaml_entries=lambda: [entry],
+        read_yaml=lambda _entry: {"not": "a scenario envelope"},
+    )
+
+    items, errors = _collect_v3_scenario_items(resolver)
+
+    assert items == [(entry.path, {"not": "a scenario envelope"})]
+    assert errors == [entry.path]
+
+
+def test_v3_receipt_pair_check_requires_exactly_two_receipts() -> None:
+    one = SimpleNamespace(scenario_id="scenario-1")
+    two = SimpleNamespace(scenario_id="scenario-1")
+
+    assert _v3_receipt_pair_bad_ids([one]) == ["scenario-1"]
+    assert _v3_receipt_pair_bad_ids([one, two]) == []
+
+
+def test_v3_conditional_stats_require_matching_condition_results() -> None:
+    raw = {
+        "projection": {
+            "projection": {
+                "source_chain": {
+                    "steps": [{"step_id": "conditional", "requirement": "conditional"}]
+                },
+                "condition_results": [{"condition_step_id": "conditional"}],
+            }
+        }
+    }
+    counters = _V3ScenarioCounters([])
+
+    _accumulate_v3_conditional_stats(counters, "scenario-1", raw)
+
+    assert counters.conditional_total == 1
+    assert counters.conditional_decided == 1
+    assert counters.conditional_problem_ids == []
+
+
+def test_v3_projection_recall_counts_only_exact_cross_artifact_matches() -> None:
+    def raw(
+        selected: tuple[str, ...],
+        tree: tuple[str, ...],
+        behavior: tuple[str, ...],
+        narrative: tuple[str, ...],
+    ) -> dict[str, Any]:
+        return {
+            "projection": {
+                "projection": {"selected_step_ids": list(selected)},
+            },
+            "attack_tree": {"root": {"projected_step_ids": list(tree)}},
+            "behavior_spec": {
+                "actions": [{"projected_step_ids": list(behavior)}],
+            },
+            "narrative": {"steps": [{"projected_step_ids": list(narrative)}]},
+        }
+
+    counters = _V3ScenarioCounters([])
+    _accumulate_v3_projection_recall(
+        counters,
+        "matching",
+        raw(("step-1",), ("step-1",), ("step-1",), ("step-1",)),
+    )
+    _accumulate_v3_projection_recall(
+        counters,
+        "mismatching",
+        raw(("step-2",), ("step-1",), ("step-1",), ("step-2",)),
+    )
+
+    assert counters.projected_total == 2
+    assert counters.projected_all_found == 1
+    assert counters.tree_behavior_matches == 1
+    assert counters.tree_behavior_problem_ids == ["mismatching"]
+    assert counters.projected_problem_ids == ["mismatching"]
+
+
+def test_v3_classification_and_pinned_stats_preserve_explicit_scope() -> None:
+    explicit = {
+        "technique_scope_evidence": {"scenario_classification_ids": ["explicit"]},
+        "faceting": {"taxonomy_chain": {"atlas_technique_ids": ["fallback"]}},
+    }
+    fallback = {"faceting": {"taxonomy_chain": {"atlas_technique_ids": ["fallback"]}}}
+    assert _v3_scenario_classifications(explicit) == {"explicit"}
+    assert _v3_scenario_classifications(fallback) == {"fallback"}
+
+    counters = _V3ScenarioCounters([])
+    _accumulate_v3_pinned_stats(
+        counters,
+        "mismatch",
+        {"pinned"},
+        {"technique_scope_evidence": {"scenario_classification_ids": ["scope"]}},
+    )
+    _accumulate_v3_pinned_stats(
+        counters,
+        "one-sided",
+        set(),
+        {"technique_scope_evidence": {"scenario_classification_ids": ["scope"]}},
+    )
+    _accumulate_v3_pinned_stats(
+        counters,
+        "empty",
+        set(),
+        {"technique_scope_evidence": {"scenario_classification_ids": []}},
+    )
+
+    assert counters.pinned_problem_ids == ["mismatch", "one-sided"]
+    assert counters.vacuous_agreement_ids == ["empty"]
+
+
+def test_v3_projection_and_zone_counters_increment_once() -> None:
+    counters = _V3ScenarioCounters([])
+    _accumulate_v3_projection_mappings(
+        counters,
+        {"projection": {"projected_mappings": [{"mapping": {"decision": "exact"}}]}},
+    )
+    _accumulate_v3_zone_differences(
+        counters,
+        "scenario-1",
+        {
+            "narrative": {"steps": [{"zone": "input"}]},
+            "attack_tree": {"root": {"zone": "input"}},
+        },
+    )
+
+    assert counters.projection_mappings["exact"] == 1
+    assert counters.zone_difference_sizes[0] == 1
+    assert counters.zone_difference_ids == []
+
+
+def test_v3_scenario_counters_use_choices_and_admission_index() -> None:
+    counters = _V3ScenarioCounters([])
+    raw = {
+        "candidate_id": "candidate-1",
+        "projection": {"projection": {}},
+        "attack_tree": {"root": {}},
+        "behavior_spec": {},
+        "narrative": {},
+    }
+
+    _accumulate_v3_scenario_counters(
+        counters,
+        "scenario-1",
+        raw,
+        {"candidate-1": SimpleNamespace(pinned_technique_ids=["pinned"])},
+        {},
+    )
+
+    assert counters.pinned_total == 1
+    assert counters.projected_problem_ids == ["scenario-1"]
+
+
+def test_v3_structural_edges_are_unique_forward_pairs() -> None:
+    structures = {"a": ("step",), "b": ("step",)}
+
+    assert _v3_structural_edges(["a", "b"], structures) == {("a", "b")}
 
 
 def test_components_are_deterministic_across_input_order() -> None:

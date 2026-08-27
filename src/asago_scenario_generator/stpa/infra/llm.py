@@ -81,6 +81,61 @@ def _inject_openrouter_headers(merged: dict[str, str], base_url: str | None) -> 
             merged.setdefault(key, default)
 
 
+def _prompt_messages(system_prompt: str, user_prompt: str) -> list[dict[str, str]]:
+    """Build the standard system + user message pair for one completion."""
+    return [
+        dict(role=role, content=content)
+        for role, content in (
+            ("system", system_prompt),
+            ("user", user_prompt),
+        )
+    ]
+
+
+def _guided_json_enabled(
+    use_guided_decoding: bool,
+    allow_unvalidated: bool,
+    response_format: type[BaseModel] | None,
+) -> bool:
+    """Whether vLLM guided_json applies for this request."""
+    return use_guided_decoding and allow_unvalidated and response_format is not None
+
+
+def _apply_legacy_json_fallback(
+    extra_kwargs: dict[str, Any],
+    allow_unvalidated: bool,
+    response_format: type[BaseModel] | None,
+    use_guided_json: bool,
+) -> None:
+    """Fall back to legacy json_object mode for models without guided decoding."""
+    if allow_unvalidated and response_format is not None and not use_guided_json:
+        extra_kwargs["response_format"] = {"type": "json_object"}
+
+
+def _token_usage(response: Any) -> Any:
+    """Normalize a response's usage record to a token-count object."""
+    return (
+        response.usage or type("U", (), {"prompt_tokens": 0, "completion_tokens": 0})()
+    )
+
+
+def _top_k_extra_body(top_k: int | None) -> dict[str, Any]:
+    """The extra_body entries for the top_k control."""
+    if top_k is None:
+        return {}
+    return {"top_k": top_k}
+
+
+def _guided_json_extra_body(
+    use_guided_json: bool,
+    response_format: type[BaseModel] | None,
+) -> dict[str, Any]:
+    """The extra_body entries for vLLM strict JSON schema enforcement."""
+    if use_guided_json and response_format is not None:
+        return {"guided_json": response_format.model_json_schema()}
+    return {}
+
+
 class LLMResult(BaseModel):
     """Wrapper carrying the LLM response plus usage telemetry."""
 
@@ -163,12 +218,10 @@ class LLMClient:
         if self.top_p is not None:
             kwargs["top_p"] = self.top_p
 
-        extra_body: dict[str, Any] = {}
-        if self.top_k is not None:
-            extra_body["top_k"] = self.top_k
-        if use_guided_json and response_format is not None:
-            extra_body["guided_json"] = response_format.model_json_schema()
-
+        extra_body = {
+            **_top_k_extra_body(self.top_k),
+            **_guided_json_extra_body(use_guided_json, response_format),
+        }
         if extra_body:
             kwargs["extra_body"] = extra_body
 
@@ -210,40 +263,29 @@ class LLMClient:
         effective_max = max_completion_tokens or self.max_completion_tokens
         effective_temp = temperature if temperature is not None else self.temperature
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
-
         # Use vLLM guided_json for strict schema enforcement when enabled via profile
         # This enables guided decoding which masks invalid tokens during generation
         # Only enabled when use_guided_decoding=True in model profile
-        use_guided_json = (
-            self.use_guided_decoding
-            and allow_unvalidated
-            and response_format is not None
+        use_guided_json = _guided_json_enabled(
+            self.use_guided_decoding, allow_unvalidated, response_format
         )
         extra_kwargs = self._build_extra_kwargs(
             effective_max, effective_temp, response_format, use_guided_json
         )
-
-        # Fallback to legacy json_object mode for models without guided decoding
-        if allow_unvalidated and response_format is not None and not use_guided_json:
-            extra_kwargs["response_format"] = {"type": "json_object"}
+        _apply_legacy_json_fallback(
+            extra_kwargs, allow_unvalidated, response_format, use_guided_json
+        )
 
         t0 = time.perf_counter_ns()
         response, content = self._request_completion(
-            messages,
+            _prompt_messages(system_prompt, user_prompt),
             response_format,
             extra_kwargs,
             allow_unvalidated,
         )
 
         duration_ms = (time.perf_counter_ns() - t0) // 1_000_000
-        usage = (
-            response.usage
-            or type("U", (), {"prompt_tokens": 0, "completion_tokens": 0})()
-        )
+        usage = _token_usage(response)
 
         return LLMResult(
             content=content,
@@ -256,5 +298,5 @@ class LLMClient:
 
 
 # mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-09T14:01:03Z","module_hash":"ff1a057fc1fbd6eacf792c97b4ac5e6deb73a2c85268d27ccd2389e6caa5f165","functions":[{"id":"func/_resolve_temperature","name":"_resolve_temperature","line":26,"end_line":35,"hash":"998ed6ac410ac249f9323306689e281049387bb4cdb7b40473aa70e8a12d5218"},{"id":"func/_resolve_max_tokens","name":"_resolve_max_tokens","line":38,"end_line":45,"hash":"cb0fddfec270db0947c9e4c4641ca1ab14a3a0840697f7b1d186b3f95bd4492c"},{"id":"func/_resolve_base_url","name":"_resolve_base_url","line":48,"end_line":50,"hash":"f49d568278a6d26ac457df37e5df8d5ec67f8e3fbf717ab6139b0868093eff26"},{"id":"func/_resolve_api_key","name":"_resolve_api_key","line":53,"end_line":55,"hash":"9d252c6a2c4627645193dc1d414b204a9fb0ae3ca6fbec47157ea6929db89a2e"},{"id":"func/_resolve_model","name":"_resolve_model","line":58,"end_line":62,"hash":"702c4a307f67d7519b9926c7cd7bcff24dd960c8d96239b4793cf9d1e670e506"},{"id":"func/_resolve_extra_headers","name":"_resolve_extra_headers","line":65,"end_line":74,"hash":"e60982eb84b4e3e6c180960e7bedb1b8fb5c8f4cf6c98d0632e8c673e10d0708"},{"id":"func/_inject_openrouter_headers","name":"_inject_openrouter_headers","line":77,"end_line":83,"hash":"7a170937e63ad4d1e269ef89e011e3003b8a7c8d66fe519abff1ab75995ac6eb"},{"id":"func/LLMClient.__init__","name":"__init__","line":104,"end_line":142,"hash":"801cd57c4cdaeac3e1a0b63df68ccb744ca229266b7865dff3116beae87477b7"},{"id":"func/LLMClient._build_extra_kwargs","name":"_build_extra_kwargs","line":144,"end_line":162,"hash":"ea5ddcda6171abbf66b936205c9c2322a781ab72c39257c7aac6771fc868f880"},{"id":"func/LLMClient.complete","name":"complete","line":164,"end_line":213,"hash":"efd8693b01257982cf4a81fb5410cdaebd45fafe79e17d74ef2503ec43845b77"}]}
+# {"version":1,"tested_at":"2026-08-26T14:50:54Z","module_hash":"1f7549ba302813e41030398beb4aa5afb1986dfed1fc94954d6720b2590bec06","source_sha256":"5e150c3e801603ab5ebf88b606641355b41ea8f227bb591d2d9b4b60cfb1e650","functions":[{"id":"func/_resolve_temperature","name":"_resolve_temperature","line":26,"end_line":35,"hash":"998ed6ac410ac249f9323306689e281049387bb4cdb7b40473aa70e8a12d5218"},{"id":"func/_resolve_max_tokens","name":"_resolve_max_tokens","line":38,"end_line":45,"hash":"cb0fddfec270db0947c9e4c4641ca1ab14a3a0840697f7b1d186b3f95bd4492c"},{"id":"func/_resolve_base_url","name":"_resolve_base_url","line":48,"end_line":50,"hash":"53db5a7a428e00f2e581cea2352b7b5914a09d5b3e3bc5b2d2816aa1f721d676"},{"id":"func/_resolve_api_key","name":"_resolve_api_key","line":53,"end_line":55,"hash":"c525af29e91b8375a85bae92778913503d11c5212731ae1db03b3ed690d15ca8"},{"id":"func/_resolve_model","name":"_resolve_model","line":58,"end_line":62,"hash":"d58dc2c9c0924bf03d603f0f4f782681efeb2a60bd49d1b634ba72de81349c8a"},{"id":"func/_resolve_extra_headers","name":"_resolve_extra_headers","line":65,"end_line":74,"hash":"e60982eb84b4e3e6c180960e7bedb1b8fb5c8f4cf6c98d0632e8c673e10d0708"},{"id":"func/_inject_openrouter_headers","name":"_inject_openrouter_headers","line":77,"end_line":81,"hash":"7a170937e63ad4d1e269ef89e011e3003b8a7c8d66fe519abff1ab75995ac6eb"},{"id":"func/_prompt_messages","name":"_prompt_messages","line":84,"end_line":92,"hash":"9ac842ffb512c78810c8a8c8208e6105388ec49a774379bf57709ad4bacb5a6a"},{"id":"func/_guided_json_enabled","name":"_guided_json_enabled","line":95,"end_line":101,"hash":"8742086e914c9b404a0da24044183ff77994ca62a04e1255e61cb9b0b4f0214f"},{"id":"func/_apply_legacy_json_fallback","name":"_apply_legacy_json_fallback","line":104,"end_line":112,"hash":"33f647c4ce69a1215a641bd22623bb14f86c3c51d1e4aea01565de078fc1a61d"},{"id":"func/_token_usage","name":"_token_usage","line":115,"end_line":119,"hash":"de804c595314ac1e2eb65ac77febc5ba127ad956340e8491a9c40fb81721ef14"},{"id":"func/_top_k_extra_body","name":"_top_k_extra_body","line":122,"end_line":126,"hash":"949f97e8feb35c14d87c8955a805f35af73f4ec6847431ede80bacf6036547ea"},{"id":"func/_guided_json_extra_body","name":"_guided_json_extra_body","line":129,"end_line":136,"hash":"f7fa30329a6bf126580f8152e04b5ebe9f88d189b373e70df55fa6a32483be03"},{"id":"func/LLMClient.__init__","name":"__init__","line":157,"end_line":197,"hash":"7eb8608426c6f50c8eb46a7e2454fe6d86a5f3406c70bd38c67d74889b8b0b37"},{"id":"func/LLMClient._build_extra_kwargs","name":"_build_extra_kwargs","line":199,"end_line":228,"hash":"57d971ed36b2b3f074af08d2049cdc01f4f5bde6a499a3d533c32c73eaaba756"},{"id":"func/LLMClient._request_completion","name":"_request_completion","line":230,"end_line":252,"hash":"bdb906ab26f8b5f78d33d50604fd273d3e44c9f79a12fb9c0bcf8645b5af6ae2"},{"id":"func/LLMClient.complete","name":"complete","line":254,"end_line":297,"hash":"d29b335dabe84c3128aaf23f82d1ab5db7f5fd5f246440c35a34e579e0e761cf"}]}
 # mutate4py-manifest-end
