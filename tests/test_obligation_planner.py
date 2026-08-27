@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import yaml
 
+from typer.testing import CliRunner
+
+from asago_scenario_generator.cli import app
 from asago_scenario_generator.models.obligation_plan import (
     TaxonomyObligationPlan,
     TaxonomyObligationSnapshot,
 )
 from asago_scenario_generator.pipeline.obligation_planner import plan_obligations
+
+runner = CliRunner()
 
 
 def _rel(
@@ -140,18 +146,36 @@ def test_scope_and_terminal_dispositions() -> None:
 def test_relationship_kind_derives_disposition() -> None:
     snapshot = _make_snapshot(
         relationships=[
-            {"risk_id": "risk-gated", "pattern_id": "AP-T1-01",
-             "relationship_kind": "gated threat"},
-            {"risk_id": "risk-missing", "pattern_id": "AP-T1-02",
-             "relationship_kind": "missing generation template"},
-            {"risk_id": "risk-infeasible", "pattern_id": "AP-T1-03",
-             "relationship_kind": "projection infeasibility"},
-            {"risk_id": "risk-unsupported", "pattern_id": "AP-T1-04",
-             "relationship_kind": "unsupported requirement"},
-            {"risk_id": "risk-governance", "pattern_id": "AP-T1-05",
-             "relationship_kind": "governance review"},
-            {"risk_id": "risk-generated", "pattern_id": "AP-T1-06",
-             "relationship_kind": "qualified generable pattern"},
+            {
+                "risk_id": "risk-gated",
+                "pattern_id": "AP-T1-01",
+                "relationship_kind": "gated threat",
+            },
+            {
+                "risk_id": "risk-missing",
+                "pattern_id": "AP-T1-02",
+                "relationship_kind": "missing generation template",
+            },
+            {
+                "risk_id": "risk-infeasible",
+                "pattern_id": "AP-T1-03",
+                "relationship_kind": "projection infeasibility",
+            },
+            {
+                "risk_id": "risk-unsupported",
+                "pattern_id": "AP-T1-04",
+                "relationship_kind": "unsupported requirement",
+            },
+            {
+                "risk_id": "risk-governance",
+                "pattern_id": "AP-T1-05",
+                "relationship_kind": "governance review",
+            },
+            {
+                "risk_id": "risk-generated",
+                "pattern_id": "AP-T1-06",
+                "relationship_kind": "qualified generable pattern",
+            },
             {"risk_id": "risk-orphan"},
         ],
     )
@@ -179,8 +203,11 @@ def test_relationship_kind_derives_disposition() -> None:
 def test_unknown_relationship_kind_defaults_to_generated() -> None:
     snapshot = _make_snapshot(
         relationships=[
-            {"risk_id": "risk-x", "pattern_id": "AP-T1-01",
-             "relationship_kind": "unclassified note"},
+            {
+                "risk_id": "risk-x",
+                "pattern_id": "AP-T1-01",
+                "relationship_kind": "unclassified note",
+            },
         ],
     )
 
@@ -437,3 +464,58 @@ def test_candidate_expansion_evidence_retained() -> None:
         == "cand:v2:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     )
     assert ob.rejected_candidates[0].reason == "rule rejected combination"
+
+
+def test_plan_obligations_cli_writes_yaml_and_json(tmp_path: Path) -> None:
+    snapshot = _make_snapshot(
+        relationships=[
+            _rel("atlas-prompt-injection", "AP-T6-01"),
+            _rel("atlas-orphan-risk", disposition="governance-only"),
+        ],
+    )
+    snapshot_path = tmp_path / "snapshot.yaml"
+    snapshot_path.write_text(
+        yaml.safe_dump(snapshot.model_dump(mode="json")), encoding="utf-8"
+    )
+    output_dir = tmp_path / "plan"
+
+    result = runner.invoke(
+        app,
+        [
+            "plan-obligations",
+            "--snapshot",
+            str(snapshot_path),
+            "--output-dir",
+            str(output_dir),
+        ],
+    )
+
+    assert result.exit_code == 0, result.stderr
+    yaml_path = output_dir / "obligation-plan.yaml"
+    json_path = output_dir / "obligation-plan.json"
+    assert yaml_path.is_file()
+    assert json_path.is_file()
+    assert f"Obligation plan written to {yaml_path}" in result.stdout
+    assert "Network calls: 0" in result.stdout
+    assert "Model calls:   0" in result.stdout
+    loaded = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+    assert loaded["network_calls"] == 0
+    assert loaded["model_calls"] == 0
+    assert len(loaded["obligations"]) == 2
+
+
+def test_plan_obligations_cli_rejects_missing_snapshot(tmp_path: Path) -> None:
+    missing = tmp_path / "missing" / "snapshot.yaml"
+    result = runner.invoke(
+        app,
+        [
+            "plan-obligations",
+            "--snapshot",
+            str(missing),
+            "--output-dir",
+            str(tmp_path / "plan"),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert f"Error: obligation snapshot not found: {missing}" in result.stderr

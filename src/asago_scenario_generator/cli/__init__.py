@@ -10,6 +10,7 @@ from asago_scenario_generator.cli._app import _VERSION, app, main
 from asago_scenario_generator.cli._shared import _default_generate_exit_code
 from asago_scenario_generator.cli import (
     generation,
+    obligation,
     preflight,
     qualification,
     reporting,
@@ -22,6 +23,7 @@ __all__ = (
     "app",
     "main",
     "generation",
+    "obligation",
     "preflight",
     "qualification",
     "reporting",

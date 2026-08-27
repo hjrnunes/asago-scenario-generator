@@ -135,11 +135,19 @@ narrative, tree, and behavior; its `stage_records` retain the bounded
 per-attempt evidence. The HTML report renders those stage outcomes and identifies
 presentation fallback separately.
 
-Useful companion commands include `projection-preflight`, `profile`, `resume`,
-`eval`, `report`,
-`qualify-catalog`, `validate-catalog-qualification`, and
-`validate-stpa-projection`. Run `asago-scenario-generator --help` for the
-complete interface.
+Useful companion commands include `projection-preflight`, `plan-obligations`,
+`profile`, `resume`, `eval`, `report`, `qualify-catalog`,
+`validate-catalog-qualification`, and `validate-stpa-projection`. Run
+`asago-scenario-generator --help` for the complete interface.
+
+Publish a deterministic obligation ledger from a pinned snapshot without
+contacting an LLM endpoint:
+
+```bash
+asago-scenario-generator plan-obligations \
+  --snapshot obligation-snapshot.yaml \
+  --output-dir output/obligation-plan
+```
 
 ## STPA-based generation
 
