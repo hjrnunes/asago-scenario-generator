@@ -26,15 +26,18 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 
 from asago_scenario_generator.data.canonical import _canonical_json, _nfc
 
-from asago_scenario_generator.models.attack_pattern import TaxonomyContext, TaxonomyPin
+from asago_scenario_generator.models.attack_pattern_contracts import (
+    TaxonomyContext,
+    TaxonomyPin,
+)
 
 _DEFAULT_ATLAS_PATH = (
     Path(__file__).resolve().parents[3]
@@ -96,6 +99,20 @@ def load_atlas_pin(path: str | Path | None = None) -> TaxonomyPin:
     return TaxonomyPin(release=str(release), digest=hashlib.sha256(raw).hexdigest())
 
 
+def _validated_identifier_keys(
+    entries: dict[Any, Any], atlas_path: Path, section: str
+) -> list[str]:
+    """Validate one pinned ATLAS section's entries and return its keys."""
+    keys: list[str] = []
+    for key, entry in entries.items():
+        if not isinstance(entry, dict) or entry.get("id") != key:
+            raise ValueError(
+                f"ATLAS source {atlas_path} has an incoherent {section} entry: {key}"
+            )
+        keys.append(key)
+    return keys
+
+
 def load_atlas_identifiers(path: str | Path | None = None) -> frozenset[str]:
     """Authoritative ATLAS identifiers addressable by taxonomy mappings.
 
@@ -108,14 +125,9 @@ def load_atlas_identifiers(path: str | Path | None = None) -> frozenset[str]:
         data = yaml.safe_load(f)
     identifiers: set[str] = set()
     for section in ("tactics", "techniques"):
-        entries = data.get(section) or {}
-        for key, entry in entries.items():
-            if not isinstance(entry, dict) or entry.get("id") != key:
-                raise ValueError(
-                    f"ATLAS source {atlas_path} has an incoherent "
-                    f"{section} entry: {key}"
-                )
-            identifiers.add(key)
+        identifiers.update(
+            _validated_identifier_keys(data.get(section) or {}, atlas_path, section)
+        )
     if not identifiers:
         raise ValueError(
             f"ATLAS source {atlas_path} contains no tactic/technique identifiers"
@@ -135,14 +147,11 @@ def load_atlas_technique_identifiers(
     atlas_path = Path(path) if path is not None else _DEFAULT_ATLAS_PATH
     with open(atlas_path) as f:
         data = yaml.safe_load(f)
-    entries = data.get("techniques") or {}
-    identifiers: set[str] = set()
-    for key, entry in entries.items():
-        if not isinstance(entry, dict) or entry.get("id") != key:
-            raise ValueError(
-                f"ATLAS source {atlas_path} has an incoherent techniques entry: {key}"
-            )
-        identifiers.add(key)
+    identifiers = set(
+        _validated_identifier_keys(
+            data.get("techniques") or {}, atlas_path, "techniques"
+        )
+    )
     if not identifiers:
         raise ValueError(f"ATLAS source {atlas_path} contains no technique identifiers")
     return frozenset(identifiers)
@@ -164,6 +173,131 @@ def _mapping_set_paths(paths: Iterable[str | Path] | None) -> list[Path]:
             f"missing={missing} unexpected={unexpected}"
         )
     return files
+
+
+def _strict_sssom_header(path: Path, lineno: int, line: str) -> list[str]:
+    cells = line.split("\t")
+    if len(cells) != len(set(cells)):
+        raise ValueError(f"{path}:{lineno}: duplicate header columns")
+    unknown = sorted(set(cells) - set(_MAPPING_ROW_FIELDS))
+    missing = sorted(set(_MAPPING_ROW_FIELDS) - set(cells))
+    if unknown or missing:
+        raise ValueError(
+            f"{path}:{lineno}: header does not match the v1 pin profile; "
+            f"unknown columns={unknown} missing columns={missing}"
+        )
+    return cells
+
+
+def _strict_sssom_row(
+    path: Path, lineno: int, line: str, header: list[str]
+) -> tuple[str, ...]:
+    cells = line.split("\t")
+    if len(cells) != len(header):
+        raise ValueError(
+            f"{path}:{lineno}: row has {len(cells)} cells, expected {len(header)}"
+        )
+    row = tuple(cells[header.index(field)] for field in _MAPPING_ROW_FIELDS)
+    if any(not cell for cell in row):
+        raise ValueError(f"{path}:{lineno}: row has an empty cell")
+    return row
+
+
+def _scalar_metadata_entry(
+    path: Path,
+    lineno: int,
+    key: str,
+    value: str,
+    scalars: list[tuple[int, str, str]],
+    seen_scalar_keys: set[str],
+) -> None:
+    if not value:
+        raise ValueError(f"{path}:{lineno}: empty {key} value")
+    if key in seen_scalar_keys:
+        raise ValueError(f"{path}:{lineno}: duplicate {key} metadata")
+    seen_scalar_keys.add(key)
+    scalars.append((lineno, key, value))
+
+
+def _curie_map_entry(
+    path: Path,
+    lineno: int,
+    body: str,
+    curies: list[tuple[int, str, str]],
+    seen_curie_prefixes: set[str],
+) -> None:
+    match = _CURIE_ENTRY_RE.match(body)
+    if not match:
+        raise ValueError(f"{path}:{lineno}: malformed curie_map entry: {body!r}")
+    prefix, uri = match.group(1), match.group(2).strip()
+    if prefix in seen_curie_prefixes:
+        raise ValueError(f"{path}:{lineno}: duplicate curie_map prefix {prefix!r}")
+    seen_curie_prefixes.add(prefix)
+    curies.append((lineno, prefix, uri))
+
+
+def _curie_block_line(indented: bool, in_metadata_block: bool) -> bool:
+    """Whether an indented comment line continues a curie_map block."""
+    return indented and in_metadata_block
+
+
+def _metadata_comment(path: Path, lineno: int, body: str) -> tuple[str, str] | None:
+    """Parse one metadata comment line into (key, value); None for prose."""
+    match = _METADATA_KEY_RE.match(body)
+    if match is None:
+        return None
+    key, value = match.group(1), match.group(2).strip()
+    if key not in _METADATA_SCALAR_KEYS and key not in _METADATA_BLOCK_KEYS:
+        raise ValueError(
+            f"{path}:{lineno}: unsupported mapping-set metadata {key!r}; "
+            "the v1 pin profile must be extended to pin it"
+        )
+    return key, value
+
+
+def _metadata_scalar_or_block(
+    path: Path,
+    lineno: int,
+    key: str,
+    value: str,
+    scalars: list[tuple[int, str, str]],
+    seen_scalar_keys: set[str],
+) -> bool:
+    """Consume a scalar entry (False) or open a block (True)."""
+    if key in _METADATA_SCALAR_KEYS:
+        _scalar_metadata_entry(path, lineno, key, value, scalars, seen_scalar_keys)
+        return False
+    if value:
+        raise ValueError(f"{path}:{lineno}: {key} must introduce an indented block")
+    return True
+
+
+def _comment_metadata(
+    path: Path,
+    lineno: int,
+    line: str,
+    in_metadata_block: bool,
+    scalars: list[tuple[int, str, str]],
+    curies: list[tuple[int, str, str]],
+    seen_scalar_keys: set[str],
+    seen_curie_prefixes: set[str],
+) -> bool:
+    """Consume one comment line; returns whether an indented block stays open."""
+    content = line[1:]
+    indented = len(content) - len(content.lstrip(" \t")) >= 2
+    body = content.strip()
+    if _curie_block_line(indented, in_metadata_block):
+        _curie_map_entry(path, lineno, body, curies, seen_curie_prefixes)
+        return True
+    if not body:
+        return False  # blank comment: excluded from the pin
+    metadata = _metadata_comment(path, lineno, body)
+    if metadata is None:
+        return False  # free explanatory comment: excluded from the pin
+    key, value = metadata
+    return _metadata_scalar_or_block(
+        path, lineno, key, value, scalars, seen_scalar_keys
+    )
 
 
 def _read_strict_sssom(
@@ -190,76 +324,109 @@ def _read_strict_sssom(
     seen_curie_prefixes: set[str] = set()
     for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if line.startswith("#"):
-            content = line[1:]
-            indented = len(content) - len(content.lstrip(" \t")) >= 2
-            body = content.strip()
-            if indented and in_metadata_block:
-                match = _CURIE_ENTRY_RE.match(body)
-                if not match:
-                    raise ValueError(
-                        f"{path}:{lineno}: malformed curie_map entry: {body!r}"
-                    )
-                prefix, uri = match.group(1), match.group(2).strip()
-                if prefix in seen_curie_prefixes:
-                    raise ValueError(
-                        f"{path}:{lineno}: duplicate curie_map prefix {prefix!r}"
-                    )
-                seen_curie_prefixes.add(prefix)
-                curies.append((lineno, prefix, uri))
-                continue
-            in_metadata_block = False
-            if not body:
-                continue  # blank comment: excluded from the pin
-            match = _METADATA_KEY_RE.match(body)
-            if match is None:
-                continue  # free explanatory comment: excluded from the pin
-            key, value = match.group(1), match.group(2).strip()
-            if key in _METADATA_SCALAR_KEYS:
-                if not value:
-                    raise ValueError(f"{path}:{lineno}: empty {key} value")
-                if key in seen_scalar_keys:
-                    raise ValueError(f"{path}:{lineno}: duplicate {key} metadata")
-                seen_scalar_keys.add(key)
-                scalars.append((lineno, key, value))
-            elif key in _METADATA_BLOCK_KEYS:
-                if value:
-                    raise ValueError(
-                        f"{path}:{lineno}: {key} must introduce an indented block"
-                    )
-                in_metadata_block = True
-            else:
-                raise ValueError(
-                    f"{path}:{lineno}: unsupported mapping-set metadata {key!r}; "
-                    "the v1 pin profile must be extended to pin it"
-                )
+            in_metadata_block = _comment_metadata(
+                path,
+                lineno,
+                line,
+                in_metadata_block,
+                scalars,
+                curies,
+                seen_scalar_keys,
+                seen_curie_prefixes,
+            )
             continue
         in_metadata_block = False
         if not line.strip():
             continue
-        cells = line.split("\t")
         if header is None:
-            if len(cells) != len(set(cells)):
-                raise ValueError(f"{path}:{lineno}: duplicate header columns")
-            unknown = sorted(set(cells) - set(_MAPPING_ROW_FIELDS))
-            missing = sorted(set(_MAPPING_ROW_FIELDS) - set(cells))
-            if unknown or missing:
-                raise ValueError(
-                    f"{path}:{lineno}: header does not match the v1 pin profile; "
-                    f"unknown columns={unknown} missing columns={missing}"
-                )
-            header = cells
+            header = _strict_sssom_header(path, lineno, line)
             continue
-        if len(cells) != len(header):
-            raise ValueError(
-                f"{path}:{lineno}: row has {len(cells)} cells, expected {len(header)}"
-            )
-        row = tuple(cells[header.index(field)] for field in _MAPPING_ROW_FIELDS)
-        if any(not cell for cell in row):
-            raise ValueError(f"{path}:{lineno}: row has an empty cell")
-        rows.append((lineno, row))
+        rows.append((lineno, _strict_sssom_row(path, lineno, line, header)))
     if header is None:
         raise ValueError(f"{path}: lacks the required SSSOM header row")
     return scalars, curies, rows
+
+
+def _merge_scalar_metadata(
+    scalar_metadata: dict[str, tuple[str, str]],
+    scalars: list[tuple[int, str, str]],
+    path: Path,
+) -> None:
+    for lineno, key, value in scalars:
+        normalized = _nfc(value)
+        origin = f"{path}:{lineno}"
+        existing = scalar_metadata.setdefault(key, (normalized, origin))
+        if existing[0] != normalized:
+            raise ValueError(
+                f"conflicting mapping-set metadata {key!r}: {existing[0]!r} "
+                f"declared at {existing[1]} but {normalized!r} declared at "
+                f"{origin}"
+            )
+
+
+def _merge_curie_entries(
+    curie_map: dict[str, tuple[str, str]],
+    curies: list[tuple[int, str, str]],
+    path: Path,
+) -> None:
+    for lineno, prefix, uri in curies:
+        normalized_uri = _nfc(uri)
+        origin = f"{path}:{lineno}"
+        existing = curie_map.setdefault(_nfc(prefix), (normalized_uri, origin))
+        if existing[0] != normalized_uri:
+            raise ValueError(
+                f"conflicting curie_map prefix {prefix!r}: {existing[0]!r} "
+                f"declared at {existing[1]} but {normalized_uri!r} declared at "
+                f"{origin}"
+            )
+
+
+def _merge_mapping_rows(
+    rows: set[str],
+    row_origins: dict[str, str],
+    file_rows: list[tuple[int, tuple[str, ...]]],
+    path: Path,
+) -> int:
+    total = 0
+    for lineno, row in file_rows:
+        total += 1
+        canonical = _canonical_json(
+            {
+                field: _nfc(value)
+                for field, value in zip(_MAPPING_ROW_FIELDS, row, strict=True)
+            }
+        )
+        if canonical in rows:
+            raise ValueError(
+                "duplicate mapping row across the mapping set: "
+                f"{canonical} first seen at {row_origins[canonical]}, "
+                f"again at {path}:{lineno}"
+            )
+        rows.add(canonical)
+        row_origins[canonical] = f"{path}:{lineno}"
+    return total
+
+
+def _mapping_set_payload(
+    scalar_metadata: Mapping[str, tuple[str, str]],
+    curie_map: Mapping[str, tuple[str, str]],
+    rows: set[str],
+) -> str:
+    metadata = {
+        _canonical_json([key, value]) for key, (value, _) in scalar_metadata.items()
+    }
+    metadata.update(
+        _canonical_json(["curie_map", prefix, uri])
+        for prefix, (uri, _) in curie_map.items()
+    )
+    payload = (
+        _MAPPING_SET_DOMAIN.encode()
+        + b"\0"
+        + _canonical_json({"metadata": sorted(metadata), "rows": sorted(rows)}).encode(
+            "utf-8"
+        )
+    )
+    return hashlib.sha256(payload).hexdigest()
 
 
 def compute_mapping_set_digest(paths: Iterable[str | Path] | None = None) -> str:
@@ -297,59 +464,12 @@ def compute_mapping_set_digest(paths: Iterable[str | Path] | None = None) -> str
     total_rows = 0
     for path in _mapping_set_paths(paths):
         scalars, curies, file_rows = _read_strict_sssom(path)
-        for lineno, key, value in scalars:
-            normalized = _nfc(value)
-            origin = f"{path}:{lineno}"
-            existing = scalar_metadata.setdefault(key, (normalized, origin))
-            if existing[0] != normalized:
-                raise ValueError(
-                    f"conflicting mapping-set metadata {key!r}: {existing[0]!r} "
-                    f"declared at {existing[1]} but {normalized!r} declared at "
-                    f"{origin}"
-                )
-        for lineno, prefix, uri in curies:
-            normalized_uri = _nfc(uri)
-            origin = f"{path}:{lineno}"
-            existing = curie_map.setdefault(_nfc(prefix), (normalized_uri, origin))
-            if existing[0] != normalized_uri:
-                raise ValueError(
-                    f"conflicting curie_map prefix {prefix!r}: {existing[0]!r} "
-                    f"declared at {existing[1]} but {normalized_uri!r} declared at "
-                    f"{origin}"
-                )
-        for lineno, row in file_rows:
-            total_rows += 1
-            canonical = _canonical_json(
-                {
-                    field: _nfc(value)
-                    for field, value in zip(_MAPPING_ROW_FIELDS, row, strict=True)
-                }
-            )
-            if canonical in rows:
-                raise ValueError(
-                    "duplicate mapping row across the mapping set: "
-                    f"{canonical} first seen at {row_origins[canonical]}, "
-                    f"again at {path}:{lineno}"
-                )
-            rows.add(canonical)
-            row_origins[canonical] = f"{path}:{lineno}"
+        _merge_scalar_metadata(scalar_metadata, scalars, path)
+        _merge_curie_entries(curie_map, curies, path)
+        total_rows += _merge_mapping_rows(rows, row_origins, file_rows, path)
     if total_rows == 0:
         raise ValueError("mapping set contains no rows")
-    metadata = {
-        _canonical_json([key, value]) for key, (value, _) in scalar_metadata.items()
-    }
-    metadata.update(
-        _canonical_json(["curie_map", prefix, uri])
-        for prefix, (uri, _) in curie_map.items()
-    )
-    payload = (
-        _MAPPING_SET_DOMAIN.encode()
-        + b"\0"
-        + _canonical_json({"metadata": sorted(metadata), "rows": sorted(rows)}).encode(
-            "utf-8"
-        )
-    )
-    return hashlib.sha256(payload).hexdigest()
+    return _mapping_set_payload(scalar_metadata, curie_map, rows)
 
 
 def _checked_identifiers(identifiers: Iterable[str], *, label: str) -> frozenset[str]:

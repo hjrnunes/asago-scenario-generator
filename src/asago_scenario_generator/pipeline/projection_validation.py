@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from asago_scenario_generator.models.attack_pattern import TaxonomyResolver
+from asago_scenario_generator.models.attack_pattern_contracts import TaxonomyResolver
 from asago_scenario_generator.models.attack_tree import (
     GateType,
     InitialIngressAction,
@@ -30,9 +30,11 @@ from asago_scenario_generator.pipeline.compatibility import (
     EXECUTOR_ROLE_TO_LEAF_COMPAT,
     STEP_TO_LEAF_ACTION_COMPAT,
 )
-from asago_scenario_generator.pipeline.projection import (
-    CapabilityFactSnapshot,
+from asago_scenario_generator.pipeline.projection_contracts import (
     _candidate_v2_id,
+)
+from asago_scenario_generator.pipeline.projection_snapshot import (
+    CapabilityFactSnapshot,
 )
 from asago_scenario_generator.pipeline.projection_drift import (
     _check_projection_drift,
@@ -114,7 +116,7 @@ def validate_projection_traceability(
                 ),
             )
         )
-        return ProjectionTraceabilityResult(valid=False, violations=violations)
+        return ProjectionTraceabilityResult(violations=violations)
 
     # --- Check 1: projection integrity & drift (contract §2) ---
     violations.extend(
@@ -185,14 +187,12 @@ def validate_projection_traceability(
 # ---------------------------------------------------------------------------#
 
 
-def _check_ingress_identity(
+def _envelope_ingress_mismatch(
     envelope: ScenarioEnvelope,
-    block: ProjectionEnvelopeBlock,
-) -> list[ProjectionTraceabilityViolation]:
-    violations: list[ProjectionTraceabilityViolation] = []
-    expected = block.canonical_ingress.entry_point_id
-
-    # Envelope-level initial_entry_point_id.
+    expected: str,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Flag an envelope initial_entry_point_id that disagrees with the projection."""
     if envelope.initial_entry_point_id != expected:
         violations.append(
             ProjectionTraceabilityViolation(
@@ -207,8 +207,13 @@ def _check_ingress_identity(
             )
         )
 
-    # Actor access provenance.
-    actor = envelope.actor_profile
+
+def _actor_access_ingress_mismatch(
+    actor: Any,
+    expected: str,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Flag actor access provenance that disagrees with the projection ingress."""
     if (
         actor is not None
         and actor.access is not None
@@ -227,8 +232,13 @@ def _check_ingress_identity(
             )
         )
 
-    # Narrative access realization.
-    narrative = envelope.narrative
+
+def _narrative_access_ingress_mismatch(
+    narrative: Any,
+    expected: str,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Flag narrative access realization that disagrees with the projection ingress."""
     if (
         narrative.access_realization is not None
         and narrative.access_realization.initial_entry_point_id != expected
@@ -246,28 +256,59 @@ def _check_ingress_identity(
             )
         )
 
-    # Attack tree initial_ingress leaves.
-    tree = envelope.attack_tree
-    if tree is not None:
-        for leaf in _iter_leaves(tree.root):
-            if (
-                leaf.action is not None
-                and isinstance(leaf.action, InitialIngressAction)
-                and leaf.action.entry_point_id != expected
-            ):
-                violations.append(
-                    ProjectionTraceabilityViolation(
-                        code=ProjectionTraceabilityViolationCode.ingress_identity_mismatch,
-                        stage=ProjectionTraceabilityStage.attack_tree,
-                        detail=(
-                            f"tree leaf '{leaf.id}' initial_ingress "
-                            f"entry_point_id '{leaf.action.entry_point_id}' "
-                            f"does not match projection canonical_ingress "
-                            f"'{expected}'"
-                        ),
-                        element_id=leaf.id,
-                    )
+
+def _ingress_leaf_mismatch(leaf: Any, expected: str) -> bool:
+    """True when an initial_ingress leaf binds a different entry point."""
+    if leaf.action is None:
+        return False
+    if not isinstance(leaf.action, InitialIngressAction):
+        return False
+    return leaf.action.entry_point_id != expected
+
+
+def _check_tree_ingress_leaves(
+    tree: Any,
+    expected: str,
+    violations: list[ProjectionTraceabilityViolation],
+) -> None:
+    """Flag initial_ingress tree leaves that disagree with the projection ingress."""
+    if tree is None:
+        return
+    for leaf in _iter_leaves(tree.root):
+        if _ingress_leaf_mismatch(leaf, expected):
+            violations.append(
+                ProjectionTraceabilityViolation(
+                    code=ProjectionTraceabilityViolationCode.ingress_identity_mismatch,
+                    stage=ProjectionTraceabilityStage.attack_tree,
+                    detail=(
+                        f"tree leaf '{leaf.id}' initial_ingress "
+                        f"entry_point_id '{leaf.action.entry_point_id}' "
+                        f"does not match projection canonical_ingress "
+                        f"'{expected}'"
+                    ),
+                    element_id=leaf.id,
                 )
+            )
+
+
+def _check_ingress_identity(
+    envelope: ScenarioEnvelope,
+    block: ProjectionEnvelopeBlock,
+) -> list[ProjectionTraceabilityViolation]:
+    violations: list[ProjectionTraceabilityViolation] = []
+    expected = block.canonical_ingress.entry_point_id
+
+    # Envelope-level initial_entry_point_id.
+    _envelope_ingress_mismatch(envelope, expected, violations)
+
+    # Actor access provenance.
+    _actor_access_ingress_mismatch(envelope.actor_profile, expected, violations)
+
+    # Narrative access realization.
+    _narrative_access_ingress_mismatch(envelope.narrative, expected, violations)
+
+    # Attack tree initial_ingress leaves.
+    _check_tree_ingress_leaves(envelope.attack_tree, expected, violations)
 
     return violations
 
@@ -339,3 +380,8 @@ def _check_or_tree_prohibition(
 # ---------------------------------------------------------------------------#
 # Tree traversal helpers
 # ---------------------------------------------------------------------------#
+
+
+# mutate4py-manifest-begin
+# {"version":1,"tested_at":"2026-08-26T14:05:09Z","module_hash":"fe1afcb73367df01fdf52b1504e83324c7c17bf656e8d00a89cae4e3c23690ee","source_sha256":"70b8efe4db763fe2996368a6b142f2a00cfc6c6ef13710d6757f741feb5783c8","functions":[{"id":"func/validate_projection_traceability","name":"validate_projection_traceability","line":83,"end_line":177,"hash":"bdcc3f4ada5abd2bc1dbdf790da236c7895b011eb6200c3d18ef7ce3722e88ec"},{"id":"func/_envelope_ingress_mismatch","name":"_envelope_ingress_mismatch","line":190,"end_line":208,"hash":"a459a842fc86045d3429db73642b924d8b7491fd22abd61598681b2820f1cbea"},{"id":"func/_actor_access_ingress_mismatch","name":"_actor_access_ingress_mismatch","line":211,"end_line":233,"hash":"70c01855ce9d25d32d7cb702950ae7d2494cc944ff8a0c23c9ce77799737032b"},{"id":"func/_narrative_access_ingress_mismatch","name":"_narrative_access_ingress_mismatch","line":236,"end_line":257,"hash":"84b236d9af1e8a1765be3022c4a6f2c0f2c4eaef430b10d5791a320adc60c199"},{"id":"func/_ingress_leaf_mismatch","name":"_ingress_leaf_mismatch","line":260,"end_line":266,"hash":"43a967f13d56cd8ca7ceb29b65dccf0bdf9667e79dbaac91db1abfc75b6b6255"},{"id":"func/_check_tree_ingress_leaves","name":"_check_tree_ingress_leaves","line":269,"end_line":291,"hash":"b92da2cbff1535faa0b726106f66a304567ae0eca837155dd15fb71a6462f619"},{"id":"func/_check_ingress_identity","name":"_check_ingress_identity","line":294,"end_line":313,"hash":"690b7e00417227b7b8d0fa58de8c63b191bf2b612787d8db6b5f0551435e35dd"},{"id":"func/_check_or_tree_prohibition","name":"_check_or_tree_prohibition","line":321,"end_line":345,"hash":"357e43401da3723b8ef2e769c7ac849516e11b61aa489bfb55f3ede702c9d46b"}]}
+# mutate4py-manifest-end
