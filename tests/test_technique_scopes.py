@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from asago_scenario_generator.models.attack_pattern import ExactMapping
 from asago_scenario_generator.models.scenario import TechniqueScopeEvidence
-from asago_scenario_generator.pipeline.projection import ProjectedMapping
+from asago_scenario_generator.pipeline.projection_contracts import ProjectedMapping
 from asago_scenario_generator.pipeline.technique_scopes import (
+    _narrative_reference_texts,
+    _step_reference_texts,
     resolved_technique_scope_evidence,
 )
 from asago_scenario_generator.pipeline.validation import validate_scenario_semantics
@@ -113,3 +115,19 @@ def test_report_labels_both_technique_scopes() -> None:
     assert "AML.T0051.001" in rendered
     assert "Projected-step mappings" in rendered
     assert "AML.T0065" in rendered
+
+
+class TestNarrativeReferenceTextHelpers:
+    """Direct branch coverage for the narrative reference text helpers."""
+
+    def test_narrative_reference_texts_without_summary(self) -> None:
+        from types import SimpleNamespace
+
+        narrative = SimpleNamespace(summary=None, steps=())
+        assert _narrative_reference_texts(narrative) == []
+
+    def test_step_reference_texts_skips_empty_fields(self) -> None:
+        from types import SimpleNamespace
+
+        step = SimpleNamespace(action="", effect=None)
+        assert _step_reference_texts(step) == []

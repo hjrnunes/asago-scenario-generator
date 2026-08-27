@@ -165,7 +165,7 @@ class TestRejectedNarrativeZones:
 
 class TestZoneSequenceDerivation:
     def test_derived_zone_sequence_preserves_outside_traversal(self):
-        from asago_scenario_generator.pipeline.generate.narrative import (
+        from asago_scenario_generator.pipeline.generate.narrative_semantics import (
             _derive_zone_sequence,
         )
 

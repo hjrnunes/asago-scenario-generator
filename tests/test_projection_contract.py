@@ -3,14 +3,17 @@ from __future__ import annotations
 import pytest
 
 from asago_scenario_generator.models.attack_tree import (
+    AiSystemAction,
     AttackTree,
     AttackTreeNode,
     ExternalPreconditionAction,
 )
 from asago_scenario_generator.models.realization import ProjectedStepRealization
-from asago_scenario_generator.pipeline.generate.tree import (
-    _validate_tree_against_projection,
+from asago_scenario_generator.pipeline.generate.tree_transport import (
     normalize_attack_tree_transport,
+)
+from asago_scenario_generator.pipeline.generate.tree_validation import (
+    _validate_tree_against_projection,
 )
 from asago_scenario_generator.pipeline.projection_validation import (
     _EXECUTOR_ROLE_TO_LEAF_COMPAT,
@@ -241,4 +244,83 @@ def test_strict_tree_validation_rejects_inside_external_mapping():
         _validate_tree_against_projection(
             tree,
             _projection_context(("system.observe", "inside")),
+        )
+
+
+def _realization(step_id: str) -> ProjectedStepRealization:
+    """Minimal canonical realization record for one projected step."""
+    return ProjectedStepRealization(
+        projected_step_id=step_id,
+        action_kind="prepare",
+        executor_role="attacker",
+        boundary_position="inside",
+        resource_ref_ids=(),
+        consumed_ref_ids=(),
+        produced_ref_ids=(),
+        produced_effect_ids=(),
+        outcome_link_pc_ids=(),
+        postcondition_ids=(),
+    )
+
+
+def _mapped_leaf(
+    projected_step_ids: tuple[str, ...],
+    realizations: tuple[ProjectedStepRealization, ...],
+) -> AttackTree:
+    """Security-bearing leaf with the given mapping and realization records.
+
+    Built with ``model_construct`` so malformed realization records reach
+    the tree validator (the model's own validators would reject them first).
+    """
+    node = AttackTreeNode.model_construct(
+        id="n1",
+        label="execute step",
+        gate="LEAF",
+        zone="input",
+        action=AiSystemAction(),
+        projected_step_ids=projected_step_ids,
+        realizations=realizations,
+    )
+    return AttackTree.model_construct(
+        id="tree-AP-T1-01", seed_id="AP-T1-01", goal="goal", root=node
+    )
+
+
+def test_strict_tree_validation_rejects_missing_realizations():
+    tree = _mapped_leaf(("step.1",), ())
+
+    with pytest.raises(ValueError, match="no realizations"):
+        _validate_tree_against_projection(
+            tree, _projection_context(("step.1", "inside"))
+        )
+
+
+def test_strict_tree_validation_rejects_duplicate_realization_records():
+    tree = _mapped_leaf(
+        ("step.1", "step.2"), (_realization("step.1"), _realization("step.1"))
+    )
+
+    with pytest.raises(ValueError, match="duplicate realization records"):
+        _validate_tree_against_projection(
+            tree, _projection_context(("step.1", "inside"), ("step.2", "inside"))
+        )
+
+
+def test_strict_tree_validation_rejects_realization_count_mismatch():
+    tree = _mapped_leaf(("step.1", "step.2"), (_realization("step.1"),))
+
+    with pytest.raises(ValueError, match="exactly one per ID required"):
+        _validate_tree_against_projection(
+            tree, _projection_context(("step.1", "inside"), ("step.2", "inside"))
+        )
+
+
+def test_strict_tree_validation_rejects_realization_id_mismatch():
+    tree = _mapped_leaf(
+        ("step.1", "step.2"), (_realization("step.1"), _realization("step.3"))
+    )
+
+    with pytest.raises(ValueError, match="do not match projected_step_ids"):
+        _validate_tree_against_projection(
+            tree, _projection_context(("step.1", "inside"), ("step.2", "inside"))
         )

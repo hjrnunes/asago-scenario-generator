@@ -24,7 +24,8 @@ from asago_scenario_generator.pipeline.generate.actor import (
     _compile_projected_actor_draft,
     _derive_canonical_actor_access,
 )
-from asago_scenario_generator.pipeline.generate.narrative import (
+from asago_scenario_generator.pipeline.generate.narrative import _call_narrative
+from asago_scenario_generator.pipeline.generate.narrative_semantics import (
     NarrativeDraftContext,
     NarrativeDraftV2,
     NarrativeDraftV3,
@@ -33,7 +34,6 @@ from asago_scenario_generator.pipeline.generate.narrative import (
     compile_narrative_draft,
     create_narrative_draft_model,
     create_narrative_draft_v3_model,
-    _call_narrative,
 )
 
 
@@ -1091,3 +1091,54 @@ class TestLegacyActorCallFloors:
         )
 
         assert actor.capability_level == "expert"
+
+
+class TestResolveNarrativeAccessNames:
+    """Phase 3 name-to-ID resolution on narrative access realization."""
+
+    def test_influence_source_none_unchanged(self) -> None:
+        from asago_scenario_generator.pipeline.generate.narrative import (
+            _resolve_influence_source_name,
+        )
+
+        realization = MagicMock(influence_source=None)
+        _resolve_influence_source_name(realization, object())
+        assert realization.influence_source is None
+
+    def test_influence_source_unresolved_keeps_name(self) -> None:
+        from asago_scenario_generator.pipeline.generate.narrative import (
+            _resolve_influence_source_name,
+        )
+
+        realization = MagicMock(influence_source="legacy source")
+        profile = MagicMock(entry_point_name_to_id=MagicMock(return_value={}))
+        _resolve_influence_source_name(realization, profile)
+        assert realization.influence_source == "legacy source"
+
+    def test_influence_source_already_canonical_kept(self) -> None:
+        from asago_scenario_generator.pipeline.generate.narrative import (
+            _resolve_influence_source_name,
+        )
+
+        realization = MagicMock(influence_source="ep:v1:abc")
+        _resolve_influence_source_name(realization, MagicMock())
+        assert realization.influence_source == "ep:v1:abc"
+
+    def test_trust_boundary_none_unchanged(self) -> None:
+        from asago_scenario_generator.pipeline.generate.narrative import (
+            _resolve_trust_boundary_name,
+        )
+
+        realization = MagicMock(trust_boundary_id=None)
+        _resolve_trust_boundary_name(realization, object())
+        assert realization.trust_boundary_id is None
+
+    def test_trust_boundary_unresolved_keeps_id(self) -> None:
+        from asago_scenario_generator.pipeline.generate.narrative import (
+            _resolve_trust_boundary_name,
+        )
+
+        realization = MagicMock(trust_boundary_id="TB1")
+        profile = MagicMock(trust_boundary_name_to_id=MagicMock(return_value={}))
+        _resolve_trust_boundary_name(realization, profile)
+        assert realization.trust_boundary_id == "TB1"

@@ -68,7 +68,16 @@ from asago_scenario_generator.pipeline.generate.gherkin import (
     Call3Response,
 )
 from asago_scenario_generator.pipeline.projection_realizations import (
+    _check_assertion_exists,
+    _check_assertion_source_steps,
+    _check_ingress_leaf_binding,
     _check_order_preservation,
+    _ingress_binding_mismatch,
+    _mapped_binding_leaves,
+    _narrative_stage_shape_check,
+    _postcondition_owner_index,
+    _security_bearing_leaf,
+    _tree_stage_shape_check,
 )
 from asago_scenario_generator.pipeline.projection import (
     ProjectionBudget,
@@ -77,7 +86,18 @@ from asago_scenario_generator.pipeline.projection import (
     project_authoritative_candidates,
 )
 from asago_scenario_generator.pipeline.projection_validation import (
+    _check_tree_ingress_leaves,
+    _ingress_leaf_mismatch,
     validate_projection_traceability,
+)
+import asago_scenario_generator.pipeline.projection_drift as projection_drift
+from asago_scenario_generator.pipeline.projection_drift import (
+    _compare_projection_pins,
+    _compare_recomputed_mappings,
+)
+from asago_scenario_generator.pipeline.projection_semantics import (
+    _extract_step_text,
+    _gherkin_step_texts,
 )
 from tests.helpers.projection_factory import (
     get_projected_candidate,
@@ -4030,7 +4050,7 @@ class TestCall2ProjectionValidation:
         from asago_scenario_generator.pipeline.generate.assembly import (
             _build_projection_context,
         )
-        from asago_scenario_generator.pipeline.generate.tree import (
+        from asago_scenario_generator.pipeline.generate.tree_validation import (
             _validate_tree_against_projection,
         )
 
@@ -4080,7 +4100,7 @@ class TestCall2ProjectionValidation:
         from asago_scenario_generator.pipeline.generate.assembly import (
             _build_projection_context,
         )
-        from asago_scenario_generator.pipeline.generate.tree import (
+        from asago_scenario_generator.pipeline.generate.tree_validation import (
             _validate_tree_against_projection,
         )
 
@@ -4130,7 +4150,7 @@ class TestCall2ProjectionValidation:
         from asago_scenario_generator.pipeline.generate.assembly import (
             _build_projection_context,
         )
-        from asago_scenario_generator.pipeline.generate.tree import (
+        from asago_scenario_generator.pipeline.generate.tree_validation import (
             _validate_tree_against_projection,
         )
 
@@ -4189,6 +4209,8 @@ class TestCall2ProjectionValidation:
         )
         from asago_scenario_generator.pipeline.generate.tree import (
             _fill_tree_realizations,
+        )
+        from asago_scenario_generator.pipeline.generate.tree_validation import (
             _validate_tree_against_projection,
         )
 
@@ -4218,7 +4240,7 @@ class TestCall2ProjectionValidation:
         from asago_scenario_generator.pipeline.generate.assembly import (
             _build_projection_context,
         )
-        from asago_scenario_generator.pipeline.generate.tree import (
+        from asago_scenario_generator.pipeline.generate.tree_validation import (
             _validate_tree_against_projection,
         )
 
@@ -4408,7 +4430,7 @@ class TestExternalPreconditionBypass:
         from asago_scenario_generator.pipeline.generate.assembly import (
             _build_projection_context,
         )
-        from asago_scenario_generator.pipeline.generate.tree import (
+        from asago_scenario_generator.pipeline.generate.tree_validation import (
             _validate_tree_against_projection,
         )
 
@@ -4821,3 +4843,615 @@ class TestPostconditionsForStep:
         block = _make_block()
 
         assert block.postconditions_for_step("step.does-not-exist") == ()
+
+
+class TestProjectionBlockCollectors:
+    """Branch-level coverage for _build_projection_block decomposition."""
+
+    def test_narrative_realization_mappings(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _narrative_realization_mappings,
+        )
+
+        candidate, _, _, _ = _project()
+        narrative = _make_narrative(candidate.canonical_ingress.entry_point_id)
+        maps = _narrative_realization_mappings(narrative)
+        assert [m.element_id for m in maps] == ["1", "2", "3"]
+        assert all(m.artifact_stage == ArtifactStage.narrative for m in maps)
+        assert maps[0].projected_step_ids == ("step.1",)
+
+    def test_narrative_realization_mappings_skips_unprojected(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _narrative_realization_mappings,
+        )
+
+        candidate, _, _, _ = _project()
+        narrative = _make_narrative(candidate.canonical_ingress.entry_point_id)
+        narrative.steps = narrative.steps + [
+            NarrativeStep.model_construct(
+                step_number=4,
+                zone="input",
+                action="external",
+                effect="precondition",
+                projected_step_ids=(),
+            )
+        ]
+        maps = _narrative_realization_mappings(narrative)
+        assert [m.element_id for m in maps] == ["1", "2", "3"]
+
+    def test_tree_realization_mappings(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _tree_realization_mappings,
+        )
+
+        candidate, _, _, _ = _project()
+        tree = _make_tree(candidate.canonical_ingress.entry_point_id)
+        maps = _tree_realization_mappings(tree)
+        assert [m.element_id for m in maps] == ["n1.1", "n1.2", "n1.3"]
+        assert all(m.artifact_stage == ArtifactStage.attack_tree for m in maps)
+
+    def test_tree_realization_mappings_none_tree(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _tree_realization_mappings,
+        )
+
+        assert _tree_realization_mappings(None) == []
+
+    def test_behavior_realization_mappings(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _behavior_realization_mappings,
+        )
+
+        spec = make_behavior_spec()
+        behavior_maps, assertion_maps = _behavior_realization_mappings(spec)
+        assert len(behavior_maps) == len(spec.actions)
+        assert all(m.artifact_stage == ArtifactStage.behavior for m in behavior_maps)
+        assert len(assertion_maps) == len(spec.assertions)
+        assert assertion_maps[0].element_id == spec.assertions[0].assertion_id
+
+    def test_behavior_realization_mappings_non_spec(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _behavior_realization_mappings,
+        )
+
+        assert _behavior_realization_mappings("raw text") == ([], [])
+
+
+class TestProjectionContextSerializers:
+    """Branch-level coverage for _build_projection_context decomposition."""
+
+    def test_projection_selected_steps(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _projection_selected_steps,
+        )
+
+        candidate, _, _, _ = _project()
+        chain = candidate.projection.source_chain
+        selected = list(candidate.projection.selected_step_ids)
+        steps = _projection_selected_steps(chain, set(selected))
+        assert [s.step_id for s in steps] == selected
+
+    def test_projection_selected_steps_filters_omitted(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _projection_selected_steps,
+        )
+
+        candidate, _, _, _ = _project()
+        chain = candidate.projection.source_chain
+        steps = _projection_selected_steps(chain, {"step.1"})
+        assert [s.step_id for s in steps] == ["step.1"]
+
+    def test_step_realizations_by_id(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _projection_selected_steps,
+            _step_realizations_by_id,
+        )
+
+        candidate, _, _, _ = _project()
+        chain = candidate.projection.source_chain
+        selected = list(candidate.projection.selected_step_ids)
+        steps = _projection_selected_steps(chain, set(selected))
+        binding_by_slot = {
+            b.slot_id: b.resource_ref for b in candidate.projection.bindings
+        }
+        rmap = _step_realizations_by_id(steps, binding_by_slot)
+        assert set(rmap) == set(selected)
+        assert "action_kind" in rmap[selected[0]]
+        assert "executor_role" in rmap[selected[0]]
+
+    def test_serialize_step_technique_ids(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _serialize_step_technique_ids,
+        )
+
+        candidate, _, _, _ = _project()
+        chain = candidate.projection.source_chain
+        ids = _serialize_step_technique_ids(chain.steps[0])
+        assert ids == ["AML.T0001"]
+
+    def test_serialize_step_resource_links_bound(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _serialize_step_resource_links,
+        )
+
+        candidate, _, _, _ = _project()
+        chain = candidate.projection.source_chain
+        bindings_by_slot = {b.slot_id: b for b in candidate.projection.bindings}
+        links = _serialize_step_resource_links(chain.steps[0], bindings_by_slot)
+        assert links[0]["role"] == "ingress"
+        assert links[0]["slot_id"] == "ingress"
+        assert links[0]["resource_ref"]["kind"] == "entry_point"
+
+    def test_serialize_step_resource_links_unbound(self):
+        from types import SimpleNamespace
+
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _serialize_step_resource_links,
+        )
+
+        unbound = SimpleNamespace(
+            role="r",
+            slot_id="missing-slot",
+            trust_boundary_slot_id=None,
+            target_ingress_slot_id=None,
+        )
+        step = SimpleNamespace(resource_links=[unbound])
+        links = _serialize_step_resource_links(step, {})
+        assert links == [
+            {
+                "role": "r",
+                "slot_id": "missing-slot",
+                "trust_boundary_slot_id": None,
+                "target_ingress_slot_id": None,
+                "resource_ref": None,
+            }
+        ]
+
+    def test_serialize_step_postconditions(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _serialize_step_postconditions,
+        )
+
+        candidate, _, _, _ = _project()
+        chain = candidate.projection.source_chain
+        pcs = _serialize_step_postconditions(chain.steps[0])
+        assert len(pcs) == 1
+        assert (
+            pcs[0]["postcondition_id"]
+            == chain.steps[0].observable_postconditions[0].postcondition_id
+        )
+        assert set(pcs[0]) == {
+            "postcondition_id",
+            "description",
+            "security_relevant",
+            "terminal",
+        }
+
+    def test_serialize_selected_steps(self):
+        from asago_scenario_generator.pipeline.generate.assembly import (
+            _projection_selected_steps,
+            _serialize_selected_steps,
+            _step_realizations_by_id,
+        )
+
+        candidate, _, _, _ = _project()
+        chain = candidate.projection.source_chain
+        selected = list(candidate.projection.selected_step_ids)
+        steps = _projection_selected_steps(chain, set(selected))
+        bindings_by_slot = {b.slot_id: b for b in candidate.projection.bindings}
+        binding_by_slot = {
+            b.slot_id: b.resource_ref for b in candidate.projection.bindings
+        }
+        step_realizations = _step_realizations_by_id(steps, binding_by_slot)
+        rows = _serialize_selected_steps(steps, bindings_by_slot, step_realizations)
+        assert [r["step_id"] for r in rows] == selected
+        assert "technique_ids" in rows[0]
+        assert "resource_links" in rows[0]
+        assert "observable_postconditions" in rows[0]
+        assert "realization" in rows[0]
+
+
+# ---------------------------------------------------------------------------#
+# Direct tests: card-12 projection check helpers (decomposed drift/checks)
+# ---------------------------------------------------------------------------#
+class TestProjectionDriftShortCircuits:
+    """The drift orchestrator stops on corrupted or substituted evidence."""
+
+    def test_corrupt_snapshot_stops_drift(self, monkeypatch: pytest.MonkeyPatch):
+        """Snapshot integrity failure returns before further recomputation."""
+        block = _make_block()
+        block.capability_snapshot.profile.zones_active = ["input"]
+        envelope = _make_envelope(block)
+
+        def fail_if_recomputed(*_args: Any, **_kwargs: Any) -> None:
+            pytest.fail("snapshot digest check must not run after integrity failure")
+
+        monkeypatch.setattr(
+            projection_drift,
+            "_verify_snapshot_digest_match",
+            fail_if_recomputed,
+        )
+        result = validate_projection_traceability(envelope)
+        codes = {v.code for v in result.violations}
+        assert ProjectionTraceabilityViolationCode.nested_mutation in codes
+
+    def test_substituted_snapshot_digest_stops_drift(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """A digest pin that does not match the snapshot stops drift checks."""
+        envelope = _make_envelope()
+        envelope.projection = envelope.projection.model_copy(
+            update={
+                "projection": envelope.projection.projection.model_copy(
+                    update={"capability_fact_snapshot_digest": "f" * 64}
+                )
+            }
+        )
+
+        def fail_if_recomputed(*_args: Any, **_kwargs: Any) -> None:
+            pytest.fail(
+                "controllability derivation must not run after snapshot pin mismatch"
+            )
+
+        monkeypatch.setattr(
+            projection_drift,
+            "_derive_controllability_from_evidence",
+            fail_if_recomputed,
+        )
+        result = validate_projection_traceability(envelope)
+        codes = {v.code for v in result.violations}
+        assert ProjectionTraceabilityViolationCode.nested_mutation in codes
+
+    def test_unresolvable_ingress_evidence_stops_drift(self):
+        """A canonical ingress absent from the snapshot profile stops drift."""
+        envelope = _make_envelope()
+        envelope.projection = envelope.projection.model_copy(
+            update={
+                "canonical_ingress": envelope.projection.canonical_ingress.model_copy(
+                    update={"entry_point_id": "ep:missing"}
+                )
+            }
+        )
+        result = validate_projection_traceability(envelope)
+        codes = {v.code for v in result.violations}
+        assert ProjectionTraceabilityViolationCode.requirement_drift in codes
+
+
+class TestRecomputeAndCompareShortCircuits:
+    """Authoritative recomputation stops on invalid patterns or chain drift."""
+
+    def test_invalid_authoritative_pattern_stops_recompute(self):
+        envelope = _make_envelope()
+        candidate, _, snapshot, _ = _project()
+        resolver = TaxonomyResolver(candidate.projection.source_chain.taxonomy_context)
+        result = validate_projection_traceability(
+            envelope,
+            authoritative_pattern={"not": "a pattern"},
+            taxonomy_resolver=resolver,
+            capability_snapshot=snapshot,
+            expected_catalog_pin="0" * 64,
+        )
+        codes = {v.code for v in result.violations}
+        assert ProjectionTraceabilityViolationCode.projection_drift in codes
+
+    def test_source_chain_mismatch_stops_recompute_before_pins(self):
+        """A divergent authoritative chain is flagged and stops pin checks."""
+        envelope = _make_envelope()
+        raw = _pattern()
+        steps = raw["canonical_chain"]["steps"]
+        steps[1]["step_id"], steps[2]["step_id"] = (
+            steps[2]["step_id"],
+            steps[1]["step_id"],
+        )
+        raw["canonical_chain"]["semantic_digest"] = compute_chain_semantic_digest(
+            raw["canonical_chain"]
+        )
+        pattern = AttackPattern.model_validate(raw)
+        resolver = TaxonomyResolver(pattern.canonical_chain.taxonomy_context)
+        result = validate_projection_traceability(
+            envelope,
+            authoritative_pattern=raw,
+            taxonomy_resolver=resolver,
+            capability_snapshot=_make_block().capability_snapshot,
+            expected_catalog_pin="0" * 64,
+        )
+        codes = {v.code for v in result.violations}
+        assert ProjectionTraceabilityViolationCode.projection_drift in codes
+        assert (
+            ProjectionTraceabilityViolationCode.authoritative_pattern_pin_mismatch
+            not in codes
+        )
+
+    def test_compare_projection_pins_flags_catalog_mismatch(self):
+        candidate, _, snapshot, _ = _project()
+        pattern = AttackPattern.model_validate(_pattern())
+        violations = []
+        _compare_projection_pins(
+            candidate.projection,
+            pattern,
+            expected_catalog_pin="1" * 64,
+            capability_snapshot=snapshot,
+            violations=violations,
+        )
+        codes = {v.code for v in violations}
+        assert (
+            ProjectionTraceabilityViolationCode.authoritative_catalog_pin_mismatch
+            in codes
+        )
+        assert (
+            ProjectionTraceabilityViolationCode.authoritative_pattern_pin_mismatch
+            not in codes
+        )
+
+    def test_compare_recomputed_mappings_flags_forged_mappings(self):
+        candidate, _, _, _ = _project()
+        block = _make_block()
+        forged = block.model_copy(update={"projected_mappings": ()})
+        violations = []
+        _compare_recomputed_mappings(
+            candidate.projection,
+            candidate.projection.source_chain,
+            forged,
+            violations,
+        )
+        assert any(
+            v.code == ProjectionTraceabilityViolationCode.projection_drift
+            for v in violations
+        )
+
+
+class TestTreeRealizationsWithoutTree:
+    """Attack-tree realizations without an attack tree are forged claims."""
+
+    def test_realizations_without_tree_flagged(self):
+        envelope = _make_envelope()
+        envelope.attack_tree = None
+        result = validate_projection_traceability(envelope)
+        codes = {v.code for v in result.violations}
+        assert ProjectionTraceabilityViolationCode.forged_opaque_id in codes
+
+    def test_no_tree_and_no_realizations_is_clean(self):
+        envelope = _make_envelope()
+        envelope.projection = envelope.projection.model_copy(
+            update={"tree_realizations": ()}
+        )
+        envelope.attack_tree = None
+        result = validate_projection_traceability(envelope)
+        assert result.valid is True
+
+
+class TestRawBehaviorSpecShape:
+    """Raw/legacy behavior specs only validate realization stage shape."""
+
+    def test_raw_behavior_spec_is_valid_with_correct_stages(self):
+        envelope = _make_envelope()
+        envelope.behavior_spec = "legacy raw behavior text"
+        result = validate_projection_traceability(envelope)
+        assert result.valid is True
+
+    def test_raw_behavior_spec_flags_wrong_stage_realization(self):
+        envelope = _make_envelope()
+        envelope.behavior_spec = "legacy raw behavior text"
+        envelope.projection = envelope.projection.model_copy(
+            update={
+                "behavior_realizations": (
+                    ArtifactRealizationMapping(
+                        artifact_stage=ArtifactStage.narrative,
+                        element_id="behavior-1",
+                        projected_step_ids=("step.1",),
+                    ),
+                )
+            }
+        )
+        result = validate_projection_traceability(envelope)
+        codes = {v.code for v in result.violations}
+        assert ProjectionTraceabilityViolationCode.forged_opaque_id in codes
+
+
+class TestBehaviorMappingMismatch:
+    """Block behavior realizations must exactly match the actual actions."""
+
+    def test_mismatched_action_steps_flagged(self):
+        envelope = _make_envelope()
+        spec = envelope.behavior_spec
+        first_action = spec.actions[0]
+        other_step = first_action.projected_step_ids[0]
+        realizations = tuple(
+            ArtifactRealizationMapping(
+                artifact_stage=ArtifactStage.behavior,
+                element_id=action.action_id,
+                projected_step_ids=(other_step,),
+            )
+            for action in spec.actions
+        )
+        envelope.projection = envelope.projection.model_copy(
+            update={"behavior_realizations": realizations}
+        )
+        result = validate_projection_traceability(envelope)
+        codes = {v.code for v in result.violations}
+        assert ProjectionTraceabilityViolationCode.forged_opaque_id in codes
+
+
+class TestAssertionHelperBranches:
+    """Direct branch coverage for the assertion realization helpers."""
+
+    def test_assertion_exists_flags_source_step_mismatch(self):
+        ar = AssertionRealizationMapping(
+            element_id="a1",
+            source_step_ids=("step.1",),
+            projected_postcondition_ids=("pc.1",),
+        )
+        actual = BehaviorAssertion(
+            assertion_id="a1",
+            text="then outcome",
+            source_step_ids=("step.2",),
+            projected_postcondition_ids=("pc.1",),
+        )
+        violations = []
+        _check_assertion_exists(ar, {"a1"}, {"a1": actual}, violations)
+        assert len(violations) == 1
+        assert (
+            violations[0].code
+            == ProjectionTraceabilityViolationCode.postcondition_assertion_mismatch
+        )
+
+    def test_assertion_exists_flags_postcondition_mismatch(self):
+        ar = AssertionRealizationMapping(
+            element_id="a1",
+            source_step_ids=("step.1",),
+            projected_postcondition_ids=("pc.1",),
+        )
+        actual = BehaviorAssertion(
+            assertion_id="a1",
+            text="then outcome",
+            source_step_ids=("step.1",),
+            projected_postcondition_ids=("pc.2",),
+        )
+        violations = []
+        _check_assertion_exists(ar, {"a1"}, {"a1": actual}, violations)
+        assert len(violations) == 1
+        assert (
+            violations[0].code
+            == ProjectionTraceabilityViolationCode.postcondition_assertion_mismatch
+        )
+
+    def test_assertion_source_steps_flags_unprojected_step(self):
+        ar = AssertionRealizationMapping(
+            element_id="a1",
+            source_step_ids=("step.x",),
+            projected_postcondition_ids=("pc.1",),
+        )
+        violations = []
+        _check_assertion_source_steps(ar, {"step.1"}, violations)
+        assert len(violations) == 1
+        assert (
+            violations[0].code == ProjectionTraceabilityViolationCode.forged_opaque_id
+        )
+
+    def test_postcondition_owner_index_skips_unselected_steps(self):
+        candidate, _, _, _ = _project()
+        index = _postcondition_owner_index(candidate.projection.source_chain, set())
+        assert index == {}
+
+
+class TestResourceBindingHelperBranches:
+    """Direct branch coverage for the resource binding helpers."""
+
+    def test_ingress_leaf_binding_flags_missing_activation_ownership(self):
+        block = _make_block()
+        chain = block.projection.source_chain
+        step_by_id = {step.step_id: step for step in chain.steps}
+        bindings_by_slot = {
+            b.slot_id: b.resource_ref for b in block.projection.bindings
+        }
+        leaf = _make_tree(block.canonical_ingress.entry_point_id).root.children[0]
+        violations = []
+        _check_ingress_leaf_binding(
+            leaf, chain, bindings_by_slot, step_by_id, ("step.2",), violations
+        )
+        assert any(
+            v.code == ProjectionTraceabilityViolationCode.incorrect_resource_binding
+            for v in violations
+        )
+
+    def test_ingress_binding_mismatch_ignores_non_entry_point_bindings(self):
+        action = InitialIngressAction(entry_point_id="ep")
+        chain = _make_block().projection.source_chain
+        violations = []
+        assert _ingress_binding_mismatch(action, chain, {}) is False
+        assert violations == []
+
+    def test_mapped_binding_leaves_skips_actionless_leaves(self):
+        tree = AttackTree.model_construct(
+            id="t",
+            seed_id="s",
+            goal="g",
+            root=AttackTreeNode.model_construct(
+                id="n1",
+                label="root",
+                gate=GateType.AND,
+                children=[
+                    AttackTreeNode.model_construct(
+                        id="n1.1",
+                        label="x",
+                        gate=GateType.LEAF,
+                        projected_step_ids=("step.1",),
+                    ),
+                    AttackTreeNode.model_construct(
+                        id="n1.2",
+                        label="y",
+                        gate=GateType.LEAF,
+                        action=AiSystemAction(),
+                        projected_step_ids=("step.2",),
+                    ),
+                ],
+            ),
+        )
+        pairs = _mapped_binding_leaves(tree)
+        assert [leaf.id for leaf, _ in pairs] == ["n1.2"]
+
+    def test_security_bearing_leaf_false_without_action(self):
+        leaf = AttackTreeNode.model_construct(id="l1", label="x", gate=GateType.LEAF)
+        assert _security_bearing_leaf(leaf) is False
+
+
+class TestStageShapeHelperBranches:
+    """Direct branch coverage for the artifact stage shape helpers."""
+
+    def test_narrative_stage_shape_check_flags_wrong_stage(self):
+        r = ArtifactRealizationMapping(
+            artifact_stage=ArtifactStage.behavior,
+            element_id="1",
+            projected_step_ids=("step.1",),
+        )
+        violations = []
+        _narrative_stage_shape_check((r,), {"1"}, violations)
+        assert len(violations) == 1
+        assert (
+            violations[0].code == ProjectionTraceabilityViolationCode.forged_opaque_id
+        )
+
+    def test_tree_stage_shape_check_flags_wrong_stage(self):
+        r = ArtifactRealizationMapping(
+            artifact_stage=ArtifactStage.narrative,
+            element_id="n1.1",
+            projected_step_ids=("step.1",),
+        )
+        violations = []
+        _tree_stage_shape_check((r,), {"n1.1"}, violations)
+        assert len(violations) == 1
+        assert (
+            violations[0].code == ProjectionTraceabilityViolationCode.forged_opaque_id
+        )
+
+
+class TestGherkinHelperBranches:
+    """Direct branch coverage for the Gherkin correspondence helpers."""
+
+    def test_extract_step_text_none_without_keyword_space(self):
+        import re as _re
+
+        zone_pat = _re.compile(r"\s*\([^)]*\)\s*$", _re.MULTILINE)
+        assert _extract_step_text("Givenfoo", zone_pat) is None
+
+    def test_gherkin_step_texts_skips_keyword_without_space(self):
+        import re as _re
+
+        zone_pat = _re.compile(r"\s*\([^)]*\)\s*$", _re.MULTILINE)
+        texts = _gherkin_step_texts(
+            "Given foo\nGivenfoo\nWhen bar (tool_execution)\nBaz", zone_pat
+        )
+        assert texts == ["foo", "bar"]
+
+
+class TestIngressIdentityHelperBranches:
+    """Direct branch coverage for the ingress identity helpers."""
+
+    def test_tree_ingress_leaves_none_tree(self):
+        violations = []
+        _check_tree_ingress_leaves(None, "ep", violations)
+        assert violations == []
+
+    def test_ingress_leaf_mismatch_false_without_action(self):
+        leaf = AttackTreeNode.model_construct(id="l1", label="x", gate=GateType.LEAF)
+        assert _ingress_leaf_mismatch(leaf, "ep") is False

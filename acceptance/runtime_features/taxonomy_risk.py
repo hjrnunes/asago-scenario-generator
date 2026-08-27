@@ -23,7 +23,7 @@ from asago_scenario_generator.pipeline.finalization import (
     GeneratedStage,
     MAX_OWNER_RETRIES,
 )
-from asago_scenario_generator.pipeline.generate.narrative import (
+from asago_scenario_generator.pipeline.generate.narrative_access import (
     MAX_NARRATIVE_STEPS,
     NARRATIVE_CONNECTOR_STEPS,
 )
@@ -3326,7 +3326,7 @@ def _h_candidate_bound_present_before_request(
 def _h_import_grounding_helper(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    from asago_scenario_generator.pipeline.generate.tree import (
+    from asago_scenario_generator.pipeline.generate.tree_validation import (
         _check_tool_execution_leaf_grounding,
     )
 
@@ -4046,6 +4046,98 @@ def _h_narrative_accepted(world: World, text: str, examples: dict) -> tuple[bool
     )
 
 
+def _h_narrative_mapping_matches_expected(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'narrative mapping matches expected projected step ID "([^"]+)" '
+        r'and zone "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse expected narrative mapping: {text}"
+    expected_id, expected_zone = match.groups()
+    mappings = _narrative_state(world).get("mappings", [])
+    if len(mappings) != 1:
+        return False, f"unexpected narrative mapping count: {mappings!r}"
+    actual_ids, actual_zone = mappings[0]
+    return (
+        actual_ids == [expected_id] and actual_zone == expected_zone,
+        f"narrative mapping was {actual_ids!r}/{actual_zone!r}",
+    )
+
+
+def _h_narrative_boundary_matches_expected(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'projected step "([^"]+)" has expected boundary position "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse expected boundary: {text}"
+    step_id, expected_boundary = match.groups()
+    actual = _narrative_state(world).get("boundaries", {}).get(step_id)
+    return actual == expected_boundary, (
+        f"boundary for {step_id!r} was {actual!r}, expected {expected_boundary!r}"
+    )
+
+
+def _h_narrative_mapping_matches_expected_ids(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'narrative mapping matches expected projected step IDs "([^"]+)" '
+        r'and zone "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse expected narrative mapping: {text}"
+    expected_ids_text, expected_zone = match.groups()
+    mappings = _narrative_state(world).get("mappings", [])
+    if len(mappings) != 1:
+        return False, f"unexpected narrative mapping count: {mappings!r}"
+    actual_ids, actual_zone = mappings[0]
+    expected_ids = _csv(expected_ids_text)
+    return (
+        actual_ids == expected_ids and actual_zone == expected_zone,
+        f"narrative mapping was {actual_ids!r}/{actual_zone!r}",
+    )
+
+
+def _h_narrative_boundaries_match_expected(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'projected step boundaries match expected positions "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse expected boundaries: {text}"
+    expected = _csv(match.group(1))
+    state = _narrative_state(world)
+    mappings = state.get("mappings", [])
+    if len(mappings) != 1:
+        return False, f"unexpected narrative mapping count: {mappings!r}"
+    actual_ids = mappings[0][0]
+    actual = [state.get("boundaries", {}).get(step_id) for step_id in actual_ids]
+    return actual == expected, f"boundaries were {actual!r}, expected {expected!r}"
+
+
+def _h_narrative_exact_projection_zone_reason(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    match = re.search(
+        r'enforcement reports exact projection-zone reason "([^"]+)"',
+        text,
+    )
+    if match is None:
+        return False, f"Could not parse exact projection reason: {text}"
+    expected = match.group(1)
+    actual = _narrative_state(world).get("enforcement_error", "")
+    return expected in actual, f"projection-zone reason missing: {actual!r}"
+
+
 def _h_narrative_rejected(world: World, text: str, examples: dict) -> tuple[bool, str]:
     match = re.search(r'projection-zone reason "([^"]+)"', text)
     if match is None:
@@ -4079,7 +4171,7 @@ def _h_derive_zone_sequence(
 ) -> tuple[bool, str]:
     from types import SimpleNamespace
 
-    from asago_scenario_generator.pipeline.generate.narrative import (
+    from asago_scenario_generator.pipeline.generate.narrative_semantics import (
         _derive_zone_sequence,
     )
 
@@ -7153,12 +7245,32 @@ def register(api: object) -> None:
             _h_narrative_accepted,
         ),
         (
+            r'the narrative mapping matches expected projected step ID "([^"]+)" and zone "([^"]+)"',
+            _h_narrative_mapping_matches_expected,
+        ),
+        (
+            r'projected step "([^"]+)" has expected boundary position "([^"]+)"',
+            _h_narrative_boundary_matches_expected,
+        ),
+        (
             r'rejects the narrative with projection-zone reason "([^"]+)"',
             _h_narrative_rejected,
         ),
         (
             r"no narrative step is removed, renumbered, or remapped",
             _h_narrative_not_modified,
+        ),
+        (
+            r'narrative mapping matches expected projected step IDs "([^"]+)" and zone "([^"]+)"',
+            _h_narrative_mapping_matches_expected_ids,
+        ),
+        (
+            r'projected step boundaries match expected positions "([^"]+)"',
+            _h_narrative_boundaries_match_expected,
+        ),
+        (
+            r'enforcement reports exact projection-zone reason "([^"]+)"',
+            _h_narrative_exact_projection_zone_reason,
         ),
         (r'ordered narrative step zones are "([^"]+)"', _h_ordered_zone_steps),
         (r"the narrative zone sequence is derived", _h_derive_zone_sequence),

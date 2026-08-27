@@ -15,11 +15,13 @@ from asago_scenario_generator.llm.client import LLMClient, LLMResult
 from asago_scenario_generator.models.attack_tree import AttackTree
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.models.projection_envelope import (
-    ArtifactRealizationMapping,
-    ArtifactStage,
-    AssertionRealizationMapping,
-    ProjectionEnvelopeBlock,
     ProjectionTraceabilityResult,
+)
+from asago_scenario_generator.pipeline.projection_block import (  # noqa: F401
+    _behavior_realization_mappings,
+    _build_projection_block,
+    _narrative_realization_mappings,
+    _tree_realization_mappings,
 )
 from asago_scenario_generator.models.source_influence_provenance import (
     SourceInfluenceProvenanceBlock,
@@ -57,12 +59,10 @@ from asago_scenario_generator.pipeline.generate.zones import active_narrative_zo
 from asago_scenario_generator.pipeline.source_influence_builder import (
     assemble_source_influence_provenance,
 )
-from asago_scenario_generator.pipeline.projection import (
+from asago_scenario_generator.pipeline.projection_contracts import (
     CapabilityFactSnapshot,
     ProjectedCandidate,
-    compute_derivation_context_digest,
 )
-from asago_scenario_generator.pipeline.projection_realizations import _iter_leaves
 from asago_scenario_generator.pipeline.seeds import ScenarioSeed
 from asago_scenario_generator.pipeline.validation import (
     check_goal_narrative_alignment,
@@ -280,23 +280,27 @@ def _call_metadata(call_name: CallName, result: LLMResult) -> CallMetadata:
     )
 
 
+def _serialize_call_raw_content(raw_content: Any) -> Any:
+    """Normalize an LLM result payload for JSON log serialization."""
+    if hasattr(raw_content, "model_dump"):
+        return raw_content.model_dump(mode="json")
+    if not isinstance(raw_content, str):
+        return str(raw_content)
+    return raw_content
+
+
 def _call_log_entry(
     call_name: CallName,
     result: LLMResult,
     scenario_id: str,
 ) -> dict:
     """Build a JSON-serialisable log entry for a single LLM call."""
-    raw_content = result.content
-    if hasattr(raw_content, "model_dump"):
-        raw_content = raw_content.model_dump(mode="json")
-    elif not isinstance(raw_content, str):
-        raw_content = str(raw_content)
     return {
         "scenario_id": scenario_id,
         "call": call_name.value,
         "system_prompt": result.system_prompt,
         "user_prompt": result.user_prompt,
-        "response": raw_content,
+        "response": _serialize_call_raw_content(result.content),
         "prompt_tokens": result.prompt_tokens,
         "completion_tokens": result.completion_tokens,
         "duration_ms": result.duration_ms,
@@ -317,17 +321,12 @@ def _call_log_entry_error(
     error message is recorded.
     """
     if result is not None:
-        raw_content = result.content
-        if hasattr(raw_content, "model_dump"):
-            raw_content = raw_content.model_dump(mode="json")
-        elif not isinstance(raw_content, str):
-            raw_content = str(raw_content)
         return {
             "scenario_id": scenario_id,
             "call": call_name.value,
             "system_prompt": result.system_prompt,
             "user_prompt": result.user_prompt,
-            "response": raw_content,
+            "response": _serialize_call_raw_content(result.content),
             "prompt_tokens": result.prompt_tokens,
             "completion_tokens": result.completion_tokens,
             "duration_ms": result.duration_ms,
@@ -343,87 +342,103 @@ def _call_log_entry_error(
 # ---------------------------------------------------------------------------#
 # Projection block construction from actual artifacts (422o.4)
 # ---------------------------------------------------------------------------#
+# Authoritative construction lives on ``pipeline.projection_block``.
+# This façade re-exports the historical names for callers and tests.
 
 
-def _build_projection_block(
-    candidate: ProjectedCandidate,
-    narrative: NarrativeLayer,
-    attack_tree: AttackTree | None,
-    behavior_spec: BehaviorSpec | str | None,
-    capability_snapshot: CapabilityFactSnapshot,
-) -> ProjectionEnvelopeBlock:
-    """Build a ProjectionEnvelopeBlock from a ProjectedCandidate and actual artifacts.
+def _projection_selected_steps(chain: Any, selected_step_ids: set[str]) -> list[Any]:
+    """Return the ordered chain steps that are part of the selection."""
+    return [step for step in chain.steps if step.step_id in selected_step_ids]
 
-    Realization mappings are derived deterministically from the actual
-    artifact fields (projected_step_ids on narrative steps and tree leaves,
-    structured behavior actions/assertions) — never from an independently
-    authored sidecar table.
-    """
-    # Build narrative realizations from actual narrative.steps
-    narrative_realizations: list[ArtifactRealizationMapping] = []
-    for step in narrative.steps:
-        if step.projected_step_ids:
-            narrative_realizations.append(
-                ArtifactRealizationMapping(
-                    artifact_stage=ArtifactStage.narrative,
-                    element_id=str(step.step_number),
-                    projected_step_ids=step.projected_step_ids,
-                )
-            )
 
-    # Build tree realizations from actual tree leaf projected_step_ids fields
-    tree_realizations: list[ArtifactRealizationMapping] = []
-    if attack_tree is not None:
-        for leaf in _iter_leaves(attack_tree.root):
-            if leaf.projected_step_ids:
-                tree_realizations.append(
-                    ArtifactRealizationMapping(
-                        artifact_stage=ArtifactStage.attack_tree,
-                        element_id=leaf.id,
-                        projected_step_ids=leaf.projected_step_ids,
-                    )
-                )
-
-    # Build behavior/assertion realizations from structured BehaviorSpec
-    behavior_realizations: list[ArtifactRealizationMapping] = []
-    assertion_realizations: list[AssertionRealizationMapping] = []
-    if isinstance(behavior_spec, BehaviorSpec):
-        for action in behavior_spec.actions:
-            behavior_realizations.append(
-                ArtifactRealizationMapping(
-                    artifact_stage=ArtifactStage.behavior,
-                    element_id=action.action_id,
-                    projected_step_ids=action.projected_step_ids,
-                )
-            )
-        for assertion in behavior_spec.assertions:
-            assertion_realizations.append(
-                AssertionRealizationMapping(
-                    element_id=assertion.assertion_id,
-                    source_step_ids=assertion.source_step_ids,
-                    projected_postcondition_ids=assertion.projected_postcondition_ids,
-                )
-            )
-
-    return ProjectionEnvelopeBlock(
-        projection=candidate.projection,
-        canonical_ingress=candidate.canonical_ingress,
-        ingress_controllability=candidate.ingress_controllability,
-        projected_mappings=candidate.projected_mappings,
-        capability_snapshot=capability_snapshot,
-        execution_requirements=candidate.execution_requirements,
-        requirement_derivation_version=candidate.requirement_derivation_version,
-        execution_requirements_digest=candidate.execution_requirements_digest,
-        derivation_context_digest=compute_derivation_context_digest(
-            candidate.projection.projection_digest,
-            candidate.projection.source_chain.pattern_id,
-            candidate.ingress_controllability,
-        ),
-        narrative_realizations=tuple(narrative_realizations),
-        tree_realizations=tuple(tree_realizations),
-        behavior_realizations=tuple(behavior_realizations),
-        assertion_realizations=tuple(assertion_realizations),
+def _step_realizations_by_id(
+    selected_steps: list[Any], binding_by_slot: dict[str, Any]
+) -> dict[str, dict[str, Any]]:
+    """Build canonical per-step realization records (post-processing only)."""
+    from asago_scenario_generator.models.realization import (
+        derive_step_realization,
     )
+
+    step_realizations: dict[str, dict[str, Any]] = {}
+    for step in selected_steps:
+        r = derive_step_realization(step, binding_by_slot)
+        step_realizations[step.step_id] = r.model_dump(mode="json")
+    return step_realizations
+
+
+def _serialize_step_technique_ids(step: Any) -> list[str]:
+    """Serialize canonical exact ATLAS bindings for the tree compiler."""
+    return [
+        technique_id
+        for mapping in step.mappings
+        if mapping.taxonomy == "ATLAS" and mapping.decision == "exact"
+        for technique_id in mapping.ids
+    ]
+
+
+def _serialize_step_resource_links(
+    step: Any, bindings_by_slot: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Serialize resource links with their concrete resource_ref values."""
+    return [
+        {
+            "role": link.role,
+            "slot_id": link.slot_id,
+            "trust_boundary_slot_id": link.trust_boundary_slot_id,
+            "target_ingress_slot_id": link.target_ingress_slot_id,
+            # Include the concrete resource_ref for this slot
+            # (humanized to names by Phase 3 before rendering).
+            "resource_ref": (
+                bindings_by_slot[link.slot_id].resource_ref.model_dump(mode="json")
+                if link.slot_id in bindings_by_slot
+                else None
+            ),
+        }
+        for link in step.resource_links
+    ]
+
+
+def _serialize_step_postconditions(step: Any) -> list[dict[str, Any]]:
+    """Serialize observable postconditions for Call 3 validation."""
+    return [
+        {
+            "postcondition_id": pc.postcondition_id,
+            "description": pc.description,
+            "security_relevant": pc.security_relevant,
+            "terminal": pc.terminal,
+        }
+        for pc in step.observable_postconditions
+    ]
+
+
+def _serialize_selected_steps(
+    selected_steps: list[Any],
+    bindings_by_slot: dict[str, Any],
+    step_realizations: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Serialize the ordered selected-step rows for the projection context."""
+    return [
+        {
+            "step_id": step.step_id,
+            "order": step.order,
+            "action_kind": step.action_kind,
+            "executor_role": step.executor_role,
+            "boundary_position": step.boundary_position,
+            "attacker_controlled": step.attacker_controlled,
+            "requirement": step.requirement,
+            # Canonical ATLAS bindings are exposed to the tree compiler,
+            # not echoed by the provider topology draft.
+            "technique_ids": _serialize_step_technique_ids(step),
+            "resource_links": _serialize_step_resource_links(step, bindings_by_slot),
+            # Postconditions are retained for Call 3 validation
+            # (gherkin.py builds postcondition ownership tables).
+            "observable_postconditions": _serialize_step_postconditions(step),
+            # Canonical realization record — used by post-processing
+            # (_fill_tree_realizations), not rendered in prompts.
+            "realization": step_realizations.get(step.step_id, {}),
+        }
+        for step in selected_steps
+    ]
 
 
 def _build_projection_context(candidate: ProjectedCandidate) -> dict[str, Any]:
@@ -460,13 +475,10 @@ def _build_projection_context(candidate: ProjectedCandidate) -> dict[str, Any]:
     The ``"realization"`` key on each step dict is retained because
     ``_fill_tree_realizations`` reads it during post-processing.
     """
-    from asago_scenario_generator.models.realization import (
-        derive_step_realization,
-    )
-
     chain = candidate.projection.source_chain
-    selected_step_ids = set(candidate.projection.selected_step_ids)
-    selected_steps = [step for step in chain.steps if step.step_id in selected_step_ids]
+    selected_steps = _projection_selected_steps(
+        chain, set(candidate.projection.selected_step_ids)
+    )
 
     # Serialize concrete resource bindings with their resource_ref values.
     bindings_by_slot = {b.slot_id: b for b in candidate.projection.bindings}
@@ -474,64 +486,12 @@ def _build_projection_context(candidate: ProjectedCandidate) -> dict[str, Any]:
 
     # Build canonical realization records per step — retained for
     # post-processing (_fill_tree_realizations) but not rendered in prompts.
-    step_realizations: dict[str, dict[str, Any]] = {}
-    for step in selected_steps:
-        r = derive_step_realization(step, binding_by_slot)
-        step_realizations[step.step_id] = r.model_dump(mode="json")
+    step_realizations = _step_realizations_by_id(selected_steps, binding_by_slot)
 
     return {
-        "selected_steps": [
-            {
-                "step_id": step.step_id,
-                "order": step.order,
-                "action_kind": step.action_kind,
-                "executor_role": step.executor_role,
-                "boundary_position": step.boundary_position,
-                "attacker_controlled": step.attacker_controlled,
-                "requirement": step.requirement,
-                # Canonical ATLAS bindings are exposed to the tree compiler,
-                # not echoed by the provider topology draft.
-                "technique_ids": [
-                    technique_id
-                    for mapping in step.mappings
-                    if mapping.taxonomy == "ATLAS" and mapping.decision == "exact"
-                    for technique_id in mapping.ids
-                ],
-                "resource_links": [
-                    {
-                        "role": link.role,
-                        "slot_id": link.slot_id,
-                        "trust_boundary_slot_id": link.trust_boundary_slot_id,
-                        "target_ingress_slot_id": link.target_ingress_slot_id,
-                        # Include the concrete resource_ref for this slot
-                        # (humanized to names by Phase 3 before rendering).
-                        "resource_ref": (
-                            bindings_by_slot[link.slot_id].resource_ref.model_dump(
-                                mode="json"
-                            )
-                            if link.slot_id in bindings_by_slot
-                            else None
-                        ),
-                    }
-                    for link in step.resource_links
-                ],
-                # Postconditions are retained for Call 3 validation
-                # (gherkin.py builds postcondition ownership tables).
-                "observable_postconditions": [
-                    {
-                        "postcondition_id": pc.postcondition_id,
-                        "description": pc.description,
-                        "security_relevant": pc.security_relevant,
-                        "terminal": pc.terminal,
-                    }
-                    for pc in step.observable_postconditions
-                ],
-                # Canonical realization record — used by post-processing
-                # (_fill_tree_realizations), not rendered in prompts.
-                "realization": step_realizations.get(step.step_id, {}),
-            }
-            for step in selected_steps
-        ],
+        "selected_steps": _serialize_selected_steps(
+            selected_steps, bindings_by_slot, step_realizations
+        ),
         "selected_step_ids": list(candidate.projection.selected_step_ids),
         "initial_ingress_slot_id": chain.initial_ingress_slot_id,
         "omitted_step_ids": [o.step_id for o in candidate.projection.omissions],
@@ -553,6 +513,111 @@ def _build_projection_context(candidate: ProjectedCandidate) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Envelope assembly
 # ---------------------------------------------------------------------------
+
+
+def _resolve_envelope_candidate_id(
+    candidate_id: str, projected_candidate: ProjectedCandidate
+) -> str:
+    """Derive candidate_id from the projected candidate if not supplied."""
+    if not candidate_id:
+        return projected_candidate.candidate_id
+    if candidate_id != projected_candidate.candidate_id:
+        raise ValueError(
+            f"candidate_id '{candidate_id}' does not match projected "
+            f"candidate identity '{projected_candidate.candidate_id}'"
+        )
+    return candidate_id
+
+
+def _derive_maestro_layers(
+    attack_tree: AttackTree | None, narrative: NarrativeLayer
+) -> set[int]:
+    """Derive MAESTRO layers from tree annotations, zone defaults, or {3}."""
+    maestro_layers: set[int] = set()
+    if attack_tree is not None:
+        maestro_layers = _extract_maestro_layers_from_tree(attack_tree.root)
+    if not maestro_layers:
+        for z in narrative.zone_sequence:
+            default = _ZONE_TO_DEFAULT_MAESTRO.get(z)
+            if default is not None:
+                maestro_layers.add(default)
+    if not maestro_layers:
+        maestro_layers = {3}
+    return maestro_layers
+
+
+def _build_faceting_metadata(
+    seed: ScenarioSeed,
+    narrative: NarrativeLayer,
+    classification_ids: list[str] | None,
+    maestro_layers: set[int],
+) -> FacetingMetadata:
+    """Build the qualified scenario classification faceting metadata."""
+    return FacetingMetadata(
+        risk_card=seed.risk_card_ref,
+        taxonomy_chain=TaxonomyChain(
+            owasp_llm_ids=seed.owasp_llm_ids,
+            agentic_threat_ids=seed.agentic_threat_ids,
+            owasp_asi_ids=seed.owasp_asi_ids,
+            atlas_technique_ids=classification_ids or None,
+            scenario_seed=seed.seed_id,
+        ),
+        capability_profile=CapabilityProfileRef(
+            # Literal 'outside' traversal is excluded: the facade records
+            # the active Schneider zones actually traversed.
+            zones_traversed=active_narrative_zones(narrative.zone_sequence),
+            architecture_match=ArchitectureMatch.explicit,
+            entry_point=narrative.entry_point,
+        ),
+        maestro_layers=sorted(maestro_layers),
+    )
+
+
+def _scenario_seed_metadata(seed: ScenarioSeed) -> dict[str, Any]:
+    """Serialize the seed identity fields persisted on the envelope."""
+    return {
+        "seed_id": seed.seed_id,
+        "threat_id": seed.threat_id,
+        "threat_name": seed.threat_name,
+        "attack_pattern_name": seed.attack_pattern_name,
+        "attack_pattern_description": seed.attack_pattern_description,
+        "owasp_origin": seed.owasp_origin,
+        "laaf_technique_ids": seed.laaf_technique_ids,
+        "atlas_technique_ids": seed.atlas_technique_ids,
+        "atlas_provenance_ids": seed.atlas_provenance_ids,
+    }
+
+
+def _require_structured_behavior_spec(
+    behavior_spec: str | BehaviorSpec | None,
+) -> BehaviorSpec:
+    """Require Call 3 to return a structured BehaviorSpec (422o.4 blocker #5)."""
+    if not isinstance(behavior_spec, BehaviorSpec):
+        raise GenerationError(
+            "Call 3 must return a structured BehaviorSpec (422o.4). "
+            "Raw text behavior specs are no longer accepted."
+        )
+    return behavior_spec
+
+
+def _resolve_source_influence_provenance(
+    source_influence_provenance: SourceInfluenceProvenanceBlock | None,
+    seed: ScenarioSeed,
+    capability_snapshot: CapabilityFactSnapshot,
+    attack_tree: AttackTree | None,
+    narrative: NarrativeLayer,
+    selected_step_ids: tuple[str, ...] | list[str],
+) -> SourceInfluenceProvenanceBlock:
+    """Use the supplied provenance block or assemble one deterministically."""
+    if source_influence_provenance is None:
+        return assemble_source_influence_provenance(
+            seed=seed,
+            capability_snapshot=capability_snapshot,
+            attack_tree=attack_tree,
+            narrative=narrative,
+            selected_step_ids=selected_step_ids,
+        )
+    return source_influence_provenance
 
 
 def _assemble_envelope(
@@ -578,29 +643,13 @@ def _assemble_envelope(
     source_influence_provenance: SourceInfluenceProvenanceBlock | None = None,
 ) -> ScenarioEnvelope:
     _validate_run_id(run_id)
-    # Derive candidate_id from projected candidate if not supplied.
-    if not candidate_id:
-        candidate_id = projected_candidate.candidate_id
-    elif candidate_id != projected_candidate.candidate_id:
-        raise ValueError(
-            f"candidate_id '{candidate_id}' does not match projected "
-            f"candidate identity '{projected_candidate.candidate_id}'"
-        )
+    candidate_id = _resolve_envelope_candidate_id(candidate_id, projected_candidate)
     _validate_candidate_id(candidate_id)
     if attempt < 1:
         raise ValueError(f"attempt must be >= 1, got {attempt}")
     scenario_id = compute_scenario_id(run_id, candidate_id, attempt)
 
-    maestro_layers: set[int] = set()
-    if attack_tree is not None:
-        maestro_layers = _extract_maestro_layers_from_tree(attack_tree.root)
-    if not maestro_layers:
-        for z in narrative.zone_sequence:
-            default = _ZONE_TO_DEFAULT_MAESTRO.get(z)
-            if default is not None:
-                maestro_layers.add(default)
-    if not maestro_layers:
-        maestro_layers = {3}
+    maestro_layers = _derive_maestro_layers(attack_tree, narrative)
 
     # The taxonomy chain records the qualified scenario classification. Exact
     # projected-step mappings remain on canonical tree leaves and in explicit
@@ -613,24 +662,8 @@ def _assemble_envelope(
     classification_ids = scenario_classification_ids(
         pinned_technique_ids, seed.atlas_technique_ids
     )
-
-    faceting = FacetingMetadata(
-        risk_card=seed.risk_card_ref,
-        taxonomy_chain=TaxonomyChain(
-            owasp_llm_ids=seed.owasp_llm_ids,
-            agentic_threat_ids=seed.agentic_threat_ids,
-            owasp_asi_ids=seed.owasp_asi_ids,
-            atlas_technique_ids=classification_ids or None,
-            scenario_seed=seed.seed_id,
-        ),
-        capability_profile=CapabilityProfileRef(
-            # Literal 'outside' traversal is excluded: the facade records
-            # the active Schneider zones actually traversed.
-            zones_traversed=active_narrative_zones(narrative.zone_sequence),
-            architecture_match=ArchitectureMatch.explicit,
-            entry_point=narrative.entry_point,
-        ),
-        maestro_layers=sorted(maestro_layers),
+    faceting = _build_faceting_metadata(
+        seed, narrative, classification_ids, maestro_layers
     )
 
     priority = _compute_priority(narrative, attack_tree, seed)
@@ -641,17 +674,7 @@ def _assemble_envelope(
         notes=notes if notes else None,
     )
 
-    scenario_seed_metadata = {
-        "seed_id": seed.seed_id,
-        "threat_id": seed.threat_id,
-        "threat_name": seed.threat_name,
-        "attack_pattern_name": seed.attack_pattern_name,
-        "attack_pattern_description": seed.attack_pattern_description,
-        "owasp_origin": seed.owasp_origin,
-        "laaf_technique_ids": seed.laaf_technique_ids,
-        "atlas_technique_ids": seed.atlas_technique_ids,
-        "atlas_provenance_ids": seed.atlas_provenance_ids,
-    }
+    scenario_seed_metadata = _scenario_seed_metadata(seed)
 
     # Build the immutable projection block from the ProjectedCandidate
     # and actual generated artifacts (422o.4).
@@ -660,11 +683,7 @@ def _assemble_envelope(
     # Call 3 now returns a structured BehaviorSpec directly (422o.4 blocker #5).
     # The BehaviorSpec is validated against the projection in _call_behavior_spec
     # and carried through to the envelope.  No deterministic replacement.
-    if not isinstance(behavior_spec, BehaviorSpec):
-        raise GenerationError(
-            "Call 3 must return a structured BehaviorSpec (422o.4). "
-            "Raw text behavior specs are no longer accepted."
-        )
+    behavior_spec = _require_structured_behavior_spec(behavior_spec)
 
     projection_block = _build_projection_block(
         projected_candidate,
@@ -688,14 +707,14 @@ def _assemble_envelope(
     # capability profile's KC sub-codes (constraints), and the actual
     # projected leaf/narrative artifacts.  The finalization gate then
     # re-validates the persisted qualification fail-closed.
-    if source_influence_provenance is None:
-        source_influence_provenance = assemble_source_influence_provenance(
-            seed=seed,
-            capability_snapshot=capability_snapshot,
-            attack_tree=attack_tree,
-            narrative=narrative,
-            selected_step_ids=projected_candidate.projection.selected_step_ids,
-        )
+    source_influence_provenance = _resolve_source_influence_provenance(
+        source_influence_provenance,
+        seed,
+        capability_snapshot,
+        attack_tree,
+        narrative,
+        projected_candidate.projection.selected_step_ids,
+    )
 
     # Use the canonical ingress ID from the projection.
     effective_entry_point_id = projected_candidate.canonical_ingress.entry_point_id
@@ -720,6 +739,906 @@ def _assemble_envelope(
         generation=generation,
         source_influence_provenance=source_influence_provenance,
     )
+
+
+# ---------------------------------------------------------------------------
+# Compatibility generation stage runners
+# ---------------------------------------------------------------------------
+
+
+def _apply_adversarial_actor_filter(
+    seed: ScenarioSeed, excluded_actor_types: list[str] | None
+) -> list[str] | None:
+    """Exclude negligent-insider for adversarial-only threats."""
+    if seed.threat_id in _ADVERSARIAL_ONLY_THREATS:
+        excluded_actor_types = (
+            list(excluded_actor_types) if excluded_actor_types else []
+        )
+        if "negligent-insider" not in excluded_actor_types:
+            excluded_actor_types.append("negligent-insider")
+            logger.debug(
+                "Excluding negligent-insider for adversarial-only threat %s (seed %s)",
+                seed.threat_id,
+                seed.seed_id,
+            )
+    return excluded_actor_types
+
+
+def _record_diversity_limitation(
+    diversity_notes: list[str], limitation: str | None
+) -> None:
+    """Record a forced-actor diversity limitation note, if any."""
+    if limitation:
+        diversity_notes.append(
+            f"Diversity limitation: forced actor '{limitation}' was "
+            f"incompatible, replaced with feasible fallback."
+        )
+
+
+def _apply_goal_category(
+    actor_profile: Any, attack_goal: dict[str, Any] | None
+) -> None:
+    """Store the selected goal category on the actor profile (Step 5)."""
+    if attack_goal is not None:
+        actor_profile.goal_category = attack_goal["id"]
+        actor_profile.goal_category_name = attack_goal["name"]
+        actor_profile.goal_category_parent = attack_goal["category_name"]
+
+
+def _run_call0(
+    seed: ScenarioSeed,
+    profile: CapabilityProfile,
+    client: LLMClient,
+    use_case: str,
+    *,
+    preferred_actor_type: str | None = None,
+    excluded_actor_types: list[str] | None = None,
+    preferred_capability_level: str | None = None,
+    attack_goal: dict[str, Any] | None = None,
+    pinned_technique_ids: list[str] | None = None,
+    forced_actor_type: str | None = None,
+    pinned_entry_point: str | None = None,
+    pinned_entry_point_id: str = "",
+    access_feedback: str | None = None,
+    projection_context: dict[str, Any],
+    call_log_entries: list[dict],
+    partial_scenario_id: str,
+    seed_id: str,
+    error_prefix: str = "",
+) -> tuple[Any, LLMResult, str | None]:
+    """Run one Call-0 actor-profile request, failing closed with a log entry."""
+    import asago_scenario_generator.pipeline.generate as _gen
+
+    try:
+        actor_profile, result0, _div_limitation = _gen._call_actor_profile(
+            seed,
+            profile,
+            client,
+            use_case,
+            preferred_actor_type=preferred_actor_type,
+            excluded_actor_types=excluded_actor_types,
+            preferred_capability_level=preferred_capability_level,
+            attack_goal=attack_goal,
+            pinned_technique_ids=pinned_technique_ids,
+            forced_actor_type=forced_actor_type,
+            pinned_entry_point=pinned_entry_point,
+            pinned_entry_point_id=pinned_entry_point_id,
+            access_feedback=access_feedback,
+            projection_context=projection_context,
+        )
+    except Exception as exc:
+        error_message = f"{error_prefix}{exc}"
+        call_log_entries.append(
+            _call_log_entry_error(
+                CallName.actor_profile, None, partial_scenario_id, error_message
+            )
+        )
+        raise GenerationError(error_message, call_log_entries, seed_id) from exc
+    return actor_profile, result0, _div_limitation
+
+
+def _regenerate_actor_profile(
+    seed: ScenarioSeed,
+    profile: CapabilityProfile,
+    client: LLMClient,
+    use_case: str,
+    *,
+    excluded_actor_types: list[str] | None,
+    preferred_capability_level: str | None,
+    attack_goal: dict[str, Any] | None,
+    pinned_technique_ids: list[str] | None,
+    corrected_type: str,
+    pinned_entry_point: str | None,
+    pinned_entry_point_id: str,
+    projection_context: dict[str, Any],
+    call_log_entries: list[dict],
+    partial_scenario_id: str,
+    seed_id: str,
+    original_actor_type: str,
+) -> tuple[Any, LLMResult, str | None]:
+    """Regenerate the actor profile with a forced type after BDI reassignment."""
+    import asago_scenario_generator.pipeline.generate as _gen
+
+    logger.warning(
+        "BDI reassignment: regenerating actor profile with forced "
+        "actor_type '%s' (was '%s') for seed %s",
+        corrected_type,
+        original_actor_type,
+        seed.seed_id,
+    )
+    try:
+        actor_profile, result0, _div_limitation = _gen._call_actor_profile(
+            seed,
+            profile,
+            client,
+            use_case,
+            excluded_actor_types=excluded_actor_types,
+            preferred_capability_level=preferred_capability_level,
+            attack_goal=attack_goal,
+            pinned_technique_ids=pinned_technique_ids,
+            forced_actor_type=corrected_type,
+            pinned_entry_point=pinned_entry_point,
+            pinned_entry_point_id=pinned_entry_point_id,
+            projection_context=projection_context,
+        )
+    except Exception as exc:
+        call_log_entries.append(
+            _call_log_entry_error(
+                CallName.actor_profile,
+                None,
+                partial_scenario_id,
+                f"BDI regeneration failed: {exc}",
+            )
+        )
+        raise GenerationError(
+            f"BDI regeneration failed: {exc}",
+            call_log_entries,
+            seed_id,
+        ) from exc
+
+    # Defence in depth: re-validate the regenerated profile.
+    actor_profile = _gen._validate_actor_type(actor_profile)
+    if actor_profile.actor_type != corrected_type:
+        logger.warning(
+            "BDI regeneration: regenerated profile still has wrong "
+            "actor_type '%s' (expected '%s') — accepting as-is",
+            actor_profile.actor_type,
+            corrected_type,
+        )
+    return actor_profile, result0, _div_limitation
+
+
+def _access_violations_initial(
+    actor_profile: Any,
+    profile: CapabilityProfile,
+    pinned_entry_point_id: str,
+) -> list[Any]:
+    """Run the actor/access provenance check, or skip when unpinned."""
+    import asago_scenario_generator.pipeline.generate as _gen
+
+    if not pinned_entry_point_id:
+        return []
+    return _gen.validate_actor_access_provenance(actor_profile, profile)
+
+
+def _access_retry_feedback(access_violations: list[Any]) -> str:
+    """Format access violations as joined feedback lines for the LLM."""
+    return "\n".join(f"- {v.message}" for v in access_violations)
+
+
+def _access_retry_force_type(
+    actor_profile: Any, access_violations: list[Any], access_retry: int
+) -> str | None:
+    """Decide whether to force the actor type on the access retry.
+
+    cmps.6: if the violation indicates actor/evidence incompatibility, do
+    not force the same actor type — let the LLM pick a feasible one.
+    """
+    if any(
+        v.rule
+        in (
+            "access_class_ingress_mode_incompatible",
+            "missing_insider_advantage",
+        )
+        for v in access_violations
+    ):
+        logger.info(
+            "Access retry %d: not forcing actor '%s' due to "
+            "access-class/ingress-mode incompatibility",
+            access_retry,
+            actor_profile.actor_type,
+        )
+        return None
+    return actor_profile.actor_type
+
+
+def _run_access_retry_attempt(
+    seed: ScenarioSeed,
+    profile: CapabilityProfile,
+    client: LLMClient,
+    use_case: str,
+    actor_profile: Any,
+    *,
+    excluded_actor_types: list[str] | None,
+    preferred_capability_level: str | None,
+    attack_goal: dict[str, Any] | None,
+    pinned_technique_ids: list[str] | None,
+    force_type: str | None,
+    pinned_entry_point: str | None,
+    pinned_entry_point_id: str,
+    access_feedback: str,
+    projection_context: dict[str, Any],
+    diversity_notes: list[str],
+    access_retry: int,
+    partial_scenario_id: str,
+) -> tuple[Any, LLMResult] | None:
+    """Run one actor-profile retry attempt, returning None on failure."""
+    import asago_scenario_generator.pipeline.generate as _gen
+
+    try:
+        actor_profile, result0, div_limitation = _gen._call_actor_profile(
+            seed,
+            profile,
+            client,
+            use_case,
+            excluded_actor_types=excluded_actor_types,
+            preferred_capability_level=preferred_capability_level,
+            attack_goal=attack_goal,
+            pinned_technique_ids=pinned_technique_ids,
+            forced_actor_type=force_type,
+            pinned_entry_point=pinned_entry_point,
+            pinned_entry_point_id=pinned_entry_point_id,
+            access_feedback=access_feedback,
+            projection_context=projection_context,
+        )
+        _record_diversity_limitation(diversity_notes, div_limitation)
+        actor_profile = _gen._validate_actor_type(actor_profile)
+        _apply_goal_category(actor_profile, attack_goal)
+    except Exception as exc:  # noqa: BLE001 - retry must catch all
+        logger.warning(
+            "Actor/access retry %d/%d failed for %s: %s",
+            access_retry,
+            _ACTOR_ACCESS_MAX_RETRIES,
+            partial_scenario_id,
+            exc,
+        )
+        return None
+    return actor_profile, result0
+
+
+def _retry_actor_access(
+    actor_profile: Any,
+    result0: LLMResult,
+    seed: ScenarioSeed,
+    profile: CapabilityProfile,
+    client: LLMClient,
+    use_case: str,
+    *,
+    excluded_actor_types: list[str] | None,
+    preferred_capability_level: str | None,
+    attack_goal: dict[str, Any] | None,
+    pinned_technique_ids: list[str] | None,
+    pinned_entry_point: str | None,
+    pinned_entry_point_id: str,
+    projection_context: dict[str, Any],
+    diversity_notes: list[str],
+    partial_scenario_id: str,
+) -> tuple[Any, LLMResult, list[Any], int]:
+    """Post-Call-0 actor/access provenance validation with bounded retries."""
+    import asago_scenario_generator.pipeline.generate as _gen
+
+    _validate_access = _gen.validate_actor_access_provenance
+    _access_violations = _access_violations_initial(
+        actor_profile, profile, pinned_entry_point_id
+    )
+    _access_retry = 0
+    while _access_violations and _access_retry < _ACTOR_ACCESS_MAX_RETRIES:
+        _access_retry += 1
+        _access_feedback = _access_retry_feedback(_access_violations)
+        logger.warning(
+            "Actor/access provenance violations in %s (retry %d/%d): %s",
+            partial_scenario_id,
+            _access_retry,
+            _ACTOR_ACCESS_MAX_RETRIES,
+            _access_feedback,
+        )
+        _force_type = _access_retry_force_type(
+            actor_profile, _access_violations, _access_retry
+        )
+        _attempt = _run_access_retry_attempt(
+            seed,
+            profile,
+            client,
+            use_case,
+            actor_profile,
+            excluded_actor_types=excluded_actor_types,
+            preferred_capability_level=preferred_capability_level,
+            attack_goal=attack_goal,
+            pinned_technique_ids=pinned_technique_ids,
+            force_type=_force_type,
+            pinned_entry_point=pinned_entry_point,
+            pinned_entry_point_id=pinned_entry_point_id,
+            access_feedback=_access_feedback,
+            projection_context=projection_context,
+            diversity_notes=diversity_notes,
+            access_retry=_access_retry,
+            partial_scenario_id=partial_scenario_id,
+        )
+        if _attempt is None:
+            break
+        actor_profile, result0 = _attempt
+        _access_violations = _validate_access(actor_profile, profile)
+
+    if _access_violations:
+        logger.warning(
+            "Actor/access provenance violations persist after %d retries for "
+            "%s — proceeding to semantic validation for quarantine: %s",
+            _access_retry,
+            partial_scenario_id,
+            "; ".join(v.message for v in _access_violations),
+        )
+    return actor_profile, result0, _access_violations, _access_retry
+
+
+def _run_call1(
+    seed: ScenarioSeed,
+    profile: CapabilityProfile,
+    client: LLMClient,
+    use_case: str,
+    actor_profile: Any,
+    *,
+    preferred_entry_point: str | None,
+    excluded_entry_points: list[str] | None,
+    excluded_patterns: list[str] | None,
+    excluded_structural_patterns: list[str] | None,
+    pinned_entry_point: str | None,
+    pinned_technique_ids: list[str] | None,
+    prior_titles: list[str] | None,
+    pinned_entry_point_id: str,
+    projection_context: dict[str, Any],
+    call_log_entries: list[dict],
+    partial_scenario_id: str,
+    seed_id: str,
+) -> tuple[Any, LLMResult]:
+    """Run the initial Call-1 narrative request, failing closed with a log entry."""
+    import asago_scenario_generator.pipeline.generate as _gen
+
+    try:
+        narrative, result1 = _gen._call_narrative(
+            seed,
+            profile,
+            client,
+            use_case,
+            actor_profile=actor_profile,
+            preferred_entry_point=preferred_entry_point,
+            excluded_entry_points=excluded_entry_points,
+            excluded_patterns=excluded_patterns,
+            excluded_structural_patterns=excluded_structural_patterns,
+            pinned_entry_point=pinned_entry_point,
+            pinned_technique_ids=pinned_technique_ids,
+            prior_titles=prior_titles,
+            pinned_entry_point_id=pinned_entry_point_id,
+            projection_context=projection_context,
+        )
+    except Exception as exc:
+        call_log_entries.append(
+            _call_log_entry_error(
+                CallName.narrative, None, partial_scenario_id, str(exc)
+            )
+        )
+        raise GenerationError(str(exc), call_log_entries, seed_id) from exc
+    return narrative, result1
+
+
+def _call1_realization_violations(narrative: Any, actor_profile: Any) -> list[Any]:
+    """Validate narrative access realization against the actor profile."""
+    import asago_scenario_generator.pipeline.generate as _gen
+
+    return _gen.narrative.validate_narrative_access_realization(
+        narrative, actor_profile
+    )
+
+
+def _call1_retry_checks(
+    narrative: Any,
+    actor_profile: Any,
+    prior_titles: list[str] | None,
+    augmented_titles: list[str],
+    retry_count: int,
+    partial_scenario_id: str,
+) -> tuple[list[str], str | None, bool, list[str]]:
+    """Run both Call-1 retry checks, returning the loop decision.
+
+    Returns (feedback_parts, realization_feedback, needs_retry,
+    augmented_titles).
+    """
+    feedback_parts: list[str] = []
+    needs_retry = False
+    realization_violations = _call1_realization_violations(narrative, actor_profile)
+    realization_feedback: str | None = None
+    if realization_violations:
+        needs_retry = True
+        realization_feedback = "\n".join(
+            f"- {v.message}" for v in realization_violations
+        )
+        feedback_parts.append(realization_feedback)
+        logger.warning(
+            "Narrative access realization violations in %s (retry %d/%d): %s",
+            partial_scenario_id,
+            retry_count + 1,
+            _ACTOR_ACCESS_MAX_RETRIES,
+            realization_feedback,
+        )
+
+    title_duplicate = prior_titles is not None and narrative.title in prior_titles
+    if title_duplicate:
+        needs_retry = True
+        if f"DUPLICATE — DO NOT REUSE: {narrative.title}" not in augmented_titles:
+            augmented_titles = list(prior_titles) + [
+                f"DUPLICATE — DO NOT REUSE: {narrative.title}"
+            ]
+        feedback_parts.append(
+            f"Title '{narrative.title}' is an exact duplicate of a "
+            f"previously generated title — choose a different title."
+        )
+        logger.warning(
+            "Exact duplicate title for %s: '%s' — retrying Call 1",
+            partial_scenario_id,
+            narrative.title,
+        )
+    return feedback_parts, realization_feedback, needs_retry, augmented_titles
+
+
+def _run_call1_retry_attempt(
+    seed: ScenarioSeed,
+    profile: CapabilityProfile,
+    client: LLMClient,
+    use_case: str,
+    actor_profile: Any,
+    *,
+    preferred_entry_point: str | None,
+    excluded_entry_points: list[str] | None,
+    excluded_patterns: list[str] | None,
+    excluded_structural_patterns: list[str] | None,
+    pinned_entry_point: str | None,
+    pinned_technique_ids: list[str] | None,
+    prior_titles: list[str] | None,
+    pinned_entry_point_id: str,
+    realization_feedback: str | None,
+    projection_context: dict[str, Any],
+    call1_retry: int,
+    partial_scenario_id: str,
+) -> tuple[Any, LLMResult] | None:
+    """Run one Call-1 retry attempt, returning None on failure."""
+    import asago_scenario_generator.pipeline.generate as _gen
+
+    try:
+        narrative, result1 = _gen._call_narrative(
+            seed,
+            profile,
+            client,
+            use_case,
+            actor_profile=actor_profile,
+            preferred_entry_point=preferred_entry_point,
+            excluded_entry_points=excluded_entry_points,
+            excluded_patterns=excluded_patterns,
+            excluded_structural_patterns=excluded_structural_patterns,
+            pinned_entry_point=pinned_entry_point,
+            pinned_technique_ids=pinned_technique_ids,
+            prior_titles=prior_titles,
+            pinned_entry_point_id=pinned_entry_point_id,
+            realization_feedback=realization_feedback,
+            projection_context=projection_context,
+        )
+        if pinned_entry_point and narrative.entry_point != pinned_entry_point:
+            # On candidate-v2 paths (422o.4), entry-point overwrite is
+            # semantic repair and is prohibited.  The mismatch becomes
+            # a typed violation for cmps.5 to route.
+            logger.warning(
+                "Narrative entry point '%s' does not match pinned '%s' "
+                "for %s — not overwriting on candidate-v2 path (422o.4).",
+                narrative.entry_point,
+                pinned_entry_point,
+                partial_scenario_id,
+            )
+    except Exception as exc:  # noqa: BLE001 - retry must catch all
+        logger.warning(
+            "Call 1 retry %d/%d failed for %s: %s",
+            call1_retry,
+            _ACTOR_ACCESS_MAX_RETRIES,
+            partial_scenario_id,
+            exc,
+        )
+        return None
+    return narrative, result1
+
+
+def _warn_call1_persistent_violations(
+    narrative: Any,
+    actor_profile: Any,
+    call1_retry: int,
+    partial_scenario_id: str,
+) -> None:
+    """Warn when realization violations persist after retries are exhausted."""
+    violations = _call1_realization_violations(narrative, actor_profile)
+    if violations:
+        logger.warning(
+            "Narrative access realization violations persist after %d retries "
+            "for %s — proceeding to semantic validation for quarantine: %s",
+            call1_retry,
+            partial_scenario_id,
+            "; ".join(v.message for v in violations),
+        )
+
+
+def _retry_call1_loop(
+    narrative: Any,
+    result1: LLMResult,
+    seed: ScenarioSeed,
+    profile: CapabilityProfile,
+    client: LLMClient,
+    use_case: str,
+    actor_profile: Any,
+    *,
+    preferred_entry_point: str | None,
+    excluded_entry_points: list[str] | None,
+    excluded_patterns: list[str] | None,
+    excluded_structural_patterns: list[str] | None,
+    pinned_entry_point: str | None,
+    pinned_technique_ids: list[str] | None,
+    prior_titles: list[str] | None,
+    pinned_entry_point_id: str,
+    projection_context: dict[str, Any],
+    partial_scenario_id: str,
+) -> tuple[Any, LLMResult, int]:
+    """Unified bounded retry path for title uniqueness and access realization."""
+    _call1_retry = 0
+    _augmented_titles = list(prior_titles) if prior_titles else []
+    while _call1_retry < _ACTOR_ACCESS_MAX_RETRIES:
+        (
+            _retry_feedback_parts,
+            _realization_feedback,
+            _needs_retry,
+            _augmented_titles,
+        ) = _call1_retry_checks(
+            narrative,
+            actor_profile,
+            prior_titles,
+            _augmented_titles,
+            _call1_retry,
+            partial_scenario_id,
+        )
+        if not _needs_retry:
+            break
+
+        _call1_retry += 1
+        _attempt = _run_call1_retry_attempt(
+            seed,
+            profile,
+            client,
+            use_case,
+            actor_profile,
+            preferred_entry_point=preferred_entry_point,
+            excluded_entry_points=excluded_entry_points,
+            excluded_patterns=excluded_patterns,
+            excluded_structural_patterns=excluded_structural_patterns,
+            pinned_entry_point=pinned_entry_point,
+            pinned_technique_ids=pinned_technique_ids,
+            prior_titles=_augmented_titles if _augmented_titles else prior_titles,
+            pinned_entry_point_id=pinned_entry_point_id,
+            realization_feedback=_realization_feedback,
+            projection_context=projection_context,
+            call1_retry=_call1_retry,
+            partial_scenario_id=partial_scenario_id,
+        )
+        if _attempt is None:
+            break
+        narrative, result1 = _attempt
+
+    # Re-check after loop exits (either all passed or retries exhausted).
+    _warn_call1_persistent_violations(
+        narrative, actor_profile, _call1_retry, partial_scenario_id
+    )
+    return narrative, result1, _call1_retry
+
+
+def _post_call1_narrative_text(narrative: Any) -> str:
+    """Flatten a narrative into a single text for heuristic checks."""
+    return " ".join(
+        [narrative.title, narrative.summary]
+        + [f"{s.action} {s.effect}" for s in narrative.steps]
+    )
+
+
+def _post_call1_goal_id(actor_profile: Any) -> Any:
+    """Read the goal category off the actor profile, if present."""
+    return actor_profile.goal_category if actor_profile else None
+
+
+def _warn_goal_narrative_alignment(
+    goal_id: Any, narrative_text: str, partial_scenario_id: str
+) -> None:
+    """Part C: warn when the narrative drifts from the goal category."""
+    if not isinstance(goal_id, str):
+        return
+    goal_warn = check_goal_narrative_alignment(goal_id, narrative_text)
+    if goal_warn:
+        logger.warning("Scenario %s: %s", partial_scenario_id, goal_warn)
+
+
+def _warn_seed_mechanism_fidelity(
+    attack_pattern_name: str, narrative_text: str, partial_scenario_id: str
+) -> None:
+    """Part D: warn when the narrative drifts from the seed mechanism."""
+    mechanism_warn = check_seed_mechanism_fidelity(attack_pattern_name, narrative_text)
+    if mechanism_warn:
+        logger.warning("Scenario %s: %s", partial_scenario_id, mechanism_warn)
+
+
+def _warn_post_call1_heuristics(
+    seed: ScenarioSeed,
+    narrative: Any,
+    actor_profile: Any,
+    partial_scenario_id: str,
+) -> None:
+    """Run the warn-only post-Call-1 heuristic checks (gmtc)."""
+    try:
+        _narrative_text = _post_call1_narrative_text(narrative)
+        _goal_id = _post_call1_goal_id(actor_profile)
+        _warn_goal_narrative_alignment(_goal_id, _narrative_text, partial_scenario_id)
+        _warn_seed_mechanism_fidelity(
+            seed.attack_pattern_name, _narrative_text, partial_scenario_id
+        )
+    except (TypeError, AttributeError):
+        # Defensive: skip heuristic checks if narrative fields are not strings
+        # (e.g. in tests using MagicMock objects).
+        pass
+
+
+def _warn_entry_point_mismatch(
+    narrative: Any, pinned_entry_point: str | None, partial_scenario_id: str
+) -> None:
+    """Warn when the narrative entry point does not match the pinned one."""
+    # On candidate-v2 paths (422o.4), entry-point overwrite is semantic
+    # repair and is prohibited.  The mismatch becomes a typed violation
+    # for cmps.5 to route.
+    if pinned_entry_point and narrative.entry_point != pinned_entry_point:
+        logger.warning(
+            "Narrative entry point '%s' does not match pinned '%s' "
+            "for %s — not overwriting on candidate-v2 path (422o.4). "
+            "Mismatch will be reported as a typed violation.",
+            narrative.entry_point,
+            pinned_entry_point,
+            partial_scenario_id,
+        )
+
+
+def _parsimony_budget(
+    pinned_technique_ids: list[str] | None, seed: ScenarioSeed
+) -> int:
+    """Compute the parsimony budget using the _call_attack_tree formula."""
+    _tech_ids_for_budget = (
+        pinned_technique_ids if pinned_technique_ids else seed.atlas_technique_ids
+    )
+    _technique_count = len(_tech_ids_for_budget) if _tech_ids_for_budget else 0
+    return compute_leaf_budget(_technique_count)
+
+
+def _run_call2(
+    seed: ScenarioSeed,
+    narrative: Any,
+    client: LLMClient,
+    use_case: str,
+    profile: CapabilityProfile,
+    actor_profile: Any,
+    *,
+    pinned_technique_ids: list[str] | None,
+    pinned_technique_names: list[str] | None,
+    pinned_entry_point_id: str,
+    projection_context: dict[str, Any],
+    call_log_entries: list[dict],
+    partial_scenario_id: str,
+    seed_id: str,
+) -> tuple[Any, LLMResult]:
+    """Run the Call-2 attack-tree request, failing closed with a log entry."""
+    import asago_scenario_generator.pipeline.generate as _gen
+
+    try:
+        attack_tree, result2 = _gen._call_attack_tree(
+            seed,
+            narrative,
+            client,
+            use_case,
+            profile=profile,
+            actor_profile=actor_profile,
+            pinned_technique_ids=pinned_technique_ids,
+            pinned_technique_names=pinned_technique_names,
+            pinned_entry_point_id=pinned_entry_point_id,
+            projection_context=projection_context,
+        )
+    except Exception as exc:
+        call_log_entries.append(
+            _call_log_entry_error(
+                CallName.attack_tree, None, partial_scenario_id, str(exc)
+            )
+        )
+        raise GenerationError(str(exc), call_log_entries, seed_id) from exc
+    return attack_tree, result2
+
+
+def _retry_tree_consistency(
+    attack_tree: AttackTree,
+    result2: LLMResult,
+    seed: ScenarioSeed,
+    narrative: Any,
+    client: LLMClient,
+    use_case: str,
+    profile: CapabilityProfile,
+    actor_profile: Any,
+    *,
+    pinned_technique_ids: list[str] | None,
+    pinned_technique_names: list[str] | None,
+    pinned_entry_point_id: str,
+    projection_context: dict[str, Any],
+    parsimony_budget: int,
+    partial_scenario_id: str = "",
+) -> tuple[AttackTree, LLMResult, list[str], int]:
+    """Enforce consistency checks on Call 2 with bounded regeneration retries."""
+    import asago_scenario_generator.pipeline.generate as _gen
+
+    # --- Post-generation: strip before consistency so effects trigger retries ---
+    skeleton_ids = set(pinned_technique_ids) if pinned_technique_ids else set()
+
+    def _strip_and_check(atree: AttackTree) -> list[str]:
+        """Run consistency checks without semantic repair.
+
+        On candidate-v2 paths (422o.4), technique stripping and zone
+        compatibility stripping are semantic repair and are prohibited.
+        Invalid technique IDs become typed violations for cmps.5 to route.
+        Only consistency checks are run — no mutation of the tree.
+        """
+        return _check_consistency(
+            atree,
+            narrative,
+            parsimony_budget,
+            threat_id=seed.threat_id,
+            tool_names=(
+                [t.name for t in profile.tool_inventory]
+                if profile and profile.tool_inventory
+                else None
+            ),
+            pinned_technique_ids=list(skeleton_ids) if skeleton_ids else None,
+        )
+
+    consistency_violations = _strip_and_check(attack_tree)
+    consistency_retry = 0
+    while consistency_violations and consistency_retry < _CONSISTENCY_MAX_RETRIES:
+        consistency_retry += 1
+        logger.warning(
+            "Consistency violations in %s (retry %d/%d): %s",
+            partial_scenario_id,
+            consistency_retry,
+            _CONSISTENCY_MAX_RETRIES,
+            "; ".join(consistency_violations),
+        )
+        feedback = "- " + "\n- ".join(consistency_violations)
+        try:
+            attack_tree, result2 = _gen._call_attack_tree(
+                seed,
+                narrative,
+                client,
+                use_case,
+                profile=profile,
+                actor_profile=actor_profile,
+                pinned_technique_ids=pinned_technique_ids,
+                pinned_technique_names=pinned_technique_names,
+                consistency_feedback=feedback,
+                pinned_entry_point_id=pinned_entry_point_id,
+                projection_context=projection_context,
+            )
+        except Exception as exc:  # noqa: BLE001 - retry must catch all to log and break
+            logger.warning(
+                "Consistency retry %d/%d failed for %s: %s",
+                consistency_retry,
+                _CONSISTENCY_MAX_RETRIES,
+                partial_scenario_id,
+                exc,
+            )
+            break
+        consistency_violations = _strip_and_check(attack_tree)
+
+    if consistency_violations:
+        logger.warning(
+            "Consistency violations persist after %d retries for %s: %s",
+            consistency_retry,
+            partial_scenario_id,
+            "; ".join(consistency_violations),
+        )
+    return attack_tree, result2, consistency_violations, consistency_retry
+
+
+def _run_call3(
+    seed: ScenarioSeed,
+    narrative: Any,
+    attack_tree: AttackTree,
+    profile: CapabilityProfile,
+    client: LLMClient,
+    use_case: str,
+    scenario_id: str,
+    *,
+    pinned_technique_ids: list[str] | None,
+    projection_context: dict[str, Any],
+    call_log_entries: list[dict],
+    partial_scenario_id: str,
+    seed_id: str,
+) -> tuple[Any, LLMResult]:
+    """Run the Call-3 behavior-spec request, failing closed with a log entry."""
+    import asago_scenario_generator.pipeline.generate as _gen
+
+    try:
+        behavior_spec, result3 = _gen._call_behavior_spec(
+            seed,
+            narrative,
+            attack_tree,
+            profile,
+            client,
+            use_case,
+            scenario_id,
+            pinned_technique_ids=pinned_technique_ids,
+            projection_context=projection_context,
+        )
+    except Exception as exc:
+        call_log_entries.append(
+            _call_log_entry_error(
+                CallName.behavior_spec, None, partial_scenario_id, str(exc)
+            )
+        )
+        raise GenerationError(str(exc), call_log_entries, seed_id) from exc
+    return behavior_spec, result3
+
+
+def _validate_envelope_fail_closed(
+    envelope: ScenarioEnvelope,
+    call_log_entries: list[dict],
+    seed_id: str,
+) -> None:
+    """Validate projection traceability and provenance on the production path."""
+    from asago_scenario_generator.pipeline.projection_validation import (
+        validate_projection_traceability,
+    )
+
+    traceability_result = validate_projection_traceability(envelope)
+    if not traceability_result.valid:
+        raise ProjectionTraceabilityError(
+            result=traceability_result,
+            scenario_id=envelope.scenario_id,
+            call_log_entries=call_log_entries,
+            seed_id=seed_id,
+        )
+
+    # Run source-influence provenance qualification (Wave 2 slice 5).
+    # Fail-closed: assembly always attaches the provenance block, and its
+    # qualification must pass or the scenario is never returned.
+    from asago_scenario_generator.pipeline.source_influence import (
+        validate_source_influence_provenance,
+    )
+
+    provenance_result = validate_source_influence_provenance(envelope)
+    if not provenance_result.valid:
+        raise SourceInfluenceProvenanceError(
+            result=provenance_result,
+            scenario_id=envelope.scenario_id,
+            call_log_entries=call_log_entries,
+            seed_id=seed_id,
+        )
+
+
+def _rewrite_call_log_scenario_ids(
+    call_log_entries: list[dict], scenario_id: str
+) -> None:
+    """Replace partial scenario IDs with the final envelope scenario ID."""
+    for entry in call_log_entries:
+        entry["scenario_id"] = scenario_id
 
 
 # ---------------------------------------------------------------------------
@@ -807,26 +1726,15 @@ def _generate_scenario_compatibility(
     # correctly intercepts them.
     import asago_scenario_generator.pipeline.generate as _gen
 
-    _call_actor_profile = _gen._call_actor_profile
     _validate_actor_type = _gen._validate_actor_type
-    _call_narrative = _gen._call_narrative
-    _call_attack_tree = _gen._call_attack_tree
-    _call_behavior_spec = _gen._call_behavior_spec
     _warn_dominant_threat_id_crossref_fn = _gen._warn_dominant_threat_id_crossref
     _assemble_envelope_fn = _gen._assemble_envelope
-    _validate_realization = _gen.narrative.validate_narrative_access_realization
 
     # Derive candidate identity from the projected candidate (422o.4).
     # The projected candidate's cand:v2 identity is the authoritative
     # identity; the caller-supplied candidate_id must match or be empty
     # (in which case we use the projected candidate's identity).
-    if not candidate_id:
-        candidate_id = projected_candidate.candidate_id
-    elif candidate_id != projected_candidate.candidate_id:
-        raise ValueError(
-            f"candidate_id '{candidate_id}' does not match projected "
-            f"candidate identity '{projected_candidate.candidate_id}'"
-        )
+    candidate_id = _resolve_envelope_candidate_id(candidate_id, projected_candidate)
 
     # Enforce identity inputs at the generation boundary.
     _validate_run_id(run_id)
@@ -852,47 +1760,31 @@ def _generate_scenario_compatibility(
     results: dict[CallName, LLMResult] = {}
 
     # --- Pre-filter: exclude negligent-insider for adversarial-only threats ---
-    if seed.threat_id in _ADVERSARIAL_ONLY_THREATS:
-        excluded_actor_types = (
-            list(excluded_actor_types) if excluded_actor_types else []
-        )
-        if "negligent-insider" not in excluded_actor_types:
-            excluded_actor_types.append("negligent-insider")
-            logger.debug(
-                "Excluding negligent-insider for adversarial-only threat %s (seed %s)",
-                seed.threat_id,
-                seed.seed_id,
-            )
+    excluded_actor_types = _apply_adversarial_actor_filter(seed, excluded_actor_types)
 
     # --- Call 0: Actor Profile ---
     _diversity_notes: list[str] = []
-    try:
-        actor_profile, result0, _div_limitation = _call_actor_profile(
-            seed,
-            profile,
-            client,
-            use_case,
-            preferred_actor_type=preferred_actor_type,
-            excluded_actor_types=excluded_actor_types,
-            preferred_capability_level=preferred_capability_level,
-            attack_goal=attack_goal,
-            pinned_technique_ids=pinned_technique_ids,
-            pinned_entry_point=pinned_entry_point,
-            pinned_entry_point_id=pinned_entry_point_id,
-            projection_context=projection_context,
-        )
-        if _div_limitation:
-            _diversity_notes.append(
-                f"Diversity limitation: forced actor '{_div_limitation}' was "
-                f"incompatible, replaced with feasible fallback."
-            )
-    except Exception as exc:
-        call_log_entries.append(
-            _call_log_entry_error(
-                CallName.actor_profile, None, partial_scenario_id, str(exc)
-            )
-        )
-        raise GenerationError(str(exc), call_log_entries, seed.seed_id) from exc
+    actor_profile, result0, _div_limitation = _run_call0(
+        seed,
+        profile,
+        client,
+        use_case,
+        preferred_actor_type=preferred_actor_type,
+        excluded_actor_types=excluded_actor_types,
+        preferred_capability_level=preferred_capability_level,
+        attack_goal=attack_goal,
+        pinned_technique_ids=pinned_technique_ids,
+        forced_actor_type=None,
+        pinned_entry_point=pinned_entry_point,
+        pinned_entry_point_id=pinned_entry_point_id,
+        access_feedback=None,
+        projection_context=projection_context,
+        call_log_entries=call_log_entries,
+        partial_scenario_id=partial_scenario_id,
+        seed_id=seed.seed_id,
+        error_prefix="",
+    )
+    _record_diversity_limitation(_diversity_notes, _div_limitation)
 
     original_actor_type = actor_profile.actor_type
     actor_profile = _validate_actor_type(actor_profile)
@@ -900,144 +1792,48 @@ def _generate_scenario_compatibility(
     # If BDI validation reassigned the actor type, regenerate the full profile
     # so that beliefs/desires/intentions/resources match the corrected type.
     if actor_profile.actor_type != original_actor_type:
-        logger.warning(
-            "BDI reassignment: regenerating actor profile with forced "
-            "actor_type '%s' (was '%s') for seed %s",
-            actor_profile.actor_type,
-            original_actor_type,
-            seed.seed_id,
-        )
         corrected_type = actor_profile.actor_type
-        try:
-            actor_profile, result0, _div_limitation = _call_actor_profile(
-                seed,
-                profile,
-                client,
-                use_case,
-                excluded_actor_types=excluded_actor_types,
-                preferred_capability_level=preferred_capability_level,
-                attack_goal=attack_goal,
-                pinned_technique_ids=pinned_technique_ids,
-                forced_actor_type=corrected_type,
-                pinned_entry_point=pinned_entry_point,
-                pinned_entry_point_id=pinned_entry_point_id,
-                projection_context=projection_context,
-            )
-            if _div_limitation:
-                _diversity_notes.append(
-                    f"Diversity limitation: forced actor '{_div_limitation}' "
-                    f"was incompatible, replaced with feasible fallback."
-                )
-        except Exception as exc:
-            call_log_entries.append(
-                _call_log_entry_error(
-                    CallName.actor_profile,
-                    None,
-                    partial_scenario_id,
-                    f"BDI regeneration failed: {exc}",
-                )
-            )
-            raise GenerationError(
-                f"BDI regeneration failed: {exc}",
-                call_log_entries,
-                seed.seed_id,
-            ) from exc
-
-        # Defence in depth: re-validate the regenerated profile.
-        actor_profile = _validate_actor_type(actor_profile)
-        if actor_profile.actor_type != corrected_type:
-            logger.warning(
-                "BDI regeneration: regenerated profile still has wrong "
-                "actor_type '%s' (expected '%s') — accepting as-is",
-                actor_profile.actor_type,
-                corrected_type,
-            )
+        actor_profile, result0, _div_limitation = _regenerate_actor_profile(
+            seed,
+            profile,
+            client,
+            use_case,
+            excluded_actor_types=excluded_actor_types,
+            preferred_capability_level=preferred_capability_level,
+            attack_goal=attack_goal,
+            pinned_technique_ids=pinned_technique_ids,
+            corrected_type=corrected_type,
+            pinned_entry_point=pinned_entry_point,
+            pinned_entry_point_id=pinned_entry_point_id,
+            projection_context=projection_context,
+            call_log_entries=call_log_entries,
+            partial_scenario_id=partial_scenario_id,
+            seed_id=seed.seed_id,
+            original_actor_type=original_actor_type,
+        )
+        _record_diversity_limitation(_diversity_notes, _div_limitation)
 
     # Store the selected goal category on the actor profile (Step 5).
-    if attack_goal is not None:
-        actor_profile.goal_category = attack_goal["id"]
-        actor_profile.goal_category_name = attack_goal["name"]
-        actor_profile.goal_category_parent = attack_goal["category_name"]
+    _apply_goal_category(actor_profile, attack_goal)
 
     # --- Post-Call-0: actor/access provenance validation + retry (cmps.6) ---
-    _validate_access = _gen.validate_actor_access_provenance
-    _access_violations = (
-        _validate_access(actor_profile, profile) if pinned_entry_point_id else []
+    actor_profile, result0, _access_violations, _access_retry = _retry_actor_access(
+        actor_profile,
+        result0,
+        seed,
+        profile,
+        client,
+        use_case,
+        excluded_actor_types=excluded_actor_types,
+        preferred_capability_level=preferred_capability_level,
+        attack_goal=attack_goal,
+        pinned_technique_ids=pinned_technique_ids,
+        pinned_entry_point=pinned_entry_point,
+        pinned_entry_point_id=pinned_entry_point_id,
+        projection_context=projection_context,
+        diversity_notes=_diversity_notes,
+        partial_scenario_id=partial_scenario_id,
     )
-    _access_retry = 0
-    while _access_violations and _access_retry < _ACTOR_ACCESS_MAX_RETRIES:
-        _access_retry += 1
-        _access_feedback = "\n".join(f"- {v.message}" for v in _access_violations)
-        logger.warning(
-            "Actor/access provenance violations in %s (retry %d/%d): %s",
-            partial_scenario_id,
-            _access_retry,
-            _ACTOR_ACCESS_MAX_RETRIES,
-            _access_feedback,
-        )
-        # cmps.6: if the violation indicates actor/evidence incompatibility,
-        # do not force the same actor type — let the LLM pick a feasible one.
-        _force_type: str | None = actor_profile.actor_type
-        if any(
-            v.rule
-            in (
-                "access_class_ingress_mode_incompatible",
-                "missing_insider_advantage",
-            )
-            for v in _access_violations
-        ):
-            _force_type = None
-            logger.info(
-                "Access retry %d: not forcing actor '%s' due to "
-                "access-class/ingress-mode incompatibility",
-                _access_retry,
-                actor_profile.actor_type,
-            )
-        try:
-            actor_profile, result0, _div_limitation = _call_actor_profile(
-                seed,
-                profile,
-                client,
-                use_case,
-                excluded_actor_types=excluded_actor_types,
-                preferred_capability_level=preferred_capability_level,
-                attack_goal=attack_goal,
-                pinned_technique_ids=pinned_technique_ids,
-                forced_actor_type=_force_type,
-                pinned_entry_point=pinned_entry_point,
-                pinned_entry_point_id=pinned_entry_point_id,
-                access_feedback=_access_feedback,
-                projection_context=projection_context,
-            )
-            if _div_limitation:
-                _diversity_notes.append(
-                    f"Diversity limitation: forced actor '{_div_limitation}' "
-                    f"was incompatible, replaced with feasible fallback."
-                )
-            actor_profile = _validate_actor_type(actor_profile)
-            if attack_goal is not None:
-                actor_profile.goal_category = attack_goal["id"]
-                actor_profile.goal_category_name = attack_goal["name"]
-                actor_profile.goal_category_parent = attack_goal["category_name"]
-        except Exception as exc:  # noqa: BLE001 - retry must catch all
-            logger.warning(
-                "Actor/access retry %d/%d failed for %s: %s",
-                _access_retry,
-                _ACTOR_ACCESS_MAX_RETRIES,
-                partial_scenario_id,
-                exc,
-            )
-            break
-        _access_violations = _validate_access(actor_profile, profile)
-
-    if _access_violations:
-        logger.warning(
-            "Actor/access provenance violations persist after %d retries for "
-            "%s — proceeding to semantic validation for quarantine: %s",
-            _access_retry,
-            partial_scenario_id,
-            "; ".join(v.message for v in _access_violations),
-        )
 
     call_metas.append(_call_metadata(CallName.actor_profile, result0))
     results[CallName.actor_profile] = result0
@@ -1046,30 +1842,25 @@ def _generate_scenario_compatibility(
     )
 
     # --- Call 1: Narrative ---
-    try:
-        narrative, result1 = _call_narrative(
-            seed,
-            profile,
-            client,
-            use_case,
-            actor_profile=actor_profile,
-            preferred_entry_point=preferred_entry_point,
-            excluded_entry_points=excluded_entry_points,
-            excluded_patterns=excluded_patterns,
-            excluded_structural_patterns=excluded_structural_patterns,
-            pinned_entry_point=pinned_entry_point,
-            pinned_technique_ids=pinned_technique_ids,
-            prior_titles=prior_titles,
-            pinned_entry_point_id=pinned_entry_point_id,
-            projection_context=projection_context,
-        )
-    except Exception as exc:
-        call_log_entries.append(
-            _call_log_entry_error(
-                CallName.narrative, None, partial_scenario_id, str(exc)
-            )
-        )
-        raise GenerationError(str(exc), call_log_entries, seed.seed_id) from exc
+    narrative, result1 = _run_call1(
+        seed,
+        profile,
+        client,
+        use_case,
+        actor_profile,
+        preferred_entry_point=preferred_entry_point,
+        excluded_entry_points=excluded_entry_points,
+        excluded_patterns=excluded_patterns,
+        excluded_structural_patterns=excluded_structural_patterns,
+        pinned_entry_point=pinned_entry_point,
+        pinned_technique_ids=pinned_technique_ids,
+        prior_titles=prior_titles,
+        pinned_entry_point_id=pinned_entry_point_id,
+        projection_context=projection_context,
+        call_log_entries=call_log_entries,
+        partial_scenario_id=partial_scenario_id,
+        seed_id=seed.seed_id,
+    )
 
     call_metas.append(_call_metadata(CallName.narrative, result1))
     results[CallName.narrative] = result1
@@ -1082,127 +1873,28 @@ def _generate_scenario_compatibility(
     # access-realization constraints.  Title retries and realization
     # retries share one bounded retry path so no later replacement
     # can bypass access validation.
-    _call1_retry = 0
-    _augmented_titles = list(prior_titles) if prior_titles else []
-    while _call1_retry < _ACTOR_ACCESS_MAX_RETRIES:
-        _needs_retry = False
-        _retry_feedback_parts: list[str] = []
-
-        # Check access realization.
-        _realization_violations = _validate_realization(narrative, actor_profile)
-        if _realization_violations:
-            _needs_retry = True
-            _realization_feedback = "\n".join(
-                f"- {v.message}" for v in _realization_violations
-            )
-            _retry_feedback_parts.append(_realization_feedback)
-            logger.warning(
-                "Narrative access realization violations in %s (retry %d/%d): %s",
-                partial_scenario_id,
-                _call1_retry + 1,
-                _ACTOR_ACCESS_MAX_RETRIES,
-                _realization_feedback,
-            )
-
-        # Check title uniqueness.
-        _title_duplicate = prior_titles is not None and narrative.title in prior_titles
-        if _title_duplicate:
-            _needs_retry = True
-            if f"DUPLICATE — DO NOT REUSE: {narrative.title}" not in _augmented_titles:
-                _augmented_titles = list(prior_titles) + [
-                    f"DUPLICATE — DO NOT REUSE: {narrative.title}"
-                ]
-            _retry_feedback_parts.append(
-                f"Title '{narrative.title}' is an exact duplicate of a "
-                f"previously generated title — choose a different title."
-            )
-            logger.warning(
-                "Exact duplicate title for %s: '%s' — retrying Call 1",
-                partial_scenario_id,
-                narrative.title,
-            )
-
-        if not _needs_retry:
-            break
-
-        _call1_retry += 1
-        _combined_feedback = "\n".join(_retry_feedback_parts)
-        try:
-            narrative, result1 = _call_narrative(
-                seed,
-                profile,
-                client,
-                use_case,
-                actor_profile=actor_profile,
-                preferred_entry_point=preferred_entry_point,
-                excluded_entry_points=excluded_entry_points,
-                excluded_patterns=excluded_patterns,
-                excluded_structural_patterns=excluded_structural_patterns,
-                pinned_entry_point=pinned_entry_point,
-                pinned_technique_ids=pinned_technique_ids,
-                prior_titles=_augmented_titles if _augmented_titles else prior_titles,
-                pinned_entry_point_id=pinned_entry_point_id,
-                realization_feedback=(
-                    _realization_feedback if _realization_violations else None
-                ),
-                projection_context=projection_context,
-            )
-            if pinned_entry_point and narrative.entry_point != pinned_entry_point:
-                # On candidate-v2 paths (422o.4), entry-point overwrite is
-                # semantic repair and is prohibited.  The mismatch becomes
-                # a typed violation for cmps.5 to route.
-                logger.warning(
-                    "Narrative entry point '%s' does not match pinned '%s' "
-                    "for %s — not overwriting on candidate-v2 path (422o.4).",
-                    narrative.entry_point,
-                    pinned_entry_point,
-                    partial_scenario_id,
-                )
-        except Exception as exc:  # noqa: BLE001 - retry must catch all
-            logger.warning(
-                "Call 1 retry %d/%d failed for %s: %s",
-                _call1_retry,
-                _ACTOR_ACCESS_MAX_RETRIES,
-                partial_scenario_id,
-                exc,
-            )
-            break
-
-    # Re-check after loop exits (either all passed or retries exhausted).
-    _realization_violations = _validate_realization(narrative, actor_profile)
-    if _realization_violations:
-        logger.warning(
-            "Narrative access realization violations persist after %d retries "
-            "for %s — proceeding to semantic validation for quarantine: %s",
-            _call1_retry,
-            partial_scenario_id,
-            "; ".join(v.message for v in _realization_violations),
-        )
+    narrative, result1, _call1_retry = _retry_call1_loop(
+        narrative,
+        result1,
+        seed,
+        profile,
+        client,
+        use_case,
+        actor_profile,
+        preferred_entry_point=preferred_entry_point,
+        excluded_entry_points=excluded_entry_points,
+        excluded_patterns=excluded_patterns,
+        excluded_structural_patterns=excluded_structural_patterns,
+        pinned_entry_point=pinned_entry_point,
+        pinned_technique_ids=pinned_technique_ids,
+        prior_titles=prior_titles,
+        pinned_entry_point_id=pinned_entry_point_id,
+        projection_context=projection_context,
+        partial_scenario_id=partial_scenario_id,
+    )
 
     # --- Post-Call-1 heuristic checks (warn-only, gmtc) ---
-    try:
-        _narrative_text = " ".join(
-            [narrative.title, narrative.summary]
-            + [f"{s.action} {s.effect}" for s in narrative.steps]
-        )
-
-        # Part C: Goal-narrative alignment
-        _goal_id = actor_profile.goal_category if actor_profile else None
-        if isinstance(_goal_id, str):
-            _goal_warn = check_goal_narrative_alignment(_goal_id, _narrative_text)
-            if _goal_warn:
-                logger.warning("Scenario %s: %s", partial_scenario_id, _goal_warn)
-
-        # Part D: Seed mechanism fidelity
-        _mechanism_warn = check_seed_mechanism_fidelity(
-            seed.attack_pattern_name, _narrative_text
-        )
-        if _mechanism_warn:
-            logger.warning("Scenario %s: %s", partial_scenario_id, _mechanism_warn)
-    except (TypeError, AttributeError):
-        # Defensive: skip heuristic checks if narrative fields are not strings
-        # (e.g. in tests using MagicMock objects).
-        pass
+    _warn_post_call1_heuristics(seed, narrative, actor_profile, partial_scenario_id)
 
     # cmps.7: actor capability is immutable after Call 0.  The legacy
     # novice multi-zone guard (a zone-count-driven capability relabel)
@@ -1218,113 +1910,47 @@ def _generate_scenario_compatibility(
     # On candidate-v2 paths (422o.4), entry-point overwrite is semantic
     # repair and is prohibited.  The mismatch becomes a typed violation
     # for cmps.5 to route.
-    if pinned_entry_point and narrative.entry_point != pinned_entry_point:
-        logger.warning(
-            "Narrative entry point '%s' does not match pinned '%s' "
-            "for %s — not overwriting on candidate-v2 path (422o.4). "
-            "Mismatch will be reported as a typed violation.",
-            narrative.entry_point,
-            pinned_entry_point,
-            partial_scenario_id,
-        )
+    _warn_entry_point_mismatch(narrative, pinned_entry_point, partial_scenario_id)
 
     # --- Call 2: Attack Tree (with consistency enforcement retries) ---
     # Compute parsimony budget using the same formula as _call_attack_tree.
-    _tech_ids_for_budget = (
-        pinned_technique_ids if pinned_technique_ids else seed.atlas_technique_ids
-    )
-    _technique_count = len(_tech_ids_for_budget) if _tech_ids_for_budget else 0
-    parsimony_budget = compute_leaf_budget(_technique_count)
+    parsimony_budget = _parsimony_budget(pinned_technique_ids, seed)
 
-    try:
-        attack_tree, result2 = _call_attack_tree(
+    attack_tree, result2 = _run_call2(
+        seed,
+        narrative,
+        client,
+        use_case,
+        profile,
+        actor_profile,
+        pinned_technique_ids=pinned_technique_ids,
+        pinned_technique_names=pinned_technique_names,
+        pinned_entry_point_id=pinned_entry_point_id,
+        projection_context=projection_context,
+        call_log_entries=call_log_entries,
+        partial_scenario_id=partial_scenario_id,
+        seed_id=seed.seed_id,
+    )
+
+    # --- Post-generation: strip before consistency so effects trigger retries ---
+    attack_tree, result2, _consistency_violations, consistency_retry = (
+        _retry_tree_consistency(
+            attack_tree,
+            result2,
             seed,
             narrative,
             client,
             use_case,
-            profile=profile,
-            actor_profile=actor_profile,
+            profile,
+            actor_profile,
             pinned_technique_ids=pinned_technique_ids,
             pinned_technique_names=pinned_technique_names,
             pinned_entry_point_id=pinned_entry_point_id,
             projection_context=projection_context,
+            parsimony_budget=parsimony_budget,
+            partial_scenario_id=partial_scenario_id,
         )
-    except Exception as exc:
-        call_log_entries.append(
-            _call_log_entry_error(
-                CallName.attack_tree, None, partial_scenario_id, str(exc)
-            )
-        )
-        raise GenerationError(str(exc), call_log_entries, seed.seed_id) from exc
-
-    # --- Post-generation: strip before consistency so effects trigger retries ---
-    skeleton_ids = set(pinned_technique_ids) if pinned_technique_ids else set()
-
-    def _strip_and_check(atree: AttackTree) -> list[str]:
-        """Run consistency checks without semantic repair.
-
-        On candidate-v2 paths (422o.4), technique stripping and zone
-        compatibility stripping are semantic repair and are prohibited.
-        Invalid technique IDs become typed violations for cmps.5 to route.
-        Only consistency checks are run — no mutation of the tree.
-        """
-        return _check_consistency(
-            atree,
-            narrative,
-            parsimony_budget,
-            threat_id=seed.threat_id,
-            tool_names=(
-                [t.name for t in profile.tool_inventory]
-                if profile and profile.tool_inventory
-                else None
-            ),
-            pinned_technique_ids=list(skeleton_ids) if skeleton_ids else None,
-        )
-
-    consistency_violations = _strip_and_check(attack_tree)
-    consistency_retry = 0
-    while consistency_violations and consistency_retry < _CONSISTENCY_MAX_RETRIES:
-        consistency_retry += 1
-        logger.warning(
-            "Consistency violations in %s (retry %d/%d): %s",
-            partial_scenario_id,
-            consistency_retry,
-            _CONSISTENCY_MAX_RETRIES,
-            "; ".join(consistency_violations),
-        )
-        feedback = "- " + "\n- ".join(consistency_violations)
-        try:
-            attack_tree, result2 = _call_attack_tree(
-                seed,
-                narrative,
-                client,
-                use_case,
-                profile=profile,
-                actor_profile=actor_profile,
-                pinned_technique_ids=pinned_technique_ids,
-                pinned_technique_names=pinned_technique_names,
-                consistency_feedback=feedback,
-                pinned_entry_point_id=pinned_entry_point_id,
-                projection_context=projection_context,
-            )
-        except Exception as exc:  # noqa: BLE001 - retry must catch all to log and break
-            logger.warning(
-                "Consistency retry %d/%d failed for %s: %s",
-                consistency_retry,
-                _CONSISTENCY_MAX_RETRIES,
-                partial_scenario_id,
-                exc,
-            )
-            break
-        consistency_violations = _strip_and_check(attack_tree)
-
-    if consistency_violations:
-        logger.warning(
-            "Consistency violations persist after %d retries for %s: %s",
-            consistency_retry,
-            partial_scenario_id,
-            "; ".join(consistency_violations),
-        )
+    )
 
     call_metas.append(_call_metadata(CallName.attack_tree, result2))
     results[CallName.attack_tree] = result2
@@ -1338,25 +1964,20 @@ def _generate_scenario_compatibility(
     )
 
     # --- Call 3: Behavior Spec ---
-    try:
-        behavior_spec, result3 = _call_behavior_spec(
-            seed,
-            narrative,
-            attack_tree,
-            profile,
-            client,
-            use_case,
-            scenario_id,
-            pinned_technique_ids=pinned_technique_ids,
-            projection_context=projection_context,
-        )
-    except Exception as exc:
-        call_log_entries.append(
-            _call_log_entry_error(
-                CallName.behavior_spec, None, partial_scenario_id, str(exc)
-            )
-        )
-        raise GenerationError(str(exc), call_log_entries, seed.seed_id) from exc
+    behavior_spec, result3 = _run_call3(
+        seed,
+        narrative,
+        attack_tree,
+        profile,
+        client,
+        use_case,
+        scenario_id,
+        pinned_technique_ids=pinned_technique_ids,
+        projection_context=projection_context,
+        call_log_entries=call_log_entries,
+        partial_scenario_id=partial_scenario_id,
+        seed_id=seed.seed_id,
+    )
 
     call_metas.append(_call_metadata(CallName.behavior_spec, result3))
     results[CallName.behavior_spec] = result3
@@ -1391,38 +2012,10 @@ def _generate_scenario_compatibility(
     # consume (retry/quarantine routing).  Generation does not retry here;
     # cmps.5 owns the retry/quarantine state machine.  Fail-closed: an
     # invalid scenario is never returned or persisted.
-    from asago_scenario_generator.pipeline.projection_validation import (
-        validate_projection_traceability,
-    )
-
-    traceability_result = validate_projection_traceability(envelope)
-    if not traceability_result.valid:
-        raise ProjectionTraceabilityError(
-            result=traceability_result,
-            scenario_id=envelope.scenario_id,
-            call_log_entries=call_log_entries,
-            seed_id=seed.seed_id,
-        )
-
-    # Run source-influence provenance qualification (Wave 2 slice 5).
-    # Fail-closed: assembly always attaches the provenance block, and its
-    # qualification must pass or the scenario is never returned.
-    from asago_scenario_generator.pipeline.source_influence import (
-        validate_source_influence_provenance,
-    )
-
-    provenance_result = validate_source_influence_provenance(envelope)
-    if not provenance_result.valid:
-        raise SourceInfluenceProvenanceError(
-            result=provenance_result,
-            scenario_id=envelope.scenario_id,
-            call_log_entries=call_log_entries,
-            seed_id=seed.seed_id,
-        )
+    _validate_envelope_fail_closed(envelope, call_log_entries, seed_id=seed.seed_id)
 
     # Update call log entries with the final scenario_id (replacing partial).
-    for entry in call_log_entries:
-        entry["scenario_id"] = envelope.scenario_id
+    _rewrite_call_log_scenario_ids(call_log_entries, envelope.scenario_id)
 
     return envelope, call_log_entries
 
@@ -1506,6 +2099,204 @@ def _cleanup_created_files(created_files: list[Path]) -> None:
         )
 
 
+def _has_structured_behavior_spec(envelope: ScenarioEnvelope) -> bool:
+    """True when the envelope carries a structured BehaviorSpec."""
+    return envelope.behavior_spec is not None and isinstance(
+        envelope.behavior_spec, BehaviorSpec
+    )
+
+
+def _scenario_output_paths(
+    envelope: ScenarioEnvelope, output_dir: Path
+) -> tuple[Path, Path | None, bool]:
+    """Resolve envelope YAML/feature paths and behavior-spec presence."""
+    envelope_path = output_dir / f"{envelope.scenario_id}.yaml"
+    has_behavior_spec = _has_structured_behavior_spec(envelope)
+    feature_path = (
+        output_dir / f"{envelope.scenario_id}.feature" if has_behavior_spec else None
+    )
+    return envelope_path, feature_path, has_behavior_spec
+
+
+def _preflight_output_paths(
+    envelope_path: Path, feature_path: Path | None, has_behavior_spec: bool
+) -> None:
+    """Reject pre-existing files and orphan/stem-mismatched features."""
+    # Preflight: pre-existing files are fatal integrity errors.
+    if envelope_path.exists():
+        raise ScenarioForgeIntegrityError(
+            f"Scenario YAML already exists: {envelope_path}"
+        )
+    if feature_path is not None and feature_path.exists():
+        raise ScenarioForgeIntegrityError(
+            f"Scenario feature file already exists: {feature_path}"
+        )
+
+    # Check for orphan/stem mismatch.
+    alt_feature = envelope_path.with_suffix(".feature")
+    if not has_behavior_spec and alt_feature.exists():
+        raise ScenarioForgeIntegrityError(
+            f"Stem mismatch: orphan feature file exists for "
+            f"'{envelope_path.stem}' but envelope has no behavior_spec"
+        )
+
+
+def _serialize_envelope_yaml(envelope: ScenarioEnvelope) -> str:
+    """Pre-serialize the envelope to canonical YAML text."""
+    data = envelope.model_dump(mode="json", exclude_none=True)
+    return yaml.dump(
+        data, default_flow_style=False, sort_keys=False, allow_unicode=True
+    )
+
+
+def _validate_outputs_fail_closed(envelope: ScenarioEnvelope) -> None:
+    """Validate projection traceability and provenance before writing."""
+    from asago_scenario_generator.pipeline.projection_validation import (
+        validate_projection_traceability,
+    )
+
+    traceability_result = validate_projection_traceability(envelope)
+    if not traceability_result.valid:
+        raise ProjectionTraceabilityError(
+            result=traceability_result,
+            scenario_id=envelope.scenario_id,
+        )
+
+    # Source-influence provenance qualification (Wave 2 slice 5, fail-closed):
+    # generation publishes only envelopes whose provenance block qualifies;
+    # a stale, tampered, or incomplete block is never written to disk.
+    from asago_scenario_generator.pipeline.source_influence import (
+        validate_source_influence_provenance,
+    )
+
+    provenance_result = validate_source_influence_provenance(envelope)
+    if not provenance_result.valid:
+        raise SourceInfluenceProvenanceError(
+            result=provenance_result,
+            scenario_id=envelope.scenario_id,
+        )
+
+
+def _open_exclusive(path: Path, kind: str):
+    """Open a path for exclusive creation, mapping races to integrity errors."""
+    try:
+        return path.open("x", encoding="utf-8")
+    except FileExistsError as exc:
+        raise ScenarioForgeIntegrityError(
+            f"Scenario {kind} already exists (race): {path}"
+        ) from exc
+
+
+def _exclusive_create_text(path: Path, text: str, kind: str) -> None:
+    """Exclusively create a text file, mapping races to integrity errors."""
+    with _open_exclusive(path, kind) as fh:
+        fh.write(text)
+
+
+def _write_created_outputs(
+    created_files: list[Path],
+    envelope_path: Path,
+    feature_path: Path | None,
+    yaml_text: str,
+    feature_text: str | None,
+) -> None:
+    """Write the YAML and feature files, registering each created path.
+
+    A path is registered as current-call-owned immediately after the
+    exclusive open succeeds, before any write, so that cleanup covers
+    files even if the write itself fails.
+    """
+    fh = _open_exclusive(envelope_path, "YAML")
+    created_files.append(envelope_path)
+    with fh:
+        fh.write(yaml_text)
+    if feature_path is not None and feature_text is not None:
+        fh = _open_exclusive(feature_path, "feature")
+        created_files.append(feature_path)
+        with fh:
+            fh.write(feature_text)
+
+
+def _require_admitted_scenario_id(admitted_scenario_id: str, scenario_id: str) -> None:
+    """Require a non-empty admitted ID matching the envelope scenario ID."""
+    if not admitted_scenario_id:
+        raise ValueError("admitted_scenario_id is required for guarded replace")
+    if scenario_id != admitted_scenario_id:
+        raise ScenarioForgeIntegrityError(
+            f"Scenario ID mismatch in guarded replace: expected "
+            f"'{admitted_scenario_id}', got '{scenario_id}'"
+        )
+
+
+def _verify_feature_bytes_match(
+    feature_path: Path, expected_text: str, scenario_id: str
+) -> None:
+    """Verify existing feature bytes are unchanged — we must not rewrite."""
+    existing_feature_bytes = feature_path.read_bytes()
+    if existing_feature_bytes != expected_text.encode("utf-8"):
+        raise ScenarioForgeIntegrityError(
+            f"Feature byte mismatch in guarded replace for "
+            f"'{scenario_id}': existing bytes differ from "
+            f"envelope behavior_spec"
+        )
+
+
+def _verify_replace_pair(
+    envelope: ScenarioEnvelope, output_dir: Path
+) -> tuple[Path, Path | None, bool]:
+    """Verify the complete existing artifact pair before changing bytes."""
+    envelope_path = output_dir / f"{envelope.scenario_id}.yaml"
+    feature_path = output_dir / f"{envelope.scenario_id}.feature"
+
+    # Verify complete existing pair before modifying anything.
+    if not envelope_path.exists():
+        raise ScenarioForgeIntegrityError(
+            f"Cannot replace non-existent scenario YAML: {envelope_path}"
+        )
+
+    has_behavior_spec = _has_structured_behavior_spec(envelope)
+    if has_behavior_spec:
+        if not feature_path.exists():
+            raise ScenarioForgeIntegrityError(
+                f"Missing feature file for guarded replace: {feature_path}"
+            )
+        # Verify feature bytes are unchanged — we must not rewrite feature.
+        _verify_feature_bytes_match(
+            feature_path,
+            envelope.behavior_spec.gherkin_text,  # type: ignore[union-attr]
+            envelope.scenario_id,
+        )
+    elif feature_path.exists():
+        raise ScenarioForgeIntegrityError(
+            f"Stem mismatch: feature file exists for "
+            f"'{envelope.scenario_id}' but envelope has no behavior_spec"
+        )
+    return envelope_path, feature_path, has_behavior_spec
+
+
+def _atomic_replace_yaml(yaml_text: str, output_dir: Path, envelope_path: Path) -> None:
+    """Write to a temp file in the same directory, then atomically replace."""
+    import os
+    import tempfile
+
+    # Write to temp file in same directory, then atomic replace.
+    tmp_fd, tmp_path = tempfile.mkstemp(
+        dir=output_dir, suffix=".yaml.tmp", prefix=envelope_path.stem
+    )
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+            f.write(yaml_text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, envelope_path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
 def write_scenario_outputs(
     envelope: ScenarioEnvelope,
     output_dir: Path,
@@ -1532,64 +2323,19 @@ def write_scenario_outputs(
             provenance block fails qualification.
     """
     # Validate projection traceability before writing (422o.4 fail-closed).
-    from asago_scenario_generator.pipeline.projection_validation import (
-        validate_projection_traceability,
-    )
-
-    traceability_result = validate_projection_traceability(envelope)
-    if not traceability_result.valid:
-        raise ProjectionTraceabilityError(
-            result=traceability_result,
-            scenario_id=envelope.scenario_id,
-        )
-
-    # Source-influence provenance qualification (Wave 2 slice 5, fail-closed):
-    # generation publishes only envelopes whose provenance block qualifies;
-    # a stale, tampered, or incomplete block is never written to disk.
-    from asago_scenario_generator.pipeline.source_influence import (
-        validate_source_influence_provenance,
-    )
-
-    provenance_result = validate_source_influence_provenance(envelope)
-    if not provenance_result.valid:
-        raise SourceInfluenceProvenanceError(
-            result=provenance_result,
-            scenario_id=envelope.scenario_id,
-        )
+    _validate_outputs_fail_closed(envelope)
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    envelope_path = output_dir / f"{envelope.scenario_id}.yaml"
-    feature_path: Path | None = None
-    has_behavior_spec = envelope.behavior_spec is not None and isinstance(
-        envelope.behavior_spec, BehaviorSpec
+    envelope_path, feature_path, has_behavior_spec = _scenario_output_paths(
+        envelope, output_dir
     )
-    if has_behavior_spec:
-        feature_path = output_dir / f"{envelope.scenario_id}.feature"
 
     # Preflight: pre-existing files are fatal integrity errors.
-    if envelope_path.exists():
-        raise ScenarioForgeIntegrityError(
-            f"Scenario YAML already exists: {envelope_path}"
-        )
-    if feature_path is not None and feature_path.exists():
-        raise ScenarioForgeIntegrityError(
-            f"Scenario feature file already exists: {feature_path}"
-        )
-
-    # Check for orphan/stem mismatch.
-    alt_feature = envelope_path.with_suffix(".feature")
-    if not has_behavior_spec and alt_feature.exists():
-        raise ScenarioForgeIntegrityError(
-            f"Stem mismatch: orphan feature file exists for "
-            f"'{envelope.scenario_id}' but envelope has no behavior_spec"
-        )
+    _preflight_output_paths(envelope_path, feature_path, has_behavior_spec)
 
     # Pre-serialize both outputs before writing either.
-    data = envelope.model_dump(mode="json", exclude_none=True)
-    yaml_text = yaml.dump(
-        data, default_flow_style=False, sort_keys=False, allow_unicode=True
-    )
+    yaml_text = _serialize_envelope_yaml(envelope)
     feature_text: str | None = None
     if has_behavior_spec:
         feature_text = envelope.behavior_spec.gherkin_text  # type: ignore[union-attr]
@@ -1600,26 +2346,9 @@ def write_scenario_outputs(
     # files even if the write itself fails.
     created_files: list[Path] = []
     try:
-        try:
-            fh = envelope_path.open("x", encoding="utf-8")
-        except FileExistsError as exc:
-            raise ScenarioForgeIntegrityError(
-                f"Scenario YAML already exists (race): {envelope_path}"
-            ) from exc
-        created_files.append(envelope_path)
-        with fh:
-            fh.write(yaml_text)
-
-        if feature_path is not None and feature_text is not None:
-            try:
-                fh = feature_path.open("x", encoding="utf-8")
-            except FileExistsError as exc:
-                raise ScenarioForgeIntegrityError(
-                    f"Scenario feature already exists (race): {feature_path}"
-                ) from exc
-            created_files.append(feature_path)
-            with fh:
-                fh.write(feature_text)
+        _write_created_outputs(
+            created_files, envelope_path, feature_path, yaml_text, feature_text
+        )
     except ScenarioForgeIntegrityError:
         _cleanup_created_files(created_files)
         raise
@@ -1653,73 +2382,16 @@ def replace_scenario_outputs(
         ScenarioForgeIntegrityError: If scenario ID mismatch, missing
             pair, stem mismatch, or feature byte mismatch.
     """
-    import os
-    import tempfile
-
-    if not admitted_scenario_id:
-        raise ValueError("admitted_scenario_id is required for guarded replace")
-    if envelope.scenario_id != admitted_scenario_id:
-        raise ScenarioForgeIntegrityError(
-            f"Scenario ID mismatch in guarded replace: expected "
-            f"'{admitted_scenario_id}', got '{envelope.scenario_id}'"
-        )
+    _require_admitted_scenario_id(admitted_scenario_id, envelope.scenario_id)
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    envelope_path = output_dir / f"{envelope.scenario_id}.yaml"
-    feature_path = output_dir / f"{envelope.scenario_id}.feature"
-
-    # Verify complete existing pair before modifying anything.
-    if not envelope_path.exists():
-        raise ScenarioForgeIntegrityError(
-            f"Cannot replace non-existent scenario YAML: {envelope_path}"
-        )
-
-    has_behavior_spec = envelope.behavior_spec is not None and isinstance(
-        envelope.behavior_spec, BehaviorSpec
+    envelope_path, feature_path, has_behavior_spec = _verify_replace_pair(
+        envelope, output_dir
     )
-
-    if has_behavior_spec:
-        if not feature_path.exists():
-            raise ScenarioForgeIntegrityError(
-                f"Missing feature file for guarded replace: {feature_path}"
-            )
-        # Verify feature bytes are unchanged — we must not rewrite feature.
-        existing_feature_bytes = feature_path.read_bytes()
-        expected_feature_text = envelope.behavior_spec.gherkin_text  # type: ignore[union-attr]
-        if existing_feature_bytes != expected_feature_text.encode("utf-8"):
-            raise ScenarioForgeIntegrityError(
-                f"Feature byte mismatch in guarded replace for "
-                f"'{envelope.scenario_id}': existing bytes differ from "
-                f"envelope behavior_spec"
-            )
-    elif feature_path.exists():
-        raise ScenarioForgeIntegrityError(
-            f"Stem mismatch: feature file exists for "
-            f"'{envelope.scenario_id}' but envelope has no behavior_spec"
-        )
 
     # Pre-serialize new YAML and atomically replace.
-    data = envelope.model_dump(mode="json", exclude_none=True)
-    yaml_text = yaml.dump(
-        data, default_flow_style=False, sort_keys=False, allow_unicode=True
-    )
-
-    # Write to temp file in same directory, then atomic replace.
-    tmp_fd, tmp_path = tempfile.mkstemp(
-        dir=output_dir, suffix=".yaml.tmp", prefix=envelope.scenario_id
-    )
-    try:
-        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-            f.write(yaml_text)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, envelope_path)
-    except Exception:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+    yaml_text = _serialize_envelope_yaml(envelope)
+    _atomic_replace_yaml(yaml_text, output_dir, envelope_path)
 
     actual_feature_path = feature_path if has_behavior_spec else None
     return envelope_path, actual_feature_path

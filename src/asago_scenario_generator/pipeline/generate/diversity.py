@@ -15,6 +15,24 @@ from asago_scenario_generator.pipeline.generate.constants import (
 )
 
 
+def _entry_point_zone_keyword_matches(ep_lower: str) -> set[str]:
+    """Zones implied by an entry-point name, defaulting to ``input``."""
+    ep_zones: set[str] = set()
+    for keyword, zones in _ENTRY_POINT_ZONE_KEYWORDS.items():
+        if keyword in ep_lower:
+            ep_zones.update(zones)
+    if not ep_zones:
+        ep_zones = {"input"}
+    return ep_zones
+
+
+def _zone_overlap_score(ep_zones: set[str], target_zones: set[str]) -> float:
+    """Jaccard overlap of entry-point zones with the threat's zone sequence."""
+    overlap = len(ep_zones & target_zones)
+    total = len(ep_zones | target_zones)
+    return overlap / total if total > 0 else 0.0
+
+
 def compute_entry_point_affinity(
     entry_points: list[str],
     zone_sequence: list[str],
@@ -29,23 +47,12 @@ def compute_entry_point_affinity(
         return {}
 
     target_zones = set(zone_sequence)
-    scores: dict[str, float] = {}
-
-    for ep in entry_points:
-        ep_lower = ep.lower()
-        ep_zones: set[str] = set()
-        for keyword, zones in _ENTRY_POINT_ZONE_KEYWORDS.items():
-            if keyword in ep_lower:
-                ep_zones.update(zones)
-        # Default: if no keywords matched, assume it feeds "input"
-        if not ep_zones:
-            ep_zones = {"input"}
-
-        overlap = len(ep_zones & target_zones)
-        total = len(ep_zones | target_zones)
-        scores[ep] = overlap / total if total > 0 else 0.0
-
-    return scores
+    return {
+        ep: _zone_overlap_score(
+            _entry_point_zone_keyword_matches(ep.lower()), target_zones
+        )
+        for ep in entry_points
+    }
 
 
 def assign_entry_point(
@@ -167,6 +174,20 @@ def get_overused_patterns(
     return overused[:5]
 
 
+def _phase_for_action_text(action_lower: str) -> str:
+    """Map action text to the first matching canonical phase label."""
+    for phase, keywords in _PHASE_KEYWORDS.items():
+        if any(kw in action_lower for kw in keywords):
+            return phase
+    return "other"
+
+
+def _append_distinct_phase(phases: list[str], matched_phase: str) -> None:
+    """Append a phase, collapsing consecutive duplicates."""
+    if not phases or phases[-1] != matched_phase:
+        phases.append(matched_phase)
+
+
 def extract_structural_pattern(narrative: NarrativeLayer) -> str:
     """Extract the structural attack phase sequence from a narrative.
 
@@ -184,15 +205,8 @@ def extract_structural_pattern(narrative: NarrativeLayer) -> str:
     """
     phases: list[str] = []
     for step in narrative.steps:
-        action_lower = step.action.lower()
-        matched_phase = "other"
-        for phase, keywords in _PHASE_KEYWORDS.items():
-            if any(kw in action_lower for kw in keywords):
-                matched_phase = phase
-                break
-        # Collapse consecutive duplicates
-        if not phases or phases[-1] != matched_phase:
-            phases.append(matched_phase)
+        matched_phase = _phase_for_action_text(step.action.lower())
+        _append_distinct_phase(phases, matched_phase)
 
     return "->".join(phases)
 
@@ -257,3 +271,8 @@ def _format_structural_exclusions(patterns: list[str]) -> str:
         "Vary the structural attack approach — do not repeat the same "
         "sequence of attack phases.\n"
     )
+
+
+# mutate4py-manifest-begin
+# {"version":1,"tested_at":"2026-08-26T11:23:15Z","module_hash":"db94968a3e1a267048c556937bde01189b576dc2bce5e3ebe83c3b9f0e5fef56","source_sha256":"58ed93d135aba613a4b10b28d10d14ad9b36b1af8c87c1e497b0052e52547a79","functions":[{"id":"func/_entry_point_zone_keyword_matches","name":"_entry_point_zone_keyword_matches","line":18,"end_line":26,"hash":"87ddc584cb281a7dd438e1f58472c7106ad67347805ffd04ccb6aaff70114d61"},{"id":"func/_zone_overlap_score","name":"_zone_overlap_score","line":29,"end_line":33,"hash":"d9f4c0082e6df14c74e17dc37f9004c3f914bfab34af05ec617be868c77f4ca4"},{"id":"func/compute_entry_point_affinity","name":"compute_entry_point_affinity","line":36,"end_line":55,"hash":"2cdc60d83353d6cdd32b3c941de9be731112e13a644d2bf7b4a8f091ee54bb4a"},{"id":"func/assign_entry_point","name":"assign_entry_point","line":58,"end_line":97,"hash":"b0e8163f6a6773663a52d4258475fa4cfbb0c932eab7741563b7d7cfcd7bfb5f"},{"id":"func/get_overused_entry_points","name":"get_overused_entry_points","line":100,"end_line":112,"hash":"426aa2dbda0c32b7174e0440630e40b90efdeb6a1ccd582c5e140186f8ddf932"},{"id":"func/extract_narrative_keywords","name":"extract_narrative_keywords","line":115,"end_line":161,"hash":"cbc9652514cf2d4b36d5080c733b7cfa7447d1599c891f35b162163a99d118ac"},{"id":"func/get_overused_patterns","name":"get_overused_patterns","line":164,"end_line":174,"hash":"1d0b44b84deda5e128c297caaaab40a909e24d5a56848908dc2dd169cf3213be"},{"id":"func/_phase_for_action_text","name":"_phase_for_action_text","line":177,"end_line":182,"hash":"465654b0ca84da407d6a8160db08c9641831bafee52b0e3856f2ccd517c76e4c"},{"id":"func/_append_distinct_phase","name":"_append_distinct_phase","line":185,"end_line":188,"hash":"7a6f8b6ed1343febaac08dc124e5d3c348cefe11abe277c4b8c79b5f8f266954"},{"id":"func/extract_structural_pattern","name":"extract_structural_pattern","line":191,"end_line":211,"hash":"472f9ae2bc07a28815b5672b7ae2d11fb6721d0d4a371f974a758d06706a243c"},{"id":"func/get_overused_structural_patterns","name":"get_overused_structural_patterns","line":214,"end_line":228,"hash":"5820e8190b63ea02e04b1945ddbee70bf3bfb94d22b94b666f5d305b622c2819"},{"id":"func/_format_structural_exclusions","name":"_format_structural_exclusions","line":231,"end_line":273,"hash":"66d20fefc7313a81749cf1e2fe9414425bf740190d4f580c244c210f58630506"}]}
+# mutate4py-manifest-end

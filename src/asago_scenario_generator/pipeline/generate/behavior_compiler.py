@@ -11,7 +11,7 @@ cross-checked exactly against this rendering.
 
 from __future__ import annotations
 
-from asago_scenario_generator.models.attack_pattern import CanonicalAttackChain
+from asago_scenario_generator.models.attack_pattern_chain import CanonicalAttackChain
 from asago_scenario_generator.models.attack_tree import AttackTree, AttackTreeNode
 from asago_scenario_generator.models.projection_envelope import (
     ProjectionEnvelopeBlock,
@@ -182,6 +182,79 @@ def _and_shortened_keyword(previous_keyword: str | None, keyword: str) -> str:
     return "And" if previous_keyword == keyword else keyword
 
 
+def _render_scenario_steps(
+    scenario: BehaviorScenario,
+    action_by_id: dict[str, BehaviorAction],
+    assertion_by_id: dict[str, BehaviorAssertion],
+    zone_map: dict[str, str] | None,
+) -> list[str]:
+    """Render one scenario's step lines with And-shortened keywords."""
+    lines: list[str] = []
+    previous_keyword: str | None = None
+    for step_id in scenario.step_ids:
+        if step_id in action_by_id:
+            action = action_by_id[step_id]
+            semantic_keyword = action.gherkin_keyword
+            text = action.text
+            zone_suffix = _zone_suffix(action.action_id, zone_map)
+        else:
+            assertion = assertion_by_id[step_id]
+            semantic_keyword = assertion.gherkin_keyword
+            text = assertion.text
+            zone_suffix = ""
+        keyword = _and_shortened_keyword(previous_keyword, semantic_keyword)
+        lines.append(f"    {keyword} {text}{zone_suffix}")
+        previous_keyword = semantic_keyword
+    return lines
+
+
+def _render_scenario_group(
+    scenarios: list[BehaviorScenario],
+    actions: list[BehaviorAction],
+    assertions: list[BehaviorAssertion],
+    zone_map: dict[str, str] | None,
+) -> list[str]:
+    """Render all grouped Scenario blocks with blank-line separators."""
+    action_by_id = {item.action_id: item for item in actions}
+    assertion_by_id = {item.assertion_id: item for item in assertions}
+    lines: list[str] = []
+    for scenario_index, scenario in enumerate(scenarios):
+        lines.append(f"  Scenario: {scenario.title}")
+        lines.append("")
+        lines.extend(
+            _render_scenario_steps(scenario, action_by_id, assertion_by_id, zone_map)
+        )
+        if scenario_index < len(scenarios) - 1:
+            lines.append("")
+    return lines
+
+
+def _render_legacy_scenario_steps(
+    actions: list[BehaviorAction],
+    zone_map: dict[str, str] | None,
+) -> list[str]:
+    """Render the legacy single-scenario action steps.
+
+    Preserve typed transitions.  ``And`` is only shorthand for another
+    action of the same semantic keyword as the immediately preceding action.
+    """
+    lines: list[str] = []
+    previous_keyword: str | None = None
+    for action in actions:
+        zone_suffix = _zone_suffix(action.action_id, zone_map)
+        keyword = _and_shortened_keyword(previous_keyword, action.gherkin_keyword)
+        lines.append(f"    {keyword} {action.text}{zone_suffix}")
+        previous_keyword = action.gherkin_keyword
+    return lines
+
+
+def _render_assertion_lines(
+    assertions: list[BehaviorAssertion],
+) -> list[str]:
+    """Render the Then-step lines for structured assertions."""
+    return [f"    {a.gherkin_keyword} {a.text}" for a in assertions]
+
+
 def render_gherkin_from_behavior_spec(
     actions: list[BehaviorAction],
     assertions: list[BehaviorAssertion],
@@ -208,45 +281,13 @@ def render_gherkin_from_behavior_spec(
     lines.append("")
 
     if scenarios:
-        action_by_id = {item.action_id: item for item in actions}
-        assertion_by_id = {item.assertion_id: item for item in assertions}
-        for scenario_index, scenario in enumerate(scenarios):
-            lines.append(f"  Scenario: {scenario.title}")
-            lines.append("")
-            previous_keyword: str | None = None
-            for step_id in scenario.step_ids:
-                if step_id in action_by_id:
-                    action = action_by_id[step_id]
-                    semantic_keyword = action.gherkin_keyword
-                    text = action.text
-                    zone_suffix = _zone_suffix(action.action_id, zone_map)
-                else:
-                    assertion = assertion_by_id[step_id]
-                    semantic_keyword = assertion.gherkin_keyword
-                    text = assertion.text
-                    zone_suffix = ""
-                keyword = _and_shortened_keyword(previous_keyword, semantic_keyword)
-                lines.append(f"    {keyword} {text}{zone_suffix}")
-                previous_keyword = semantic_keyword
-            if scenario_index < len(scenarios) - 1:
-                lines.append("")
+        lines.extend(_render_scenario_group(scenarios, actions, assertions, zone_map))
         return "\n".join(lines) + "\n"
 
     # Legacy single-scenario rendering for artifacts without explicit grouping.
     lines.append("  Scenario: Projected attack realization")
     lines.append("")
-
-    # Preserve typed transitions.  ``And`` is only shorthand for another
-    # action of the same semantic keyword as the immediately preceding action.
-    previous_keyword: str | None = None
-    for action in actions:
-        zone_suffix = _zone_suffix(action.action_id, zone_map)
-        keyword = _and_shortened_keyword(previous_keyword, action.gherkin_keyword)
-        lines.append(f"    {keyword} {action.text}{zone_suffix}")
-        previous_keyword = action.gherkin_keyword
-
-    # Render assertions (Then steps).
-    for assertion in assertions:
-        lines.append(f"    {assertion.gherkin_keyword} {assertion.text}")
+    lines.extend(_render_legacy_scenario_steps(actions, zone_map))
+    lines.extend(_render_assertion_lines(assertions))
 
     return "\n".join(lines) + "\n"

@@ -25,6 +25,19 @@ GENERATE_DIR = (
     / "pipeline"
     / "generate"
 )
+TESTS_DIR = Path(__file__).resolve().parent
+ACCEPTANCE_DIR = TESTS_DIR.parent / "acceptance"
+
+_TREE_FACADE = "asago_scenario_generator.pipeline.generate.tree"
+_TREE_TRANSPORT = "asago_scenario_generator.pipeline.generate.tree_transport"
+_TREE_VALIDATION = "asago_scenario_generator.pipeline.generate.tree_validation"
+_LEAF_HELPERS_ON_TREE = frozenset(
+    {
+        "_check_tool_execution_leaf_grounding",
+        "_enumerate_root_to_leaf_paths",
+        "normalize_attack_tree_transport",
+    }
+)
 
 
 def _imported_modules(path: Path) -> set[str]:
@@ -37,6 +50,16 @@ def _imported_modules(path: Path) -> set[str]:
         elif isinstance(node, ast.ImportFrom) and node.module:
             modules.add(node.module)
     return modules
+
+
+def _imported_names(path: Path, module: str) -> set[str]:
+    """Return names imported from *module* in a source file."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == module:
+            names.update(alias.name for alias in node.names)
+    return names
 
 
 def test_actor_context_does_not_import_actor_or_form_a_cycle() -> None:
@@ -190,6 +213,102 @@ class TestActorSemanticLeafBoundaries:
             }
             assert siblings <= allowed_siblings, (
                 f"{module} reaches orchestration siblings: {sorted(siblings)}"
+            )
+
+
+class TestStagesDependInwardOnDraftLeaves:
+    """Stage orchestration consumes draft contracts, not IO-near façades."""
+
+    def test_stages_import_semantic_leaves_not_actor_or_narrative_facades(
+        self,
+    ) -> None:
+        """Accepted-draft evidence stays on the compiler leaves."""
+        imports = _imported_modules(GENERATE_DIR / "stages.py")
+        assert "asago_scenario_generator.pipeline.generate.actor_semantics" in imports
+        assert (
+            "asago_scenario_generator.pipeline.generate.narrative_semantics" in imports
+        )
+        assert "asago_scenario_generator.pipeline.generate.actor" not in imports
+        assert "asago_scenario_generator.pipeline.generate.narrative" not in imports
+
+    def test_stages_import_projection_contracts_not_projection_facade(self) -> None:
+        """Generation stages consume candidate identity from the contract leaf."""
+        imports = _imported_modules(GENERATE_DIR / "stages.py")
+        assert "asago_scenario_generator.pipeline.projection_contracts" in imports
+        assert "asago_scenario_generator.pipeline.projection" not in imports
+
+
+class TestGenerateSupportLeavesStayOffTheTreeFacade:
+    """Tree, zone, name, and diversity helpers stay off the IO-near tree façade."""
+
+    _MODULES = (
+        "tree_transport.py",
+        "tree_validation.py",
+        "zones.py",
+        "names.py",
+        "diversity.py",
+    )
+    _FORBIDDEN_IO_NEAR_PREFIXES = (
+        "asago_scenario_generator.llm",
+        "asago_scenario_generator.prompts",
+        "asago_scenario_generator.manifest",
+        "asago_scenario_generator.report",
+        "asago_scenario_generator.cli",
+        "asago_scenario_generator.stpa",
+        "asago_scenario_generator.pipeline.generate.tree",
+        "asago_scenario_generator.pipeline.generate.narrative",
+        "asago_scenario_generator.pipeline.generate.assembly",
+        "asago_scenario_generator.pipeline.generate.actor",
+        "asago_scenario_generator.pipeline.projection",
+    )
+
+    def test_support_leaves_do_not_import_io_near_or_facade_modules(self) -> None:
+        """These helpers stay free of prompts, LLM, and generate façades."""
+        for module in self._MODULES:
+            imports = _imported_modules(GENERATE_DIR / module)
+            violations = [
+                imp
+                for imp in imports
+                if any(
+                    imp == forbidden or imp.startswith(forbidden + ".")
+                    for forbidden in self._FORBIDDEN_IO_NEAR_PREFIXES
+                )
+            ]
+            assert not violations, (
+                f"{module} imports forbidden modules: {sorted(violations)}"
+            )
+
+
+class TestTreeFacadeDoesNotReexportLeafHelpers:
+    """Path, grounding, and transport helpers stay on their leaves."""
+
+    def test_tree_does_not_import_unused_leaf_helpers(self) -> None:
+        """The IO-near façade must not pull helpers it no longer owns."""
+        names = _imported_names(GENERATE_DIR / "tree.py", _TREE_VALIDATION)
+        names |= _imported_names(GENERATE_DIR / "tree.py", _TREE_TRANSPORT)
+        leaked = names & _LEAF_HELPERS_ON_TREE
+        assert not leaked, f"tree.py re-imports leaf helpers: {sorted(leaked)}"
+
+    def test_assembly_consumes_tree_validation_not_the_facade(self) -> None:
+        """Envelope assembly reaches consistency through the validation leaf."""
+        imports = _imported_modules(GENERATE_DIR / "assembly.py")
+        assert _TREE_VALIDATION in imports
+        assert _TREE_FACADE not in imports
+
+    def test_consumers_import_leaf_helpers_from_leaves(self) -> None:
+        """Tests and acceptance do not reach leaf helpers through tree.py."""
+        consumers = (
+            TESTS_DIR / "test_consistency_enforcement.py",
+            TESTS_DIR / "test_cmps9_typed_actions.py",
+            TESTS_DIR / "test_external_impact_transport.py",
+            TESTS_DIR / "test_projection_traceability.py",
+            TESTS_DIR / "test_attack_tree_retry.py",
+            ACCEPTANCE_DIR / "runtime_features" / "taxonomy_risk.py",
+        )
+        for path in consumers:
+            leaked = _imported_names(path, _TREE_FACADE) & _LEAF_HELPERS_ON_TREE
+            assert not leaked, (
+                f"{path.name} imports leaf helpers from tree.py: {sorted(leaked)}"
             )
 
 
