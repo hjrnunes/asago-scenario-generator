@@ -11,7 +11,10 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from asago_scenario_generator.model_profiles import load_profile
+from asago_scenario_generator.model_profiles import (
+    DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    load_profile,
+)
 
 DEFAULT_PROFILES_FILE = Path("config/model-profiles.yaml")
 DEFAULT_MODEL = "gemma-3n-e4b-it"
@@ -212,7 +215,11 @@ def _resolution_specs(
             "ASAGO_SCENARIO_GENERATOR_TEMPERATURE",
             DEFAULT_TEMPERATURE,
         ),
-        "timeout": (timeout, "ASAGO_SCENARIO_GENERATOR_TIMEOUT", None),
+        "timeout": (
+            timeout,
+            "ASAGO_SCENARIO_GENERATOR_TIMEOUT",
+            DEFAULT_REQUEST_TIMEOUT_SECONDS,
+        ),
         "top_p": (top_p, "ASAGO_SCENARIO_GENERATOR_TOP_P", None),
         "top_k": (top_k, "ASAGO_SCENARIO_GENERATOR_TOP_K", None),
         "use_guided_decoding": (

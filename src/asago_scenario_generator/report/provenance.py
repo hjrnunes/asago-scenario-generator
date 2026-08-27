@@ -9,12 +9,12 @@ and the rest of the taxonomy/risk report template -- rely on.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any
 
 import yaml
 
 from asago_scenario_generator.data.atlas import ATLAS_TECHNIQUE_DESCRIPTIONS
+from asago_scenario_generator.data.paths import DATA_ROOT
 from asago_scenario_generator.data.loaders import (
     load_attack_goals_taxonomy,
     load_attack_patterns,
@@ -148,8 +148,7 @@ def _record_threat_description(threat_id: str, info: dict[str, Any]) -> None:
 def _load_taxonomy_lookups() -> None:
     """Populate _THREAT_DESCRIPTIONS from the taxonomy YAML."""
     taxonomy_path = (
-        Path(__file__).resolve().parents[3]
-        / "data"
+        DATA_ROOT
         / "taxonomies"
         / "owasp-agentic-threats"
         / "owasp-agentic-threats-v1.1.yaml"

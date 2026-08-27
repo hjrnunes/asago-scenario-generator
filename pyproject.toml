@@ -36,6 +36,9 @@ dev = [
 [tool.uv]
 exclude-newer = "7 days"
 
+[tool.hatch.build.targets.wheel.force-include]
+"data" = "asago_scenario_generator/data/bundled"
+
 [tool.pytest.ini_options]
 # Bare `pytest` runs the unit suite only. The acceptance suite is generated
 # from Gherkin IR and is run explicitly (`pytest build/acceptance/generated/`) so

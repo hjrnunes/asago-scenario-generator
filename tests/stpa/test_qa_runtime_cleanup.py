@@ -162,13 +162,13 @@ def test_acceptance_refresh_registration_preserves_characterization():
     acceptance_refresh.register(api)
 
     assert acceptance_refresh.FEATURE_ID == "acceptance_refresh"
-    assert len(api.entries) == 38
+    assert len(api.entries) == 39
     feature_entries = [entry for entry in api.entries if entry[3] is not None]
     global_entries = [entry for entry in api.entries if entry[3] is None]
     assert len(feature_entries) == 13
-    assert len(global_entries) == 25
+    assert len(global_entries) == 26
     assert [entry[2] for entry in feature_entries] == list(range(21826, 21839))
-    assert [entry[2] for entry in global_entries] == list(range(21916, 21941))
+    assert [entry[2] for entry in global_entries] == list(range(21916, 21942))
     assert all(entry[3] == "acceptance_refresh" for entry in feature_entries)
     assert api.feature is None
 
@@ -185,7 +185,7 @@ def test_acceptance_refresh_registration_preserves_characterization():
         "CL-1 has source RESP-1 and target RESP-2",
         "the warnings list includes a warning naming step",
         "no assembly failure is logged",
-        "the SP1RunResult stage_errors contains the assemble_control_structure failure",
+        "the SP1RunResult stage_warnings contains the assemble_control_structure repair",
         "the control_structure module (?:does not )?exports?",
         "the SP2 prompts directory contains",
         "the SP3 prompts directory contains",
@@ -211,6 +211,7 @@ def test_acceptance_refresh_registration_preserves_characterization():
         "the ControlElementSet contains controlled process CP-1",
         "the Call 2[ab] user prompt contains",
         "the Call 3 user prompt contains the assembled responsibilities and controlled processes",
+        "a ControlElementSet from Call 2b whose feedback channel FB-1-1 updates",
     ]
     assert [entry[0] for entry in api.entries] == expected_patterns
 
@@ -410,12 +411,12 @@ def test_acceptance_refresh_handler_branches_remain_characterized(tmp_path):
 
     error_world = SimpleNamespace(
         gd_run_result=SimpleNamespace(
-            stage_errors=["assemble_control_structure failed"]
+            stage_warnings=["assemble_control_structure repaired"]
         ),
         sp1_run_result=None,
     )
     assert _h_ar_sp1_assembly_error(error_world, "", {})[0]
-    error_world.gd_run_result = SimpleNamespace(stage_errors=[])
+    error_world.gd_run_result = SimpleNamespace(stage_warnings=[])
     assert not _h_ar_sp1_assembly_error(error_world, "", {})[0]
 
 

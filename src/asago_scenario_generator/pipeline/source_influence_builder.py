@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from asago_scenario_generator.data.paths import DATA_ROOT
 from asago_scenario_generator.models.source_influence_provenance import (
     SourceInfluenceArtifactElement,
     SourceInfluenceArtifactKind,
@@ -67,8 +68,7 @@ __all__ = [
 ]
 
 _DEFAULT_THREATS_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "data"
+    DATA_ROOT
     / "taxonomies"
     / "owasp-agentic-threats"
     / "owasp-agentic-threats-v1.1.yaml"

@@ -1980,7 +1980,7 @@ class TestLLMConfig:
             real_uc = tmp / "real-use-case.txt"
             real_uc.write_text("The real use case content", encoding="utf-8")
             ref_file = tmp / "use-case.txt"
-            ref_file.write_text("real-use-case.txt\n", encoding="utf-8")
+            ref_file.write_text("real-use-case.txt", encoding="utf-8")
             text = read_use_case(str(ref_file))
             assert text == "The real use case content"
 

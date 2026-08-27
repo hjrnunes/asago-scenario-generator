@@ -30,6 +30,7 @@ from .acceptance_refresh_stage2 import (
     _h_ar_module_export,
     _h_ar_named_prompts_contains,
     _h_ar_no_log_step,
+    _h_ar_object_shaped_feedback_update,
     _h_ar_prior_prompt_contains,
     _h_ar_render_call2a_prompt,
     _h_ar_responsibility_no_field,
@@ -106,7 +107,7 @@ def register(api: object) -> None:
         "no assembly failure is logged", _h_ar_no_assembly_failure, source_order=21837
     )
     api.register_first(
-        "the SP1RunResult stage_errors contains the assemble_control_structure failure",
+        "the SP1RunResult stage_warnings contains the assemble_control_structure repair",
         _h_ar_sp1_assembly_error,
         source_order=21838,
     )
@@ -229,6 +230,11 @@ def register(api: object) -> None:
         "the Call 3 user prompt contains the assembled responsibilities and controlled processes",
         _h_ar_call3_prompt,
         source_order=21940,
+    )
+    api.register_first(
+        "a ControlElementSet from Call 2b whose feedback channel FB-1-1 updates",
+        _h_ar_object_shaped_feedback_update,
+        source_order=21941,
     )
     api.set_feature(None)
 

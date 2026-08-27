@@ -20,7 +20,12 @@ from typing import Any
 
 import yaml
 
-from asago_scenario_generator.stpa.infra.llm import LLMClient
+from asago_scenario_generator.stpa.infra.llm import (
+    DEFAULT_TEMPERATURE as LLM_DEFAULT_TEMPERATURE,
+    LLMClient,
+    effective_model_config,
+    effective_temperature,
+)
 from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call_raw
 from asago_scenario_generator.stpa.infra.manifest_helpers import (
     count_calls_by_stage,
@@ -47,6 +52,7 @@ from .attack_tree import build_attack_tree_prompts, parse_attack_tree
 from .bdi_generation import (
     assemble_scenario_spec,
     generate_bdi,
+    is_bdi_length_retry_exhausted,
     parse_ica_slot_id,
     populate_defender_bdi,
 )
@@ -74,7 +80,7 @@ from .validators import (
     validate_vulnerability_completeness,
 )
 
-DEFAULT_TEMPERATURE = 0.4
+DEFAULT_TEMPERATURE = LLM_DEFAULT_TEMPERATURE
 
 __all__ = ["SP3RunResult", "run_sp3"]
 
@@ -101,6 +107,14 @@ class SP3RunResult:
     validation_errors: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class _Stage5ThreatResult:
+    """One threat outcome plus whether provider failures should open the circuit."""
+
+    scenario_spec: ScenarioSpec | None
+    abort_remaining: bool = False
+
+
 def run_sp3(
     *,
     llm_client: LLMClient,
@@ -110,7 +124,7 @@ def run_sp3(
     run_dir: Path,
     capability_profile: CapabilityProfile | None = None,
     max_workers: int = 1,
-    temperature: float = DEFAULT_TEMPERATURE,
+    temperature: float | None = None,
 ) -> SP3RunResult:
     """Run the full SP3 pipeline: Stage 5 → Stage 6 → Stage 7.
 
@@ -125,7 +139,8 @@ def run_sp3(
             envelopes are enriched with ``system_context`` and
             ``consumer_hints`` blocks.
         max_workers: Maximum parallel workers for LLM calls.
-        temperature: LLM temperature.
+        temperature: Explicit LLM temperature override. When omitted, use the
+            resolved client temperature (default 0.4).
 
     Returns:
         An :class:`SP3RunResult` with artifacts and diagnostics.
@@ -134,6 +149,7 @@ def run_sp3(
     scenarios_dir = run_dir / "scenarios"
     scenarios_dir.mkdir(parents=True, exist_ok=True)
     loader = TemplateLoader(PROMPTS_DIR)
+    temperature = effective_temperature(llm_client, temperature)
 
     stage_errors: list[str] = []
     validation_errors: list[str] = []
@@ -142,7 +158,7 @@ def run_sp3(
 
     # --- Stage 5: BDI generation (1 LLM call per scenario) ---
     for idx, threat in enumerate(enriched_threat_set.structural_threats):
-        spec = _run_stage5_for_threat(
+        stage5_result = _run_stage5_for_threat(
             llm_client,
             threat,
             control_structure,
@@ -153,8 +169,18 @@ def run_sp3(
             stage_errors,
             capability_profile=capability_profile,
         )
-        if spec is not None:
-            scenario_specs.append(spec)
+        if stage5_result.scenario_spec is not None:
+            scenario_specs.append(stage5_result.scenario_spec)
+        if stage5_result.abort_remaining:
+            remaining = len(enriched_threat_set.structural_threats) - idx - 1
+            if remaining:
+                stage_errors.append(
+                    "Stage 5 aborted "
+                    f"{remaining} remaining threats after repeated structured-output "
+                    "length failures. Verify the serving runtime's structured-output "
+                    "configuration before retrying the run."
+                )
+            break
 
     # --- Stage 6: Concretization (3 LLM calls per scenario, parallelizable) ---
     for spec in scenario_specs:
@@ -222,6 +248,7 @@ def run_sp3(
         scenario_envelopes=scenario_envelopes,
         validation_errors=all_validation_errors,
         max_workers=max_workers,
+        temperature=temperature,
         stage_errors=stage_errors,
     )
 
@@ -251,7 +278,7 @@ def _run_stage5_for_threat(
     stage_errors: list[str],
     *,
     capability_profile: CapabilityProfile | None = None,
-) -> ScenarioSpec | None:
+) -> _Stage5ThreatResult:
     """Run Stage 5 BDI generation for a single threat."""
     slot_parts = parse_ica_slot_id(threat.ica_slot_id)
     target_resp_id = slot_parts["controller"]
@@ -260,7 +287,7 @@ def _run_stage5_for_threat(
         defender_bdi = populate_defender_bdi(control_structure, target_resp_id)
     except ValueError as e:
         stage_errors.append(f"Stage 5: {e}")
-        return None
+        return _Stage5ThreatResult(None)
 
     llm_result, error = generate_bdi(
         llm_client,
@@ -275,7 +302,10 @@ def _run_stage5_for_threat(
 
     if error is not None or llm_result is None:
         stage_errors.append(f"Stage 5 BDI generation failed: {error}")
-        return None
+        return _Stage5ThreatResult(
+            None,
+            abort_remaining=is_bdi_length_retry_exhausted(error),
+        )
 
     try:
         spec = assemble_scenario_spec(
@@ -286,9 +316,9 @@ def _run_stage5_for_threat(
         # reference error) stop this scenario before Stage 6: no narrative,
         # attack-tree, or Gherkin call is made and no artifact is written.
         stage_errors.append(f"Stage 5: {e}")
-        return None
+        return _Stage5ThreatResult(None)
     _validate_stage5_spec(spec, control_structure, stage_errors)
-    return spec
+    return _Stage5ThreatResult(spec)
 
 
 def _validate_stage5_spec(
@@ -691,6 +721,7 @@ def _write_manifest(
     scenario_envelopes: list[ScenarioEnvelope],
     validation_errors: list[str],
     max_workers: int,
+    temperature: float,
     stage_errors: list[str],
 ) -> None:
     """Write the run manifest YAML."""
@@ -706,11 +737,10 @@ def _write_manifest(
         "run_id": f"sp3-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
         "run_dir": str(run_dir),
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "model_config": {
-            "model": llm_client.model,
-            "base_url": llm_client.base_url,
-            "temperature": llm_client.temperature,
-        },
+        "model_config": effective_model_config(
+            llm_client,
+            temperature=temperature,
+        ),
         "input_hashes": input_hashes,
         "prompt_hashes": prompt_hashes,
         "stage_summary": stage_summary,

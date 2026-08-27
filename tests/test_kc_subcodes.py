@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 from pydantic import ValidationError
 
@@ -11,6 +13,8 @@ from asago_scenario_generator.models.capability_profile import (
     ToolInventoryEntry,
     VALID_KC_SUBCODES,
 )
+
+_LOGGER = "asago_scenario_generator.models.capability_profile"
 
 
 def _base_profile_data(**overrides) -> dict:
@@ -147,3 +151,44 @@ class TestBackwardCompatibility:
         assert p2.has_persistent_memory is True
         assert p2.multi_agent is True
         assert p2.hitl is True
+
+    def test_roundtrip_own_output_emits_no_warning(self, caplog):
+        """Reloading the project's own output raises no deprecation noise.
+
+        The serialized output contains the computed booleans; they match
+        the kc-derived values, so the strip is silent (issue #10).
+        """
+        codes = ["KC1.1", "KC4.3", "KC2.3", "KCX-HITL", "KC6.1.1"]
+        p = CapabilityProfile(**_base_profile_data(kc_subcodes=codes))
+        with caplog.at_level(logging.WARNING, logger=_LOGGER):
+            CapabilityProfile(**p.model_dump(mode="json"))
+        assert not any(
+            "Stripped deprecated fields" in record.message
+            for record in caplog.records
+        )
+
+    def test_conflicting_legacy_values_still_warn(self, caplog):
+        """A legacy value disagreeing with the computed flag warns and is stripped."""
+        codes = ["KC1.1", "KCX-HITL"]  # KCX-HITL computes hitl=True
+        with caplog.at_level(logging.WARNING, logger=_LOGGER):
+            p = CapabilityProfile(
+                **_base_profile_data(kc_subcodes=codes, hitl=False)
+            )
+        assert p.hitl is True
+        assert any(
+            "Stripped deprecated fields" in record.message
+            for record in caplog.records
+        )
+
+    def test_legacy_values_without_kc_evidence_still_warn(self, caplog):
+        """True legacy values with no supporting KC sub-codes warn (conflict)."""
+        with caplog.at_level(logging.WARNING, logger=_LOGGER):
+            p = CapabilityProfile(**_base_profile_data(
+                kc_subcodes=["KC1.1"],
+                multi_agent=True,
+            ))
+        assert p.multi_agent is False
+        assert any(
+            "Stripped deprecated fields" in record.message
+            for record in caplog.records
+        )

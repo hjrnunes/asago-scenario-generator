@@ -251,6 +251,20 @@ _LEGACY_BOOL_FIELDS: frozenset[str] = frozenset(
 )
 
 
+def _legacy_flag_values(kc_subcodes: list[str]) -> dict[str, bool]:
+    """Derive the computed boolean flags from KC sub-codes.
+
+    Shared by the ``CapabilityProfile`` computed fields and the legacy
+    input stripper so the two derivations can never drift apart.
+    """
+    kc_set = set(kc_subcodes)
+    return {
+        "has_persistent_memory": bool(kc_set & _KC4_PERSISTENT) or "KCX-PMEM" in kc_set,
+        "multi_agent": bool(kc_set & _KC_MULTI_AGENT),
+        "hitl": bool(kc_set & _KC_HITL),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
@@ -1455,20 +1469,19 @@ class CapabilityProfile(BaseModel):
     @property
     def has_persistent_memory(self) -> bool:
         """True if any KC code implies cross-session persistence."""
-        kc_set = set(self.kc_subcodes)
-        return bool(kc_set & _KC4_PERSISTENT) or "KCX-PMEM" in kc_set
+        return _legacy_flag_values(self.kc_subcodes)["has_persistent_memory"]
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def multi_agent(self) -> bool:
         """True if KC codes indicate multi-agent collaboration."""
-        return bool(set(self.kc_subcodes) & _KC_MULTI_AGENT)
+        return _legacy_flag_values(self.kc_subcodes)["multi_agent"]
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def hitl(self) -> bool:
         """True if KC codes indicate human-in-the-loop controls."""
-        return "KCX-HITL" in self.kc_subcodes
+        return _legacy_flag_values(self.kc_subcodes)["hitl"]
 
     # --- Stage 1 tool inventory (optional but required when tool_execution active) ---
 
@@ -1545,17 +1558,22 @@ class CapabilityProfile(BaseModel):
         """Strip legacy boolean fields from input data.
 
         These fields are now computed from kc_subcodes.  Hand-written YAML
-        profiles and older serialized profiles may still include them.
-        Stripping with a warning ensures backward compatibility while
-        surfacing that the values are no longer used.
+        profiles and older serialized profiles may still include them, and
+        the project's own serialized output includes the computed values.
+        Values that match the kc-derived result are removed silently so
+        round-tripping our own output is warning-free; only values that
+        disagree with the computed result surface a deprecation warning.
         """
         if not isinstance(data, dict):
             return data
+        derived = _legacy_flag_values(list(data.get("kc_subcodes") or []))
         stripped = []
         for field_name in _LEGACY_BOOL_FIELDS:
-            if field_name in data:
+            if field_name not in data:
+                continue
+            input_value = data.pop(field_name)
+            if input_value != derived[field_name]:
                 stripped.append(field_name)
-                del data[field_name]
         if stripped:
             logger.warning(
                 "Stripped deprecated fields from CapabilityProfile input: %s. "

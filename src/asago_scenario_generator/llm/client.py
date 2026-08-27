@@ -14,6 +14,7 @@ from openai import LengthFinishReasonError, OpenAI
 from pydantic import BaseModel, Field
 
 from asago_scenario_generator.llm.messages import prompt_messages as _prompt_messages
+from asago_scenario_generator.model_profiles import DEFAULT_REQUEST_TIMEOUT_SECONDS
 
 _DEFAULT_TEMPERATURE = 0.4
 
@@ -332,14 +333,17 @@ def _openai_client(
     extra_headers: dict[str, str] | None,
     timeout: float | None,
 ) -> OpenAI:
-    """Build the OpenAI SDK client with optional timeout."""
+    """Build a bounded OpenAI SDK client without hidden transport retries."""
+    effective_timeout = (
+        timeout if timeout is not None else DEFAULT_REQUEST_TIMEOUT_SECONDS
+    )
     openai_kwargs: dict[str, Any] = dict(
         base_url=base_url,
         api_key=api_key,
         default_headers=extra_headers or None,
+        timeout=effective_timeout,
+        max_retries=0,
     )
-    if timeout is not None:
-        openai_kwargs["timeout"] = timeout
     return OpenAI(**openai_kwargs)
 
 
@@ -490,14 +494,16 @@ class LLMClient:
         self.top_p = top_p
         self.top_k = top_k
         self.use_guided_decoding = use_guided_decoding
-        self.timeout = timeout
+        self.timeout = (
+            timeout if timeout is not None else DEFAULT_REQUEST_TIMEOUT_SECONDS
+        )
 
         # --- extra headers resolution ---
         self.extra_headers = self._resolve_extra_headers(extra_headers)
 
         _require_base_url(self.base_url)
         self._client = _openai_client(
-            self.base_url, self.api_key, self.extra_headers, timeout
+            self.base_url, self.api_key, self.extra_headers, self.timeout
         )
 
     def _resolve_extra_headers(
