@@ -16,6 +16,27 @@ EvidenceStrength = Literal["high", "weak"]
 AdjudicationStatus = Literal["confirmed", "rejected", "unresolved"]
 
 
+def _deterministic_yaml(data: dict[str, Any]) -> str:
+    """Serialize mapping data to a deterministic YAML string.
+
+    Double-quoted style is required for losslessness: PyYAML's plain,
+    single-quoted, and literal styles silently corrupt U+0085 (NEL)
+    values, which its reader treats as a line break.
+    """
+    return yaml.dump(
+        data,
+        default_flow_style=False,
+        sort_keys=True,
+        allow_unicode=True,
+        default_style='"',
+    )
+
+
+def _deterministic_json(data: dict[str, Any]) -> str:
+    """Serialize mapping data to a deterministic JSON string."""
+    return json.dumps(data, indent=2, sort_keys=True) + "\n"
+
+
 class ProposalProvenance(BaseModel):
     """Provenance tracking for a correspondence proposal."""
 
@@ -75,18 +96,7 @@ class ProposalSet(BaseModel):
 
     def to_yaml(self) -> str:
         """Serialize proposal set to deterministic YAML string."""
-        data = self.model_dump(mode="json")
-        block_style = False
-        sort_keys = True
-        allow_unicode = True
-        default_style = '"'
-        return yaml.dump(
-            data,
-            default_flow_style=block_style,
-            sort_keys=sort_keys,
-            allow_unicode=allow_unicode,
-            default_style=default_style,
-        )
+        return _deterministic_yaml(self.model_dump(mode="json"))
 
     @classmethod
     def from_yaml(cls, text: str | bytes) -> ProposalSet:
@@ -96,8 +106,7 @@ class ProposalSet(BaseModel):
 
     def to_json(self) -> str:
         """Serialize proposal set to deterministic JSON string."""
-        data = self.model_dump(mode="json")
-        return json.dumps(data, indent=2, sort_keys=True) + "\n"
+        return _deterministic_json(self.model_dump(mode="json"))
 
     @classmethod
     def from_json(cls, text: str | bytes) -> ProposalSet:
@@ -170,18 +179,7 @@ class ReconciliationResult(BaseModel):
 
     def to_yaml(self) -> str:
         """Serialize reconciliation result to deterministic YAML string."""
-        data = self.model_dump(mode="json")
-        block_style = False
-        sort_keys = True
-        allow_unicode = True
-        default_style = '"'
-        return yaml.dump(
-            data,
-            default_flow_style=block_style,
-            sort_keys=sort_keys,
-            allow_unicode=allow_unicode,
-            default_style=default_style,
-        )
+        return _deterministic_yaml(self.model_dump(mode="json"))
 
     @classmethod
     def from_yaml(cls, text: str | bytes) -> ReconciliationResult:
@@ -191,8 +189,7 @@ class ReconciliationResult(BaseModel):
 
     def to_json(self) -> str:
         """Serialize reconciliation result to deterministic JSON string."""
-        data = self.model_dump(mode="json")
-        return json.dumps(data, indent=2, sort_keys=True) + "\n"
+        return _deterministic_json(self.model_dump(mode="json"))
 
     @classmethod
     def from_json(cls, text: str | bytes) -> ReconciliationResult:

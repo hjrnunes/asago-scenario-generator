@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Sequence
 
 from asago_scenario_generator.models.correspondence import (
     AdjudicationHistoryItem,
@@ -125,9 +125,12 @@ def _proposal_from_evidence(
 def propose_correspondence(
     resource_map: SystemResourceMap | ResourceMapSnapshot | dict[str, Any],
     source_artifacts: Any = None,
-    adapters: list[Any] | None = None,
 ) -> ProposalSet:
-    """Generate deterministic correspondence proposals from resource map and source artifacts."""
+    """Generate deterministic correspondence proposals from resource map and source artifacts.
+
+    Proposers and adapters participate only through the evidence items in
+    ``source_artifacts``; no proposal is ever confirmed at proposal time.
+    """
     stpa_version, taxonomy_version, _, _ = _extract_versions_and_identifiers(
         resource_map
     )
@@ -152,10 +155,10 @@ def propose_correspondence(
 
 
 def _conflict_pairs(
-    sorted_proposals: list[Any],
+    sorted_proposals: Sequence[CorrespondenceProposal | ReconciledProposal],
 ) -> set[tuple[str, str]]:
     """Detect (left_ref, right_ref) pairs whose proposals disagree."""
-    pairs: dict[tuple[str, str], list[Any]] = {}
+    pairs: dict[tuple[str, str], list[CorrespondenceProposal | ReconciledProposal]] = {}
     for p in sorted_proposals:
         key = (p.left_ref, p.right_ref)
         pairs.setdefault(key, []).append(p)
@@ -237,7 +240,7 @@ def _confirmation_errors(
 
 
 def _adjudication_history(
-    p: Any,
+    p: CorrespondenceProposal | ReconciledProposal,
     target_adj: str,
     conflict_reason: str | None,
 ) -> list[AdjudicationHistoryItem]:
@@ -258,7 +261,7 @@ def _adjudication_history(
 
 def reconcile_correspondence(
     resource_map: SystemResourceMap | ResourceMapSnapshot | dict[str, Any],
-    proposals: ProposalSet | list[Any],
+    proposals: ProposalSet | Sequence[CorrespondenceProposal | ReconciledProposal],
     adjudications: dict[str, str] | None = None,
 ) -> ReconciliationResult:
     """Deterministically reconcile proposals into confirmed, rejected, or unresolved states."""
@@ -269,13 +272,9 @@ def reconcile_correspondence(
     if adjudications is None:
         adjudications = {}
 
-    # Extract raw proposal list
-    if isinstance(proposals, ProposalSet):
-        raw_list = proposals.proposals
-    elif isinstance(proposals, list):
-        raw_list = proposals
-    else:
-        raw_list = []
+    raw_list = (
+        proposals.proposals if isinstance(proposals, ProposalSet) else list(proposals)
+    )
 
     # Sort proposals canonically by proposal_id to ensure presentation order independence
     sorted_proposals = sorted(raw_list, key=lambda p: p.proposal_id)
