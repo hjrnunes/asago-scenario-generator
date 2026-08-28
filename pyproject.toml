@@ -36,15 +36,18 @@ dev = [
 [tool.uv]
 exclude-newer = "7 days"
 
-# Prune bulky non-package directories from mutate4py's workspace discovery:
-# its worker copies and py-file walk skip these instead of copying live-run
-# artifacts and scratch state into every per-worker tree.
+# Keep bulky non-package directories out of mutate4py's workspace
+# discovery and per-worker tree copies (the tool skips excluded dirs in
+# both). `build` must stay included: the migration-contract tests execute
+# the generated acceptance entrypoints and run inside mutation workers.
 [tool.uv.workspace]
 exclude = [
-    "build",
-    "dist",
     "output",
     "tmp",
+    "dist",
+    ".worktrees",
+    ".hypothesis",
+    "ai",
 ]
 
 [tool.hatch.build.targets.wheel.force-include]

@@ -78,16 +78,28 @@ Tool scope remains `src/`; Ruff also checks `acceptance/`.
 
 Mutation tooling details:
 
+- The mutation tool is the project fork `hjrnunes/mutate4py` (pinned in
+  `config/swarmforge.env`); the fork carries a worker-copy patch that
+  honors `[tool.uv.workspace].exclude` when materializing per-worker tree
+  copies, so the bulky directories excluded in `pyproject.toml`
+  (`output/`, `tmp/`, `.worktrees/`, ...) stay out of every worker.
+  `build` must remain absent from that exclude list: migration-contract
+  tests execute the generated acceptance entrypoints inside workers.
 - Manifests live in gitignored sidecar files (`<file>.manifest.json`,
   written with `--manifest-file`), so mutation runs never dirty tracked
-  sources. When no sidecar exists yet, a differential run selects all
-  covered sites once and records the sidecar.
+  sources. The sidecars inherit the differential state of the embedded
+  manifests they replaced.
 - `scripts/differential-mutation.sh` also builds a per-source test-context
   coverage db (`--build-test-contexts`, cached by the tool) so each mutant
   runs only the tests that cover its line. Set `ASAGO_MUTATION_CONTEXT_DB=0`
-  to skip narrowing.
+  to skip narrowing and select from the LCOV file alone. With narrowing
+  on, the tool hard-errors when a selected line is LCOV-covered but absent
+  from the db: the context list in `config/mutation-test-contexts.tsv`
+  is missing a test that covers that line — extend the list or run without
+  narrowing.
 - Stale `mutate4py` worker trees under `.mutate4py/workers/` are pruned to
-  the two most recent runs by `scripts/differential-mutation.sh`.
+  the two most recent runs by `scripts/differential-mutation.sh`; the tool
+  itself removes a completed run's trees.
 - The Gherkin mutation runner adapter
   (`acceptance/gherkin_mutation_runner.py`) gives every runner process a
   private scratch tree, so parallel `gherkin-mutator` workers never splice
