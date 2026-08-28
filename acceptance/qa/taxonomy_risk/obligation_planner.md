@@ -1,194 +1,165 @@
 # End-to-end QA: taxonomy obligation planner
 
-Drive a deterministic file-to-file obligation planner: a snapshot fixture
-file in, a published YAML or JSON plan artifact out. That invocation is
-a user-interface affordance; it is not `generate` or `stpa-run`, and it
-is not required as a new public CLI subcommand. Inspect the artifact
-with standard JSON/YAML readers, the console, and the filesystem. Do not
-import project modules, call `plan_obligations`, or contact an LLM
-endpoint. Never set `ASAGO_SCENARIO_GENERATOR_QA_PIPELINE`.
+Drive the public `plan-obligations` file adapter with complete typed input.
+The fixture contains full serialized `AttackPattern` and
+`CapabilityFactSnapshot` records from the shared offline projection factory.
+The planner derives candidate records from those authoritative records;
+callers do not provide candidate expansions or candidate identities.
 
-Use a fresh output directory for every case. The snapshot fixture pins
-closed schema metadata, catalog and mapping pins, a capability snapshot,
-qualification facts, and generation inputs. Digests must be computed
-from canonical content. The snapshot must not require a network or model
-client.
+Inspect the published YAML with standard readers and the console/filesystem.
+Do not call `generate` or `stpa-run`, import the planner directly, contact an
+LLM endpoint, or set `ASAGO_SCENARIO_GENERATOR_QA_PIPELINE`. Use a fresh output
+directory for every case. The acceptance runtime separately checks persisted
+plan tamper rejection through the closed model loader.
 
-Inspect only published plan fields and qualification-trace values. Do
-not assert that arbitrary words are absent from the whole serialized
-schema.
+Bounded projection may emit `budget_deferred` only for candidate identities and
+bindings actually derived and validated before the derivation-work limit.
+Remaining overflow is reported as typed limitation evidence, not inferred
+candidate rows. Projection and qualification evidence round-trips typed
+condition and precondition evaluations. Absent or explicitly unknown required
+qualification facts appear as `qualification_fact` readings with `result:
+unknown` and the corresponding status. An explicitly contradictory required
+fact remains `status: contradictory`, uses contradictory rationale, and
+classifies the row as `contradictory_evidence`; contradictory takes precedence
+over mixed absent/unknown readings, after capability exclusion.
 
-## QA-TOP-01: shared pattern keeps distinct risk-scoped obligations
+## QA-TOP-01: shared authoritative pattern keeps risk-scoped obligations
 
-1. Author a snapshot in which `atlas-prompt-injection` and
-   `atlas-memory-poisoning` both map as applicable to `AP-T1-01`.
-2. Produce the obligation-plan artifact.
-3. Inspect the ledger with a standard YAML or JSON reader.
+1. Build typed input with reviewed risks `risk-a` and `risk-b`, both mapped to
+   the full authoritative `AP-T1-01` record.
+2. Publish the YAML plan.
+3. Inspect rows, risk references, and obligation IDs.
 
-**Expected:** The ledger contains two obligations for `AP-T1-01`. Their
-identifiers differ. Each obligation retains its own risk identity
-(`atlas-prompt-injection` vs `atlas-memory-poisoning`). No network or
-model call is recorded.
+Expected: two rows retain both risk identities and have distinct obligation
+IDs. The same pattern does not collapse separate reviewed risks.
 
-## QA-TOP-02: applicable and capability-excluded relationships are both recorded
+## QA-TOP-02: governance-only risk remains visible
 
-1. Author a snapshot in which `atlas-prompt-injection` has an
-   applicable mapping to `AP-T6-01` and a capability-excluded mapping
-   to `AP-T11-01`.
-2. Produce the obligation-plan artifact.
-3. Inspect the scope dispositions in the ledger.
+1. Build typed input with only reviewed risk `risk-governance-only` and no
+   pattern mapping.
+2. Publish the YAML plan.
 
-**Expected:** The plan records scope disposition `applicable` for
-`atlas-prompt-injection`/`AP-T6-01` and scope disposition
-`capability_excluded` for `atlas-prompt-injection`/`AP-T11-01`. Neither
-relationship is omitted.
+Expected: exactly one row remains, with the original `risk_ref`,
+`governance_only` scope, `not_attempted` qualification and correspondence,
+and no invented attack-pattern ID.
 
-## QA-TOP-03: every expected relationship has one closed disposition on every axis
+## QA-TOP-03: candidate rows come from authoritative projection
 
-1. Author one snapshot with six expected relationships covering
-   capability-excluded, governance-only, missing-evidence,
-   contradictory-evidence, structurally-infeasible, and ready
-   outcomes.
-2. Produce the obligation-plan artifact.
-3. Count ledger rows and inspect each disposition axis.
+1. Build typed input with `risk-a`, the complete serialized `AP-T1-01`
+   `AttackPattern`, the complete serialized capability snapshot, and the
+   canonical catalog/mapping pins. The mapping-pin inventory contains the
+   unchanged `sssom` taxonomy-context pin plus the
+   `obligation_edges` pin at release `obligation-mapping-bundle-v1`, whose
+   digest covers the supplied cross-taxonomy and SSSOM rows.
+2. Publish the YAML plan.
+3. Compare the candidate ID, canonical ingress, and every resource binding
+   with the shared projection factory's derived candidate.
 
-**Expected:** The ledger contains exactly six obligations. Every
-obligation has exactly one scope disposition, exactly one
-qualification disposition, and correspondence disposition
-`not_assessed`. No expected relationship is missing from the ledger.
+Expected: the row has exactly the closed v1 fields and one candidate record.
+The candidate ID, ingress, and bindings match the authoritative projection;
+no caller-supplied candidate data is accepted.
 
-## QA-TOP-04: closed scope and qualification dispositions are explicit
+## QA-TOP-04: projection evidence is retained without leaking secrets
 
-1. Author separate snapshot cases for:
-   - capability-gated pattern `atlas-prompt-injection`/`AP-T11-01`
-     (scope `capability_excluded`, qualification `not_attempted`,
-     candidate projection `not_attempted`)
-   - missing qualification facts `atlas-memory-poisoning`/`AP-T1-01`
-     (scope `applicable`, qualification `missing_evidence`, candidate
-     projection `not_attempted`)
-   - contradictory facts `atlas-memory-poisoning`/`AP-T1-04` (scope
-     `applicable`, qualification `contradictory_evidence`, candidate
-     projection `not_attempted`)
-   - structurally infeasible `atlas-memory-poisoning`/`AP-T1-03`
-     (scope `applicable`, qualification `structurally_infeasible`,
-     candidate projection `not_attempted`)
-   - qualified projectable `atlas-prompt-injection`/`AP-T6-01` (scope
-     `applicable`, qualification `ready`, candidate projection
-     `projectable`)
-2. Produce a plan for each case.
-3. Inspect the matching ledger row.
+1. Add a deliberately recognizable secret as an additional typed, present
+   string fact (with its canonical reference key) and recompute the
+   domain-framed digest.
+2. Publish the plan and inspect row evidence and raw YAML bytes.
 
-**Expected:** Each case publishes exactly one obligation for the named
-risk and pattern, with the named scope, qualification, correspondence
-`not_assessed`, and candidate projection disposition, plus evidence
-for that relationship kind.
+Expected: authoritative projection evidence is retained, while the secret is
+absent from persisted row evidence and the YAML artifact.
 
-## QA-TOP-05: governance-only risks invent no pattern
+## QA-TOP-05: stale qualification digest fails closed
 
-1. Author a snapshot whose only risk is `atlas-orphan-risk` with no
-   actionable attack pattern.
-2. Produce the obligation-plan artifact.
-3. Inspect the ledger row for that risk.
+1. Replace the qualification facts `semantic_digest` with an all-zero digest.
+2. Run the public adapter.
 
-**Expected:** The ledger contains exactly one obligation for
-`atlas-orphan-risk`. Its scope disposition is `governance_only`. Its
-qualification disposition is `not_attempted`. Its correspondence
-disposition is `not_assessed`. It lists no attack-pattern ID.
+Expected: typed validation fails with a qualification/digest diagnostic and no
+partial YAML plan is published. The digest is content integrity, not caller
+identity.
 
-## QA-TOP-06: qualification traces omit secrets from sensitive values
+## QA-TOP-06: unknown candidate input is rejected
 
-1. Put an unmistakable configuration secret `SECRET_live_token_END` in
-   the snapshot environment or configuration surface.
-2. Make qualification applicable for `atlas-prompt-injection`/`AP-T6-01`
-   with predicate `deployment.attacker_code_execution_on_agent_host`,
-   facts `deployment.attacker_code_execution_on_agent_host=false`,
-   result `false`, and reason `fact present and unequal`.
-3. Produce the plan and inspect the qualification-trace predicate,
-   facts, result, and reason.
+1. Add the legacy `candidate_expansions` field to otherwise valid typed input.
+2. Run the public adapter.
 
-**Expected:** The trace records the predicate, facts, result, and
-reason. None of those sensitive trace values contains
-`SECRET_live_token_END`.
+Expected: the closed typed contract rejects the unknown field before planning;
+the diagnostic names `candidate_expansions`, and no partial plan is published.
 
-## QA-TOP-07: candidate records retain projection dispositions
+## QA-TOP-07: every identity-bearing input changes the row identity
 
-1. Make candidate projection applicable for
-   `atlas-prompt-injection`/`AP-T6-01`.
-2. Include:
-   - `cand:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` with projection
-     disposition `projectable` and reason `qualified combination`
-   - `cand:v2:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb` with projection
-     disposition `projection_infeasible` and reason
-     `missing required resource`
-   - `cand:v2:cccccccccccccccccccccccccccccccc` with projection
-     disposition `budget_deferred` and reason
-     `projection budget exhausted`
-3. Produce the plan and inspect candidate records.
+1. Produce a baseline plan.
+2. Produce paired plans changing exactly one of risk identity, the complete
+   authoritative pattern record, the complete capability snapshot, catalog
+   pin release, or mapping pin release.
+3. Compare obligation IDs and plan semantic digests.
 
-**Expected:** The obligation retains each candidate ID with its
-projection disposition and reason.
+Expected: each changed input produces a different obligation ID and semantic
+digest. Pattern and capability variants remain full, self-consistent records;
+an isolated pattern ID, pattern digest, or capability reference is not a
+valid substitute.
 
-## QA-TOP-08: planning records zero network and model calls
+## QA-TOP-08: public planning makes no external calls
 
-1. Use any snapshot that contains applicable and capability-excluded
-   relationships.
-2. Produce the plan while capturing call logs, endpoint logs, and
-   environment.
-3. Confirm `ASAGO_SCENARIO_GENERATOR_QA_PIPELINE` is unset.
+1. Publish a valid typed plan with the environment's live-model opt-in
+   removed.
+2. Inspect the command summary and captured environment/request evidence.
 
-**Expected:** Obligation planning recorded 0 network calls and 0 model
-calls. No LLM endpoint is contacted.
+Expected: the command reports `Network calls: 0` and `Model calls: 0`; no live
+endpoint is contacted.
 
-## QA-TOP-09: identity-bearing input changes change obligation IDs
+## QA-TOP-09: summary reconciles from emitted rows
 
-1. Author paired snapshots that otherwise share the remaining
-   identity-bearing inputs but differ in one of:
-   - risk ID `atlas-prompt-injection` versus `atlas-memory-poisoning`
-   - pattern ID `AP-T6-01` versus `AP-T1-01`
-   - capability snapshot `profile-v1` versus `profile-v2`
-   - catalog pin `atlas-2026.05` versus `atlas-2026.06`
-   - mapping pin `sssom-v1` versus `sssom-v2`
-2. Produce a plan from each snapshot.
-3. Compare obligation identifiers and semantic digests.
+1. Build input with two mapped risks and one reviewed risk with no mapping.
+2. Publish the plan.
+3. Recompute all summary counters from obligation rows and candidate records.
 
-**Expected:** Each pair has different obligation identifiers and
-different semantic digests.
+Expected: every summary value equals the recomputed value. The summary retains
+only the closed v1 counters and does not add taxonomy-correspondence or
+scenario-realization rates. All three reviewed risks remain represented.
 
-## QA-TOP-10: ICA prose keyword changes do not change the plan
+## QA-TOP-10: invalid projection budget fails before publication
 
-1. Author paired snapshots that share the same risks, patterns, and
-   pins but include ICA prose `the agent injects a prompt` versus
-   `the agent poisons memory`.
-2. Produce a plan from each snapshot.
-3. Compare obligation identifiers, semantic digests, and dispositions.
+1. Set `projection_budget.max_candidates` to zero in otherwise valid typed
+   input.
+2. Run the public adapter.
 
-**Expected:** Both plans have identical obligation identifiers,
-identical semantic digests, identical scope dispositions, and
-identical qualification dispositions.
+Expected: validation fails before planning and no partial YAML artifact is
+published.
 
-## QA-TOP-11: invalid scope and qualification combinations are rejected
+## QA-TOP-11: normalized equivalent typed inputs are byte-equivalent
 
-1. Author snapshots that would combine:
-   - scope `governance_only` with qualification `ready`
-   - scope `capability_excluded` with qualification `missing_evidence`
-   - scope `applicable` with qualification `not_attempted`
-2. Attempt to produce a plan for each combination.
-3. Inspect console output and the output directory.
+1. Build one typed input with a composed NFC risk identifier and one with the
+   canonically equivalent decomposed spelling.
+2. Plan both through the typed planner.
+3. Compare canonical semantic bytes, semantic digests, obligation IDs, and
+   derived candidate IDs.
 
-**Expected:** Planning is rejected. No partial plan is published. The
-result identifies the disposition combination as invalid.
+Expected: both plans have byte-equivalent canonical content and retain the
+same identities after input normalization.
 
-## QA-TOP-12: summary counts are derived from obligation rows
+## QA-TOP-12: ICA and scenario keyword prose is outside obligation planning
 
-1. Author a snapshot whose rows cover every summary category and
-   produce six obligations: four applicable, one governance-only, one
-   capability-excluded; among applicable rows, one ready, two
-   missing-or-contradictory, one structurally infeasible; among
-   candidate records, one projectable, one projection-infeasible, one
-   budget-deferred.
-2. Produce the plan and inspect the summary with a standard reader.
-3. Recompute the same counts from the obligation rows.
+1. Plan one typed input while carrying a baseline ICA/scenario prose fixture.
+2. Plan the same typed input while carrying different ICA and scenario
+   keyword prose.
+3. Compare the canonical plan bytes, semantic digest, and obligation IDs.
 
-**Expected:** The published summary matches those derived counts. The
-summary does not include a taxonomy correspondence rate or a scenario
-realization rate.
+Expected: changing either prose value has no effect on the obligation plan;
+the planner receives only `TaxonomyObligationInputs`.
+
+## QA-TOP-13: typed planning constructs no provider client and contacts no endpoint
+
+1. Run one real typed planner call with provider-client constructors patched to
+   fail and socket connection functions patched to fail while recording any
+   attempted activity.
+2. Inspect the recorded construction and connection counts.
+
+Expected: both counts are zero. The check is deterministic and does not
+   require a reachable endpoint or live-model opt-in.
+
+## Completion evidence
+
+The executable checks are in
+`acceptance/qa/taxonomy_risk/obligation_planner.py`. A successful run prints
+`Result: PASS` and leaves only untracked diagnostic evidence under `tmp/`.

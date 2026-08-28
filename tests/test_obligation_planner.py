@@ -1,1160 +1,658 @@
-"""Focused unit tests for taxonomy obligation planner."""
+"""Focused tests for the typed taxonomy-obligation planner seam."""
 
 from __future__ import annotations
 
+import unicodedata
+from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
 
 import pytest
 import yaml
 from pydantic import ValidationError
-from typer.testing import CliRunner
 
-from asago_scenario_generator.cli import app
-from asago_scenario_generator.models.obligation_plan import (
-    CandidateRecord,
-    TaxonomyObligationPlan,
-    TaxonomyObligationSnapshot,
+from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
+from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
+from asago_scenario_generator.models.attack_pattern_digests import (
+    compute_chain_semantic_digest,
 )
+from asago_scenario_generator.models.capability_profile import CapabilityProfile
+from asago_scenario_generator.pipeline.obligation_contracts import (
+    TaxonomyObligationInputs,
+)
+from asago_scenario_generator.pipeline import obligation_planner as planner_module
 from asago_scenario_generator.pipeline.obligation_planner import (
-    _json_serializable,
-    _sanitize_secrets,
-    plan_obligations,
+    plan_taxonomy_obligations,
+)
+from asago_scenario_generator.pipeline.projection import capture_capability_snapshot
+from asago_scenario_generator.pipeline.projection_authoritative import (
+    _derived_candidates,
+)
+from asago_scenario_generator.pipeline.projection_contracts import (
+    AuthoritativeProjectionObservation,
+    ProjectionBatch,
+    ProjectionBudget,
+    ProjectionLimitation,
+    canonical_json_bytes,
+)
+from asago_scenario_generator.pipeline.projection_qualification import (
+    compute_authoritative_catalog_pin,
+)
+from tests.helpers.obligation_factory import make_inputs, make_plan
+from tests.helpers.projection_factory import (
+    get_projected_candidate,
+    get_test_raw_pattern,
+    get_test_profile,
+    get_test_resolver,
+    get_test_snapshot,
 )
 
-runner = CliRunner()
 
+def test_shared_pattern_keeps_distinct_risk_scoped_obligations() -> None:
+    """Two reviewed risks reaching one pattern remain separate ledger rows."""
+    plan = make_plan(risk_ids=("risk-a", "risk-b"))
 
-def _rel(
-    risk_id: str,
-    pattern_id: str | None = None,
-    *,
-    scope: str | None = None,
-    disposition: str | None = "ready",
-) -> dict[str, Any]:
-    rel: dict[str, Any] = {
-        "risk_id": risk_id,
-        "pattern_id": pattern_id,
-        "disposition": disposition,
-    }
-    if scope is not None:
-        rel["scope"] = scope
-    return rel
-
-
-def _make_snapshot(**overrides: Any) -> TaxonomyObligationSnapshot:
-    defaults: dict[str, Any] = {
-        "taxonomy_version": "atlas-2026.05",
-        "mapping_version": "sssom-v1",
-        "qualification_ruleset_version": "catalog-qualification-v1",
-        "template_version": "scenario-envelope-v1",
-        "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "relationships": [],
-    }
-    defaults.update(overrides)
-    return TaxonomyObligationSnapshot(**defaults)
-
-
-def test_shared_pattern_distinct_risk_scoped_obligations() -> None:
-    snapshot = _make_snapshot(
-        relationships=[
-            _rel("atlas-prompt-injection", "AP-T1-01"),
-            _rel(
-                "atlas-memory-poisoning",
-                "AP-T1-01",
-                disposition="missing_evidence",
-            ),
-        ],
-    )
-
-    plan = plan_obligations(snapshot)
     assert len(plan.obligations) == 2
-    ob_prompt = next(
-        o for o in plan.obligations if o.risk_id == "atlas-prompt-injection"
-    )
-    ob_memory = next(
-        o for o in plan.obligations if o.risk_id == "atlas-memory-poisoning"
-    )
-
-    assert ob_prompt.pattern_id == "AP-T1-01"
-    assert ob_memory.pattern_id == "AP-T1-01"
-    assert ob_prompt.obligation_id != ob_memory.obligation_id
-    assert ob_prompt.obligation_id.startswith("ob:atlas-prompt-injection:AP-T1-01:")
-    assert ob_memory.obligation_id.startswith("ob:atlas-memory-poisoning:AP-T1-01:")
-    assert plan.network_calls == 0
-    assert plan.model_calls == 0
+    assert {row.risk_ref.risk_id for row in plan.obligations} == {"risk-a", "risk-b"}
+    assert len({row.obligation_id for row in plan.obligations}) == 2
+    assert all(row.attack_pattern_id == "AP-T1-01" for row in plan.obligations)
 
 
-def test_order_independence() -> None:
-    snapshot_a = _make_snapshot(
-        relationships=[
-            _rel("atlas-prompt-injection", "AP-T6-01"),
-            _rel(
-                "atlas-memory-poisoning",
-                "AP-T1-01",
-                disposition="missing_evidence",
-            ),
-        ],
-    )
-    snapshot_b = _make_snapshot(
-        relationships=[
-            _rel(
-                "atlas-memory-poisoning",
-                "AP-T1-01",
-                disposition="missing_evidence",
-            ),
-            _rel("atlas-prompt-injection", "AP-T6-01"),
-        ],
-    )
+def test_reviewed_risk_without_mapping_is_retained_for_governance() -> None:
+    """A risk with no resolved pattern is visible rather than silently dropped."""
+    plan = make_plan(risk_ids=("risk-governance",), include_mapping=False)
 
-    plan_a = plan_obligations(snapshot_a)
-    plan_b = plan_obligations(snapshot_b)
+    assert len(plan.obligations) == 1
+    row = plan.obligations[0]
+    assert row.risk_ref.risk_id == "risk-governance"
+    assert row.attack_pattern_id is None
+    assert row.scope_disposition == "governance_only"
+    assert row.qualification_disposition == "not_attempted"
+    assert row.candidate_records == ()
+    assert any(item.kind == "governance" for item in row.evidence)
 
-    assert [o.obligation_id for o in plan_a.obligations] == [
-        o.obligation_id for o in plan_b.obligations
+
+def test_every_mapping_path_is_retained_as_evidence() -> None:
+    """The planner preserves direct and transitive mapping paths."""
+    mappings = [
+        {
+            "source_id": "risk-path",
+            "target_id": "taxonomy-intermediate",
+            "relation": "risk_to_taxonomy",
+            "evidence": ["reviewed direct mapping"],
+        },
+        {
+            "source_id": "taxonomy-intermediate",
+            "target_id": "AP-T1-01",
+            "relation": "taxonomy_to_pattern",
+            "evidence": ["reviewed transitive mapping"],
+        },
+        {
+            "source_id": "risk-path",
+            "target_id": "AP-T1-01",
+            "relation": "direct_pattern_match",
+            "evidence": ["reviewed direct pattern mapping"],
+        },
     ]
-    assert plan_a.to_json() == plan_b.to_json()
-    assert plan_a.to_yaml() == plan_b.to_yaml()
+    plan = make_plan(risk_ids=("risk-path",), mappings=mappings)
+
+    mapping_evidence = [
+        item for item in plan.obligations[0].evidence if item.kind == "mapping"
+    ]
+    assert len(mapping_evidence) == 2
+    assert any("taxonomy-intermediate" in item.detail for item in mapping_evidence)
+    assert any("direct_pattern_match" in item.detail for item in mapping_evidence)
 
 
-def test_scope_and_terminal_dispositions() -> None:
-    snapshot = _make_snapshot(
-        relationships=[
-            _rel(
-                "atlas-prompt-injection",
-                "AP-T11-01",
-                scope="capability_excluded",
-                disposition="not_attempted",
-            ),
-            _rel(
-                "atlas-memory-poisoning",
-                "AP-T1-01",
-                disposition="missing_evidence",
-            ),
-            _rel(
-                "atlas-memory-poisoning",
-                "AP-T1-02",
-                disposition="structurally_infeasible",
-            ),
-            _rel(
-                "atlas-memory-poisoning",
-                "AP-T1-03",
-                disposition="contradictory_evidence",
-            ),
-            _rel("atlas-prompt-injection", "AP-T6-01"),
-            _rel("atlas-orphan-risk", disposition="governance_only"),
-        ],
-    )
+def test_candidates_are_derived_with_authoritative_ingress_and_bindings() -> None:
+    """Projected candidates carry the exact ingress and resource bindings."""
+    candidate = get_projected_candidate()
+    row = make_plan().obligations[0]
 
-    plan = plan_obligations(snapshot)
-    assert len(plan.obligations) == 6
-    dispositions = {
-        (o.risk_id, o.pattern_id): (
-            o.scope_disposition,
-            o.qualification_disposition,
-            o.projection_disposition,
+    records = {record.candidate_id: record for record in row.candidate_records}
+    record = records[candidate.candidate_id]
+    assert record.projection_disposition == "projectable"
+    assert record.canonical_ingress == candidate.canonical_ingress
+    assert record.resource_bindings == candidate.projection.bindings
+
+
+def test_deferred_observation_rejects_candidate_identity_collisions() -> None:
+    """A reused candidate digest cannot hide different derived content."""
+    candidate = get_projected_candidate()
+    collision = candidate.model_copy(update={"pattern_id": "AP-COLLISION"})
+    allocator = SimpleNamespace(
+        candidate_groups=(
+            SimpleNamespace(generated=(candidate,)),
+            SimpleNamespace(generated=(collision,)),
         )
-        for o in plan.obligations
-    }
-
-    assert dispositions[("atlas-prompt-injection", "AP-T11-01")] == (
-        "capability_excluded",
-        "not_attempted",
-        "not_attempted",
-    )
-    assert dispositions[("atlas-memory-poisoning", "AP-T1-01")] == (
-        "applicable",
-        "missing_evidence",
-        "not_attempted",
-    )
-    assert dispositions[("atlas-memory-poisoning", "AP-T1-02")] == (
-        "applicable",
-        "structurally_infeasible",
-        "not_attempted",
-    )
-    assert dispositions[("atlas-memory-poisoning", "AP-T1-03")] == (
-        "applicable",
-        "contradictory_evidence",
-        "not_attempted",
-    )
-    assert dispositions[("atlas-prompt-injection", "AP-T6-01")] == (
-        "applicable",
-        "ready",
-        "projectable",
-    )
-    assert dispositions[("atlas-orphan-risk", None)] == (
-        "governance_only",
-        "not_attempted",
-        "not_attempted",
     )
 
+    with pytest.raises(ValueError, match="candidate-v2 identity collision"):
+        _derived_candidates(allocator)
 
-def test_relationship_kind_derives_disposition() -> None:
-    snapshot = _make_snapshot(
-        relationships=[
-            {
-                "risk_id": "risk-gated",
-                "pattern_id": "AP-T1-01",
-                "relationship_kind": "gated threat",
-            },
-            {
-                "risk_id": "risk-missing",
-                "pattern_id": "AP-T1-02",
-                "relationship_kind": "missing generation template",
-            },
-            {
-                "risk_id": "risk-infeasible",
-                "pattern_id": "AP-T1-03",
-                "relationship_kind": "projection infeasibility",
-            },
-            {
-                "risk_id": "risk-unsupported",
-                "pattern_id": "AP-T1-04",
-                "relationship_kind": "unsupported requirement",
-            },
-            {
-                "risk_id": "risk-governance",
-                "pattern_id": "AP-T1-05",
-                "relationship_kind": "governance review",
-            },
-            {
-                "risk_id": "risk-generated",
-                "pattern_id": "AP-T1-06",
-                "relationship_kind": "qualified generable pattern",
-            },
-            {"risk_id": "risk-orphan"},
-        ],
+
+def test_budget_deferred_candidates_retain_authoritative_identity_and_bindings() -> (
+    None
+):
+    """A candidate output cap changes disposition, not candidate truth."""
+    profile_payload = get_test_profile().model_dump(mode="json")
+    profile_payload["entry_points"][1]["controllability"] = "direct"
+    snapshot = capture_capability_snapshot(
+        CapabilityProfile.model_validate(profile_payload),
+        get_test_snapshot().facts,
     )
-
-    plan = plan_obligations(snapshot)
-    dispositions = {
-        (o.risk_id, o.pattern_id): (
-            o.scope_disposition,
-            o.qualification_disposition,
-            o.projection_disposition,
+    complete_inputs = make_inputs(capability_snapshot=snapshot)
+    complete = plan_taxonomy_obligations(complete_inputs)
+    bounded = plan_taxonomy_obligations(
+        complete_inputs.model_copy(
+            update={
+                "projection_budget": ProjectionBudget(
+                    max_candidates=1,
+                    max_derivation_work=4096,
+                )
+            }
         )
-        for o in plan.obligations
+    )
+
+    complete_records = {
+        record.candidate_id: (record.canonical_ingress, record.resource_bindings)
+        for record in complete.obligations[0].candidate_records
     }
-
-    assert dispositions[("risk-gated", "AP-T1-01")] == (
-        "capability_excluded",
-        "not_attempted",
-        "not_attempted",
-    )
-    assert dispositions[("risk-missing", "AP-T1-02")] == (
-        "applicable",
-        "missing_evidence",
-        "not_attempted",
-    )
-    assert dispositions[("risk-infeasible", "AP-T1-03")] == (
-        "applicable",
-        "structurally_infeasible",
-        "not_attempted",
-    )
-    assert dispositions[("risk-unsupported", "AP-T1-04")] == (
-        "applicable",
-        "structurally_infeasible",
-        "not_attempted",
-    )
-    assert dispositions[("risk-governance", "AP-T1-05")] == (
-        "governance_only",
-        "not_attempted",
-        "not_attempted",
-    )
-    assert dispositions[("risk-generated", "AP-T1-06")] == (
-        "applicable",
-        "ready",
-        "projectable",
-    )
-    assert dispositions[("risk-orphan", None)] == (
-        "governance_only",
-        "not_attempted",
-        "not_attempted",
-    )
-
-
-def test_unknown_relationship_kind_defaults_to_ready() -> None:
-    snapshot = _make_snapshot(
-        relationships=[
-            {
-                "risk_id": "risk-x",
-                "pattern_id": "AP-T1-01",
-                "relationship_kind": "unclassified note",
-            },
-        ],
-    )
-
-    plan = plan_obligations(snapshot)
-    assert plan.obligations[0].scope_disposition == "applicable"
-    assert plan.obligations[0].qualification_disposition == "ready"
-    assert plan.obligations[0].projection_disposition == "projectable"
-
-
-def test_trace_matching_requires_risk_and_pattern() -> None:
-    snapshot = _make_snapshot(
-        relationships=[_rel("risk-a", "AP-T1-01")],
-        qualification_evaluations=[
-            {
-                "risk_id": "risk-a",
-                "pattern_id": "AP-T1-01",
-                "predicate": "exact.match",
-                "facts": "exact.match=true",
-                "result": "true",
-                "reason": "same risk and pattern",
-            },
-            {
-                "risk_id": "risk-a",
-                "pattern_id": "AP-T1-02",
-                "predicate": "wrong.pattern",
-                "facts": "wrong.pattern=true",
-                "result": "true",
-                "reason": "same risk other pattern",
-            },
-            {
-                "risk_id": "risk-b",
-                "pattern_id": "AP-T1-01",
-                "predicate": "wrong.risk",
-                "facts": "wrong.risk=true",
-                "result": "true",
-                "reason": "same pattern other risk",
-            },
-        ],
-    )
-
-    plan = plan_obligations(snapshot)
-    predicates = [t.predicate for t in plan.obligations[0].qualification_trace]
-
-    assert predicates == ["exact.match"]
-
-
-def test_expansion_matching_requires_risk_and_pattern() -> None:
-    snapshot = _make_snapshot(
-        relationships=[_rel("risk-a", "AP-T1-01")],
-        candidate_expansions=[
-            {
-                "risk_id": "risk-a",
-                "pattern_id": "AP-T1-01",
-                "accepted_candidates": [
-                    {
-                        "candidate_id": "cand:one",
-                        "projection_disposition": "projectable",
-                    },
-                    {
-                        "candidate_id": "cand:one",
-                        "projection_disposition": "projectable",
-                    },
-                ],
-                "rejected_candidates": [
-                    {
-                        "candidate_id": "cand:two",
-                        "projection_disposition": "projection_infeasible",
-                        "reason": "duplicate rejected",
-                    },
-                ],
-            },
-            {
-                "risk_id": "risk-a",
-                "pattern_id": "AP-T1-02",
-                "accepted_candidates": [
-                    {
-                        "candidate_id": "cand:other-pattern",
-                        "projection_disposition": "projectable",
-                    }
-                ],
-            },
-            {
-                "risk_id": "risk-b",
-                "pattern_id": "AP-T1-01",
-                "accepted_candidates": [
-                    {
-                        "candidate_id": "cand:other-risk",
-                        "projection_disposition": "projectable",
-                    }
-                ],
-            },
-        ],
-    )
-
-    plan = plan_obligations(snapshot)
-    ob = plan.obligations[0]
-
-    assert len(ob.candidate_records) == 2
-    assert ob.candidate_records[0].candidate_id == "cand:one"
-    assert ob.candidate_records[1].candidate_id == "cand:two"
-
-
-def test_non_string_config_values_are_ignored_as_secrets() -> None:
-    snapshot = _make_snapshot(
-        config={"api_key": 12345, "blank": "   ", "real": "sekret-token"},
-        relationships=[_rel("risk-a", "AP-T1-01")],
-        qualification_evaluations=[
-            {
-                "risk_id": "risk-a",
-                "pattern_id": "AP-T1-01",
-                "predicate": "pred sekret-token tail",
-                "facts": "f=1",
-                "result": "true",
-                "reason": "evaluated",
-            },
-        ],
-    )
-
-    plan = plan_obligations(snapshot)
-    trace = plan.obligations[0].qualification_trace[0]
-
-    assert trace.predicate == "pred [REDACTED] tail"
-    assert "sekret-token" not in plan.to_json()
-
-
-def test_yaml_artifact_is_block_style_with_sorted_keys() -> None:
-    snapshot = _make_snapshot(relationships=[_rel("risk-a", "AP-T1-01")])
-    text = plan_obligations(snapshot).to_yaml()
-
-    assert "semantic_digest: " in text
-    assert list(yaml.safe_load(text)) == sorted(yaml.safe_load(text))
-
-
-def test_unicode_ids_survive_yaml_serialization() -> None:
-    snapshot = _make_snapshot(
-        relationships=[_rel("risco-falha-é", "AP-T1-01")],
-    )
-
-    plan = plan_obligations(snapshot)
-    text = plan.to_yaml()
-
-    assert "risco-falha-é" in text
-    assert TaxonomyObligationPlan.from_yaml(text) == plan
-
-
-def test_traces_pass_through_without_secrets() -> None:
-    snapshot = _make_snapshot(
-        relationships=[_rel("risk-a", "AP-T1-01")],
-        qualification_evaluations=[
-            {
-                "risk_id": "risk-a",
-                "pattern_id": "AP-T1-01",
-                "predicate": "pred",
-                "facts": "f=1",
-                "result": "true",
-                "reason": "evaluated",
-            },
-        ],
-    )
-
-    plan = plan_obligations(snapshot)
-    trace = plan.obligations[0].qualification_trace[0]
-
-    assert trace.predicate == "pred"
-    assert trace.facts == "f=1"
-    assert trace.reason == "evaluated"
-
-
-def test_structured_fact_values_are_sanitized() -> None:
-    snapshot = _make_snapshot(
-        config={"real": "sekret-token"},
-        relationships=[_rel("risk-a", "AP-T1-01")],
-        qualification_evaluations=[
-            {
-                "risk_id": "risk-a",
-                "pattern_id": "AP-T1-01",
-                "predicate": "pred",
-                "facts": {"env": "value sekret-token", "tags": ["a sekret-token"]},
-                "result": "true",
-                "reason": "evaluated",
-            },
-        ],
-    )
-
-    plan = plan_obligations(snapshot)
-    trace = plan.obligations[0].qualification_trace[0]
-
-    assert trace.facts == {"env": "value [REDACTED]", "tags": ["a [REDACTED]"]}
-    assert "sekret-token" not in plan.to_yaml() + plan.to_json()
-
-
-def test_plan_accepts_raw_dict_snapshot() -> None:
-    snapshot = {
-        "taxonomy_version": "atlas-2026.05",
-        "mapping_version": "sssom-v1",
-        "qualification_ruleset_version": "catalog-qualification-v1",
-        "template_version": "scenario-envelope-v1",
-        "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "relationships": [_rel("risk-a", "AP-T1-01")],
+    bounded_records = {
+        record.candidate_id: (record.canonical_ingress, record.resource_bindings)
+        for record in bounded.obligations[0].candidate_records
     }
+    dispositions = [
+        record.projection_disposition
+        for record in bounded.obligations[0].candidate_records
+    ]
 
-    plan = plan_obligations(snapshot)
+    assert len(complete_records) == 2
+    assert bounded_records == complete_records
+    assert dispositions.count("projectable") == 1
+    assert dispositions.count("budget_deferred") == 1
+    assert bounded.summary.projectable == 1
+    assert bounded.summary.budget_deferred == 1
 
-    assert len(plan.obligations) == 1
-    assert plan.obligations[0].risk_id == "risk-a"
 
-
-def test_governance_only_risk_without_pattern() -> None:
-    snapshot = _make_snapshot(
-        relationships=[
-            {
-                "risk_id": "atlas-orphan-risk",
-                "scope_disposition": "governance_only",
-                "qualification_disposition": "not_attempted",
-                "projection_disposition": "not_attempted",
+def test_derivation_work_limit_does_not_synthesize_deferred_candidates() -> None:
+    """Unknown overflow remains a limitation, never a fabricated candidate."""
+    profile_payload = get_test_profile().model_dump(mode="json")
+    profile_payload["entry_points"][1]["controllability"] = "direct"
+    snapshot = capture_capability_snapshot(
+        CapabilityProfile.model_validate(profile_payload),
+        get_test_snapshot().facts,
+    )
+    complete_inputs = make_inputs(capability_snapshot=snapshot)
+    complete = plan_taxonomy_obligations(complete_inputs)
+    work_limited = plan_taxonomy_obligations(
+        complete_inputs.model_copy(
+            update={
+                "projection_budget": ProjectionBudget(
+                    max_candidates=1,
+                    max_derivation_work=1,
+                )
             }
-        ],
+        )
+    )
+    complete_ids = {
+        record.candidate_id for record in complete.obligations[0].candidate_records
+    }
+    limited_records = work_limited.obligations[0].candidate_records
+
+    assert len(complete_ids) == 2
+    assert len(limited_records) == 1
+    assert limited_records[0].candidate_id in complete_ids
+    assert limited_records[0].projection_disposition == "projectable"
+    assert work_limited.summary.budget_deferred == 0
+    assert any(
+        evidence.source == "derivation_work_exhausted"
+        for evidence in work_limited.obligations[0].evidence
     )
 
-    plan = plan_obligations(snapshot)
-    assert len(plan.obligations) == 1
-    ob = plan.obligations[0]
-    assert ob.risk_id == "atlas-orphan-risk"
-    assert ob.pattern_id is None
-    assert ob.scope_disposition == "governance_only"
-    assert ob.qualification_disposition == "not_attempted"
-    assert ob.projection_disposition == "not_attempted"
-    assert ob.obligation_id.startswith("ob:atlas-orphan-risk:")
 
-
-def test_qualification_trace_omits_secrets() -> None:
-    secret_token = "**************************"
-    snapshot = _make_snapshot(
-        config={"api_key": secret_token, "custom_secret": secret_token},
-        relationships=[_rel("atlas-prompt-injection", "AP-T6-01")],
-        qualification_evaluations=[
-            {
-                "risk_id": "atlas-prompt-injection",
-                "pattern_id": "AP-T6-01",
-                "predicate": "deployment.attacker_code_execution_on_agent_host",
-                "facts": "deployment.attacker_code_execution_on_agent_host=false",
-                "result": "false",
-                "reason": "fact present and unequal",
-            }
-        ],
-    )
-
-    plan = plan_obligations(snapshot)
-    serialized_yaml = plan.to_yaml()
-    serialized_json = plan.to_json()
-
-    assert secret_token not in serialized_yaml
-    assert secret_token not in serialized_json
-    ob = plan.obligations[0]
-    assert len(ob.qualification_trace) == 1
-    assert (
-        ob.qualification_trace[0].predicate
-        == "deployment.attacker_code_execution_on_agent_host"
-    )
-    assert ob.qualification_trace[0].result == "false"
-    assert ob.qualification_trace[0].reason == "fact present and unequal"
-
-
-def test_candidate_expansion_evidence_retained() -> None:
-    snapshot = _make_snapshot(
-        relationships=[_rel("atlas-prompt-injection", "AP-T6-01")],
-        candidate_expansions=[
-            {
-                "risk_id": "atlas-prompt-injection",
-                "pattern_id": "AP-T6-01",
-                "accepted_candidates": [
-                    {
-                        "candidate_id": "cand:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                        "projection_disposition": "projectable",
-                    }
-                ],
-                "rejected_candidates": [
-                    {
-                        "candidate_id": "cand:v2:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-                        "projection_disposition": "projection_infeasible",
-                        "reason": "rule rejected combination",
-                    }
-                ],
-            }
-        ],
-    )
-
-    plan = plan_obligations(snapshot)
-    ob = plan.obligations[0]
-    assert len(ob.candidate_records) == 2
-    assert (
-        ob.candidate_records[0].candidate_id
-        == "cand:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    )
-    assert (
-        ob.candidate_records[1].candidate_id
-        == "cand:v2:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    )
-    assert ob.candidate_records[1].reason == "rule rejected combination"
-
-
-def test_plan_obligations_cli_writes_yaml_and_json(tmp_path: Path) -> None:
-    snapshot = _make_snapshot(
-        relationships=[
-            _rel("atlas-prompt-injection", "AP-T6-01"),
-            _rel("atlas-orphan-risk", disposition="governance_only"),
-        ],
-    )
-    snapshot_path = tmp_path / "snapshot.yaml"
-    snapshot_path.write_text(
-        yaml.safe_dump(snapshot.model_dump(mode="json")), encoding="utf-8"
-    )
-    output_dir = tmp_path / "plan"
-
-    result = runner.invoke(
-        app,
-        [
-            "plan-obligations",
-            "--snapshot",
-            str(snapshot_path),
-            "--output-dir",
-            str(output_dir),
-        ],
-    )
-
-    assert result.exit_code == 0, result.stderr
-    yaml_path = output_dir / "taxonomy-obligation-plan.yaml"
-    json_path = output_dir / "taxonomy-obligation-plan.json"
-    assert yaml_path.is_file()
-    assert json_path.is_file()
-    assert f"Obligation plan written to {yaml_path}" in result.stdout
-    assert "Network calls: 0" in result.stdout
-    assert "Model calls:   0" in result.stdout
-    loaded = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
-    assert loaded["network_calls"] == 0
-    assert loaded["model_calls"] == 0
-    assert len(loaded["obligations"]) == 2
-
-
-@pytest.mark.parametrize("format_name", ["yaml", "json"])
-def test_plan_obligations_cli_writes_only_requested_format(
-    tmp_path: Path, format_name: str
+def test_pattern_local_limitation_keeps_empty_projection_qualified(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    snapshot = _make_snapshot(relationships=[_rel("risk-a", "AP-T1-01")])
-    snapshot_path = tmp_path / "snapshot.yaml"
-    snapshot_path.write_text(
-        yaml.safe_dump(snapshot.model_dump(mode="json")), encoding="utf-8"
-    )
-    output_dir = tmp_path / "plan"
-
-    result = runner.invoke(
-        app,
-        [
-            "plan-obligations",
-            "--snapshot",
-            str(snapshot_path),
-            "--output-dir",
-            str(output_dir),
-            "--format",
-            format_name,
-        ],
-    )
-
-    assert result.exit_code == 0, result.stderr
-    yaml_path = output_dir / "taxonomy-obligation-plan.yaml"
-    json_path = output_dir / "taxonomy-obligation-plan.json"
-    assert yaml_path.is_file() == (format_name == "yaml")
-    assert json_path.is_file() == (format_name == "json")
-
-
-def test_plan_obligations_cli_rejects_missing_snapshot(tmp_path: Path) -> None:
-    missing = tmp_path / "missing" / "snapshot.yaml"
-    result = runner.invoke(
-        app,
-        [
-            "plan-obligations",
-            "--snapshot",
-            str(missing),
-            "--output-dir",
-            str(tmp_path / "plan"),
-        ],
-    )
-
-    assert result.exit_code == 1
-    assert f"Error: obligation snapshot not found: {missing}" in result.stderr
-
-
-def test_validate_obligation_plan_cli_accepts_published_yaml(tmp_path: Path) -> None:
-    snapshot = _make_snapshot(relationships=[_rel("risk-a", "AP-T1-01")])
-    snapshot_path = tmp_path / "snapshot.yaml"
-    snapshot_path.write_text(
-        yaml.safe_dump(snapshot.model_dump(mode="json")), encoding="utf-8"
-    )
-    output_dir = tmp_path / "plan"
-    published = runner.invoke(
-        app,
-        [
-            "plan-obligations",
-            "--snapshot",
-            str(snapshot_path),
-            "--output-dir",
-            str(output_dir),
-            "--format",
-            "yaml",
-        ],
-    )
-    assert published.exit_code == 0, published.stderr
-    plan_path = output_dir / "taxonomy-obligation-plan.yaml"
-
-    result = runner.invoke(app, ["validate-obligation-plan", "--plan", str(plan_path)])
-
-    assert result.exit_code == 0, result.stderr
-    assert f"Obligation plan valid: {plan_path}" in result.stdout
-    assert "Schema version: taxonomy-obligation-plan-v1" in result.stdout
-
-
-def test_validate_obligation_plan_cli_accepts_published_json(tmp_path: Path) -> None:
-    snapshot = _make_snapshot(relationships=[_rel("risk-a", "AP-T1-01")])
-    snapshot_path = tmp_path / "snapshot.yaml"
-    snapshot_path.write_text(
-        yaml.safe_dump(snapshot.model_dump(mode="json")), encoding="utf-8"
-    )
-    output_dir = tmp_path / "plan"
-    published = runner.invoke(
-        app,
-        [
-            "plan-obligations",
-            "--snapshot",
-            str(snapshot_path),
-            "--output-dir",
-            str(output_dir),
-            "--format",
-            "json",
-        ],
-    )
-    assert published.exit_code == 0, published.stderr
-    plan_path = output_dir / "taxonomy-obligation-plan.json"
-
-    result = runner.invoke(app, ["validate-obligation-plan", "--plan", str(plan_path)])
-
-    assert result.exit_code == 0, result.stderr
-    assert f"Obligation plan valid: {plan_path}" in result.stdout
-
-
-def test_validate_obligation_plan_cli_rejects_digest_mismatch(tmp_path: Path) -> None:
-    snapshot = _make_snapshot(relationships=[_rel("risk-a", "AP-T1-01")])
-    snapshot_path = tmp_path / "snapshot.yaml"
-    snapshot_path.write_text(
-        yaml.safe_dump(snapshot.model_dump(mode="json")), encoding="utf-8"
-    )
-    output_dir = tmp_path / "plan"
-    published = runner.invoke(
-        app,
-        [
-            "plan-obligations",
-            "--snapshot",
-            str(snapshot_path),
-            "--output-dir",
-            str(output_dir),
-            "--format",
-            "yaml",
-        ],
-    )
-    assert published.exit_code == 0, published.stderr
-    plan_path = output_dir / "taxonomy-obligation-plan.yaml"
-    payload = yaml.safe_load(plan_path.read_text(encoding="utf-8"))
-    payload["catalog_pins"]["tampered"] = "atlas-tampered-2099"
-    plan_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
-
-    result = runner.invoke(app, ["validate-obligation-plan", "--plan", str(plan_path)])
-
-    assert result.exit_code == 1
-    assert "Digest mismatch" in result.stderr
-
-
-def test_validate_obligation_plan_cli_rejects_missing_plan(tmp_path: Path) -> None:
-    missing = tmp_path / "missing" / "taxonomy-obligation-plan.yaml"
-    result = runner.invoke(app, ["validate-obligation-plan", "--plan", str(missing)])
-
-    assert result.exit_code == 1
-    assert f"Error: obligation plan not found: {missing}" in result.stderr
-
-
-@pytest.mark.parametrize(
-    ("disposition", "expected"),
-    [
-        ("gated", ("capability_excluded", "not_attempted", "not_attempted")),
-        ("governance-only", ("governance_only", "not_attempted", "not_attempted")),
-        ("missing-template", ("applicable", "missing_evidence", "not_attempted")),
-        ("infeasible", ("applicable", "structurally_infeasible", "not_attempted")),
-        ("unsupported", ("applicable", "structurally_infeasible", "not_attempted")),
-        ("generated", ("applicable", "ready", "projectable")),
-    ],
-)
-def test_legacy_dispositions_map_to_contract_dispositions(
-    disposition: str, expected: tuple[str, str, str]
-) -> None:
-    snapshot = _make_snapshot(
-        relationships=[_rel("risk-a", "AP-T1-01", disposition=disposition)],
-    )
-
-    plan = plan_obligations(snapshot)
-    ob = plan.obligations[0]
-
-    assert (
-        ob.scope_disposition,
-        ob.qualification_disposition,
-        ob.projection_disposition,
-    ) == expected
-
-
-def test_legacy_not_attempted_without_pattern_is_governance_only() -> None:
-    snapshot = _make_snapshot(
-        relationships=[_rel("risk-orphan", None, disposition="not_attempted")],
-    )
-
-    plan = plan_obligations(snapshot)
-    ob = plan.obligations[0]
-
-    assert (
-        ob.scope_disposition,
-        ob.qualification_disposition,
-        ob.projection_disposition,
-    ) == (
-        "governance_only",
-        "not_attempted",
-        "not_attempted",
-    )
-
-
-def test_unknown_legacy_disposition_falls_back_to_kind_derivation() -> None:
-    snapshot = _make_snapshot(
-        relationships=[_rel("risk-a", "AP-T1-01", disposition="mystery")],
-    )
-
-    plan = plan_obligations(snapshot)
-    ob = plan.obligations[0]
-
-    assert ob.scope_disposition == "applicable"
-    assert ob.qualification_disposition == "ready"
-    assert ob.projection_disposition == "projectable"
-
-
-def test_legacy_excluded_scope_with_conflicting_projection_is_rejected() -> None:
-    snapshot = _make_snapshot(
-        relationships=[
-            {
-                "risk_id": "risk-a",
-                "pattern_id": "AP-T1-01",
-                "disposition": "governance-only",
-                "projection_disposition": "projectable",
-            }
-        ],
-    )
-
-    with pytest.raises(ValueError, match="Invalid disposition combination"):
-        plan_obligations(snapshot)
-
-
-def test_explicit_pins_take_precedence_over_legacy_aliases() -> None:
-    snapshot = _make_snapshot(
-        catalog_pin="atlas-modern",
-        taxonomy_version="atlas-legacy",
-        mapping_pin="sssom-modern",
-        mapping_version="sssom-legacy",
-    )
-
-    plan = plan_obligations(snapshot)
-
-    assert plan.catalog_pins["catalog"] == "atlas-modern"
-    assert plan.mapping_pins["mapping"] == "sssom-modern"
-
-
-def test_canonical_json_serialization_is_key_order_independent() -> None:
-    assert _json_serializable({"a": 1, "b": 2}) == _json_serializable({"b": 2, "a": 1})
-
-
-@pytest.mark.parametrize(
-    ("scope", "expected"),
-    [
-        ("in-scope", ("applicable", "ready", "projectable")),
-        ("out-of-scope", ("capability_excluded", "not_attempted", "not_attempted")),
-    ],
-)
-def test_explicit_scope_aliases_are_normalized(
-    scope: str, expected: tuple[str, str, str]
-) -> None:
-    snapshot = _make_snapshot(
-        relationships=[_rel("risk-a", "AP-T1-01", scope=scope, disposition=None)],
-    )
-
-    plan = plan_obligations(snapshot)
-    ob = plan.obligations[0]
-
-    assert (
-        ob.scope_disposition,
-        ob.qualification_disposition,
-        ob.projection_disposition,
-    ) == expected
-
-
-@pytest.mark.parametrize(
-    ("scope", "qualification", "projection", "message"),
-    [
-        (
-            "governance_only",
-            "ready",
-            "not_attempted",
-            "scope 'governance_only' cannot be combined with qualification 'ready'",
-        ),
-        (
-            "capability_excluded",
-            "ready",
-            "not_attempted",
-            "scope 'capability_excluded' cannot be combined with qualification 'ready'",
-        ),
-        (
-            "applicable",
-            "not_attempted",
-            "not_attempted",
-            "scope 'applicable' cannot be combined with qualification 'not_attempted'",
-        ),
-        (
-            "applicable",
-            "missing_evidence",
-            "projectable",
-            "qualification 'missing_evidence' cannot be combined with projection 'projectable'",
-        ),
-        (
-            "applicable",
-            "bogus_qualification",
-            "not_attempted",
-            "Invalid qualification disposition 'bogus_qualification' for scope 'applicable'",
-        ),
-    ],
-)
-def test_invalid_disposition_combinations_are_rejected(
-    scope: str,
-    qualification: str,
-    projection: str,
-    message: str,
-) -> None:
-    snapshot = _make_snapshot(
-        relationships=[
-            {
-                "risk_id": "risk-a",
-                "pattern_id": "AP-T1-01",
-                "scope_disposition": scope,
-                "qualification_disposition": qualification,
-                "projection_disposition": projection,
-            }
-        ],
-    )
-
-    with pytest.raises(ValueError, match=message):
-        plan_obligations(snapshot)
-
-
-def test_summary_counts_follow_candidate_records_when_present() -> None:
-    snapshot = _make_snapshot(
-        relationships=[
-            _rel("risk-a", "AP-T1-01"),
-            _rel("risk-b", "AP-T1-02", disposition="missing_evidence"),
-        ],
-        candidate_expansions=[
-            {
-                "risk_id": "risk-a",
-                "pattern_id": "AP-T1-01",
-                "candidates": [
-                    {
-                        "candidate_id": "cand:one",
-                        "projection_disposition": "projectable",
-                        "reason": "ready",
-                    },
-                    {
-                        "candidate_id": "cand:two",
-                        "projection_disposition": "projection_infeasible",
-                        "reason": "infeasible",
-                    },
-                    {
-                        "candidate_id": "cand:three",
-                        "projection_disposition": "budget_deferred",
-                        "reason": "deferred",
-                    },
-                ],
-            }
-        ],
-    )
-
-    plan = plan_obligations(snapshot)
-    summary = plan.summary
-
-    assert summary.total == 2
-    assert summary.applicable == 2
-    assert summary.ready == 1
-    assert summary.missing_or_contradictory == 1
-    assert summary.projectable == 1
-    assert summary.projection_infeasible == 1
-    assert summary.budget_deferred == 1
-
-
-def test_summary_counts_follow_obligation_rows_without_candidate_records() -> None:
-    snapshot = _make_snapshot(
-        relationships=[
-            _rel("risk-a", "AP-T1-01"),
-            _rel(
-                "risk-gated",
-                "AP-T1-02",
-                scope="capability_excluded",
-                disposition="not_attempted",
+    """A bounded result applies only its own pattern limitation fallback."""
+    inputs = make_inputs()
+    observation = AuthoritativeProjectionObservation(
+        batch=ProjectionBatch(
+            capability_fact_snapshot_digest=inputs.capability_snapshot.snapshot_digest,
+            candidates=(),
+            infeasibilities=(),
+            limitations=(
+                ProjectionLimitation(
+                    code="derivation_work_exhausted",
+                    pattern_id="AP-T1-01",
+                    total_compatible_bindings=1,
+                    emitted_bindings=0,
+                ),
             ),
-            _rel("risk-orphan", disposition="governance_only"),
-            _rel("risk-missing", "AP-T1-03", disposition="missing_evidence"),
-            _rel(
-                "risk-contradictory", "AP-T1-04", disposition="contradictory_evidence"
-            ),
-            _rel("risk-struct", "AP-T1-05", disposition="structurally_infeasible"),
-        ],
+        )
+    )
+    monkeypatch.setattr(
+        planner_module,
+        "project_authoritative_candidate_observations",
+        lambda *_args, **_kwargs: observation,
     )
 
-    plan = plan_obligations(snapshot)
-    summary = plan.summary
+    row = plan_taxonomy_obligations(inputs).obligations[0]
 
-    assert summary.total == 6
-    assert summary.applicable == 4
-    assert summary.governance_only == 1
-    assert summary.capability_excluded == 1
-    assert summary.ready == 1
-    assert summary.missing_or_contradictory == 2
-    assert summary.structurally_infeasible == 1
-    assert summary.projectable == 1
-    assert summary.projection_infeasible == 0
-    assert summary.budget_deferred == 0
+    assert row.qualification_disposition == "ready"
+    assert row.candidate_records == ()
+    assert any(
+        evidence.source == "derivation_work_exhausted" for evidence in row.evidence
+    )
 
 
-def test_sanitize_secrets_passes_through_other_scalars() -> None:
-    secrets = {"sekret-token"}
+def test_projection_rejections_are_retained_as_typed_candidate_records() -> None:
+    """A structural projection rejection remains countable and explainable."""
+    profile_payload = get_test_profile().model_dump(mode="json")
+    profile_payload["entry_points"] = [
+        {**entry_point, "direction": "output"}
+        for entry_point in profile_payload["entry_points"]
+    ]
+    snapshot = capture_capability_snapshot(
+        CapabilityProfile.model_validate(profile_payload),
+        get_test_snapshot().facts,
+    )
 
-    assert _sanitize_secrets(4104, secrets) == 4104
-    assert _sanitize_secrets(None, secrets) is None
-    assert _sanitize_secrets({"facts": 4104}, secrets) == {"facts": 4104}
-    assert _sanitize_secrets("no secret here", set()) == "no secret here"
+    plan = plan_taxonomy_obligations(make_inputs(capability_snapshot=snapshot))
+    row = plan.obligations[0]
+
+    assert row.qualification_disposition == "structurally_infeasible"
+    assert len(row.candidate_records) == 1
+    record = row.candidate_records[0]
+    assert record.projection_disposition == "projection_infeasible"
+    assert record.canonical_ingress is None
+    assert record.resource_bindings == ()
+    assert record.reason == "no compatible canonical entry_point resource for slot"
+    assert len(record.evidence) == 1
+    assert record.evidence[0].source == "missing_compatible_resource"
+    assert plan.summary.projection_infeasible == 1
 
 
-def test_excluded_scope_with_unsettled_projection_is_rejected() -> None:
-    snapshot = _make_snapshot(
-        relationships=[
-            {
-                "risk_id": "risk-a",
-                "pattern_id": "AP-T1-01",
-                "scope_disposition": "capability_excluded",
-                "qualification_disposition": "not_attempted",
-                "projection_disposition": "projectable",
+def test_unsupported_projection_is_retained_with_concrete_rejection_evidence() -> None:
+    """Unsupported derivation produces a deterministic rejected candidate row."""
+    raw_pattern = deepcopy(get_test_raw_pattern())
+    raw_pattern["canonical_chain"]["steps"][0]["resource_links"] = []
+    raw_pattern["canonical_chain"]["semantic_digest"] = compute_chain_semantic_digest(
+        raw_pattern["canonical_chain"]
+    )
+    pattern = AttackPattern.model_validate(raw_pattern)
+    catalog_digest = compute_authoritative_catalog_pin(
+        [pattern.model_dump(mode="json")],
+        get_test_resolver(),
+    )
+
+    plan = plan_taxonomy_obligations(
+        make_inputs(
+            pattern=pattern,
+            catalog_pins={
+                "atlas": {
+                    "release": "v1",
+                    "digest": catalog_digest,
+                }
+            },
+        )
+    )
+    row = plan.obligations[0]
+
+    assert row.qualification_disposition == "structurally_infeasible"
+    assert len(row.candidate_records) == 1
+    record = row.candidate_records[0]
+    assert record.projection_disposition == "projection_infeasible"
+    assert record.reason == (
+        "no activation mechanism (ingress or source_influence) among selected steps"
+    )
+    assert record.evidence[0].source == "unsupported_requirement_derivation"
+    assert plan.summary.projection_infeasible == 1
+
+
+def test_capability_exclusion_precedes_absent_separate_qualification_facts() -> None:
+    """An incompatible profile is excluded without attempting qualification."""
+    raw_pattern = deepcopy(get_test_raw_pattern())
+    raw_pattern["prerequisite_capabilities"]["kc_requires"] = {
+        "all": ["KC2.1"],
+        "any": [],
+    }
+    pattern = AttackPattern.model_validate(raw_pattern)
+    catalog_digest = compute_authoritative_catalog_pin(
+        [pattern.model_dump(mode="json")],
+        get_test_resolver(),
+    )
+    payload = make_inputs(
+        pattern=pattern,
+        catalog_pins={
+            "atlas": {
+                "release": "v1",
+                "digest": catalog_digest,
             }
-        ],
+        },
+    ).model_dump(mode="json")
+    payload["qualification_facts"] = {"facts": {}}
+
+    plan = plan_taxonomy_obligations(TaxonomyObligationInputs.model_validate(payload))
+    row = plan.obligations[0]
+
+    assert row.scope_disposition == "capability_excluded"
+    assert row.qualification_disposition == "not_attempted"
+    assert row.candidate_records == ()
+    assert any(
+        evidence.kind == "projection" and evidence.source == "incompatible_profile"
+        for evidence in row.evidence
     )
 
-    with pytest.raises(
-        ValueError,
-        match="scope 'capability_excluded' cannot be combined with projection 'projectable'",
+
+def test_contradictory_qualification_fact_is_retained_as_contradictory_evidence() -> (
+    None
+):
+    """Contradictory required facts block readiness without becoming unknown."""
+    payload = make_inputs().model_dump(mode="json")
+    qualification = payload["qualification_facts"]
+    fact_key = next(iter(qualification["facts"]))
+    qualification["facts"][fact_key]["status"] = "contradictory"
+    qualification["facts"][fact_key]["value"] = None
+    qualification["semantic_digest"] = None
+
+    plan = plan_taxonomy_obligations(TaxonomyObligationInputs.model_validate(payload))
+    row = plan.obligations[0]
+
+    assert row.qualification_disposition == "contradictory_evidence"
+    assert row.candidate_records == ()
+    evaluation = next(
+        evaluation
+        for evidence in row.evidence
+        for evaluation in evidence.fact_evaluations
+        if evaluation.evaluation_type == "qualification_fact"
+    )
+    assert evaluation.result == "unknown"
+    assert evaluation.rationale == "authoritative qualification fact is contradictory"
+    assert [(fact.status, fact.value) for fact in evaluation.facts] == [
+        ("contradictory", None)
+    ]
+    assert TaxonomyObligationPlan.from_yaml(plan.to_yaml()) == plan
+
+
+def test_contradictory_qualification_precedes_mixed_missing_readings() -> None:
+    """Contradiction wins deterministically when required readings are mixed."""
+    raw_pattern = deepcopy(get_test_raw_pattern())
+    second_fact = {
+        "namespace": "profile",
+        "fact_id": "region",
+        "value_type": "string",
+        "property_path": [],
+    }
+    raw_pattern["canonical_chain"]["steps"][2]["preconditions"] = [
+        {
+            "condition_id": "pre.region",
+            "condition": {
+                "op": "equality",
+                "schema_version": "1",
+                "fact": second_fact,
+                "value": "eu",
+            },
+        }
+    ]
+    raw_pattern["canonical_chain"]["semantic_digest"] = compute_chain_semantic_digest(
+        raw_pattern["canonical_chain"]
+    )
+    pattern = AttackPattern.model_validate(raw_pattern)
+    catalog_digest = compute_authoritative_catalog_pin(
+        [pattern.model_dump(mode="json")],
+        get_test_resolver(),
+    )
+    payload = make_inputs(
+        pattern=pattern,
+        catalog_pins={
+            "atlas": {
+                "release": "v1",
+                "digest": catalog_digest,
+            }
+        },
+    ).model_dump(mode="json")
+    qualification = payload["qualification_facts"]
+    mode_key = next(
+        key
+        for key, value in qualification["facts"].items()
+        if value["fact"]["fact_id"] == "mode"
+    )
+    region_key = canonical_json_bytes(second_fact).decode("utf-8")
+    qualification["facts"][mode_key]["status"] = "contradictory"
+    qualification["facts"][mode_key]["value"] = None
+    qualification["facts"][region_key] = {
+        "fact": second_fact,
+        "status": "absent",
+        "value": None,
+    }
+    qualification["semantic_digest"] = None
+
+    plan = plan_taxonomy_obligations(TaxonomyObligationInputs.model_validate(payload))
+    row = plan.obligations[0]
+    evaluation = next(
+        evaluation
+        for evidence in row.evidence
+        for evaluation in evidence.fact_evaluations
+        if evaluation.evaluation_type == "qualification_fact"
+    )
+
+    assert row.qualification_disposition == "contradictory_evidence"
+    assert row.candidate_records == ()
+    assert {fact.status for fact in evaluation.facts} == {"absent", "contradictory"}
+    assert evaluation.rationale == "authoritative qualification fact is contradictory"
+
+
+def test_ready_obligation_persists_typed_condition_fact_evidence() -> None:
+    """Ready rows retain evaluated facts, result, status, and rationale."""
+    plan = make_plan()
+    evaluations = tuple(
+        evaluation
+        for evidence in plan.obligations[0].evidence
+        for evaluation in evidence.fact_evaluations
+    )
+
+    condition = next(
+        item for item in evaluations if item.evaluation_type == "condition"
+    )
+    assert condition.step_id == "step.2"
+    assert condition.result == "true"
+    assert condition.rationale == "authoritative condition evaluation"
+    assert [(fact.status, fact.value) for fact in condition.facts] == [
+        ("present", "active")
+    ]
+    assert TaxonomyObligationPlan.from_yaml(plan.to_yaml()) == plan
+
+
+def test_ready_obligation_persists_typed_precondition_fact_evidence() -> None:
+    """Selected-step preconditions survive as typed qualification evidence."""
+    raw_pattern = deepcopy(get_test_raw_pattern())
+    raw_pattern["canonical_chain"]["steps"][-1]["preconditions"] = [
+        {
+            "condition_id": "pre.active",
+            "condition": {
+                "op": "equality",
+                "schema_version": "1",
+                "fact": {
+                    "namespace": "profile",
+                    "fact_id": "mode",
+                    "value_type": "string",
+                    "property_path": [],
+                },
+                "value": "active",
+            },
+        }
+    ]
+    raw_pattern["canonical_chain"]["semantic_digest"] = compute_chain_semantic_digest(
+        raw_pattern["canonical_chain"]
+    )
+    pattern = AttackPattern.model_validate(raw_pattern)
+    catalog_digest = compute_authoritative_catalog_pin(
+        [pattern.model_dump(mode="json")],
+        get_test_resolver(),
+    )
+    plan = plan_taxonomy_obligations(
+        make_inputs(
+            pattern=pattern,
+            catalog_pins={
+                "atlas": {
+                    "release": "v1",
+                    "digest": catalog_digest,
+                }
+            },
+        )
+    )
+    evaluations = tuple(
+        evaluation
+        for evidence in plan.obligations[0].evidence
+        for evaluation in evidence.fact_evaluations
+    )
+
+    precondition = next(
+        item for item in evaluations if item.evaluation_type == "precondition"
+    )
+    assert precondition.step_id == "step.3"
+    assert precondition.condition_id == "pre.active"
+    assert precondition.result == "true"
+    assert precondition.rationale == "authoritative precondition evaluation"
+    assert [fact.status for fact in precondition.facts] == ["present"]
+
+
+def test_failed_precondition_persists_typed_projection_fact_evidence() -> None:
+    """Projection rejection retains the evaluated facts and rejection rationale."""
+    raw_pattern = deepcopy(get_test_raw_pattern())
+    raw_pattern["canonical_chain"]["steps"][-1]["preconditions"] = [
+        {
+            "condition_id": "pre.inactive",
+            "condition": {
+                "op": "equality",
+                "schema_version": "1",
+                "fact": {
+                    "namespace": "profile",
+                    "fact_id": "mode",
+                    "value_type": "string",
+                    "property_path": [],
+                },
+                "value": "inactive",
+            },
+        }
+    ]
+    raw_pattern["canonical_chain"]["semantic_digest"] = compute_chain_semantic_digest(
+        raw_pattern["canonical_chain"]
+    )
+    pattern = AttackPattern.model_validate(raw_pattern)
+    catalog_digest = compute_authoritative_catalog_pin(
+        [pattern.model_dump(mode="json")],
+        get_test_resolver(),
+    )
+    row = plan_taxonomy_obligations(
+        make_inputs(
+            pattern=pattern,
+            catalog_pins={
+                "atlas": {
+                    "release": "v1",
+                    "digest": catalog_digest,
+                }
+            },
+        )
+    ).obligations[0]
+    rejection = next(
+        evidence
+        for evidence in row.evidence
+        if evidence.source == "precondition_not_satisfied"
+    )
+    precondition = next(
+        item
+        for item in rejection.fact_evaluations
+        if item.evaluation_type == "precondition"
+        and item.condition_id == "pre.inactive"
+    )
+
+    assert row.qualification_disposition == "contradictory_evidence"
+    assert precondition.result == "false"
+    assert [(fact.status, fact.value) for fact in precondition.facts] == [
+        ("present", "active")
+    ]
+    assert precondition.rationale == (
+        "one or more selected-step preconditions are false"
+    )
+
+
+def test_planner_accepts_only_complete_typed_inputs() -> None:
+    """The public planner fails closed for mappings, paths, and legacy records."""
+    with pytest.raises(TypeError):
+        plan_taxonomy_obligations({})  # type: ignore[arg-type]
+
+    payload = make_inputs().model_dump(mode="json")
+    for field, value in (
+        ("config", {"api_secret": "SECRET_SENTINEL"}),
+        ("qualification_trace", [{"predicate": "legacy"}]),
+        ("candidate_expansions", [{"candidate_id": "caller-authored"}]),
     ):
-        plan_obligations(snapshot)
+        with pytest.raises(ValidationError):
+            TaxonomyObligationInputs.model_validate({**payload, field: value})
 
 
-def test_unknown_scope_disposition_is_rejected_by_closed_model() -> None:
-    snapshot = _make_snapshot(
-        relationships=[
+def test_invalid_snapshot_and_budget_are_rejected_before_planning() -> None:
+    """Contradictory global inputs do not produce a partial plan."""
+    payload = make_inputs().model_dump(mode="json")
+
+    snapshot = dict(payload["capability_snapshot"])
+    snapshot["snapshot_digest"] = snapshot["snapshot_digest"][::-1]
+    with pytest.raises((ValidationError, ValueError)):
+        TaxonomyObligationInputs.model_validate(
+            {**payload, "capability_snapshot": snapshot}
+        )
+
+    with pytest.raises((ValidationError, ValueError)):
+        TaxonomyObligationInputs.model_validate(
             {
-                "risk_id": "risk-a",
-                "pattern_id": "AP-T1-01",
-                "scope_disposition": "unclassified_scope",
-                "qualification_disposition": "ready",
-                "projection_disposition": "projectable",
+                **payload,
+                "projection_budget": {
+                    "max_candidates": 0,
+                    "max_derivation_work": 4096,
+                },
             }
-        ],
+        )
+
+
+def test_unicode_risk_ids_are_normalized_before_identity_is_computed() -> None:
+    """NFC-equivalent risk identifiers produce one canonical obligation identity."""
+    decomposed = "risco-e\u0301"
+    plan = make_plan(risk_ids=(decomposed,))
+
+    assert plan.obligations[0].risk_ref.risk_id == unicodedata.normalize(
+        "NFC", decomposed
     )
+    assert plan.obligations[0].risk_ref.risk_id == "risco-é"
+    assert plan.obligations[0].obligation_id.startswith("ob:v1:")
 
-    with pytest.raises(ValidationError):
-        plan_obligations(snapshot)
+
+def test_planner_is_offline_and_deterministic(offline_llm: None) -> None:
+    """Planning uses the typed local inputs and never needs an LLM provider."""
+    first = make_plan()
+    second = make_plan()
+
+    assert first == second
+    assert first.to_yaml() == second.to_yaml()
+    assert first.to_json() == second.to_json()
 
 
-def test_bare_string_entries_in_candidates_section_are_ignored() -> None:
-    snapshot = _make_snapshot(
-        relationships=[_rel("risk-a", "AP-T1-01")],
-        candidate_expansions=[
-            {
-                "risk_id": "risk-a",
-                "pattern_id": "AP-T1-01",
-                "candidates": ["cand:bare-string"],
-            }
-        ],
+def test_yaml_persistence_is_atomic_and_round_trip_verified(tmp_path: Path) -> None:
+    """The persistence adapter publishes one validated YAML artifact atomically."""
+    from asago_scenario_generator.cli.obligation import run_plan_obligations
+
+    input_path = tmp_path / "obligation-inputs.yaml"
+    input_path.write_text(
+        yaml.safe_dump(make_inputs().model_dump(mode="json"), sort_keys=True),
+        encoding="utf-8",
     )
+    output_dir = tmp_path / "published"
 
-    plan = plan_obligations(snapshot)
+    expected = make_plan()
+    plan, written = run_plan_obligations(input_path, output_dir)
 
-    assert plan.obligations[0].candidate_records == []
-
-
-def test_candidates_without_identifier_are_skipped() -> None:
-    snapshot = _make_snapshot(
-        relationships=[_rel("risk-a", "AP-T1-01")],
-        candidate_expansions=[
-            {
-                "risk_id": "risk-a",
-                "pattern_id": "AP-T1-01",
-                "accepted_candidates": [
-                    {"projection_disposition": "projectable"},
-                    "cand:bare-accepted",
-                ],
-            }
-        ],
-    )
-
-    plan = plan_obligations(snapshot)
-
-    records = plan.obligations[0].candidate_records
-    assert [c.candidate_id for c in records] == ["cand:bare-accepted"]
-    assert records[0].projection_disposition == "projectable"
-    assert records[0].reason == "qualified combination"
-
-
-@pytest.mark.parametrize(
-    ("section_key", "expected_reason"),
-    [
-        ("accepted_candidates", "qualified combination"),
-        ("rejected_candidates", "missing required resource"),
-    ],
-)
-def test_section_entries_without_reason_use_section_default(
-    section_key: str, expected_reason: str
-) -> None:
-    snapshot = _make_snapshot(
-        relationships=[_rel("risk-a", "AP-T1-01")],
-        candidate_expansions=[
-            {
-                "risk_id": "risk-a",
-                "pattern_id": "AP-T1-01",
-                section_key: [{"candidate_id": "cand:no-reason"}],
-            }
-        ],
-    )
-
-    plan = plan_obligations(snapshot)
-
-    records = plan.obligations[0].candidate_records
-    assert len(records) == 1
-    assert records[0].reason == expected_reason
-
-
-def test_plan_pins_fall_back_to_defaults_when_blank() -> None:
-    snapshot = _make_snapshot(
-        catalog_pin="",
-        taxonomy_version=None,
-        mapping_pin="",
-        mapping_version=None,
-        relationships=[_rel("risk-a", "AP-T1-01")],
-    )
-
-    plan = plan_obligations(snapshot)
-
-    assert plan.catalog_pins == {"catalog": "atlas-2026.05", "atlas": "atlas-2026.05"}
-    assert plan.mapping_pins == {"mapping": "sssom-v1", "sssom": "sssom-v1"}
-
-
-def test_plan_pins_backfill_from_legacy_alias_when_modern_pin_blank() -> None:
-    snapshot = _make_snapshot(
-        catalog_pin="",
-        taxonomy_version="atlas-legacy",
-        mapping_pin="",
-        mapping_version="sssom-legacy",
-        relationships=[_rel("risk-a", "AP-T1-01")],
-    )
-
-    plan = plan_obligations(snapshot)
-
-    assert plan.catalog_pins == {"catalog": "atlas-legacy", "atlas": "atlas-legacy"}
-    assert plan.mapping_pins == {"mapping": "sssom-legacy", "sssom": "sssom-legacy"}
+    assert plan == expected
+    assert written == [output_dir / "taxonomy-obligation-plan.yaml"]
+    assert TaxonomyObligationPlan.from_yaml(written[0].read_text()) == plan
+    assert not list(output_dir.glob("*.tmp"))

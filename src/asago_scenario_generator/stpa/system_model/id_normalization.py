@@ -9,20 +9,20 @@ wrapped and types are inferred from source-ID prefixes *before* rewrite, so
 the correct namespace can be chosen.  Empty description sentinels are
 replaced *after* canonical IDs and rewritten references exist.
 
-This module is a leaf.  It depends on the boundary schema and the
-standard library only — never on LLM clients, files, or Stage 2
-orchestration.
+This module is a policy leaf.  It depends on the boundary schema and a
+pure STPA raw-model traversal helper — never on infra/IO, LLM clients,
+files, or Stage 2 orchestration.
 """
 
 from __future__ import annotations
 
-import copy
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel
 
+from asago_scenario_generator.stpa._model_data import raw_model_data
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
     ReferenceType,
@@ -100,27 +100,10 @@ class ControlStructureNormalization:
         return self.mapping
 
 
-def _raw_payload_data(value: Any) -> Any:
-    """Copy a tolerant model graph without invoking typed serialization."""
-    if isinstance(value, BaseModel):
-        return _raw_payload_data(value.__dict__)
-    if isinstance(value, Mapping):
-        return {
-            key: _raw_payload_data(field_value) for key, field_value in value.items()
-        }
-    if isinstance(value, list):
-        return [_raw_payload_data(item) for item in value]
-    if isinstance(value, tuple):
-        return tuple(_raw_payload_data(item) for item in value)
-    if isinstance(value, set):
-        return {_raw_payload_data(item) for item in value}
-    return copy.deepcopy(value)
-
-
 def _payload_dict(payload: Mapping[str, Any] | BaseModel) -> dict[str, Any]:
     """Return a deep-copied dictionary for a decoded payload."""
     if isinstance(payload, BaseModel):
-        value = _raw_payload_data(payload)
+        value = raw_model_data(payload)
     elif isinstance(payload, Mapping):
         value = payload
     else:
@@ -128,7 +111,7 @@ def _payload_dict(payload: Mapping[str, Any] | BaseModel) -> dict[str, Any]:
             "Control-structure payload must be a mapping or Pydantic model, "
             f"got {type(payload).__name__}."
         )
-    return _raw_payload_data(dict(value))
+    return raw_model_data(dict(value))
 
 
 def _empty_namespace_entries() -> NamespaceEntries:

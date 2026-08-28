@@ -26,6 +26,7 @@ import shutil
 import subprocess
 import sys
 import threading
+from collections import Counter
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -511,6 +512,78 @@ def _count_line(stdout: str, label: str) -> str | None:
     return match.group(1) if match else None
 
 
+def _scenario_files(root: Path) -> dict[str, bytes]:
+    """Read scenario artifacts while ignoring run-local telemetry values."""
+    files: dict[str, bytes] = {}
+    scenarios = root / "scenarios"
+    if not scenarios.is_dir():
+        return files
+    for path in sorted(scenarios.iterdir()):
+        if not path.is_file() or path.suffix not in {".yaml", ".yml", ".feature"}:
+            continue
+        if path.suffix == ".feature":
+            content = path.read_bytes()
+        else:
+            text = path.read_text(encoding="utf-8")
+            text = re.sub(r"(?m)^scenario_id:\s*.*$", "scenario_id: <volatile>", text)
+            text = re.sub(r"(?m)^candidate_id:\s*.*$", "candidate_id: <volatile>", text)
+            text = re.sub(r"(?m)^generated_at:\s*.*$", "generated_at: <volatile>", text)
+            text = re.sub(r"(?m)^(\s*duration_ms:)\s*.*$", r"\1 <volatile>", text)
+            content = text.encode("utf-8")
+        files[path.suffix] = content
+    return files
+
+
+def _prompt_evidence(requests: list[dict]) -> dict[str, object]:
+    """Return order-independent prompt contracts and selected exact prompts."""
+    contracts: list[tuple[str, str, tuple[bool, ...]]] = []
+    selected: dict[str, str] = {}
+    marker_sets = {
+        "candidate_filter": (
+            "## Candidates to judge",
+            "candidate handle",
+            "Return an object with exactly one required field per candidate handle above.",
+        ),
+        "actor_profile": (
+            "Compatible actor/capability choices:",
+            "Resource handles (select zero to four; do not invent resources):",
+        ),
+        "narrative": (
+            "Semantic Draft V3 Response Protocol",
+            "Compatibility regions and projected-step handles:",
+        ),
+        "attack_tree": ("Canonical leaf inventory (respond with handles only):",),
+        "behavior_spec": ("Action handles:", "Required assertion handles:"),
+    }
+    for request in requests:
+        schema = str(request.get("schema", ""))
+        prompt = str(request.get("user_prompt", ""))
+        if schema.startswith("FilterMapDraftV3For"):
+            family = "candidate_filter"
+            pattern_match = re.search(r"\*\*Name:\*\* ([^\n]+)", prompt)
+            if pattern_match and pattern_match.group(1) == ACCEPT_AP_T6_04:
+                selected[family] = prompt
+        elif schema.startswith("ActorDraftV3For"):
+            family = "actor_profile"
+            selected.setdefault(family, prompt)
+        elif schema.startswith("NarrativeDraftV3For"):
+            family = "narrative"
+            selected.setdefault(family, prompt)
+        elif schema.startswith("AttackTreeDraftV3For"):
+            family = "attack_tree"
+            selected.setdefault(family, prompt)
+        elif schema.startswith("BehaviorDraftV2For"):
+            family = "behavior_spec"
+            selected.setdefault(family, prompt)
+        else:
+            family = "unknown"
+        markers = marker_sets.get(family, ())
+        contracts.append(
+            (family, schema, tuple(marker in prompt for marker in markers))
+        )
+    return {"contracts": sorted(contracts), "selected_prompts": selected}
+
+
 def qa_topc_01(server: ThreadingHTTPServer) -> None:
     """QA-TOPC-01: default taxonomy generate outputs are unchanged."""
     case = "TOPC-01"
@@ -522,29 +595,38 @@ def qa_topc_01(server: ThreadingHTTPServer) -> None:
         "generate --help grew obligation-planner flags",
     )
     captured: list[tuple[Path, subprocess.CompletedProcess[str], list[dict]]] = []
-    for label in ("fixture", "live"):
-        ws = _new_workspace(f"{case}-{label}")
-        _write_generate_inputs(ws)
-        FixtureHandler.reset()
-        os.environ["ACCEPT_PATTERN"] = ACCEPT_AP_T6_04
-        env = os.environ.copy()
-        env["PYTHONHASHSEED"] = "0"
-        env.pop(QA_PIPELINE_ENV, None)
-        completed = _run_cli(
-            f"{case}-{label}",
-            _generate_argv(ws, server),
-            env=env,
-        )
-        run_dir = _run_dir(ws)
-        if completed.returncode != 0 or run_dir is None:
-            failures.append(
-                f"{case}-{label}: generate exited {completed.returncode}: "
-                f"{completed.stderr[-400:]!r}"
+    previous_accept_pattern = os.environ.get("ACCEPT_PATTERN")
+    os.environ["ACCEPT_PATTERN"] = ACCEPT_AP_T6_04
+    try:
+        for label in ("fixture", "live"):
+            ws = _new_workspace(f"{case}-{label}")
+            _write_generate_inputs(ws)
+            FixtureHandler.reset()
+            env = os.environ.copy()
+            env["PYTHONHASHSEED"] = "0"
+            env.pop(QA_PIPELINE_ENV, None)
+            completed = _run_cli(
+                f"{case}-{label}",
+                _generate_argv(ws, server),
+                env=env,
             )
-            return
-        captured.append((run_dir, completed, list(FixtureHandler.requests)))
-        _no_obligation_artifact(f"{case}-{label}", run_dir)
+            run_dir = _run_dir(ws)
+            if completed.returncode != 0 or run_dir is None:
+                failures.append(
+                    f"{case}-{label}: generate exited {completed.returncode}: "
+                    f"{completed.stderr[-400:]!r}"
+                )
+                return
+            captured.append((run_dir, completed, list(FixtureHandler.requests)))
+            _no_obligation_artifact(f"{case}-{label}", run_dir)
+    finally:
+        if previous_accept_pattern is None:
+            os.environ.pop("ACCEPT_PATTERN", None)
+        else:
+            os.environ["ACCEPT_PATTERN"] = previous_accept_pattern
     (fixture_dir, fixture_cli, fixture_reqs), (live_dir, live_cli, live_reqs) = captured
+    fixture_scenarios = _scenario_files(fixture_dir)
+    live_scenarios = _scenario_files(live_dir)
     fixture_features = sorted(
         path.read_bytes() for path in fixture_dir.rglob("*.feature")
     )
@@ -571,6 +653,11 @@ def qa_topc_01(server: ThreadingHTTPServer) -> None:
     )
     _check(
         case,
+        fixture_scenarios == live_scenarios,
+        "scenario YAML or feature artifacts drifted from fixture",
+    )
+    _check(
+        case,
         len(list(fixture_dir.rglob("*.feature")))
         == len(list(live_dir.rglob("*.feature"))),
         "feature file count drifted",
@@ -594,16 +681,38 @@ def qa_topc_01(server: ThreadingHTTPServer) -> None:
             == _count_line(live_cli.stdout, label),
             f"{label} drifted from fixture",
         )
-    fixture_schemas = [item["schema"] for item in fixture_reqs]
-    live_schemas = [item["schema"] for item in live_reqs]
+    fixture_schemas = Counter(item["schema"] for item in fixture_reqs)
+    live_schemas = Counter(item["schema"] for item in live_reqs)
     _check(
         case,
         fixture_schemas == live_schemas,
-        f"provider schemas drifted: {fixture_schemas} vs {live_schemas}",
+        f"provider schema inventory drifted: {fixture_schemas} vs {live_schemas}",
+    )
+    fixture_prompts = _prompt_evidence(fixture_reqs)
+    live_prompts = _prompt_evidence(live_reqs)
+    _check(
+        case,
+        fixture_prompts == live_prompts,
+        "provider prompt contracts drifted from fixture",
+    )
+    _check(
+        case,
+        all(
+            family in live_prompts["selected_prompts"]
+            for family in (
+                "candidate_filter",
+                "actor_profile",
+                "narrative",
+                "attack_tree",
+                "behavior_spec",
+            )
+        ),
+        "selected scenario prompt chain is incomplete",
     )
     notes.append(
         "01: successive generate runs mint distinct scenario:v2 hashes; "
-        "the suite compares feature text, artifact roles, counts, and request schemas."
+        "the suite compares normalized scenario artifacts, roles, counts, "
+        "request-schema inventory, and prompt contracts."
     )
     notes.append(f"01: compared fixture {fixture_dir.name} to live {live_dir.name}")
 

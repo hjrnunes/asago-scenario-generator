@@ -9,13 +9,12 @@ this boundary.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from typing import Any
 
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 from asago_scenario_generator.models.attack_pattern_contracts import (
     AuthoritativeFactReference,
-    Condition,
     TaxonomyResolver,
 )
 from asago_scenario_generator.models.attack_pattern_validation import (
@@ -35,6 +34,8 @@ from asago_scenario_generator.pipeline.projection_contracts import (  # noqa: F4
     ProjectionIssue,
     ProjectionLimitation,
     ProjectionModel,
+    RejectedProjectionCandidate,
+    AuthoritativeProjectionObservation,
     _canonical_json,
     _condition_facts,
     _condition_fact_items,
@@ -77,6 +78,7 @@ from asago_scenario_generator.pipeline.projection_contracts import (  # noqa: F4
     canonical_json_bytes,
     compute_derivation_context_digest,
     compute_execution_requirements_digest,
+    required_fact_references as _required_fact_references,
 )
 from asago_scenario_generator.pipeline.projection_snapshot import (  # noqa: F401
     CapabilityFactSnapshot,
@@ -162,46 +164,21 @@ def _available_resource_categories(
     }
 
 
-def _pattern_conditions(pattern: AttackPattern) -> Iterable[Condition]:
-    for step in pattern.canonical_chain.steps:
-        if step.condition is not None:
-            yield step.condition
-        yield from (precondition.condition for precondition in step.preconditions)
-
-
-def _readiness_fact_references(
-    patterns: Sequence[AttackPattern],
-) -> dict[str, AuthoritativeFactReference]:
-    fact_refs: dict[str, AuthoritativeFactReference] = {}
-    for pattern in patterns:
-        for condition in _pattern_conditions(pattern):
-            for reference in _condition_facts(condition):
-                fact_refs[_fact_key(reference)] = reference
-    return fact_refs
-
-
 def required_fact_references(
     patterns: Sequence[AttackPattern],
 ) -> tuple[AuthoritativeFactReference, ...]:
     """Return the complete canonical fact inventory used by readiness."""
-    references = _readiness_fact_references(patterns)
-    return tuple(references[key] for key in sorted(references))
-
-
-def _required_fact_ids(
-    fact_refs: dict[str, AuthoritativeFactReference],
-) -> tuple[str, ...]:
-    return tuple(sorted(reference.fact_id for reference in fact_refs.values()))
+    return _required_fact_references(patterns)
 
 
 def _missing_fact_ids(
-    fact_refs: dict[str, AuthoritativeFactReference],
+    fact_refs: tuple[AuthoritativeFactReference, ...],
     snapshot: CapabilityFactSnapshot,
 ) -> tuple[str, ...]:
     return tuple(
         sorted(
             reference.fact_id
-            for reference in fact_refs.values()
+            for reference in fact_refs
             if (
                 (evidence := snapshot.fact(reference)) is None
                 or evidence.status == "unknown"
@@ -222,8 +199,8 @@ def check_projection_readiness(
         for category in required_categories
         if not available_by_category[category]
     )
-    fact_refs = _readiness_fact_references(patterns)
-    required_facts = _required_fact_ids(fact_refs)
+    fact_refs = _required_fact_references(patterns)
+    required_facts = tuple(sorted(reference.fact_id for reference in fact_refs))
     missing_facts = _missing_fact_ids(fact_refs, snapshot)
     return ProjectionReadinessReport(
         ready=not missing_categories and not missing_facts,
@@ -494,39 +471,21 @@ def project_authoritative_candidates(
     feasible coverage targets, reservation is best-effort and the caller
     should emit a ``selection_limitation`` for uncovered targets.
     """
-    _authoritative_records_type_check(records)
-    budget = _resolve_projection_budget(budget)
-    snapshot.assert_integrity()
-    qualified = _qualify_authoritative_records(records, taxonomy_resolver)
-    catalog_pin = _catalog_content_pin(qualified)
-    candidate_groups: list[_PatternProjectionState] = []
-    issues: list[ProjectionIssue] = []
-    for pattern, pattern_pin in qualified:
-        _project_authoritative_pattern(
-            pattern, pattern_pin, snapshot, catalog_pin, candidate_groups, issues
-        )
-    allocator = _AuthoritativeCandidateAllocator(
-        budget, candidate_groups, issues, coverage_target_ids
-    )
-    allocator.reserve_coverage_targets()
-    allocator.emit_reserved_targets()
-    allocator.emit_pending()
-    allocator.fill_round_robin()
-    allocator.probe_truncation()
-    return ProjectionBatch(
-        capability_fact_snapshot_digest=snapshot.snapshot_digest,
-        candidates=_sorted_emitted_candidates(allocator.by_identity),
-        infeasibilities=_sorted_infeasibilities(issues),
-        limitations=_sorted_limitations(allocator.build_limitations()),
-        unreserved_coverage_targets=allocator.unreserved_targets(),
-        infeasible_coverage_targets=allocator.infeasible_coverage_targets(),
-    )
+    return _project_authoritative_observation(
+        records,
+        taxonomy_resolver,
+        snapshot,
+        budget=budget,
+        coverage_target_ids=coverage_target_ids,
+        retain_deferred=False,
+    ).batch
 
 
 # Authoritative projection, qualification, and allocation machinery lives
 # in the sibling module pipeline.projection_authoritative; re-export it
 # here so every existing import path keeps working.
 from asago_scenario_generator.pipeline.projection_authoritative import (  # noqa: E402
+    _project_authoritative_observation as _project_authoritative_observation,
     _resolve_projection_budget as _resolve_projection_budget,
     _catalog_content_pin as _catalog_content_pin,
     _sorted_emitted_candidates as _sorted_emitted_candidates,

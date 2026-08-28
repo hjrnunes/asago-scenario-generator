@@ -136,7 +136,7 @@ per-attempt evidence. The HTML report renders those stage outcomes and identifie
 presentation fallback separately.
 
 Useful companion commands include `projection-preflight`, `plan-obligations`,
-`validate-obligation-plan`, `validate-resource-map`, `propose-correspondence`,
+`validate-resource-map`, `propose-correspondence`,
 `reconcile-correspondence`, `profile`, `resume`, `eval`, `report`,
 `qualify-catalog`, `validate-catalog-qualification`, and
 `validate-stpa-projection`. Run `asago-scenario-generator --help` for the
@@ -151,13 +151,50 @@ asago-scenario-generator plan-obligations \
   --output-dir output/obligation-plan
 ```
 
-Load a published obligation plan through the closed schema without contacting
-an LLM endpoint:
+The planner's external seam is typed and deterministic:
 
-```bash
-asago-scenario-generator validate-obligation-plan \
-  --plan output/obligation-plan/taxonomy-obligation-plan.yaml
+```python
+plan_taxonomy_obligations(
+    inputs: TaxonomyObligationInputs,
+) -> TaxonomyObligationPlan
 ```
+
+`TaxonomyObligationInputs` contains reviewed risk cards, the immutable
+capability/fact snapshot, authoritative attack-pattern catalog, pinned mapping
+sets, qualification facts, a bounded projection budget, and the compatibility
+policy. It does not accept file paths or an LLM client. Malformed, incomplete,
+or contradictory global inputs fail before a partial plan is returned.
+
+The mapping pins have two distinct authorities: `mapping_pins.sssom` retains
+the authoritative taxonomy-context `mapping_set_digest`, while
+`mapping_pins.obligation_edges` uses release `obligation-mapping-bundle-v1` to
+bind the complete typed cross-taxonomy and SSSOM edge bundle. Both pins are
+required; the supplied-edge bundle pin cannot substitute for the context pin.
+
+Each published `taxonomy-obligation-plan-v1` row retains `risk_ref`,
+`taxonomy_chain`, `attack_pattern_id`, `attack_pattern_semantic_digest`, the
+scope and qualification dispositions, candidate records, evidence, and
+`correspondence_disposition: not_assessed`. A risk with no actionable pattern
+remains visible as `governance_only`; advisory candidate filtering cannot remove
+the obligation row. Plan identity includes the risk, pattern and its semantic
+digest, capability snapshot digest, and catalog/mapping pins. Publication is
+atomic; the round-tripped YAML artifact is validated against its semantic
+digest.
+
+The planner crosses inward through
+`pipeline.projection_authoritative.project_authoritative_candidate_observations`
+to observe the existing projection result plus bounded qualification and
+candidate observations. The public generation projection façade still returns
+its `ProjectionBatch` with the default emission behavior unchanged. A
+`budget_deferred` record is emitted only for a concrete candidate already
+derived and validated before the bound; unvalidated overflow is a typed
+limitation, not a synthesized identity. Row evidence retains typed condition
+and precondition evaluations and explicit unknown/absent qualification-fact
+readings.
+
+There is no separate `validate-obligation-plan` CLI command. Consumers should
+load a persisted artifact through the typed plan model/persistence adapter,
+which enforces the closed schema and digest before accepting it.
 
 Validate an analyst-authored system resource map against a pinned snapshot
 without contacting an LLM endpoint:

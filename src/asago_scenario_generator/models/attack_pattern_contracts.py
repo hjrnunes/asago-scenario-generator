@@ -165,7 +165,8 @@ class AuthoritativeFactReference(ContractModel):
     property_path: tuple[Identifier, ...] = Field(max_length=MAX_PROPERTY_PATH_SEGMENTS)
 
 
-def _validate_fact_scalar(fact: AuthoritativeFactReference, value: Scalar) -> None:
+def validate_fact_scalar(fact: AuthoritativeFactReference, value: Scalar) -> None:
+    """Require a scalar value to match its authoritative fact's type."""
     expected = {"string": str, "integer": int, "boolean": bool}[fact.value_type]
     if type(value) is not expected:
         raise ValueError(f"value must exactly match fact value_type {fact.value_type}")
@@ -179,7 +180,7 @@ class EqualityCondition(ContractModel):
 
     @model_validator(mode="after")
     def matching_type(self) -> EqualityCondition:
-        _validate_fact_scalar(self.fact, self.value)
+        validate_fact_scalar(self.fact, self.value)
         return self
 
 
@@ -193,7 +194,7 @@ def _validate_membership_values(
 ) -> None:
     """Membership values must match the fact type and be unique."""
     for value in values:
-        _validate_fact_scalar(fact, value)
+        validate_fact_scalar(fact, value)
     if not _membership_values_unique(values):
         raise ValueError("membership values must be unique")
 
@@ -227,7 +228,7 @@ class PropertyMatchCondition(ContractModel):
     def matching_type_and_path(self) -> PropertyMatchCondition:
         if not self.fact.property_path:
             raise ValueError("property_match requires a nonempty property path")
-        _validate_fact_scalar(self.fact, self.value)
+        validate_fact_scalar(self.fact, self.value)
         return self
 
 
@@ -325,7 +326,7 @@ class EvaluatedFactEvidence(ContractModel):
         elif self.value is None:
             raise ValueError("present fact evidence requires a value")
         else:
-            _validate_fact_scalar(self.fact, self.value)
+            validate_fact_scalar(self.fact, self.value)
         return self
 
 

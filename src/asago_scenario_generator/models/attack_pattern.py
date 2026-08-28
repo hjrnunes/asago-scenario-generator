@@ -78,6 +78,7 @@ from .attack_pattern_contracts import (
     UpstreamSourceInfluenceRequirement,
     evaluate_condition,
     Scalar,
+    validate_fact_scalar,
 )
 from .attack_pattern_digests import (
     compute_chain_semantic_digest,
@@ -197,6 +198,7 @@ __all__ = (
     "compute_chain_semantic_digest",
     "compute_projection_digest",
     "validate_attack_pattern",
+    "validate_fact_scalar",
     "validate_legacy_attack_pattern",
     "validate_projection_snapshot",
 )

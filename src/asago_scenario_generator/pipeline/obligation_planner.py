@@ -1,619 +1,1065 @@
-"""Deterministic offline taxonomy obligation planner."""
+"""Pure, deterministic Phase 1 taxonomy-obligation planning."""
 
 from __future__ import annotations
 
-import json
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
 
+from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 from asago_scenario_generator.models.obligation_plan import (
     CandidateRecord,
-    ObligationPlanSummary,
-    ObligationProjectionDisposition,
-    QualificationTraceItem,
+    EvidenceRecord,
+    FactEvaluationEvidence,
+    QualificationFactEvidence,
+    RiskReference,
+    TaxonomyChainEntry,
     TaxonomyObligation,
     TaxonomyObligationPlan,
-    TaxonomyObligationSnapshot,
-    compute_sha256,
+    derive_obligation_summary,
+)
+from asago_scenario_generator.models.canonical import compute_framed_digest
+import asago_scenario_generator.pipeline.obligation_contracts as _contracts
+from asago_scenario_generator.pipeline.projection_authoritative import (
+    project_authoritative_candidate_observations,
+)
+from asago_scenario_generator.pipeline.projection_contracts import (
+    CapabilityFactSnapshot,
+    canonical_json_bytes,
+    required_fact_references,
+)
+from asago_scenario_generator.pipeline.projection_qualification import (
+    compute_authoritative_catalog_pin,
 )
 
-_DEFAULT_CATALOG_PIN = "atlas-2026.05"
-_DEFAULT_MAPPING_PIN = "sssom-v1"
-_REDACTED = "[REDACTED]"
 
-# Legacy single "disposition" strings mapped to their default (scope,
-# qualification, projection) dispositions. A None component leaves that
-# disposition to its explicit or kind-derived resolution below.
-_LEGACY_DISPOSITION_DEFAULTS: dict[str, tuple[str | None, str, str | None]] = {
-    "governance-only": ("governance_only", "not_attempted", "not_attempted"),
-    "governance_only": ("governance_only", "not_attempted", "not_attempted"),
-    "gated": ("capability_excluded", "not_attempted", "not_attempted"),
-    "missing-template": (None, "missing_evidence", None),
-    "missing_evidence": (None, "missing_evidence", None),
-    "infeasible": (None, "structurally_infeasible", None),
-    "unsupported": (None, "structurally_infeasible", None),
-    "structurally_infeasible": (None, "structurally_infeasible", None),
-    "contradictory_evidence": (None, "contradictory_evidence", None),
-    "generated": (None, "ready", None),
-    "ready": (None, "ready", None),
-    "not_attempted": (None, "not_attempted", None),
+_OBLIGATION_ID_DOMAIN = "asago-scenario-generator:taxonomy-obligation:v1"
+
+
+def _canonical_text(value: Any) -> str:
+    """Return repository-canonical JSON for deterministic evidence text."""
+    if hasattr(value, "model_dump"):
+        value = value.model_dump(mode="json")
+    return canonical_json_bytes(value).decode("utf-8")
+
+
+@dataclass(frozen=True)
+class _MappingEdge:
+    """One deterministic graph edge used only during planning."""
+
+    source_id: str
+    target_id: str
+    relation: str
+    evidence: tuple[str, ...]
+    source: str
+
+
+def _require_catalog(patterns: tuple[AttackPattern, ...]) -> tuple[AttackPattern, ...]:
+    """Require a nonempty authoritative catalog for resolver construction."""
+    if not patterns:
+        raise ValueError("a catalog resolver requires at least one pattern")
+    return patterns
+
+
+def _shared_taxonomy_context(patterns: tuple[AttackPattern, ...]) -> Any:
+    """Return the one taxonomy context shared by all catalog patterns."""
+    contexts = {
+        _canonical_text(pattern.canonical_chain.taxonomy_context)
+        for pattern in patterns
+    }
+    if len(contexts) != 1:
+        raise ValueError(
+            "all authoritative attack patterns must share one taxonomy context"
+        )
+    return patterns[0].canonical_chain.taxonomy_context
+
+
+def _pattern_mappings(pattern: AttackPattern) -> tuple[Any, ...]:
+    """Flatten chain- and step-level mapping decisions for one pattern."""
+    chain = pattern.canonical_chain
+    return tuple(chain.mappings) + tuple(
+        mapping for step in chain.steps for mapping in step.mappings
+    )
+
+
+def _catalog_identifiers(
+    patterns: tuple[AttackPattern, ...],
+) -> dict[str, set[str]]:
+    """Index every typed catalog identifier by taxonomy."""
+    identifiers: dict[str, set[str]] = {}
+    for pattern in patterns:
+        for mapping in _pattern_mappings(pattern):
+            identifiers.setdefault(str(mapping.taxonomy), set()).update(
+                str(identifier) for identifier in getattr(mapping, "ids", ())
+            )
+    return identifiers
+
+
+class _CatalogResolver:
+    """No-I/O resolver assembled from the already typed catalog entries."""
+
+    def __init__(self, patterns: tuple[AttackPattern, ...]) -> None:
+        catalog = _require_catalog(patterns)
+        self._taxonomy_context = _shared_taxonomy_context(catalog)
+        self._identifiers = _catalog_identifiers(catalog)
+
+    @property
+    def taxonomy_context(self) -> Any:
+        """Expose the context required by the existing qualification boundary."""
+        return self._taxonomy_context
+
+    def contains(self, taxonomy: str, identifier: str) -> bool:
+        """Resolve only identifiers present in the typed authoritative catalog."""
+        return identifier in self._identifiers.get(str(taxonomy), set())
+
+
+def _chain_entries(pattern: AttackPattern) -> tuple[TaxonomyChainEntry, ...]:
+    """Extract the ordered, duplicate-free taxonomy chain from a pattern."""
+    entries: list[TaxonomyChainEntry] = []
+    seen: set[tuple[str, str]] = set()
+    chain = pattern.canonical_chain
+    mappings = [*chain.mappings]
+    mappings.extend(mapping for step in chain.steps for mapping in step.mappings)
+    for mapping in mappings:
+        taxonomy = str(mapping.taxonomy)
+        for identifier in getattr(mapping, "ids", ()):
+            key = (taxonomy, str(identifier))
+            if key not in seen:
+                seen.add(key)
+                entries.append(TaxonomyChainEntry(taxonomy=key[0], id=key[1]))
+    return tuple(entries)
+
+
+def _snapshot_digest(snapshot: CapabilityFactSnapshot) -> str:
+    """Verify and return the authoritative capability/fact snapshot digest."""
+    snapshot.assert_integrity()
+    return snapshot.snapshot_digest
+
+
+def _pattern_lookup(
+    catalog: tuple[AttackPattern, ...],
+) -> dict[str, AttackPattern]:
+    """Index typed catalog entries by attack-pattern identity."""
+    return {item.id: item for item in catalog}
+
+
+def _mapping_edges(
+    inputs: _contracts.TaxonomyObligationInputs,
+) -> tuple[_MappingEdge, ...]:
+    """Convert cross-taxonomy and SSSOM rows into one sorted graph edge set."""
+    edges = [
+        _MappingEdge(
+            source_id=item.source_id,
+            target_id=item.target_id,
+            relation=item.relation,
+            evidence=tuple(sorted(item.evidence)),
+            source="cross-taxonomy",
+        )
+        for item in inputs.cross_taxonomy_mappings
+    ]
+    edges.extend(
+        _MappingEdge(
+            source_id=item.subject_id,
+            target_id=item.object_id,
+            relation=item.predicate_id,
+            evidence=(item.mapping_justification,),
+            source="sssom",
+        )
+        for item in inputs.sssom_mappings
+    )
+    unique: dict[tuple[Any, ...], _MappingEdge] = {}
+    for edge in edges:
+        key = (
+            edge.source_id,
+            edge.target_id,
+            edge.relation,
+            edge.evidence,
+            edge.source,
+        )
+        unique[key] = edge
+    return tuple(
+        sorted(
+            unique.values(),
+            key=lambda edge: (
+                edge.source_id,
+                edge.target_id,
+                edge.relation,
+                edge.source,
+                edge.evidence,
+            ),
+        )
+    )
+
+
+def _mapping_adjacency(
+    edges: tuple[_MappingEdge, ...],
+) -> dict[str, list[_MappingEdge]]:
+    """Build sorted adjacency lists for all reviewed mapping edges."""
+    adjacency: dict[str, list[_MappingEdge]] = {}
+    for edge in edges:
+        adjacency.setdefault(edge.source_id, []).append(edge)
+    for values in adjacency.values():
+        values.sort(
+            key=lambda edge: (
+                edge.target_id,
+                edge.relation,
+                edge.source,
+                edge.evidence,
+            )
+        )
+    return adjacency
+
+
+def _visit_mapping_paths(
+    node: str,
+    pattern_ids: set[str],
+    adjacency: dict[str, list[_MappingEdge]],
+    visited: frozenset[str],
+    path: tuple[_MappingEdge, ...],
+    found: dict[str, set[tuple[_MappingEdge, ...]]],
+) -> None:
+    """Collect every simple path reaching a catalog pattern."""
+    if node in pattern_ids:
+        found.setdefault(node, set()).add(path)
+        return
+    for edge in adjacency.get(node, ()):
+        if edge.target_id in visited:
+            continue
+        _visit_mapping_paths(
+            edge.target_id,
+            pattern_ids,
+            adjacency,
+            visited | {edge.target_id},
+            path + (edge,),
+            found,
+        )
+
+
+def _sorted_mapping_paths(
+    found: dict[str, set[tuple[_MappingEdge, ...]]],
+) -> dict[str, tuple[tuple[_MappingEdge, ...], ...]]:
+    """Return collected paths in canonical pattern/path order."""
+    return {
+        pattern_id: tuple(
+            sorted(
+                paths,
+                key=lambda path: tuple(
+                    (item.source_id, item.target_id, item.relation, item.source)
+                    for item in path
+                ),
+            )
+        )
+        for pattern_id, paths in sorted(found.items())
+    }
+
+
+def _mapping_paths(
+    risk_id: str,
+    pattern_ids: set[str],
+    edges: tuple[_MappingEdge, ...],
+) -> dict[str, tuple[tuple[_MappingEdge, ...], ...]]:
+    """Traverse every simple path from a risk to each catalog pattern."""
+    adjacency = _mapping_adjacency(edges)
+    found: dict[str, set[tuple[_MappingEdge, ...]]] = {}
+    if risk_id in pattern_ids:
+        found[risk_id] = {()}
+    else:
+        _visit_mapping_paths(
+            risk_id,
+            pattern_ids,
+            adjacency,
+            frozenset({risk_id}),
+            (),
+            found,
+        )
+    return _sorted_mapping_paths(found)
+
+
+def _path_evidence(
+    paths: tuple[tuple[_MappingEdge, ...], ...],
+) -> tuple[EvidenceRecord, ...]:
+    """Retain every distinct mapping path as deterministic evidence."""
+    records: list[EvidenceRecord] = []
+    for path in paths:
+        records.append(
+            EvidenceRecord(
+                kind="mapping",
+                source=path[-1].source if path else "direct-catalog-identity",
+                detail=_canonical_text(
+                    {
+                        "path": [
+                            {
+                                "source_id": edge.source_id,
+                                "target_id": edge.target_id,
+                                "relation": edge.relation,
+                                "source": edge.source,
+                                "evidence": list(edge.evidence),
+                            }
+                            for edge in path
+                        ]
+                    }
+                ),
+            )
+        )
+    return tuple(records)
+
+
+def _risk_reference(card: Any) -> RiskReference:
+    """Convert a typed input risk card into immutable persisted provenance."""
+    return RiskReference.model_validate(card.model_dump(mode="json"))
+
+
+def _identity_digest(
+    risk_id: str,
+    pattern: AttackPattern | None,
+    inputs: _contracts.TaxonomyObligationInputs,
+) -> str:
+    """Derive the version-framed identity for one risk-pattern obligation."""
+    payload = {
+        "risk_id": risk_id,
+        "attack_pattern_id": pattern.id if pattern else None,
+        "attack_pattern_semantic_digest": (
+            pattern.canonical_chain.semantic_digest if pattern else None
+        ),
+        "capability_snapshot_digest": _snapshot_digest(inputs.capability_snapshot),
+        "catalog_pins": {
+            key: value.model_dump(mode="json")
+            for key, value in sorted(inputs.catalog_pins.items())
+        },
+        "mapping_pins": {
+            key: value.model_dump(mode="json")
+            for key, value in sorted(inputs.mapping_pins.items())
+        },
+    }
+    return "ob:v1:" + compute_framed_digest(_OBLIGATION_ID_DOMAIN, payload)
+
+
+def _pattern_fact_keys(pattern: AttackPattern) -> frozenset[str]:
+    """Return canonical fact references required by one authoritative pattern."""
+    return frozenset(
+        canonical_json_bytes(reference.model_dump(mode="json")).decode("utf-8")
+        for reference in required_fact_references((pattern,))
+    )
+
+
+def _qualification_facts_state(
+    pattern: AttackPattern,
+    facts: _contracts.QualificationFactsInput,
+) -> Literal["complete", "missing", "contradictory"]:
+    """Classify required readings with contradictory status taking precedence."""
+    statuses = {
+        getattr(facts.facts.get(key), "status", "absent")
+        for key in _pattern_fact_keys(pattern)
+    }
+    if "contradictory" in statuses:
+        return "contradictory"
+    if statuses - {"present"}:
+        return "missing"
+    return "complete"
+
+
+def _issue_evidence(issue: Any) -> EvidenceRecord:
+    """Convert one authoritative projection issue to typed evidence."""
+    return EvidenceRecord(
+        kind="projection",
+        source=issue.code,
+        detail=issue.detail,
+        fact_evaluations=tuple(
+            _condition_fact_evaluation(result, rationale=issue.detail)
+            for result in issue.condition_results
+        )
+        + tuple(
+            _precondition_fact_evaluation(result, rationale=issue.detail)
+            for result in issue.precondition_results
+        ),
+    )
+
+
+def _limitation_evidence(limitation: Any) -> EvidenceRecord:
+    """Convert one bounded projection limitation to typed evidence."""
+    return EvidenceRecord(
+        kind="projection",
+        source=limitation.code,
+        detail=(
+            f"emitted {limitation.emitted_bindings} of "
+            f"{limitation.total_compatible_bindings} compatible bindings"
+        ),
+    )
+
+
+def _projection_issue_evidence(
+    batch: Any, pattern_id: str
+) -> tuple[EvidenceRecord, ...]:
+    """Return issue evidence for one pattern in stable source order."""
+    return tuple(
+        _issue_evidence(issue)
+        for issue in batch.infeasibilities
+        if issue.pattern_id == pattern_id
+    )
+
+
+def _projection_limitation_evidence(
+    batch: Any, pattern_id: str
+) -> tuple[EvidenceRecord, ...]:
+    """Return bounded limitation evidence for one pattern."""
+    return tuple(
+        _limitation_evidence(limitation)
+        for limitation in batch.limitations
+        if limitation.pattern_id == pattern_id
+    )
+
+
+def _projection_evidence(batch: Any, pattern_id: str) -> tuple[EvidenceRecord, ...]:
+    """Convert authoritative projection outcomes into bounded plan evidence."""
+    return _projection_issue_evidence(
+        batch, pattern_id
+    ) + _projection_limitation_evidence(batch, pattern_id)
+
+
+_PROJECTION_QUALIFICATION_PRIORITY = {
+    "incompatible_profile": 0,
+    "unresolved_condition": 1,
+    "unresolved_precondition": 1,
+    "precondition_not_satisfied": 2,
+    "unsupported_requirement_derivation": 3,
+    "missing_compatible_resource": 3,
+    "source_influence_relation_infeasible": 3,
+    "inapplicable_projection": 3,
+}
+_PROJECTION_QUALIFICATION_OUTCOMES = {
+    "incompatible_profile": (
+        "capability_excluded",
+        "profile is incompatible with prerequisites",
+    ),
+    "unresolved_condition": (
+        "missing_evidence",
+        "authoritative qualification fact is unresolved",
+    ),
+    "unresolved_precondition": (
+        "missing_evidence",
+        "authoritative qualification fact is unresolved",
+    ),
+    "precondition_not_satisfied": (
+        "contradictory_evidence",
+        "authoritative precondition is not satisfied",
+    ),
+    "unsupported_requirement_derivation": (
+        "structurally_infeasible",
+        "authoritative projection is infeasible",
+    ),
+    "missing_compatible_resource": (
+        "structurally_infeasible",
+        "authoritative projection is infeasible",
+    ),
+    "source_influence_relation_infeasible": (
+        "structurally_infeasible",
+        "authoritative projection is infeasible",
+    ),
+    "inapplicable_projection": (
+        "structurally_infeasible",
+        "authoritative projection is infeasible",
+    ),
+}
+_QUALIFICATION_FACT_OUTCOMES = {
+    "missing": ("missing_evidence", "authoritative qualification fact is absent"),
+    "contradictory": (
+        "contradictory_evidence",
+        "authoritative qualification fact is contradictory",
+    ),
 }
 
-# Relationship-kind substrings that force an excluded or governance scope.
-_KIND_EXCLUSION_SUBSTRINGS = ("gated", "capability")
-_KIND_GOVERNANCE_SUBSTRINGS = ("governance", "orphan")
 
-# Relationship-kind substrings mapped to their qualification disposition, in
-# evaluation order. Kinds matching no rule qualify as ready.
-_KIND_QUALIFICATION_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
-    (("missing",), "missing_evidence"),
-    (("contradict",), "contradictory_evidence"),
-    (
-        ("infeasib", "structurally", "unsupported"),
-        "structurally_infeasible",
-    ),
-    (("ready", "qualified", "generated", "projectable"), "ready"),
-)
-
-_EXCLUDED_SCOPES = ("capability_excluded", "governance_only")
-_APPLICABLE_QUALIFICATIONS = (
-    "ready",
-    "missing_evidence",
-    "contradictory_evidence",
-    "structurally_infeasible",
-)
-_SETTLED_PROJECTIONS = ("not_attempted", "projection_infeasible")
-
-# Candidate expansion sections in consumption order: (expansion key, default
-# projection disposition, default reason, honor rejection_reason, accept bare
-# string entries).
-_CANDIDATE_SECTIONS: tuple[
-    tuple[str, ObligationProjectionDisposition, str, bool, bool], ...
-] = (
-    ("candidates", "projectable", "", False, False),
-    ("accepted_candidates", "projectable", "qualified combination", True, True),
-    (
-        "rejected_candidates",
-        "projection_infeasible",
-        "missing required resource",
-        True,
-        True,
-    ),
-)
+def _qualification_from_codes(
+    codes: set[str], has_limitation: bool
+) -> tuple[str, str | None]:
+    """Select a typed outcome from projection issue codes by precedence."""
+    selected = min(
+        filter(_PROJECTION_QUALIFICATION_PRIORITY.__contains__, codes),
+        key=_PROJECTION_QUALIFICATION_PRIORITY.__getitem__,
+        default=None,
+    )
+    fallback = (
+        ("ready", None)
+        if has_limitation
+        else ("structurally_infeasible", "no projectable candidate was produced")
+    )
+    return _PROJECTION_QUALIFICATION_OUTCOMES.get(selected, fallback)
 
 
-def _collect_config_secrets(config: dict[str, Any]) -> set[str]:
-    """Collect secret string tokens from configuration to sanitize traces."""
-    secrets: set[str] = set()
-    for _key, val in config.items():
-        if isinstance(val, str) and val.strip():
-            secrets.add(val.strip())
-    return secrets
+def _projection_issue_codes(batch: Any, pattern_id: str) -> set[str]:
+    """Collect projection issue codes for one pattern."""
+    return {
+        item.code for item in batch.infeasibilities if item.pattern_id == pattern_id
+    }
 
 
-def _redact_text(text: str, secrets: set[str]) -> str:
-    """Replace every known secret occurrence in a string."""
-    for secret in secrets:
-        if secret in text:
-            text = text.replace(secret, _REDACTED)
-    return text
+def _has_projection_limitation(batch: Any, pattern_id: str) -> bool:
+    """Report whether bounded projection retained a limitation for a pattern."""
+    return any(item.pattern_id == pattern_id for item in batch.limitations)
 
 
-def _sanitize_secrets(value: Any, secrets: set[str]) -> Any:
-    """Remove known secrets from values."""
-    if not secrets:
-        return value
-    if isinstance(value, str):
-        return _redact_text(value, secrets)
-    return _sanitize_container(value, secrets)
+def _qualification_without_candidates(
+    batch: Any, pattern_id: str
+) -> tuple[str, str | None]:
+    """Classify a pattern when projection emitted no candidate records."""
+    if batch is None:
+        return "ready", None
+    return _qualification_from_codes(
+        _projection_issue_codes(batch, pattern_id),
+        _has_projection_limitation(batch, pattern_id),
+    )
 
 
-def _sanitize_container(value: Any, secrets: set[str]) -> Any:
-    """Redact secrets inside mapping or sequence values."""
-    if isinstance(value, dict):
-        return {key: _sanitize_secrets(item, secrets) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_sanitize_secrets(item, secrets) for item in value]
-    return value
+def _qualification_from_projection(
+    batch: Any,
+    pattern_id: str,
+    has_candidates: bool,
+    qualification_facts_state: Literal["complete", "missing", "contradictory"],
+) -> tuple[str, str | None]:
+    """Translate gates, giving capability exclusion precedence over fact gaps."""
+    if not has_candidates:
+        without_candidates = _qualification_without_candidates(batch, pattern_id)
+        if without_candidates[0] == "capability_excluded":
+            return without_candidates
+    fact_outcome = _QUALIFICATION_FACT_OUTCOMES.get(qualification_facts_state)
+    if fact_outcome:
+        return fact_outcome
+    if has_candidates:
+        return "ready", None
+    return _qualification_without_candidates(batch, pattern_id)
 
 
-def _canonical_obligation_id(risk_id: str, pattern_id: str | None, pin_tag: str) -> str:
-    """Construct deterministic canonical obligation identifier."""
-    if pattern_id:
-        return f"ob:{risk_id}:{pattern_id}:{pin_tag}"
-    return f"ob:{risk_id}:{pin_tag}"
+def _catalog_records(
+    inputs: _contracts.TaxonomyObligationInputs,
+) -> list[dict[str, Any]]:
+    """Serialize the validated catalog for the projection seam."""
+    return [
+        pattern.model_dump(mode="json") for pattern in inputs.attack_pattern_catalog
+    ]
 
 
-def _raw_dispositions(rel: dict[str, Any]) -> tuple[Any, Any, Any]:
-    """Read explicit scope, qualification, and projection dispositions."""
+def _verify_catalog_pin(
+    records: list[dict[str, Any]],
+    resolver: _CatalogResolver,
+    pins: dict[str, Any],
+) -> None:
+    """Require the computed catalog content to be one declared pin."""
+    computed = compute_authoritative_catalog_pin(records, resolver)
+    if computed not in {pin.digest for pin in pins.values()}:
+        raise ValueError(
+            "authoritative attack-pattern catalog does not match catalog pin"
+        )
+
+
+def _group_candidates_by_pattern(
+    candidates: tuple[Any, ...],
+) -> dict[str, tuple[Any, ...]]:
+    """Group authoritative projection candidates by pattern identity."""
+    grouped: dict[str, list[Any]] = {}
+    for candidate in candidates:
+        grouped.setdefault(candidate.pattern_id, []).append(candidate)
+    return {key: tuple(value) for key, value in grouped.items()}
+
+
+def _build_projection_batch(
+    inputs: _contracts.TaxonomyObligationInputs,
+) -> tuple[
+    Any,
+    dict[str, tuple[Any, ...]],
+    frozenset[str],
+    dict[str, Any],
+    dict[str, tuple[Any, ...]],
+]:
+    """Observe one bounded authoritative run and group every derived identity."""
+    records = _catalog_records(inputs)
+    if not records:
+        return None, {}, frozenset(), {}, {}
+    resolver = _CatalogResolver(inputs.attack_pattern_catalog)
+    _verify_catalog_pin(records, resolver, inputs.catalog_pins)
+    observation = project_authoritative_candidate_observations(
+        records,
+        resolver,
+        inputs.capability_snapshot,
+        budget=inputs.projection_budget,
+    )
+    all_candidates = observation.batch.candidates + observation.deferred_candidates
+    deferred_ids = frozenset(
+        candidate.candidate_id for candidate in observation.deferred_candidates
+    )
     return (
-        rel.get("scope_disposition") or rel.get("scope"),
-        rel.get("qualification_disposition") or rel.get("qualification"),
-        rel.get("projection_disposition") or rel.get("projection"),
+        observation.batch,
+        _group_candidates_by_pattern(all_candidates),
+        deferred_ids,
+        {trace.pattern_id: trace for trace in observation.qualification_traces},
+        _group_candidates_by_pattern(observation.rejected_candidates),
     )
 
 
-def _apply_legacy_disposition(
-    rel: dict[str, Any],
-    raw_scope: Any,
-    raw_qualification: Any,
-    raw_projection: Any,
-) -> tuple[Any, Any, Any]:
-    """Fill missing dispositions from a legacy single disposition string."""
-    raw_disp = rel.get("disposition")
-    if not raw_disp:
-        return raw_scope, raw_qualification, raw_projection
-    default_scope, default_qualification, default_projection = (
-        _LEGACY_DISPOSITION_DEFAULTS.get(str(raw_disp), (None, None, None))
+def _candidate_records(
+    candidates: tuple[Any, ...], deferred_ids: frozenset[str]
+) -> tuple[CandidateRecord, ...]:
+    """Persist only concrete projected identities, bindings, and budget outcomes."""
+    return tuple(
+        CandidateRecord(
+            candidate_id=candidate.candidate_id,
+            canonical_ingress=candidate.canonical_ingress,
+            resource_bindings=tuple(candidate.projection.bindings),
+            projection_disposition=(
+                "budget_deferred"
+                if candidate.candidate_id in deferred_ids
+                else "projectable"
+            ),
+            reason=(
+                "authoritative candidate exceeded the projection candidate budget"
+                if candidate.candidate_id in deferred_ids
+                else ""
+            ),
+        )
+        for candidate in candidates
     )
+
+
+def _rejected_candidate_records(
+    candidates: tuple[Any, ...],
+) -> tuple[CandidateRecord, ...]:
+    """Persist projection rejects with their deterministic typed evidence."""
+    return tuple(
+        CandidateRecord(
+            candidate_id=candidate.candidate_id,
+            canonical_ingress=candidate.canonical_ingress,
+            resource_bindings=candidate.resource_bindings,
+            projection_disposition="projection_infeasible",
+            reason=candidate.reason,
+            evidence=(_issue_evidence(candidate.issue),),
+        )
+        for candidate in candidates
+    )
+
+
+def _pattern_disposition(
+    pattern: AttackPattern,
+    inputs: _contracts.TaxonomyObligationInputs,
+    batch: Any,
+    candidates: tuple[Any, ...],
+    deferred_ids: frozenset[str],
+    rejected_candidates: tuple[Any, ...],
+) -> tuple[str, str, tuple[CandidateRecord, ...], str | None]:
+    """Resolve scope, qualification, and candidate children for a pattern."""
+    qualification, reason = _qualification_from_projection(
+        batch,
+        pattern.id,
+        bool(candidates),
+        _qualification_facts_state(pattern, inputs.qualification_facts),
+    )
+    if qualification == "capability_excluded":
+        return "capability_excluded", "not_attempted", (), reason
+    records = (
+        _candidate_records(candidates, deferred_ids)
+        + _rejected_candidate_records(rejected_candidates)
+        if qualification in {"ready", "structurally_infeasible"}
+        else ()
+    )
+    return "applicable", qualification, records, reason
+
+
+def _qualification_evidence(reason: str | None) -> tuple[EvidenceRecord, ...]:
+    """Return one typed qualification record when a reason was derived."""
+    if reason is None:
+        return ()
     return (
-        raw_scope or default_scope,
-        raw_qualification or default_qualification,
-        raw_projection or default_projection,
+        EvidenceRecord(
+            kind="qualification",
+            source="authoritative-projection",
+            detail=reason,
+        ),
     )
 
 
-def _matches_any(text: str, substrings: tuple[str, ...]) -> bool:
-    """Report whether any substring occurs in the text."""
-    return any(substring in text for substring in substrings)
+def _condition_fact_evaluation(
+    result: Any,
+    *,
+    rationale: str = "authoritative condition evaluation",
+) -> FactEvaluationEvidence:
+    """Persist one authoritative step-condition result with its typed fact readings."""
+    return FactEvaluationEvidence(
+        evaluation_type="condition",
+        step_id=result.condition_step_id,
+        result=result.result,
+        facts=result.evidence,
+        rationale=rationale,
+    )
 
 
-def _explicit_scope(raw_scope: Any) -> str:
-    """Normalize an explicitly provided scope disposition."""
-    scope = str(raw_scope)
-    if scope == "in-scope":
-        return "applicable"
-    if scope == "out-of-scope":
-        return "capability_excluded"
-    return scope
+def _precondition_fact_evaluation(
+    result: Any,
+    *,
+    rationale: str = "authoritative precondition evaluation",
+) -> FactEvaluationEvidence:
+    """Persist one selected-step precondition result with its fact readings."""
+    return FactEvaluationEvidence(
+        evaluation_type="precondition",
+        step_id=result.step_id,
+        condition_id=result.condition_id,
+        result=result.result,
+        facts=result.evidence,
+        rationale=rationale,
+    )
 
 
-def _kind_scope(kind: str, pattern_id: str | None) -> str:
-    """Derive the scope from the relationship kind when none is explicit."""
-    if _matches_any(kind, _KIND_EXCLUSION_SUBSTRINGS):
-        return "capability_excluded"
-    if not pattern_id or _matches_any(kind, _KIND_GOVERNANCE_SUBSTRINGS):
-        return "governance_only"
-    return "applicable"
+def _qualification_trace_evidence(trace: Any) -> tuple[EvidenceRecord, ...]:
+    """Retain typed condition and precondition facts for successful qualification."""
+    if trace is None or not (trace.condition_results or trace.precondition_results):
+        return ()
+    return (
+        EvidenceRecord(
+            kind="qualification",
+            source="authoritative-projection",
+            detail="authoritative qualification fact evaluations",
+            fact_evaluations=tuple(
+                _condition_fact_evaluation(result) for result in trace.condition_results
+            )
+            + tuple(
+                _precondition_fact_evaluation(result)
+                for result in trace.precondition_results
+            ),
+        ),
+    )
 
 
-def _resolve_scope(raw_scope: Any, kind: str, pattern_id: str | None) -> str:
-    """Resolve the scope disposition for one relationship."""
-    if raw_scope:
-        return _explicit_scope(raw_scope)
-    return _kind_scope(kind, pattern_id)
+def _unready_fact_status(
+    reading: _contracts.QualificationFact | None,
+) -> Literal["absent", "unknown", "contradictory"]:
+    """Map an unusable typed reading to persisted evidence vocabulary."""
+    if reading is None:
+        return "absent"
+    if reading.status in ("absent", "unknown", "contradictory"):
+        return reading.status
+    return "absent"
 
 
-def _kind_qualification(kind: str) -> str:
-    """Derive the qualification disposition from the relationship kind."""
-    for substrings, qualification in _KIND_QUALIFICATION_RULES:
-        if _matches_any(kind, substrings):
-            return qualification
-    return "ready"
-
-
-def _resolve_qualification(raw_qualification: Any, scope: str, kind: str) -> str:
-    """Resolve the qualification disposition for one relationship."""
-    if raw_qualification:
-        return str(raw_qualification)
-    if scope in _EXCLUDED_SCOPES:
-        return "not_attempted"
-    return _kind_qualification(kind)
-
-
-def _resolve_projection(raw_projection: Any, qualification: str) -> str:
-    """Resolve the projection disposition for one relationship."""
-    if raw_projection:
-        return str(raw_projection)
-    if qualification == "ready":
-        return "projectable"
-    return "not_attempted"
-
-
-def _reject_excluded_scope(scope: str, qualification: str, projection: str) -> None:
-    """Reject non-terminal dispositions under an excluded scope."""
-    if qualification != "not_attempted":
-        raise ValueError(
-            f"Invalid disposition combination: scope '{scope}' cannot be "
-            f"combined with qualification '{qualification}'"
-        )
-    if projection != "not_attempted":
-        raise ValueError(
-            f"Invalid disposition combination: scope '{scope}' cannot be "
-            f"combined with projection '{projection}'"
-        )
-
-
-def _reject_inapplicable(qualification: str, projection: str) -> None:
-    """Reject qualification and projection values outside the applicable scope."""
-    if qualification == "not_attempted":
-        raise ValueError(
-            "Invalid disposition combination: scope 'applicable' cannot be "
-            f"combined with qualification '{qualification}'"
-        )
-    if qualification not in _APPLICABLE_QUALIFICATIONS:
-        raise ValueError(
-            f"Invalid qualification disposition '{qualification}' for scope 'applicable'"
-        )
-    if qualification != "ready" and projection not in _SETTLED_PROJECTIONS:
-        raise ValueError(
-            "Invalid disposition combination: qualification "
-            f"'{qualification}' cannot be combined with projection '{projection}'"
-        )
-
-
-def _validate_dispositions(scope: str, qualification: str, projection: str) -> None:
-    """Reject disposition combinations outside the closed Phase 1 contract."""
-    if scope in _EXCLUDED_SCOPES:
-        _reject_excluded_scope(scope, qualification, projection)
-    elif scope == "applicable":
-        _reject_inapplicable(qualification, projection)
-
-
-def _resolve_dispositions(
-    rel: dict[str, Any],
-    pattern_id: str | None,
-) -> tuple[str, str, str]:
-    """Resolve scope, qualification, and projection dispositions for one relationship."""
-    raw_scope, raw_qualification, raw_projection = _raw_dispositions(rel)
-    (
-        raw_scope,
-        raw_qualification,
-        raw_projection,
-    ) = _apply_legacy_disposition(rel, raw_scope, raw_qualification, raw_projection)
-    kind = rel.get("relationship_kind", "")
-    scope = _resolve_scope(raw_scope, kind, pattern_id)
-    qualification = _resolve_qualification(raw_qualification, scope, kind)
-    projection = _resolve_projection(raw_projection, qualification)
-    _validate_dispositions(scope, qualification, projection)
-    return scope, qualification, projection
-
-
-def _build_qualification_trace(
-    evals: list[dict[str, Any]],
-    risk_id: str,
-    pattern_id: str | None,
-    secrets: set[str],
-) -> list[QualificationTraceItem]:
-    """Extract and sanitize qualification traces matching this obligation."""
-    trace_items: list[QualificationTraceItem] = []
-    for ev in evals:
-        if ev.get("risk_id") == risk_id and ev.get("pattern_id") == pattern_id:
-            facts = _sanitize_secrets(ev.get("facts", ""), secrets)
-            predicate = _sanitize_secrets(ev.get("predicate", ""), secrets)
-            result = _sanitize_secrets(str(ev.get("result", "")), secrets)
-            reason = _sanitize_secrets(ev.get("reason", ""), secrets)
-            trace_items.append(
-                QualificationTraceItem(
-                    predicate=predicate,
-                    facts=facts,
-                    result=result,
-                    reason=reason,
+def _missing_qualification_facts(
+    pattern: AttackPattern,
+    inputs: _contracts.TaxonomyObligationInputs,
+) -> tuple[QualificationFactEvidence, ...]:
+    """Collect required facts that are missing or not usable for readiness."""
+    missing: list[QualificationFactEvidence] = []
+    for reference in required_fact_references((pattern,)):
+        key = canonical_json_bytes(reference.model_dump(mode="json")).decode("utf-8")
+        reading = inputs.qualification_facts.facts.get(key)
+        if reading is None or reading.status != "present":
+            missing.append(
+                QualificationFactEvidence(
+                    fact=reference,
+                    status=_unready_fact_status(reading),
+                    value=None,
                 )
             )
-    return trace_items
+    return tuple(missing)
 
 
-def _candidate_reason(
-    candidate: dict[str, Any], default: str, honor_rejection_reason: bool
-) -> str:
-    """Resolve a candidate entry's reason string."""
-    if "reason" in candidate:
-        return str(candidate["reason"])
-    if honor_rejection_reason:
-        return str(candidate.get("rejection_reason", default))
-    return default
-
-
-def _candidate_record(
-    candidate: Any,
-    default_disposition: ObligationProjectionDisposition,
-    default_reason: str,
-    honor_rejection_reason: bool,
-) -> CandidateRecord | None:
-    """Build one candidate record from a mapping or bare-string entry."""
-    if isinstance(candidate, str):
-        return CandidateRecord(
-            candidate_id=candidate,
-            projection_disposition=default_disposition,
-            reason=default_reason,
-        )
-    candidate_id = str(candidate.get("candidate_id", ""))
-    if not candidate_id:
-        return None
-    return CandidateRecord(
-        candidate_id=candidate_id,
-        projection_disposition=candidate.get(
-            "projection_disposition", default_disposition
-        ),
-        reason=_candidate_reason(candidate, default_reason, honor_rejection_reason),
+def _missing_qualification_evidence(
+    pattern: AttackPattern,
+    inputs: _contracts.TaxonomyObligationInputs,
+    qualification: str,
+) -> tuple[EvidenceRecord, ...]:
+    """Retain unusable typed facts as explicit, non-ready evidence."""
+    if qualification not in {"missing_evidence", "contradictory_evidence"}:
+        return ()
+    missing = _missing_qualification_facts(pattern, inputs)
+    if not missing:
+        return ()
+    rationale = (
+        "authoritative qualification fact is contradictory"
+        if qualification == "contradictory_evidence"
+        else "authoritative qualification fact is absent"
     )
-
-
-def _append_unique_candidate(
-    candidates: list[CandidateRecord],
-    seen: set[str],
-    record: CandidateRecord | None,
-) -> None:
-    """Append a record unless it is empty or duplicates a seen candidate id."""
-    if record is not None and record.candidate_id not in seen:
-        seen.add(record.candidate_id)
-        candidates.append(record)
-
-
-def _collect_candidate_section(
-    candidates: list[CandidateRecord],
-    seen: set[str],
-    expansion: dict[str, Any],
-    section: tuple[str, ObligationProjectionDisposition, str, bool, bool],
-) -> None:
-    """Collect one expansion section's records with per-section defaults."""
-    (
-        key,
-        default_disposition,
-        default_reason,
-        honor_rejection_reason,
-        accept_bare_strings,
-    ) = section
-    for entry in expansion.get(key, []):
-        if isinstance(entry, str) and not accept_bare_strings:
-            continue
-        record = _candidate_record(
-            entry, default_disposition, default_reason, honor_rejection_reason
-        )
-        _append_unique_candidate(candidates, seen, record)
-
-
-def _expansion_matches(
-    expansion: dict[str, Any], risk_id: str, pattern_id: str | None
-) -> bool:
-    """Report whether an expansion belongs to the given risk and pattern."""
     return (
-        expansion.get("risk_id") == risk_id
-        and expansion.get("pattern_id") == pattern_id
-    )
-
-
-def _build_candidate_records(
-    expansions: list[dict[str, Any]],
-    risk_id: str,
-    pattern_id: str | None,
-) -> list[CandidateRecord]:
-    """Extract candidate expansion records matching this obligation."""
-    candidates: list[CandidateRecord] = []
-    seen: set[str] = set()
-    for expansion in expansions:
-        if not _expansion_matches(expansion, risk_id, pattern_id):
-            continue
-        for section in _CANDIDATE_SECTIONS:
-            _collect_candidate_section(candidates, seen, expansion, section)
-    return candidates
-
-
-def _count_scope(obligations: list[TaxonomyObligation], disposition: str) -> int:
-    """Count obligations carrying one scope disposition."""
-    return sum(1 for o in obligations if o.scope_disposition == disposition)
-
-
-def _count_qualification(
-    obligations: list[TaxonomyObligation], *dispositions: str
-) -> int:
-    """Count obligations carrying any of the qualification dispositions."""
-    return sum(1 for o in obligations if o.qualification_disposition in dispositions)
-
-
-def _count_obligation_disposition(
-    obligations: list[TaxonomyObligation], disposition: str
-) -> int:
-    """Count obligations carrying one terminal projection disposition."""
-    return sum(1 for o in obligations if o.projection_disposition == disposition)
-
-
-def _count_candidate_disposition(
-    obligations: list[TaxonomyObligation], disposition: str
-) -> int:
-    """Count candidate records carrying one projection disposition."""
-    return sum(
-        1
-        for o in obligations
-        for c in o.candidate_records
-        if c.projection_disposition == disposition
-    )
-
-
-def _count_projection(
-    obligations: list[TaxonomyObligation],
-    disposition: str,
-    use_candidate_records: bool,
-) -> int:
-    """Count a projection disposition at the candidate level when records exist."""
-    if use_candidate_records:
-        return _count_candidate_disposition(obligations, disposition)
-    return _count_obligation_disposition(obligations, disposition)
-
-
-def _derive_summary(obligations: list[TaxonomyObligation]) -> ObligationPlanSummary:
-    """Derive summary counts from obligation rows and candidate records."""
-    use_candidate_records = any(o.candidate_records for o in obligations)
-    return ObligationPlanSummary(
-        total=len(obligations),
-        applicable=_count_scope(obligations, "applicable"),
-        governance_only=_count_scope(obligations, "governance_only"),
-        capability_excluded=_count_scope(obligations, "capability_excluded"),
-        ready=_count_qualification(obligations, "ready"),
-        missing_or_contradictory=_count_qualification(
-            obligations, "missing_evidence", "contradictory_evidence"
-        ),
-        structurally_infeasible=_count_qualification(
-            obligations, "structurally_infeasible"
-        ),
-        projectable=_count_projection(
-            obligations, "projectable", use_candidate_records
-        ),
-        projection_infeasible=_count_projection(
-            obligations, "projection_infeasible", use_candidate_records
-        ),
-        budget_deferred=_count_projection(
-            obligations, "budget_deferred", use_candidate_records
+        EvidenceRecord(
+            kind="qualification",
+            source="qualification-facts",
+            detail=rationale,
+            fact_evaluations=(
+                FactEvaluationEvidence(
+                    evaluation_type="qualification_fact",
+                    step_id=pattern.id,
+                    result="unknown",
+                    facts=missing,
+                    rationale=rationale,
+                ),
+            ),
         ),
     )
 
 
-def _canonicalize_relationship_for_digest(rel: dict[str, Any]) -> dict[str, Any]:
-    """Strip non-structural generation prose (such as ICA prose) from relationship for digest stability."""
-    return {
-        "risk_id": str(rel.get("risk_id", "")),
-        "pattern_id": str(rel.get("pattern_id", "")) if rel.get("pattern_id") else None,
-        "relationship_kind": str(rel.get("relationship_kind", "")),
-        "scope_disposition": str(rel.get("scope_disposition", rel.get("scope", ""))),
-        "qualification_disposition": str(
-            rel.get("qualification_disposition", rel.get("qualification", ""))
+def _advisory_evidence(
+    evidence: tuple[EvidenceRecord, ...],
+) -> tuple[EvidenceRecord, ...]:
+    """Keep a nonempty evidence set for a directly resolved pattern."""
+    if evidence:
+        return evidence
+    return (
+        EvidenceRecord(
+            kind="advisory",
+            source="obligation-planner",
+            detail="authoritative mapping path retained",
         ),
-        "projection_disposition": str(
-            rel.get("projection_disposition", rel.get("projection", ""))
+    )
+
+
+def _obligation_evidence(
+    paths: tuple[tuple[_MappingEdge, ...], ...],
+    batch: Any,
+    pattern_id: str,
+    qualification_reason: str | None,
+    qualification_trace: Any,
+) -> tuple[EvidenceRecord, ...]:
+    """Combine mapping, projection, and qualification provenance."""
+    mapping = _path_evidence(paths)
+    projection = _projection_evidence(batch, pattern_id) if batch else ()
+    evidence = (
+        mapping
+        + projection
+        + _qualification_evidence(qualification_reason)
+        + _qualification_trace_evidence(qualification_trace)
+    )
+    return _advisory_evidence(evidence)
+
+
+def _build_governance_obligation(
+    card: Any,
+    inputs: _contracts.TaxonomyObligationInputs,
+) -> TaxonomyObligation:
+    """Build the visible row for a risk without a resolved pattern."""
+    return TaxonomyObligation(
+        obligation_id=_identity_digest(card.risk_id, None, inputs),
+        risk_ref=_risk_reference(card),
+        taxonomy_chain=(),
+        scope_disposition="governance_only",
+        qualification_disposition="not_attempted",
+        candidate_records=(),
+        correspondence_disposition="not_assessed",
+        evidence=(
+            EvidenceRecord(
+                kind="governance",
+                source="obligation-planner",
+                detail="reviewed risk did not resolve to an authoritative attack pattern",
+            ),
         ),
-    }
-
-
-def _canonicalize_card_for_digest(card: dict[str, Any]) -> dict[str, Any]:
-    """Strip non-structural prose from risk card for digest stability."""
-    return {
-        "risk_id": str(card.get("risk_id", "")),
-        "pattern_id": str(card.get("pattern_id", ""))
-        if card.get("pattern_id")
-        else None,
-    }
-
-
-def _json_serializable(obj: Any) -> Any:
-    """Ensure object is JSON serializable for sorting."""
-    return json.dumps(obj, sort_keys=True, default=str)
-
-
-def _planning_snapshot(
-    snapshot: TaxonomyObligationSnapshot | dict[str, Any],
-) -> TaxonomyObligationSnapshot:
-    """Coerce a raw mapping into a snapshot model."""
-    if isinstance(snapshot, dict):
-        return TaxonomyObligationSnapshot.model_validate(snapshot)
-    return snapshot
-
-
-def _resolved_pin(pin: str | None, legacy_pin: str | None, default: str) -> str:
-    """Prefer the explicit pin, then its legacy alias, then the default."""
-    return pin or legacy_pin or default
-
-
-def _generation_inputs_digest(
-    snap: TaxonomyObligationSnapshot, catalog_pin: str, mapping_pin: str
-) -> str:
-    """Digest the canonical identity-bearing relationship and card content."""
-    canonical_relationships = sorted(
-        [_canonicalize_relationship_for_digest(rel) for rel in snap.relationships],
-        key=_json_serializable,
     )
-    canonical_cards = sorted(
-        [_canonicalize_card_for_digest(card) for card in snap.risk_cards],
-        key=_json_serializable,
+
+
+def _build_pattern_obligation(
+    card: Any,
+    pattern: AttackPattern,
+    paths: tuple[tuple[_MappingEdge, ...], ...],
+    inputs: _contracts.TaxonomyObligationInputs,
+    batch: Any,
+    candidates_by_pattern: dict[str, tuple[Any, ...]],
+    deferred_ids: frozenset[str],
+    qualification_traces: dict[str, Any],
+    rejected_by_pattern: dict[str, tuple[Any, ...]],
+) -> TaxonomyObligation:
+    """Build one row for a resolved pattern and its authoritative projection."""
+    scope, qualification, candidate_records, qualification_reason = (
+        _pattern_disposition(
+            pattern,
+            inputs,
+            batch,
+            candidates_by_pattern.get(pattern.id, ()),
+            deferred_ids,
+            rejected_by_pattern.get(pattern.id, ()),
+        )
     )
-    return compute_sha256(
-        {
-            "catalog_pin": catalog_pin,
-            "mapping_pin": mapping_pin,
-            "relationships": canonical_relationships,
-            "risk_cards": canonical_cards,
-        }
+    return TaxonomyObligation(
+        obligation_id=_identity_digest(card.risk_id, pattern, inputs),
+        risk_ref=_risk_reference(card),
+        taxonomy_chain=_chain_entries(pattern),
+        attack_pattern_id=pattern.id,
+        attack_pattern_semantic_digest=pattern.canonical_chain.semantic_digest,
+        scope_disposition=scope,
+        qualification_disposition=qualification,
+        candidate_records=candidate_records,
+        correspondence_disposition="not_assessed",
+        evidence=(
+            _obligation_evidence(
+                paths,
+                batch,
+                pattern.id,
+                qualification_reason,
+                qualification_traces.get(pattern.id),
+            )
+            + _missing_qualification_evidence(pattern, inputs, qualification)
+        ),
     )
 
 
 def _build_obligation(
-    rel: dict[str, Any],
-    snap: TaxonomyObligationSnapshot,
-    pin_tag: str,
-    secrets: set[str],
+    card: Any,
+    pattern: AttackPattern | None,
+    paths: tuple[tuple[_MappingEdge, ...], ...],
+    inputs: _contracts.TaxonomyObligationInputs,
+    batch: Any,
+    candidates_by_pattern: dict[str, tuple[Any, ...]],
+    deferred_ids: frozenset[str],
+    qualification_traces: dict[str, Any],
+    rejected_by_pattern: dict[str, tuple[Any, ...]],
 ) -> TaxonomyObligation:
-    """Build one ledger obligation from a snapshot relationship."""
-    risk_id = str(rel.get("risk_id", ""))
-    raw_pattern = rel.get("pattern_id")
-    pattern_id = str(raw_pattern) if raw_pattern else None
-    scope_disp, qual_disp, proj_disp = _resolve_dispositions(rel, pattern_id)
-    evidence: dict[str, Any] = {}
-    if rel.get("relationship_kind"):
-        evidence["relationship_kind"] = rel["relationship_kind"]
-    return TaxonomyObligation(
-        obligation_id=_canonical_obligation_id(risk_id, pattern_id, pin_tag),
-        risk_id=risk_id,
-        pattern_id=pattern_id,
-        scope_disposition=scope_disp,
-        qualification_disposition=qual_disp,
-        correspondence_disposition="not_assessed",
-        projection_disposition=proj_disp,
-        qualification_trace=_build_qualification_trace(
-            snap.qualification_evaluations, risk_id, pattern_id, secrets
-        ),
-        candidate_records=_build_candidate_records(
-            snap.candidate_expansions, risk_id, pattern_id
-        ),
-        evidence=evidence,
+    """Build one complete obligation row from typed planner inputs."""
+    if pattern is None:
+        return _build_governance_obligation(card, inputs)
+    return _build_pattern_obligation(
+        card,
+        pattern,
+        paths,
+        inputs,
+        batch,
+        candidates_by_pattern,
+        deferred_ids,
+        qualification_traces,
+        rejected_by_pattern,
     )
 
 
-def _build_obligations(
-    snap: TaxonomyObligationSnapshot, pin_tag: str, secrets: set[str]
-) -> list[TaxonomyObligation]:
-    """Build the unsorted obligation ledger from snapshot relationships."""
-    return [
-        _build_obligation(rel, snap, pin_tag, secrets) for rel in snap.relationships
-    ]
+def _validate_planner_inputs(inputs: Any) -> None:
+    """Reject adapter payloads at the typed planner seam."""
+    if not isinstance(inputs, _contracts.TaxonomyObligationInputs):
+        raise TypeError(
+            "plan_taxonomy_obligations requires TaxonomyObligationInputs; "
+            "file paths and adapter payloads belong at the adapter boundary"
+        )
 
 
-def plan_obligations(
-    snapshot: TaxonomyObligationSnapshot | dict[str, Any],
+def _rows_for_risk(
+    card: Any,
+    patterns: dict[str, AttackPattern],
+    edges: tuple[_MappingEdge, ...],
+    inputs: _contracts.TaxonomyObligationInputs,
+    batch: Any,
+    candidates_by_pattern: dict[str, tuple[Any, ...]],
+    deferred_ids: frozenset[str],
+    qualification_traces: dict[str, Any],
+    rejected_by_pattern: dict[str, tuple[Any, ...]],
+) -> tuple[TaxonomyObligation, ...]:
+    """Build all rows reachable from one reviewed risk card."""
+    paths_by_pattern = _mapping_paths(card.risk_id, set(patterns), edges)
+    if not paths_by_pattern:
+        return (
+            _build_obligation(
+                card,
+                None,
+                (),
+                inputs,
+                batch,
+                candidates_by_pattern,
+                deferred_ids,
+                qualification_traces,
+                rejected_by_pattern,
+            ),
+        )
+    return tuple(
+        _build_obligation(
+            card,
+            patterns[pattern_id],
+            paths,
+            inputs,
+            batch,
+            candidates_by_pattern,
+            deferred_ids,
+            qualification_traces,
+            rejected_by_pattern,
+        )
+        for pattern_id, paths in paths_by_pattern.items()
+    )
+
+
+def _build_obligation_rows(
+    inputs: _contracts.TaxonomyObligationInputs,
+    patterns: dict[str, AttackPattern],
+    edges: tuple[_MappingEdge, ...],
+    batch: Any,
+    candidates_by_pattern: dict[str, tuple[Any, ...]],
+    deferred_ids: frozenset[str],
+    qualification_traces: dict[str, Any],
+    rejected_by_pattern: dict[str, tuple[Any, ...]],
+) -> tuple[TaxonomyObligation, ...]:
+    """Build and canonically order the complete obligation ledger."""
+    obligations: list[TaxonomyObligation] = []
+    for card in sorted(inputs.risk_cards, key=lambda item: item.risk_id):
+        obligations.extend(
+            _rows_for_risk(
+                card,
+                patterns,
+                edges,
+                inputs,
+                batch,
+                candidates_by_pattern,
+                deferred_ids,
+                qualification_traces,
+                rejected_by_pattern,
+            )
+        )
+    obligations.sort(
+        key=lambda row: (
+            row.risk_ref.risk_id,
+            row.attack_pattern_id or "",
+            row.obligation_id,
+        )
+    )
+    return tuple(obligations)
+
+
+def _finalize_plan(
+    rows: tuple[TaxonomyObligation, ...],
+    inputs: _contracts.TaxonomyObligationInputs,
 ) -> TaxonomyObligationPlan:
-    """Produce a deterministic taxonomy obligation plan from a pinned snapshot.
-
-    Makes zero network and model calls.
-    """
-    snap = _planning_snapshot(snapshot)
-    catalog_pin = _resolved_pin(
-        snap.catalog_pin, snap.taxonomy_version, _DEFAULT_CATALOG_PIN
-    )
-    mapping_pin = _resolved_pin(
-        snap.mapping_pin, snap.mapping_version, _DEFAULT_MAPPING_PIN
-    )
-    capability_snapshot_digest = compute_sha256(snap.capability_content)
-    qualification_facts_digest = compute_sha256(snap.qualification_facts)
-    generation_inputs_digest = _generation_inputs_digest(snap, catalog_pin, mapping_pin)
-    pin_tag = compute_sha256(
-        f"{catalog_pin}|{mapping_pin}|{capability_snapshot_digest}"
-    )[:8]
-
-    obligations = _build_obligations(
-        snap, pin_tag, _collect_config_secrets(snap.config)
-    )
-    obligations.sort(key=_canonical_sort_key)
-
-    plan = TaxonomyObligationPlan(
+    """Construct, digest, and integrity-check the immutable plan."""
+    provisional = TaxonomyObligationPlan(
         schema_version="taxonomy-obligation-plan-v1",
-        catalog_pins={"catalog": catalog_pin, "atlas": catalog_pin},
-        mapping_pins={"mapping": mapping_pin, "sssom": mapping_pin},
-        capability_snapshot_digest=capability_snapshot_digest,
-        qualification_facts_digest=qualification_facts_digest,
-        generation_inputs_digest=generation_inputs_digest,
-        semantic_digest="",
-        obligations=obligations,
-        summary=_derive_summary(obligations),
-        network_calls=0,
-        model_calls=0,
+        semantic_digest="0" * 64,
+        capability_snapshot_digest=_snapshot_digest(inputs.capability_snapshot),
+        catalog_pins=dict(inputs.catalog_pins),
+        mapping_pins=dict(inputs.mapping_pins),
+        qualification_facts_digest=inputs.qualification_facts.semantic_digest
+        or "0" * 64,
+        obligations=rows,
+        summary=derive_obligation_summary(rows),
     )
-    plan.semantic_digest = plan.compute_semantic_digest()
+    plan = provisional.model_copy(
+        update={"semantic_digest": provisional.compute_semantic_digest()}
+    )
+    plan.assert_integrity()
     return plan
 
 
-def _canonical_sort_key(ob: TaxonomyObligation) -> tuple[str, str, str, str]:
-    """Canonical sort key: semantic identity with content as the tiebreaker."""
-    return (ob.risk_id, ob.pattern_id or "", ob.obligation_id, ob.model_dump_json())
+def plan_taxonomy_obligations(
+    inputs: _contracts.TaxonomyObligationInputs,
+) -> TaxonomyObligationPlan:
+    """Return the complete deterministic obligation ledger for typed inputs."""
+    _validate_planner_inputs(inputs)
+    patterns = _pattern_lookup(inputs.attack_pattern_catalog)
+    edges = _mapping_edges(inputs)
+    (
+        batch,
+        candidates_by_pattern,
+        deferred_ids,
+        qualification_traces,
+        rejected_by_pattern,
+    ) = _build_projection_batch(inputs)
+    rows = _build_obligation_rows(
+        inputs,
+        patterns,
+        edges,
+        batch,
+        candidates_by_pattern,
+        deferred_ids,
+        qualification_traces,
+        rejected_by_pattern,
+    )
+    return _finalize_plan(rows, inputs)
+
+
+__all__ = ["plan_taxonomy_obligations"]
 
 
 # mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-28T10:28:54Z","module_hash":"a99d4e5019bc6fb05da871eb76073223cd1791efb264805d932015da1845ae3f","source_sha256":"e739470e70ee0221e802410eb2a50a80d918e04e700b5df34b21100e1ae6c485","functions":[{"id":"func/_collect_config_secrets","name":"_collect_config_secrets","line":84,"end_line":90,"hash":"e81e1d78c3225399a6475f76a32a5e8a17b2d64b7e07b8ecfc708072de2ecac9"},{"id":"func/_redact_text","name":"_redact_text","line":93,"end_line":98,"hash":"2f1dfc73f75f23a3248af9b43a39cfb1be82b355fb145716ce5c9b395536122f"},{"id":"func/_sanitize_secrets","name":"_sanitize_secrets","line":101,"end_line":107,"hash":"52ebba85061c0261cde6e03c4a9ff85bc437da947a85c96840a51c41e787427d"},{"id":"func/_sanitize_container","name":"_sanitize_container","line":110,"end_line":116,"hash":"baeab770be10837607c1642a06900aff048e191eae71acd78b49b918e4485384"},{"id":"func/_canonical_obligation_id","name":"_canonical_obligation_id","line":119,"end_line":123,"hash":"1a71bb675d184f1afd5b3263af3626f7c414165b2d957b65a4fb1ffd82963820"},{"id":"func/_raw_dispositions","name":"_raw_dispositions","line":126,"end_line":132,"hash":"2a281b0f77acf2434ac5bc962ee65d77eae8eceed86631800f2c85f102b9f70c"},{"id":"func/_apply_legacy_disposition","name":"_apply_legacy_disposition","line":135,"end_line":152,"hash":"ae2a5b6942a394a851177bab4061ee98bcd45b1dd1deb7c6d101bea296b0259e"},{"id":"func/_matches_any","name":"_matches_any","line":155,"end_line":157,"hash":"4b08b6111399f202593fd75e93044b59a204cea6f14cf7ede1bd44483bf890cb"},{"id":"func/_explicit_scope","name":"_explicit_scope","line":160,"end_line":167,"hash":"acdfdb70e9d09c85436264f5b26c4857f36f4c95289e714f6aa3e582ec3d4ca3"},{"id":"func/_kind_scope","name":"_kind_scope","line":170,"end_line":176,"hash":"5a1eff6cec8bdb3d3800af331d84d4dba675cb3e16db8e84f934d1cd3b8fbffb"},{"id":"func/_resolve_scope","name":"_resolve_scope","line":179,"end_line":183,"hash":"786dc36153105519e07c0cdf941503ef106115d634364131977796d047d66994"},{"id":"func/_kind_qualification","name":"_kind_qualification","line":186,"end_line":191,"hash":"354104b97df1dd4a645603bcfce07c7ffc701c29c948606d33d45b4dc4741db4"},{"id":"func/_resolve_qualification","name":"_resolve_qualification","line":194,"end_line":200,"hash":"bfb11b4ff192259abe7f047b086c09e9feffce96463518ad1cfac6ea79e24675"},{"id":"func/_resolve_projection","name":"_resolve_projection","line":203,"end_line":209,"hash":"5df389d2e70c88de6a20b21bdd4d9b7e080cecafd1e686a29d16d6c67f47469f"},{"id":"func/_reject_excluded_scope","name":"_reject_excluded_scope","line":212,"end_line":223,"hash":"f2432199cd203f14120081153ce40af54c412e0fe9ac457ed3057fdeeb647c3e"},{"id":"func/_reject_inapplicable","name":"_reject_inapplicable","line":226,"end_line":241,"hash":"5d77624068a1771d015ef4d7b5691d8e710ae6adcdfe9a023539f612a7ab5a7a"},{"id":"func/_validate_dispositions","name":"_validate_dispositions","line":244,"end_line":249,"hash":"a2d2d99a67ab1b7d1d46253af95d21682e4c01ee8b304077b56b148668d7801a"},{"id":"func/_resolve_dispositions","name":"_resolve_dispositions","line":252,"end_line":268,"hash":"ef515639a805b44019b79551484d80fcd44ad498314ce31fdee3c23b88236564"},{"id":"func/_build_qualification_trace","name":"_build_qualification_trace","line":271,"end_line":293,"hash":"82820a3f4daebf0a03011f670adc0002de739cbb1a40b254336f3d0cfdd51029"},{"id":"func/_candidate_reason","name":"_candidate_reason","line":296,"end_line":304,"hash":"892ff8ce63b41e233c15760584c23d39a05641aeca1f153f47656ec3d2a469f5"},{"id":"func/_candidate_record","name":"_candidate_record","line":307,"end_line":329,"hash":"29b5a3cb4bf83788183619d419f64f5a1343210dbe18bdfe23027856823ce48c"},{"id":"func/_append_unique_candidate","name":"_append_unique_candidate","line":332,"end_line":340,"hash":"38edca1cbeaa72298e8ddf9f45cff906cb73e61d4429696462c4dc2f88d4a268"},{"id":"func/_collect_candidate_section","name":"_collect_candidate_section","line":343,"end_line":363,"hash":"25f3b2437092be19123b24d67cabff932ab2d71a09369f12dd2b5a23c98b08ae"},{"id":"func/_expansion_matches","name":"_expansion_matches","line":366,"end_line":373,"hash":"34e312194da0ed682fca29e23d42740fb214ad6f8e8c95368be28655f3666755"},{"id":"func/_build_candidate_records","name":"_build_candidate_records","line":376,"end_line":389,"hash":"15043673e615b32d9fd30acd8a280c4bc835a6c30588a1892193dd307794aa64"},{"id":"func/_count_scope","name":"_count_scope","line":392,"end_line":394,"hash":"f4853f9121383a0894a2692f388e081555711961cd121f37765e4e3f432158a3"},{"id":"func/_count_qualification","name":"_count_qualification","line":397,"end_line":401,"hash":"a6293b2490723109f7e395e1872da80b1ed358040000886fdb8f440e31a4270c"},{"id":"func/_count_obligation_disposition","name":"_count_obligation_disposition","line":404,"end_line":408,"hash":"38474515485edf7439832b402b377e161a69f026c3ea27089b8db4a7cc866fc4"},{"id":"func/_count_candidate_disposition","name":"_count_candidate_disposition","line":411,"end_line":420,"hash":"be16f15bafb8cc29fefe0901d78e1cb8d74ea5341065e413bfb196721004ea96"},{"id":"func/_count_projection","name":"_count_projection","line":423,"end_line":431,"hash":"b2c96d958a8a55a4e46459c0d33b567d245ba28bed2e583d54a5e7930ea8c182"},{"id":"func/_derive_summary","name":"_derive_summary","line":434,"end_line":458,"hash":"b833e95e2083520f97fceab272d979fb94a3dccceb2d3754b185c2035996dde0"},{"id":"func/_canonicalize_relationship_for_digest","name":"_canonicalize_relationship_for_digest","line":461,"end_line":474,"hash":"a1d4dd280fa5215e587056677c85a330dcf69be18098324c2143d72ae0cec560"},{"id":"func/_canonicalize_card_for_digest","name":"_canonicalize_card_for_digest","line":477,"end_line":484,"hash":"22c0e66fd91887117f4cea3da87fb172eb1b91cae31f5de17f4995c784ae6a96"},{"id":"func/_json_serializable","name":"_json_serializable","line":487,"end_line":489,"hash":"83919b4581fb61750efbe23eb197ebae0e58b4b76edf7a4cf21b427aa0b78795"},{"id":"func/_planning_snapshot","name":"_planning_snapshot","line":492,"end_line":498,"hash":"852b065369a3e4de7c56d40a191288a5b13edb4896224a069eb3adde35eec4d8"},{"id":"func/_resolved_pin","name":"_resolved_pin","line":501,"end_line":503,"hash":"e37dcf2d1b50ff1dd81fb5533c4a2f5c3b2d7fbd6a4736a59220103b5309b91c"},{"id":"func/_generation_inputs_digest","name":"_generation_inputs_digest","line":506,"end_line":525,"hash":"c023b9d4dd498189e0c6140651b6d42dd3bc85a47748a8fa15fa334fafd832e6"},{"id":"func/_build_obligation","name":"_build_obligation","line":528,"end_line":557,"hash":"e15349574686682b2499dca04f6ff91ec2244462ed2498eaf1ae6f1a57e504e1"},{"id":"func/_build_obligations","name":"_build_obligations","line":560,"end_line":566,"hash":"e7f4559898a99c35f1ab84ce14feaf88458f058d30092e4ff1c735f321b3a1e4"},{"id":"func/plan_obligations","name":"plan_obligations","line":569,"end_line":609,"hash":"5a4e4bb554e544cffcf3501facb9c61d2645f87cc3d79229a2e1849a82ec1213"},{"id":"func/_canonical_sort_key","name":"_canonical_sort_key","line":612,"end_line":614,"hash":"ac77c500171be1c7761e31922c1dbdba71bdfce8287cb6f298fc1082c01cac43"}]}
+# {"version":1,"tested_at":"2026-08-28T17:29:28Z","module_hash":"081041620ef82eaef9d94feb5a62bbd2a34b13d14af619d0d3135ace2c2e558d","source_sha256":"1d9709663874b7b8fea6e43c01ce1d7e3853a9dd88b3b498d8e21bda231a16d4","functions":[{"id":"func/_canonical_text","name":"_canonical_text","line":38,"end_line":42,"hash":"050bf5104ad7fe2b6b952652b052ae2fc89b15dee4c13376b02809b275ae7f5d"},{"id":"func/_require_catalog","name":"_require_catalog","line":56,"end_line":60,"hash":"b4c4082994b293b0dfe2c4b0aae9a7f959420960d4f0290bb863c1ef16f94965"},{"id":"func/_shared_taxonomy_context","name":"_shared_taxonomy_context","line":63,"end_line":73,"hash":"480e6bc8b693b07d6e920591ad26b05b41e927b39429773fa7962bf69d5412db"},{"id":"func/_pattern_mappings","name":"_pattern_mappings","line":76,"end_line":81,"hash":"b39d6c526e6e904775c7b63cd336b53baf0f9b875f19836d0839dad403e24e2e"},{"id":"func/_catalog_identifiers","name":"_catalog_identifiers","line":84,"end_line":94,"hash":"5b273c144404d3226914e94b06ac54e6522758125fc3b6e9c9f38e3dcd9a2f59"},{"id":"func/_CatalogResolver.__init__","name":"__init__","line":100,"end_line":103,"hash":"b86f61c67f200fd475104eaf7faa988675fdc54e9f792f661f3e53b62fa83bf2"},{"id":"func/_CatalogResolver.taxonomy_context","name":"taxonomy_context","line":106,"end_line":108,"hash":"50eca23c8a4afc1b40544692f79979daa7fb4be7e0108f869fc15ce056725257"},{"id":"func/_CatalogResolver.contains","name":"contains","line":110,"end_line":112,"hash":"58c239d77888227bfe5a1ceab8c02a34b8c234a276f93d3da4c70a419b256bb8"},{"id":"func/_chain_entries","name":"_chain_entries","line":115,"end_line":129,"hash":"6d547811c69c67b9225771efac18632d5404066f9df82d8f9de3842ea9f4cb46"},{"id":"func/_snapshot_digest","name":"_snapshot_digest","line":132,"end_line":135,"hash":"d5a6cb8fa34bf620fb87b0ed0773aea1a77384b5097be34a2b3f20439bda443e"},{"id":"func/_pattern_lookup","name":"_pattern_lookup","line":138,"end_line":142,"hash":"1769ebd3564dd73717db430a48c6c2181e347bd54a96a669771cd914b878f129"},{"id":"func/_mapping_edges","name":"_mapping_edges","line":145,"end_line":190,"hash":"33c3918e5105895f1470a57206b539be54bb2a1abe417a72ecf34ec141d0fd01"},{"id":"func/_mapping_adjacency","name":"_mapping_adjacency","line":193,"end_line":209,"hash":"fba3fbf02995210bcdadad73b18b9fca393a3787b482aab5d0b6d6390ef4aef2"},{"id":"func/_visit_mapping_paths","name":"_visit_mapping_paths","line":212,"end_line":234,"hash":"a59c14db77fd42d628a38be578952b64c18b0804debf1911d47e25a6e5934ee1"},{"id":"func/_sorted_mapping_paths","name":"_sorted_mapping_paths","line":237,"end_line":252,"hash":"a0f25888c4bd04194a946438f6bfe197fb8d797717facf7649cb6bacc7120573"},{"id":"func/_mapping_paths","name":"_mapping_paths","line":255,"end_line":274,"hash":"a7003905c1136abd062f018ca7582f4ae63aa2b9bc9ec6a5271d614c3c240c00"},{"id":"func/_path_evidence","name":"_path_evidence","line":277,"end_line":303,"hash":"c24f1db317aeec8bb6c2e27d3b947f9679405bf5a6fd5d17fa7da4590192208d"},{"id":"func/_risk_reference","name":"_risk_reference","line":306,"end_line":308,"hash":"060330bdf23552ff35d2f45496fa1038be0ad787056d50fdfad346e0651b0bb3"},{"id":"func/_identity_digest","name":"_identity_digest","line":311,"end_line":333,"hash":"5f5e4d8195c02b748afe464df7f7022960bdcbdf070129633bf09039d6e3825c"},{"id":"func/_pattern_fact_keys","name":"_pattern_fact_keys","line":336,"end_line":341,"hash":"bed2707b2859c490a063a165b86381e2a5e6e752bd7abccd31dcc73ecd126662"},{"id":"func/_qualification_facts_state","name":"_qualification_facts_state","line":344,"end_line":357,"hash":"4af457354d9ffa6548fd40081e6940e480071b6a4cad0f405b63c85a6c92babc"},{"id":"func/_issue_evidence","name":"_issue_evidence","line":360,"end_line":374,"hash":"d935a0ba598b5cfb3900802ee07e0a9c4d8e2cf3eb170394006c504b6de8000e"},{"id":"func/_limitation_evidence","name":"_limitation_evidence","line":377,"end_line":386,"hash":"69075dc4358eecaa08538fbae6cc6fe7a8d63f475389699846cc60434ed6f800"},{"id":"func/_projection_issue_evidence","name":"_projection_issue_evidence","line":389,"end_line":397,"hash":"9f3d335103cb34242786310586f48a18867892a9cd5e23868dbe3906e26a369b"},{"id":"func/_projection_limitation_evidence","name":"_projection_limitation_evidence","line":400,"end_line":408,"hash":"5263e017bd4d6adf9af0df63e5af3b80f71e03b03fdc8207d92390a5246d7d65"},{"id":"func/_projection_evidence","name":"_projection_evidence","line":411,"end_line":415,"hash":"681f8d35a93feafd7ad53853e9de6378755dbdbd6f36501153014d6346209f30"},{"id":"func/_qualification_from_codes","name":"_qualification_from_codes","line":471,"end_line":485,"hash":"3d84e88dbecba4feb3c187ae10568c1a23acd2fa918e96c965be80aa7715f6f4"},{"id":"func/_projection_issue_codes","name":"_projection_issue_codes","line":488,"end_line":492,"hash":"d21b11d21e5db0d61a8232b965216e132e400e1e57b11c02b689f7e629eb5b1b"},{"id":"func/_has_projection_limitation","name":"_has_projection_limitation","line":495,"end_line":497,"hash":"053d44983ea41c8e334a0e991ba46e6b6c9ac7ed0d9ae24447ebd726884075e0"},{"id":"func/_qualification_without_candidates","name":"_qualification_without_candidates","line":500,"end_line":509,"hash":"f9e854be4af4d5e2e5294242539f03576fbd0be0267cae008ec9f7293ba7a2b6"},{"id":"func/_qualification_from_projection","name":"_qualification_from_projection","line":512,"end_line":528,"hash":"432409b4181270a1f7ba534514062fb1da5e46b2119475de9a828245fc7ce344"},{"id":"func/_catalog_records","name":"_catalog_records","line":531,"end_line":537,"hash":"1ae26535af240042172fda6b0e4183cbdc44c53e82794b479d8dc175fc11ba89"},{"id":"func/_verify_catalog_pin","name":"_verify_catalog_pin","line":540,"end_line":550,"hash":"550e35c439de3b5839d7bf82483b198b16669ff7efeede1e81f12d4241e40fd1"},{"id":"func/_group_candidates_by_pattern","name":"_group_candidates_by_pattern","line":553,"end_line":560,"hash":"6d94b90f5be1ec88d13462df89630b4e8bd4c78d1b209964c660635eb333bd36"},{"id":"func/_build_projection_batch","name":"_build_projection_batch","line":563,"end_line":594,"hash":"1a71474c2a89fa77a910377d545e260536d9c475eb5d561a22dad32ea25428d8"},{"id":"func/_candidate_records","name":"_candidate_records","line":597,"end_line":618,"hash":"f55580eed6b5f94855cec93ef6e2c0348d6cfbbe86ede96b99789228fc5a2102"},{"id":"func/_rejected_candidate_records","name":"_rejected_candidate_records","line":621,"end_line":635,"hash":"7cbc65690b8dbf79d8cdb18cea621b9a67fea0be91a636e6713908f9056923aa"},{"id":"func/_pattern_disposition","name":"_pattern_disposition","line":638,"end_line":661,"hash":"1e33013fe29a01d38326943afa357b3ba927d47be5f8475a65ff07d729742861"},{"id":"func/_qualification_evidence","name":"_qualification_evidence","line":664,"end_line":674,"hash":"42905b246c8b30522d596b8c96b32969fcf2c3c5430d2488e408d9b45a622302"},{"id":"func/_condition_fact_evaluation","name":"_condition_fact_evaluation","line":677,"end_line":689,"hash":"032c77dc87449e85979a1b45b2deb5e7c74d37f8bab3ad281c55baa94160c95a"},{"id":"func/_precondition_fact_evaluation","name":"_precondition_fact_evaluation","line":692,"end_line":705,"hash":"9a8efab8ffcd189434f3f0a400df8c67b6a90dd7c0679009a54be3f87afea302"},{"id":"func/_qualification_trace_evidence","name":"_qualification_trace_evidence","line":708,"end_line":725,"hash":"5cf0c72100d8fe9c67b7ab949fd6191c63b08580e33c616dc1488901f740784e"},{"id":"func/_unready_fact_status","name":"_unready_fact_status","line":728,"end_line":736,"hash":"492556138ed4b139242c4b742f0a5f9d490ab31d7179c8a103ec4e0f81506845"},{"id":"func/_missing_qualification_facts","name":"_missing_qualification_facts","line":739,"end_line":756,"hash":"fcf01b1aa6e6bd607992fb906c64ef9fbbda1064620020235cd67eb48273f2ac"},{"id":"func/_missing_qualification_evidence","name":"_missing_qualification_evidence","line":759,"end_line":790,"hash":"2b544a95d3afcf7946e4e2f114fa2f3c3baa474e65a80508ea876813cd3b3276"},{"id":"func/_advisory_evidence","name":"_advisory_evidence","line":793,"end_line":805,"hash":"0f1c2f4de5936219c8aec531029247e66568d19d597bb1e2d45b2d0ef6420692"},{"id":"func/_obligation_evidence","name":"_obligation_evidence","line":808,"end_line":824,"hash":"c733205c802e100154c8b82afb8fba18cf28cf2b1690868685888a3a6845e553"},{"id":"func/_build_governance_obligation","name":"_build_governance_obligation","line":827,"end_line":847,"hash":"21de56b67c8435364a2561a5954ed5d4a029d2f32bc3257cffb70b4f01f487e2"},{"id":"func/_build_pattern_obligation","name":"_build_pattern_obligation","line":850,"end_line":892,"hash":"3ede8ecc32a21eab2ed20988ef73d0ce416239493c0d617795491a91849efcff"},{"id":"func/_build_obligation","name":"_build_obligation","line":895,"end_line":919,"hash":"dc2b69804f3da6afaa07bfa9b7701299b70ed6fca5ab73bab062a4bbfc8f957f"},{"id":"func/_validate_planner_inputs","name":"_validate_planner_inputs","line":922,"end_line":928,"hash":"f404452faa25a5a9564e5f613cbdc965251b8d463e3684370129030070fb5684"},{"id":"func/_rows_for_risk","name":"_rows_for_risk","line":931,"end_line":971,"hash":"16e0c4663b30b10414a4e0feef62ef9a7d5730c624f8a76d00b8bf4e15a29469"},{"id":"func/_build_obligation_rows","name":"_build_obligation_rows","line":974,"end_line":1007,"hash":"011555867af50c99a5e99810fabf9466de62b7d146d9dc44a7739168534ad070"},{"id":"func/_finalize_plan","name":"_finalize_plan","line":1010,"end_line":1030,"hash":"3e3cda2bfaa78d6c1162bf33b1597d7e299d9cf5b82a964426becc9988a905e9"},{"id":"func/plan_taxonomy_obligations","name":"plan_taxonomy_obligations","line":1033,"end_line":1057,"hash":"68e09361effb151c54323e66bb2189a2092b3d7749119c1555c3a7a5e36c5409"}]}
 # mutate4py-manifest-end

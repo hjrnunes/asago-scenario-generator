@@ -23,7 +23,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     log_llm_call_failure,
     safe_llm_call,
 )
-from asago_scenario_generator.stpa.infra.unvalidated_decode import raw_model_data
+from asago_scenario_generator.stpa._model_data import raw_model_data
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.control_structure import (

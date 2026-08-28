@@ -20,8 +20,8 @@ from asago_scenario_generator.stpa.infra.call_log import (
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.unvalidated_decode import (
     construct_model_unvalidated,
-    raw_model_data,
 )
+from asago_scenario_generator.stpa._model_data import raw_model_data
 
 _T = TypeVar("_T", bound=BaseModel)
 

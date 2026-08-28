@@ -1,126 +1,99 @@
 # End-to-end QA: taxonomy obligation plan artifact
 
-Drive a deterministic file-to-file obligation planner: a snapshot fixture
-file in, published YAML and JSON plan artifacts out. That invocation is
-a user-interface affordance; it is not `generate` or `stpa-run`, and it
-is not required as a new public CLI subcommand. Inspect those files with
-standard JSON/YAML readers and byte comparison. Do not import project
-modules, call `plan_obligations`, or contact an LLM endpoint. Never set
-`ASAGO_SCENARIO_GENERATOR_QA_PIPELINE`.
+Drive the public `plan-obligations` adapter with a YAML input file containing
+complete serialized `AttackPattern` and `CapabilityFactSnapshot` authority.
+Inspect the single published YAML artifact with standard readers and compare
+raw bytes where determinism is required. Candidate records are derived by the
+planner and are never supplied in the input.
 
-Use a fresh output directory for every case.
+Do not import the planner, call `plan_obligations`, invoke `generate` or
+`stpa-run`, contact an LLM endpoint, or set
+`ASAGO_SCENARIO_GENERATOR_QA_PIPELINE`. The acceptance runtime and unit
+contract cover closed-model load/tamper checks; this external QA suite checks
+the file adapter and publication boundary.
 
-## QA-TOPA-01: closed schema metadata is computed from canonical content
+The persisted evidence contract retains typed condition and precondition
+evaluations and explicit absent qualification facts. When projection is
+bounded, only candidates actually derived and validated can be
+`budget_deferred`; overflow is a typed limitation rather than a fabricated
+candidate.
 
-1. Author a snapshot that pins catalog pin `atlas-2026.05`, mapping pin
-   `sssom-v1`, capability snapshot content `profile-v1`, and
-   qualification facts `facts-v1`.
-2. Produce the obligation-plan artifact.
-3. Inspect the published plan with a standard reader.
+## QA-TOPA-01: metadata carries authoritative pins and digests
 
-**Expected:** The plan records schema version
-`taxonomy-obligation-plan-v1`, catalog pin `atlas-2026.05`, mapping pin
-`sssom-v1`, and computed digests for capability snapshot, qualification
-facts, generation inputs, and semantic content. Those digests are not
-copied from caller-supplied digest fields.
+1. Publish a valid input built from the shared projection fixture.
+2. Inspect the YAML top-level mapping.
 
-## QA-TOPA-02: identifiers and digests ignore presentation order
+Expected: the artifact is `taxonomy-obligation-plan-v1` with exactly the
+closed metadata fields, the authoritative capability snapshot digest, the
+domain-framed qualification facts digest, and the catalog/mapping pins. The
+`mapping_pins` inventory is exactly `sssom` (the unchanged taxonomy-context
+pin) and `obligation_edges` (release `obligation-mapping-bundle-v1`, covering
+the supplied cross-taxonomy and SSSOM rows). All content digests are
+64-character lowercase SHA-256 values.
 
-1. Author two snapshots with the same two relationships in opposite
-   order:
-   `atlas-prompt-injection:AP-T6-01,atlas-memory-poisoning:AP-T1-01`
-   versus
-   `atlas-memory-poisoning:AP-T1-01,atlas-prompt-injection:AP-T6-01`.
-2. Produce a plan from each snapshot.
-3. Compare obligation identifiers, semantic digests, canonical ledger
-   order, and serialized artifacts.
+## QA-TOPA-02: presentation order is canonicalized
 
-**Expected:** Both plans have identical obligation identifiers,
-identical semantic digests, and identical canonical ledger order. The
-serialized artifacts are canonically equivalent.
+1. Publish equivalent inputs with `risk-a`, `risk-b` and then `risk-b`,
+   `risk-a` in the risk-card and mapping sequences.
+2. Compare obligation IDs, plan semantic digests, and raw YAML bytes.
 
-## QA-TOPA-03: YAML and JSON round-trip without semantic loss
+Expected: IDs, semantic digest, row order, and serialized bytes are identical.
 
-1. Produce a plan that includes pins, closed dispositions, computed
-   digests, qualification traces, candidate records, and summary
-   counts.
-2. Serialize it as YAML, deserialize it with a standard YAML reader,
-   and re-inspect identity, schema version, pins, digests,
-   dispositions, traces, candidate records, and summary counts.
-3. Repeat with JSON.
+## QA-TOPA-03: YAML round-trip preserves the closed plan
 
-**Expected:** Obligation identities, schema version, pins, computed
-digests, scope/qualification/projection/correspondence dispositions,
-qualification traces, candidate records, and summary counts are
-preserved in both formats.
+1. Publish a plan containing two risk-scoped rows and derived candidates.
+2. Load the bytes with a standard YAML reader.
+3. Inspect every row's closed field set, correspondence disposition, and
+   derived candidate identity.
 
-## QA-TOPA-04: identical inputs are byte-stable
+Expected: parsing produces the same mapping, every row has exactly the v1 row
+fields, correspondence remains `not_assessed`, and derived candidate records
+retain the authoritative candidate identity.
 
-1. Produce the same plan twice as YAML.
-2. Produce the same plan twice as JSON.
-3. Compare the raw artifact bytes.
+## QA-TOPA-04: identical typed inputs are byte-stable
 
-**Expected:** The two YAML artifacts are byte-identical. The two JSON
-artifacts are byte-identical.
+1. Publish the same valid input twice into fresh directories.
+2. Compare the raw YAML artifact bytes.
 
-## QA-TOPA-05: tampered persisted content is rejected
+Expected: the artifacts are byte-identical and both use the exact filename
+`taxonomy-obligation-plan.yaml`.
 
-1. Publish a valid plan as YAML and as JSON.
-2. Tamper `catalog_pins`, `mapping_pins`, or `obligations` without
-   updating the semantic digest.
-3. Load each tampered artifact through the same file-to-file
-   publication path.
+## QA-TOPA-05: malformed typed input fails before publication
 
-**Expected:** Loading is rejected. The result identifies a digest
-mismatch. No silently accepted tampered plan is published.
+Run the adapter with each of these otherwise valid inputs:
 
-## QA-TOPA-06: unknown fields are rejected
+- unknown top-level `candidate_expansions` field;
+- `projection_budget.max_candidates: 0`;
+- a false qualification facts `semantic_digest`.
 
-1. Persist otherwise valid plans that include unknown fields
-   `extra_score` and `covered_rate`.
-2. Load each artifact.
+Expected: each invocation exits nonzero, identifies the offending field or
+digest, and leaves no partial `taxonomy-obligation-plan.*` file. In particular,
+`candidate_expansions` is not part of the typed input contract.
 
-**Expected:** Loading is rejected. The result identifies the unknown
-field.
+## QA-TOPA-06: publication is YAML-only and offline
 
-## QA-TOPA-07: unsupported schema versions are rejected
+1. Publish a valid typed plan and inspect the output and console.
+2. Request `--format json` separately.
 
-1. Persist otherwise valid plans that declare schema version
-   `taxonomy-obligation-plan-v0` and `taxonomy-obligation-plan-v2`.
-2. Load each artifact.
+Expected: successful publication is YAML-only, atomic, and reports
+`Network calls: 0` and `Model calls: 0`. A JSON publication request is rejected
+without creating a partial artifact; no JSON output is expected from this
+Phase 1 surface.
 
-**Expected:** Loading is rejected. The result identifies the schema
-version as unsupported.
+## QA-TOPA-07: summary reconciles from rows
 
-## QA-TOPA-08: caller-supplied false digests are ignored
+1. Publish input containing two mapped risks and one reviewed risk without a
+   mapping.
+2. Recompute each summary counter from the emitted rows and candidate records.
 
-1. Author snapshots that supply false values for
-   `capability_snapshot_digest`, `semantic_digest`, and
-   `qualification_facts_digest`:
-   - `deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef`
-   - `cafebebecafebebecafebebecafebebecafebebecafebebecafebebecafebebe`
-   - `0000000000000000000000000000000000000000000000000000000000000000`
-2. Produce a plan from each snapshot.
-3. Inspect the recorded digest of that kind.
+Expected: the published summary equals the recomputation, retains all three
+reviewed risks, and contains no taxonomy-correspondence or
+scenario-realization rate. Persisted content tampering is rejected separately
+by the closed plan loader.
 
-**Expected:** The plan does not record the false caller-supplied value.
-It records the digest computed from canonical content.
+## Completion evidence
 
-## QA-TOPA-09: YAML publication is atomic
-
-1. Publish the plan as YAML.
-2. Inspect the output directory and load the published file with a
-   standard YAML reader.
-
-**Expected:** The published artifact is named
-`taxonomy-obligation-plan.yaml`. It loads as a complete closed plan.
-No partial plan file remains.
-
-## QA-TOPA-10: Phase 1 correspondence claims are rejected
-
-1. Persist otherwise valid plans that set correspondence disposition
-   to `covered`, `matched`, or `satisfied`.
-2. Load each artifact.
-
-**Expected:** Loading is rejected. The result identifies the
-correspondence disposition as invalid.
+The executable checks are in
+`acceptance/qa/taxonomy_risk/obligation_plan_artifact.py`. A successful run
+prints `Result: PASS` and leaves only untracked diagnostic evidence under
+`tmp/`.

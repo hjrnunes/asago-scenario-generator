@@ -117,6 +117,82 @@ Its `semantic_generation` summary states whether all four stages were accepted
 and retains bounded `stage_records` evidence; the HTML report presents the same
 semantic and presentation statuses separately.
 
+## Taxonomy obligation planning (observational Phase 1)
+
+The obligation planner is a shared-domain boundary between reviewed taxonomy
+inputs and the existing generation workflows. Its public seam is
+`plan_taxonomy_obligations(TaxonomyObligationInputs)`. The input is a typed,
+immutable value containing risk cards, one capability/fact snapshot, the
+authoritative attack-pattern catalog, pinned cross-taxonomy/SSSOM mappings,
+qualification facts, a bounded projection budget, and compatibility policy.
+The planner does not accept paths, construct a provider client, or import
+STPA implementation modules. The file/CLI adapter loads the input and writes
+the plan; it is not part of the pure planner.
+
+The input carries two distinct mapping authorities: `mapping_pins.sssom` is the
+taxonomy-context `mapping_set_digest`; `mapping_pins.obligation_edges` is the
+`obligation-mapping-bundle-v1` digest over the complete typed cross-taxonomy
+and SSSOM rows. Both pins are required.
+
+The planner owns risk-to-pattern traversal, capability scope, qualification,
+candidate projection disposition, canonical ordering, identity derivation, and
+row/summary reconciliation. It must retain every reviewed risk, including a
+risk with no actionable pattern as `governance_only`, and it must not use the
+advisory candidate filter as an obligation denominator. A Phase 1 row has the
+closed fields `obligation_id`, `risk_ref`, `taxonomy_chain`,
+`attack_pattern_id`, `attack_pattern_semantic_digest`,
+`scope_disposition`, `qualification_disposition`, `candidate_records`,
+`correspondence_disposition`, and `evidence`. Correspondence is always
+`not_assessed` here; it is not a scenario or coverage claim.
+
+Implementation crosses inward through
+`pipeline.projection_authoritative.project_authoritative_candidate_observations`.
+That seam returns the established `ProjectionBatch` plus bounded observation
+tails; `pipeline.projection.project_authoritative_candidates` continues to
+return the existing `ProjectionBatch` with default deferred retention disabled,
+so public generation behavior is unchanged. `budget_deferred` candidate
+records are only concrete candidates derived and validated before
+`max_derivation_work` is exhausted; aggregate overflow is a typed limitation,
+never a fabricated identity. Projection issues and qualification traces persist
+typed condition and precondition evaluations. Missing or explicitly unknown
+qualification inputs persist `qualification_fact` evidence with `result:
+unknown` and their corresponding `status`; an explicitly contradictory
+required input persists `status: contradictory` with the contradictory
+qualification rationale and classifies the obligation as
+`contradictory_evidence`. When readings are mixed, contradictory takes
+precedence over absent/unknown, while capability exclusion still takes
+precedence over qualification status.
+
+Structural projection rejections are also retained as deterministic,
+non-runnable candidate observations. A concrete attempted binding preserves
+its canonical ingress and resource bindings; an aggregate failure such as no
+compatible resource preserves the typed issue and reason without inventing a
+resource identity. The planner maps these observations to
+`projection_infeasible` candidate records with typed projection evidence, so
+the summary count reconciles directly to persisted rows while `ProjectionBatch`
+and its generation-facing candidates remain unchanged.
+
+Obligation identity is separate from display names, candidate IDs, STPA slot
+and ICA IDs, and scenario IDs. It is framed from the risk ID, attack-pattern
+ID and semantic digest, capability snapshot digest, and catalog/mapping pins.
+Every persisted plan
+records the capability snapshot and qualification-facts digests as well as
+catalog/mapping pins. `TaxonomyObligationPlan` canonicalizes set-like
+collections, preserves semantic order, computes a versioned semantic digest,
+and rejects unknown fields, unsupported versions, and digest mismatches on
+load. The persistence adapter writes via an atomic temporary-file rename and
+loads the written artifact back through the closed model before reporting
+success; no partial file is a valid plan.
+
+Phase 2 consumes the plan through its model interface and adds a separately
+versioned `SystemResourceMap`, explicit evidence-bearing correspondence
+proposals, and deterministic reconciliation. The resource map links canonical
+capability resources to STPA RESP/PM/CA/FB/CP/CL/CM identities; it does not
+change STPA artifacts or infer correspondence from prose. This dependency
+direction keeps taxonomy planning, STPA generation, persistence, and later
+hybrid reporting replaceable and prevents either workflow from importing the
+other workflow's implementation.
+
 ## Taxonomy and risk-driven workflow
 
 The `generate` workflow consumes a use-case description, policy risk

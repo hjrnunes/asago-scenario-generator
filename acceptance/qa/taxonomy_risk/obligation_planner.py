@@ -1,28 +1,30 @@
 #!/usr/bin/env python3
-"""Executable end-to-end QA suite for the taxonomy obligation planner.
+"""Offline end-to-end QA for the typed taxonomy-obligation planner.
 
-Mirrors ``obligation_planner.md`` (QA-TOP-01..12).  Drives the public
-``asago-scenario-generator plan-obligations`` file-to-file command: a
-snapshot fixture file in, a published YAML or JSON plan artifact out.
-Inspects the artifact with standard JSON/YAML readers, the console, and
-the filesystem.  Never imports project modules, never calls
-``plan_obligations``, and never sets ``ASAGO_SCENARIO_GENERATOR_QA_PIPELINE``.
+The suite drives only the public ``plan-obligations`` command and reads the
+published YAML artifact.  Its input is built from the same authoritative
+projection fixture used by ``tests/test_obligation_planner_contract.py``;
+candidate records are intentionally absent from the input.  No live endpoint
+or model is contacted.
 
 Run with::
 
     uv run python acceptance/qa/taxonomy_risk/obligation_planner.py
-
-Exit status is 0 only when every pinned assertion passes.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import shutil
 import subprocess
 import sys
+import unicodedata
+from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -31,15 +33,248 @@ QA_PIPELINE_ENV = "ASAGO_SCENARIO_GENERATOR_QA_PIPELINE"
 failures: list[str] = []
 notes: list[str] = []
 
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 _SEARCH_PATH = f"/opt/homebrew/bin:/usr/local/bin:{os.environ.get('PATH', '')}"
 _UV = shutil.which("uv", path=_SEARCH_PATH) or "uv"
+_ZERO = "0" * 64
 
-PINNED = {
-    "catalog_pin": "atlas-2026.05",
-    "mapping_pin": "sssom-v1",
-    "capability_content": "profile-v1",
-    "qualification_facts": "facts-v1",
-}
+
+def _authoritative_fixture() -> tuple[Any, dict[str, Any], Any]:
+    """Load the shared, sanitized, offline projection fixture."""
+    from tests.helpers.projection_factory import (
+        get_projected_candidate,
+        get_test_raw_pattern,
+        get_test_snapshot,
+    )
+
+    return get_projected_candidate(), get_test_raw_pattern(), get_test_snapshot()
+
+
+def _canonical_json(value: Any) -> bytes:
+    """Encode values using the contract's canonical JSON rules."""
+    return json.dumps(
+        _canonical_value(value),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _canonical_value(value: Any) -> Any:
+    """Mirror the project's canonical JSON normalization without importing it."""
+    if hasattr(value, "model_dump"):
+        return _canonical_value(value.model_dump(mode="json"))
+    if isinstance(value, str):
+        return unicodedata.normalize("NFC", value)
+    if isinstance(value, dict):
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError("canonical JSON mapping keys must be strings")
+            normalized_key = unicodedata.normalize("NFC", key)
+            if normalized_key in normalized:
+                raise ValueError("canonical mapping keys collide after normalization")
+            normalized[normalized_key] = _canonical_value(item)
+        return normalized
+    if isinstance(value, (list, tuple)):
+        return [_canonical_value(item) for item in value]
+    return value
+
+
+def _typed_dump(value: Any) -> dict[str, Any]:
+    """Return a full JSON-mode row dump for the standalone digest mirror."""
+    dumped = (
+        value.model_dump(mode="json") if hasattr(value, "model_dump") else dict(value)
+    )
+    if not isinstance(dumped, dict):
+        raise TypeError("mapping rows must dump to mappings")
+    return dumped
+
+
+def _canonical_cross_mapping(value: Any) -> dict[str, Any]:
+    """Mirror the typed cross-taxonomy row dump and evidence set contract."""
+    row = _typed_dump(value)
+    evidence = row.get("evidence", ())
+    return {
+        "source_id": row["source_id"],
+        "target_id": row["target_id"],
+        "relation": row.get("relation", "related_match"),
+        "evidence": sorted({_canonical_value(item) for item in evidence}),
+        "confidence": row.get("confidence"),
+        "source_taxonomy": row.get("source_taxonomy"),
+        "target_taxonomy": row.get("target_taxonomy"),
+    }
+
+
+def _canonical_sssom_mapping(value: Any) -> dict[str, Any]:
+    """Mirror the full typed SSSOM row dump for the standalone digest."""
+    row = _typed_dump(value)
+    return {
+        "subject_id": row["subject_id"],
+        "object_id": row["object_id"],
+        "predicate_id": row["predicate_id"],
+        "subject_source": row["subject_source"],
+        "object_source": row["object_source"],
+        "mapping_justification": row["mapping_justification"],
+    }
+
+
+def _compute_mapping_bundle_digest(
+    cross_taxonomy_mappings: Any, sssom_mappings: Any
+) -> str:
+    """Compute the v1 edge-bundle pin with no project-module dependency."""
+    payload = {
+        "cross_taxonomy_mappings": sorted(
+            [_canonical_cross_mapping(item) for item in cross_taxonomy_mappings],
+            key=_canonical_json,
+        ),
+        "sssom_mappings": sorted(
+            [_canonical_sssom_mapping(item) for item in sssom_mappings],
+            key=_canonical_json,
+        ),
+    }
+    return hashlib.sha256(
+        b"asago-scenario-generator:obligation-mapping-bundle:v1\0"
+        + _canonical_json(payload)
+    ).hexdigest()
+
+
+def _qualification_facts(snapshot: Any) -> dict[str, Any]:
+    """Build a content-addressed qualification-fact set from the fixture."""
+    facts: dict[str, Any] = {}
+    for item in snapshot.facts:
+        raw = item.model_dump(mode="json")
+        key = json.dumps(
+            raw["fact"],
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        facts[key] = raw
+    digest = hashlib.sha256(
+        b"asago-scenario-generator:qualification-facts:v1\0" + _canonical_json(facts)
+    ).hexdigest()
+    return {"facts": facts, "semantic_digest": digest}
+
+
+def _typed_pattern_variant(pattern_id: str) -> dict[str, Any]:
+    """Return a complete, self-consistent authoritative pattern variant."""
+    from asago_scenario_generator.models.attack_pattern import (
+        compute_chain_semantic_digest,
+    )
+
+    _candidate, raw_pattern, _snapshot = _authoritative_fixture()
+    variant = deepcopy(raw_pattern)
+    variant["id"] = pattern_id
+    variant["canonical_chain"]["pattern_id"] = pattern_id
+    variant["canonical_chain"]["semantic_digest"] = compute_chain_semantic_digest(
+        variant["canonical_chain"]
+    )
+    return variant
+
+
+def _typed_capability_variant() -> Any:
+    """Return a complete capability snapshot with changed authoritative facts."""
+    from asago_scenario_generator.pipeline.projection import (
+        capture_capability_snapshot,
+    )
+    from tests.helpers.projection_factory import get_test_profile
+
+    _candidate, _raw_pattern, snapshot = _authoritative_fixture()
+    changed_fact = snapshot.facts[0].model_copy(update={"value": "inactive"})
+    return capture_capability_snapshot(get_test_profile(), (changed_fact,))
+
+
+def _typed_catalog_pin(pattern: dict[str, Any]) -> str:
+    """Compute a catalog pin from the complete authoritative pattern record."""
+    candidate, raw_pattern, _snapshot = _authoritative_fixture()
+    if pattern == raw_pattern:
+        return candidate.projection.catalog_pin
+    from asago_scenario_generator.pipeline.projection_qualification import (
+        compute_authoritative_catalog_pin,
+    )
+    from tests.helpers.projection_factory import get_test_resolver
+
+    return compute_authoritative_catalog_pin([pattern], get_test_resolver())
+
+
+def _typed_payload(
+    *,
+    risk_ids: tuple[str, ...] = ("risk-a",),
+    pattern_id: str | None = "AP-T1-01",
+    pattern_record: dict[str, Any] | None = None,
+    catalog_release: str | None = None,
+    mapping_release: str | None = None,
+    capability_snapshot: Any | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build complete typed inputs with no candidate-record escape hatch."""
+    _candidate, raw_pattern, snapshot = _authoritative_fixture()
+    context = raw_pattern["canonical_chain"]["taxonomy_context"]
+    if pattern_id is None:
+        pattern: dict[str, Any] | None = None
+    elif pattern_record is not None:
+        pattern = deepcopy(pattern_record)
+    elif pattern_id == raw_pattern["id"]:
+        pattern = deepcopy(raw_pattern)
+    else:
+        pattern = _typed_pattern_variant(pattern_id)
+    selected_snapshot = capability_snapshot or snapshot
+    mappings = [
+        {
+            "source_id": risk_id,
+            "target_id": pattern_id,
+            "relation": "exact",
+            "evidence": ["reviewed-risk-card-mapping"],
+        }
+        for risk_id in risk_ids
+        if pattern_id is not None
+    ]
+    catalog_pin = {
+        "release": catalog_release or context["atlas"]["release"],
+        "digest": _typed_catalog_pin(pattern or raw_pattern),
+    }
+    mapping_pin = {
+        "release": mapping_release or context["atlas"]["release"],
+        "digest": context["mapping_set_digest"],
+    }
+    obligation_edges_pin = {
+        "release": "obligation-mapping-bundle-v1",
+        "digest": _compute_mapping_bundle_digest(mappings, []),
+    }
+    payload: dict[str, Any] = {
+        "risk_cards": [
+            {
+                "risk_id": risk_id,
+                "risk_name": f"Risk {risk_id}",
+                "risk_description": "A reviewed risk used by planner QA.",
+                "taxonomy": "ibm-risk-atlas",
+                "confidence": 1.0,
+                "grounding_confidence": "high",
+                "evidence": [],
+                "mitigations": [],
+            }
+            for risk_id in risk_ids
+        ],
+        "capability_snapshot": selected_snapshot.model_dump(mode="json"),
+        "attack_pattern_catalog": [pattern] if pattern is not None else [],
+        "cross_taxonomy_mappings": mappings,
+        "sssom_mappings": [],
+        "catalog_pins": {"atlas": catalog_pin},
+        "mapping_pins": {
+            "sssom": mapping_pin,
+            "obligation_edges": obligation_edges_pin,
+        },
+        "qualification_facts": _qualification_facts(selected_snapshot),
+        "projection_budget": {"max_candidates": 100, "max_derivation_work": 4096},
+        "compatibility_policy": {"allow_legacy_keyword_matches": False},
+    }
+    if extra:
+        payload.update(extra)
+    return payload
 
 
 def _command() -> list[str]:
@@ -51,82 +286,46 @@ def _command() -> list[str]:
     raise RuntimeError("neither uv nor .venv/bin/asago-scenario-generator is available")
 
 
-def _rel(
-    risk_id: str,
-    pattern_id: str | None,
-    *,
-    scope: str,
-    qualification: str,
-    projection: str,
-    kind: str | None = None,
-) -> dict:
-    payload: dict[str, object] = {
-        "risk_id": risk_id,
-        "pattern_id": pattern_id,
-        "scope_disposition": scope,
-        "qualification_disposition": qualification,
-        "projection_disposition": projection,
-    }
-    if kind is not None:
-        payload["relationship_kind"] = kind
-    return payload
-
-
-def _ready(risk_id: str, pattern_id: str) -> dict:
-    return _rel(
-        risk_id,
-        pattern_id,
-        scope="applicable",
-        qualification="ready",
-        projection="projectable",
-    )
-
-
-def _snapshot(**overrides: object) -> dict:
-    payload: dict[str, object] = {
-        **PINNED,
-        "relationships": [],
-        "risk_cards": [],
-        "config": {},
-        "qualification_evaluations": [],
-        "candidate_expansions": [],
-        "ica_prose": "",
-    }
-    payload.update(overrides)
-    return payload
-
-
 def _new_workspace(case: str) -> Path:
-    ws = RUN_ROOT / "workspaces" / case
-    if ws.exists():
-        shutil.rmtree(ws)
-    ws.mkdir(parents=True)
-    return ws
+    workspace = RUN_ROOT / "workspaces" / case
+    if workspace.exists():
+        shutil.rmtree(workspace)
+    workspace.mkdir(parents=True)
+    return workspace
 
 
-def _write_snapshot(ws: Path, payload: dict) -> Path:
-    path = ws / "snapshot.yaml"
+def _write_payload(workspace: Path, payload: dict[str, Any]) -> Path:
+    path = workspace / "typed-inputs.yaml"
     path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
     return path
 
 
 def _run_cli(
     case: str,
-    argv: list[str],
+    snapshot: Path,
+    output_dir: Path,
     *,
-    env: dict[str, str] | None = None,
+    format_name: str = "yaml",
 ) -> subprocess.CompletedProcess[str]:
     capture_dir = RUN_ROOT / "captures" / case
     capture_dir.mkdir(parents=True, exist_ok=True)
-    child = os.environ.copy()
-    child.pop(QA_PIPELINE_ENV, None)
-    child.pop("ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL", None)
-    if env:
-        child.update(env)
+    environment = os.environ.copy()
+    environment.pop(QA_PIPELINE_ENV, None)
+    environment.pop("ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL", None)
+    argv = [
+        *_command(),
+        "plan-obligations",
+        "--snapshot",
+        str(snapshot),
+        "--output-dir",
+        str(output_dir),
+        "--format",
+        format_name,
+    ]
     completed = subprocess.run(
         argv,
         cwd=REPO_ROOT,
-        env=child,
+        env=environment,
         capture_output=True,
         text=True,
         timeout=120,
@@ -136,24 +335,7 @@ def _run_cli(
     (capture_dir / "stdout.txt").write_text(completed.stdout, encoding="utf-8")
     (capture_dir / "stderr.txt").write_text(completed.stderr, encoding="utf-8")
     (capture_dir / "exit.txt").write_text(f"{completed.returncode}\n", encoding="utf-8")
-    (capture_dir / "env-qa-pipeline.txt").write_text(
-        f"{QA_PIPELINE_ENV}={'set' if QA_PIPELINE_ENV in child else 'unset'}\n",
-        encoding="utf-8",
-    )
     return completed
-
-
-def _plan_argv(snapshot: Path, output_dir: Path, fmt: str = "yaml") -> list[str]:
-    return [
-        *_command(),
-        "plan-obligations",
-        "--snapshot",
-        str(snapshot),
-        "--output-dir",
-        str(output_dir),
-        "--format",
-        fmt,
-    ]
 
 
 def _check(case: str, condition: bool, message: str) -> None:
@@ -161,831 +343,400 @@ def _check(case: str, condition: bool, message: str) -> None:
         failures.append(f"{case}: {message}")
 
 
-def _load_yaml(path: Path) -> dict:
-    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError(f"{path} is not a YAML mapping")
-    return payload
-
-
-def _artifact_path(output_dir: Path, fmt: str) -> Path:
-    name = (
-        "taxonomy-obligation-plan.json"
-        if fmt == "json"
-        else "taxonomy-obligation-plan.yaml"
-    )
-    return output_dir / name
-
-
 def _produce(
-    case: str, payload: dict, *, fmt: str = "yaml"
-) -> tuple[Path, dict, subprocess.CompletedProcess[str]]:
-    ws = _new_workspace(case)
-    snapshot = _write_snapshot(ws, payload)
-    output_dir = ws / "plan"
-    completed = _run_cli(case, _plan_argv(snapshot, output_dir, fmt))
+    case: str, payload: dict[str, Any]
+) -> tuple[Path, dict[str, Any], subprocess.CompletedProcess[str]]:
+    workspace = _new_workspace(case)
+    snapshot = _write_payload(workspace, payload)
+    output_dir = workspace / "plan"
+    completed = _run_cli(case, snapshot, output_dir)
     _check(
         case,
         completed.returncode == 0,
         f"exit {completed.returncode}: {completed.stderr[-300:]!r}",
     )
-    artifact = _artifact_path(output_dir, fmt)
-    _check(case, artifact.is_file(), f"missing published artifact {artifact.name}")
-    plan = _load_yaml(artifact) if artifact.is_file() else {}
-    return artifact, plan, completed
+    artifact = output_dir / "taxonomy-obligation-plan.yaml"
+    _check(case, artifact.is_file(), "YAML plan artifact was not published")
+    if not artifact.is_file():
+        return artifact, {}, completed
+    value = yaml.safe_load(artifact.read_text(encoding="utf-8"))
+    _check(case, isinstance(value, dict), "published artifact is not a mapping")
+    return artifact, value if isinstance(value, dict) else {}, completed
 
 
-def _reject(case: str, payload: dict) -> tuple[Path, subprocess.CompletedProcess[str]]:
-    ws = _new_workspace(case)
-    snapshot = _write_snapshot(ws, payload)
-    output_dir = ws / "plan"
-    completed = _run_cli(case, _plan_argv(snapshot, output_dir, "yaml"))
+def _reject(
+    case: str, payload: dict[str, Any]
+) -> tuple[Path, subprocess.CompletedProcess[str]]:
+    workspace = _new_workspace(case)
+    snapshot = _write_payload(workspace, payload)
+    output_dir = workspace / "plan"
+    completed = _run_cli(case, snapshot, output_dir)
     return output_dir, completed
 
 
-def _obligations(plan: dict) -> list[dict]:
-    rows = plan.get("obligations")
-    return rows if isinstance(rows, list) else []
+def _rows(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    value = plan.get("obligations")
+    return value if isinstance(value, list) else []
 
 
-def _row(plan: dict, risk_id: str, pattern_id: str | None = None) -> dict | None:
-    for row in _obligations(plan):
-        if row.get("risk_id") != risk_id:
-            continue
-        if pattern_id is None or row.get("pattern_id") == pattern_id:
+def _risk_id(row: dict[str, Any]) -> str | None:
+    ref = row.get("risk_ref")
+    return ref.get("risk_id") if isinstance(ref, dict) else None
+
+
+def _row(
+    plan: dict[str, Any], risk_id: str, pattern_id: str | None = None
+) -> dict[str, Any] | None:
+    for row in _rows(plan):
+        if _risk_id(row) == risk_id and (
+            pattern_id is None or row.get("attack_pattern_id") == pattern_id
+        ):
             return row
     return None
 
 
-def qa_top_01() -> None:
-    """QA-TOP-01: shared pattern keeps distinct risk-scoped obligations."""
-    case = "TOP-01"
-    artifact, plan, completed = _produce(
-        case,
-        _snapshot(
-            relationships=[
-                _ready("atlas-prompt-injection", "AP-T1-01"),
-                _ready("atlas-memory-poisoning", "AP-T1-01"),
-            ]
+def _summary_from_rows(rows: list[dict[str, Any]]) -> dict[str, int]:
+    candidates = [
+        candidate
+        for row in rows
+        for candidate in row.get("candidate_records", [])
+        if isinstance(candidate, dict)
+    ]
+    return {
+        "total": len(rows),
+        "applicable": sum(row.get("scope_disposition") == "applicable" for row in rows),
+        "governance_only": sum(
+            row.get("scope_disposition") == "governance_only" for row in rows
         ),
-    )
-    rows = [row for row in _obligations(plan) if row.get("pattern_id") == "AP-T1-01"]
-    _check(case, len(rows) == 2, f"expected 2 AP-T1-01 obligations, got {len(rows)}")
-    ids = {row.get("obligation_id") for row in rows}
-    _check(case, len(ids) == 2, f"obligation identifiers are not distinct: {ids}")
-    risks = {row.get("risk_id") for row in rows}
+        "capability_excluded": sum(
+            row.get("scope_disposition") == "capability_excluded" for row in rows
+        ),
+        "ready": sum(row.get("qualification_disposition") == "ready" for row in rows),
+        "missing_or_contradictory": sum(
+            row.get("qualification_disposition")
+            in {"missing_evidence", "contradictory_evidence"}
+            for row in rows
+        ),
+        "structurally_infeasible": sum(
+            row.get("qualification_disposition") == "structurally_infeasible"
+            for row in rows
+        ),
+        "projectable": sum(
+            item.get("projection_disposition") == "projectable" for item in candidates
+        ),
+        "projection_infeasible": sum(
+            item.get("projection_disposition") == "projection_infeasible"
+            for item in candidates
+        ),
+        "budget_deferred": sum(
+            item.get("projection_disposition") == "budget_deferred"
+            for item in candidates
+        ),
+    }
+
+
+def qa_top_01() -> None:
+    """Shared pattern retains two distinct risk-scoped rows."""
+    case = "TOP-01"
+    payload = _typed_payload(risk_ids=("risk-a", "risk-b"))
+    _artifact, plan, _completed = _produce(case, payload)
+    rows = [row for row in _rows(plan) if row.get("attack_pattern_id") == "AP-T1-01"]
+    _check(case, len(rows) == 2, f"expected two rows, got {len(rows)}")
+    _check(case, len({row.get("obligation_id") for row in rows}) == 2, "IDs collapsed")
     _check(
         case,
-        risks == {"atlas-prompt-injection", "atlas-memory-poisoning"},
-        f"risk identities lost: {risks}",
+        {_risk_id(row) for row in rows} == {"risk-a", "risk-b"},
+        "risk identity lost",
+    )
+    mapping_pins = plan.get("mapping_pins") or {}
+    _check(
+        case,
+        set(mapping_pins) == {"sssom", "obligation_edges"},
+        "mapping pin inventory changed",
+    )
+    edge_pin = mapping_pins.get("obligation_edges") or {}
+    _check(
+        case,
+        edge_pin.get("release") == "obligation-mapping-bundle-v1",
+        "obligation edge pin release changed",
     )
     _check(
         case,
-        plan.get("network_calls") == 0,
-        f"network_calls={plan.get('network_calls')!r}",
+        edge_pin.get("digest")
+        == _compute_mapping_bundle_digest(
+            payload["cross_taxonomy_mappings"], payload["sssom_mappings"]
+        ),
+        "obligation edge pin digest changed",
     )
-    _check(
-        case, plan.get("model_calls") == 0, f"model_calls={plan.get('model_calls')!r}"
-    )
-    _check(
-        case,
-        "http://" not in completed.stdout + completed.stderr,
-        "network endpoint mentioned",
-    )
-    notes.append(f"01: published {artifact.name}")
 
 
 def qa_top_02() -> None:
-    """QA-TOP-02: applicable and capability-excluded relationships are both recorded."""
+    """A reviewed risk without a mapping remains visible as governance-only."""
     case = "TOP-02"
     _artifact, plan, _completed = _produce(
-        case,
-        _snapshot(
-            relationships=[
-                _ready("atlas-prompt-injection", "AP-T6-01"),
-                _rel(
-                    "atlas-prompt-injection",
-                    "AP-T11-01",
-                    scope="capability_excluded",
-                    qualification="not_attempted",
-                    projection="not_attempted",
-                ),
-            ]
-        ),
+        case, _typed_payload(risk_ids=("risk-governance-only",), pattern_id=None)
     )
-    applicable = _row(plan, "atlas-prompt-injection", "AP-T6-01")
-    excluded = _row(plan, "atlas-prompt-injection", "AP-T11-01")
-    _check(
-        case,
-        applicable is not None and applicable.get("scope_disposition") == "applicable",
-        f"missing applicable AP-T6-01: {applicable}",
-    )
-    _check(
-        case,
-        excluded is not None
-        and excluded.get("scope_disposition") == "capability_excluded",
-        f"missing capability-excluded AP-T11-01: {excluded}",
-    )
+    row = _row(plan, "risk-governance-only")
+    _check(case, row is not None, "governance row missing")
+    if row:
+        _check(case, row.get("scope_disposition") == "governance_only", "wrong scope")
+        _check(
+            case,
+            row.get("qualification_disposition") == "not_attempted",
+            "wrong qualification",
+        )
+        _check(case, row.get("attack_pattern_id") is None, "pattern invented")
 
 
 def qa_top_03() -> None:
-    """QA-TOP-03: every expected relationship has one closed disposition on every axis."""
+    """The authoritative projection creates a complete closed candidate row."""
     case = "TOP-03"
-    relationships = [
-        _rel(
-            "atlas-prompt-injection",
-            "AP-T11-01",
-            scope="capability_excluded",
-            qualification="not_attempted",
-            projection="not_attempted",
-            kind="capability-gated pattern",
-        ),
-        _rel(
-            "atlas-orphan-risk",
-            None,
-            scope="governance_only",
-            qualification="not_attempted",
-            projection="not_attempted",
-            kind="governance review",
-        ),
-        _rel(
-            "atlas-memory-poisoning",
-            "AP-T1-01",
-            scope="applicable",
-            qualification="missing_evidence",
-            projection="not_attempted",
-            kind="missing qualification facts",
-        ),
-        _rel(
-            "atlas-memory-poisoning",
-            "AP-T1-04",
-            scope="applicable",
-            qualification="contradictory_evidence",
-            projection="not_attempted",
-            kind="contradictory facts",
-        ),
-        _rel(
-            "atlas-memory-poisoning",
-            "AP-T1-03",
-            scope="applicable",
-            qualification="structurally_infeasible",
-            projection="not_attempted",
-            kind="structurally infeasible",
-        ),
-        _rel(
-            "atlas-prompt-injection",
-            "AP-T6-01",
-            scope="applicable",
-            qualification="ready",
-            projection="projectable",
-            kind="qualified projectable",
-        ),
-    ]
-    _artifact, plan, _completed = _produce(case, _snapshot(relationships=relationships))
-    rows = _obligations(plan)
-    _check(case, len(rows) == 6, f"expected 6 obligations, got {len(rows)}")
-    for row in rows:
-        _check(
-            case,
-            bool(row.get("scope_disposition")),
-            f"blank scope disposition: {row}",
-        )
-        _check(
-            case,
-            bool(row.get("qualification_disposition")),
-            f"blank qualification disposition: {row}",
-        )
-        _check(
-            case,
-            row.get("correspondence_disposition") == "not_assessed",
-            f"correspondence {row.get('correspondence_disposition')!r}",
-        )
-    expected = {
-        ("atlas-prompt-injection", "AP-T11-01"),
-        ("atlas-orphan-risk", None),
-        ("atlas-memory-poisoning", "AP-T1-01"),
-        ("atlas-memory-poisoning", "AP-T1-04"),
-        ("atlas-memory-poisoning", "AP-T1-03"),
-        ("atlas-prompt-injection", "AP-T6-01"),
+    candidate, _raw_pattern, _snapshot = _authoritative_fixture()
+    artifact, plan, _completed = _produce(case, _typed_payload())
+    row = _row(plan, "risk-a", "AP-T1-01")
+    expected_fields = {
+        "obligation_id",
+        "risk_ref",
+        "taxonomy_chain",
+        "attack_pattern_id",
+        "attack_pattern_semantic_digest",
+        "scope_disposition",
+        "qualification_disposition",
+        "candidate_records",
+        "correspondence_disposition",
+        "evidence",
     }
-    actual = {(row.get("risk_id"), row.get("pattern_id")) for row in rows}
-    _check(case, actual == expected, f"omitted relationships: {expected - actual}")
+    _check(case, row is not None, "projectable row missing")
+    if row is None:
+        return
+    _check(case, set(row) == expected_fields, f"row fields differ: {set(row)}")
+    records = row.get("candidate_records") or []
+    projectable = [
+        record
+        for record in records
+        if record.get("projection_disposition") == "projectable"
+    ]
+    rejected = [
+        record
+        for record in records
+        if record.get("projection_disposition") == "projection_infeasible"
+    ]
+    _check(
+        case,
+        len(projectable) == 1,
+        f"expected one derived projectable candidate, got {records}",
+    )
+    _check(
+        case,
+        rejected
+        and all(record.get("reason") and record.get("evidence") for record in rejected),
+        "projection-infeasible candidate records lost typed reason/evidence",
+    )
+    if projectable:
+        record = projectable[0]
+        _check(
+            case,
+            record.get("candidate_id") == candidate.candidate_id,
+            "candidate ID changed",
+        )
+        _check(
+            case,
+            record.get("canonical_ingress")
+            == candidate.canonical_ingress.model_dump(mode="json"),
+            "canonical ingress changed",
+        )
+        _check(
+            case,
+            record.get("resource_bindings")
+            == [
+                binding.model_dump(mode="json")
+                for binding in candidate.projection.bindings
+            ],
+            "resource bindings changed",
+        )
+    _check(case, artifact.suffix == ".yaml", "non-YAML publication surfaced")
 
 
 def qa_top_04() -> None:
-    """QA-TOP-04: closed scope and qualification dispositions are explicit."""
-    cases = (
-        (
-            "capability-gated",
-            "capability-gated pattern",
-            "atlas-prompt-injection",
-            "AP-T11-01",
-            "capability_excluded",
-            "not_attempted",
-            "not_attempted",
+    """Projection evidence is retained while secrets stay out of the artifact."""
+    case = "TOP-04"
+    secret = "SECRET_live_token_END"
+    payload = _typed_payload()
+    qualification = payload["qualification_facts"]
+    if isinstance(qualification, dict):
+        facts = qualification.get("facts")
+        if isinstance(facts, dict):
+            secret_reference = {
+                "namespace": "system",
+                "fact_id": "qa.secret-token",
+                "value_type": "string",
+                "property_path": [],
+            }
+            secret_key = json.dumps(
+                secret_reference,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            )
+            facts[secret_key] = {
+                "fact": secret_reference,
+                "status": "present",
+                "value": secret,
+            }
+            qualification["semantic_digest"] = hashlib.sha256(
+                b"asago-scenario-generator:qualification-facts:v1\0"
+                + _canonical_json(facts)
+            ).hexdigest()
+    artifact, plan, _completed = _produce(case, payload)
+    row = _row(plan, "risk-a", "AP-T1-01") or {}
+    evidence = row.get("evidence") if isinstance(row.get("evidence"), list) else []
+    _check(
+        case,
+        any(
+            item.get("kind") == "projection"
+            and item.get("source") == "unsupported_requirement_derivation"
+            for item in evidence
+            if isinstance(item, dict)
         ),
-        (
-            "missing-evidence",
-            "missing qualification facts",
-            "atlas-memory-poisoning",
-            "AP-T1-01",
-            "applicable",
-            "missing_evidence",
-            "not_attempted",
-        ),
-        (
-            "contradictory-evidence",
-            "contradictory facts",
-            "atlas-memory-poisoning",
-            "AP-T1-04",
-            "applicable",
-            "contradictory_evidence",
-            "not_attempted",
-        ),
-        (
-            "structurally-infeasible",
-            "structurally infeasible",
-            "atlas-memory-poisoning",
-            "AP-T1-03",
-            "applicable",
-            "structurally_infeasible",
-            "not_attempted",
-        ),
-        (
-            "ready",
-            "qualified projectable",
-            "atlas-prompt-injection",
-            "AP-T6-01",
-            "applicable",
-            "ready",
-            "projectable",
-        ),
+        "authoritative projection evidence missing",
     )
-    for label, kind, risk_id, pattern_id, scope, qualification, projection in cases:
-        case = f"TOP-04-{label}"
-        _artifact, plan, _completed = _produce(
-            case,
-            _snapshot(
-                relationships=[
-                    {
-                        "risk_id": risk_id,
-                        "pattern_id": pattern_id,
-                        "relationship_kind": kind,
-                    }
-                ]
-            ),
-        )
-        row = _row(plan, risk_id, pattern_id)
-        _check(
-            case, row is not None, f"expected 1 obligation for {risk_id}/{pattern_id}"
-        )
-        if row is None:
-            continue
-        _check(
-            case,
-            row.get("scope_disposition") == scope,
-            f"scope {row.get('scope_disposition')!r} != {scope!r}",
-        )
-        _check(
-            case,
-            row.get("qualification_disposition") == qualification,
-            f"qualification {row.get('qualification_disposition')!r} != {qualification!r}",
-        )
-        _check(
-            case,
-            row.get("correspondence_disposition") == "not_assessed",
-            f"correspondence {row.get('correspondence_disposition')!r}",
-        )
-        _check(
-            case,
-            row.get("projection_disposition") == projection,
-            f"projection {row.get('projection_disposition')!r} != {projection!r}",
-        )
-        evidence = row.get("evidence") or {}
-        _check(
-            case,
-            evidence.get("relationship_kind") == kind,
-            f"evidence {evidence!r} missing {kind!r}",
-        )
+    raw = artifact.read_bytes() if artifact.is_file() else b""
+    _check(case, secret.encode() not in raw, "secret leaked into YAML artifact")
 
 
 def qa_top_05() -> None:
-    """QA-TOP-05: governance-only risks invent no pattern."""
+    """A false qualification content digest fails typed validation."""
     case = "TOP-05"
-    _artifact, plan, _completed = _produce(
+    payload = _typed_payload()
+    qualification = payload["qualification_facts"]
+    if isinstance(qualification, dict):
+        qualification["semantic_digest"] = _ZERO
+    output_dir, completed = _reject(case, payload)
+    _check(case, completed.returncode != 0, "stale qualification digest was accepted")
+    _check(
         case,
-        _snapshot(
-            relationships=[
-                _rel(
-                    "atlas-orphan-risk",
-                    None,
-                    scope="governance_only",
-                    qualification="not_attempted",
-                    projection="not_attempted",
-                )
-            ]
-        ),
+        not list(output_dir.glob("taxonomy-obligation-plan.*")),
+        "partial plan published",
     )
-    rows = [
-        row for row in _obligations(plan) if row.get("risk_id") == "atlas-orphan-risk"
-    ]
-    _check(case, len(rows) == 1, f"expected 1 orphan obligation, got {len(rows)}")
-    if rows:
-        _check(
-            case,
-            rows[0].get("scope_disposition") == "governance_only",
-            f"scope {rows[0].get('scope_disposition')!r}",
-        )
-        _check(
-            case,
-            rows[0].get("qualification_disposition") == "not_attempted",
-            f"qualification {rows[0].get('qualification_disposition')!r}",
-        )
-        _check(
-            case,
-            rows[0].get("correspondence_disposition") == "not_assessed",
-            f"correspondence {rows[0].get('correspondence_disposition')!r}",
-        )
-        _check(
-            case,
-            rows[0].get("pattern_id") in (None, ""),
-            f"invented pattern {rows[0].get('pattern_id')!r}",
-        )
+    _check(
+        case,
+        "qualification" in (completed.stdout + completed.stderr).lower(),
+        "digest error omitted qualification",
+    )
 
 
 def qa_top_06() -> None:
-    """QA-TOP-06: qualification traces omit secrets from sensitive values."""
+    """Unknown typed input fields fail before any artifact is published."""
     case = "TOP-06"
-    secret = "SECRET_live_token_END"
-    artifact, plan, _completed = _produce(
-        case,
-        _snapshot(
-            config={"api_key": secret},
-            relationships=[_ready("atlas-prompt-injection", "AP-T6-01")],
-            qualification_evaluations=[
-                {
-                    "risk_id": "atlas-prompt-injection",
-                    "pattern_id": "AP-T6-01",
-                    "predicate": "deployment.attacker_code_execution_on_agent_host",
-                    "facts": (
-                        "deployment.attacker_code_execution_on_agent_host=false "
-                        f"token={secret}"
-                    ),
-                    "result": "false",
-                    "reason": "fact present and unequal",
-                }
-            ],
-        ),
+    output_dir, completed = _reject(
+        case, _typed_payload(extra={"candidate_expansions": []})
     )
-    row = _row(plan, "atlas-prompt-injection", "AP-T6-01")
-    traces = row.get("qualification_trace") if row else []
-    _check(case, isinstance(traces, list) and traces, "qualification trace missing")
-    if traces:
-        item = traces[0]
-        _check(
-            case,
-            item.get("predicate") == "deployment.attacker_code_execution_on_agent_host",
-            f"predicate {item.get('predicate')!r}",
-        )
-        _check(
-            case,
-            item.get("facts")
-            == "deployment.attacker_code_execution_on_agent_host=false token=[REDACTED]",
-            f"facts {item.get('facts')!r}",
-        )
-        _check(
-            case, str(item.get("result")) == "false", f"result {item.get('result')!r}"
-        )
-        _check(
-            case,
-            item.get("reason") == "fact present and unequal",
-            f"reason {item.get('reason')!r}",
-        )
-        for field in ("predicate", "facts", "result", "reason"):
-            _check(
-                case,
-                secret not in str(item.get(field, "")),
-                f"{field} contains {secret}",
-            )
-    raw = artifact.read_bytes() if artifact.is_file() else b""
+    _check(case, completed.returncode != 0, "unknown candidate field was accepted")
     _check(
-        case, secret.encode("utf-8") not in raw, "published artifact contains secret"
+        case,
+        not list(output_dir.glob("taxonomy-obligation-plan.*")),
+        "partial plan published",
+    )
+    _check(
+        case,
+        "candidate_expansions" in (completed.stdout + completed.stderr),
+        "unknown field omitted",
     )
 
 
 def qa_top_07() -> None:
-    """QA-TOP-07: candidate records retain projection dispositions."""
+    """Each identity-bearing input changes the obligation identity."""
     case = "TOP-07"
-    projectable = "cand:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    infeasible = "cand:v2:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    deferred = "cand:v2:cccccccccccccccccccccccccccccccc"
-    _artifact, plan, _completed = _produce(
-        case,
-        _snapshot(
-            relationships=[_ready("atlas-prompt-injection", "AP-T6-01")],
-            candidate_expansions=[
-                {
-                    "risk_id": "atlas-prompt-injection",
-                    "pattern_id": "AP-T6-01",
-                    "candidates": [
-                        {
-                            "candidate_id": projectable,
-                            "projection_disposition": "projectable",
-                            "reason": "qualified combination",
-                        },
-                        {
-                            "candidate_id": infeasible,
-                            "projection_disposition": "projection_infeasible",
-                            "reason": "missing required resource",
-                        },
-                        {
-                            "candidate_id": deferred,
-                            "projection_disposition": "budget_deferred",
-                            "reason": "projection budget exhausted",
-                        },
-                    ],
-                }
-            ],
-        ),
+    variants = (
+        _typed_payload(risk_ids=("risk-b",)),
+        _typed_payload(pattern_id="AP-T1-02"),
+        _typed_payload(capability_snapshot=_typed_capability_variant()),
+        _typed_payload(catalog_release="repinned-catalog"),
+        _typed_payload(mapping_release="repinned-mapping"),
     )
-    row = _row(plan, "atlas-prompt-injection", "AP-T6-01")
-    records = (row or {}).get("candidate_records") or []
-    by_id = {
-        item.get("candidate_id"): item for item in records if isinstance(item, dict)
-    }
-    expected = (
-        (projectable, "projectable", "qualified combination"),
-        (infeasible, "projection_infeasible", "missing required resource"),
-        (deferred, "budget_deferred", "projection budget exhausted"),
-    )
-    for candidate_id, disposition, reason in expected:
-        item = by_id.get(candidate_id)
-        _check(case, item is not None, f"candidate {candidate_id} missing: {records!r}")
-        if item is None:
-            continue
+    _artifact, base, _completed = _produce(f"{case}-base", _typed_payload())
+    base_id = _rows(base)[0].get("obligation_id") if _rows(base) else None
+    base_digest = base.get("semantic_digest")
+    for index, payload in enumerate(variants, start=1):
+        _artifact, changed, _completed = _produce(f"{case}-{index}", payload)
+        rows = _rows(changed)
         _check(
             case,
-            item.get("projection_disposition") == disposition,
-            f"{candidate_id} disposition {item.get('projection_disposition')!r}",
+            bool(rows) and rows[0].get("obligation_id") != base_id,
+            "obligation ID did not change",
         )
         _check(
             case,
-            item.get("reason") == reason,
-            f"{candidate_id} reason {item.get('reason')!r}",
+            changed.get("semantic_digest") != base_digest,
+            "semantic digest did not change",
         )
 
 
 def qa_top_08() -> None:
-    """QA-TOP-08: planning records zero network and model calls."""
+    """Publication is YAML-only, atomic, and reports zero external calls."""
     case = "TOP-08"
+    artifact, plan, completed = _produce(case, _typed_payload())
     _check(
-        case,
-        QA_PIPELINE_ENV not in os.environ,
-        f"{QA_PIPELINE_ENV} is set in the parent environment",
-    )
-    artifact, plan, completed = _produce(
-        case,
-        _snapshot(
-            relationships=[
-                _ready("atlas-prompt-injection", "AP-T6-01"),
-                _rel(
-                    "atlas-prompt-injection",
-                    "AP-T11-01",
-                    scope="capability_excluded",
-                    qualification="not_attempted",
-                    projection="not_attempted",
-                ),
-            ]
-        ),
+        case, artifact.name == "taxonomy-obligation-plan.yaml", "wrong artifact name"
     )
     _check(
         case,
-        plan.get("network_calls") == 0,
-        f"network_calls={plan.get('network_calls')!r}",
+        plan.get("schema_version") == "taxonomy-obligation-plan-v1",
+        "artifact did not load as closed plan",
     )
+    _check(case, "Network calls: 0" in completed.stdout, "network count missing")
+    _check(case, "Model calls:   0" in completed.stdout, "model count missing")
+    _check(case, not list(artifact.parent.glob("*.tmp")), "temporary artifact remained")
+    _check(case, not list(artifact.parent.glob("*.part")), "partial artifact remained")
     _check(
-        case, plan.get("model_calls") == 0, f"model_calls={plan.get('model_calls')!r}"
+        case, "json" not in completed.stdout.lower(), "JSON publication was advertised"
     )
-    _check(
-        case,
-        "Network calls: 0" in completed.stdout,
-        "console omitted network-call count",
-    )
-    _check(
-        case, "Model calls:   0" in completed.stdout, "console omitted model-call count"
-    )
-    combined = completed.stdout + completed.stderr
-    _check(case, "openai" not in combined.lower(), "LLM client mentioned")
-    raw = artifact.read_bytes() if artifact.is_file() else b""
-    _check(case, b"sk-" not in raw, "artifact contains a secret-shaped token")
 
 
 def qa_top_09() -> None:
-    """QA-TOP-09: identity-bearing input changes change obligation IDs."""
-    pairs = (
-        (
-            "risk",
-            {"relationships": [_ready("atlas-prompt-injection", "AP-T6-01")]},
-            {"relationships": [_ready("atlas-memory-poisoning", "AP-T6-01")]},
-            "atlas-prompt-injection",
-            "atlas-memory-poisoning",
-            "risk_id",
-        ),
-        (
-            "pattern",
-            {"relationships": [_ready("atlas-prompt-injection", "AP-T6-01")]},
-            {"relationships": [_ready("atlas-prompt-injection", "AP-T1-01")]},
-            "AP-T6-01",
-            "AP-T1-01",
-            "pattern_id",
-        ),
-        (
-            "capability",
-            {"capability_content": "profile-v1"},
-            {"capability_content": "profile-v2"},
-            "profile-v1",
-            "profile-v2",
-            "capability_content",
-        ),
-        (
-            "catalog",
-            {"catalog_pin": "atlas-2026.05"},
-            {"catalog_pin": "atlas-2026.06"},
-            "atlas-2026.05",
-            "atlas-2026.06",
-            "catalog_pin",
-        ),
-        (
-            "mapping",
-            {"mapping_pin": "sssom-v1"},
-            {"mapping_pin": "sssom-v2"},
-            "sssom-v1",
-            "sssom-v2",
-            "mapping_pin",
-        ),
+    """Summary counts reconcile directly from the emitted rows."""
+    case = "TOP-09"
+    payload = _typed_payload(
+        risk_ids=("risk-a", "risk-b", "risk-governance-only"),
+        pattern_id="AP-T1-01",
     )
-    for label, extra_a, extra_b, _value_a, _value_b, _axis in pairs:
-        case = f"TOP-09-{label}"
-        base = {"relationships": [_ready("atlas-prompt-injection", "AP-T6-01")]}
-        payload_a = _snapshot(**{**base, **extra_a})
-        payload_b = _snapshot(**{**base, **extra_b})
-        _artifact_a, plan_a, _completed_a = _produce(f"{case}-a", payload_a)
-        _artifact_b, plan_b, _completed_b = _produce(f"{case}-b", payload_b)
-        ids_a = [row.get("obligation_id") for row in _obligations(plan_a)]
-        ids_b = [row.get("obligation_id") for row in _obligations(plan_b)]
-        _check(case, ids_a != ids_b, f"identifiers unchanged: {ids_a}")
-        _check(
-            case,
-            plan_a.get("semantic_digest") != plan_b.get("semantic_digest"),
-            "semantic digests unchanged",
+    payload["cross_taxonomy_mappings"] = [
+        item
+        for item in payload["cross_taxonomy_mappings"]
+        if item["source_id"] in {"risk-a", "risk-b"}
+    ]
+    payload["mapping_pins"]["obligation_edges"]["digest"] = (
+        _compute_mapping_bundle_digest(
+            payload["cross_taxonomy_mappings"], payload["sssom_mappings"]
         )
+    )
+    artifact, plan, _completed = _produce(case, payload)
+    rows = _rows(plan)
+    derived = _summary_from_rows(rows)
+    summary = plan.get("summary") if isinstance(plan.get("summary"), dict) else {}
+    for key, value in derived.items():
+        _check(case, summary.get(key) == value, f"summary.{key} does not reconcile")
+    _check(case, "taxonomy_correspondence_rate" not in summary, "taxonomy rate present")
+    _check(case, "scenario_realization_rate" not in summary, "scenario rate present")
+    _check(case, artifact.is_file(), "summary artifact missing")
 
 
 def qa_top_10() -> None:
-    """QA-TOP-10: ICA prose keyword changes do not change the plan."""
+    """Invalid projection budgets fail typed validation without publication."""
     case = "TOP-10"
-    shared = _snapshot(relationships=[_ready("atlas-prompt-injection", "AP-T6-01")])
-    _artifact_a, plan_a, _completed_a = _produce(
-        f"{case}-a", {**shared, "ica_prose": "the agent injects a prompt"}
-    )
-    _artifact_b, plan_b, _completed_b = _produce(
-        f"{case}-b", {**shared, "ica_prose": "the agent poisons memory"}
-    )
-    ids_a = [row.get("obligation_id") for row in _obligations(plan_a)]
-    ids_b = [row.get("obligation_id") for row in _obligations(plan_b)]
-    _check(case, ids_a == ids_b, f"identifiers differ: {ids_a} vs {ids_b}")
-    _check(
+    output_dir, completed = _reject(
         case,
-        plan_a.get("semantic_digest") == plan_b.get("semantic_digest"),
-        "semantic digests differ",
-    )
-    scopes_a = [row.get("scope_disposition") for row in _obligations(plan_a)]
-    scopes_b = [row.get("scope_disposition") for row in _obligations(plan_b)]
-    quals_a = [row.get("qualification_disposition") for row in _obligations(plan_a)]
-    quals_b = [row.get("qualification_disposition") for row in _obligations(plan_b)]
-    _check(
-        case,
-        scopes_a == scopes_b,
-        f"scope dispositions differ: {scopes_a} vs {scopes_b}",
-    )
-    _check(
-        case,
-        quals_a == quals_b,
-        f"qualification dispositions differ: {quals_a} vs {quals_b}",
-    )
-
-
-def qa_top_11() -> None:
-    """QA-TOP-11: invalid scope and qualification combinations are rejected."""
-    combinations = (
-        ("governance_only", "ready", "AP-T6-01"),
-        ("capability_excluded", "missing_evidence", "AP-T6-01"),
-        ("applicable", "not_attempted", "AP-T6-01"),
-    )
-    for scope, qualification, pattern_id in combinations:
-        case = f"TOP-11-{scope}-{qualification}"
-        output_dir, completed = _reject(
-            case,
-            _snapshot(
-                relationships=[
-                    {
-                        "risk_id": "atlas-prompt-injection",
-                        "pattern_id": None
-                        if scope == "governance_only"
-                        else pattern_id,
-                        "scope_disposition": scope,
-                        "qualification_disposition": qualification,
-                        "projection_disposition": (
-                            "projectable"
-                            if qualification == "ready"
-                            else "not_attempted"
-                        ),
-                    }
-                ]
-            ),
-        )
-        _check(case, completed.returncode != 0, "planning was accepted")
-        published = (
-            list(output_dir.glob("taxonomy-obligation-plan.*"))
-            if output_dir.exists()
-            else []
-        )
-        _check(case, not published, f"partial plan published: {published}")
-        combined = completed.stdout + completed.stderr
-        _check(
-            case,
-            scope in combined,
-            f"error omitted scope {scope!r}: {combined[-300:]!r}",
-        )
-        _check(
-            case,
-            qualification in combined,
-            f"error omitted qualification {qualification!r}: {combined[-300:]!r}",
-        )
-
-
-def _derived_summary(rows: list[dict]) -> dict[str, int]:
-    candidate_records = [
-        item
-        for row in rows
-        for item in (row.get("candidate_records") or [])
-        if isinstance(item, dict)
-    ]
-    use_candidates = bool(candidate_records)
-
-    def _count_scope(disposition: str) -> int:
-        return sum(1 for row in rows if row.get("scope_disposition") == disposition)
-
-    def _count_qualification(*dispositions: str) -> int:
-        return sum(
-            1 for row in rows if row.get("qualification_disposition") in dispositions
-        )
-
-    def _count_projection(disposition: str) -> int:
-        if use_candidates:
-            return sum(
-                1
-                for item in candidate_records
-                if item.get("projection_disposition") == disposition
-            )
-        return sum(
-            1 for row in rows if row.get("projection_disposition") == disposition
-        )
-
-    return {
-        "total": len(rows),
-        "applicable": _count_scope("applicable"),
-        "governance_only": _count_scope("governance_only"),
-        "capability_excluded": _count_scope("capability_excluded"),
-        "ready": _count_qualification("ready"),
-        "missing_or_contradictory": _count_qualification(
-            "missing_evidence", "contradictory_evidence"
-        ),
-        "structurally_infeasible": _count_qualification("structurally_infeasible"),
-        "projectable": _count_projection("projectable"),
-        "projection_infeasible": _count_projection("projection_infeasible"),
-        "budget_deferred": _count_projection("budget_deferred"),
-    }
-
-
-def qa_top_12() -> None:
-    """QA-TOP-12: summary counts are derived from obligation rows."""
-    case = "TOP-12"
-    artifact, plan, _completed = _produce(
-        case,
-        _snapshot(
-            relationships=[
-                _rel(
-                    "risk-ready",
-                    "AP-T6-01",
-                    scope="applicable",
-                    qualification="ready",
-                    projection="projectable",
-                ),
-                _rel(
-                    "risk-missing",
-                    "AP-T1-01",
-                    scope="applicable",
-                    qualification="missing_evidence",
-                    projection="not_attempted",
-                ),
-                _rel(
-                    "risk-contradictory",
-                    "AP-T1-02",
-                    scope="applicable",
-                    qualification="contradictory_evidence",
-                    projection="not_attempted",
-                ),
-                _rel(
-                    "risk-struct",
-                    "AP-T1-03",
-                    scope="applicable",
-                    qualification="structurally_infeasible",
-                    projection="not_attempted",
-                ),
-                _rel(
-                    "risk-gated",
-                    "AP-T11-01",
-                    scope="capability_excluded",
-                    qualification="not_attempted",
-                    projection="not_attempted",
-                ),
-                _rel(
-                    "risk-gov",
-                    None,
-                    scope="governance_only",
-                    qualification="not_attempted",
-                    projection="not_attempted",
-                ),
-            ],
-            candidate_expansions=[
-                {
-                    "risk_id": "risk-ready",
-                    "pattern_id": "AP-T6-01",
-                    "candidates": [
-                        {
-                            "candidate_id": "cand:v2:11111111111111111111111111111111",
-                            "projection_disposition": "projectable",
-                            "reason": "ready",
-                        },
-                        {
-                            "candidate_id": "cand:v2:22222222222222222222222222222222",
-                            "projection_disposition": "projection_infeasible",
-                            "reason": "infeasible",
-                        },
-                        {
-                            "candidate_id": "cand:v2:33333333333333333333333333333333",
-                            "projection_disposition": "budget_deferred",
-                            "reason": "deferred",
-                        },
-                    ],
-                }
-            ],
+        _typed_payload(
+            extra={
+                "projection_budget": {"max_candidates": 0, "max_derivation_work": 4096}
+            }
         ),
     )
-    rows = _obligations(plan)
-    derived = _derived_summary(rows)
-    expected = {
-        "total": 6,
-        "applicable": 4,
-        "governance_only": 1,
-        "capability_excluded": 1,
-        "ready": 1,
-        "missing_or_contradictory": 2,
-        "structurally_infeasible": 1,
-        "projectable": 1,
-        "projection_infeasible": 1,
-        "budget_deferred": 1,
-    }
-    summary = plan.get("summary") if isinstance(plan.get("summary"), dict) else {}
-    for key, value in expected.items():
-        _check(
-            case,
-            summary.get(key) == value,
-            f"summary.{key}={summary.get(key)!r} != {value}",
-        )
-        _check(
-            case,
-            derived.get(key) == value,
-            f"derived.{key}={derived.get(key)!r} != {value}",
-        )
-        _check(
-            case,
-            summary.get(key) == derived.get(key),
-            f"summary.{key} drifted from rows",
-        )
-    raw = artifact.read_text(encoding="utf-8") if artifact.is_file() else ""
+    _check(case, completed.returncode != 0, "invalid budget was accepted")
     _check(
         case,
-        "taxonomy_correspondence_rate" not in summary
-        and "taxonomy correspondence rate" not in raw.lower(),
-        "summary includes a taxonomy correspondence rate",
-    )
-    _check(
-        case,
-        "scenario_realization_rate" not in summary
-        and "scenario realization rate" not in raw.lower(),
-        "summary includes a scenario realization rate",
+        not list(output_dir.glob("taxonomy-obligation-plan.*")),
+        "partial plan published",
     )
 
 
@@ -1005,8 +756,6 @@ def main() -> int:
         qa_top_08,
         qa_top_09,
         qa_top_10,
-        qa_top_11,
-        qa_top_12,
     ):
         procedure()
         print(f"  [done] {procedure.__name__}", flush=True)

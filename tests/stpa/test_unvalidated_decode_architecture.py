@@ -27,7 +27,12 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ResponsibilityConstraint,
 )
 
-STPA_ROOT = Path(__file__).resolve().parent.parent.parent / "src" / "asago_scenario_generator" / "stpa"
+STPA_ROOT = (
+    Path(__file__).resolve().parent.parent.parent
+    / "src"
+    / "asago_scenario_generator"
+    / "stpa"
+)
 DECODE_PATH = STPA_ROOT / "infra" / "unvalidated_decode.py"
 HELPERS_PATH = STPA_ROOT / "infra" / "llm_helpers.py"
 CONTROL_STRUCTURE_PATH = STPA_ROOT / "models" / "control_structure.py"
@@ -112,13 +117,54 @@ class TestDecodeLayerIsPolicyFree:
 
     def test_decode_module_does_not_import_domain_models(self):
         imports = _imported_names(DECODE_PATH)
-        leaks = [name for name in imports if name.startswith("asago_scenario_generator.stpa.models")]
+        leaks = [
+            name
+            for name in imports
+            if name.startswith("asago_scenario_generator.stpa.models")
+        ]
         assert leaks == [], f"decode layer imported domain models: {leaks}"
 
     def test_decode_module_does_not_import_llm_adapter(self):
         imports = _imported_names(DECODE_PATH)
         assert "asago_scenario_generator.stpa.infra.llm_helpers" not in imports
         assert "asago_scenario_generator.stpa.infra.llm" not in imports
+
+    def test_tolerant_copy_has_one_shared_owner(self):
+        from asago_scenario_generator.stpa import _model_data
+        from asago_scenario_generator.stpa.infra import unvalidated_decode
+        from asago_scenario_generator.stpa.system_model import id_normalization
+
+        assert unvalidated_decode.raw_model_data is _model_data.raw_model_data
+        assert id_normalization.raw_model_data is _model_data.raw_model_data
+
+    def test_tolerant_copy_preserves_raw_container_shapes_and_isolation(self):
+        from asago_scenario_generator.stpa._model_data import raw_model_data
+
+        class _Nested(BaseModel):
+            value: int
+
+        opaque = bytearray(b"x")
+        source = {
+            "list": [{"value": 1}],
+            "tuple": ("checkpoint",),
+            "set": {"tag"},
+            "model": _Nested(value=1),
+            "opaque": opaque,
+        }
+
+        copied = raw_model_data(source)
+
+        assert copied["list"] == [{"value": 1}]
+        assert copied["tuple"] == ("checkpoint",)
+        assert copied["set"] == {"tag"}
+        assert copied["model"] == {"value": 1}
+        assert copied["opaque"] == bytearray(b"x")
+        assert copied["opaque"] is not opaque
+
+        source["list"][0]["value"] = 2
+        opaque[0] = ord("y")
+        assert copied["list"] == [{"value": 1}]
+        assert copied["opaque"] == bytearray(b"x")
 
 
 class TestDescriptionPolicyLivesOnModels:
@@ -130,8 +176,7 @@ class TestDescriptionPolicyLivesOnModels:
             field = model.model_fields["description"]
             metadata = field.metadata
             has_min_length = any(
-                getattr(constraint, "min_length", None) == 1
-                for constraint in metadata
+                getattr(constraint, "min_length", None) == 1 for constraint in metadata
             )
             if not has_min_length:
                 missing.append(model.__name__)

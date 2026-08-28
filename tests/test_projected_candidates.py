@@ -25,6 +25,9 @@ from asago_scenario_generator.pipeline.projection import (
     project_authoritative_candidates,
     validate_projected_candidate,
 )
+from asago_scenario_generator.pipeline.projection_authoritative import (
+    project_authoritative_candidate_observations,
+)
 
 ZERO = "0" * 64
 
@@ -475,6 +478,61 @@ def test_expansion_is_bounded_coverage_aware_stable_and_deduplicated() -> None:
         )
         == 2
     )
+
+
+def test_observation_preserves_established_public_projection_truncation() -> None:
+    """Planning observation adds deferred facts without changing public output."""
+    raw = _pattern()
+    resolver = TaxonomyResolver(
+        AttackPattern.model_validate(raw).canonical_chain.taxonomy_context
+    )
+    snapshot = capture_capability_snapshot(
+        _profile(duplicate_resources=True), (_evidence(),)
+    )
+    budget = ProjectionBudget(max_candidates=3, max_derivation_work=4096)
+
+    established = project_authoritative_candidates(
+        [raw], resolver, snapshot, budget=budget
+    )
+    observed = project_authoritative_candidate_observations(
+        [raw], resolver, snapshot, budget=budget
+    )
+
+    assert len(established.candidates) == 3
+    assert {item.code for item in established.limitations} == {
+        "candidate_budget_exhausted"
+    }
+    assert observed.batch == established
+    assert observed.deferred_candidates
+    assert not (
+        {item.candidate_id for item in observed.deferred_candidates}
+        & {item.candidate_id for item in established.candidates}
+    )
+
+
+def test_observation_preserves_public_limitations_before_tail_collection() -> None:
+    """Observing deferred candidates cannot alter the public batch limits."""
+    raw = _pattern()
+    resolver = TaxonomyResolver(
+        AttackPattern.model_validate(raw).canonical_chain.taxonomy_context
+    )
+    snapshot = capture_capability_snapshot(
+        _profile(duplicate_resources=True), (_evidence(),)
+    )
+    budget = ProjectionBudget(max_candidates=1, max_derivation_work=2)
+
+    established = project_authoritative_candidates(
+        [raw], resolver, snapshot, budget=budget
+    )
+    observed = project_authoritative_candidate_observations(
+        [raw], resolver, snapshot, budget=budget
+    )
+
+    assert observed.batch == established
+    assert {item.code for item in observed.batch.limitations} == {
+        "candidate_budget_exhausted"
+    }
+    assert observed.deferred_candidates
 
 
 def test_explicit_execution_requirements_are_versioned_and_digest_verified() -> None:
@@ -1057,6 +1115,72 @@ def test_derived_id_collision_fails_closed_typed() -> None:
         issue.code == "unsupported_requirement_derivation" and "collide" in issue.detail
         for issue in result.infeasibilities
     )
+
+
+def test_observation_retains_concrete_rejected_combinations() -> None:
+    """A failed requirement derivation keeps its concrete binding identity."""
+    raw = _pattern(conditional=False)
+    resolver = TaxonomyResolver(
+        __import__(
+            "asago_scenario_generator.models.attack_pattern",
+            fromlist=["AttackPattern"],
+        )
+        .AttackPattern.model_validate(raw)
+        .canonical_chain.taxonomy_context
+    )
+    snapshot = capture_capability_snapshot(_profile(), (_evidence(),))
+
+    import asago_scenario_generator.pipeline.projection_requirements as req_mod
+
+    original = req_mod._requirement_id
+    req_mod._requirement_id = lambda prefix, *components: "req.collision.forced"
+    try:
+        observed = project_authoritative_candidate_observations(
+            [raw],
+            resolver,
+            snapshot,
+            budget=ProjectionBudget(max_candidates=100),
+        )
+    finally:
+        req_mod._requirement_id = original
+
+    assert observed.batch.candidates == ()
+    rejected = next(
+        item
+        for item in observed.rejected_candidates
+        if item.reason.startswith("derived requirement IDs collide")
+    )
+    assert rejected.projection_disposition == "projection_infeasible"
+    assert rejected.reason.startswith("derived requirement IDs collide")
+    assert rejected.canonical_ingress is not None
+    assert rejected.resource_bindings
+    assert rejected.issue.code == "unsupported_requirement_derivation"
+
+
+def test_observation_rejected_identity_is_deterministic() -> None:
+    """Equivalent rejected combinations receive the same observation identity."""
+    raw = _pattern(conditional=False)
+    pattern = AttackPattern.model_validate(raw)
+    resolver = TaxonomyResolver(pattern.canonical_chain.taxonomy_context)
+    snapshot = capture_capability_snapshot(_profile(), (_evidence(),))
+
+    import asago_scenario_generator.pipeline.projection_requirements as req_mod
+
+    original = req_mod._requirement_id
+    req_mod._requirement_id = lambda prefix, *components: "req.collision.forced"
+    try:
+        first = project_authoritative_candidate_observations(
+            [raw], resolver, snapshot, budget=ProjectionBudget(max_candidates=100)
+        )
+        second = project_authoritative_candidate_observations(
+            [raw], resolver, snapshot, budget=ProjectionBudget(max_candidates=100)
+        )
+    finally:
+        req_mod._requirement_id = original
+
+    assert [item.candidate_id for item in first.rejected_candidates] == [
+        item.candidate_id for item in second.rejected_candidates
+    ]
 
 
 def test_dotted_component_partition_collision_fails_closed() -> None:

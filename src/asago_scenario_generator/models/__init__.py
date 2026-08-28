@@ -1,5 +1,10 @@
 """asago-scenario-generator models — Pydantic models for all pipeline artifacts."""
 
+from __future__ import annotations
+
+import importlib
+from typing import Any
+
 from asago_scenario_generator.models.attack_pattern import (
     AgentInternalResourceReference,
     AllCondition,
@@ -58,6 +63,7 @@ from asago_scenario_generator.models.attack_pattern import (
     compute_projection_digest,
     evaluate_condition,
     validate_attack_pattern,
+    validate_fact_scalar,
     validate_legacy_attack_pattern,
     validate_projection_snapshot,
 )
@@ -135,37 +141,22 @@ from asago_scenario_generator.models.source_influence_provenance import (
     SourceInfluenceViolationCode,
     parse_source_ref,
 )
-from asago_scenario_generator.models.scenario import (
-    ArchitectureMatch,
-    AttackComplexity,
-    CallMetadata,
-    CallName,
-    CapabilityProfileRef,
-    FacetingMetadata,
-    GenerationMetadata,
-    LikelihoodLevel,
-    NarrativeLayer,
-    NarrativeStep,
-    Priority,
-    PrioritySignals,
-    RiskCardRef,
-    ScenarioEnvelope,
-    SeverityLevel,
-    StructuralExposureSignal,
-    TaxonomyChain,
-    TechniqueMaturity,
-)
+from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.models.obligation_plan import (
     CandidateRecord,
+    EvidenceRecord,
+    MitigationReference,
     ObligationCorrespondenceDisposition,
     ObligationPlanSummary,
     ObligationProjectionDisposition,
     ObligationQualificationDisposition,
     ObligationScopeDisposition,
-    QualificationTraceItem,
+    QualificationFactEvidence,
+    RiskEvidence,
+    RiskReference,
     TaxonomyObligation,
     TaxonomyObligationPlan,
-    TaxonomyObligationSnapshot,
+    derive_obligation_summary,
 )
 from asago_scenario_generator.models.system_resource_map import (
     ActorControllerEntry,
@@ -197,10 +188,47 @@ from asago_scenario_generator.models.threat_scope import (
     ThreatScope,
     ThreatScopeEntry,
 )
-from asago_scenario_generator.models.threat_surface import (
-    ThreatSurface,
-    ThreatSurfaceEntry,
+
+_LAZY_MODEL_EXPORTS = frozenset(
+    {
+        "ArchitectureMatch",
+        "AttackComplexity",
+        "CallMetadata",
+        "CallName",
+        "CapabilityProfileRef",
+        "FacetingMetadata",
+        "GenerationMetadata",
+        "LikelihoodLevel",
+        "NarrativeLayer",
+        "NarrativeStep",
+        "Priority",
+        "PrioritySignals",
+        "RiskCardRef",
+        "ScenarioEnvelope",
+        "SeverityLevel",
+        "StructuralExposureSignal",
+        "TaxonomyChain",
+        "TechniqueMaturity",
+        "ThreatSurface",
+        "ThreatSurfaceEntry",
+    }
 )
+
+
+def __getattr__(name: str) -> Any:
+    """Resolve scenario-derived façade exports after contract initialization."""
+    if name in _LAZY_MODEL_EXPORTS:
+        module_name = (
+            "threat_surface" if name.startswith("ThreatSurface") else "scenario"
+        )
+        module = importlib.import_module(
+            f"asago_scenario_generator.models.{module_name}"
+        )
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     # complexity
@@ -265,6 +293,7 @@ __all__ = [
     "EvaluatedFactEvidence",
     "EvidenceLevel",
     "EvidenceLink",
+    "EvidenceRecord",
     # risk_card
     "EvidenceSpan",
     "ExactMapping",
@@ -285,6 +314,7 @@ __all__ = [
     "MemoryScope",
     "MemoryType",
     "MitigationRef",
+    "MitigationReference",
     "NarrativeLayer",
     "NarrativeStep",
     "NistClassification",
@@ -298,13 +328,15 @@ __all__ = [
     "ObligationProjectionDisposition",
     "ObligationQualificationDisposition",
     "ObligationScopeDisposition",
+    "QualificationFactEvidence",
     "OutputSurfaceResourceReference",
     "OutOfScopeEntry",
     "PrerequisiteCapabilities",
     "Priority",
     "PrioritySignals",
     "ProjectionSnapshot",
-    "QualificationTraceItem",
+    "RiskEvidence",
+    "RiskReference",
     "SourceInfluencePath",
     "PropertyMatchCondition",
     "ProvenanceReference",
@@ -359,7 +391,6 @@ __all__ = [
     "TaxonomyContext",
     "TaxonomyObligation",
     "TaxonomyObligationPlan",
-    "TaxonomyObligationSnapshot",
     "TaxonomyPin",
     "TaxonomyResolver",
     "TechniqueMaturity",
@@ -377,6 +408,7 @@ __all__ = [
     "UpstreamSourceInfluenceRequirement",
     "capability_level_rank",
     "compute_chain_semantic_digest",
+    "compute_framed_digest",
     "compute_projection_digest",
     # capability_profile
     "derive_zones_from_kc",
@@ -384,6 +416,8 @@ __all__ = [
     "evaluate_condition",
     "parse_source_ref",
     "validate_attack_pattern",
+    "validate_fact_scalar",
     "validate_legacy_attack_pattern",
     "validate_projection_snapshot",
+    "derive_obligation_summary",
 ]
