@@ -668,6 +668,102 @@ def test_plan_obligations_cli_rejects_missing_snapshot(tmp_path: Path) -> None:
     assert f"Error: obligation snapshot not found: {missing}" in result.stderr
 
 
+def test_validate_obligation_plan_cli_accepts_published_yaml(tmp_path: Path) -> None:
+    snapshot = _make_snapshot(relationships=[_rel("risk-a", "AP-T1-01")])
+    snapshot_path = tmp_path / "snapshot.yaml"
+    snapshot_path.write_text(
+        yaml.safe_dump(snapshot.model_dump(mode="json")), encoding="utf-8"
+    )
+    output_dir = tmp_path / "plan"
+    published = runner.invoke(
+        app,
+        [
+            "plan-obligations",
+            "--snapshot",
+            str(snapshot_path),
+            "--output-dir",
+            str(output_dir),
+            "--format",
+            "yaml",
+        ],
+    )
+    assert published.exit_code == 0, published.stderr
+    plan_path = output_dir / "taxonomy-obligation-plan.yaml"
+
+    result = runner.invoke(app, ["validate-obligation-plan", "--plan", str(plan_path)])
+
+    assert result.exit_code == 0, result.stderr
+    assert f"Obligation plan valid: {plan_path}" in result.stdout
+    assert "Schema version: taxonomy-obligation-plan-v1" in result.stdout
+
+
+def test_validate_obligation_plan_cli_accepts_published_json(tmp_path: Path) -> None:
+    snapshot = _make_snapshot(relationships=[_rel("risk-a", "AP-T1-01")])
+    snapshot_path = tmp_path / "snapshot.yaml"
+    snapshot_path.write_text(
+        yaml.safe_dump(snapshot.model_dump(mode="json")), encoding="utf-8"
+    )
+    output_dir = tmp_path / "plan"
+    published = runner.invoke(
+        app,
+        [
+            "plan-obligations",
+            "--snapshot",
+            str(snapshot_path),
+            "--output-dir",
+            str(output_dir),
+            "--format",
+            "json",
+        ],
+    )
+    assert published.exit_code == 0, published.stderr
+    plan_path = output_dir / "taxonomy-obligation-plan.json"
+
+    result = runner.invoke(app, ["validate-obligation-plan", "--plan", str(plan_path)])
+
+    assert result.exit_code == 0, result.stderr
+    assert f"Obligation plan valid: {plan_path}" in result.stdout
+
+
+def test_validate_obligation_plan_cli_rejects_digest_mismatch(tmp_path: Path) -> None:
+    snapshot = _make_snapshot(relationships=[_rel("risk-a", "AP-T1-01")])
+    snapshot_path = tmp_path / "snapshot.yaml"
+    snapshot_path.write_text(
+        yaml.safe_dump(snapshot.model_dump(mode="json")), encoding="utf-8"
+    )
+    output_dir = tmp_path / "plan"
+    published = runner.invoke(
+        app,
+        [
+            "plan-obligations",
+            "--snapshot",
+            str(snapshot_path),
+            "--output-dir",
+            str(output_dir),
+            "--format",
+            "yaml",
+        ],
+    )
+    assert published.exit_code == 0, published.stderr
+    plan_path = output_dir / "taxonomy-obligation-plan.yaml"
+    payload = yaml.safe_load(plan_path.read_text(encoding="utf-8"))
+    payload["catalog_pins"]["tampered"] = "atlas-tampered-2099"
+    plan_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    result = runner.invoke(app, ["validate-obligation-plan", "--plan", str(plan_path)])
+
+    assert result.exit_code == 1
+    assert "Digest mismatch" in result.stderr
+
+
+def test_validate_obligation_plan_cli_rejects_missing_plan(tmp_path: Path) -> None:
+    missing = tmp_path / "missing" / "taxonomy-obligation-plan.yaml"
+    result = runner.invoke(app, ["validate-obligation-plan", "--plan", str(missing)])
+
+    assert result.exit_code == 1
+    assert f"Error: obligation plan not found: {missing}" in result.stderr
+
+
 @pytest.mark.parametrize(
     ("disposition", "expected"),
     [

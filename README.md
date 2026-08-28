@@ -136,7 +136,7 @@ per-attempt evidence. The HTML report renders those stage outcomes and identifie
 presentation fallback separately.
 
 Useful companion commands include `projection-preflight`, `plan-obligations`,
-`validate-resource-map`, `propose-correspondence`,
+`validate-obligation-plan`, `validate-resource-map`, `propose-correspondence`,
 `reconcile-correspondence`, `profile`, `resume`, `eval`, `report`,
 `qualify-catalog`, `validate-catalog-qualification`, and
 `validate-stpa-projection`. Run `asago-scenario-generator --help` for the
@@ -149,6 +149,14 @@ contacting an LLM endpoint:
 asago-scenario-generator plan-obligations \
   --snapshot obligation-snapshot.yaml \
   --output-dir output/obligation-plan
+```
+
+Load a published obligation plan through the closed schema without contacting
+an LLM endpoint:
+
+```bash
+asago-scenario-generator validate-obligation-plan \
+  --plan output/obligation-plan/taxonomy-obligation-plan.yaml
 ```
 
 Validate an analyst-authored system resource map against a pinned snapshot

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Executable end-to-end QA suite for the taxonomy obligation planner.
 
-Mirrors ``obligation_planner.md`` (QA-TOP-01..08).  Drives the public
+Mirrors ``obligation_planner.md`` (QA-TOP-01..12).  Drives the public
 ``asago-scenario-generator plan-obligations`` file-to-file command: a
 snapshot fixture file in, a published YAML or JSON plan artifact out.
 Inspects the artifact with standard JSON/YAML readers, the console, and
@@ -35,11 +35,10 @@ _SEARCH_PATH = f"/opt/homebrew/bin:/usr/local/bin:{os.environ.get('PATH', '')}"
 _UV = shutil.which("uv", path=_SEARCH_PATH) or "uv"
 
 PINNED = {
-    "taxonomy_version": "atlas-2026.05",
-    "mapping_version": "sssom-v1",
-    "qualification_ruleset_version": "catalog-qualification-v1",
-    "template_version": "scenario-envelope-v1",
-    "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "catalog_pin": "atlas-2026.05",
+    "mapping_pin": "sssom-v1",
+    "capability_content": "profile-v1",
+    "qualification_facts": "facts-v1",
 }
 
 
@@ -57,14 +56,30 @@ def _rel(
     pattern_id: str | None,
     *,
     scope: str,
-    disposition: str,
+    qualification: str,
+    projection: str,
+    kind: str | None = None,
 ) -> dict:
-    return {
+    payload: dict[str, object] = {
         "risk_id": risk_id,
         "pattern_id": pattern_id,
-        "scope": scope,
-        "disposition": disposition,
+        "scope_disposition": scope,
+        "qualification_disposition": qualification,
+        "projection_disposition": projection,
     }
+    if kind is not None:
+        payload["relationship_kind"] = kind
+    return payload
+
+
+def _ready(risk_id: str, pattern_id: str) -> dict:
+    return _rel(
+        risk_id,
+        pattern_id,
+        scope="applicable",
+        qualification="ready",
+        projection="projectable",
+    )
 
 
 def _snapshot(**overrides: object) -> dict:
@@ -75,6 +90,7 @@ def _snapshot(**overrides: object) -> dict:
         "config": {},
         "qualification_evaluations": [],
         "candidate_expansions": [],
+        "ica_prose": "",
     }
     payload.update(overrides)
     return payload
@@ -127,7 +143,7 @@ def _run_cli(
     return completed
 
 
-def _plan_argv(snapshot: Path, output_dir: Path, fmt: str = "both") -> list[str]:
+def _plan_argv(snapshot: Path, output_dir: Path, fmt: str = "yaml") -> list[str]:
     return [
         *_command(),
         "plan-obligations",
@@ -152,6 +168,15 @@ def _load_yaml(path: Path) -> dict:
     return payload
 
 
+def _artifact_path(output_dir: Path, fmt: str) -> Path:
+    name = (
+        "taxonomy-obligation-plan.json"
+        if fmt == "json"
+        else "taxonomy-obligation-plan.yaml"
+    )
+    return output_dir / name
+
+
 def _produce(
     case: str, payload: dict, *, fmt: str = "yaml"
 ) -> tuple[Path, dict, subprocess.CompletedProcess[str]]:
@@ -164,17 +189,32 @@ def _produce(
         completed.returncode == 0,
         f"exit {completed.returncode}: {completed.stderr[-300:]!r}",
     )
-    artifact = output_dir / (
-        "obligation-plan.json" if fmt == "json" else "obligation-plan.yaml"
-    )
+    artifact = _artifact_path(output_dir, fmt)
     _check(case, artifact.is_file(), f"missing published artifact {artifact.name}")
     plan = _load_yaml(artifact) if artifact.is_file() else {}
     return artifact, plan, completed
 
 
+def _reject(case: str, payload: dict) -> tuple[Path, subprocess.CompletedProcess[str]]:
+    ws = _new_workspace(case)
+    snapshot = _write_snapshot(ws, payload)
+    output_dir = ws / "plan"
+    completed = _run_cli(case, _plan_argv(snapshot, output_dir, "yaml"))
+    return output_dir, completed
+
+
 def _obligations(plan: dict) -> list[dict]:
     rows = plan.get("obligations")
     return rows if isinstance(rows, list) else []
+
+
+def _row(plan: dict, risk_id: str, pattern_id: str | None = None) -> dict | None:
+    for row in _obligations(plan):
+        if row.get("risk_id") != risk_id:
+            continue
+        if pattern_id is None or row.get("pattern_id") == pattern_id:
+            return row
+    return None
 
 
 def qa_top_01() -> None:
@@ -184,18 +224,8 @@ def qa_top_01() -> None:
         case,
         _snapshot(
             relationships=[
-                _rel(
-                    "atlas-prompt-injection",
-                    "AP-T1-01",
-                    scope="in-scope",
-                    disposition="generated",
-                ),
-                _rel(
-                    "atlas-memory-poisoning",
-                    "AP-T1-01",
-                    scope="in-scope",
-                    disposition="missing-template",
-                ),
+                _ready("atlas-prompt-injection", "AP-T1-01"),
+                _ready("atlas-memory-poisoning", "AP-T1-01"),
             ]
         ),
     )
@@ -226,92 +256,115 @@ def qa_top_01() -> None:
 
 
 def qa_top_02() -> None:
-    """QA-TOP-02: in-scope and out-of-scope relationships are both recorded."""
+    """QA-TOP-02: applicable and capability-excluded relationships are both recorded."""
     case = "TOP-02"
     _artifact, plan, _completed = _produce(
         case,
         _snapshot(
             relationships=[
-                _rel(
-                    "atlas-prompt-injection",
-                    "AP-T6-01",
-                    scope="in-scope",
-                    disposition="generated",
-                ),
+                _ready("atlas-prompt-injection", "AP-T6-01"),
                 _rel(
                     "atlas-prompt-injection",
                     "AP-T11-01",
-                    scope="out-of-scope",
-                    disposition="gated",
+                    scope="capability_excluded",
+                    qualification="not_attempted",
+                    projection="not_attempted",
                 ),
             ]
         ),
     )
-    rows = {
-        (row.get("risk_id"), row.get("pattern_id"), row.get("scope"))
-        for row in _obligations(plan)
-    }
+    applicable = _row(plan, "atlas-prompt-injection", "AP-T6-01")
+    excluded = _row(plan, "atlas-prompt-injection", "AP-T11-01")
     _check(
         case,
-        ("atlas-prompt-injection", "AP-T6-01", "in-scope") in rows,
-        f"missing in-scope AP-T6-01: {rows}",
+        applicable is not None and applicable.get("scope_disposition") == "applicable",
+        f"missing applicable AP-T6-01: {applicable}",
     )
     _check(
         case,
-        ("atlas-prompt-injection", "AP-T11-01", "out-of-scope") in rows,
-        f"missing out-of-scope AP-T11-01: {rows}",
+        excluded is not None
+        and excluded.get("scope_disposition") == "capability_excluded",
+        f"missing capability-excluded AP-T11-01: {excluded}",
     )
 
 
 def qa_top_03() -> None:
-    """QA-TOP-03: every expected relationship has one terminal outcome."""
+    """QA-TOP-03: every expected relationship has one closed disposition on every axis."""
     case = "TOP-03"
     relationships = [
         _rel(
             "atlas-prompt-injection",
             "AP-T11-01",
-            scope="out-of-scope",
-            disposition="gated",
+            scope="capability_excluded",
+            qualification="not_attempted",
+            projection="not_attempted",
+            kind="capability-gated pattern",
         ),
         _rel(
-            "atlas-orphan-risk", None, scope="in-scope", disposition="governance-only"
+            "atlas-orphan-risk",
+            None,
+            scope="governance_only",
+            qualification="not_attempted",
+            projection="not_attempted",
+            kind="governance review",
         ),
         _rel(
             "atlas-memory-poisoning",
             "AP-T1-01",
-            scope="in-scope",
-            disposition="missing-template",
+            scope="applicable",
+            qualification="missing_evidence",
+            projection="not_attempted",
+            kind="missing qualification facts",
         ),
         _rel(
             "atlas-memory-poisoning",
-            "AP-T1-02",
-            scope="in-scope",
-            disposition="infeasible",
+            "AP-T1-04",
+            scope="applicable",
+            qualification="contradictory_evidence",
+            projection="not_attempted",
+            kind="contradictory facts",
         ),
         _rel(
             "atlas-memory-poisoning",
             "AP-T1-03",
-            scope="in-scope",
-            disposition="unsupported",
+            scope="applicable",
+            qualification="structurally_infeasible",
+            projection="not_attempted",
+            kind="structurally infeasible",
         ),
         _rel(
             "atlas-prompt-injection",
             "AP-T6-01",
-            scope="in-scope",
-            disposition="generated",
+            scope="applicable",
+            qualification="ready",
+            projection="projectable",
+            kind="qualified projectable",
         ),
     ]
     _artifact, plan, _completed = _produce(case, _snapshot(relationships=relationships))
     rows = _obligations(plan)
     _check(case, len(rows) == 6, f"expected 6 obligations, got {len(rows)}")
-    dispositions = [row.get("terminal_disposition") for row in rows]
-    _check(case, all(dispositions), f"blank terminal disposition: {dispositions}")
-    _check(case, len(dispositions) == 6, "disposition count drifted")
+    for row in rows:
+        _check(
+            case,
+            bool(row.get("scope_disposition")),
+            f"blank scope disposition: {row}",
+        )
+        _check(
+            case,
+            bool(row.get("qualification_disposition")),
+            f"blank qualification disposition: {row}",
+        )
+        _check(
+            case,
+            row.get("correspondence_disposition") == "not_assessed",
+            f"correspondence {row.get('correspondence_disposition')!r}",
+        )
     expected = {
         ("atlas-prompt-injection", "AP-T11-01"),
         ("atlas-orphan-risk", None),
         ("atlas-memory-poisoning", "AP-T1-01"),
-        ("atlas-memory-poisoning", "AP-T1-02"),
+        ("atlas-memory-poisoning", "AP-T1-04"),
         ("atlas-memory-poisoning", "AP-T1-03"),
         ("atlas-prompt-injection", "AP-T6-01"),
     }
@@ -320,71 +373,100 @@ def qa_top_03() -> None:
 
 
 def qa_top_04() -> None:
-    """QA-TOP-04: pattern-bearing terminal dispositions are explicit."""
+    """QA-TOP-04: closed scope and qualification dispositions are explicit."""
     cases = (
         (
-            "gated",
+            "capability-gated",
+            "capability-gated pattern",
             "atlas-prompt-injection",
             "AP-T11-01",
-            "out-of-scope",
-            "gated",
+            "capability_excluded",
+            "not_attempted",
+            "not_attempted",
         ),
         (
-            "missing-template",
+            "missing-evidence",
+            "missing qualification facts",
             "atlas-memory-poisoning",
             "AP-T1-01",
-            "in-scope",
-            "missing-template",
+            "applicable",
+            "missing_evidence",
+            "not_attempted",
         ),
         (
-            "infeasible",
+            "contradictory-evidence",
+            "contradictory facts",
             "atlas-memory-poisoning",
-            "AP-T1-02",
-            "in-scope",
-            "infeasible",
+            "AP-T1-04",
+            "applicable",
+            "contradictory_evidence",
+            "not_attempted",
         ),
         (
-            "unsupported",
+            "structurally-infeasible",
+            "structurally infeasible",
             "atlas-memory-poisoning",
             "AP-T1-03",
-            "in-scope",
-            "unsupported",
+            "applicable",
+            "structurally_infeasible",
+            "not_attempted",
         ),
         (
-            "generated",
+            "ready",
+            "qualified projectable",
             "atlas-prompt-injection",
             "AP-T6-01",
-            "in-scope",
-            "generated",
+            "applicable",
+            "ready",
+            "projectable",
         ),
     )
-    for label, risk_id, pattern_id, scope, disposition in cases:
+    for label, kind, risk_id, pattern_id, scope, qualification, projection in cases:
         case = f"TOP-04-{label}"
         _artifact, plan, _completed = _produce(
             case,
             _snapshot(
                 relationships=[
-                    _rel(risk_id, pattern_id, scope=scope, disposition=disposition)
+                    {
+                        "risk_id": risk_id,
+                        "pattern_id": pattern_id,
+                        "relationship_kind": kind,
+                    }
                 ]
             ),
         )
-        rows = [
-            row
-            for row in _obligations(plan)
-            if row.get("risk_id") == risk_id and row.get("pattern_id") == pattern_id
-        ]
-        _check(case, len(rows) == 1, f"expected 1 obligation, got {len(rows)}")
-        if rows:
-            _check(
-                case,
-                rows[0].get("scope") == scope,
-                f"scope {rows[0].get('scope')!r} != {scope!r}",
-            )
-            _check(
-                case,
-                rows[0].get("terminal_disposition") == disposition,
-                f"disposition {rows[0].get('terminal_disposition')!r} != {disposition!r}",
-            )
+        row = _row(plan, risk_id, pattern_id)
+        _check(
+            case, row is not None, f"expected 1 obligation for {risk_id}/{pattern_id}"
+        )
+        if row is None:
+            continue
+        _check(
+            case,
+            row.get("scope_disposition") == scope,
+            f"scope {row.get('scope_disposition')!r} != {scope!r}",
+        )
+        _check(
+            case,
+            row.get("qualification_disposition") == qualification,
+            f"qualification {row.get('qualification_disposition')!r} != {qualification!r}",
+        )
+        _check(
+            case,
+            row.get("correspondence_disposition") == "not_assessed",
+            f"correspondence {row.get('correspondence_disposition')!r}",
+        )
+        _check(
+            case,
+            row.get("projection_disposition") == projection,
+            f"projection {row.get('projection_disposition')!r} != {projection!r}",
+        )
+        evidence = row.get("evidence") or {}
+        _check(
+            case,
+            evidence.get("relationship_kind") == kind,
+            f"evidence {evidence!r} missing {kind!r}",
+        )
 
 
 def qa_top_05() -> None:
@@ -397,8 +479,9 @@ def qa_top_05() -> None:
                 _rel(
                     "atlas-orphan-risk",
                     None,
-                    scope="in-scope",
-                    disposition="governance-only",
+                    scope="governance_only",
+                    qualification="not_attempted",
+                    projection="not_attempted",
                 )
             ]
         ),
@@ -410,8 +493,18 @@ def qa_top_05() -> None:
     if rows:
         _check(
             case,
-            rows[0].get("terminal_disposition") == "governance-only",
-            f"disposition {rows[0].get('terminal_disposition')!r}",
+            rows[0].get("scope_disposition") == "governance_only",
+            f"scope {rows[0].get('scope_disposition')!r}",
+        )
+        _check(
+            case,
+            rows[0].get("qualification_disposition") == "not_attempted",
+            f"qualification {rows[0].get('qualification_disposition')!r}",
+        )
+        _check(
+            case,
+            rows[0].get("correspondence_disposition") == "not_assessed",
+            f"correspondence {rows[0].get('correspondence_disposition')!r}",
         )
         _check(
             case,
@@ -421,35 +514,31 @@ def qa_top_05() -> None:
 
 
 def qa_top_06() -> None:
-    """QA-TOP-06: qualification traces omit secrets."""
+    """QA-TOP-06: qualification traces omit secrets from sensitive values."""
     case = "TOP-06"
-    secret = "sk-live-token"
+    secret = "SECRET_live_token_END"
     artifact, plan, _completed = _produce(
         case,
         _snapshot(
             config={"api_key": secret},
-            relationships=[
-                _rel(
-                    "atlas-prompt-injection",
-                    "AP-T6-01",
-                    scope="in-scope",
-                    disposition="generated",
-                )
-            ],
+            relationships=[_ready("atlas-prompt-injection", "AP-T6-01")],
             qualification_evaluations=[
                 {
                     "risk_id": "atlas-prompt-injection",
                     "pattern_id": "AP-T6-01",
                     "predicate": "deployment.attacker_code_execution_on_agent_host",
-                    "facts": "deployment.attacker_code_execution_on_agent_host=false",
+                    "facts": (
+                        "deployment.attacker_code_execution_on_agent_host=false "
+                        f"token={secret}"
+                    ),
                     "result": "false",
                     "reason": "fact present and unequal",
                 }
             ],
         ),
     )
-    rows = _obligations(plan)
-    traces = rows[0].get("qualification_trace") if rows else []
+    row = _row(plan, "atlas-prompt-injection", "AP-T6-01")
+    traces = row.get("qualification_trace") if row else []
     _check(case, isinstance(traces, list) and traces, "qualification trace missing")
     if traces:
         item = traces[0]
@@ -461,7 +550,7 @@ def qa_top_06() -> None:
         _check(
             case,
             item.get("facts")
-            == "deployment.attacker_code_execution_on_agent_host=false",
+            == "deployment.attacker_code_execution_on_agent_host=false token=[REDACTED]",
             f"facts {item.get('facts')!r}",
         )
         _check(
@@ -472,71 +561,78 @@ def qa_top_06() -> None:
             item.get("reason") == "fact present and unequal",
             f"reason {item.get('reason')!r}",
         )
+        for field in ("predicate", "facts", "result", "reason"):
+            _check(
+                case,
+                secret not in str(item.get(field, "")),
+                f"{field} contains {secret}",
+            )
     raw = artifact.read_bytes() if artifact.is_file() else b""
     _check(
-        case,
-        secret.encode("utf-8") not in raw,
-        "published artifact contains sk-live-token",
+        case, secret.encode("utf-8") not in raw, "published artifact contains secret"
     )
 
 
 def qa_top_07() -> None:
-    """QA-TOP-07: accepted and rejected candidates are retained."""
+    """QA-TOP-07: candidate records retain projection dispositions."""
     case = "TOP-07"
-    accepted = "cand:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    rejected = "cand:v2:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    projectable = "cand:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    infeasible = "cand:v2:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    deferred = "cand:v2:cccccccccccccccccccccccccccccccc"
     _artifact, plan, _completed = _produce(
         case,
         _snapshot(
-            relationships=[
-                _rel(
-                    "atlas-prompt-injection",
-                    "AP-T6-01",
-                    scope="in-scope",
-                    disposition="generated",
-                )
-            ],
+            relationships=[_ready("atlas-prompt-injection", "AP-T6-01")],
             candidate_expansions=[
                 {
                     "risk_id": "atlas-prompt-injection",
                     "pattern_id": "AP-T6-01",
-                    "accepted_candidates": [accepted],
-                    "rejected_candidates": [
+                    "candidates": [
                         {
-                            "candidate_id": rejected,
-                            "reason": "rule rejected combination",
-                        }
+                            "candidate_id": projectable,
+                            "projection_disposition": "projectable",
+                            "reason": "qualified combination",
+                        },
+                        {
+                            "candidate_id": infeasible,
+                            "projection_disposition": "projection_infeasible",
+                            "reason": "missing required resource",
+                        },
+                        {
+                            "candidate_id": deferred,
+                            "projection_disposition": "budget_deferred",
+                            "reason": "projection budget exhausted",
+                        },
                     ],
                 }
             ],
         ),
     )
-    rows = _obligations(plan)
-    _check(case, rows, "ledger empty")
-    if rows:
+    row = _row(plan, "atlas-prompt-injection", "AP-T6-01")
+    records = (row or {}).get("candidate_records") or []
+    by_id = {
+        item.get("candidate_id"): item for item in records if isinstance(item, dict)
+    }
+    expected = (
+        (projectable, "projectable", "qualified combination"),
+        (infeasible, "projection_infeasible", "missing required resource"),
+        (deferred, "budget_deferred", "projection budget exhausted"),
+    )
+    for candidate_id, disposition, reason in expected:
+        item = by_id.get(candidate_id)
+        _check(case, item is not None, f"candidate {candidate_id} missing: {records!r}")
+        if item is None:
+            continue
         _check(
             case,
-            accepted in (rows[0].get("accepted_candidates") or []),
-            f"accepted candidate missing: {rows[0].get('accepted_candidates')!r}",
-        )
-        rejected_rows = rows[0].get("rejected_candidates") or []
-        match = next(
-            (
-                item
-                for item in rejected_rows
-                if isinstance(item, dict) and item.get("candidate_id") == rejected
-            ),
-            None,
+            item.get("projection_disposition") == disposition,
+            f"{candidate_id} disposition {item.get('projection_disposition')!r}",
         )
         _check(
-            case, match is not None, f"rejected candidate missing: {rejected_rows!r}"
+            case,
+            item.get("reason") == reason,
+            f"{candidate_id} reason {item.get('reason')!r}",
         )
-        if match is not None:
-            _check(
-                case,
-                match.get("reason") == "rule rejected combination",
-                f"rejected reason {match.get('reason')!r}",
-            )
 
 
 def qa_top_08() -> None:
@@ -551,17 +647,13 @@ def qa_top_08() -> None:
         case,
         _snapshot(
             relationships=[
-                _rel(
-                    "atlas-prompt-injection",
-                    "AP-T6-01",
-                    scope="in-scope",
-                    disposition="generated",
-                ),
+                _ready("atlas-prompt-injection", "AP-T6-01"),
                 _rel(
                     "atlas-prompt-injection",
                     "AP-T11-01",
-                    scope="out-of-scope",
-                    disposition="gated",
+                    scope="capability_excluded",
+                    qualification="not_attempted",
+                    projection="not_attempted",
                 ),
             ]
         ),
@@ -588,6 +680,315 @@ def qa_top_08() -> None:
     _check(case, b"sk-" not in raw, "artifact contains a secret-shaped token")
 
 
+def qa_top_09() -> None:
+    """QA-TOP-09: identity-bearing input changes change obligation IDs."""
+    pairs = (
+        (
+            "risk",
+            {"relationships": [_ready("atlas-prompt-injection", "AP-T6-01")]},
+            {"relationships": [_ready("atlas-memory-poisoning", "AP-T6-01")]},
+            "atlas-prompt-injection",
+            "atlas-memory-poisoning",
+            "risk_id",
+        ),
+        (
+            "pattern",
+            {"relationships": [_ready("atlas-prompt-injection", "AP-T6-01")]},
+            {"relationships": [_ready("atlas-prompt-injection", "AP-T1-01")]},
+            "AP-T6-01",
+            "AP-T1-01",
+            "pattern_id",
+        ),
+        (
+            "capability",
+            {"capability_content": "profile-v1"},
+            {"capability_content": "profile-v2"},
+            "profile-v1",
+            "profile-v2",
+            "capability_content",
+        ),
+        (
+            "catalog",
+            {"catalog_pin": "atlas-2026.05"},
+            {"catalog_pin": "atlas-2026.06"},
+            "atlas-2026.05",
+            "atlas-2026.06",
+            "catalog_pin",
+        ),
+        (
+            "mapping",
+            {"mapping_pin": "sssom-v1"},
+            {"mapping_pin": "sssom-v2"},
+            "sssom-v1",
+            "sssom-v2",
+            "mapping_pin",
+        ),
+    )
+    for label, extra_a, extra_b, _value_a, _value_b, _axis in pairs:
+        case = f"TOP-09-{label}"
+        base = {"relationships": [_ready("atlas-prompt-injection", "AP-T6-01")]}
+        payload_a = _snapshot(**{**base, **extra_a})
+        payload_b = _snapshot(**{**base, **extra_b})
+        _artifact_a, plan_a, _completed_a = _produce(f"{case}-a", payload_a)
+        _artifact_b, plan_b, _completed_b = _produce(f"{case}-b", payload_b)
+        ids_a = [row.get("obligation_id") for row in _obligations(plan_a)]
+        ids_b = [row.get("obligation_id") for row in _obligations(plan_b)]
+        _check(case, ids_a != ids_b, f"identifiers unchanged: {ids_a}")
+        _check(
+            case,
+            plan_a.get("semantic_digest") != plan_b.get("semantic_digest"),
+            "semantic digests unchanged",
+        )
+
+
+def qa_top_10() -> None:
+    """QA-TOP-10: ICA prose keyword changes do not change the plan."""
+    case = "TOP-10"
+    shared = _snapshot(relationships=[_ready("atlas-prompt-injection", "AP-T6-01")])
+    _artifact_a, plan_a, _completed_a = _produce(
+        f"{case}-a", {**shared, "ica_prose": "the agent injects a prompt"}
+    )
+    _artifact_b, plan_b, _completed_b = _produce(
+        f"{case}-b", {**shared, "ica_prose": "the agent poisons memory"}
+    )
+    ids_a = [row.get("obligation_id") for row in _obligations(plan_a)]
+    ids_b = [row.get("obligation_id") for row in _obligations(plan_b)]
+    _check(case, ids_a == ids_b, f"identifiers differ: {ids_a} vs {ids_b}")
+    _check(
+        case,
+        plan_a.get("semantic_digest") == plan_b.get("semantic_digest"),
+        "semantic digests differ",
+    )
+    scopes_a = [row.get("scope_disposition") for row in _obligations(plan_a)]
+    scopes_b = [row.get("scope_disposition") for row in _obligations(plan_b)]
+    quals_a = [row.get("qualification_disposition") for row in _obligations(plan_a)]
+    quals_b = [row.get("qualification_disposition") for row in _obligations(plan_b)]
+    _check(
+        case,
+        scopes_a == scopes_b,
+        f"scope dispositions differ: {scopes_a} vs {scopes_b}",
+    )
+    _check(
+        case,
+        quals_a == quals_b,
+        f"qualification dispositions differ: {quals_a} vs {quals_b}",
+    )
+
+
+def qa_top_11() -> None:
+    """QA-TOP-11: invalid scope and qualification combinations are rejected."""
+    combinations = (
+        ("governance_only", "ready", "AP-T6-01"),
+        ("capability_excluded", "missing_evidence", "AP-T6-01"),
+        ("applicable", "not_attempted", "AP-T6-01"),
+    )
+    for scope, qualification, pattern_id in combinations:
+        case = f"TOP-11-{scope}-{qualification}"
+        output_dir, completed = _reject(
+            case,
+            _snapshot(
+                relationships=[
+                    {
+                        "risk_id": "atlas-prompt-injection",
+                        "pattern_id": None
+                        if scope == "governance_only"
+                        else pattern_id,
+                        "scope_disposition": scope,
+                        "qualification_disposition": qualification,
+                        "projection_disposition": (
+                            "projectable"
+                            if qualification == "ready"
+                            else "not_attempted"
+                        ),
+                    }
+                ]
+            ),
+        )
+        _check(case, completed.returncode != 0, "planning was accepted")
+        published = (
+            list(output_dir.glob("taxonomy-obligation-plan.*"))
+            if output_dir.exists()
+            else []
+        )
+        _check(case, not published, f"partial plan published: {published}")
+        combined = completed.stdout + completed.stderr
+        _check(
+            case,
+            scope in combined,
+            f"error omitted scope {scope!r}: {combined[-300:]!r}",
+        )
+        _check(
+            case,
+            qualification in combined,
+            f"error omitted qualification {qualification!r}: {combined[-300:]!r}",
+        )
+
+
+def _derived_summary(rows: list[dict]) -> dict[str, int]:
+    candidate_records = [
+        item
+        for row in rows
+        for item in (row.get("candidate_records") or [])
+        if isinstance(item, dict)
+    ]
+    use_candidates = bool(candidate_records)
+
+    def _count_scope(disposition: str) -> int:
+        return sum(1 for row in rows if row.get("scope_disposition") == disposition)
+
+    def _count_qualification(*dispositions: str) -> int:
+        return sum(
+            1 for row in rows if row.get("qualification_disposition") in dispositions
+        )
+
+    def _count_projection(disposition: str) -> int:
+        if use_candidates:
+            return sum(
+                1
+                for item in candidate_records
+                if item.get("projection_disposition") == disposition
+            )
+        return sum(
+            1 for row in rows if row.get("projection_disposition") == disposition
+        )
+
+    return {
+        "total": len(rows),
+        "applicable": _count_scope("applicable"),
+        "governance_only": _count_scope("governance_only"),
+        "capability_excluded": _count_scope("capability_excluded"),
+        "ready": _count_qualification("ready"),
+        "missing_or_contradictory": _count_qualification(
+            "missing_evidence", "contradictory_evidence"
+        ),
+        "structurally_infeasible": _count_qualification("structurally_infeasible"),
+        "projectable": _count_projection("projectable"),
+        "projection_infeasible": _count_projection("projection_infeasible"),
+        "budget_deferred": _count_projection("budget_deferred"),
+    }
+
+
+def qa_top_12() -> None:
+    """QA-TOP-12: summary counts are derived from obligation rows."""
+    case = "TOP-12"
+    artifact, plan, _completed = _produce(
+        case,
+        _snapshot(
+            relationships=[
+                _rel(
+                    "risk-ready",
+                    "AP-T6-01",
+                    scope="applicable",
+                    qualification="ready",
+                    projection="projectable",
+                ),
+                _rel(
+                    "risk-missing",
+                    "AP-T1-01",
+                    scope="applicable",
+                    qualification="missing_evidence",
+                    projection="not_attempted",
+                ),
+                _rel(
+                    "risk-contradictory",
+                    "AP-T1-02",
+                    scope="applicable",
+                    qualification="contradictory_evidence",
+                    projection="not_attempted",
+                ),
+                _rel(
+                    "risk-struct",
+                    "AP-T1-03",
+                    scope="applicable",
+                    qualification="structurally_infeasible",
+                    projection="not_attempted",
+                ),
+                _rel(
+                    "risk-gated",
+                    "AP-T11-01",
+                    scope="capability_excluded",
+                    qualification="not_attempted",
+                    projection="not_attempted",
+                ),
+                _rel(
+                    "risk-gov",
+                    None,
+                    scope="governance_only",
+                    qualification="not_attempted",
+                    projection="not_attempted",
+                ),
+            ],
+            candidate_expansions=[
+                {
+                    "risk_id": "risk-ready",
+                    "pattern_id": "AP-T6-01",
+                    "candidates": [
+                        {
+                            "candidate_id": "cand:v2:11111111111111111111111111111111",
+                            "projection_disposition": "projectable",
+                            "reason": "ready",
+                        },
+                        {
+                            "candidate_id": "cand:v2:22222222222222222222222222222222",
+                            "projection_disposition": "projection_infeasible",
+                            "reason": "infeasible",
+                        },
+                        {
+                            "candidate_id": "cand:v2:33333333333333333333333333333333",
+                            "projection_disposition": "budget_deferred",
+                            "reason": "deferred",
+                        },
+                    ],
+                }
+            ],
+        ),
+    )
+    rows = _obligations(plan)
+    derived = _derived_summary(rows)
+    expected = {
+        "total": 6,
+        "applicable": 4,
+        "governance_only": 1,
+        "capability_excluded": 1,
+        "ready": 1,
+        "missing_or_contradictory": 2,
+        "structurally_infeasible": 1,
+        "projectable": 1,
+        "projection_infeasible": 1,
+        "budget_deferred": 1,
+    }
+    summary = plan.get("summary") if isinstance(plan.get("summary"), dict) else {}
+    for key, value in expected.items():
+        _check(
+            case,
+            summary.get(key) == value,
+            f"summary.{key}={summary.get(key)!r} != {value}",
+        )
+        _check(
+            case,
+            derived.get(key) == value,
+            f"derived.{key}={derived.get(key)!r} != {value}",
+        )
+        _check(
+            case,
+            summary.get(key) == derived.get(key),
+            f"summary.{key} drifted from rows",
+        )
+    raw = artifact.read_text(encoding="utf-8") if artifact.is_file() else ""
+    _check(
+        case,
+        "taxonomy_correspondence_rate" not in summary
+        and "taxonomy correspondence rate" not in raw.lower(),
+        "summary includes a taxonomy correspondence rate",
+    )
+    _check(
+        case,
+        "scenario_realization_rate" not in summary
+        and "scenario realization rate" not in raw.lower(),
+        "summary includes a scenario realization rate",
+    )
+
+
 def main() -> int:
     if os.environ.get(QA_PIPELINE_ENV):
         print(f"Refusing to run: {QA_PIPELINE_ENV} must not be set.", file=sys.stderr)
@@ -602,6 +1003,10 @@ def main() -> int:
         qa_top_06,
         qa_top_07,
         qa_top_08,
+        qa_top_09,
+        qa_top_10,
+        qa_top_11,
+        qa_top_12,
     ):
         procedure()
         print(f"  [done] {procedure.__name__}", flush=True)

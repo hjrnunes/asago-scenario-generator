@@ -42,6 +42,15 @@ def run_plan_obligations(
     return plan, written
 
 
+def run_validate_obligation_plan(plan_path: Path) -> TaxonomyObligationPlan:
+    """Load a published obligation plan and reject closed-schema violations."""
+    _validate_file(plan_path, "obligation plan")
+    text = plan_path.read_text(encoding="utf-8")
+    if plan_path.suffix.lower() == ".json":
+        return TaxonomyObligationPlan.from_json(text)
+    return TaxonomyObligationPlan.from_yaml(text)
+
+
 @app.command(name="plan-obligations")
 def plan_obligations_cmd(
     snapshot: Path = typer.Option(
@@ -73,3 +82,27 @@ def plan_obligations_cmd(
     typer.echo(f"  Obligations:   {len(plan.obligations)}")
     typer.echo(f"  Network calls: {plan.network_calls}")
     typer.echo(f"  Model calls:   {plan.model_calls}")
+
+
+@app.command(name="validate-obligation-plan")
+def validate_obligation_plan_cmd(
+    plan: Path = typer.Option(
+        ...,
+        "--plan",
+        help="Published taxonomy obligation plan JSON or YAML file.",
+    ),
+) -> None:
+    """Load a published obligation plan through the closed schema.
+
+    This is a file-to-file user-interface affordance. It is not generate
+    or stpa-run and it makes no network or model calls.
+    """
+    _print_banner("validate-obligation-plan")
+    try:
+        loaded = run_validate_obligation_plan(plan)
+    except Exception as exc:  # noqa: BLE001 - CLI validation boundary
+        _abort(exc)
+    typer.echo(f"Obligation plan valid: {plan}")
+    typer.echo(f"  Schema version: {loaded.schema_version}")
+    typer.echo(f"  Obligations:    {len(loaded.obligations)}")
+    typer.echo(f"  Semantic digest: {loaded.semantic_digest}")
