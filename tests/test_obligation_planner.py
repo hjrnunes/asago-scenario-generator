@@ -5,7 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
+from pydantic import ValidationError
 from typer.testing import CliRunner
 
 from asago_scenario_generator.cli import app
@@ -14,7 +16,10 @@ from asago_scenario_generator.models.obligation_plan import (
     TaxonomyObligationPlan,
     TaxonomyObligationSnapshot,
 )
-from asago_scenario_generator.pipeline.obligation_planner import plan_obligations
+from asago_scenario_generator.pipeline.obligation_planner import (
+    _sanitize_secrets,
+    plan_obligations,
+)
 
 runner = CliRunner()
 
@@ -24,7 +29,7 @@ def _rel(
     pattern_id: str | None = None,
     *,
     scope: str | None = None,
-    disposition: str = "ready",
+    disposition: str | None = "ready",
 ) -> dict[str, Any]:
     rel: dict[str, Any] = {
         "risk_id": risk_id,
@@ -329,8 +334,14 @@ def test_expansion_matching_requires_risk_and_pattern() -> None:
                 "risk_id": "risk-a",
                 "pattern_id": "AP-T1-01",
                 "accepted_candidates": [
-                    {"candidate_id": "cand:one", "projection_disposition": "projectable"},
-                    {"candidate_id": "cand:one", "projection_disposition": "projectable"},
+                    {
+                        "candidate_id": "cand:one",
+                        "projection_disposition": "projectable",
+                    },
+                    {
+                        "candidate_id": "cand:one",
+                        "projection_disposition": "projectable",
+                    },
                 ],
                 "rejected_candidates": [
                     {
@@ -344,14 +355,20 @@ def test_expansion_matching_requires_risk_and_pattern() -> None:
                 "risk_id": "risk-a",
                 "pattern_id": "AP-T1-02",
                 "accepted_candidates": [
-                    {"candidate_id": "cand:other-pattern", "projection_disposition": "projectable"}
+                    {
+                        "candidate_id": "cand:other-pattern",
+                        "projection_disposition": "projectable",
+                    }
                 ],
             },
             {
                 "risk_id": "risk-b",
                 "pattern_id": "AP-T1-01",
                 "accepted_candidates": [
-                    {"candidate_id": "cand:other-risk", "projection_disposition": "projectable"}
+                    {
+                        "candidate_id": "cand:other-risk",
+                        "projection_disposition": "projectable",
+                    }
                 ],
             },
         ],
@@ -472,7 +489,14 @@ def test_plan_accepts_raw_dict_snapshot() -> None:
 
 def test_governance_only_risk_without_pattern() -> None:
     snapshot = _make_snapshot(
-        relationships=[{"risk_id": "atlas-orphan-risk", "scope_disposition": "governance_only", "qualification_disposition": "not_attempted", "projection_disposition": "not_attempted"}],
+        relationships=[
+            {
+                "risk_id": "atlas-orphan-risk",
+                "scope_disposition": "governance_only",
+                "qualification_disposition": "not_attempted",
+                "projection_disposition": "not_attempted",
+            }
+        ],
     )
 
     plan = plan_obligations(snapshot)
@@ -554,10 +578,7 @@ def test_candidate_expansion_evidence_retained() -> None:
         ob.candidate_records[1].candidate_id
         == "cand:v2:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     )
-    assert (
-        ob.candidate_records[1].reason
-        == "rule rejected combination"
-    )
+    assert ob.candidate_records[1].reason == "rule rejected combination"
 
 
 def test_plan_obligations_cli_writes_yaml_and_json(tmp_path: Path) -> None:
@@ -598,6 +619,37 @@ def test_plan_obligations_cli_writes_yaml_and_json(tmp_path: Path) -> None:
     assert len(loaded["obligations"]) == 2
 
 
+@pytest.mark.parametrize("format_name", ["yaml", "json"])
+def test_plan_obligations_cli_writes_only_requested_format(
+    tmp_path: Path, format_name: str
+) -> None:
+    snapshot = _make_snapshot(relationships=[_rel("risk-a", "AP-T1-01")])
+    snapshot_path = tmp_path / "snapshot.yaml"
+    snapshot_path.write_text(
+        yaml.safe_dump(snapshot.model_dump(mode="json")), encoding="utf-8"
+    )
+    output_dir = tmp_path / "plan"
+
+    result = runner.invoke(
+        app,
+        [
+            "plan-obligations",
+            "--snapshot",
+            str(snapshot_path),
+            "--output-dir",
+            str(output_dir),
+            "--format",
+            format_name,
+        ],
+    )
+
+    assert result.exit_code == 0, result.stderr
+    yaml_path = output_dir / "taxonomy-obligation-plan.yaml"
+    json_path = output_dir / "taxonomy-obligation-plan.json"
+    assert yaml_path.is_file() == (format_name == "yaml")
+    assert json_path.is_file() == (format_name == "json")
+
+
 def test_plan_obligations_cli_rejects_missing_snapshot(tmp_path: Path) -> None:
     missing = tmp_path / "missing" / "snapshot.yaml"
     result = runner.invoke(
@@ -614,3 +666,364 @@ def test_plan_obligations_cli_rejects_missing_snapshot(tmp_path: Path) -> None:
     assert result.exit_code == 1
     assert f"Error: obligation snapshot not found: {missing}" in result.stderr
 
+
+@pytest.mark.parametrize(
+    ("disposition", "expected"),
+    [
+        ("gated", ("capability_excluded", "not_attempted", "not_attempted")),
+        ("governance-only", ("governance_only", "not_attempted", "not_attempted")),
+        ("missing-template", ("applicable", "missing_evidence", "not_attempted")),
+        ("infeasible", ("applicable", "structurally_infeasible", "not_attempted")),
+        ("unsupported", ("applicable", "structurally_infeasible", "not_attempted")),
+        ("generated", ("applicable", "ready", "projectable")),
+    ],
+)
+def test_legacy_dispositions_map_to_contract_dispositions(
+    disposition: str, expected: tuple[str, str, str]
+) -> None:
+    snapshot = _make_snapshot(
+        relationships=[_rel("risk-a", "AP-T1-01", disposition=disposition)],
+    )
+
+    plan = plan_obligations(snapshot)
+    ob = plan.obligations[0]
+
+    assert (
+        ob.scope_disposition,
+        ob.qualification_disposition,
+        ob.projection_disposition,
+    ) == expected
+
+
+def test_legacy_not_attempted_without_pattern_is_governance_only() -> None:
+    snapshot = _make_snapshot(
+        relationships=[_rel("risk-orphan", None, disposition="not_attempted")],
+    )
+
+    plan = plan_obligations(snapshot)
+    ob = plan.obligations[0]
+
+    assert (
+        ob.scope_disposition,
+        ob.qualification_disposition,
+        ob.projection_disposition,
+    ) == (
+        "governance_only",
+        "not_attempted",
+        "not_attempted",
+    )
+
+
+def test_unknown_legacy_disposition_falls_back_to_kind_derivation() -> None:
+    snapshot = _make_snapshot(
+        relationships=[_rel("risk-a", "AP-T1-01", disposition="mystery")],
+    )
+
+    plan = plan_obligations(snapshot)
+    ob = plan.obligations[0]
+
+    assert ob.scope_disposition == "applicable"
+    assert ob.qualification_disposition == "ready"
+    assert ob.projection_disposition == "projectable"
+
+
+@pytest.mark.parametrize(
+    ("scope", "expected"),
+    [
+        ("in-scope", ("applicable", "ready", "projectable")),
+        ("out-of-scope", ("capability_excluded", "not_attempted", "not_attempted")),
+    ],
+)
+def test_explicit_scope_aliases_are_normalized(
+    scope: str, expected: tuple[str, str, str]
+) -> None:
+    snapshot = _make_snapshot(
+        relationships=[_rel("risk-a", "AP-T1-01", scope=scope, disposition=None)],
+    )
+
+    plan = plan_obligations(snapshot)
+    ob = plan.obligations[0]
+
+    assert (
+        ob.scope_disposition,
+        ob.qualification_disposition,
+        ob.projection_disposition,
+    ) == expected
+
+
+@pytest.mark.parametrize(
+    ("scope", "qualification", "projection", "message"),
+    [
+        (
+            "governance_only",
+            "ready",
+            "not_attempted",
+            "scope 'governance_only' cannot be combined with qualification 'ready'",
+        ),
+        (
+            "capability_excluded",
+            "ready",
+            "not_attempted",
+            "scope 'capability_excluded' cannot be combined with qualification 'ready'",
+        ),
+        (
+            "applicable",
+            "not_attempted",
+            "not_attempted",
+            "scope 'applicable' cannot be combined with qualification 'not_attempted'",
+        ),
+        (
+            "applicable",
+            "missing_evidence",
+            "projectable",
+            "qualification 'missing_evidence' cannot be combined with projection 'projectable'",
+        ),
+        (
+            "applicable",
+            "bogus_qualification",
+            "not_attempted",
+            "Invalid qualification disposition 'bogus_qualification' for scope 'applicable'",
+        ),
+    ],
+)
+def test_invalid_disposition_combinations_are_rejected(
+    scope: str,
+    qualification: str,
+    projection: str,
+    message: str,
+) -> None:
+    snapshot = _make_snapshot(
+        relationships=[
+            {
+                "risk_id": "risk-a",
+                "pattern_id": "AP-T1-01",
+                "scope_disposition": scope,
+                "qualification_disposition": qualification,
+                "projection_disposition": projection,
+            }
+        ],
+    )
+
+    with pytest.raises(ValueError, match=message):
+        plan_obligations(snapshot)
+
+
+def test_summary_counts_follow_candidate_records_when_present() -> None:
+    snapshot = _make_snapshot(
+        relationships=[
+            _rel("risk-a", "AP-T1-01"),
+            _rel("risk-b", "AP-T1-02", disposition="missing_evidence"),
+        ],
+        candidate_expansions=[
+            {
+                "risk_id": "risk-a",
+                "pattern_id": "AP-T1-01",
+                "candidates": [
+                    {
+                        "candidate_id": "cand:one",
+                        "projection_disposition": "projectable",
+                        "reason": "ready",
+                    },
+                    {
+                        "candidate_id": "cand:two",
+                        "projection_disposition": "projection_infeasible",
+                        "reason": "infeasible",
+                    },
+                    {
+                        "candidate_id": "cand:three",
+                        "projection_disposition": "budget_deferred",
+                        "reason": "deferred",
+                    },
+                ],
+            }
+        ],
+    )
+
+    plan = plan_obligations(snapshot)
+    summary = plan.summary
+
+    assert summary.total == 2
+    assert summary.applicable == 2
+    assert summary.ready == 1
+    assert summary.missing_or_contradictory == 1
+    assert summary.projectable == 1
+    assert summary.projection_infeasible == 1
+    assert summary.budget_deferred == 1
+
+
+def test_summary_counts_follow_obligation_rows_without_candidate_records() -> None:
+    snapshot = _make_snapshot(
+        relationships=[
+            _rel("risk-a", "AP-T1-01"),
+            _rel(
+                "risk-gated",
+                "AP-T1-02",
+                scope="capability_excluded",
+                disposition="not_attempted",
+            ),
+            _rel("risk-orphan", disposition="governance_only"),
+            _rel("risk-missing", "AP-T1-03", disposition="missing_evidence"),
+            _rel(
+                "risk-contradictory", "AP-T1-04", disposition="contradictory_evidence"
+            ),
+            _rel("risk-struct", "AP-T1-05", disposition="structurally_infeasible"),
+        ],
+    )
+
+    plan = plan_obligations(snapshot)
+    summary = plan.summary
+
+    assert summary.total == 6
+    assert summary.applicable == 4
+    assert summary.governance_only == 1
+    assert summary.capability_excluded == 1
+    assert summary.ready == 1
+    assert summary.missing_or_contradictory == 2
+    assert summary.structurally_infeasible == 1
+    assert summary.projectable == 1
+    assert summary.projection_infeasible == 0
+    assert summary.budget_deferred == 0
+
+
+def test_sanitize_secrets_passes_through_other_scalars() -> None:
+    secrets = {"sekret-token"}
+
+    assert _sanitize_secrets(4104, secrets) == 4104
+    assert _sanitize_secrets(None, secrets) is None
+    assert _sanitize_secrets({"facts": 4104}, secrets) == {"facts": 4104}
+    assert _sanitize_secrets("no secret here", set()) == "no secret here"
+
+
+def test_excluded_scope_with_unsettled_projection_is_rejected() -> None:
+    snapshot = _make_snapshot(
+        relationships=[
+            {
+                "risk_id": "risk-a",
+                "pattern_id": "AP-T1-01",
+                "scope_disposition": "capability_excluded",
+                "qualification_disposition": "not_attempted",
+                "projection_disposition": "projectable",
+            }
+        ],
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="scope 'capability_excluded' cannot be combined with projection 'projectable'",
+    ):
+        plan_obligations(snapshot)
+
+
+def test_unknown_scope_disposition_is_rejected_by_closed_model() -> None:
+    snapshot = _make_snapshot(
+        relationships=[
+            {
+                "risk_id": "risk-a",
+                "pattern_id": "AP-T1-01",
+                "scope_disposition": "unclassified_scope",
+                "qualification_disposition": "ready",
+                "projection_disposition": "projectable",
+            }
+        ],
+    )
+
+    with pytest.raises(ValidationError):
+        plan_obligations(snapshot)
+
+
+def test_bare_string_entries_in_candidates_section_are_ignored() -> None:
+    snapshot = _make_snapshot(
+        relationships=[_rel("risk-a", "AP-T1-01")],
+        candidate_expansions=[
+            {
+                "risk_id": "risk-a",
+                "pattern_id": "AP-T1-01",
+                "candidates": ["cand:bare-string"],
+            }
+        ],
+    )
+
+    plan = plan_obligations(snapshot)
+
+    assert plan.obligations[0].candidate_records == []
+
+
+def test_candidates_without_identifier_are_skipped() -> None:
+    snapshot = _make_snapshot(
+        relationships=[_rel("risk-a", "AP-T1-01")],
+        candidate_expansions=[
+            {
+                "risk_id": "risk-a",
+                "pattern_id": "AP-T1-01",
+                "accepted_candidates": [
+                    {"projection_disposition": "projectable"},
+                    "cand:bare-accepted",
+                ],
+            }
+        ],
+    )
+
+    plan = plan_obligations(snapshot)
+
+    records = plan.obligations[0].candidate_records
+    assert [c.candidate_id for c in records] == ["cand:bare-accepted"]
+    assert records[0].projection_disposition == "projectable"
+    assert records[0].reason == "qualified combination"
+
+
+@pytest.mark.parametrize(
+    ("section_key", "expected_reason"),
+    [
+        ("accepted_candidates", "qualified combination"),
+        ("rejected_candidates", "missing required resource"),
+    ],
+)
+def test_section_entries_without_reason_use_section_default(
+    section_key: str, expected_reason: str
+) -> None:
+    snapshot = _make_snapshot(
+        relationships=[_rel("risk-a", "AP-T1-01")],
+        candidate_expansions=[
+            {
+                "risk_id": "risk-a",
+                "pattern_id": "AP-T1-01",
+                section_key: [{"candidate_id": "cand:no-reason"}],
+            }
+        ],
+    )
+
+    plan = plan_obligations(snapshot)
+
+    records = plan.obligations[0].candidate_records
+    assert len(records) == 1
+    assert records[0].reason == expected_reason
+
+
+def test_plan_pins_fall_back_to_defaults_when_blank() -> None:
+    snapshot = _make_snapshot(
+        catalog_pin="",
+        taxonomy_version=None,
+        mapping_pin="",
+        mapping_version=None,
+        relationships=[_rel("risk-a", "AP-T1-01")],
+    )
+
+    plan = plan_obligations(snapshot)
+
+    assert plan.catalog_pins == {"catalog": "atlas-2026.05", "atlas": "atlas-2026.05"}
+    assert plan.mapping_pins == {"mapping": "sssom-v1", "sssom": "sssom-v1"}
+
+
+def test_plan_pins_backfill_from_legacy_alias_when_modern_pin_blank() -> None:
+    snapshot = _make_snapshot(
+        catalog_pin="",
+        taxonomy_version="atlas-legacy",
+        mapping_pin="",
+        mapping_version="sssom-legacy",
+        relationships=[_rel("risk-a", "AP-T1-01")],
+    )
+
+    plan = plan_obligations(snapshot)
+
+    assert plan.catalog_pins == {"catalog": "atlas-legacy", "atlas": "atlas-legacy"}
+    assert plan.mapping_pins == {"mapping": "sssom-legacy", "sssom": "sssom-legacy"}

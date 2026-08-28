@@ -8,11 +8,76 @@ from typing import Any
 from asago_scenario_generator.models.obligation_plan import (
     CandidateRecord,
     ObligationPlanSummary,
+    ObligationProjectionDisposition,
     QualificationTraceItem,
     TaxonomyObligation,
     TaxonomyObligationPlan,
     TaxonomyObligationSnapshot,
     compute_sha256,
+)
+
+_DEFAULT_CATALOG_PIN = "atlas-2026.05"
+_DEFAULT_MAPPING_PIN = "sssom-v1"
+_REDACTED = "[REDACTED]"
+
+# Legacy single "disposition" strings mapped to their default (scope,
+# qualification, projection) dispositions. A None component leaves that
+# disposition to its explicit or kind-derived resolution below.
+_LEGACY_DISPOSITION_DEFAULTS: dict[str, tuple[str | None, str, str | None]] = {
+    "governance-only": ("governance_only", "not_attempted", "not_attempted"),
+    "governance_only": ("governance_only", "not_attempted", "not_attempted"),
+    "gated": ("capability_excluded", "not_attempted", "not_attempted"),
+    "missing-template": (None, "missing_evidence", None),
+    "missing_evidence": (None, "missing_evidence", None),
+    "infeasible": (None, "structurally_infeasible", None),
+    "unsupported": (None, "structurally_infeasible", None),
+    "structurally_infeasible": (None, "structurally_infeasible", None),
+    "contradictory_evidence": (None, "contradictory_evidence", None),
+    "generated": (None, "ready", None),
+    "ready": (None, "ready", None),
+    "not_attempted": (None, "not_attempted", None),
+}
+
+# Relationship-kind substrings that force an excluded or governance scope.
+_KIND_EXCLUSION_SUBSTRINGS = ("gated", "capability")
+_KIND_GOVERNANCE_SUBSTRINGS = ("governance", "orphan")
+
+# Relationship-kind substrings mapped to their qualification disposition, in
+# evaluation order. Kinds matching no rule qualify as ready.
+_KIND_QUALIFICATION_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("missing",), "missing_evidence"),
+    (("contradict",), "contradictory_evidence"),
+    (
+        ("infeasib", "structurally", "unsupported"),
+        "structurally_infeasible",
+    ),
+    (("ready", "qualified", "generated", "projectable"), "ready"),
+)
+
+_EXCLUDED_SCOPES = ("capability_excluded", "governance_only")
+_APPLICABLE_QUALIFICATIONS = (
+    "ready",
+    "missing_evidence",
+    "contradictory_evidence",
+    "structurally_infeasible",
+)
+_SETTLED_PROJECTIONS = ("not_attempted", "projection_infeasible")
+
+# Candidate expansion sections in consumption order: (expansion key, default
+# projection disposition, default reason, honor rejection_reason, accept bare
+# string entries).
+_CANDIDATE_SECTIONS: tuple[
+    tuple[str, ObligationProjectionDisposition, str, bool, bool], ...
+] = (
+    ("candidates", "projectable", "", False, False),
+    ("accepted_candidates", "projectable", "qualified combination", True, True),
+    (
+        "rejected_candidates",
+        "projection_infeasible",
+        "missing required resource",
+        True,
+        True,
+    ),
 )
 
 
@@ -25,20 +90,29 @@ def _collect_config_secrets(config: dict[str, Any]) -> set[str]:
     return secrets
 
 
+def _redact_text(text: str, secrets: set[str]) -> str:
+    """Replace every known secret occurrence in a string."""
+    for secret in secrets:
+        if secret in text:
+            text = text.replace(secret, _REDACTED)
+    return text
+
+
 def _sanitize_secrets(value: Any, secrets: set[str]) -> Any:
     """Remove known secrets from values."""
     if not secrets:
         return value
     if isinstance(value, str):
-        sanitized = value
-        for secret in secrets:
-            if secret in sanitized:
-                sanitized = sanitized.replace(secret, "[REDACTED]")
-        return sanitized
+        return _redact_text(value, secrets)
+    return _sanitize_container(value, secrets)
+
+
+def _sanitize_container(value: Any, secrets: set[str]) -> Any:
+    """Redact secrets inside mapping or sequence values."""
     if isinstance(value, dict):
-        return {k: _sanitize_secrets(v, secrets) for k, v in value.items()}
+        return {key: _sanitize_secrets(item, secrets) for key, item in value.items()}
     if isinstance(value, list):
-        return [_sanitize_secrets(v, secrets) for v in value]
+        return [_sanitize_secrets(item, secrets) for item in value]
     return value
 
 
@@ -49,140 +123,148 @@ def _canonical_obligation_id(risk_id: str, pattern_id: str | None, pin_tag: str)
     return f"ob:{risk_id}:{pin_tag}"
 
 
+def _raw_dispositions(rel: dict[str, Any]) -> tuple[Any, Any, Any]:
+    """Read explicit scope, qualification, and projection dispositions."""
+    return (
+        rel.get("scope_disposition") or rel.get("scope"),
+        rel.get("qualification_disposition") or rel.get("qualification"),
+        rel.get("projection_disposition") or rel.get("projection"),
+    )
+
+
+def _apply_legacy_disposition(
+    rel: dict[str, Any],
+    raw_scope: Any,
+    raw_qualification: Any,
+    raw_projection: Any,
+) -> tuple[Any, Any, Any]:
+    """Fill missing dispositions from a legacy single disposition string."""
+    raw_disp = rel.get("disposition")
+    if not raw_disp:
+        return raw_scope, raw_qualification, raw_projection
+    default_scope, default_qualification, default_projection = (
+        _LEGACY_DISPOSITION_DEFAULTS.get(str(raw_disp), (None, None, None))
+    )
+    return (
+        raw_scope or default_scope,
+        raw_qualification or default_qualification,
+        raw_projection or default_projection,
+    )
+
+
+def _matches_any(text: str, substrings: tuple[str, ...]) -> bool:
+    """Report whether any substring occurs in the text."""
+    return any(substring in text for substring in substrings)
+
+
+def _explicit_scope(raw_scope: Any) -> str:
+    """Normalize an explicitly provided scope disposition."""
+    scope = str(raw_scope)
+    if scope == "in-scope":
+        return "applicable"
+    if scope == "out-of-scope":
+        return "capability_excluded"
+    return scope
+
+
+def _kind_scope(kind: str, pattern_id: str | None) -> str:
+    """Derive the scope from the relationship kind when none is explicit."""
+    if _matches_any(kind, _KIND_EXCLUSION_SUBSTRINGS):
+        return "capability_excluded"
+    if not pattern_id or _matches_any(kind, _KIND_GOVERNANCE_SUBSTRINGS):
+        return "governance_only"
+    return "applicable"
+
+
+def _resolve_scope(raw_scope: Any, kind: str, pattern_id: str | None) -> str:
+    """Resolve the scope disposition for one relationship."""
+    if raw_scope:
+        return _explicit_scope(raw_scope)
+    return _kind_scope(kind, pattern_id)
+
+
+def _kind_qualification(kind: str) -> str:
+    """Derive the qualification disposition from the relationship kind."""
+    for substrings, qualification in _KIND_QUALIFICATION_RULES:
+        if _matches_any(kind, substrings):
+            return qualification
+    return "ready"
+
+
+def _resolve_qualification(raw_qualification: Any, scope: str, kind: str) -> str:
+    """Resolve the qualification disposition for one relationship."""
+    if raw_qualification:
+        return str(raw_qualification)
+    if scope in _EXCLUDED_SCOPES:
+        return "not_attempted"
+    return _kind_qualification(kind)
+
+
+def _resolve_projection(raw_projection: Any, qualification: str) -> str:
+    """Resolve the projection disposition for one relationship."""
+    if raw_projection:
+        return str(raw_projection)
+    if qualification == "ready":
+        return "projectable"
+    return "not_attempted"
+
+
+def _reject_excluded_scope(scope: str, qualification: str, projection: str) -> None:
+    """Reject non-terminal dispositions under an excluded scope."""
+    if qualification != "not_attempted":
+        raise ValueError(
+            f"Invalid disposition combination: scope '{scope}' cannot be "
+            f"combined with qualification '{qualification}'"
+        )
+    if projection != "not_attempted":
+        raise ValueError(
+            f"Invalid disposition combination: scope '{scope}' cannot be "
+            f"combined with projection '{projection}'"
+        )
+
+
+def _reject_inapplicable(qualification: str, projection: str) -> None:
+    """Reject qualification and projection values outside the applicable scope."""
+    if qualification == "not_attempted":
+        raise ValueError(
+            "Invalid disposition combination: scope 'applicable' cannot be "
+            f"combined with qualification '{qualification}'"
+        )
+    if qualification not in _APPLICABLE_QUALIFICATIONS:
+        raise ValueError(
+            f"Invalid qualification disposition '{qualification}' for scope 'applicable'"
+        )
+    if qualification != "ready" and projection not in _SETTLED_PROJECTIONS:
+        raise ValueError(
+            "Invalid disposition combination: qualification "
+            f"'{qualification}' cannot be combined with projection '{projection}'"
+        )
+
+
+def _validate_dispositions(scope: str, qualification: str, projection: str) -> None:
+    """Reject disposition combinations outside the closed Phase 1 contract."""
+    if scope in _EXCLUDED_SCOPES:
+        _reject_excluded_scope(scope, qualification, projection)
+    elif scope == "applicable":
+        _reject_inapplicable(qualification, projection)
+
+
 def _resolve_dispositions(
     rel: dict[str, Any],
     pattern_id: str | None,
 ) -> tuple[str, str, str]:
     """Resolve scope, qualification, and projection dispositions for one relationship."""
-    raw_scope = rel.get("scope_disposition") or rel.get("scope")
-    raw_qualification = rel.get("qualification_disposition") or rel.get("qualification")
-    raw_projection = rel.get("projection_disposition") or rel.get("projection")
-    raw_disp = rel.get("disposition")
+    raw_scope, raw_qualification, raw_projection = _raw_dispositions(rel)
+    (
+        raw_scope,
+        raw_qualification,
+        raw_projection,
+    ) = _apply_legacy_disposition(rel, raw_scope, raw_qualification, raw_projection)
     kind = rel.get("relationship_kind", "")
-
-    # Normalize legacy disposition if present
-    if raw_disp:
-        disp_str = str(raw_disp)
-        if disp_str in ("governance-only", "governance_only"):
-            if not raw_scope:
-                raw_scope = "governance_only"
-            if not raw_qualification:
-                raw_qualification = "not_attempted"
-            if not raw_projection:
-                raw_projection = "not_attempted"
-        elif disp_str == "gated":
-            if not raw_scope:
-                raw_scope = "capability_excluded"
-            if not raw_qualification:
-                raw_qualification = "not_attempted"
-            if not raw_projection:
-                raw_projection = "not_attempted"
-        elif disp_str in ("missing-template", "missing_evidence"):
-            if not raw_qualification:
-                raw_qualification = "missing_evidence"
-        elif disp_str in ("infeasible", "unsupported", "structurally_infeasible"):
-            if not raw_qualification:
-                raw_qualification = "structurally_infeasible"
-        elif disp_str == "contradictory_evidence":
-            if not raw_qualification:
-                raw_qualification = "contradictory_evidence"
-        elif disp_str in ("generated", "ready"):
-            if not raw_qualification:
-                raw_qualification = "ready"
-        elif disp_str in (
-            "ready",
-            "missing_evidence",
-            "contradictory_evidence",
-            "structurally_infeasible",
-            "not_attempted",
-        ):
-            if not raw_qualification:
-                raw_qualification = disp_str
-
-    # 1. Scope
-    if raw_scope:
-        scope = str(raw_scope)
-        if scope == "in-scope":
-            scope = "applicable"
-        elif scope == "out-of-scope":
-            scope = "capability_excluded"
-    elif "gated" in kind or "capability" in kind:
-        scope = "capability_excluded"
-    elif not pattern_id or "governance" in kind or "orphan" in kind:
-        scope = "governance_only"
-    else:
-        scope = "applicable"
-
-    # 2. Qualification
-    if raw_qualification:
-        qualification = str(raw_qualification)
-    elif scope in ("capability_excluded", "governance_only"):
-        qualification = "not_attempted"
-    elif "missing" in kind:
-        qualification = "missing_evidence"
-    elif "contradict" in kind:
-        qualification = "contradictory_evidence"
-    elif "infeasib" in kind or "structurally" in kind or "unsupported" in kind:
-        qualification = "structurally_infeasible"
-    elif (
-        "ready" in kind
-        or "qualified" in kind
-        or "generated" in kind
-        or "projectable" in kind
-    ):
-        qualification = "ready"
-    else:
-        qualification = "ready"
-
-    # 3. Projection
-    if raw_projection:
-        projection = str(raw_projection)
-    elif qualification == "ready":
-        projection = "projectable"
-    else:
-        projection = "not_attempted"
-
-    # Validation of combinations
-    if scope == "governance_only":
-        if qualification != "not_attempted":
-            raise ValueError(
-                f"Invalid disposition combination: scope '{scope}' cannot be combined with qualification '{qualification}'"
-            )
-        if projection != "not_attempted":
-            raise ValueError(
-                f"Invalid disposition combination: scope '{scope}' cannot be combined with projection '{projection}'"
-            )
-    elif scope == "capability_excluded":
-        if qualification != "not_attempted":
-            raise ValueError(
-                f"Invalid disposition combination: scope '{scope}' cannot be combined with qualification '{qualification}'"
-            )
-        if projection != "not_attempted":
-            raise ValueError(
-                f"Invalid disposition combination: scope '{scope}' cannot be combined with projection '{projection}'"
-            )
-    elif scope == "applicable":
-        if qualification == "not_attempted":
-            raise ValueError(
-                f"Invalid disposition combination: scope '{scope}' cannot be combined with qualification '{qualification}'"
-            )
-        if qualification not in (
-            "ready",
-            "missing_evidence",
-            "contradictory_evidence",
-            "structurally_infeasible",
-        ):
-            raise ValueError(
-                f"Invalid qualification disposition '{qualification}' for scope '{scope}'"
-            )
-        if qualification != "ready" and projection not in (
-            "not_attempted",
-            "projection_infeasible",
-        ):
-            raise ValueError(
-                f"Invalid disposition combination: qualification '{qualification}' cannot be combined with projection '{projection}'"
-            )
-
+    scope = _resolve_scope(raw_scope, kind, pattern_id)
+    qualification = _resolve_qualification(raw_qualification, scope, kind)
+    projection = _resolve_projection(raw_projection, qualification)
+    _validate_dispositions(scope, qualification, projection)
     return scope, qualification, projection
 
 
@@ -211,6 +293,86 @@ def _build_qualification_trace(
     return trace_items
 
 
+def _candidate_reason(
+    candidate: dict[str, Any], default: str, honor_rejection_reason: bool
+) -> str:
+    """Resolve a candidate entry's reason string."""
+    if "reason" in candidate:
+        return str(candidate["reason"])
+    if honor_rejection_reason:
+        return str(candidate.get("rejection_reason", default))
+    return default
+
+
+def _candidate_record(
+    candidate: Any,
+    default_disposition: ObligationProjectionDisposition,
+    default_reason: str,
+    honor_rejection_reason: bool,
+) -> CandidateRecord | None:
+    """Build one candidate record from a mapping or bare-string entry."""
+    if isinstance(candidate, str):
+        return CandidateRecord(
+            candidate_id=candidate,
+            projection_disposition=default_disposition,
+            reason=default_reason,
+        )
+    candidate_id = str(candidate.get("candidate_id", ""))
+    if not candidate_id:
+        return None
+    return CandidateRecord(
+        candidate_id=candidate_id,
+        projection_disposition=candidate.get(
+            "projection_disposition", default_disposition
+        ),
+        reason=_candidate_reason(candidate, default_reason, honor_rejection_reason),
+    )
+
+
+def _append_unique_candidate(
+    candidates: list[CandidateRecord],
+    seen: set[str],
+    record: CandidateRecord | None,
+) -> None:
+    """Append a record unless it is empty or duplicates a seen candidate id."""
+    if record is not None and record.candidate_id not in seen:
+        seen.add(record.candidate_id)
+        candidates.append(record)
+
+
+def _collect_candidate_section(
+    candidates: list[CandidateRecord],
+    seen: set[str],
+    expansion: dict[str, Any],
+    section: tuple[str, ObligationProjectionDisposition, str, bool, bool],
+) -> None:
+    """Collect one expansion section's records with per-section defaults."""
+    (
+        key,
+        default_disposition,
+        default_reason,
+        honor_rejection_reason,
+        accept_bare_strings,
+    ) = section
+    for entry in expansion.get(key, []):
+        if isinstance(entry, str) and not accept_bare_strings:
+            continue
+        record = _candidate_record(
+            entry, default_disposition, default_reason, honor_rejection_reason
+        )
+        _append_unique_candidate(candidates, seen, record)
+
+
+def _expansion_matches(
+    expansion: dict[str, Any], risk_id: str, pattern_id: str | None
+) -> bool:
+    """Report whether an expansion belongs to the given risk and pattern."""
+    return (
+        expansion.get("risk_id") == risk_id
+        and expansion.get("pattern_id") == pattern_id
+    )
+
+
 def _build_candidate_records(
     expansions: list[dict[str, Any]],
     risk_id: str,
@@ -219,142 +381,80 @@ def _build_candidate_records(
     """Extract candidate expansion records matching this obligation."""
     candidates: list[CandidateRecord] = []
     seen: set[str] = set()
-    for exp in expansions:
-        if exp.get("risk_id") == risk_id and exp.get("pattern_id") == pattern_id:
-            for cand in exp.get("candidates", []):
-                if isinstance(cand, dict):
-                    cid = str(cand.get("candidate_id", ""))
-                    if cid and cid not in seen:
-                        seen.add(cid)
-                        candidates.append(
-                            CandidateRecord(
-                                candidate_id=cid,
-                                projection_disposition=cand.get(
-                                    "projection_disposition", "projectable"
-                                ),
-                                reason=str(cand.get("reason", "")),
-                            )
-                        )
-            for cand in exp.get("accepted_candidates", []):
-                if isinstance(cand, dict):
-                    cid = str(cand.get("candidate_id", ""))
-                    if cid and cid not in seen:
-                        seen.add(cid)
-                        candidates.append(
-                            CandidateRecord(
-                                candidate_id=cid,
-                                projection_disposition=cand.get(
-                                    "projection_disposition", "projectable"
-                                ),
-                                reason=str(
-                                    cand.get(
-                                        "reason",
-                                        cand.get(
-                                            "rejection_reason", "qualified combination"
-                                        ),
-                                    )
-                                ),
-                            )
-                        )
-                elif isinstance(cand, str) and cand not in seen:
-                    seen.add(cand)
-                    candidates.append(
-                        CandidateRecord(
-                            candidate_id=cand,
-                            projection_disposition="projectable",
-                            reason="qualified combination",
-                        )
-                    )
-            for rej in exp.get("rejected_candidates", []):
-                if isinstance(rej, dict):
-                    cid = str(rej.get("candidate_id", ""))
-                    if cid and cid not in seen:
-                        seen.add(cid)
-                        candidates.append(
-                            CandidateRecord(
-                                candidate_id=cid,
-                                projection_disposition=rej.get(
-                                    "projection_disposition", "projection_infeasible"
-                                ),
-                                reason=str(
-                                    rej.get(
-                                        "reason",
-                                        rej.get(
-                                            "rejection_reason",
-                                            "missing required resource",
-                                        ),
-                                    )
-                                ),
-                            )
-                        )
-                elif isinstance(rej, str) and rej not in seen:
-                    seen.add(rej)
-                    candidates.append(
-                        CandidateRecord(
-                            candidate_id=rej,
-                            projection_disposition="projection_infeasible",
-                            reason="missing required resource",
-                        )
-                    )
+    for expansion in expansions:
+        if not _expansion_matches(expansion, risk_id, pattern_id):
+            continue
+        for section in _CANDIDATE_SECTIONS:
+            _collect_candidate_section(candidates, seen, expansion, section)
     return candidates
+
+
+def _count_scope(obligations: list[TaxonomyObligation], disposition: str) -> int:
+    """Count obligations carrying one scope disposition."""
+    return sum(1 for o in obligations if o.scope_disposition == disposition)
+
+
+def _count_qualification(
+    obligations: list[TaxonomyObligation], *dispositions: str
+) -> int:
+    """Count obligations carrying any of the qualification dispositions."""
+    return sum(1 for o in obligations if o.qualification_disposition in dispositions)
+
+
+def _count_obligation_disposition(
+    obligations: list[TaxonomyObligation], disposition: str
+) -> int:
+    """Count obligations carrying one terminal projection disposition."""
+    return sum(1 for o in obligations if o.projection_disposition == disposition)
+
+
+def _count_candidate_disposition(
+    obligations: list[TaxonomyObligation], disposition: str
+) -> int:
+    """Count candidate records carrying one projection disposition."""
+    return sum(
+        1
+        for o in obligations
+        for c in o.candidate_records
+        if c.projection_disposition == disposition
+    )
+
+
+def _count_projection(
+    obligations: list[TaxonomyObligation],
+    disposition: str,
+    use_candidate_records: bool,
+) -> int:
+    """Count a projection disposition at the candidate level when records exist."""
+    if use_candidate_records:
+        return _count_candidate_disposition(obligations, disposition)
+    return _count_obligation_disposition(obligations, disposition)
 
 
 def _derive_summary(obligations: list[TaxonomyObligation]) -> ObligationPlanSummary:
     """Derive summary counts from obligation rows and candidate records."""
-    total = len(obligations)
-    applicable = sum(1 for o in obligations if o.scope_disposition == "applicable")
-    governance_only = sum(
-        1 for o in obligations if o.scope_disposition == "governance_only"
-    )
-    capability_excluded = sum(
-        1 for o in obligations if o.scope_disposition == "capability_excluded"
-    )
-    ready = sum(1 for o in obligations if o.qualification_disposition == "ready")
-    missing_or_contradictory = sum(
-        1
-        for o in obligations
-        if o.qualification_disposition in ("missing_evidence", "contradictory_evidence")
-    )
-    structurally_infeasible = sum(
-        1
-        for o in obligations
-        if o.qualification_disposition == "structurally_infeasible"
-    )
-
-    projectable = 0
-    projection_infeasible = 0
-    budget_deferred = 0
-
-    has_candidate_records = any(o.candidate_records for o in obligations)
-    if has_candidate_records:
-        for o in obligations:
-            for c in o.candidate_records:
-                if c.projection_disposition == "projectable":
-                    projectable += 1
-                elif c.projection_disposition == "projection_infeasible":
-                    projection_infeasible += 1
-                elif c.projection_disposition == "budget_deferred":
-                    budget_deferred += 1
-    else:
-        for o in obligations:
-            if o.projection_disposition == "projectable":
-                projectable += 1
-            elif o.projection_disposition == "projection_infeasible":
-                projection_infeasible += 1
-            elif o.projection_disposition == "budget_deferred":
-                budget_deferred += 1
-
+    use_candidate_records = any(o.candidate_records for o in obligations)
     return ObligationPlanSummary(
-        total=total,
-        applicable=applicable,
-        governance_only=governance_only,
-        capability_excluded=capability_excluded,
-        ready=ready,
-        missing_or_contradictory=missing_or_contradictory,
-        structurally_infeasible=structurally_infeasible,
-        projectable=projectable,
-        projection_infeasible=projection_infeasible,
-        budget_deferred=budget_deferred,
+        total=len(obligations),
+        applicable=_count_scope(obligations, "applicable"),
+        governance_only=_count_scope(obligations, "governance_only"),
+        capability_excluded=_count_scope(obligations, "capability_excluded"),
+        ready=_count_qualification(obligations, "ready"),
+        missing_or_contradictory=_count_qualification(
+            obligations, "missing_evidence", "contradictory_evidence"
+        ),
+        structurally_infeasible=_count_qualification(
+            obligations, "structurally_infeasible"
+        ),
+        projectable=_count_projection(
+            obligations, "projectable", use_candidate_records
+        ),
+        projection_infeasible=_count_projection(
+            obligations, "projection_infeasible", use_candidate_records
+        ),
+        budget_deferred=_count_projection(
+            obligations, "budget_deferred", use_candidate_records
+        ),
     )
 
 
@@ -389,6 +489,83 @@ def _json_serializable(obj: Any) -> Any:
     return json.dumps(obj, sort_keys=True, default=str)
 
 
+def _planning_snapshot(
+    snapshot: TaxonomyObligationSnapshot | dict[str, Any],
+) -> TaxonomyObligationSnapshot:
+    """Coerce a raw mapping into a snapshot model."""
+    if isinstance(snapshot, dict):
+        return TaxonomyObligationSnapshot.model_validate(snapshot)
+    return snapshot
+
+
+def _resolved_pin(pin: str | None, legacy_pin: str | None, default: str) -> str:
+    """Prefer the explicit pin, then its legacy alias, then the default."""
+    return pin or legacy_pin or default
+
+
+def _generation_inputs_digest(
+    snap: TaxonomyObligationSnapshot, catalog_pin: str, mapping_pin: str
+) -> str:
+    """Digest the canonical identity-bearing relationship and card content."""
+    canonical_relationships = sorted(
+        [_canonicalize_relationship_for_digest(rel) for rel in snap.relationships],
+        key=_json_serializable,
+    )
+    canonical_cards = sorted(
+        [_canonicalize_card_for_digest(card) for card in snap.risk_cards],
+        key=_json_serializable,
+    )
+    return compute_sha256(
+        {
+            "catalog_pin": catalog_pin,
+            "mapping_pin": mapping_pin,
+            "relationships": canonical_relationships,
+            "risk_cards": canonical_cards,
+        }
+    )
+
+
+def _build_obligation(
+    rel: dict[str, Any],
+    snap: TaxonomyObligationSnapshot,
+    pin_tag: str,
+    secrets: set[str],
+) -> TaxonomyObligation:
+    """Build one ledger obligation from a snapshot relationship."""
+    risk_id = str(rel.get("risk_id", ""))
+    raw_pattern = rel.get("pattern_id")
+    pattern_id = str(raw_pattern) if raw_pattern else None
+    scope_disp, qual_disp, proj_disp = _resolve_dispositions(rel, pattern_id)
+    evidence: dict[str, Any] = {}
+    if rel.get("relationship_kind"):
+        evidence["relationship_kind"] = rel["relationship_kind"]
+    return TaxonomyObligation(
+        obligation_id=_canonical_obligation_id(risk_id, pattern_id, pin_tag),
+        risk_id=risk_id,
+        pattern_id=pattern_id,
+        scope_disposition=scope_disp,
+        qualification_disposition=qual_disp,
+        correspondence_disposition="not_assessed",
+        projection_disposition=proj_disp,
+        qualification_trace=_build_qualification_trace(
+            snap.qualification_evaluations, risk_id, pattern_id, secrets
+        ),
+        candidate_records=_build_candidate_records(
+            snap.candidate_expansions, risk_id, pattern_id
+        ),
+        evidence=evidence,
+    )
+
+
+def _build_obligations(
+    snap: TaxonomyObligationSnapshot, pin_tag: str, secrets: set[str]
+) -> list[TaxonomyObligation]:
+    """Build the unsorted obligation ledger from snapshot relationships."""
+    return [
+        _build_obligation(rel, snap, pin_tag, secrets) for rel in snap.relationships
+    ]
+
+
 def plan_obligations(
     snapshot: TaxonomyObligationSnapshot | dict[str, Any],
 ) -> TaxonomyObligationPlan:
@@ -396,92 +573,35 @@ def plan_obligations(
 
     Makes zero network and model calls.
     """
-    if isinstance(snapshot, dict):
-        snap = TaxonomyObligationSnapshot.model_validate(snapshot)
-    else:
-        snap = snapshot
-
-    catalog_pin = snap.catalog_pin or snap.taxonomy_version or "atlas-2026.05"
-    mapping_pin = snap.mapping_pin or snap.mapping_version or "sssom-v1"
-
-    catalog_pins = {"catalog": catalog_pin, "atlas": catalog_pin}
-    mapping_pins = {"mapping": mapping_pin, "sssom": mapping_pin}
-
+    snap = _planning_snapshot(snapshot)
+    catalog_pin = _resolved_pin(
+        snap.catalog_pin, snap.taxonomy_version, _DEFAULT_CATALOG_PIN
+    )
+    mapping_pin = _resolved_pin(
+        snap.mapping_pin, snap.mapping_version, _DEFAULT_MAPPING_PIN
+    )
     capability_snapshot_digest = compute_sha256(snap.capability_content)
     qualification_facts_digest = compute_sha256(snap.qualification_facts)
-
-    canonical_rels = sorted(
-        [_canonicalize_relationship_for_digest(r) for r in snap.relationships],
-        key=_json_serializable,
-    )
-    canonical_cards = sorted(
-        [_canonicalize_card_for_digest(c) for c in snap.risk_cards],
-        key=_json_serializable,
-    )
-
-    generation_inputs_digest = compute_sha256(
-        {
-            "catalog_pin": catalog_pin,
-            "mapping_pin": mapping_pin,
-            "relationships": canonical_rels,
-            "risk_cards": canonical_cards,
-        }
-    )
-
+    generation_inputs_digest = _generation_inputs_digest(snap, catalog_pin, mapping_pin)
     pin_tag = compute_sha256(
         f"{catalog_pin}|{mapping_pin}|{capability_snapshot_digest}"
     )[:8]
 
-    secrets = _collect_config_secrets(snap.config)
-    obligations: list[TaxonomyObligation] = []
-
-    for rel in snap.relationships:
-        risk_id = str(rel.get("risk_id", ""))
-        raw_pattern = rel.get("pattern_id")
-        pattern_id = str(raw_pattern) if raw_pattern else None
-
-        scope_disp, qual_disp, proj_disp = _resolve_dispositions(rel, pattern_id)
-        obligation_id = _canonical_obligation_id(risk_id, pattern_id, pin_tag)
-
-        trace = _build_qualification_trace(
-            snap.qualification_evaluations, risk_id, pattern_id, secrets
-        )
-        candidates = _build_candidate_records(
-            snap.candidate_expansions, risk_id, pattern_id
-        )
-
-        evidence: dict[str, Any] = {}
-        if rel.get("relationship_kind"):
-            evidence["relationship_kind"] = rel["relationship_kind"]
-
-        obligations.append(
-            TaxonomyObligation(
-                obligation_id=obligation_id,
-                risk_id=risk_id,
-                pattern_id=pattern_id,
-                scope_disposition=scope_disp,
-                qualification_disposition=qual_disp,
-                correspondence_disposition="not_assessed",
-                projection_disposition=proj_disp,
-                qualification_trace=trace,
-                candidate_records=candidates,
-                evidence=evidence,
-            )
-        )
-
+    obligations = _build_obligations(
+        snap, pin_tag, _collect_config_secrets(snap.config)
+    )
     obligations.sort(key=_canonical_sort_key)
-    summary = _derive_summary(obligations)
 
     plan = TaxonomyObligationPlan(
         schema_version="taxonomy-obligation-plan-v1",
-        catalog_pins=catalog_pins,
-        mapping_pins=mapping_pins,
+        catalog_pins={"catalog": catalog_pin, "atlas": catalog_pin},
+        mapping_pins={"mapping": mapping_pin, "sssom": mapping_pin},
         capability_snapshot_digest=capability_snapshot_digest,
         qualification_facts_digest=qualification_facts_digest,
         generation_inputs_digest=generation_inputs_digest,
         semantic_digest="",
         obligations=obligations,
-        summary=summary,
+        summary=_derive_summary(obligations),
         network_calls=0,
         model_calls=0,
     )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -13,6 +14,8 @@ from asago_scenario_generator.models.obligation_plan import (
     QualificationTraceItem,
     TaxonomyObligation,
     TaxonomyObligationPlan,
+    TaxonomyObligationSnapshot,
+    compute_sha256,
 )
 
 
@@ -65,9 +68,7 @@ def _make_plan(**overrides: Any) -> TaxonomyObligationPlan:
             capability_excluded=sum(
                 1 for o in obligations if o.scope_disposition == "capability_excluded"
             ),
-            ready=sum(
-                1 for o in obligations if o.qualification_disposition == "ready"
-            ),
+            ready=sum(1 for o in obligations if o.qualification_disposition == "ready"),
             missing_or_contradictory=sum(
                 1
                 for o in obligations
@@ -113,7 +114,9 @@ def _make_plan(**overrides: Any) -> TaxonomyObligationPlan:
         network_calls=0,
         model_calls=0,
     )
-    plan.semantic_digest = overrides.get("semantic_digest", plan.compute_semantic_digest())
+    plan.semantic_digest = overrides.get(
+        "semantic_digest", plan.compute_semantic_digest()
+    )
     return plan
 
 
@@ -245,12 +248,87 @@ def test_unsupported_schema_version_rejected() -> None:
     raw = plan.model_dump(mode="json")
     raw["schema_version"] = "taxonomy-obligation-plan-v2"
     with pytest.raises(ValueError, match="Unsupported schema version"):
-        TaxonomyObligationPlan.from_json(json_dumps_quick(raw))
+        TaxonomyObligationPlan.from_json(json.dumps(raw))
 
 
-def json_dumps_quick(obj: Any) -> str:
-    import json
-    return json.dumps(obj)
+def test_deserialization_rejects_non_mapping_payload() -> None:
+    with pytest.raises(ValueError, match="YAML data must be a dictionary"):
+        TaxonomyObligationPlan.from_yaml("- one\n- two\n")
+    with pytest.raises(ValueError, match="JSON data must be a dictionary"):
+        TaxonomyObligationPlan.from_json(json.dumps(["not", "a", "dict"]))
+
+
+def test_correspondence_claim_rejected_on_load() -> None:
+    plan = _make_plan()
+    raw = plan.model_dump(mode="json")
+    raw["obligations"][0]["correspondence_disposition"] = "aligned"
+    with pytest.raises(ValueError, match="Invalid correspondence disposition"):
+        TaxonomyObligationPlan.from_json(json.dumps(raw))
+
+
+def test_omitted_correspondence_disposition_defaults_on_load() -> None:
+    plan = _make_plan()
+    raw = plan.model_dump(mode="json")
+    del raw["obligations"][0]["correspondence_disposition"]
+
+    loaded = TaxonomyObligationPlan.from_json(json.dumps(raw))
+
+    assert loaded.obligations[0].correspondence_disposition == "not_assessed"
+
+
+def test_unknown_field_wraps_validation_error_as_value_error() -> None:
+    plan = _make_plan()
+    raw = plan.model_dump(mode="json")
+    raw["unexpected_field"] = 1
+    with pytest.raises(ValueError, match="unexpected_field"):
+        TaxonomyObligationPlan.from_json(json.dumps(raw))
+
+
+def test_digest_computes_over_bytes_and_defaults_to_str() -> None:
+    assert compute_sha256(b"abc") == compute_sha256("abc")
+    assert compute_sha256(12345) == compute_sha256("12345")
+    assert compute_sha256({"b": 2, "a": 1}) == compute_sha256({"a": 1, "b": 2})
+
+
+def test_pin_sync_backfills_legacy_alias_in_both_directions() -> None:
+    from_legacy = TaxonomyObligationSnapshot(catalog_pin="", taxonomy_version="atlas-x")
+    assert from_legacy.catalog_pin == "atlas-x"
+    assert from_legacy.taxonomy_version == "atlas-x"
+
+    from_modern = TaxonomyObligationSnapshot(catalog_pin="atlas-y")
+    assert from_modern.catalog_pin == "atlas-y"
+    assert from_modern.taxonomy_version == "atlas-y"
+
+    mapping_from_legacy = TaxonomyObligationSnapshot(
+        mapping_pin="", mapping_version="sssom-x"
+    )
+    assert mapping_from_legacy.mapping_pin == "sssom-x"
+    assert mapping_from_legacy.mapping_version == "sssom-x"
+
+    mapping_from_modern = TaxonomyObligationSnapshot(mapping_pin="sssom-y")
+    assert mapping_from_modern.mapping_pin == "sssom-y"
+    assert mapping_from_modern.mapping_version == "sssom-y"
+
+
+def test_pin_sync_keeps_both_values_when_both_present() -> None:
+    snapshot = TaxonomyObligationSnapshot(
+        catalog_pin="atlas-kept",
+        taxonomy_version="atlas-legacy",
+        mapping_pin="sssom-kept",
+        mapping_version="sssom-legacy",
+    )
+    assert snapshot.catalog_pin == "atlas-kept"
+    assert snapshot.taxonomy_version == "atlas-legacy"
+    assert snapshot.mapping_pin == "sssom-kept"
+    assert snapshot.mapping_version == "sssom-legacy"
+
+
+def test_pin_sync_applies_model_defaults() -> None:
+    snapshot = TaxonomyObligationSnapshot()
+    assert snapshot.catalog_pin == "atlas-2026.05"
+    assert snapshot.taxonomy_version == "atlas-2026.05"
+    assert snapshot.mapping_pin == "sssom-v1"
+    assert snapshot.mapping_version == "sssom-v1"
 
 
 def test_unknown_fields_forbidden() -> None:
@@ -264,4 +342,3 @@ def test_unknown_fields_forbidden() -> None:
             projection_disposition="projectable",
             unsupported_field="fail",  # type: ignore[call-arg]
         )
-

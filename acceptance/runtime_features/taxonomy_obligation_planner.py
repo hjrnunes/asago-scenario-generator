@@ -95,6 +95,20 @@ def _rel(
     return rel
 
 
+def _ready_relationship(
+    risk_id: str = "atlas-prompt-injection",
+    pattern_id: str | None = "AP-T6-01",
+) -> dict[str, Any]:
+    """Build the in-scope, ready, projectable relationship fixture."""
+    return {
+        "risk_id": risk_id,
+        "pattern_id": pattern_id,
+        "scope_disposition": "applicable",
+        "qualification_disposition": "ready",
+        "projection_disposition": "projectable",
+    }
+
+
 def _ensure_in_scope_relationship(
     snap: TaxonomyObligationSnapshot, risk_id: str, pattern_id: str | None
 ) -> None:
@@ -103,15 +117,7 @@ def _ensure_in_scope_relationship(
         r.get("risk_id") == risk_id and r.get("pattern_id") == pattern_id
         for r in snap.relationships
     ):
-        snap.relationships.append(
-            {
-                "risk_id": risk_id,
-                "pattern_id": pattern_id,
-                "scope_disposition": "applicable",
-                "qualification_disposition": "ready",
-                "projection_disposition": "projectable",
-            }
-        )
+        snap.relationships.append(_ready_relationship(risk_id, pattern_id))
 
 
 def _obligation_ids(plan: TaxonomyObligationPlan) -> list[str]:
@@ -233,37 +239,50 @@ def _h_records_schema_version(
 
 
 def _h_records_catalog_pin(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    state = _planner_state(world)
-    match = re.search(r'records catalog pin "([^"]+)"', text)
-    expected = match.group(1) if match else examples.get("catalog_pin", "")
-    plan = state["plan"]
-    pins = (
-        list(plan.catalog_pins.values())
-        if isinstance(plan.catalog_pins, dict)
-        else plan.catalog_pins
+    return _check_recorded_pin(
+        world,
+        text,
+        examples,
+        step_pattern=r'records catalog pin "([^"]+)"',
+        example_key="catalog_pin",
+        pins_attribute="catalog_pins",
+        label="catalog",
     )
-    if expected not in pins:
-        return (
-            False,
-            f"Expected catalog pin '{expected}', got {plan.catalog_pins}",
-        )
-    return True, ""
 
 
 def _h_records_mapping_pin(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    state = _planner_state(world)
-    match = re.search(r'records mapping pin "([^"]+)"', text)
-    expected = match.group(1) if match else examples.get("mapping_pin", "")
-    plan = state["plan"]
-    pins = (
-        list(plan.mapping_pins.values())
-        if isinstance(plan.mapping_pins, dict)
-        else plan.mapping_pins
+    return _check_recorded_pin(
+        world,
+        text,
+        examples,
+        step_pattern=r'records mapping pin "([^"]+)"',
+        example_key="mapping_pin",
+        pins_attribute="mapping_pins",
+        label="mapping",
     )
-    if expected not in pins:
+
+
+def _check_recorded_pin(
+    world: World,
+    text: str,
+    examples: dict,
+    *,
+    step_pattern: str,
+    example_key: str,
+    pins_attribute: str,
+    label: str,
+) -> tuple[bool, str]:
+    """Check that the plan records one kind of pin."""
+    state = _planner_state(world)
+    match = re.search(step_pattern, text)
+    expected = match.group(1) if match else examples.get(example_key, "")
+    plan = state["plan"]
+    pins = getattr(plan, pins_attribute)
+    values = list(pins.values()) if isinstance(pins, dict) else pins
+    if expected not in values:
         return (
             False,
-            f"Expected mapping pin '{expected}', got {plan.mapping_pins}",
+            f"Expected {label} pin '{expected}', got {getattr(plan, pins_attribute)}",
         )
     return True, ""
 
@@ -306,15 +325,7 @@ def _parse_order(order_str: str) -> list[dict[str, Any]]:
     for item in items:
         if ":" in item:
             risk_id, pattern_id = item.split(":", 1)
-            rels.append(
-                {
-                    "risk_id": risk_id,
-                    "pattern_id": pattern_id,
-                    "scope_disposition": "applicable",
-                    "qualification_disposition": "ready",
-                    "projection_disposition": "projectable",
-                }
-            )
+            rels.append(_ready_relationship(risk_id, pattern_id))
         else:
             rels.append(
                 {
@@ -328,13 +339,18 @@ def _parse_order(order_str: str) -> list[dict[str, Any]]:
     return rels
 
 
+def _ordered_snapshot(order: str) -> TaxonomyObligationSnapshot:
+    """Build a snapshot presenting the parsed relationship order."""
+    snap = _default_snapshot()
+    snap.relationships = _parse_order(order)
+    return snap
+
+
 def _h_order_a(world: World, text: str, examples: dict) -> tuple[bool, str]:
     state = _planner_state(world)
     match = re.search(r'order "([^"]+)"', text)
     order = match.group(1) if match else examples.get("order_a", "")
-    snap = _default_snapshot()
-    snap.relationships = _parse_order(order)
-    state["snapshot_a"] = snap
+    state["snapshot_a"] = _ordered_snapshot(order)
     return True, ""
 
 
@@ -342,9 +358,7 @@ def _h_order_b(world: World, text: str, examples: dict) -> tuple[bool, str]:
     state = _planner_state(world)
     match = re.search(r'order "([^"]+)"', text)
     order = match.group(1) if match else examples.get("order_b", "")
-    snap = _default_snapshot()
-    snap.relationships = _parse_order(order)
-    state["snapshot_b"] = snap
+    state["snapshot_b"] = _ordered_snapshot(order)
     return True, ""
 
 
@@ -415,13 +429,7 @@ def _h_rich_plan_snapshot(world: World, text: str, examples: dict) -> tuple[bool
     state = _planner_state(world)
     snap = _default_snapshot()
     snap.relationships = [
-        {
-            "risk_id": "atlas-prompt-injection",
-            "pattern_id": "AP-T6-01",
-            "scope_disposition": "applicable",
-            "qualification_disposition": "ready",
-            "projection_disposition": "projectable",
-        },
+        _ready_relationship(),
         {
             "risk_id": "atlas-memory-poisoning",
             "pattern_id": "AP-T1-01",
@@ -573,15 +581,7 @@ def _h_published_plan_in_format(
     state = _planner_state(world)
     fmt = _requested_format(text, examples, r'in "([^"]+)"', "format")
     snap = _default_snapshot()
-    snap.relationships = [
-        {
-            "risk_id": "atlas-prompt-injection",
-            "pattern_id": "AP-T6-01",
-            "scope_disposition": "applicable",
-            "qualification_disposition": "ready",
-            "projection_disposition": "projectable",
-        }
-    ]
+    snap.relationships = [_ready_relationship()]
     state["plan"] = plan_obligations(snap)
     state["persisted_format"] = fmt
     state["persisted_text"] = _serialize_plan(state["plan"], fmt)
@@ -667,15 +667,7 @@ def _h_persisted_plan_unknown_field(
     match = re.search(r'unknown field "([^"]+)"', text)
     field = match.group(1) if match else examples.get("field", "")
     snap = _default_snapshot()
-    snap.relationships = [
-        {
-            "risk_id": "atlas-prompt-injection",
-            "pattern_id": "AP-T6-01",
-            "scope_disposition": "applicable",
-            "qualification_disposition": "ready",
-            "projection_disposition": "projectable",
-        }
-    ]
+    snap.relationships = [_ready_relationship()]
     p = plan_obligations(snap)
     data = json.loads(p.to_json())
     data[field] = 12345
@@ -709,15 +701,7 @@ def _h_persisted_plan_declares_schema_version(
     match = re.search(r'schema version "([^"]+)"', text)
     version = match.group(1) if match else examples.get("schema_version", "")
     snap = _default_snapshot()
-    snap.relationships = [
-        {
-            "risk_id": "atlas-prompt-injection",
-            "pattern_id": "AP-T6-01",
-            "scope_disposition": "applicable",
-            "qualification_disposition": "ready",
-            "projection_disposition": "projectable",
-        }
-    ]
+    snap.relationships = [_ready_relationship()]
     p = plan_obligations(snap)
     data = json.loads(p.to_json())
     data["schema_version"] = version
@@ -755,15 +739,7 @@ def _h_snapshot_supplies_false_digest(
     else:
         digest_kind, false_digest = match.groups()
     snap = _default_snapshot()
-    snap.relationships = [
-        {
-            "risk_id": "atlas-prompt-injection",
-            "pattern_id": "AP-T6-01",
-            "scope_disposition": "applicable",
-            "qualification_disposition": "ready",
-            "projection_disposition": "projectable",
-        }
-    ]
+    snap.relationships = [_ready_relationship()]
     setattr(snap, digest_kind, false_digest)
     state["snapshot"] = snap
     state["false_digests"][digest_kind] = false_digest
@@ -817,15 +793,7 @@ def _h_publish_plan_atomically(
     fmt = _requested_format(text, examples, r'published as "([^"]+)"', "format")
     snap = state.get("snapshot") or _default_snapshot()
     if not snap.relationships:
-        snap.relationships = [
-            {
-                "risk_id": "atlas-prompt-injection",
-                "pattern_id": "AP-T6-01",
-                "scope_disposition": "applicable",
-                "qualification_disposition": "ready",
-                "projection_disposition": "projectable",
-            }
-        ]
+        snap.relationships = [_ready_relationship()]
     tmp_dir = Path(tempfile.mkdtemp(prefix="asago_obligation_pub_"))
     snap_path = tmp_dir / "snapshot.yaml"
     snap_path.write_text(yaml.safe_dump(snap.model_dump(), sort_keys=False))
@@ -890,15 +858,7 @@ def _h_persisted_plan_invalid_correspondence(
     match = re.search(r'correspondence disposition to "([^"]+)"', text)
     disp = match.group(1) if match else examples.get("invalid_disposition", "")
     snap = _default_snapshot()
-    snap.relationships = [
-        {
-            "risk_id": "atlas-prompt-injection",
-            "pattern_id": "AP-T6-01",
-            "scope_disposition": "applicable",
-            "qualification_disposition": "ready",
-            "projection_disposition": "projectable",
-        }
-    ]
+    snap.relationships = [_ready_relationship()]
     p = plan_obligations(snap)
     data = json.loads(p.to_json())
     data["obligations"][0]["correspondence_disposition"] = disp
@@ -1558,13 +1518,7 @@ def _h_snapshot_applicable_and_excluded(
     state = _planner_state(world)
     snap = state["snapshot"]
     snap.relationships = [
-        {
-            "risk_id": "atlas-prompt-injection",
-            "pattern_id": "AP-T6-01",
-            "scope_disposition": "applicable",
-            "qualification_disposition": "ready",
-            "projection_disposition": "projectable",
-        },
+        _ready_relationship(),
         {
             "risk_id": "atlas-memory-poisoning",
             "pattern_id": "AP-T11-01",
@@ -1601,69 +1555,33 @@ def _h_recorded_model_calls(
 
 
 # Planner Feature Scenario 09 (Identity input change)
+def _snapshot_with_identity_input(inp: str, val: str) -> TaxonomyObligationSnapshot:
+    """Build a snapshot varying exactly one identity-bearing input."""
+    snap = _default_snapshot()
+    if inp == "risk ID":
+        snap.relationships = [_ready_relationship(risk_id=val)]
+    elif inp == "pattern ID":
+        snap.relationships = [_ready_relationship(pattern_id=val)]
+    elif inp == "capability snapshot":
+        snap.capability_content = val
+        snap.relationships = [_ready_relationship()]
+    elif inp == "catalog pin":
+        snap.catalog_pin = val
+        snap.taxonomy_version = val
+        snap.relationships = [_ready_relationship()]
+    elif inp == "mapping pin":
+        snap.mapping_pin = val
+        snap.mapping_version = val
+        snap.relationships = [_ready_relationship()]
+    return snap
+
+
 def _h_snapshot_input_a(world: World, text: str, examples: dict) -> tuple[bool, str]:
     state = _planner_state(world)
     match = re.search(r'one snapshot has "([^"]+)" "([^"]+)"', text)
     inp = match.group(1) if match else examples.get("identity_input", "")
     val = match.group(2) if match else examples.get("value_a", "")
-
-    snap = _default_snapshot()
-    if inp == "risk ID":
-        snap.relationships = [
-            {
-                "risk_id": val,
-                "pattern_id": "AP-T6-01",
-                "scope_disposition": "applicable",
-                "qualification_disposition": "ready",
-                "projection_disposition": "projectable",
-            }
-        ]
-    elif inp == "pattern ID":
-        snap.relationships = [
-            {
-                "risk_id": "atlas-prompt-injection",
-                "pattern_id": val,
-                "scope_disposition": "applicable",
-                "qualification_disposition": "ready",
-                "projection_disposition": "projectable",
-            }
-        ]
-    elif inp == "capability snapshot":
-        snap.capability_content = val
-        snap.relationships = [
-            {
-                "risk_id": "atlas-prompt-injection",
-                "pattern_id": "AP-T6-01",
-                "scope_disposition": "applicable",
-                "qualification_disposition": "ready",
-                "projection_disposition": "projectable",
-            }
-        ]
-    elif inp == "catalog pin":
-        snap.catalog_pin = val
-        snap.taxonomy_version = val
-        snap.relationships = [
-            {
-                "risk_id": "atlas-prompt-injection",
-                "pattern_id": "AP-T6-01",
-                "scope_disposition": "applicable",
-                "qualification_disposition": "ready",
-                "projection_disposition": "projectable",
-            }
-        ]
-    elif inp == "mapping pin":
-        snap.mapping_pin = val
-        snap.mapping_version = val
-        snap.relationships = [
-            {
-                "risk_id": "atlas-prompt-injection",
-                "pattern_id": "AP-T6-01",
-                "scope_disposition": "applicable",
-                "qualification_disposition": "ready",
-                "projection_disposition": "projectable",
-            }
-        ]
-    state["snapshot_a"] = snap
+    state["snapshot_a"] = _snapshot_with_identity_input(inp, val)
     return True, ""
 
 
@@ -1672,64 +1590,7 @@ def _h_snapshot_input_b(world: World, text: str, examples: dict) -> tuple[bool, 
     match = re.search(r'another snapshot has "([^"]+)" "([^"]+)"', text)
     inp = match.group(1) if match else examples.get("identity_input", "")
     val = match.group(2) if match else examples.get("value_b", "")
-
-    snap = _default_snapshot()
-    if inp == "risk ID":
-        snap.relationships = [
-            {
-                "risk_id": val,
-                "pattern_id": "AP-T6-01",
-                "scope_disposition": "applicable",
-                "qualification_disposition": "ready",
-                "projection_disposition": "projectable",
-            }
-        ]
-    elif inp == "pattern ID":
-        snap.relationships = [
-            {
-                "risk_id": "atlas-prompt-injection",
-                "pattern_id": val,
-                "scope_disposition": "applicable",
-                "qualification_disposition": "ready",
-                "projection_disposition": "projectable",
-            }
-        ]
-    elif inp == "capability snapshot":
-        snap.capability_content = val
-        snap.relationships = [
-            {
-                "risk_id": "atlas-prompt-injection",
-                "pattern_id": "AP-T6-01",
-                "scope_disposition": "applicable",
-                "qualification_disposition": "ready",
-                "projection_disposition": "projectable",
-            }
-        ]
-    elif inp == "catalog pin":
-        snap.catalog_pin = val
-        snap.taxonomy_version = val
-        snap.relationships = [
-            {
-                "risk_id": "atlas-prompt-injection",
-                "pattern_id": "AP-T6-01",
-                "scope_disposition": "applicable",
-                "qualification_disposition": "ready",
-                "projection_disposition": "projectable",
-            }
-        ]
-    elif inp == "mapping pin":
-        snap.mapping_pin = val
-        snap.mapping_version = val
-        snap.relationships = [
-            {
-                "risk_id": "atlas-prompt-injection",
-                "pattern_id": "AP-T6-01",
-                "scope_disposition": "applicable",
-                "qualification_disposition": "ready",
-                "projection_disposition": "projectable",
-            }
-        ]
-    state["snapshot_b"] = snap
+    state["snapshot_b"] = _snapshot_with_identity_input(inp, val)
     return True, ""
 
 
@@ -1763,24 +1624,21 @@ def _h_two_plans_different_digests(
 
 
 # Planner Feature Scenario 10 (ICA prose ignored)
+def _snapshot_with_ica_prose(prose: str) -> TaxonomyObligationSnapshot:
+    """Build a ready-relationship snapshot carrying ICA prose."""
+    snap = _default_snapshot()
+    snap.ica_prose = prose
+    snap.relationships = [_ready_relationship()]
+    return snap
+
+
 def _h_snapshot_ica_prose_a(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     state = _planner_state(world)
     match = re.search(r'includes ICA prose "([^"]+)"', text)
     prose = match.group(1) if match else examples.get("prose_a", "")
-    snap = _default_snapshot()
-    snap.ica_prose = prose
-    snap.relationships = [
-        {
-            "risk_id": "atlas-prompt-injection",
-            "pattern_id": "AP-T6-01",
-            "scope_disposition": "applicable",
-            "qualification_disposition": "ready",
-            "projection_disposition": "projectable",
-        }
-    ]
-    state["snapshot_a"] = snap
+    state["snapshot_a"] = _snapshot_with_ica_prose(prose)
     return True, ""
 
 
@@ -1790,18 +1648,7 @@ def _h_snapshot_ica_prose_b(
     state = _planner_state(world)
     match = re.search(r'includes ICA prose "([^"]+)"', text)
     prose = match.group(1) if match else examples.get("prose_b", "")
-    snap = _default_snapshot()
-    snap.ica_prose = prose
-    snap.relationships = [
-        {
-            "risk_id": "atlas-prompt-injection",
-            "pattern_id": "AP-T6-01",
-            "scope_disposition": "applicable",
-            "qualification_disposition": "ready",
-            "projection_disposition": "projectable",
-        }
-    ]
-    state["snapshot_b"] = snap
+    state["snapshot_b"] = _snapshot_with_ica_prose(prose)
     return True, ""
 
 

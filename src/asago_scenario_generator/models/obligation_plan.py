@@ -43,6 +43,35 @@ def _deterministic_json(data: dict[str, Any]) -> str:
     return json.dumps(data, indent=2, sort_keys=True) + "\n"
 
 
+def _synced_pin_pair(
+    modern: str | None, legacy: str | None
+) -> tuple[str | None, str | None]:
+    """Keep a modern pin and its legacy alias consistent with each other."""
+    if legacy and not modern:
+        return legacy, legacy
+    if modern and not legacy:
+        return modern, modern
+    return modern, legacy
+
+
+def _reject_unsupported_schema_version(data: dict[str, Any]) -> None:
+    """Reject persisted plans declaring an unsupported schema version."""
+    schema_ver = data.get("schema_version")
+    if schema_ver != "taxonomy-obligation-plan-v1":
+        raise ValueError(f"Unsupported schema version: '{schema_ver}' is unsupported")
+
+
+def _reject_phase_one_correspondence_claims(data: dict[str, Any]) -> None:
+    """Reject persisted Phase 1 plans claiming a correspondence disposition."""
+    for ob in data.get("obligations", []):
+        if isinstance(ob, dict):
+            disp = ob.get("correspondence_disposition")
+            if disp is not None and disp != "not_assessed":
+                raise ValueError(
+                    f"Invalid correspondence disposition: '{disp}' is invalid"
+                )
+
+
 def compute_sha256(data: Any) -> str:
     """Compute deterministic SHA-256 hex digest for arbitrary data."""
     if isinstance(data, str):
@@ -175,20 +204,8 @@ class TaxonomyObligationPlan(BaseModel):
     @classmethod
     def _validate_and_check_digest(cls, data: dict[str, Any]) -> TaxonomyObligationPlan:
         """Validate model schema and ensure semantic digest matches computed value."""
-        schema_ver = data.get("schema_version")
-        if schema_ver != "taxonomy-obligation-plan-v1":
-            raise ValueError(
-                f"Unsupported schema version: '{schema_ver}' is unsupported"
-            )
-
-        for ob in data.get("obligations", []):
-            if isinstance(ob, dict):
-                disp = ob.get("correspondence_disposition")
-                if disp is not None and disp != "not_assessed":
-                    raise ValueError(
-                        f"Invalid correspondence disposition: '{disp}' is invalid"
-                    )
-
+        _reject_unsupported_schema_version(data)
+        _reject_phase_one_correspondence_claims(data)
         try:
             plan = cls.model_validate(data)
         except ValidationError as exc:
@@ -232,15 +249,12 @@ class TaxonomyObligationSnapshot(BaseModel):
     digest: str | None = None
 
     def model_post_init(self, __context: Any) -> None:
-        if self.taxonomy_version and not self.catalog_pin:
-            self.catalog_pin = self.taxonomy_version
-        elif self.catalog_pin and not self.taxonomy_version:
-            self.taxonomy_version = self.catalog_pin
-
-        if self.mapping_version and not self.mapping_pin:
-            self.mapping_pin = self.mapping_version
-        elif self.mapping_pin and not self.mapping_version:
-            self.mapping_version = self.mapping_pin
+        self.catalog_pin, self.taxonomy_version = _synced_pin_pair(
+            self.catalog_pin, self.taxonomy_version
+        )
+        self.mapping_pin, self.mapping_version = _synced_pin_pair(
+            self.mapping_pin, self.mapping_version
+        )
 
 
 # mutate4py-manifest-begin
