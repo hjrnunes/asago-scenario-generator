@@ -60,8 +60,3 @@ __all__ = [
     "check_solution_neutrality",
     "run_sp1",
 ]
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-09T13:27:20Z","module_hash":"9ca157f8102b7761c861dc5eed11dbcc289d4f12a0c2546cef453deb7c5cfd68","functions":[]}
-# mutate4py-manifest-end

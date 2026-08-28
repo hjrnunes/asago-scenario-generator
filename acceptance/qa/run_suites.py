@@ -13,19 +13,17 @@ Usage::
 
     uv run python acceptance/qa/run_suites.py [--serial PATH ...] [--max-parallel N] [--run-root DIR] PATH [PATH ...]
 
-- ``--serial`` suites run first, one at a time (defaults to the
-  clean-checkout unit-independence suite, which is heavy: git archive +
-  ``uv sync --locked`` + full pytest in a scratch copy).
+- ``--serial`` suites are the heavy clean-checkout suite (git archive +
+  ``uv sync --locked`` + full pytest in scratch copies). By default they run
+  concurrently with the pool: the host has far more cores than the serial
+  suite's pytest workers plus the pool's single-process CLI suites consume.
+  Pass ``--serial-first`` to restore strictly sequential scheduling.
 - The remaining positional suites run concurrently with at most
   ``--max-parallel`` workers (default: one per suite, capped at the
   CPU count).
 - Each suite's output goes to ``tmp/qa-run-<timestamp>/<name>.log``.
 - Exit status is nonzero if any suite failed; failing suites never kill
   their siblings.
-
-The clean-checkout suite belongs in the serial bucket: it re-syncs and
-re-runs pytest inside a fresh clone, and running it inside the pool
-would contend with the pool's own pytest/uv invocations for no gain.
 """
 
 from __future__ import annotations
@@ -122,6 +120,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Maximum concurrently running pool suites (default: CPU count).",
     )
     parser.add_argument(
+        "--serial-first",
+        action="store_true",
+        help="Run the serial bucket strictly before the pool instead of "
+        "concurrently with it.",
+    )
+    parser.add_argument(
         "--run-root",
         type=Path,
         default=None,
@@ -147,35 +151,42 @@ def main(argv: list[str] | None = None) -> int:
     started_wall = time.monotonic()
 
     # --- serial bucket (clean-checkout baseline) ---
-    for suite in serial_paths:
-        log_path = run_root / f"{suite.name}.log"
-        results.append(_run_one(PROJECT_ROOT, suite, log_path))
+    if args.serial_first:
+        # Legacy scheduling: drain the serial bucket before the pool.
+        for suite in serial_paths:
+            log_path = run_root / f"{suite.name}.log"
+            results.append(_run_one(PROJECT_ROOT, suite, log_path))
+        concurrent_serial: list[Path] = []
+    else:
+        # The serial suite's pytest workers plus the pool's single-process
+        # CLI suites together stay well under the host's core budget, so
+        # both buckets overlap by default.
+        concurrent_serial = serial_paths
 
-    # --- parallel pool ---
     max_workers = args.max_parallel or max(1, os.cpu_count() or 2)
     max_workers = min(max_workers, len(pool_paths)) if pool_paths else 0
-    if pool_paths:
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(
-                    _run_one, PROJECT_ROOT, suite, run_root / f"{suite.name}.log"
-                ): suite
-                for suite in pool_paths
-            }
-            for future in as_completed(futures):
-                result = future.result()
-                results.append(result)
-                if not result["ok"]:
-                    print(
-                        f"[run_suites] suite failed: {result['suite']} "
-                        f"(see {result['log']})",
-                        file=sys.stderr,
-                    )
-                else:
-                    print(
-                        f"[run_suites] completed: {result['suite']} "
-                        f"in {result['seconds']:.1f}s"
-                    )
+    worker_count = max(1, max_workers + len(concurrent_serial))
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = {
+            executor.submit(
+                _run_one, PROJECT_ROOT, suite, run_root / f"{suite.name}.log"
+            ): suite
+            for suite in (*concurrent_serial, *pool_paths)
+        }
+        for future in as_completed(futures):
+            result = future.result()
+            results.append(result)
+            if not result["ok"]:
+                print(
+                    f"[run_suites] suite failed: {result['suite']} "
+                    f"(see {result['log']})",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    f"[run_suites] completed: {result['suite']} "
+                    f"in {result['seconds']:.1f}s"
+                )
 
     return _print_report(results, time.monotonic() - started_wall)
 

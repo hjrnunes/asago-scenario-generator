@@ -60,8 +60,3 @@ class STPARunManifest(BaseModel):
         ),
     )
     eval_scorecard_path: str | None = None
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-08T23:13:34Z","module_hash":"5ed1c01dc526997426ea91bb445bf9eb03cb6c8b33932c099c96beace4df8cf0","functions":[]}
-# mutate4py-manifest-end

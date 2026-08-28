@@ -99,8 +99,3 @@ def load_capability_profile(profile_path: Path) -> CapabilityProfile:
         Validated CapabilityProfile model.
     """
     return read_yaml(profile_path, CapabilityProfile)
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-09T13:27:21Z","module_hash":"9d74283244fdd5b0b4a102888721e83cd5c7afe89e59b70fc595e0e1739527a4","functions":[{"id":"func/derive_capability_profile","name":"derive_capability_profile","line":30,"end_line":89,"hash":"42508df14a55fd6c10b781ca826717e6c08b96838a5ede3aff00fd69cf89c0a4"},{"id":"func/load_capability_profile","name":"load_capability_profile","line":92,"end_line":103,"hash":"879c915a125131af1cfb241df23ef326e72ed0742affe7d456dfc8ecb9658f89"}]}
-# mutate4py-manifest-end

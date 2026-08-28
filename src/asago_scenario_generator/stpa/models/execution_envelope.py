@@ -279,8 +279,3 @@ __all__ = [
     "step_kind_for",
     "uca_ref_for",
 ]
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-20T10:33:14Z","module_hash":"f6325c495575c75a4b27250459a952ce0d04058170895856ac7327d4155fd72b","functions":[{"id":"func/TemporalAssertion.validate_predicate_consistency","name":"validate_predicate_consistency","line":95,"end_line":103,"hash":"8b33c3f26027dab43072b2fcb0cbb96551ec72db21a6fefd1eba04ed2c32bf65"},{"id":"func/_validate_sequence","name":"_validate_sequence","line":139,"end_line":165,"hash":"774a92e224a06eb5ea8a393404d4565c95c40a6e28219a3c021eca6c2f310b98"},{"id":"func/_validate_uca_step_is_last","name":"_validate_uca_step_is_last","line":168,"end_line":186,"hash":"0f6abc85faeaf8eead3964465977cab636ff81b3c039ff4c014a92a62143a531"},{"id":"func/TemporalActionVector.validate_deterministic_sequences","name":"validate_deterministic_sequences","line":203,"end_line":229,"hash":"81f5192adcd8ff29e88d34cd7c665bbc0f4ba232c53e0f3376ebcd243739b2c1"},{"id":"func/CandidateExecutionEnvelope.validate_canonical_references","name":"validate_canonical_references","line":269,"end_line":296,"hash":"9c80a1b145db2dcba35b19c0f62034dd2fe3767236e93e6719bdacdcd9977bca"}]}
-# mutate4py-manifest-end

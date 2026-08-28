@@ -65,8 +65,3 @@ class EnrichedThreatSet(BaseModel):
 
     structural_threats: list[StructuralThreat]
     coverage_analysis: CoverageAnalysis
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-08T23:13:34Z","module_hash":"2d28c6413794627c31738275b8342736a7d35fa1bb512dd26d069a666e57b52c","functions":[]}
-# mutate4py-manifest-end

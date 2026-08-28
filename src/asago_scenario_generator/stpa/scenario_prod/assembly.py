@@ -198,8 +198,3 @@ def assemble_candidate_envelope(
         ica_id=ica_id,
         scenario_id=scenario_id,
     )
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-20T10:32:41Z","module_hash":"9445b37b8d9ca755ac4adbbf0959982f453cf1c27ccf79bb3a885945dd06e623","functions":[{"id":"func/assemble_envelope","name":"assemble_envelope","line":45,"end_line":108,"hash":"85e02f9cc6ea6fd619fe565c6899f1abf9c7c29156f3cb8c2df9ac260a986bb0"},{"id":"func/_find_responsibility","name":"_find_responsibility","line":119,"end_line":127,"hash":"e5703d4d5b4be900fd9355108c681ddd49aed0de8250c8b928164f6473a4cea2"},{"id":"func/_find_control_action","name":"_find_control_action","line":130,"end_line":141,"hash":"c5685f93bc5ab728882771670354914868b8d33ee3e132ea87ea3e8ee17fc1dd"},{"id":"func/_collect_source_ids","name":"_collect_source_ids","line":144,"end_line":160,"hash":"4a249f24587d61575b7675765c66188f9430fb14a4b3502810407e69b8b5fb12"},{"id":"func/_validate_causal_factor_sources","name":"_validate_causal_factor_sources","line":163,"end_line":177,"hash":"ae97e621767c3377e0737c996d44193cbdcbf14f153a076aecf1fe83fa824afe"},{"id":"func/assemble_candidate_envelope","name":"assemble_candidate_envelope","line":180,"end_line":238,"hash":"0c59a72323985446a12e22307f51ee28c875dbb9f1742cd49d7ad17fea5d67de"}]}
-# mutate4py-manifest-end

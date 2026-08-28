@@ -16,8 +16,3 @@ __all__ = [
     "REQUIRED_FIELDS",
     "load_profile",
 ]
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-26T11:34:31Z","module_hash":"4b7a309263ca8eb8f62afa69704a2e127785a97c9c4444370cf8a2c1616fb2d9","source_sha256":"ea4bf307b91c4763d38cfda3cff30ed3f1f2f3ccfc5da4dbb368cdead3f10dd6","functions":[]}
-# mutate4py-manifest-end

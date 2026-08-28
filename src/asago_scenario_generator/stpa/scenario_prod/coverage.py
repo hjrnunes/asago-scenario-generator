@@ -105,8 +105,3 @@ def write_coverage_gaps(coverage_gaps: dict, run_dir: Path) -> Path:
         encoding="utf-8",
     )
     return path
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-10T14:15:36Z","module_hash":"c76b7872676f2396943e52e98c317b55e908801c3cb866b9afeccfc6eb389375","functions":[{"id":"func/compute_coverage_gaps","name":"compute_coverage_gaps","line":31,"end_line":89,"hash":"a6444db31a68cead8c994eecbd641661384d88d157176faaf1da1fe5d7f0a314"},{"id":"func/write_coverage_gaps","name":"write_coverage_gaps","line":92,"end_line":107,"hash":"8ed670ecac10f9c93e7bb9a28365f55b1776f3f94dd22f6c1a8a79ff8aad925b"}]}
-# mutate4py-manifest-end

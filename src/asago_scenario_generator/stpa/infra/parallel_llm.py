@@ -142,8 +142,3 @@ def parallel_safe_llm_calls(
             for spec in calls
         ]
         return [f.result() for f in futures]
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-09T11:12:50Z","module_hash":"eccf5aae2345ea55776c4f75c575838dce499262117ac2fa7ef6893ac6bfce05","functions":[{"id":"func/_execute_single_call","name":"_execute_single_call","line":70,"end_line":103,"hash":"01c9f15052dfed89650386d0a881b03f95c66a7ac85067f3859da3dd212d4866"},{"id":"func/parallel_safe_llm_calls","name":"parallel_safe_llm_calls","line":106,"end_line":138,"hash":"9c79843a4d19aab82e6908e5f53555fd64bc32ed285fb950d3568c57924ebc11"}]}
-# mutate4py-manifest-end

@@ -210,8 +210,3 @@ def _write_manifest(
         ),
         encoding="utf-8",
     )
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-10T00:44:00Z","module_hash":"946c4646245bb7f299945b9148f6613f1f13dd108f8831cefd6400c9797e01eb","functions":[{"id":"func/run_sp2","name":"run_sp2","line":59,"end_line":136,"hash":"7b560f6ff5237937d80854a127e7ecee9c5f87b007f1ae342c9907cbcf687c91"},{"id":"func/_write_manifest","name":"_write_manifest","line":139,"end_line":196,"hash":"82039d629a7a1c766f3394db8996fe3e44bb127b4664961398067e922a198c30"}]}
-# mutate4py-manifest-end

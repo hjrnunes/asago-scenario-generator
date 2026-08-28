@@ -76,6 +76,26 @@ canonical differential mutation invocation is `scripts/differential-mutation.sh
 The project target is CRAP at or below 6 and mutation score at or above 80.
 Tool scope remains `src/`; Ruff also checks `acceptance/`.
 
+Mutation tooling details:
+
+- Manifests live in gitignored sidecar files (`<file>.manifest.json`,
+  written with `--manifest-file`), so mutation runs never dirty tracked
+  sources. When no sidecar exists yet, a differential run selects all
+  covered sites once and records the sidecar.
+- `scripts/differential-mutation.sh` also builds a per-source test-context
+  coverage db (`--build-test-contexts`, cached by the tool) so each mutant
+  runs only the tests that cover its line. Set `ASAGO_MUTATION_CONTEXT_DB=0`
+  to skip narrowing.
+- Stale `mutate4py` worker trees under `.mutate4py/workers/` are pruned to
+  the two most recent runs by `scripts/differential-mutation.sh`.
+- The Gherkin mutation runner adapter
+  (`acceptance/gherkin_mutation_runner.py`) gives every runner process a
+  private scratch tree, so parallel `gherkin-mutator` workers never splice
+  the shared snapshot IR under `build/acceptance/ir/`.
+- The heavy clean-checkout QA suite runs its two orderings concurrently and
+  `acceptance/qa/run_suites.py` overlaps the clean-checkout suite with the
+  pool suites by default (`--serial-first` restores sequential scheduling).
+
 ## External tools and pins
 
 `config/swarmforge.env` records repository URLs, exact revisions, commands, and

@@ -220,8 +220,3 @@ def _match_keyword_set(
                 )
             )
     return mappings
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-10T00:18:55Z","module_hash":"ca8d1e1863574af806efc3a4a1e02603ea112204935ba8a3dc11bf3a103f757a","functions":[{"id":"func/match_catalog","name":"match_catalog","line":160,"end_line":189,"hash":"a1efbd16e21327f68ad693bd1c92e8d42100ea264a86c6ec924238453fb8d15a"},{"id":"func/_match_keyword_set","name":"_match_keyword_set","line":192,"end_line":222,"hash":"38c9280c1a8b74b0953d3d55d9ee9feaff6c7a188c4401a24ff1bbee0767fcaa"}]}
-# mutate4py-manifest-end

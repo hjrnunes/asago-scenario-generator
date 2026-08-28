@@ -117,8 +117,3 @@ def append_call_log(entries: list[dict], run_dir: Path) -> None:
         )
         with calls_path.open("a", encoding="utf-8") as fh:
             fh.write(payload)
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-09T17:32:48Z","module_hash":"bdd4259849dc001e9ce50ac9e05f4af149ab09e2c47936e3cc4e6651abb12935","functions":[{"id":"func/_sha256","name":"_sha256","line":37,"end_line":39,"hash":"67d51b4b362a429bf5d02c7d0ff6e4f6338360ab956b700e80bf057a0e9a9443"},{"id":"func/make_call_log_entry","name":"make_call_log_entry","line":42,"end_line":101,"hash":"853111b20a56322817d78971f08c532b5013bf36f41b60205fb169e0d396c09d"},{"id":"func/append_call_log","name":"append_call_log","line":104,"end_line":117,"hash":"5c770898b5ddec662466b41f29ab930af8034546067a37e0d08aa4c36b37bad2"}]}
-# mutate4py-manifest-end

@@ -68,8 +68,3 @@ __all__ = [
     "StpaProjectionTraceabilityViolation",
     "StpaProjectionTraceabilityViolationCode",
 ]
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-20T20:27:50Z","module_hash":"9a864036293f2c6809c203916a58eb4a9a5d4a08c83e83dcdf5394acd435dfa4","functions":[{"id":"func/StpaProjectionTraceabilityResult._sync_valid","name":"_sync_valid","line":56,"end_line":59,"hash":"1dbd5734c1931688dd12f6e456ce7391a6cf0916043f02ff9617a980c967bad5"}]}
-# mutate4py-manifest-end

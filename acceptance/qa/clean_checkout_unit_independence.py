@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -73,6 +74,9 @@ def child_env() -> dict[str, str]:
     environment = dict(os.environ)
     for name in UNSET_ENV:
         environment.pop(name, None)
+    # Per-checkout .venvs are recreated from the shared uv cache on every run;
+    # hardlinking keeps each checkout isolated while avoiding full copies.
+    environment["UV_LINK_MODE"] = "hardlink"
     return environment
 
 
@@ -120,6 +124,16 @@ def write_inventory(label: str, root: Path) -> dict[str, bool]:
     return found
 
 
+def prune_previous_runs(keep: int = 2) -> None:
+    """Delete all but the newest ``keep`` prior clean-checkout run trees."""
+    runs_root = PROJECT_ROOT / "tmp" / "qa-clean-checkout"
+    if not runs_root.is_dir():
+        return
+    prior = sorted(p for p in runs_root.iterdir() if p.is_dir() and p != RUN_ROOT)
+    for stale in prior[:-keep] if len(prior) > keep else []:
+        shutil.rmtree(stale, ignore_errors=True)
+
+
 def source_checkout(name: str) -> Path:
     """Materialize committed source without ignored files or repository metadata."""
     target = RUN_ROOT / name
@@ -161,7 +175,7 @@ def qa_cui_01() -> None:
     check("QA-CUI-01 uv sync --locked succeeds", synced)
     result = run_command(
         "cui-01-unit-suite",
-        [UV, "run", "pytest", "tests/", "-q"],
+        [UV, "run", "pytest", "tests/", "-q", "-n", "2"],
         cwd=checkout,
         env=child_env(),
     )
@@ -188,7 +202,9 @@ def qa_cui_02() -> None:
             "tests/stpa/test_acceptance_snapshot.py",
         ),
     )
-    for label, first, second in orders:
+
+    def run_order(order: tuple[str, str, str]) -> None:
+        label, first, second = order
         checkout = source_checkout(f"cui-02-{label}")
         before = write_inventory(f"cui-02-{label}-before", checkout)
         synced = sync_checkout(f"cui-02-{label}", checkout)
@@ -208,6 +224,13 @@ def qa_cui_02() -> None:
             f"QA-CUI-02 {label} creates no generated output",
             not any(before.values()) and not any(after.values()),
         )
+
+    # The two orderings use disjoint checkouts; running them concurrently
+    # halves this phase's wall time without changing any assertion.
+    with ThreadPoolExecutor(max_workers=len(orders)) as executor:
+        futures = [executor.submit(run_order, order) for order in orders]
+        for future in futures:
+            future.result()
 
 
 def qa_cui_03() -> None:
@@ -273,6 +296,7 @@ def qa_cui_04() -> None:
 
 def main() -> int:
     """Run all clean-checkout QA procedures."""
+    prune_previous_runs()
     print(f"QA evidence: {RUN_ROOT.relative_to(PROJECT_ROOT)}", flush=True)
     qa_cui_01()
     qa_cui_02()

@@ -197,8 +197,3 @@ def _validate_ref_items(
             raise ValueError(
                 f"{model_name} references non-existent {attr_name} '{ref_value}'."
             )
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-08T23:13:34Z","module_hash":"bacc4f02e593f9ea7c19867c78c89252298d61f761c197f1c5e6e1abc094ab6f","functions":[{"id":"func/ScenarioSpec.validate_against","name":"validate_against","line":82,"end_line":112,"hash":"b5f3b0fff2dade0010ce3d68b761fe6f173237300c4c658255b955186ce3c081"},{"id":"func/_build_lookup_maps","name":"_build_lookup_maps","line":115,"end_line":136,"hash":"b114dd4e0d6acbec60c82defef2d8b4170618b683673aa2bceb71f9343dda7b0"},{"id":"func/_validate_target","name":"_validate_target","line":139,"end_line":161,"hash":"d40818f06ac8a94db8511b0199b91691dd8cf0c82e374686938ff7075d7b0d2d"},{"id":"func/_validate_defender_bdi","name":"_validate_defender_bdi","line":164,"end_line":179,"hash":"cd5f60176463094dee673af1db7275677030c230ba9265974fc12f268d4bd5ae"},{"id":"func/_validate_ref_items","name":"_validate_ref_items","line":182,"end_line":195,"hash":"4122803ce918efdb06fd1da19cc87ccc13e6a70333dd4b6e59d08591543481ae"}]}
-# mutate4py-manifest-end

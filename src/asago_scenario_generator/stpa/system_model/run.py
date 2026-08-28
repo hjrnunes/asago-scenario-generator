@@ -430,8 +430,3 @@ def _write_manifest(
     if stage_errors:
         manifest.stage_errors = stage_errors
     write_yaml(manifest, run_dir / "run-manifest.yaml")
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-13T19:48:27Z","module_hash":"5763124a1343cf5c8f78e35f44ae47b8d2c59f7e87a2b54c3f5fdbca639f20da","functions":[{"id":"func/run_sp1","name":"run_sp1","line":79,"end_line":168,"hash":"d424caecdd95117094deece88e91b9bbcf78aa74f58e3d1fee52c0aedb776d1d"},{"id":"func/_try_derive_loss_analysis","name":"_try_derive_loss_analysis","line":184,"end_line":207,"hash":"b1795ba3b9e34725aac83d6c52e299ce98641aa62de59de074c6709bb2fc2119"},{"id":"func/_try_derive_capability_profile","name":"_try_derive_capability_profile","line":210,"end_line":238,"hash":"cdeddcc8136f89427881ec908455e5a85949ae0aa19030b9b137a52923038840"},{"id":"func/_run_stage_2_block","name":"_run_stage_2_block","line":241,"end_line":323,"hash":"21a7f70f55bbfccef88c20e398955fcf1f858ea7aa1497fac1ac39a0bd03533a"},{"id":"func/_compute_input_hashes","name":"_compute_input_hashes","line":326,"end_line":334,"hash":"e6bdbd62d47427569dd6f476f0e301433f188035c685a7e38fa64960bd43b80c"},{"id":"func/_summarize_critic_findings","name":"_summarize_critic_findings","line":337,"end_line":341,"hash":"52f92e834950dffd8fbfbc258cbf55efcd8d6e9f51c7cfe4543c097d2d38b54d"},{"id":"func/_write_manifest","name":"_write_manifest","line":344,"end_line":397,"hash":"f717c04a63526fc8352afd95bf559a30ac330856291c910cf0c6cfb68364bcc1"}]}
-# mutate4py-manifest-end

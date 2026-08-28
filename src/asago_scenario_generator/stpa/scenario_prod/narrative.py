@@ -231,8 +231,3 @@ def derive_temporal_action_vector(
         steps=steps,
         uca_constraint=uca_constraint,
     )
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-20T20:28:40Z","module_hash":"408de2fe35590fdecbdf0703f010f1130f657cf11ffcc8c4bdda35b32b0bc2c7","functions":[{"id":"func/generate_narrative","name":"generate_narrative","line":44,"end_line":91,"hash":"45b1b3df64e80ba8fb67270e38c724c45d26465aab5ef860721774f9e98b9a65"},{"id":"func/build_narrative_prompts","name":"build_narrative_prompts","line":94,"end_line":138,"hash":"3ef51999b5007904f372d31b08d352898c0c08679855caffc2cc181abe99c49e"},{"id":"func/derive_temporal_action_vector","name":"derive_temporal_action_vector","line":158,"end_line":230,"hash":"c9c3815f942598ff9bd6b67ca02a2cbcd446dd9934b5ee68957152a9653b9b63"}]}
-# mutate4py-manifest-end

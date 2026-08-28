@@ -64,8 +64,3 @@ def hash_prompt_templates(prompts_dir: Path) -> dict[str, str]:
         Dict mapping template filename to its 64-character hex digest.
     """
     return TemplateLoader(prompts_dir).hash_prompt_templates()
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-08T23:13:34Z","module_hash":"bb453980269f39497e9f3fded162f09e98e8499e351e09080d7f322a665676e6","functions":[{"id":"func/TemplateLoader.__init__","name":"__init__","line":23,"end_line":29,"hash":"40c5c66ab688c6af0921b638e02938c21f736978e0c76a25b8b566681c36207c"},{"id":"func/TemplateLoader.render_prompt","name":"render_prompt","line":31,"end_line":42,"hash":"4e185463d9e3d75d2129f4eaea737763577787d609c294a58d0566bc9f3828d8"},{"id":"func/TemplateLoader.hash_prompt_templates","name":"hash_prompt_templates","line":44,"end_line":54,"hash":"8c5db8250e309e67613891803a7ff6d3bd6fd1074781452ee2936bc4e4400e7b"},{"id":"func/hash_prompt_templates","name":"hash_prompt_templates","line":57,"end_line":66,"hash":"e51f5ecc835a6ca5115ba6df6114bdbed6aba65678df919df4d6860792c91488"}]}
-# mutate4py-manifest-end

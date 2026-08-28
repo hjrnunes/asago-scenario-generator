@@ -36,6 +36,17 @@ dev = [
 [tool.uv]
 exclude-newer = "7 days"
 
+# Prune bulky non-package directories from mutate4py's workspace discovery:
+# its worker copies and py-file walk skip these instead of copying live-run
+# artifacts and scratch state into every per-worker tree.
+[tool.uv.workspace]
+exclude = [
+    "build",
+    "dist",
+    "output",
+    "tmp",
+]
+
 [tool.hatch.build.targets.wheel.force-include]
 "data" = "asago_scenario_generator/data/bundled"
 

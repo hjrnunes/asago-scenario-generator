@@ -102,8 +102,3 @@ def create_slots(control_structure: ControlStructure) -> list[SlotPlaceholder]:
             )
 
     return slots
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-10T00:18:09Z","module_hash":"71cb5d3f26b28eefa4786a06656e3fb682b8e5407a8f2f571ba14bdc54a83743","functions":[{"id":"func/create_slots","name":"create_slots","line":52,"end_line":104,"hash":"e46420f0c3e13f06794476442bbb7f8acbdd45099034a92fac327a1bcded3792"}]}
-# mutate4py-manifest-end

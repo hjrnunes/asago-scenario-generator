@@ -148,8 +148,3 @@ def _validate_constraint_references(
                     f"SecurityConstraint {sc.constraint_id} references "
                     f"non-existent hazard '{ref}' in related_hazards."
                 )
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-08T23:13:34Z","module_hash":"0d3ea96b02eff6e7b3ceda97d7d25ec470e9465d33b2705dcf80a85bf2e12267","functions":[{"id":"func/LossAnalysis.validate_references_and_provenance","name":"validate_references_and_provenance","line":60,"end_line":77,"hash":"4015d77b7a787bbf4eca8dbe0fdc25029b43ed03c705a15cc6b42fe252ca5d04"},{"id":"func/_validate_risk_card_provenance","name":"_validate_risk_card_provenance","line":80,"end_line":92,"hash":"9705c2e27a574a20899be3b77f3b005c17e3de562e3dc97483a64a245839d6ae"},{"id":"func/_validate_use_case_provenance","name":"_validate_use_case_provenance","line":95,"end_line":108,"hash":"8c910326bcc34c57020be2f50971f912caf648b1b58b0c73fac47a13583c131d"},{"id":"func/_validate_hazard_references","name":"_validate_hazard_references","line":111,"end_line":119,"hash":"a8cf6a6bb6ae577e351cebf8038ade2e50e8cb68416af088d89a1639466aab81"},{"id":"func/_validate_constraint_references","name":"_validate_constraint_references","line":122,"end_line":132,"hash":"fd8f9a5b56a10e725b43bd72743c538d5181d0f15a9b18b50c5f1697e555d5bc"}]}
-# mutate4py-manifest-end

@@ -163,8 +163,3 @@ __all__ = [
     "ScenarioEnvelope",
     "SystemContext",
 ]
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-08T23:13:34Z","module_hash":"5dcba9e829a9cd8df0f5cc563c3206dfd5e1b613ca540fe8e378d0ecbcdec2ae","functions":[]}
-# mutate4py-manifest-end

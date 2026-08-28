@@ -11,8 +11,3 @@ from asago_scenario_generator.stpa.pipeline.runner import (
 )
 
 __all__ = ["STPARunResult", "run_stpa_pipeline"]
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-10T17:26:00Z","module_hash":"11098affbb243b50a0a3c348b51fa1c6382d1335d6fc62761d9a7a97fd18ace9","functions":[]}
-# mutate4py-manifest-end

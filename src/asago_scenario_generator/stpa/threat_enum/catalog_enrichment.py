@@ -154,8 +154,3 @@ def _build_ca_description_lookup(
             link.coordination_mechanism.description
         )
     return lookup
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-10T00:23:37Z","module_hash":"e1ef1042932ee7d346b0f9a6c782cf3ba0423fd8800ccb46bb6cd607b22a38d9","functions":[{"id":"func/enrich_threats","name":"enrich_threats","line":47,"end_line":86,"hash":"fe6af00fabf4804d2b05869798ff4fc58b6cb4bbeac10c49175967eddf59c022"},{"id":"func/reconcile_na_slots","name":"reconcile_na_slots","line":89,"end_line":124,"hash":"f6c93dd49419ec4669e3be4dc5b0a8f352bdf555ab0e29824cbbcdf53abafd4b"},{"id":"func/_build_structural_threat","name":"_build_structural_threat","line":127,"end_line":141,"hash":"08ddbcc04b5bc8e1abc5ac5680ad89e6d7a51e16b2f8ee01f67f912144038629"},{"id":"func/_build_ca_description_lookup","name":"_build_ca_description_lookup","line":144,"end_line":156,"hash":"d16d6c56732b5538b34fdb8663fbed1c790bc3e2d4a668e819e25d06a02b2695"}]}
-# mutate4py-manifest-end

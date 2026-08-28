@@ -475,9 +475,13 @@ semantic draft: Rejected: invalid`.
 
 ### QA-TRSR-30: deterministic repository gates and output hygiene
 
+The invoking QA pipeline already runs the documented gate sequence, so the
+suite executes only the hygiene half by default; set `QA_RUN_GATES=1` to
+also rerun the gates inside this suite (`QA_SKIP_GATES=1` skips both).
+
 1. Confirm the live-model opt-in is unset and no LLM endpoint is
    reachable.
-2. Run the documented commands in order:
+2. Run the documented commands in order (only with `QA_RUN_GATES=1`):
 
    ```bash
    ./scripts/quality.sh

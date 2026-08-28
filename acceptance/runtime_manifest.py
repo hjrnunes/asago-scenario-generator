@@ -96,8 +96,3 @@ def register_all(api: Any, modules: tuple[ModuleType, ...] | None = None) -> Non
         raise RuntimeError("runtime feature registration set is incomplete")
     for name, module in zip(MODULES, selected):
         register_one(api, name, module)
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-12T15:44:24Z","module_hash":"995dc1770db0dbe5bb294afb36072e6e08241613031c13752107d4fabc8391e5","functions":[{"id":"func/_validate_module","name":"_validate_module","line":27,"end_line":33,"hash":"b04bb0f432ca3879bec77223eb14e97367d8c54127beaaca19ec66644ea80483"},{"id":"func/load_modules","name":"load_modules","line":36,"end_line":48,"hash":"d931c44b91b732541db286ece733d73a9212a1ef4b272b0b845eeaa1e4197b64"},{"id":"func/_register_one","name":"_register_one","line":51,"end_line":60,"hash":"7b84e1e6aa81923854153303701f739d0e5b3c1279116a6ffdc9d21ff90ee9ce"},{"id":"func/register_all","name":"register_all","line":63,"end_line":69,"hash":"2baccb463f0f9a273a6ce509e3b08c56592b3dd12651e0b058aed0c47c7bf823"}]}
-# mutate4py-manifest-end

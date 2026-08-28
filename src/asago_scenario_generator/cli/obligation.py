@@ -69,8 +69,3 @@ def plan_obligations_cmd(
     typer.echo(f"  Obligations:   {len(plan.obligations)}")
     typer.echo("  Network calls: 0")
     typer.echo("  Model calls:   0")
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-28T14:19:21Z","module_hash":"a0a57bfc4c15c58a3ce60058fc07eb534dff21ffbdc5a81d8c47499f8c15b28d","source_sha256":"ad76ceedc1f33355b30f00e0eb99ebd8e1849a6a1aa96a46cda978f096cbbda6","functions":[{"id":"func/run_plan_obligations","name":"run_plan_obligations","line":28,"end_line":42,"hash":"22e8bc5835a711687194fb9a63d282ad2af3299c49e8813b904f9e6444fe1c24"},{"id":"func/plan_obligations_cmd","name":"plan_obligations_cmd","line":46,"end_line":71,"hash":"0ec604a882f8022c88c248c04322da4607c3df2d7214ba9c7cbc7c9eaea22746"}]}
-# mutate4py-manifest-end

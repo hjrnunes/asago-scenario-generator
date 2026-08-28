@@ -452,8 +452,3 @@ def _remap_references(
     for item in items:
         refs = getattr(item, ref_attr)
         setattr(item, ref_attr, [id_map.get(ref, ref) for ref in refs])
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-11T11:50:53Z","module_hash":"06e356214430b4d9828468d3816ed3e24981490c507a106b3705abc29c8211fc","functions":[{"id":"func/derive_loss_analysis","name":"derive_loss_analysis","line":37,"end_line":124,"hash":"21c908533bc79b6d01657c6c6335cf95eb7c544a19bad2903de0e205dc5e1959"},{"id":"func/_run_stage1a_call","name":"_run_stage1a_call","line":127,"end_line":160,"hash":"37aad383f7dbea5e5024505d7cccd7f3b80ce9d0b597e22eb644775b3cf9221a"},{"id":"func/_max_id_num","name":"_max_id_num","line":163,"end_line":176,"hash":"6a33fe3dc4ff93f3d1859511ae0bdbec836b0ca731d6dcef08e7e0ed2bb487cb"},{"id":"func/_merge_drafts","name":"_merge_drafts","line":179,"end_line":215,"hash":"78acb5779c3bb0725d26d07091b065d434d296125cb4e524ca2f9cb34315912f"},{"id":"func/_renumber_items","name":"_renumber_items","line":218,"end_line":236,"hash":"5d4dfbcc96950022de526a41235bddac53174e3a916c2445c78b74eccad5c43b"},{"id":"func/_remap_references","name":"_remap_references","line":239,"end_line":250,"hash":"f0a6f06c65cc019b9471cc1339e2ab13e037dd073f592adfb160d29787e64545"}]}
-# mutate4py-manifest-end

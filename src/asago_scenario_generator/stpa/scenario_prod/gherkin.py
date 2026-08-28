@@ -211,8 +211,3 @@ def build_gherkin_prompts(
     )
 
     return system_prompt, user_prompt
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-20T20:28:31Z","module_hash":"39dbab10feb8c8caf10eb8cfc2c93254f63d4069fea10e6e2d4627c7d9cb9e4f","functions":[{"id":"func/generate_gherkin","name":"generate_gherkin","line":39,"end_line":90,"hash":"2696cb3a713cbffb2fdaa407f50ce235c9448f7a34345f8f5d02e58043d37246"},{"id":"func/parse_gherkin_spec","name":"parse_gherkin_spec","line":93,"end_line":108,"hash":"a421a08206d3ea26c0ce738422c2057124a80e6f99ed56c665f5373702e05926"},{"id":"func/_strip_code_fences","name":"_strip_code_fences","line":111,"end_line":116,"hash":"3965cc27ab2581cbf686d2ccada42a3298dedb886a4e2c3f43c62af0122c97ee"},{"id":"func/_parse_gherkin_yaml","name":"_parse_gherkin_yaml","line":119,"end_line":127,"hash":"fac2f2d6c061952fdb0cc0611f4dc7f67cc7fc8b120be72f26576e2890ec4f68"},{"id":"func/find_security_constraint","name":"find_security_constraint","line":130,"end_line":142,"hash":"84567bf4637b14b8cf301f46d81d9a7c5dba9cbf59bd92219ab128d599483bab"},{"id":"func/_extract_valid_loss_ids","name":"_extract_valid_loss_ids","line":145,"end_line":150,"hash":"b3877b29573191a25c86f7e31ce855690431951fc143624d7e6cf845b1adf4b1"},{"id":"func/_extract_valid_hazard_ids","name":"_extract_valid_hazard_ids","line":153,"end_line":155,"hash":"20caf5a95c1f64901c0a119dd47705fb0e21aa8b5bfbbd84b2d1d3ad0a557215"},{"id":"func/build_gherkin_prompts","name":"build_gherkin_prompts","line":158,"end_line":213,"hash":"a677d168f27195e9f861619faacb6c4d77a9c455692e55138b5635ddb596a5d1"}]}
-# mutate4py-manifest-end

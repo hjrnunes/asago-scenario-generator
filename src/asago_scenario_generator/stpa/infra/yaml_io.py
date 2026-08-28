@@ -67,8 +67,3 @@ def read_yaml(path: Path, model_class: type[BaseModel]) -> BaseModel:
     path = Path(path)
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     return model_class.model_validate(raw)
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-09T00:31:41Z","module_hash":"e4223336446c8dabf9d1a065b733d02945a34bf089f09a63f1ae0e36e38232cf","functions":[{"id":"func/write_yaml","name":"write_yaml","line":19,"end_line":51,"hash":"9c701f2357e0581f43ad8f0e38eb3aeb355425e6cd09249b80e7a9b03f455ed4"},{"id":"func/read_yaml","name":"read_yaml","line":54,"end_line":69,"hash":"ff05853616a7dd881a650822852f4c42d1dee015ada855d8116699ae5d763209"}]}
-# mutate4py-manifest-end

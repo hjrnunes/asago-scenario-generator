@@ -141,8 +141,3 @@ def check_all_na_quality(
         flagged_slots=flagged_slots,
         ratio_flags=ratio_flags,
     )
-
-
-# mutate4py-manifest-begin
-# {"version":1,"tested_at":"2026-08-10T00:23:57Z","module_hash":"7538c9c1af0cf25a8c112781130a82f67fad4f1dfde83d527c59370f071c3465","functions":[{"id":"func/NAQualityResult.__init__","name":"__init__","line":47,"end_line":53,"hash":"9c1643611dd392f461d5c4ac6243c2ebcb6cb353b7f3096a6690c6564e1a9d60"},{"id":"func/check_structural_keywords","name":"check_structural_keywords","line":56,"end_line":73,"hash":"ae1510dbbaf09692ea2e1c74c4e15a6435a1990768466d767805d3bda13cdcf2"},{"id":"func/check_na_ratio","name":"check_na_ratio","line":76,"end_line":103,"hash":"614e1656054368a6be169ed9655d316c6c66d3c3e4d31ad2e10c74492e8ab443"},{"id":"func/_group_slots_by_responsibility","name":"_group_slots_by_responsibility","line":106,"end_line":118,"hash":"953010d6a540a7779fcbaf5aeecd01cc3d58a431951bad62cb55f8ec479d4f60"},{"id":"func/check_all_na_quality","name":"check_all_na_quality","line":121,"end_line":143,"hash":"04aff0e9f3ae62c148b29c974926ad96c3ccc3ceecf73d1b593fe53b00526664"}]}
-# mutate4py-manifest-end
