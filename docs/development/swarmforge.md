@@ -96,7 +96,16 @@ Mutation tooling details:
   on, the tool hard-errors when a selected line is LCOV-covered but absent
   from the db: the context list in `config/mutation-test-contexts.tsv`
   is missing a test that covers that line — extend the list or run without
-  narrowing.
+  narrowing. The context list is regenerated from per-test coverage
+  contexts (`pytest tests/ --cov=asago_scenario_generator --cov-context=test`
+  over the full unit suite, then decoding `.coverage`); every listed test
+  covers at least one line of its source file.
+- The script runs mutate4py through `uv run --no-cache --with <fork-source>`:
+  uv caches wheels built for `file://` sources keyed by package name and
+  version, so a same-version fork checkout keeps serving its first build
+  even after its code changes (mtime touches and `--refresh-package` do
+  not invalidate it). `--no-cache` forces a rebuild per invocation; the
+  cost is a ~1s local build per gate invocation.
 - Stale `mutate4py` worker trees under `.mutate4py/workers/` are pruned to
   the two most recent runs by `scripts/differential-mutation.sh`; the tool
   itself removes a completed run's trees.
