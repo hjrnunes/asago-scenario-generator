@@ -185,6 +185,8 @@ def _require_result(
     if result is not None:
         return result, None
     if world is not None:
+        # Shared generated-test registry: the correspondence feature reuses
+        # step texts registered here and may own the live result.
         corr_state = getattr(world, "correspondence_state", None)
         if corr_state and corr_state.get("reconciliation_result") is not None:
             return corr_state["reconciliation_result"], None
@@ -519,6 +521,8 @@ def _h_resource_map_pins_versions(
     )
     srm = _make_representative_map(stpa_version=map_stpa, taxonomy_version=map_taxonomy)
     state["resource_map"] = srm
+    # Shared generated-test registry: the correspondence artifact feature
+    # reuses this step text, so keep its resource map versions in sync.
     corr_state = getattr(world, "correspondence_state", None)
     if corr_state is not None and corr_state.get("resource_map") is not None:
         corr_state["resource_map"].stpa_version = map_stpa
@@ -1094,6 +1098,8 @@ def _h_two_artifacts_byte_identical(
     state = _get_srm_state(world)
     texts = state["serialized_texts"]
     if len(texts) != 2:
+        # Shared generated-test registry: the correspondence artifact feature
+        # also registers this step and may own the serialized texts.
         corr_state = getattr(world, "correspondence_state", None)
         if corr_state and len(corr_state.get("serialized_twice", [])) == 2:
             texts = corr_state["serialized_twice"]

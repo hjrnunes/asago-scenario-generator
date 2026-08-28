@@ -2,54 +2,12 @@
 
 from __future__ import annotations
 
-from asago_scenario_generator.models.system_resource_map import (
-    ControlActionEntry,
-    LossLinkEntry,
-    SystemResourceEntry,
-    SystemResourceMap,
-    TrustBoundaryEntry,
-)
 from asago_scenario_generator.pipeline.correspondence import propose_correspondence
-
-
-def _make_test_resource_map() -> SystemResourceMap:
-    return SystemResourceMap(
-        schema_version="1",
-        stpa_version="stpa-v1",
-        taxonomy_version="atlas-2026.05",
-        system_resources=[
-            SystemResourceEntry(
-                element_id="SR-1",
-                taxonomy_ref="ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            )
-        ],
-        control_actions=[
-            ControlActionEntry(
-                element_id="CA-1-1",
-                controller_id="RESP-1",
-                process_id="CP-2",
-                action_name="Issue Payment",
-            )
-        ],
-        loss_links=[
-            LossLinkEntry(
-                element_id="LL-1",
-                loss_id="L-1",
-                hazard_id="H-1",
-            )
-        ],
-        trust_boundaries=[
-            TrustBoundaryEntry(
-                element_id="TB-1",
-                resource_ids=["SR-1"],
-                taxonomy_ref="tb:v1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            )
-        ],
-    )
+from tests.helpers.correspondence_factory import make_test_resource_map
 
 
 def test_propose_exact_id_and_curated_map() -> None:
-    srm = _make_test_resource_map()
+    srm = make_test_resource_map()
     evidence = [
         {
             "evidence_source": "exact-id",
@@ -88,7 +46,7 @@ def test_propose_exact_id_and_curated_map() -> None:
 
 
 def test_propose_weak_resource_overlap() -> None:
-    srm = _make_test_resource_map()
+    srm = make_test_resource_map()
     evidence = [
         {
             "evidence_source": "resource-overlap",
@@ -110,7 +68,7 @@ def test_propose_weak_resource_overlap() -> None:
 
 
 def test_propose_provenance_retained() -> None:
-    srm = _make_test_resource_map()
+    srm = make_test_resource_map()
     evidence = [
         {
             "proposal_id": "P-1",
@@ -141,7 +99,7 @@ def test_propose_provenance_retained() -> None:
 
 
 def test_propose_heuristic_and_model_assisted_adapters_cannot_confirm() -> None:
-    srm = _make_test_resource_map()
+    srm = make_test_resource_map()
     evidence = [
         {
             "proposal_id": "P-H",

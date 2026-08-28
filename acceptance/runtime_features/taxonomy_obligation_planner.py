@@ -303,6 +303,8 @@ def _h_canonically_equivalent(
                 return False, "Serialized SRM artifacts not equivalent"
             return True, ""
         corr_state = getattr(world, "correspondence_state", None)
+        # Shared generated-test registry: the correspondence artifact feature
+        # also registers this step and may own the serialized artifacts.
         if corr_state and corr_state.get("serialized_a") is not None:
             if corr_state["serialized_a"] != corr_state["serialized_b"]:
                 return False, "Serialized correspondence artifacts not equivalent"
@@ -456,6 +458,8 @@ def _h_byte_identical(world: World, text: str, examples: dict) -> tuple[bool, st
                 return True, ""
             return False, "Serialized texts are not byte-identical"
         corr_state = getattr(world, "correspondence_state", None)
+        # Shared generated-test registry: the correspondence artifact feature
+        # also registers this step and may own the serialized texts.
         if corr_state and len(corr_state.get("serialized_twice", [])) == 2:
             corr_texts = corr_state["serialized_twice"]
             if corr_texts[0] == corr_texts[1]:

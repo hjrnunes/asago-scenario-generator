@@ -105,6 +105,81 @@ def _get_corr_state(world: World) -> dict[str, Any]:
     return state
 
 
+def _require_reconciliation_result(
+    state: dict[str, Any],
+) -> tuple[ReconciliationResult | None, str | None]:
+    """Return the reconciliation result, or a failure message when missing."""
+    result = state.get("reconciliation_result")
+    if result is None:
+        return None, "Reconciliation result missing"
+    return result, None
+
+
+def _require_proposal_set(
+    state: dict[str, Any],
+) -> tuple[Any, str | None]:
+    """Return the proposal set, or a failure message when missing."""
+    pset = state.get("proposal_set")
+    if pset is None:
+        return None, "Proposal set missing"
+    return pset, None
+
+
+def _proposal_by_id(
+    proposals: list[Any],
+    prop_id: str,
+) -> tuple[Any | None, str | None]:
+    """Find one proposal by id, or a failure message when absent."""
+    prop = next((p for p in proposals if p.proposal_id == prop_id), None)
+    if prop is None:
+        return None, f"Proposal {prop_id} missing"
+    return prop, None
+
+
+def _make_proposal(
+    state: dict[str, Any],
+    prop_id: str,
+    **overrides: Any,
+) -> CorrespondenceProposal:
+    """Build a proposal pinned to the state's resource-map versions."""
+    srm = state["resource_map"]
+    fields: dict[str, Any] = {
+        "proposal_id": prop_id,
+        "left_ref": "CA-1-1",
+        "right_ref": "ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "relation_type": "supports",
+        "evidence_source": "exact-id",
+        "strength": "high",
+        "evidence_refs": ["CA-1-1"],
+        "stpa_version": str(srm.stpa_version),
+        "taxonomy_version": str(srm.taxonomy_version),
+    }
+    fields.update(overrides)
+    return CorrespondenceProposal(**fields)
+
+
+def _proposals_for_ids(
+    state: dict[str, Any],
+    ids: list[str],
+) -> list[CorrespondenceProposal]:
+    """Build one canonical proposal per id for presentation-order scenarios."""
+    return [_make_proposal(state, pid) for pid in ids]
+
+
+def _serialize_result(result: ReconciliationResult, fmt: str) -> str:
+    """Serialize a reconciliation result in the requested format (YAML or JSON)."""
+    if fmt.upper() == "YAML":
+        return result.to_yaml()
+    return result.to_json()
+
+
+def _deserialize_result(text: str, fmt: str) -> ReconciliationResult:
+    """Deserialize a reconciliation result from the requested format (YAML or JSON)."""
+    if fmt.upper() == "YAML":
+        return ReconciliationResult.from_yaml(text)
+    return ReconciliationResult.from_json(text)
+
+
 # -----------------------------------------------------------------------------
 # Background steps
 # -----------------------------------------------------------------------------
@@ -156,18 +231,7 @@ def _h_proposal_has_relation_type(
         prop_id = examples.get("proposal_id", "P-1")
         rel_type = examples.get("relation_type", "supports")
 
-    srm = state["resource_map"]
-    prop = CorrespondenceProposal(
-        proposal_id=prop_id,
-        left_ref="CA-1-1",
-        right_ref="ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        relation_type=rel_type,
-        evidence_source="exact-id",
-        strength="high",
-        evidence_refs=["CA-1-1"],
-        stpa_version=str(srm.stpa_version),
-        taxonomy_version=str(srm.taxonomy_version),
-    )
+    prop = _make_proposal(state, prop_id, relation_type=rel_type)
     state["raw_proposals"][prop_id] = prop
     return True, ""
 
@@ -186,17 +250,12 @@ def _h_proposal_has_relation_type_and_strength(
         rel_type = examples.get("relation_type", "supports")
         strength = examples.get("strength", "high")
 
-    srm = state["resource_map"]
-    prop = CorrespondenceProposal(
-        proposal_id=prop_id,
-        left_ref="CA-1-1",
-        right_ref="ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    prop = _make_proposal(
+        state,
+        prop_id,
         relation_type=rel_type,
         evidence_source="exact-id" if strength == "high" else "resource-overlap",
         strength=strength,
-        evidence_refs=["CA-1-1"],
-        stpa_version=str(srm.stpa_version),
-        taxonomy_version=str(srm.taxonomy_version),
     )
     state["raw_proposals"][prop_id] = prop
     return True, ""
@@ -237,9 +296,9 @@ def _h_result_retains_proposal(
     state = _get_corr_state(world)
     match = re.search(r'the result retains proposal "([^"]*)"', text)
     prop_id = match.group(1) if match else examples.get("proposal_id", "")
-    res = state["reconciliation_result"]
-    if res is None:
-        return False, "Reconciliation result is missing"
+    res, failure = _require_reconciliation_result(state)
+    if failure:
+        return False, failure
     found = any(p.proposal_id == prop_id for p in res.proposals)
     if not found:
         return False, f"Proposal {prop_id} not retained in result"
@@ -257,11 +316,11 @@ def _h_result_records_adjudication(
         expected_adj = examples.get("adjudication", "")
         prop_id = examples.get("proposal_id", "")
 
-    res = state["reconciliation_result"]
-    if res is None:
-        return False, "Reconciliation result is missing"
-    prop = next((p for p in res.proposals if p.proposal_id == prop_id), None)
-    if prop is None:
+    res, failure = _require_reconciliation_result(state)
+    if failure:
+        return False, failure
+    prop, failure = _proposal_by_id(res.proposals, prop_id)
+    if failure:
         return False, f"Proposal {prop_id} not found in result"
     if prop.adjudication != expected_adj:
         return (
@@ -282,11 +341,11 @@ def _h_result_records_relation_type(
         expected_rel = examples.get("relation_type", "")
         prop_id = examples.get("proposal_id", "")
 
-    res = state["reconciliation_result"]
-    if res is None:
-        return False, "Reconciliation result is missing"
-    prop = next((p for p in res.proposals if p.proposal_id == prop_id), None)
-    if prop is None:
+    res, failure = _require_reconciliation_result(state)
+    if failure:
+        return False, failure
+    prop, failure = _proposal_by_id(res.proposals, prop_id)
+    if failure:
         return False, f"Proposal {prop_id} not found in result"
     if prop.relation_type != expected_rel:
         return (
@@ -307,11 +366,11 @@ def _h_proposal_has_relation_type_check(
         prop_id = examples.get("proposal_id", "")
         expected_rel = examples.get("relation_type", "")
 
-    res = state["reconciliation_result"]
-    if res is None:
-        return False, "Reconciliation result is missing"
-    prop = next((p for p in res.proposals if p.proposal_id == prop_id), None)
-    if prop is None:
+    res, failure = _require_reconciliation_result(state)
+    if failure:
+        return False, failure
+    prop, failure = _proposal_by_id(res.proposals, prop_id)
+    if failure:
         return False, f"Proposal {prop_id} not found in result"
     if prop.relation_type != expected_rel:
         return (
@@ -332,11 +391,11 @@ def _h_proposal_has_strength_check(
         prop_id = examples.get("proposal_id", "")
         expected_strength = examples.get("strength", "")
 
-    res = state["reconciliation_result"]
-    if res is None:
-        return False, "Reconciliation result is missing"
-    prop = next((p for p in res.proposals if p.proposal_id == prop_id), None)
-    if prop is None:
+    res, failure = _require_reconciliation_result(state)
+    if failure:
+        return False, failure
+    prop, failure = _proposal_by_id(res.proposals, prop_id)
+    if failure:
         return False, f"Proposal {prop_id} not found in result"
     if prop.strength != expected_strength:
         return (
@@ -357,11 +416,11 @@ def _h_proposal_has_adjudication_check(
         prop_id = examples.get("proposal_id", "")
         expected_adj = examples.get("adjudication", "")
 
-    res = state["reconciliation_result"]
-    if res is None:
-        return False, "Reconciliation result is missing"
-    prop = next((p for p in res.proposals if p.proposal_id == prop_id), None)
-    if prop is None:
+    res, failure = _require_reconciliation_result(state)
+    if failure:
+        return False, failure
+    prop, failure = _proposal_by_id(res.proposals, prop_id)
+    if failure:
         return False, f"Proposal {prop_id} not found in result"
     if prop.adjudication != expected_adj:
         return (
@@ -375,9 +434,9 @@ def _h_relation_type_not_equal_adjudication(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     state = _get_corr_state(world)
-    res = state["reconciliation_result"]
-    if res is None:
-        return False, "Reconciliation result is missing"
+    res, failure = _require_reconciliation_result(state)
+    if failure:
+        return False, failure
     for p in res.proposals:
         if p.relation_type == p.adjudication:
             return (
@@ -391,9 +450,9 @@ def _h_relation_type_not_equal_strength(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     state = _get_corr_state(world)
-    res = state["reconciliation_result"]
-    if res is None:
-        return False, "Reconciliation result is missing"
+    res, failure = _require_reconciliation_result(state)
+    if failure:
+        return False, failure
     for p in res.proposals:
         if p.relation_type == p.strength:
             return (
@@ -421,28 +480,21 @@ def _h_conflicting_proposals(
         left_ref = examples.get("left_ref", "CA-1-1")
         right_ref = examples.get("right_ref", "ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 
-    srm = state["resource_map"]
-    p_a = CorrespondenceProposal(
-        proposal_id=prop_a,
+    p_a = _make_proposal(
+        state,
+        prop_a,
         left_ref=left_ref,
         right_ref=right_ref,
         relation_type=type_a,
-        evidence_source="exact-id",
-        strength="high",
         evidence_refs=[left_ref],
-        stpa_version=str(srm.stpa_version),
-        taxonomy_version=str(srm.taxonomy_version),
     )
-    p_b = CorrespondenceProposal(
-        proposal_id=prop_b,
+    p_b = _make_proposal(
+        state,
+        prop_b,
         left_ref=left_ref,
         right_ref=right_ref,
         relation_type=type_b,
-        evidence_source="exact-id",
-        strength="high",
         evidence_refs=[left_ref],
-        stpa_version=str(srm.stpa_version),
-        taxonomy_version=str(srm.taxonomy_version),
     )
     state["raw_proposals"] = {prop_a: p_a, prop_b: p_b}
     state["adjudications"] = {prop_a: "confirmed", prop_b: "confirmed"}
@@ -484,9 +536,9 @@ def _h_pair_has_adjudication(
     state = _get_corr_state(world)
     match = re.search(r'the pair has adjudication "([^"]*)"', text)
     expected_adj = match.group(1) if match else examples.get("adjudication", "")
-    res = state["reconciliation_result"]
-    if res is None:
-        return False, "Reconciliation result is missing"
+    res, failure = _require_reconciliation_result(state)
+    if failure:
+        return False, failure
     for p in res.proposals:
         if p.adjudication != expected_adj:
             return (
@@ -502,9 +554,9 @@ def _h_pair_has_conflict_reason(
     state = _get_corr_state(world)
     match = re.search(r'the pair has conflict reason "([^"]*)"', text)
     expected_reason = match.group(1) if match else examples.get("conflict_reason", "")
-    res = state["reconciliation_result"]
-    if res is None:
-        return False, "Reconciliation result is missing"
+    res, failure = _require_reconciliation_result(state)
+    if failure:
+        return False, failure
     for p in res.proposals:
         if p.conflict_reason != expected_reason:
             return (
@@ -518,9 +570,9 @@ def _h_neither_proposal_confirmed_by_order(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     state = _get_corr_state(world)
-    res = state["reconciliation_result"]
-    if res is None:
-        return False, "Reconciliation result is missing"
+    res, failure = _require_reconciliation_result(state)
+    if failure:
+        return False, failure
     for p in res.proposals:
         if p.adjudication == "confirmed":
             return False, f"Proposal {p.proposal_id} was confirmed by order"
@@ -538,64 +590,35 @@ def _h_proposal_has_confirmation_defect(
         prop_id = examples.get("proposal_id", "P-9")
         defect = examples.get("defect", "")
 
-    srm = state["resource_map"]
     if defect == "dangling-left":
-        prop = CorrespondenceProposal(
-            proposal_id=prop_id,
+        prop = _make_proposal(
+            state,
+            prop_id,
             left_ref="NON-EXISTENT-LEFT",
-            right_ref="ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            relation_type="supports",
-            evidence_source="exact-id",
-            strength="high",
             evidence_refs=["NON-EXISTENT-LEFT"],
-            stpa_version=str(srm.stpa_version),
-            taxonomy_version=str(srm.taxonomy_version),
         )
     elif defect == "dangling-right":
-        prop = CorrespondenceProposal(
-            proposal_id=prop_id,
-            left_ref="CA-1-1",
+        prop = _make_proposal(
+            state,
+            prop_id,
             right_ref="NON-EXISTENT-RIGHT",
-            relation_type="supports",
-            evidence_source="exact-id",
-            strength="high",
-            evidence_refs=["CA-1-1"],
-            stpa_version=str(srm.stpa_version),
-            taxonomy_version=str(srm.taxonomy_version),
         )
     elif defect == "stale-version":
-        prop = CorrespondenceProposal(
-            proposal_id=prop_id,
-            left_ref="CA-1-1",
-            right_ref="ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            relation_type="supports",
-            evidence_source="exact-id",
-            strength="high",
-            evidence_refs=["CA-1-1"],
+        prop = _make_proposal(
+            state,
+            prop_id,
             stpa_version="stpa-v0-outdated",
-            taxonomy_version=str(srm.taxonomy_version),
         )
     elif defect == "evidence-free":
-        prop = CorrespondenceProposal(
-            proposal_id=prop_id,
-            left_ref="CA-1-1",
-            right_ref="ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            relation_type="supports",
+        prop = _make_proposal(
+            state,
+            prop_id,
             evidence_source="",
-            strength="high",
             evidence_refs=[],
-            stpa_version=str(srm.stpa_version),
-            taxonomy_version=str(srm.taxonomy_version),
         )
     else:
-        prop = CorrespondenceProposal(
-            proposal_id=prop_id,
-            left_ref="CA-1-1",
-            right_ref="ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            relation_type="supports",
-            stpa_version=str(srm.stpa_version),
-            taxonomy_version=str(srm.taxonomy_version),
-        )
+        # Unknown defect: match the model defaults, including empty evidence.
+        prop = _make_proposal(state, prop_id, evidence_refs=[])
 
     state["raw_proposals"] = {prop_id: prop}
     state["adjudications"] = {prop_id: "confirmed"}
@@ -638,20 +661,7 @@ def _h_proposals_order_a_reconciled(
     ids = [x.strip() for x in order_a.split(",") if x.strip()]
 
     srm = state["resource_map"]
-    props = [
-        CorrespondenceProposal(
-            proposal_id=pid,
-            left_ref="CA-1-1",
-            right_ref="ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            relation_type="supports",
-            evidence_source="exact-id",
-            strength="high",
-            evidence_refs=["CA-1-1"],
-            stpa_version=str(srm.stpa_version),
-            taxonomy_version=str(srm.taxonomy_version),
-        )
-        for pid in ids
-    ]
+    props = _proposals_for_ids(state, ids)
     adjudications = {pid: "confirmed" for pid in ids}
     state["result_a"] = reconcile_correspondence(
         srm, props, adjudications=adjudications
@@ -667,22 +677,7 @@ def _h_same_proposals_presented_as_order_b(
     order_b = match.group(1) if match else examples.get("order_b", "P-3,P-1,P-2")
     ids = [x.strip() for x in order_b.split(",") if x.strip()]
 
-    srm = state["resource_map"]
-    props = [
-        CorrespondenceProposal(
-            proposal_id=pid,
-            left_ref="CA-1-1",
-            right_ref="ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            relation_type="supports",
-            evidence_source="exact-id",
-            strength="high",
-            evidence_refs=["CA-1-1"],
-            stpa_version=str(srm.stpa_version),
-            taxonomy_version=str(srm.taxonomy_version),
-        )
-        for pid in ids
-    ]
-    state["raw_proposals_b"] = props
+    state["raw_proposals_b"] = _proposals_for_ids(state, ids)
     state["adjudications_b"] = {pid: "confirmed" for pid in ids}
     return True, ""
 
@@ -766,9 +761,9 @@ def _h_result_contains_proposal_count(
     expected_count = (
         int(match.group(1)) if match else int(examples.get("proposal_count", 0))
     )
-    res = state["reconciliation_result"]
-    if res is None:
-        return False, "Reconciliation result missing"
+    res, failure = _require_reconciliation_result(state)
+    if failure:
+        return False, failure
     if len(res.proposals) != expected_count:
         return (
             False,
@@ -781,9 +776,9 @@ def _h_no_relation_inferred_from_wording(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     state = _get_corr_state(world)
-    res = state["reconciliation_result"]
-    if res is None:
-        return False, "Reconciliation result missing"
+    res, failure = _require_reconciliation_result(state)
+    if failure:
+        return False, failure
     if len(res.proposals) > 0:
         return False, "Relation was inferred from wording"
     return True, ""
@@ -906,9 +901,9 @@ def _h_proposal_set_contains_proposal(
     state = _get_corr_state(world)
     match = re.search(r'the proposal set contains proposal "([^"]*)"', text)
     prop_id = match.group(1) if match else examples.get("proposal_id", "")
-    pset = state["proposal_set"]
-    if pset is None:
-        return False, "Proposal set missing"
+    pset, failure = _require_proposal_set(state)
+    if failure:
+        return False, failure
     found = any(p.proposal_id == prop_id for p in pset.proposals)
     if not found:
         return False, f"Proposal {prop_id} not in proposal set"
@@ -922,12 +917,12 @@ def _h_that_proposal_has_evidence_source(
     match = re.search(r'that proposal has evidence source "([^"]*)"', text)
     expected_src = match.group(1) if match else examples.get("evidence_source", "")
     prop_id = examples.get("proposal_id", "P-1")
-    pset = state["proposal_set"]
-    if pset is None:
-        return False, "Proposal set missing"
-    prop = next((p for p in pset.proposals if p.proposal_id == prop_id), None)
-    if prop is None:
-        return False, f"Proposal {prop_id} missing"
+    pset, failure = _require_proposal_set(state)
+    if failure:
+        return False, failure
+    prop, failure = _proposal_by_id(pset.proposals, prop_id)
+    if failure:
+        return False, failure
     if prop.evidence_source != expected_src:
         return (
             False,
@@ -943,12 +938,12 @@ def _h_that_proposal_has_strength(
     match = re.search(r'that proposal has strength "([^"]*)"', text)
     expected_strength = match.group(1) if match else examples.get("strength", "")
     prop_id = examples.get("proposal_id", "P-1")
-    pset = state["proposal_set"]
-    if pset is None:
-        return False, "Proposal set missing"
-    prop = next((p for p in pset.proposals if p.proposal_id == prop_id), None)
-    if prop is None:
-        return False, f"Proposal {prop_id} missing"
+    pset, failure = _require_proposal_set(state)
+    if failure:
+        return False, failure
+    prop, failure = _proposal_by_id(pset.proposals, prop_id)
+    if failure:
+        return False, failure
     if prop.strength != expected_strength:
         return (
             False,
@@ -964,12 +959,12 @@ def _h_that_proposal_has_relation_type(
     match = re.search(r'that proposal has relation type "([^"]*)"', text)
     expected_rel = match.group(1) if match else examples.get("relation_type", "")
     prop_id = examples.get("proposal_id", "P-1")
-    pset = state["proposal_set"]
-    if pset is None:
-        return False, "Proposal set missing"
-    prop = next((p for p in pset.proposals if p.proposal_id == prop_id), None)
-    if prop is None:
-        return False, f"Proposal {prop_id} missing"
+    pset, failure = _require_proposal_set(state)
+    if failure:
+        return False, failure
+    prop, failure = _proposal_by_id(pset.proposals, prop_id)
+    if failure:
+        return False, failure
     if prop.relation_type != expected_rel:
         return (
             False,
@@ -983,12 +978,12 @@ def _h_that_proposal_not_confirmed(
 ) -> tuple[bool, str]:
     state = _get_corr_state(world)
     prop_id = examples.get("proposal_id", "P-1")
-    pset = state["proposal_set"]
-    if pset is None:
-        return False, "Proposal set missing"
-    prop = next((p for p in pset.proposals if p.proposal_id == prop_id), None)
-    if prop is None:
-        return False, f"Proposal {prop_id} missing"
+    pset, failure = _require_proposal_set(state)
+    if failure:
+        return False, failure
+    prop, failure = _proposal_by_id(pset.proposals, prop_id)
+    if failure:
+        return False, failure
     if prop.is_confirmed:
         return False, f"Proposal {prop_id} was confirmed"
     return True, ""
@@ -1003,12 +998,12 @@ def _h_that_proposal_not_classified_as_other(
     )
     other_src = match.group(1) if match else examples.get("other_source", "")
     prop_id = examples.get("proposal_id", "P-3")
-    pset = state["proposal_set"]
-    if pset is None:
-        return False, "Proposal set missing"
-    prop = next((p for p in pset.proposals if p.proposal_id == prop_id), None)
-    if prop is None:
-        return False, f"Proposal {prop_id} missing"
+    pset, failure = _require_proposal_set(state)
+    if failure:
+        return False, failure
+    prop, failure = _proposal_by_id(pset.proposals, prop_id)
+    if failure:
+        return False, failure
     if prop.evidence_source == other_src:
         return False, f"Proposal {prop_id} classified as other source '{other_src}'"
     return True, ""
@@ -1101,12 +1096,12 @@ def _h_proposal_has_left_and_right_ref(
         left_ref = examples.get("left_ref", "")
         right_ref = examples.get("right_ref", "")
 
-    pset = state["proposal_set"]
-    if pset is None:
-        return False, "Proposal set missing"
-    prop = next((p for p in pset.proposals if p.proposal_id == prop_id), None)
-    if prop is None:
-        return False, f"Proposal {prop_id} missing"
+    pset, failure = _require_proposal_set(state)
+    if failure:
+        return False, failure
+    prop, failure = _proposal_by_id(pset.proposals, prop_id)
+    if failure:
+        return False, failure
     if prop.left_ref != left_ref or prop.right_ref != right_ref:
         return (
             False,
@@ -1129,12 +1124,12 @@ def _h_proposal_records_proposer_and_ver(
         proposer_id = examples.get("proposer_id", "")
         ver = examples.get("proposer_version", "")
 
-    pset = state["proposal_set"]
-    if pset is None:
-        return False, "Proposal set missing"
-    prop = next((p for p in pset.proposals if p.proposal_id == prop_id), None)
-    if prop is None:
-        return False, f"Proposal {prop_id} missing"
+    pset, failure = _require_proposal_set(state)
+    if failure:
+        return False, failure
+    prop, failure = _proposal_by_id(pset.proposals, prop_id)
+    if failure:
+        return False, failure
     if prop.proposer_id != proposer_id or str(prop.proposer_version) != str(ver):
         return (
             False,
@@ -1155,12 +1150,12 @@ def _h_proposal_records_evidence_refs(
         refs_csv = examples.get("evidence_refs", "")
 
     expected_refs = [x.strip() for x in refs_csv.split(",") if x.strip()]
-    pset = state["proposal_set"]
-    if pset is None:
-        return False, "Proposal set missing"
-    prop = next((p for p in pset.proposals if p.proposal_id == prop_id), None)
-    if prop is None:
-        return False, f"Proposal {prop_id} missing"
+    pset, failure = _require_proposal_set(state)
+    if failure:
+        return False, failure
+    prop, failure = _proposal_by_id(pset.proposals, prop_id)
+    if failure:
+        return False, failure
     if prop.evidence_refs != expected_refs:
         return (
             False,
@@ -1184,12 +1179,12 @@ def _h_proposal_records_stpa_and_tax_ver(
         stpa_v = examples.get("stpa_version", "")
         tax_v = examples.get("taxonomy_version", "")
 
-    pset = state["proposal_set"]
-    if pset is None:
-        return False, "Proposal set missing"
-    prop = next((p for p in pset.proposals if p.proposal_id == prop_id), None)
-    if prop is None:
-        return False, f"Proposal {prop_id} missing"
+    pset, failure = _require_proposal_set(state)
+    if failure:
+        return False, failure
+    prop, failure = _proposal_by_id(pset.proposals, prop_id)
+    if failure:
+        return False, failure
     if prop.stpa_version != stpa_v or prop.taxonomy_version != tax_v:
         return (
             False,
@@ -1209,12 +1204,12 @@ def _h_proposal_records_rationale(
         prop_id = examples.get("proposal_id", "P-1")
         rationale = examples.get("rationale", "")
 
-    pset = state["proposal_set"]
-    if pset is None:
-        return False, "Proposal set missing"
-    prop = next((p for p in pset.proposals if p.proposal_id == prop_id), None)
-    if prop is None:
-        return False, f"Proposal {prop_id} missing"
+    pset, failure = _require_proposal_set(state)
+    if failure:
+        return False, failure
+    prop, failure = _proposal_by_id(pset.proposals, prop_id)
+    if failure:
+        return False, failure
     if prop.rationale != rationale:
         return (
             False,
@@ -1262,9 +1257,9 @@ def _h_every_proposal_from_proposer_has_evidence_source(
         proposer_id = examples.get("proposer_id", "")
         expected_src = examples.get("evidence_source", "")
 
-    pset = state["proposal_set"]
-    if pset is None:
-        return False, "Proposal set missing"
+    pset, failure = _require_proposal_set(state)
+    if failure:
+        return False, failure
     props = [p for p in pset.proposals if p.proposer_id == proposer_id]
     for p in props:
         if p.evidence_source != expected_src:
@@ -1281,9 +1276,9 @@ def _h_no_confirmed_relation_written_by_proposer(
     state = _get_corr_state(world)
     match = re.search(r'no confirmed relation is written by "([^"]*)"', text)
     proposer_id = match.group(1) if match else examples.get("proposer_id", "")
-    pset = state["proposal_set"]
-    if pset is None:
-        return False, "Proposal set missing"
+    pset, failure = _require_proposal_set(state)
+    if failure:
+        return False, failure
     props = [p for p in pset.proposals if p.proposer_id == proposer_id]
     for p in props:
         if p.is_confirmed:
@@ -1305,9 +1300,9 @@ def _h_every_proposal_records_stpa_ver(
     state = _get_corr_state(world)
     match = re.search(r'every proposal records STPA version "([^"]*)"', text)
     expected_v = match.group(1) if match else examples.get("stpa_version", "")
-    pset = state["proposal_set"]
-    if pset is None:
-        return False, "Proposal set missing"
+    pset, failure = _require_proposal_set(state)
+    if failure:
+        return False, failure
     for p in pset.proposals:
         if p.stpa_version != expected_v:
             return (
@@ -1323,9 +1318,9 @@ def _h_every_proposal_records_tax_ver(
     state = _get_corr_state(world)
     match = re.search(r'every proposal records taxonomy version "([^"]*)"', text)
     expected_v = match.group(1) if match else examples.get("taxonomy_version", "")
-    pset = state["proposal_set"]
-    if pset is None:
-        return False, "Proposal set missing"
+    pset, failure = _require_proposal_set(state)
+    if failure:
+        return False, failure
     for p in pset.proposals:
         if p.taxonomy_version != expected_v:
             return (
@@ -1396,18 +1391,11 @@ def _h_result_serialized_and_deserialized(
     state = _get_corr_state(world)
     match = re.search(r'the result is serialized as "([^"]*)" and deserialized', text)
     fmt = match.group(1) if match else examples.get("format", "YAML")
-    res = state["reconciliation_result"]
-    if res is None:
-        return False, "Reconciliation result missing"
+    res, failure = _require_reconciliation_result(state)
+    if failure:
+        return False, failure
 
-    if fmt.upper() == "YAML":
-        serialized = res.to_yaml()
-        deserialized = ReconciliationResult.from_yaml(serialized)
-    else:
-        serialized = res.to_json()
-        deserialized = ReconciliationResult.from_json(serialized)
-
-    state["deserialized_result"] = deserialized
+    state["deserialized_result"] = _deserialize_result(_serialize_result(res, fmt), fmt)
     return True, ""
 
 
@@ -1480,18 +1468,14 @@ def _h_result_serialized_twice(
     state = _get_corr_state(world)
     match = re.search(r'the result is serialized as "([^"]*)" twice', text)
     fmt = match.group(1) if match else examples.get("format", "YAML")
-    res = state["reconciliation_result"]
-    if res is None:
-        return False, "Reconciliation result missing"
+    res, failure = _require_reconciliation_result(state)
+    if failure:
+        return False, failure
 
-    if fmt.upper() == "YAML":
-        t1 = res.to_yaml()
-        t2 = res.to_yaml()
-    else:
-        t1 = res.to_json()
-        t2 = res.to_json()
-
-    state["serialized_twice"] = [t1, t2]
+    state["serialized_twice"] = [
+        _serialize_result(res, fmt),
+        _serialize_result(res, fmt),
+    ]
     return True, ""
 
 
@@ -1503,22 +1487,7 @@ def _h_one_proposal_set_presents_order_a(
     order_a = match.group(1) if match else examples.get("order_a", "P-1,P-2,P-3")
     ids = [x.strip() for x in order_a.split(",") if x.strip()]
 
-    srm = state["resource_map"]
-    props = [
-        CorrespondenceProposal(
-            proposal_id=pid,
-            left_ref="CA-1-1",
-            right_ref="ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            relation_type="supports",
-            evidence_source="exact-id",
-            strength="high",
-            evidence_refs=["CA-1-1"],
-            stpa_version=str(srm.stpa_version),
-            taxonomy_version=str(srm.taxonomy_version),
-        )
-        for pid in ids
-    ]
-    state["set_a_proposals"] = props
+    state["set_a_proposals"] = _proposals_for_ids(state, ids)
     return True, ""
 
 
@@ -1533,22 +1502,7 @@ def _h_another_proposal_set_presents_order_b(
     order_b = match.group(1) if match else examples.get("order_b", "P-3,P-2,P-1")
     ids = [x.strip() for x in order_b.split(",") if x.strip()]
 
-    srm = state["resource_map"]
-    props = [
-        CorrespondenceProposal(
-            proposal_id=pid,
-            left_ref="CA-1-1",
-            right_ref="ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            relation_type="supports",
-            evidence_source="exact-id",
-            strength="high",
-            evidence_refs=["CA-1-1"],
-            stpa_version=str(srm.stpa_version),
-            taxonomy_version=str(srm.taxonomy_version),
-        )
-        for pid in ids
-    ]
-    state["set_b_proposals"] = props
+    state["set_b_proposals"] = _proposals_for_ids(state, ids)
     return True, ""
 
 
@@ -1603,9 +1557,9 @@ def _h_proposer_emits_shared_contract(
     new_id = examples.get("new_id", "P-3")
     new_adj = examples.get("new_adjudication", "unresolved")
 
-    srm = state["resource_map"]
-    prop_new = CorrespondenceProposal(
-        proposal_id=new_id,
+    prop_new = _make_proposal(
+        state,
+        new_id,
         left_ref="CP-2",
         right_ref="tb:v1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         relation_type="overlaps",
@@ -1613,8 +1567,6 @@ def _h_proposer_emits_shared_contract(
         strength="weak",
         proposer_id=proposer_id,
         evidence_refs=["CP-2"],
-        stpa_version=str(srm.stpa_version),
-        taxonomy_version=str(srm.taxonomy_version),
     )
     state["raw_proposals"][new_id] = prop_new
     state["new_id"] = new_id
@@ -1631,28 +1583,15 @@ def _h_existing_proposals_already_have_adjudications(
     existing_ids = [x.strip() for x in existing_csv.split(",") if x.strip()]
     state["existing_ids"] = existing_ids
 
-    srm = state["resource_map"]
-    p1 = CorrespondenceProposal(
-        proposal_id="P-1",
-        left_ref="CA-1-1",
-        right_ref="ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        relation_type="supports",
-        evidence_source="exact-id",
-        strength="high",
-        evidence_refs=["CA-1-1"],
-        stpa_version=str(srm.stpa_version),
-        taxonomy_version=str(srm.taxonomy_version),
-    )
-    p2 = CorrespondenceProposal(
-        proposal_id="P-2",
+    p1 = _make_proposal(state, "P-1")
+    p2 = _make_proposal(
+        state,
+        "P-2",
         left_ref="L-1",
         right_ref="AP-T6-01",
         relation_type="addresses",
         evidence_source="curated-map",
-        strength="high",
         evidence_refs=["L-1"],
-        stpa_version=str(srm.stpa_version),
-        taxonomy_version=str(srm.taxonomy_version),
     )
     state["raw_proposals"]["P-1"] = p1
     state["raw_proposals"]["P-2"] = p2
@@ -1674,11 +1613,11 @@ def _h_proposal_retained_with_new_adjudication(
         prop_id = examples.get("new_id", "P-3")
         adj = examples.get("new_adjudication", "unresolved")
 
-    res = state["reconciliation_result"]
-    if res is None:
-        return False, "Reconciliation result missing"
-    prop = next((p for p in res.proposals if p.proposal_id == prop_id), None)
-    if prop is None:
+    res, failure = _require_reconciliation_result(state)
+    if failure:
+        return False, failure
+    prop, lookup_failure = _proposal_by_id(res.proposals, prop_id)
+    if lookup_failure:
         return False, f"Proposal {prop_id} missing in result"
     if prop.adjudication != adj:
         return (
@@ -1695,13 +1634,13 @@ def _h_existing_proposals_keep_adjudications(
     match = re.search(r'proposals "([^"]*)" keep their previous adjudications', text)
     existing_csv = match.group(1) if match else examples.get("existing_ids", "P-1,P-2")
     existing_ids = [x.strip() for x in existing_csv.split(",") if x.strip()]
-    res = state["reconciliation_result"]
-    if res is None:
-        return False, "Reconciliation result missing"
+    res, failure = _require_reconciliation_result(state)
+    if failure:
+        return False, failure
 
     for eid in existing_ids:
-        prop = next((p for p in res.proposals if p.proposal_id == eid), None)
-        if prop is None:
+        prop, lookup_failure = _proposal_by_id(res.proposals, eid)
+        if lookup_failure:
             return False, f"Existing proposal {eid} missing in result"
         expected_adj = state["adjudications"].get(eid)
         if prop.adjudication != expected_adj:
@@ -1724,14 +1663,10 @@ def _h_result_serialized_as_format(
     state = _get_corr_state(world)
     match = re.search(r'the result is serialized as "([^"]*)"$', text)
     fmt = match.group(1) if match else examples.get("format", "YAML")
-    res = state["reconciliation_result"]
-    if res is None:
-        return False, "Reconciliation result missing"
-    if fmt.upper() == "YAML":
-        text_out = res.to_yaml()
-    else:
-        text_out = res.to_json()
-    state["serialized_output"] = text_out
+    res, failure = _require_reconciliation_result(state)
+    if failure:
+        return False, failure
+    state["serialized_output"] = _serialize_result(res, fmt)
     return True, ""
 
 

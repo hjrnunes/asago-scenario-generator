@@ -17,6 +17,29 @@ from asago_scenario_generator.models.system_resource_map import (
     SystemResourceMap,
 )
 
+# SystemResourceMap collections contributing element ids, with the attribute
+# holding each entry's taxonomy reference (if any).
+_SRM_ELEMENT_COLLECTIONS = (
+    ("system_resources", "taxonomy_ref"),
+    ("actor_controllers", None),
+    ("controlled_processes", None),
+    ("control_actions", None),
+    ("feedback_paths", None),
+    ("trust_boundaries", "taxonomy_ref"),
+    ("data_flows", None),
+    ("use_case_facts", None),
+    ("assertions", None),
+)
+
+# Evidence source -> (default strength, default relation type).
+_EVIDENCE_SOURCE_DEFAULTS = {
+    "exact-id": ("high", "supports"),
+    "curated-map": ("high", "addresses"),
+    "resource-overlap": ("weak", "overlaps"),
+    "heuristic": ("weak", "supports"),
+    "model-assisted": ("weak", "supports"),
+}
+
 
 def _extract_versions_and_identifiers(
     resource_map: SystemResourceMap | ResourceMapSnapshot | dict[str, Any],
@@ -31,34 +54,19 @@ def _extract_versions_and_identifiers(
         stpa_version = str(resource_map.stpa_version)
         taxonomy_version = str(resource_map.taxonomy_version)
 
-        for sr in resource_map.system_resources:
-            stpa_ids.add(sr.element_id)
-            if sr.taxonomy_ref:
-                tax_ids.add(sr.taxonomy_ref)
-        for ac in resource_map.actor_controllers:
-            stpa_ids.add(ac.element_id)
-        for cp in resource_map.controlled_processes:
-            stpa_ids.add(cp.element_id)
-        for ca in resource_map.control_actions:
-            stpa_ids.add(ca.element_id)
-        for fb in resource_map.feedback_paths:
-            stpa_ids.add(fb.element_id)
-        for tb in resource_map.trust_boundaries:
-            stpa_ids.add(tb.element_id)
-            if tb.taxonomy_ref:
-                tax_ids.add(tb.taxonomy_ref)
-        for df in resource_map.data_flows:
-            stpa_ids.add(df.element_id)
+        for collection, taxonomy_field in _SRM_ELEMENT_COLLECTIONS:
+            for entry in getattr(resource_map, collection):
+                stpa_ids.add(entry.element_id)
+                if taxonomy_field:
+                    taxonomy_ref = getattr(entry, taxonomy_field)
+                    if taxonomy_ref:
+                        tax_ids.add(taxonomy_ref)
         for ll in resource_map.loss_links:
             stpa_ids.add(ll.element_id)
             if ll.loss_id:
                 stpa_ids.add(ll.loss_id)
             if ll.hazard_id:
                 stpa_ids.add(ll.hazard_id)
-        for uf in resource_map.use_case_facts:
-            stpa_ids.add(uf.element_id)
-        for a in resource_map.assertions:
-            stpa_ids.add(a.element_id)
 
     elif isinstance(resource_map, ResourceMapSnapshot):
         stpa_version = str(resource_map.stpa_version)
@@ -75,6 +83,45 @@ def _extract_versions_and_identifiers(
     return stpa_version, taxonomy_version, stpa_ids, tax_ids
 
 
+def _proposal_from_evidence(
+    item: dict[str, Any],
+    index: int,
+    stpa_version: str,
+    taxonomy_version: str,
+) -> CorrespondenceProposal:
+    """Build one proposal from a raw evidence item, applying source defaults."""
+    prop_id = item.get("proposal_id", f"P-{index}")
+    left_ref = item.get("left_ref", "")
+    right_ref = item.get("right_ref", "")
+    evidence_source = item.get("evidence_source", "exact-id")
+    adapter_kind = item.get("adapter_kind", None)
+
+    defaults = _EVIDENCE_SOURCE_DEFAULTS.get(evidence_source)
+    if defaults is None:
+        # Unknown sources default to high/supports unless an adapter vouches.
+        defaults = ("weak", "supports") if adapter_kind else ("high", "supports")
+    default_strength, default_rel = defaults
+
+    return CorrespondenceProposal(
+        proposal_id=prop_id,
+        left_ref=left_ref,
+        right_ref=right_ref,
+        relation_type=item.get("relation_type", default_rel),
+        evidence_source=evidence_source,
+        strength=item.get("strength", default_strength),
+        proposer_id=item.get("proposer_id", ""),
+        proposer_version=item.get("proposer_version", "1"),
+        evidence_refs=item.get(
+            "evidence_refs",
+            [left_ref, right_ref] if left_ref and right_ref else [],
+        ),
+        stpa_version=item.get("stpa_version", stpa_version),
+        taxonomy_version=item.get("taxonomy_version", taxonomy_version),
+        rationale=item.get("rationale", ""),
+        is_confirmed=False,
+    )
+
+
 def propose_correspondence(
     resource_map: SystemResourceMap | ResourceMapSnapshot | dict[str, Any],
     source_artifacts: Any = None,
@@ -89,55 +136,9 @@ def propose_correspondence(
 
     if isinstance(source_artifacts, dict) and "evidence" in source_artifacts:
         for idx, item in enumerate(source_artifacts["evidence"], 1):
-            prop_id = item.get("proposal_id", f"P-{idx}")
-            left_ref = item.get("left_ref", "")
-            right_ref = item.get("right_ref", "")
-            evidence_source = item.get("evidence_source", "exact-id")
-            adapter_kind = item.get("adapter_kind", None)
-
-            if evidence_source == "exact-id":
-                default_strength = "high"
-                default_rel = "supports"
-            elif evidence_source == "curated-map":
-                default_strength = "high"
-                default_rel = "addresses"
-            elif evidence_source == "resource-overlap":
-                default_strength = "weak"
-                default_rel = "overlaps"
-            elif evidence_source in ("heuristic", "model-assisted") or adapter_kind:
-                default_strength = "weak"
-                default_rel = "supports"
-            else:
-                default_strength = "high"
-                default_rel = "supports"
-
-            strength = item.get("strength", default_strength)
-            relation_type = item.get("relation_type", default_rel)
-            proposer_id = item.get("proposer_id", "")
-            proposer_version = item.get("proposer_version", "1")
-            evidence_refs = item.get(
-                "evidence_refs", [left_ref, right_ref] if left_ref and right_ref else []
+            proposals.append(
+                _proposal_from_evidence(item, idx, stpa_version, taxonomy_version)
             )
-            prop_stpa_v = item.get("stpa_version", stpa_version)
-            prop_tax_v = item.get("taxonomy_version", taxonomy_version)
-            rationale = item.get("rationale", "")
-
-            proposal = CorrespondenceProposal(
-                proposal_id=prop_id,
-                left_ref=left_ref,
-                right_ref=right_ref,
-                relation_type=relation_type,
-                evidence_source=evidence_source,
-                strength=strength,
-                proposer_id=proposer_id,
-                proposer_version=proposer_version,
-                evidence_refs=evidence_refs,
-                stpa_version=prop_stpa_v,
-                taxonomy_version=prop_tax_v,
-                rationale=rationale,
-                is_confirmed=False,
-            )
-            proposals.append(proposal)
 
     # Sort proposals canonically by proposal_id
     proposals.sort(key=lambda p: p.proposal_id)
@@ -148,6 +149,111 @@ def propose_correspondence(
         taxonomy_version=taxonomy_version,
         proposals=proposals,
     )
+
+
+def _conflict_pairs(
+    sorted_proposals: list[Any],
+) -> set[tuple[str, str]]:
+    """Detect (left_ref, right_ref) pairs whose proposals disagree."""
+    pairs: dict[tuple[str, str], list[Any]] = {}
+    for p in sorted_proposals:
+        key = (p.left_ref, p.right_ref)
+        pairs.setdefault(key, []).append(p)
+
+    conflict_pairs: set[tuple[str, str]] = set()
+    for key, group in pairs.items():
+        if len(group) > 1:
+            rel_types = {p.relation_type for p in group}
+            if len(rel_types) > 1 or "contradicts" in rel_types:
+                conflict_pairs.add(key)
+    return conflict_pairs
+
+
+def _confirmation_errors(
+    prop_id: str,
+    left_ref: str,
+    right_ref: str,
+    prop_stpa_v: str,
+    prop_tax_v: str,
+    evidence_source: str,
+    evidence_refs: list[str],
+    stpa_version: str,
+    taxonomy_version: str,
+    valid_stpa_ids: set[str],
+    valid_tax_ids: set[str],
+) -> list[ReconciliationError]:
+    """Collect the defects that block confirming one proposal."""
+    errors: list[ReconciliationError] = []
+
+    if valid_stpa_ids and left_ref not in valid_stpa_ids:
+        errors.append(
+            ReconciliationError(
+                proposal_id=prop_id,
+                error_code="dangling_reference",
+                message=f"Proposal {prop_id} has dangling left reference {left_ref}",
+            )
+        )
+
+    if valid_tax_ids and right_ref not in valid_tax_ids:
+        errors.append(
+            ReconciliationError(
+                proposal_id=prop_id,
+                error_code="dangling_reference",
+                message=f"Proposal {prop_id} has dangling right reference {right_ref}",
+            )
+        )
+
+    if stpa_version and prop_stpa_v and prop_stpa_v != stpa_version:
+        errors.append(
+            ReconciliationError(
+                proposal_id=prop_id,
+                error_code="source_version_mismatch",
+                message=f"Proposal {prop_id} STPA version {prop_stpa_v} does not match {stpa_version}",
+            )
+        )
+    elif taxonomy_version and prop_tax_v and prop_tax_v != taxonomy_version:
+        errors.append(
+            ReconciliationError(
+                proposal_id=prop_id,
+                error_code="source_version_mismatch",
+                message=f"Proposal {prop_id} taxonomy version {prop_tax_v} does not match {taxonomy_version}",
+            )
+        )
+
+    if (
+        not evidence_source
+        or evidence_source in ("none", "evidence-free")
+        or not evidence_refs
+    ):
+        errors.append(
+            ReconciliationError(
+                proposal_id=prop_id,
+                error_code="evidence_required",
+                message=f"Proposal {prop_id} lacks explicit evidence required for confirmation",
+            )
+        )
+
+    return errors
+
+
+def _adjudication_history(
+    p: Any,
+    target_adj: str,
+    conflict_reason: str | None,
+) -> list[AdjudicationHistoryItem]:
+    """Carry forward the proposal's history and append the new adjudication."""
+    history_items: list[AdjudicationHistoryItem] = []
+    if hasattr(p, "adjudication_history") and p.adjudication_history:
+        history_items.extend(p.adjudication_history)
+    new_reason = conflict_reason or ("confirmed" if target_adj == "confirmed" else None)
+    if not history_items or history_items[-1].adjudication != target_adj:
+        history_items.append(
+            AdjudicationHistoryItem(
+                adjudication=target_adj,
+                reason=new_reason,
+            )
+        )
+    return history_items
 
 
 def reconcile_correspondence(
@@ -174,18 +280,7 @@ def reconcile_correspondence(
     # Sort proposals canonically by proposal_id to ensure presentation order independence
     sorted_proposals = sorted(raw_list, key=lambda p: p.proposal_id)
 
-    # Detect conflicts by grouping proposals on (left_ref, right_ref)
-    pairs: dict[tuple[str, str], list[Any]] = {}
-    for p in sorted_proposals:
-        key = (p.left_ref, p.right_ref)
-        pairs.setdefault(key, []).append(p)
-
-    conflict_pairs: set[tuple[str, str]] = set()
-    for key, group in pairs.items():
-        if len(group) > 1:
-            rel_types = {p.relation_type for p in group}
-            if len(rel_types) > 1 or "contradicts" in rel_types:
-                conflict_pairs.add(key)
+    conflict_pairs = _conflict_pairs(sorted_proposals)
 
     errors: list[ReconciliationError] = []
     reconciled_proposals: list[ReconciledProposal] = []
@@ -195,16 +290,10 @@ def reconcile_correspondence(
         prop_id = p.proposal_id
         left_ref = p.left_ref
         right_ref = p.right_ref
-        relation_type = p.relation_type
         evidence_source = getattr(p, "evidence_source", "exact-id")
-        strength = getattr(p, "strength", "high")
-        proposer_id = getattr(p, "proposer_id", "")
-        proposer_version = getattr(p, "proposer_version", "1")
         evidence_refs = getattr(p, "evidence_refs", [])
         prop_stpa_v = getattr(p, "stpa_version", stpa_version)
         prop_tax_v = getattr(p, "taxonomy_version", taxonomy_version)
-        rationale = getattr(p, "rationale", "")
-        provenance = getattr(p, "provenance", None)
 
         # Determine target adjudication
         key = (left_ref, right_ref)
@@ -221,101 +310,46 @@ def reconcile_correspondence(
 
         # Check for defects if attempting to confirm
         if target_adj == "confirmed":
-            # 1. Dangling left reference
-            if valid_stpa_ids and left_ref not in valid_stpa_ids:
-                is_valid = False
-                errors.append(
-                    ReconciliationError(
-                        proposal_id=prop_id,
-                        error_code="dangling_reference",
-                        message=f"Proposal {prop_id} has dangling left reference {left_ref}",
-                    )
-                )
-                target_adj = "unresolved"
-
-            # 2. Dangling right reference
-            if valid_tax_ids and right_ref not in valid_tax_ids:
-                is_valid = False
-                errors.append(
-                    ReconciliationError(
-                        proposal_id=prop_id,
-                        error_code="dangling_reference",
-                        message=f"Proposal {prop_id} has dangling right reference {right_ref}",
-                    )
-                )
-                target_adj = "unresolved"
-
-            # 3. Source version mismatch
-            if stpa_version and prop_stpa_v and prop_stpa_v != stpa_version:
-                is_valid = False
-                errors.append(
-                    ReconciliationError(
-                        proposal_id=prop_id,
-                        error_code="source_version_mismatch",
-                        message=f"Proposal {prop_id} STPA version {prop_stpa_v} does not match {stpa_version}",
-                    )
-                )
-                target_adj = "unresolved"
-            elif taxonomy_version and prop_tax_v and prop_tax_v != taxonomy_version:
-                is_valid = False
-                errors.append(
-                    ReconciliationError(
-                        proposal_id=prop_id,
-                        error_code="source_version_mismatch",
-                        message=f"Proposal {prop_id} taxonomy version {prop_tax_v} does not match {taxonomy_version}",
-                    )
-                )
-                target_adj = "unresolved"
-
-            # 4. Evidence-free confirmation
-            if (
-                not evidence_source
-                or evidence_source in ("none", "evidence-free")
-                or not evidence_refs
-            ):
-                is_valid = False
-                errors.append(
-                    ReconciliationError(
-                        proposal_id=prop_id,
-                        error_code="evidence_required",
-                        message=f"Proposal {prop_id} lacks explicit evidence required for confirmation",
-                    )
-                )
-                target_adj = "unresolved"
-
-        history_items: list[AdjudicationHistoryItem] = []
-        if hasattr(p, "adjudication_history") and p.adjudication_history:
-            history_items.extend(p.adjudication_history)
-        new_reason = conflict_reason or (
-            "confirmed" if target_adj == "confirmed" else None
-        )
-        if not history_items or history_items[-1].adjudication != target_adj:
-            history_items.append(
-                AdjudicationHistoryItem(
-                    adjudication=target_adj,
-                    reason=new_reason,
-                )
+            confirmation_defects = _confirmation_errors(
+                prop_id,
+                left_ref,
+                right_ref,
+                prop_stpa_v,
+                prop_tax_v,
+                evidence_source,
+                evidence_refs,
+                stpa_version,
+                taxonomy_version,
+                valid_stpa_ids,
+                valid_tax_ids,
             )
+            if confirmation_defects:
+                is_valid = False
+                errors.extend(confirmation_defects)
+                target_adj = "unresolved"
 
-        reconciled = ReconciledProposal(
-            proposal_id=prop_id,
-            left_ref=left_ref,
-            right_ref=right_ref,
-            relation_type=relation_type,
-            evidence_source=evidence_source,
-            strength=strength,
-            adjudication=target_adj,
-            conflict_reason=conflict_reason,
-            proposer_id=proposer_id,
-            proposer_version=proposer_version,
-            evidence_refs=list(evidence_refs),
-            stpa_version=prop_stpa_v,
-            taxonomy_version=prop_tax_v,
-            rationale=rationale,
-            provenance=provenance,
-            adjudication_history=history_items,
+        reconciled_proposals.append(
+            ReconciledProposal(
+                proposal_id=prop_id,
+                left_ref=left_ref,
+                right_ref=right_ref,
+                relation_type=p.relation_type,
+                evidence_source=evidence_source,
+                strength=getattr(p, "strength", "high"),
+                adjudication=target_adj,
+                conflict_reason=conflict_reason,
+                proposer_id=getattr(p, "proposer_id", ""),
+                proposer_version=getattr(p, "proposer_version", "1"),
+                evidence_refs=list(evidence_refs),
+                stpa_version=prop_stpa_v,
+                taxonomy_version=prop_tax_v,
+                rationale=getattr(p, "rationale", ""),
+                provenance=getattr(p, "provenance", None),
+                adjudication_history=_adjudication_history(
+                    p, target_adj, conflict_reason
+                ),
+            )
         )
-        reconciled_proposals.append(reconciled)
 
     # Sort reconciled proposals canonically
     reconciled_proposals.sort(key=lambda p: p.proposal_id)

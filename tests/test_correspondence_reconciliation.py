@@ -5,54 +5,12 @@ from __future__ import annotations
 from asago_scenario_generator.models.correspondence import (
     CorrespondenceProposal,
 )
-from asago_scenario_generator.models.system_resource_map import (
-    ControlActionEntry,
-    LossLinkEntry,
-    SystemResourceEntry,
-    SystemResourceMap,
-    TrustBoundaryEntry,
-)
 from asago_scenario_generator.pipeline.correspondence import reconcile_correspondence
-
-
-def _make_test_resource_map() -> SystemResourceMap:
-    return SystemResourceMap(
-        schema_version="1",
-        stpa_version="stpa-v1",
-        taxonomy_version="atlas-2026.05",
-        system_resources=[
-            SystemResourceEntry(
-                element_id="SR-1",
-                taxonomy_ref="ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            )
-        ],
-        control_actions=[
-            ControlActionEntry(
-                element_id="CA-1-1",
-                controller_id="RESP-1",
-                process_id="CP-2",
-                action_name="Issue Payment",
-            )
-        ],
-        loss_links=[
-            LossLinkEntry(
-                element_id="LL-1",
-                loss_id="L-1",
-                hazard_id="H-1",
-            )
-        ],
-        trust_boundaries=[
-            TrustBoundaryEntry(
-                element_id="TB-1",
-                resource_ids=["SR-1"],
-                taxonomy_ref="tb:v1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            )
-        ],
-    )
+from tests.helpers.correspondence_factory import make_test_resource_map
 
 
 def test_reconciliation_retains_confirmed_rejected_unresolved() -> None:
-    srm = _make_test_resource_map()
+    srm = make_test_resource_map()
     proposals = [
         CorrespondenceProposal(
             proposal_id="P-1",
@@ -113,7 +71,7 @@ def test_reconciliation_retains_confirmed_rejected_unresolved() -> None:
 
 
 def test_reconciliation_separates_relation_type_strength_and_adjudication() -> None:
-    srm = _make_test_resource_map()
+    srm = make_test_resource_map()
     proposals = [
         CorrespondenceProposal(
             proposal_id="P-1",
@@ -157,7 +115,7 @@ def test_reconciliation_separates_relation_type_strength_and_adjudication() -> N
 
 
 def test_reconciliation_preserves_conflicting_proposals_as_unresolved() -> None:
-    srm = _make_test_resource_map()
+    srm = make_test_resource_map()
     prop_a = CorrespondenceProposal(
         proposal_id="P-1",
         left_ref="CA-1-1",
@@ -201,7 +159,7 @@ def test_reconciliation_preserves_conflicting_proposals_as_unresolved() -> None:
 
 
 def test_reconciliation_rejects_confirmation_defects() -> None:
-    srm = _make_test_resource_map()
+    srm = make_test_resource_map()
 
     # 1. Dangling left ref
     p_dangling_left = CorrespondenceProposal(
@@ -283,7 +241,7 @@ def test_reconciliation_rejects_confirmation_defects() -> None:
 
 
 def test_reconciliation_is_deterministic_and_idempotent() -> None:
-    srm = _make_test_resource_map()
+    srm = make_test_resource_map()
     p1 = CorrespondenceProposal(
         proposal_id="P-1",
         left_ref="CA-1-1",
