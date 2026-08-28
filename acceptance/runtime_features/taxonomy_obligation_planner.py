@@ -17,6 +17,12 @@ from asago_scenario_generator.pipeline.obligation_planner import plan_obligation
 
 FEATURE_ID = "taxonomy_obligation_planner"
 
+# Compatibility fixtures pair each workflow with its default command.
+_COMPAT_WORKFLOW_COMMANDS = {
+    "taxonomy/risk": "generate",
+    "STPA": "stpa-run",
+}
+
 
 def _default_snapshot() -> TaxonomyObligationSnapshot:
     return TaxonomyObligationSnapshot(
@@ -987,6 +993,22 @@ def _h_default_command_runs(
 def _h_artifacts_match_fixture(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
+    # The compatibility contract pairs each workflow with its default
+    # command; a fixture recorded under an unknown workflow, or run with a
+    # mismatched command, means the defaults were not what the scenario
+    # pinned.
+    state = _planner_state(world)
+    workflow = state.get("fixture_workflow", "")
+    command = state.get("ran_command", "")
+    expected_command = _COMPAT_WORKFLOW_COMMANDS.get(workflow)
+    if expected_command is None:
+        return False, f"Unknown fixture workflow '{workflow}'"
+    if command != expected_command:
+        return (
+            False,
+            f"Default command '{command}' does not match workflow "
+            f"'{workflow}' (expected '{expected_command}')",
+        )
     return True, ""
 
 

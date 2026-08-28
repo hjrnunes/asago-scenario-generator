@@ -98,6 +98,47 @@ def test_propose_provenance_retained() -> None:
     assert p1.rationale == "exact identifier match"
 
 
+def test_propose_default_ids_are_one_based_and_refs_default_to_pair() -> None:
+    srm = make_test_resource_map()
+    evidence = [
+        {
+            "evidence_source": "exact-id",
+            "left_ref": "CA-1-1",
+            "right_ref": "ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        },
+        {
+            "evidence_source": "curated-map",
+            "left_ref": "L-1",
+            "right_ref": "AP-T6-01",
+        },
+    ]
+
+    pset = propose_correspondence(srm, source_artifacts={"evidence": evidence})
+    # Default ids enumerate from 1 in evidence order, then sort canonically.
+    assert [p.proposal_id for p in pset.proposals] == ["P-1", "P-2"]
+    for p in pset.proposals:
+        assert p.evidence_refs == [p.left_ref, p.right_ref]
+        assert p.is_confirmed is False
+
+
+def test_propose_one_sided_evidence_defaults_to_no_evidence_refs() -> None:
+    srm = make_test_resource_map()
+    evidence = [
+        {
+            "proposal_id": "P-1",
+            "left_ref": "CA-1-1",
+            "right_ref": "",
+            "evidence_source": "exact-id",
+        }
+    ]
+
+    pset = propose_correspondence(srm, source_artifacts={"evidence": evidence})
+    p1 = pset.proposals[0]
+    # Default evidence refs require both endpoints; a one-sided item
+    # proposes with no evidence rather than a dangling half pair.
+    assert p1.evidence_refs == []
+
+
 def test_propose_heuristic_and_model_assisted_adapters_cannot_confirm() -> None:
     srm = make_test_resource_map()
     evidence = [

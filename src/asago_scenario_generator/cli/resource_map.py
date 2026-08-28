@@ -9,30 +9,13 @@ import typer
 import yaml
 
 from asago_scenario_generator.cli._app import app
-from asago_scenario_generator.cli._shared import _abort, _print_banner, _validate_file
-
-
-def _load_payload(path: Path, label: str) -> dict:
-    """Parse a snapshot or map with a standard JSON or YAML reader."""
-    text = path.read_text(encoding="utf-8")
-    payload = (
-        json.loads(text) if path.suffix.lower() == ".json" else yaml.safe_load(text)
-    )
-    if not isinstance(payload, dict):
-        raise ValueError(f"{label} must be a JSON or YAML object")
-    return payload
-
-
-def _requested_formats(fmt: str) -> tuple[str, ...]:
-    """Return the published artifact formats requested by the user."""
-    normalized = fmt.lower()
-    if normalized == "yaml":
-        return ("yaml",)
-    if normalized == "json":
-        return ("json",)
-    if normalized == "both":
-        return ("yaml", "json")
-    raise typer.BadParameter("must be 'yaml', 'json', or 'both'", param_hint="--format")
+from asago_scenario_generator.cli._shared import (
+    _abort,
+    _load_payload,
+    _print_banner,
+    _requested_formats,
+    _validate_file,
+)
 
 
 def _dump_result(payload: dict, fmt: str) -> str:

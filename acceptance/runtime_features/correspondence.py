@@ -168,16 +168,20 @@ def _proposals_for_ids(
 
 def _serialize_result(result: ReconciliationResult, fmt: str) -> str:
     """Serialize a reconciliation result in the requested format (YAML or JSON)."""
-    if fmt.upper() == "YAML":
+    if fmt == "YAML":
         return result.to_yaml()
-    return result.to_json()
+    if fmt == "JSON":
+        return result.to_json()
+    raise ValueError(f"Unsupported serialization format: {fmt}")
 
 
 def _deserialize_result(text: str, fmt: str) -> ReconciliationResult:
     """Deserialize a reconciliation result from the requested format (YAML or JSON)."""
-    if fmt.upper() == "YAML":
+    if fmt == "YAML":
         return ReconciliationResult.from_yaml(text)
-    return ReconciliationResult.from_json(text)
+    if fmt == "JSON":
+        return ReconciliationResult.from_json(text)
+    raise ValueError(f"Unsupported serialization format: {fmt}")
 
 
 # -----------------------------------------------------------------------------
@@ -617,8 +621,7 @@ def _h_proposal_has_confirmation_defect(
             evidence_refs=[],
         )
     else:
-        # Unknown defect: match the model defaults, including empty evidence.
-        prop = _make_proposal(state, prop_id, evidence_refs=[])
+        return False, f"Unknown confirmation defect: {defect}"
 
     state["raw_proposals"] = {prop_id: prop}
     state["adjudications"] = {prop_id: "confirmed"}
@@ -1391,6 +1394,8 @@ def _h_result_serialized_and_deserialized(
     state = _get_corr_state(world)
     match = re.search(r'the result is serialized as "([^"]*)" and deserialized', text)
     fmt = match.group(1) if match else examples.get("format", "YAML")
+    if fmt not in ("YAML", "JSON"):
+        return False, f"Unsupported serialization format: {fmt}"
     res, failure = _require_reconciliation_result(state)
     if failure:
         return False, failure
@@ -1468,6 +1473,8 @@ def _h_result_serialized_twice(
     state = _get_corr_state(world)
     match = re.search(r'the result is serialized as "([^"]*)" twice', text)
     fmt = match.group(1) if match else examples.get("format", "YAML")
+    if fmt not in ("YAML", "JSON"):
+        return False, f"Unsupported serialization format: {fmt}"
     res, failure = _require_reconciliation_result(state)
     if failure:
         return False, failure
@@ -1651,6 +1658,31 @@ def _h_existing_proposals_keep_adjudications(
     return True, ""
 
 
+def _h_result_records_proposer(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    state = _get_corr_state(world)
+    match = re.search(r'the result records proposer "([^"]*)" for "([^"]*)"', text)
+    if match:
+        expected_proposer, prop_id = match.group(1), match.group(2)
+    else:
+        expected_proposer = examples.get("proposer_id", "")
+        prop_id = examples.get("proposal_id", "")
+
+    res, failure = _require_reconciliation_result(state)
+    if failure:
+        return False, failure
+    prop, failure = _proposal_by_id(res.proposals, prop_id)
+    if failure:
+        return False, f"Proposal {prop_id} not found in result"
+    if prop.proposer_id != expected_proposer:
+        return (
+            False,
+            f"Proposal {prop_id} proposer '{prop.proposer_id}' != expected '{expected_proposer}'",
+        )
+    return True, ""
+
+
 def _h_reconciliation_rules_unchanged(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -1663,6 +1695,8 @@ def _h_result_serialized_as_format(
     state = _get_corr_state(world)
     match = re.search(r'the result is serialized as "([^"]*)"$', text)
     fmt = match.group(1) if match else examples.get("format", "YAML")
+    if fmt not in ("YAML", "JSON"):
+        return False, f"Unsupported serialization format: {fmt}"
     res, failure = _require_reconciliation_result(state)
     if failure:
         return False, failure
@@ -2010,6 +2044,10 @@ def register(api: Any) -> None:
         (
             r'^proposal "([^"]*)" is retained with adjudication "([^"]*)"$',
             _h_proposal_retained_with_new_adjudication,
+        ),
+        (
+            r'^the result records proposer "([^"]*)" for "([^"]*)"$',
+            _h_result_records_proposer,
         ),
         (
             r'^proposals "([^"]*)" keep their previous adjudications$',
