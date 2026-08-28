@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from typer.testing import CliRunner
+
+from asago_scenario_generator.cli import app
 from asago_scenario_generator.models.system_resource_map import (
     ControlActionEntry,
     SystemResourceEntry,
@@ -11,6 +14,8 @@ from asago_scenario_generator.pipeline.correspondence import (
     propose_correspondence,
     reconcile_correspondence,
 )
+
+runner = CliRunner()
 
 
 def test_correspondence_does_not_mutate_inputs() -> None:
@@ -51,3 +56,14 @@ def test_correspondence_does_not_mutate_inputs() -> None:
     # Source artifacts unchanged
     assert source_artifacts["control_structure"] == initial_cs
     assert source_artifacts["attack_patterns"] == initial_ap
+
+
+def test_generate_and_stpa_run_help_omit_correspondence_flags() -> None:
+    """Default generate and stpa-run surfaces do not grow correspondence flags."""
+    generate = runner.invoke(app, ["generate", "--help"])
+    stpa_run = runner.invoke(app, ["stpa-run", "--help"])
+
+    assert generate.exit_code == 0
+    assert stpa_run.exit_code == 0
+    assert "correspondence" not in generate.stdout.lower()
+    assert "correspondence" not in stpa_run.stdout.lower()

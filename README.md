@@ -136,7 +136,8 @@ per-attempt evidence. The HTML report renders those stage outcomes and identifie
 presentation fallback separately.
 
 Useful companion commands include `projection-preflight`, `plan-obligations`,
-`validate-resource-map`, `profile`, `resume`, `eval`, `report`,
+`validate-resource-map`, `propose-correspondence`,
+`reconcile-correspondence`, `profile`, `resume`, `eval`, `report`,
 `qualify-catalog`, `validate-catalog-qualification`, and
 `validate-stpa-projection`. Run `asago-scenario-generator --help` for the
 complete interface.
@@ -158,6 +159,22 @@ asago-scenario-generator validate-resource-map \
   --snapshot resource-map-snapshot.yaml \
   --map resource-map.yaml \
   --output-dir output/resource-map
+```
+
+Propose and reconcile STPA-to-taxonomy correspondence from a resource map
+and source artifacts without contacting an LLM endpoint:
+
+```bash
+asago-scenario-generator propose-correspondence \
+  --map resource-map.yaml \
+  --artifacts correspondence-artifacts.yaml \
+  --output-dir output/correspondence
+
+asago-scenario-generator reconcile-correspondence \
+  --map resource-map.yaml \
+  --proposals output/correspondence/proposal-set.yaml \
+  --adjudications correspondence-adjudications.yaml \
+  --output-dir output/correspondence
 ```
 
 ## STPA-based generation

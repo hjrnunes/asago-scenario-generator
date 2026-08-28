@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import yaml
+from typer.testing import CliRunner
+
+from asago_scenario_generator.cli import app
 from asago_scenario_generator.pipeline.correspondence import propose_correspondence
 from tests.helpers.correspondence_factory import make_test_resource_map
+
+runner = CliRunner()
 
 
 def test_propose_exact_id_and_curated_map() -> None:
@@ -171,3 +179,130 @@ def test_propose_heuristic_and_model_assisted_adapters_cannot_confirm() -> None:
             assert p.evidence_source == "heuristic"
         elif p.proposer_id == "model-assisted-adapter":
             assert p.evidence_source == "model-assisted"
+
+
+def test_propose_correspondence_cli_writes_yaml_and_json(tmp_path: Path) -> None:
+    map_path = tmp_path / "resource-map.yaml"
+    map_path.write_text(
+        yaml.safe_dump(make_test_resource_map().model_dump(mode="json")),
+        encoding="utf-8",
+    )
+    artifacts_path = tmp_path / "artifacts.yaml"
+    artifacts_path.write_text(
+        yaml.safe_dump(
+            {
+                "evidence": [
+                    {
+                        "proposal_id": "P-1",
+                        "evidence_source": "exact-id",
+                        "left_ref": "CA-1-1",
+                        "right_ref": "ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "out"
+
+    result = runner.invoke(
+        app,
+        [
+            "propose-correspondence",
+            "--map",
+            str(map_path),
+            "--artifacts",
+            str(artifacts_path),
+            "--output-dir",
+            str(output_dir),
+        ],
+    )
+
+    assert result.exit_code == 0, result.stderr
+    yaml_path = output_dir / "proposal-set.yaml"
+    json_path = output_dir / "proposal-set.json"
+    assert yaml_path.is_file()
+    assert json_path.is_file()
+    assert f"Proposal set written to {yaml_path}" in result.stdout
+    assert "Network calls: 0" in result.stdout
+    assert "Model calls:   0" in result.stdout
+    loaded = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+    assert loaded["proposals"][0]["proposal_id"] == "P-1"
+    assert loaded["proposals"][0]["is_confirmed"] is False
+
+
+def test_propose_correspondence_cli_accepts_snapshot_payload(tmp_path: Path) -> None:
+    map_path = tmp_path / "snapshot.yaml"
+    map_path.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": "1",
+                "stpa_version": "stpa-v1",
+                "taxonomy_version": "atlas-2026.05",
+                "stpa_identifiers": ["CA-1-1"],
+                "taxonomy_identifiers": [
+                    "ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    artifacts_path = tmp_path / "artifacts.yaml"
+    artifacts_path.write_text(
+        yaml.safe_dump(
+            {
+                "evidence": [
+                    {
+                        "proposal_id": "P-1",
+                        "evidence_source": "exact-id",
+                        "left_ref": "CA-1-1",
+                        "right_ref": "ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "out"
+
+    result = runner.invoke(
+        app,
+        [
+            "propose-correspondence",
+            "--map",
+            str(map_path),
+            "--artifacts",
+            str(artifacts_path),
+            "--output-dir",
+            str(output_dir),
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stderr
+    loaded = yaml.safe_load(
+        (output_dir / "proposal-set.json").read_text(encoding="utf-8")
+    )
+    assert loaded["proposals"][0]["stpa_version"] == "stpa-v1"
+
+
+def test_propose_correspondence_cli_rejects_missing_map(tmp_path: Path) -> None:
+    missing = tmp_path / "missing" / "resource-map.yaml"
+    artifacts_path = tmp_path / "artifacts.yaml"
+    artifacts_path.write_text("evidence: []\n", encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "propose-correspondence",
+            "--map",
+            str(missing),
+            "--artifacts",
+            str(artifacts_path),
+            "--output-dir",
+            str(tmp_path / "out"),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert f"Error: resource map not found: {missing}" in result.stderr

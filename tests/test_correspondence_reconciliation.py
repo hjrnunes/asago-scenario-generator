@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import yaml
+from typer.testing import CliRunner
+
+from asago_scenario_generator.cli import app
 from asago_scenario_generator.models.correspondence import (
     AdjudicationHistoryItem,
     CorrespondenceProposal,
@@ -15,6 +21,8 @@ from asago_scenario_generator.models.system_resource_map import (
 )
 from asago_scenario_generator.pipeline.correspondence import reconcile_correspondence
 from tests.helpers.correspondence_factory import make_test_resource_map
+
+runner = CliRunner()
 
 
 def test_reconciliation_retains_confirmed_rejected_unresolved() -> None:
@@ -570,3 +578,207 @@ def test_reconciliation_is_deterministic_and_idempotent() -> None:
     assert [p.adjudication for p in res_repeat.proposals] == [
         p.adjudication for p in res_a.proposals
     ]
+
+
+def test_reconcile_correspondence_cli_writes_yaml_and_json(tmp_path: Path) -> None:
+    map_path = tmp_path / "resource-map.yaml"
+    map_path.write_text(
+        yaml.safe_dump(make_test_resource_map().model_dump(mode="json")),
+        encoding="utf-8",
+    )
+    proposals_path = tmp_path / "proposals.yaml"
+    proposals_path.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": "1",
+                "stpa_version": "stpa-v1",
+                "taxonomy_version": "atlas-2026.05",
+                "proposals": [
+                    {
+                        "proposal_id": "P-1",
+                        "left_ref": "CA-1-1",
+                        "right_ref": "ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "relation_type": "supports",
+                        "evidence_source": "exact-id",
+                        "strength": "high",
+                        "evidence_refs": ["CA-1-1"],
+                        "stpa_version": "stpa-v1",
+                        "taxonomy_version": "atlas-2026.05",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    adj_path = tmp_path / "adjudications.yaml"
+    adj_path.write_text(yaml.safe_dump({"P-1": "confirmed"}), encoding="utf-8")
+    output_dir = tmp_path / "out"
+
+    result = runner.invoke(
+        app,
+        [
+            "reconcile-correspondence",
+            "--map",
+            str(map_path),
+            "--proposals",
+            str(proposals_path),
+            "--adjudications",
+            str(adj_path),
+            "--output-dir",
+            str(output_dir),
+        ],
+    )
+
+    assert result.exit_code == 0, result.stderr
+    yaml_path = output_dir / "reconciliation-result.yaml"
+    json_path = output_dir / "reconciliation-result.json"
+    assert yaml_path.is_file()
+    assert json_path.is_file()
+    assert f"Reconciliation result written to {yaml_path}" in result.stdout
+    assert "Network calls: 0" in result.stdout
+    assert "Model calls:   0" in result.stdout
+    loaded = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+    assert loaded["is_valid"] is True
+    assert loaded["proposals"][0]["adjudication"] == "confirmed"
+    assert loaded["network_calls"] == 0
+    assert loaded["model_calls"] == 0
+
+
+def test_reconcile_correspondence_cli_omits_adjudications(tmp_path: Path) -> None:
+    map_path = tmp_path / "resource-map.yaml"
+    map_path.write_text(
+        yaml.safe_dump(make_test_resource_map().model_dump(mode="json")),
+        encoding="utf-8",
+    )
+    proposals_path = tmp_path / "proposals.yaml"
+    proposals_path.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": "1",
+                "proposals": [
+                    {
+                        "proposal_id": "P-1",
+                        "left_ref": "CA-1-1",
+                        "right_ref": "ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "relation_type": "supports",
+                        "evidence_source": "exact-id",
+                        "strength": "high",
+                        "evidence_refs": ["CA-1-1"],
+                        "stpa_version": "stpa-v1",
+                        "taxonomy_version": "atlas-2026.05",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "out"
+
+    result = runner.invoke(
+        app,
+        [
+            "reconcile-correspondence",
+            "--map",
+            str(map_path),
+            "--proposals",
+            str(proposals_path),
+            "--output-dir",
+            str(output_dir),
+            "--format",
+            "json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stderr
+    loaded = yaml.safe_load(
+        (output_dir / "reconciliation-result.json").read_text(encoding="utf-8")
+    )
+    assert loaded["proposals"][0]["adjudication"] == "unresolved"
+
+
+def test_reconcile_correspondence_cli_rejects_confirmation_defects(
+    tmp_path: Path,
+) -> None:
+    map_path = tmp_path / "resource-map.yaml"
+    map_path.write_text(
+        yaml.safe_dump(make_test_resource_map().model_dump(mode="json")),
+        encoding="utf-8",
+    )
+    proposals_path = tmp_path / "proposals.yaml"
+    proposals_path.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": "1",
+                "proposals": [
+                    {
+                        "proposal_id": "P-9",
+                        "left_ref": "MISSING",
+                        "right_ref": "ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "relation_type": "supports",
+                        "evidence_source": "exact-id",
+                        "strength": "high",
+                        "evidence_refs": ["MISSING"],
+                        "stpa_version": "stpa-v1",
+                        "taxonomy_version": "atlas-2026.05",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    adj_path = tmp_path / "adjudications.yaml"
+    adj_path.write_text(yaml.safe_dump({"P-9": "confirmed"}), encoding="utf-8")
+    output_dir = tmp_path / "out"
+
+    result = runner.invoke(
+        app,
+        [
+            "reconcile-correspondence",
+            "--map",
+            str(map_path),
+            "--proposals",
+            str(proposals_path),
+            "--adjudications",
+            str(adj_path),
+            "--output-dir",
+            str(output_dir),
+            "--format",
+            "yaml",
+        ],
+    )
+
+    assert result.exit_code == 1
+    loaded = yaml.safe_load(
+        (output_dir / "reconciliation-result.yaml").read_text(encoding="utf-8")
+    )
+    assert loaded["is_valid"] is False
+    assert any(
+        error["error_code"] == "dangling_reference" for error in loaded["errors"]
+    )
+    assert loaded["proposals"][0]["adjudication"] != "confirmed"
+
+
+def test_reconcile_correspondence_cli_rejects_missing_proposals(
+    tmp_path: Path,
+) -> None:
+    map_path = tmp_path / "resource-map.yaml"
+    map_path.write_text(
+        yaml.safe_dump(make_test_resource_map().model_dump(mode="json")),
+        encoding="utf-8",
+    )
+    missing = tmp_path / "missing" / "proposals.yaml"
+    result = runner.invoke(
+        app,
+        [
+            "reconcile-correspondence",
+            "--map",
+            str(map_path),
+            "--proposals",
+            str(missing),
+            "--output-dir",
+            str(tmp_path / "out"),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert f"Error: proposal set not found: {missing}" in result.stderr
