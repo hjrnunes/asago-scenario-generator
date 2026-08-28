@@ -17,6 +17,7 @@ from asago_scenario_generator.models.obligation_plan import (
     TaxonomyObligationSnapshot,
 )
 from asago_scenario_generator.pipeline.obligation_planner import (
+    _json_serializable,
     _sanitize_secrets,
     plan_obligations,
 )
@@ -725,6 +726,40 @@ def test_unknown_legacy_disposition_falls_back_to_kind_derivation() -> None:
     assert ob.scope_disposition == "applicable"
     assert ob.qualification_disposition == "ready"
     assert ob.projection_disposition == "projectable"
+
+
+def test_legacy_excluded_scope_with_conflicting_projection_is_rejected() -> None:
+    snapshot = _make_snapshot(
+        relationships=[
+            {
+                "risk_id": "risk-a",
+                "pattern_id": "AP-T1-01",
+                "disposition": "governance-only",
+                "projection_disposition": "projectable",
+            }
+        ],
+    )
+
+    with pytest.raises(ValueError, match="Invalid disposition combination"):
+        plan_obligations(snapshot)
+
+
+def test_explicit_pins_take_precedence_over_legacy_aliases() -> None:
+    snapshot = _make_snapshot(
+        catalog_pin="atlas-modern",
+        taxonomy_version="atlas-legacy",
+        mapping_pin="sssom-modern",
+        mapping_version="sssom-legacy",
+    )
+
+    plan = plan_obligations(snapshot)
+
+    assert plan.catalog_pins["catalog"] == "atlas-modern"
+    assert plan.mapping_pins["mapping"] == "sssom-modern"
+
+
+def test_canonical_json_serialization_is_key_order_independent() -> None:
+    assert _json_serializable({"a": 1, "b": 2}) == _json_serializable({"b": 2, "a": 1})
 
 
 @pytest.mark.parametrize(

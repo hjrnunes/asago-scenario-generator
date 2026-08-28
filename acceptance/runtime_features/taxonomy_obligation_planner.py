@@ -17,6 +17,7 @@ from asago_scenario_generator.models.obligation_plan import (
     TaxonomyObligation,
     TaxonomyObligationPlan,
     TaxonomyObligationSnapshot,
+    compute_sha256,
 )
 from asago_scenario_generator.pipeline.obligation_planner import plan_obligations
 
@@ -147,9 +148,9 @@ def _selected_or_first(state: dict[str, Any]) -> TaxonomyObligation:
 def _requested_format(
     text: str, examples: dict, step_pattern: str, example_key: str
 ) -> str:
-    """Parse the requested serialization format from a step."""
+    """Parse the requested serialization format from a step, case-sensitively."""
     match = re.search(step_pattern, text)
-    return (match.group(1) if match else examples.get(example_key, "")).upper()
+    return match.group(1) if match else examples.get(example_key, "")
 
 
 def _serialize_plan(plan: TaxonomyObligationPlan, fmt: str) -> str:
@@ -580,6 +581,8 @@ def _h_published_plan_in_format(
 ) -> tuple[bool, str]:
     state = _planner_state(world)
     fmt = _requested_format(text, examples, r'in "([^"]+)"', "format")
+    if fmt not in ("YAML", "JSON"):
+        return False, f"Unknown format: {fmt}"
     snap = _default_snapshot()
     snap.relationships = [_ready_relationship()]
     state["plan"] = plan_obligations(snap)
@@ -681,14 +684,10 @@ def _h_identifies_unknown_field(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     state = _planner_state(world)
-    match = re.search(r'unknown field "([^"]+)"', text)
-    field = (
-        match.group(1)
-        if match
-        else examples.get("field", state.get("unknown_field", ""))
-    )
+    match = re.search(r'identifies unknown field "([^"]+)"', text)
+    field = match.group(1) if match else state.get("unknown_field", "")
     err = state.get("load_error", "")
-    if field not in err and "extra" not in err.lower():
+    if field not in err:
         return False, f"Expected unknown field '{field}' in error, got: {err}"
     return True, ""
 
@@ -722,8 +721,11 @@ def _h_identifies_schema_version_unsupported(
         else examples.get("schema_version", state.get("schema_version", ""))
     )
     err = state.get("load_error", "")
-    if version not in err and "unsupported" not in err.lower():
-        return False, f"Expected schema version '{version}' in error, got: {err}"
+    if version not in err or "unsupported" not in err.lower():
+        return (
+            False,
+            f"Expected unsupported schema version '{version}' in error, got: {err}",
+        )
     return True, ""
 
 
@@ -785,12 +787,38 @@ def _h_plan_records_computed_digest_kind(
     return True, ""
 
 
+def _h_plan_records_pinned_digest(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Check the plan digests the pinned capability or qualification-facts content."""
+    state = _planner_state(world)
+    match = re.search(
+        r'the plan records the (capability snapshot|qualification facts) digest of "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse pinned digest expectation: {text}"
+    kind, expected_content = match.groups()
+    plan = state["plan"]
+    if kind == "capability snapshot":
+        expected = compute_sha256({"content": expected_content})
+        actual = plan.capability_snapshot_digest
+    else:
+        expected = compute_sha256({"facts": expected_content})
+        actual = plan.qualification_facts_digest
+    if actual != expected:
+        return False, f"{kind} digest mismatch: {actual} != {expected}"
+    return True, ""
+
+
 # Artifact Scenario 09 (Atomically published)
 def _h_publish_plan_atomically(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     state = _planner_state(world)
     fmt = _requested_format(text, examples, r'published as "([^"]+)"', "format")
+    if fmt not in ("YAML", "JSON"):
+        return False, f"Unknown format: {fmt}"
     snap = state.get("snapshot") or _default_snapshot()
     if not snap.relationships:
         snap.relationships = [_ready_relationship()]
@@ -815,8 +843,10 @@ def _h_published_artifact_named(
     expected_name = match.group(1) if match else examples.get("artifact_name", "")
     state["published_artifact_name"] = expected_name
     pub_dir = state["published_dir"]
-    target = pub_dir / expected_name
-    if not target.is_file():
+    # Compare against the exact published names: the local filesystem may be
+    # case-insensitive, so is_file() alone would accept case-mutated names.
+    published_names = {p.name for p in pub_dir.iterdir()}
+    if expected_name not in published_names:
         return False, f"Artifact '{expected_name}' not found in {pub_dir}"
     return True, ""
 
@@ -881,7 +911,7 @@ def _h_identifies_correspondence_invalid(
         )
     )
     err = state.get("load_error", "")
-    if disp not in err and "correspondence" not in err.lower():
+    if disp not in err or "correspondence" not in err.lower():
         return False, f"Expected invalid correspondence '{disp}' in error, got: {err}"
     return True, ""
 
@@ -1736,6 +1766,123 @@ def _h_identifies_disposition_combination_invalid(
     return True, ""
 
 
+def _h_identifies_pinned_invalid_combination(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Check the rejection error names the pinned scope/qualification literals."""
+    state = _planner_state(world)
+    match = re.search(
+        r'identifies scope "([^"]+)" and qualification "([^"]+)" as an invalid combination',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse invalid combination expectation: {text}"
+    scope, qualification = match.groups()
+    err = str(state.get("plan_error", ""))
+    if scope not in err or qualification not in err:
+        return (
+            False,
+            f"Expected error mentioning ({scope}, {qualification}), got: {err}",
+        )
+    return True, ""
+
+
+def _plan_from_snapshot_order(
+    state: dict[str, Any], which: str
+) -> TaxonomyObligationPlan:
+    """Return plan_a or plan_b for a first/second snapshot reference."""
+    return state["plan_a" if which == "first" else "plan_b"]
+
+
+def _h_plan_snapshot_records_obligation_for(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Check one identity-comparison plan records an obligation for a pinned axis value."""
+    state = _planner_state(world)
+    match = re.search(
+        r'the plan from the (first|second) snapshot records an obligation for (risk|pattern) "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse plan obligation expectation: {text}"
+    which, axis, expected = match.groups()
+    plan = _plan_from_snapshot_order(state, which)
+    if axis == "risk":
+        found = any(o.risk_id == expected for o in plan.obligations)
+    else:
+        found = any(o.pattern_id == expected for o in plan.obligations)
+    if not found:
+        return (
+            False,
+            f"Plan from {which} snapshot has no obligation with {axis} '{expected}'",
+        )
+    return True, ""
+
+
+def _h_plan_snapshot_pins_pin(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Check one identity-comparison plan pins a pinned catalog/mapping value."""
+    state = _planner_state(world)
+    match = re.search(
+        r'the plan from the (first|second) snapshot pins (catalog|mapping) pin "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse plan pin expectation: {text}"
+    which, kind, expected = match.groups()
+    plan = _plan_from_snapshot_order(state, which)
+    pins = plan.catalog_pins if kind == "catalog" else plan.mapping_pins
+    if expected not in pins.values():
+        return False, f"Plan from {which} snapshot pins {expected!r} not in {pins}"
+    return True, ""
+
+
+def _h_plan_snapshot_capability_digest(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Check one identity-comparison plan digests the pinned capability content."""
+    state = _planner_state(world)
+    match = re.search(
+        r'the plan from the (first|second) snapshot records the capability snapshot digest of "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse capability digest expectation: {text}"
+    which, expected_content = match.groups()
+    plan = _plan_from_snapshot_order(state, which)
+    expected = compute_sha256(expected_content)
+    if plan.capability_snapshot_digest != expected:
+        return (
+            False,
+            f"Capability digest mismatch for {which} snapshot: "
+            f"{plan.capability_snapshot_digest} != {expected}",
+        )
+    return True, ""
+
+
+def _h_obligation_is_for_risk_and_pattern(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Check the selected obligation carries the pinned risk and pattern identity."""
+    state = _planner_state(world)
+    match = re.search(
+        r'that obligation is for risk "([^"]+)" and pattern "([^"]+)"',
+        text,
+    )
+    if not match:
+        return False, f"Could not parse obligation identity expectation: {text}"
+    risk_id, pattern_id = match.groups()
+    ob = _selected_or_first(state)
+    if ob.risk_id != risk_id or ob.pattern_id != pattern_id:
+        return (
+            False,
+            f"Obligation identity mismatch: {ob.risk_id}/{ob.pattern_id} "
+            f"vs {risk_id}/{pattern_id}",
+        )
+    return True, ""
+
+
 # Planner Feature Scenario 12 (Summary counts)
 def _h_snapshot_summary_category(
     world: World, text: str, examples: dict
@@ -2103,6 +2250,10 @@ def register(api: Any) -> None:
             r'the plan records the "([^"]+)" computed from canonical content',
             _h_plan_records_computed_digest_kind,
         ),
+        (
+            r'the plan records the (capability snapshot|qualification facts) digest of "([^"]+)"',
+            _h_plan_records_pinned_digest,
+        ),
         (r'the plan is published as "([^"]+)"', _h_publish_plan_atomically),
         (r'the published artifact is named "([^"]+)"', _h_published_artifact_named),
         (
@@ -2225,6 +2376,10 @@ def register(api: Any) -> None:
             _h_qualification_trace_no_secret,
         ),
         (
+            r'that obligation is for risk "([^"]+)" and pattern "([^"]+)"',
+            _h_obligation_is_for_risk_and_pattern,
+        ),
+        (
             r'candidate projection is applicable for risk "([^"]+)" and pattern "([^"]+)"',
             _h_candidate_projection_applicable,
         ),
@@ -2274,6 +2429,18 @@ def register(api: Any) -> None:
             _h_two_plans_different_digests,
         ),
         (
+            r'the plan from the (first|second) snapshot records an obligation for (risk|pattern) "([^"]+)"',
+            _h_plan_snapshot_records_obligation_for,
+        ),
+        (
+            r'the plan from the (first|second) snapshot pins (catalog|mapping) pin "([^"]+)"',
+            _h_plan_snapshot_pins_pin,
+        ),
+        (
+            r'the plan from the (first|second) snapshot records the capability snapshot digest of "([^"]+)"',
+            _h_plan_snapshot_capability_digest,
+        ),
+        (
             r'one snapshot includes ICA prose "([^"]+)"',
             _h_snapshot_ica_prose_a,
         ),
@@ -2302,6 +2469,10 @@ def register(api: Any) -> None:
         (
             r"the result identifies the disposition combination as invalid",
             _h_identifies_disposition_combination_invalid,
+        ),
+        (
+            r'the result identifies scope "([^"]+)" and qualification "([^"]+)" as an invalid combination',
+            _h_identifies_pinned_invalid_combination,
         ),
         (
             r"a snapshot whose obligation rows include every summary category",

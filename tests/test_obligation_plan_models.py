@@ -284,6 +284,15 @@ def test_unknown_field_wraps_validation_error_as_value_error() -> None:
         TaxonomyObligationPlan.from_json(json.dumps(raw))
 
 
+def test_json_serialization_is_sorted_and_trailing_newline_terminated() -> None:
+    plan = _make_plan()
+    text = plan.to_json()
+    assert text.endswith("}\n")
+    lines = [line for line in text.splitlines() if line.startswith('  "')]
+    top_level_keys = [line.split('"')[1] for line in lines]
+    assert top_level_keys == sorted(top_level_keys)
+
+
 def test_digest_computes_over_bytes_and_defaults_to_str() -> None:
     assert compute_sha256(b"abc") == compute_sha256("abc")
     assert compute_sha256(12345) == compute_sha256("12345")
