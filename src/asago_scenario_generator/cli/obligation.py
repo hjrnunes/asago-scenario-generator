@@ -14,6 +14,32 @@ from asago_scenario_generator.cli._shared import (
     _requested_formats,
     _validate_file,
 )
+from asago_scenario_generator.manifest import atomic_write_text
+from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
+
+
+def run_plan_obligations(
+    snapshot_path: Path,
+    output_dir: Path,
+    format_name: str = "both",
+) -> tuple[TaxonomyObligationPlan, list[Path]]:
+    """Publish a deterministic obligation plan from a snapshot file."""
+    from asago_scenario_generator.pipeline.obligation_planner import plan_obligations
+
+    _validate_file(snapshot_path, "obligation snapshot")
+    formats = _requested_formats(format_name)
+    plan = plan_obligations(_load_payload(snapshot_path, "obligation snapshot"))
+    output_dir.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    if "yaml" in formats:
+        path = output_dir / "taxonomy-obligation-plan.yaml"
+        atomic_write_text(path, plan.to_yaml())
+        written.append(path)
+    if "json" in formats:
+        path = output_dir / "taxonomy-obligation-plan.json"
+        atomic_write_text(path, plan.to_json())
+        written.append(path)
+    return plan, written
 
 
 @app.command(name="plan-obligations")
@@ -37,23 +63,9 @@ def plan_obligations_cmd(
     This is a file-to-file user-interface affordance. It is not generate
     or stpa-run and it makes no network or model calls.
     """
-    from asago_scenario_generator.pipeline.obligation_planner import plan_obligations
-
     _print_banner("plan-obligations")
-    _validate_file(snapshot, "obligation snapshot")
-    formats = _requested_formats(format)
     try:
-        plan = plan_obligations(_load_payload(snapshot, "obligation snapshot"))
-        output_dir.mkdir(parents=True, exist_ok=True)
-        written: list[Path] = []
-        if "yaml" in formats:
-            path = output_dir / "obligation-plan.yaml"
-            path.write_text(plan.to_yaml(), encoding="utf-8")
-            written.append(path)
-        if "json" in formats:
-            path = output_dir / "obligation-plan.json"
-            path.write_text(plan.to_json(), encoding="utf-8")
-            written.append(path)
+        plan, written = run_plan_obligations(snapshot, output_dir, format)
     except Exception as exc:  # noqa: BLE001 - CLI validation boundary
         _abort(exc)
     for path in written:

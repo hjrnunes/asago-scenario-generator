@@ -6,11 +6,11 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-
 from typer.testing import CliRunner
 
 from asago_scenario_generator.cli import app
 from asago_scenario_generator.models.obligation_plan import (
+    CandidateRecord,
     TaxonomyObligationPlan,
     TaxonomyObligationSnapshot,
 )
@@ -23,15 +23,17 @@ def _rel(
     risk_id: str,
     pattern_id: str | None = None,
     *,
-    scope: str = "in-scope",
-    disposition: str = "generated",
+    scope: str | None = None,
+    disposition: str = "ready",
 ) -> dict[str, Any]:
-    return {
+    rel: dict[str, Any] = {
         "risk_id": risk_id,
         "pattern_id": pattern_id,
-        "scope": scope,
         "disposition": disposition,
     }
+    if scope is not None:
+        rel["scope"] = scope
+    return rel
 
 
 def _make_snapshot(**overrides: Any) -> TaxonomyObligationSnapshot:
@@ -51,7 +53,11 @@ def test_shared_pattern_distinct_risk_scoped_obligations() -> None:
     snapshot = _make_snapshot(
         relationships=[
             _rel("atlas-prompt-injection", "AP-T1-01"),
-            _rel("atlas-memory-poisoning", "AP-T1-01", disposition="missing-template"),
+            _rel(
+                "atlas-memory-poisoning",
+                "AP-T1-01",
+                disposition="missing_evidence",
+            ),
         ],
     )
 
@@ -67,8 +73,8 @@ def test_shared_pattern_distinct_risk_scoped_obligations() -> None:
     assert ob_prompt.pattern_id == "AP-T1-01"
     assert ob_memory.pattern_id == "AP-T1-01"
     assert ob_prompt.obligation_id != ob_memory.obligation_id
-    assert ob_prompt.obligation_id == "ob:atlas-prompt-injection:AP-T1-01"
-    assert ob_memory.obligation_id == "ob:atlas-memory-poisoning:AP-T1-01"
+    assert ob_prompt.obligation_id.startswith("ob:atlas-prompt-injection:AP-T1-01:")
+    assert ob_memory.obligation_id.startswith("ob:atlas-memory-poisoning:AP-T1-01:")
     assert plan.network_calls == 0
     assert plan.model_calls == 0
 
@@ -77,12 +83,20 @@ def test_order_independence() -> None:
     snapshot_a = _make_snapshot(
         relationships=[
             _rel("atlas-prompt-injection", "AP-T6-01"),
-            _rel("atlas-memory-poisoning", "AP-T1-01", disposition="missing-template"),
+            _rel(
+                "atlas-memory-poisoning",
+                "AP-T1-01",
+                disposition="missing_evidence",
+            ),
         ],
     )
     snapshot_b = _make_snapshot(
         relationships=[
-            _rel("atlas-memory-poisoning", "AP-T1-01", disposition="missing-template"),
+            _rel(
+                "atlas-memory-poisoning",
+                "AP-T1-01",
+                disposition="missing_evidence",
+            ),
             _rel("atlas-prompt-injection", "AP-T6-01"),
         ],
     )
@@ -103,44 +117,70 @@ def test_scope_and_terminal_dispositions() -> None:
             _rel(
                 "atlas-prompt-injection",
                 "AP-T11-01",
-                scope="out-of-scope",
-                disposition="gated",
+                scope="capability_excluded",
+                disposition="not_attempted",
             ),
-            _rel("atlas-memory-poisoning", "AP-T1-01", disposition="missing-template"),
-            _rel("atlas-memory-poisoning", "AP-T1-02", disposition="infeasible"),
-            _rel("atlas-memory-poisoning", "AP-T1-03", disposition="unsupported"),
+            _rel(
+                "atlas-memory-poisoning",
+                "AP-T1-01",
+                disposition="missing_evidence",
+            ),
+            _rel(
+                "atlas-memory-poisoning",
+                "AP-T1-02",
+                disposition="structurally_infeasible",
+            ),
+            _rel(
+                "atlas-memory-poisoning",
+                "AP-T1-03",
+                disposition="contradictory_evidence",
+            ),
             _rel("atlas-prompt-injection", "AP-T6-01"),
-            _rel("atlas-orphan-risk", disposition="governance-only"),
+            _rel("atlas-orphan-risk", disposition="governance_only"),
         ],
     )
 
     plan = plan_obligations(snapshot)
     assert len(plan.obligations) == 6
     dispositions = {
-        o.obligation_id: (o.scope, o.terminal_disposition) for o in plan.obligations
+        (o.risk_id, o.pattern_id): (
+            o.scope_disposition,
+            o.qualification_disposition,
+            o.projection_disposition,
+        )
+        for o in plan.obligations
     }
 
-    assert dispositions["ob:atlas-prompt-injection:AP-T11-01"] == (
-        "out-of-scope",
-        "gated",
+    assert dispositions[("atlas-prompt-injection", "AP-T11-01")] == (
+        "capability_excluded",
+        "not_attempted",
+        "not_attempted",
     )
-    assert dispositions["ob:atlas-memory-poisoning:AP-T1-01"] == (
-        "in-scope",
-        "missing-template",
+    assert dispositions[("atlas-memory-poisoning", "AP-T1-01")] == (
+        "applicable",
+        "missing_evidence",
+        "not_attempted",
     )
-    assert dispositions["ob:atlas-memory-poisoning:AP-T1-02"] == (
-        "in-scope",
-        "infeasible",
+    assert dispositions[("atlas-memory-poisoning", "AP-T1-02")] == (
+        "applicable",
+        "structurally_infeasible",
+        "not_attempted",
     )
-    assert dispositions["ob:atlas-memory-poisoning:AP-T1-03"] == (
-        "in-scope",
-        "unsupported",
+    assert dispositions[("atlas-memory-poisoning", "AP-T1-03")] == (
+        "applicable",
+        "contradictory_evidence",
+        "not_attempted",
     )
-    assert dispositions["ob:atlas-prompt-injection:AP-T6-01"] == (
-        "in-scope",
-        "generated",
+    assert dispositions[("atlas-prompt-injection", "AP-T6-01")] == (
+        "applicable",
+        "ready",
+        "projectable",
     )
-    assert dispositions["ob:atlas-orphan-risk"] == ("in-scope", "governance-only")
+    assert dispositions[("atlas-orphan-risk", None)] == (
+        "governance_only",
+        "not_attempted",
+        "not_attempted",
+    )
 
 
 def test_relationship_kind_derives_disposition() -> None:
@@ -182,25 +222,52 @@ def test_relationship_kind_derives_disposition() -> None:
 
     plan = plan_obligations(snapshot)
     dispositions = {
-        o.obligation_id: (o.scope, o.terminal_disposition) for o in plan.obligations
+        (o.risk_id, o.pattern_id): (
+            o.scope_disposition,
+            o.qualification_disposition,
+            o.projection_disposition,
+        )
+        for o in plan.obligations
     }
 
-    assert dispositions["ob:risk-gated:AP-T1-01"] == ("out-of-scope", "gated")
-    assert dispositions["ob:risk-missing:AP-T1-02"] == ("in-scope", "missing-template")
-    assert dispositions["ob:risk-infeasible:AP-T1-03"] == ("in-scope", "infeasible")
-    assert dispositions["ob:risk-unsupported:AP-T1-04"] == (
-        "in-scope",
-        "unsupported",
+    assert dispositions[("risk-gated", "AP-T1-01")] == (
+        "capability_excluded",
+        "not_attempted",
+        "not_attempted",
     )
-    assert dispositions["ob:risk-governance:AP-T1-05"] == (
-        "in-scope",
-        "governance-only",
+    assert dispositions[("risk-missing", "AP-T1-02")] == (
+        "applicable",
+        "missing_evidence",
+        "not_attempted",
     )
-    assert dispositions["ob:risk-generated:AP-T1-06"] == ("in-scope", "generated")
-    assert dispositions["ob:risk-orphan"] == ("in-scope", "governance-only")
+    assert dispositions[("risk-infeasible", "AP-T1-03")] == (
+        "applicable",
+        "structurally_infeasible",
+        "not_attempted",
+    )
+    assert dispositions[("risk-unsupported", "AP-T1-04")] == (
+        "applicable",
+        "structurally_infeasible",
+        "not_attempted",
+    )
+    assert dispositions[("risk-governance", "AP-T1-05")] == (
+        "governance_only",
+        "not_attempted",
+        "not_attempted",
+    )
+    assert dispositions[("risk-generated", "AP-T1-06")] == (
+        "applicable",
+        "ready",
+        "projectable",
+    )
+    assert dispositions[("risk-orphan", None)] == (
+        "governance_only",
+        "not_attempted",
+        "not_attempted",
+    )
 
 
-def test_unknown_relationship_kind_defaults_to_generated() -> None:
+def test_unknown_relationship_kind_defaults_to_ready() -> None:
     snapshot = _make_snapshot(
         relationships=[
             {
@@ -212,8 +279,9 @@ def test_unknown_relationship_kind_defaults_to_generated() -> None:
     )
 
     plan = plan_obligations(snapshot)
-    assert plan.obligations[0].terminal_disposition == "generated"
-    assert plan.obligations[0].scope == "in-scope"
+    assert plan.obligations[0].scope_disposition == "applicable"
+    assert plan.obligations[0].qualification_disposition == "ready"
+    assert plan.obligations[0].projection_disposition == "projectable"
 
 
 def test_trace_matching_requires_risk_and_pattern() -> None:
@@ -260,20 +328,31 @@ def test_expansion_matching_requires_risk_and_pattern() -> None:
             {
                 "risk_id": "risk-a",
                 "pattern_id": "AP-T1-01",
-                "accepted_candidates": ["cand:one", "cand:one", 7],
+                "accepted_candidates": [
+                    {"candidate_id": "cand:one", "projection_disposition": "projectable"},
+                    {"candidate_id": "cand:one", "projection_disposition": "projectable"},
+                ],
                 "rejected_candidates": [
-                    {"candidate_id": "cand:two", "reason": "duplicate rejected"},
+                    {
+                        "candidate_id": "cand:two",
+                        "projection_disposition": "projection_infeasible",
+                        "reason": "duplicate rejected",
+                    },
                 ],
             },
             {
                 "risk_id": "risk-a",
                 "pattern_id": "AP-T1-02",
-                "accepted_candidates": ["cand:other-pattern"],
+                "accepted_candidates": [
+                    {"candidate_id": "cand:other-pattern", "projection_disposition": "projectable"}
+                ],
             },
             {
                 "risk_id": "risk-b",
                 "pattern_id": "AP-T1-01",
-                "accepted_candidates": ["cand:other-risk"],
+                "accepted_candidates": [
+                    {"candidate_id": "cand:other-risk", "projection_disposition": "projectable"}
+                ],
             },
         ],
     )
@@ -281,8 +360,9 @@ def test_expansion_matching_requires_risk_and_pattern() -> None:
     plan = plan_obligations(snapshot)
     ob = plan.obligations[0]
 
-    assert ob.accepted_candidates == ["cand:one"]
-    assert [r.candidate_id for r in ob.rejected_candidates] == ["cand:two"]
+    assert len(ob.candidate_records) == 2
+    assert ob.candidate_records[0].candidate_id == "cand:one"
+    assert ob.candidate_records[1].candidate_id == "cand:two"
 
 
 def test_non_string_config_values_are_ignored_as_secrets() -> None:
@@ -312,7 +392,7 @@ def test_yaml_artifact_is_block_style_with_sorted_keys() -> None:
     snapshot = _make_snapshot(relationships=[_rel("risk-a", "AP-T1-01")])
     text = plan_obligations(snapshot).to_yaml()
 
-    assert text.startswith("digest: ")
+    assert "semantic_digest: " in text
     assert list(yaml.safe_load(text)) == sorted(yaml.safe_load(text))
 
 
@@ -392,7 +472,7 @@ def test_plan_accepts_raw_dict_snapshot() -> None:
 
 def test_governance_only_risk_without_pattern() -> None:
     snapshot = _make_snapshot(
-        relationships=[_rel("atlas-orphan-risk", disposition="governance-only")],
+        relationships=[{"risk_id": "atlas-orphan-risk", "scope_disposition": "governance_only", "qualification_disposition": "not_attempted", "projection_disposition": "not_attempted"}],
     )
 
     plan = plan_obligations(snapshot)
@@ -400,8 +480,10 @@ def test_governance_only_risk_without_pattern() -> None:
     ob = plan.obligations[0]
     assert ob.risk_id == "atlas-orphan-risk"
     assert ob.pattern_id is None
-    assert ob.terminal_disposition == "governance-only"
-    assert ob.obligation_id == "ob:atlas-orphan-risk"
+    assert ob.scope_disposition == "governance_only"
+    assert ob.qualification_disposition == "not_attempted"
+    assert ob.projection_disposition == "not_attempted"
+    assert ob.obligation_id.startswith("ob:atlas-orphan-risk:")
 
 
 def test_qualification_trace_omits_secrets() -> None:
@@ -444,10 +526,16 @@ def test_candidate_expansion_evidence_retained() -> None:
             {
                 "risk_id": "atlas-prompt-injection",
                 "pattern_id": "AP-T6-01",
-                "accepted_candidates": ["cand:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+                "accepted_candidates": [
+                    {
+                        "candidate_id": "cand:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "projection_disposition": "projectable",
+                    }
+                ],
                 "rejected_candidates": [
                     {
                         "candidate_id": "cand:v2:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                        "projection_disposition": "projection_infeasible",
                         "reason": "rule rejected combination",
                     }
                 ],
@@ -457,20 +545,26 @@ def test_candidate_expansion_evidence_retained() -> None:
 
     plan = plan_obligations(snapshot)
     ob = plan.obligations[0]
-    assert ob.accepted_candidates == ["cand:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
-    assert len(ob.rejected_candidates) == 1
+    assert len(ob.candidate_records) == 2
     assert (
-        ob.rejected_candidates[0].candidate_id
+        ob.candidate_records[0].candidate_id
+        == "cand:v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    )
+    assert (
+        ob.candidate_records[1].candidate_id
         == "cand:v2:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     )
-    assert ob.rejected_candidates[0].reason == "rule rejected combination"
+    assert (
+        ob.candidate_records[1].reason
+        == "rule rejected combination"
+    )
 
 
 def test_plan_obligations_cli_writes_yaml_and_json(tmp_path: Path) -> None:
     snapshot = _make_snapshot(
         relationships=[
             _rel("atlas-prompt-injection", "AP-T6-01"),
-            _rel("atlas-orphan-risk", disposition="governance-only"),
+            _rel("atlas-orphan-risk", disposition="governance_only"),
         ],
     )
     snapshot_path = tmp_path / "snapshot.yaml"
@@ -491,8 +585,8 @@ def test_plan_obligations_cli_writes_yaml_and_json(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 0, result.stderr
-    yaml_path = output_dir / "obligation-plan.yaml"
-    json_path = output_dir / "obligation-plan.json"
+    yaml_path = output_dir / "taxonomy-obligation-plan.yaml"
+    json_path = output_dir / "taxonomy-obligation-plan.json"
     assert yaml_path.is_file()
     assert json_path.is_file()
     assert f"Obligation plan written to {yaml_path}" in result.stdout
@@ -519,3 +613,4 @@ def test_plan_obligations_cli_rejects_missing_snapshot(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert f"Error: obligation snapshot not found: {missing}" in result.stderr
+

@@ -16,8 +16,10 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from asago_scenario_generator.models.obligation_plan import (
-    ObligationDisposition,
-    ObligationScope,
+    ObligationCorrespondenceDisposition,
+    ObligationProjectionDisposition,
+    ObligationQualificationDisposition,
+    ObligationScopeDisposition,
     TaxonomyObligationPlan,
     TaxonomyObligationSnapshot,
 )
@@ -29,15 +31,25 @@ _IDS = st.text(
     min_size=1,
     max_size=16,
 )
-_DISPOSITIONS = [
-    "gated",
-    "missing-template",
-    "infeasible",
-    "unsupported",
-    "generated",
-    "governance-only",
+
+_VALID_COMBINATIONS = [
+    ("applicable", "ready", "projectable", True),
+    ("applicable", "missing_evidence", "not_attempted", True),
+    ("applicable", "contradictory_evidence", "not_attempted", True),
+    ("applicable", "structurally_infeasible", "not_attempted", True),
+    ("capability_excluded", "not_attempted", "not_attempted", True),
+    ("governance_only", "not_attempted", "not_attempted", False),
 ]
-_SCOPES = ["in-scope", "out-of-scope"]
+
+_VALID_KINDS = [
+    "gated threat",
+    "missing generation template",
+    "projection infeasibility",
+    "unsupported requirement",
+    "qualified generable pattern",
+    "governance review",
+    "unclassified note",
+]
 
 
 def _snapshot(
@@ -60,33 +72,31 @@ def _snapshot(
 
 @st.composite
 def _relationship_lists(draw: st.DrawFn) -> list[dict[str, object]]:
-    """Draw relationship dicts with arbitrary risk/pattern/kind shapes."""
-    pairs = st.tuples(_IDS, st.one_of(_IDS, st.none()))
-    raw = draw(
-        st.lists(
-            st.tuples(pairs, st.one_of(st.sampled_from(_DISPOSITIONS), st.none())),
-            max_size=8,
-        )
-    )
+    """Draw relationship dicts with valid combinations and kinds."""
+    num_items = draw(st.integers(min_value=0, max_value=8))
     relationships: list[dict[str, object]] = []
-    for (risk_id, pattern_id), disposition in raw:
-        rel: dict[str, object] = {"risk_id": risk_id, "pattern_id": pattern_id}
-        if disposition is not None:
-            rel["disposition"] = disposition
-        elif draw(st.booleans()):
-            rel["relationship_kind"] = draw(
-                st.sampled_from(
-                    (
-                        "gated threat",
-                        "missing generation template",
-                        "projection infeasibility",
-                        "unsupported requirement",
-                        "qualified generable pattern",
-                        "governance review",
-                        "unclassified note",
-                    )
-                )
-            )
+    for _ in range(num_items):
+        risk_id = draw(_IDS)
+        combo = draw(st.sampled_from(_VALID_COMBINATIONS))
+        scope, qual, proj, pattern_allowed = combo
+        pattern_id = draw(_IDS) if pattern_allowed else None
+
+        use_kind = draw(st.booleans())
+        if use_kind:
+            kind = draw(st.sampled_from(_VALID_KINDS))
+            rel: dict[str, object] = {
+                "risk_id": risk_id,
+                "pattern_id": draw(_IDS),
+                "relationship_kind": kind,
+            }
+        else:
+            rel = {
+                "risk_id": risk_id,
+                "pattern_id": pattern_id,
+                "scope_disposition": scope,
+                "qualification_disposition": qual,
+                "projection_disposition": proj,
+            }
         relationships.append(rel)
     return relationships
 
@@ -115,14 +125,16 @@ def test_every_obligation_has_closed_scope_and_disposition(
     plan = plan_obligations(_snapshot(relationships))
 
     for obligation in plan.obligations:
-        assert obligation.scope in get_args(ObligationScope)
-        assert obligation.terminal_disposition in get_args(ObligationDisposition)
-        expected_id = (
-            f"ob:{obligation.risk_id}:{obligation.pattern_id}"
-            if obligation.pattern_id is not None
-            else f"ob:{obligation.risk_id}"
+        assert obligation.scope_disposition in get_args(ObligationScopeDisposition)
+        assert obligation.qualification_disposition in get_args(
+            ObligationQualificationDisposition
         )
-        assert obligation.obligation_id == expected_id
+        assert obligation.correspondence_disposition in get_args(
+            ObligationCorrespondenceDisposition
+        )
+        assert obligation.projection_disposition in get_args(
+            ObligationProjectionDisposition
+        )
         assert obligation.risk_id in obligation.obligation_id
 
 
@@ -217,3 +229,4 @@ def test_json_artifact_is_sorted_and_parseable(
     keys = [key for key in parsed]
     assert keys == sorted(keys)
     assert yaml.safe_load(text) == parsed
+
