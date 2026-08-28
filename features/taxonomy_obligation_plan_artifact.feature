@@ -1,52 +1,48 @@
-# mutation-stamp: sha256=9231912afc5cd7d64874710a0fe97764a2679b754df1b21422325bfb17df778a
-# acceptance-mutation-manifest-begin
-# {"version":1,"tested_at":"2026-08-27T17:14:27.448662Z","feature_name":"Taxonomy obligation plan artifact","feature_path":"features/taxonomy_obligation_plan_artifact.feature","background_hash":"404ec7aa5df544172f5d7bba33f66ab007a962f33538ef45f7b38cb73129ab7b","implementation_hash":"unknown","scenarios":[{"index":0,"name":"Taxonomy obligation plan artifact 01 copies pinned snapshot versions into the plan","scenario_hash":"4ba23d6cf8f5391c7a0f2867a8b72984827c455afa6c3b3ca230e86d969ee8e3","mutation_count":5,"result":{"Total":5,"Killed":5,"Survived":0,"Errors":0},"tested_at":"2026-08-27T17:14:27.448662Z"},{"index":1,"name":"Taxonomy obligation plan artifact 02 keeps identifiers and order independent of presentation order","scenario_hash":"98764ac154ca3922fa5458816e5e8a2104ed635d2809613aa7d20b248e2ea542","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-27T17:14:27.448662Z"},{"index":2,"name":"Taxonomy obligation plan artifact 03 round-trips without semantic loss","scenario_hash":"876f03e0ed42f5186611804b97f71eb645916db7a126a29f5bb15731577a840b","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-27T17:14:27.448662Z"},{"index":3,"name":"Taxonomy obligation plan artifact 04 is byte-stable for identical inputs","scenario_hash":"c85325c3b98e55a1c342d68078e028b81208ca681fb7ba1f74a4f1aa2ec8b54c","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-27T17:14:27.448662Z"}]}
-# acceptance-mutation-manifest-end
-
 Feature: Taxonomy obligation plan artifact
-  The obligation plan is a versioned YAML and JSON artifact. Identifiers
-  and ordering come from semantic identity, and round-trip persistence
-  preserves pinned versions, dispositions, and evidence.
+  The obligation plan is a closed, versioned YAML and JSON artifact.
+  Identifiers and digests come from canonical content, unknown fields
+  and unsupported versions are rejected, and round-trip persistence
+  preserves pins, dispositions, and evidence.
 
   Background:
     Given a pinned taxonomy obligation snapshot is available
     And obligation planning makes no network or model calls
 
-  # Taxonomy obligation plan artifact 01 copies pinned snapshot versions into the plan
-  Scenario Outline: Taxonomy obligation plan artifact 01 copies pinned snapshot versions into the plan
-    Given the snapshot pins taxonomy version "<taxonomy_version>", mapping version "<mapping_version>", qualification ruleset version "<ruleset_version>", template version "<template_version>", and digest "<digest>"
+  # Taxonomy obligation plan artifact 01 records closed schema metadata from canonical content
+  Scenario Outline: Taxonomy obligation plan artifact 01 records closed schema metadata from canonical content
+    Given the snapshot pins catalog pin "<catalog_pin>", mapping pin "<mapping_pin>", capability snapshot content "<capability_content>", and qualification facts "<qualification_facts>"
     When the obligation plan is produced
-    Then the plan records taxonomy version "<taxonomy_version>"
-    And the plan records mapping version "<mapping_version>"
-    And the plan records qualification ruleset version "<ruleset_version>"
-    And the plan records template version "<template_version>"
-    And the plan records digest "<digest>"
+    Then the plan records schema version "<schema_version>"
+    And the plan records catalog pin "<catalog_pin>"
+    And the plan records mapping pin "<mapping_pin>"
+    And the plan records computed digests for capability snapshot, qualification facts, generation inputs, and semantic content
 
     Examples:
-      | taxonomy_version | mapping_version | ruleset_version            | template_version      | digest                                                           |
-      | atlas-2026.05    | sssom-v1        | catalog-qualification-v1   | scenario-envelope-v1  | aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa |
+      | schema_version              | catalog_pin   | mapping_pin | capability_content | qualification_facts |
+      | taxonomy-obligation-plan-v1 | atlas-2026.05 | sssom-v1    | profile-v1         | facts-v1            |
 
-  # Taxonomy obligation plan artifact 02 keeps identifiers and order independent of presentation order
-  Scenario Outline: Taxonomy obligation plan artifact 02 keeps identifiers and order independent of presentation order
+  # Taxonomy obligation plan artifact 02 keeps identifiers and digests independent of presentation order
+  Scenario Outline: Taxonomy obligation plan artifact 02 keeps identifiers and digests independent of presentation order
     Given one snapshot presents relationships in order "<order_a>"
     And another snapshot presents the same relationships in order "<order_b>"
     When an obligation plan is produced from each presentation
     Then both plans have identical obligation identifiers
+    And both plans have identical semantic digests
     And both plans have identical canonical ledger order
     And both serialized artifacts are canonically equivalent
 
     Examples:
-      | order_a                                          | order_b                                          |
+      | order_a                                                       | order_b                                                       |
       | atlas-prompt-injection:AP-T6-01,atlas-memory-poisoning:AP-T1-01 | atlas-memory-poisoning:AP-T1-01,atlas-prompt-injection:AP-T6-01 |
 
   # Taxonomy obligation plan artifact 03 round-trips without semantic loss
   Scenario Outline: Taxonomy obligation plan artifact 03 round-trips without semantic loss
-    Given the snapshot produces a plan with pinned versions, dispositions, and evidence
+    Given the snapshot produces a plan with pins, dispositions, digests, and evidence
     When the plan is serialized as "<format>" and deserialized
     Then obligation identities are preserved
-    And pinned versions are preserved
-    And terminal dispositions are preserved
-    And qualification traces and candidate evidence are preserved
+    And schema version, pins, and computed digests are preserved
+    And scope, qualification, projection, and correspondence dispositions are preserved
+    And qualification traces, candidate records, and summary counts are preserved
 
     Examples:
       | format |
@@ -55,7 +51,7 @@ Feature: Taxonomy obligation plan artifact
 
   # Taxonomy obligation plan artifact 04 is byte-stable for identical inputs
   Scenario Outline: Taxonomy obligation plan artifact 04 is byte-stable for identical inputs
-    Given the snapshot produces a plan with pinned versions, dispositions, and evidence
+    Given the snapshot produces a plan with pins, dispositions, digests, and evidence
     When the plan is serialized as "<format>" twice
     Then the two artifacts are byte-identical
 
@@ -63,3 +59,79 @@ Feature: Taxonomy obligation plan artifact
       | format |
       | YAML   |
       | JSON   |
+
+  # Taxonomy obligation plan artifact 05 rejects tampered persisted content
+  Scenario Outline: Taxonomy obligation plan artifact 05 rejects tampered persisted content
+    Given a published plan artifact in "<format>"
+    And the persisted content is tampered in field "<field>" without updating the semantic digest
+    When the plan is loaded
+    Then loading is rejected
+    And the result identifies a digest mismatch
+
+    Examples:
+      | format | field        |
+      | YAML   | catalog_pins |
+      | JSON   | mapping_pins |
+      | YAML   | obligations  |
+
+  # Taxonomy obligation plan artifact 06 rejects unknown fields
+  Scenario Outline: Taxonomy obligation plan artifact 06 rejects unknown fields
+    Given a persisted plan includes unknown field "<field>"
+    When the plan is loaded
+    Then loading is rejected
+    And the result identifies unknown field "<field>"
+
+    Examples:
+      | field         |
+      | extra_score   |
+      | covered_rate  |
+
+  # Taxonomy obligation plan artifact 07 rejects unsupported schema versions
+  Scenario Outline: Taxonomy obligation plan artifact 07 rejects unsupported schema versions
+    Given a persisted plan declares schema version "<schema_version>"
+    When the plan is loaded
+    Then loading is rejected
+    And the result identifies schema version "<schema_version>" as unsupported
+
+    Examples:
+      | schema_version               |
+      | taxonomy-obligation-plan-v0  |
+      | taxonomy-obligation-plan-v2  |
+
+  # Taxonomy obligation plan artifact 08 ignores caller-supplied false digests
+  Scenario Outline: Taxonomy obligation plan artifact 08 ignores caller-supplied false digests
+    Given the snapshot supplies "<digest_kind>" with false value "<false_digest>"
+    And the canonical content does not match "<false_digest>"
+    When the obligation plan is produced
+    Then the plan does not record "<false_digest>" as the "<digest_kind>"
+    And the plan records the "<digest_kind>" computed from canonical content
+
+    Examples:
+      | digest_kind                | false_digest                                                     |
+      | capability_snapshot_digest | deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef |
+      | semantic_digest            | cafebebecafebebecafebebecafebebecafebebecafebebecafebebecafebebe |
+      | qualification_facts_digest | 0000000000000000000000000000000000000000000000000000000000000000 |
+
+  # Taxonomy obligation plan artifact 09 publishes the YAML plan atomically
+  Scenario Outline: Taxonomy obligation plan artifact 09 publishes the YAML plan atomically
+    When the plan is published as "<format>"
+    Then the published artifact is named "<artifact_name>"
+    And the published artifact loads as a complete closed plan
+    And no partial plan file remains
+
+    Examples:
+      | format | artifact_name                   |
+      | YAML   | taxonomy-obligation-plan.yaml   |
+
+  # Taxonomy obligation plan artifact 10 rejects Phase 1 correspondence claims
+  Scenario Outline: Taxonomy obligation plan artifact 10 rejects Phase 1 correspondence claims
+    Given a persisted plan sets correspondence disposition to "<invalid_disposition>"
+    When the plan is loaded
+    Then loading is rejected
+    And the result identifies correspondence disposition "<invalid_disposition>" as invalid
+
+    Examples:
+      | invalid_disposition |
+      | covered             |
+      | matched             |
+      | satisfied           |
