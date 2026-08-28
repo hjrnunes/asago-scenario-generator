@@ -71,8 +71,10 @@ entrypoints and fail when `build/acceptance/` has not been reconstructed yet.
 
 Changed production code should also be evaluated with the configured coverage,
 CRAP, DRY, source mutation, and Gherkin mutation commands where relevant. The
-project target is CRAP at or below 6 and mutation score at or above 80. Tool
-scope remains `src/`; Ruff also checks `acceptance/`.
+canonical differential mutation invocation is `scripts/differential-mutation.sh
+<src>` with per-source test contexts in `config/mutation-test-contexts.tsv`.
+The project target is CRAP at or below 6 and mutation score at or above 80.
+Tool scope remains `src/`; Ruff also checks `acceptance/`.
 
 ## External tools and pins
 
@@ -98,18 +100,23 @@ The local installation uses the fork `hjrnunes/swarm-forge` (pinned in
 `config/swarmforge.env`:
 
 - Shared launcher scripts come from the fork's `main` branch and live under
-  ignored `swarmforge/scripts/`; the fork carries the project's committed
-  patches (droid agent backend, auto-approval of every handoff, and the
-  project-name dashboard title). The `./swarm` wrapper archives the local
-  fork checkout first and falls back to the fork's GitHub tarball.
+  ignored `swarmforge/scripts/`; the fork carries all of the project's
+  local changes (project agent backend, env-gated auto-approve, project-name
+  dashboard title, and APS worktree provisioning). The `./swarm` wrapper
+  archives the local fork checkout first and falls back to the fork's GitHub
+  tarball. No post-fetch patch step exists: the retired patch script was
+  deleted because re-applying its unconditional auto-approve shadow over
+  the fork's env-gated `should-hold?` would silently override
+  `SWARMFORGE_AUTO_APPROVE`. The wrapper exports
+  `SWARMFORGE_AUTO_APPROVE=true` by default; set it to false before launching
+  to restore the specifier approval gate.
 - The `six-pack` configuration lives under ignored `swarmforge/`:
-  `swarmforge/swarmforge.conf` runs all six roles on the droid agent backend
-  in invisible tmux windows (`window-invisible`), role prompts are the
-  auto-approve-adapted six-pack prompts under `swarmforge/roles/`, and
-  `apply-droid-patch.sh` re-applies the fork patches if scripts were ever
-  re-fetched from upstream instead of the fork.
+  `swarmforge/swarmforge.conf` runs all six roles on the project's configured
+  agent backend in invisible tmux windows (`window-invisible`), and role
+  prompts are the auto-approve-adapted six-pack prompts under
+  `swarmforge/roles/`.
 - Model selection is harness-local: each role prompt has a sibling
-  `roles/<role>.settings.json` passed to the droid CLI with `--settings`,
+  `roles/<role>.settings.json` passed to the agent CLI with `--settings`,
   e.g. specifier/QA on `grok-4.6`, coder on `deepseek-v4-flash-0731`,
   architect on `deepseek-v4-pro`, cleaner/hardender on `gpt-5.6-luna`, with
   matching reasoning effort. These files are ignored, not repository content;
@@ -118,12 +125,16 @@ The local installation uses the fork `hjrnunes/swarm-forge` (pinned in
   Launch from a feature branch with `./swarm`; stop with `./close-swarm` or
   by closing its first terminal window. Handoffs are auto-approved and
   delivered via `ready_for_next.sh` / `done_with_current.sh`.
+  `done_with_current_batch.sh` verifies that every item of a multi-item batch
+  got exactly one sent `git_handoff` (terminal-role batches and QA-origin
+  items exempt) and refuses to complete the batch otherwise; `pack_board.sh`
+  suggests the closest board card names when a handoff names an unknown task;
+  `swarm_handoff.sh` preserves the drafted task name in multi-item batches
+  (it only auto-fills a blank name or corrects drift on single-item batches).
 
 The scaffolder is intentionally absent because the portable acceptance
 pipeline is already committed. The project uses ordinary commit messages
-without agent-role bylines. The retired SwarmForge-Droid installation (role
-prompts and helpers under `.factory/`, runtime under `.swarmforge-droid/`)
-is no longer used; do not launch it against a feature branch.
+without agent-role bylines.
 
 ## Completion
 
