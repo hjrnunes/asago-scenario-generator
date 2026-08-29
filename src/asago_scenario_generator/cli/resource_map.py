@@ -1,4 +1,4 @@
-"""Offline file-to-file system resource map validator command."""
+"""Optional file adapter for the typed system-resource-map validator."""
 
 from __future__ import annotations
 
@@ -16,12 +16,23 @@ from asago_scenario_generator.cli._shared import (
     _requested_formats,
     _validate_file,
 )
+from asago_scenario_generator.models.system_resource_map import SystemResourceMap
+from asago_scenario_generator.pipeline.projection_contracts import (
+    CapabilityFactSnapshot,
+)
+from asago_scenario_generator.pipeline.system_resource_map import (
+    validate_system_resource_map,
+)
+from asago_scenario_generator.pipeline.system_resource_map_persistence import (
+    write_system_resource_map,
+)
+from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 
 
 def _dump_result(payload: dict, fmt: str) -> str:
-    """Serialize a validation result with a standard JSON or YAML writer."""
+    """Serialize diagnostics with a deterministic standard writer."""
     if fmt == "json":
-        return json.dumps(payload, indent=2, sort_keys=True) + "\n"
+        return json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     return yaml.dump(
         payload,
         default_flow_style=False,
@@ -30,111 +41,86 @@ def _dump_result(payload: dict, fmt: str) -> str:
     )
 
 
-def _normalized_hint(context_hint: str | None) -> str | None:
-    """Treat a blank context hint as omitted."""
-    if context_hint is None:
-        return None
-    stripped = context_hint.strip()
-    return stripped or None
+def _load_resource_map(path: Path) -> SystemResourceMap:
+    """Read a resource map through its closed model contract."""
+    text = path.read_text(encoding="utf-8")
+    if path.suffix.lower() == ".json":
+        return SystemResourceMap.from_json(text)
+    return SystemResourceMap.from_yaml(text)
 
 
-def _write_artifact(path: Path, text: str, written: list[Path]) -> None:
-    """Write one published artifact and record its path."""
-    path.write_text(text, encoding="utf-8")
-    written.append(path)
-
-
-def _publish_validation(
+def _write_diagnostics(
     output_dir: Path, payload: dict, formats: tuple[str, ...]
 ) -> list[Path]:
-    """Publish the validation result in the requested formats."""
+    """Publish validation diagnostics in requested formats."""
+    output_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
-    names = {
-        "yaml": "resource-map-validation.yaml",
-        "json": "resource-map-validation.json",
-    }
     for fmt in formats:
-        _write_artifact(output_dir / names[fmt], _dump_result(payload, fmt), written)
+        path = output_dir / f"system-resource-map-validation.{fmt}"
+        path.write_text(_dump_result(payload, fmt), encoding="utf-8")
+        written.append(path)
     return written
 
 
-def _publish_canonical(
-    output_dir: Path, canonical, formats: tuple[str, ...]
-) -> list[Path]:
-    """Publish the canonical map when validation succeeds."""
-    written: list[Path] = []
-    if canonical is None:
-        return written
-    if "yaml" in formats:
-        _write_artifact(output_dir / "resource-map.yaml", canonical.to_yaml(), written)
-    if "json" in formats:
-        _write_artifact(output_dir / "resource-map.json", canonical.to_json(), written)
-    return written
-
-
-def _announce(result, written: list[Path]) -> None:
-    """Print published paths and call counts, then fail closed when invalid."""
+@app.command(name="validate-system-resource-map")
+def validate_system_resource_map_cmd(
+    resource_map: Path = typer.Option(
+        ...,
+        "--map",
+        help="system-resource-map-v1 YAML or JSON file.",
+    ),
+    capability_snapshot: Path = typer.Option(
+        ...,
+        "--capability-snapshot",
+        "--snapshot",
+        help="Complete CapabilityFactSnapshot YAML or JSON file.",
+    ),
+    control_structure: Path = typer.Option(
+        ...,
+        "--control-structure",
+        help="STPA ControlStructure YAML or JSON file.",
+    ),
+    output_dir: Path = typer.Option(
+        ...,
+        help="Directory for validation diagnostics and canonical map artifact.",
+    ),
+    format: str = typer.Option(
+        "yaml",
+        "--format",
+        help="Diagnostic format: yaml, json, or both.",
+    ),
+) -> None:
+    """Validate and optionally publish one typed resource-map sidecar."""
+    _print_banner("validate-system-resource-map")
+    _validate_file(resource_map, "system resource map")
+    _validate_file(capability_snapshot, "capability snapshot")
+    _validate_file(control_structure, "control structure")
+    formats = _requested_formats(format)
+    try:
+        resource_map_model = _load_resource_map(resource_map)
+        capability_model = CapabilityFactSnapshot.model_validate(
+            _load_payload(capability_snapshot, "capability snapshot")
+        )
+        control_model = ControlStructure.model_validate(
+            _load_payload(control_structure, "control structure")
+        )
+        result = validate_system_resource_map(
+            resource_map_model, capability_model, control_model
+        )
+        payload = result.model_dump(mode="json", exclude={"canonical_map"})
+        written = _write_diagnostics(output_dir, payload, formats)
+        if result.is_valid:
+            written.append(write_system_resource_map(output_dir, result.canonical_map))
+    except Exception as exc:  # noqa: BLE001 - CLI validation boundary
+        _abort(exc)
     for path in written:
-        typer.echo(f"Resource map artifact written to {path}")
+        typer.echo(f"System resource map artifact written to {path}")
     typer.echo(f"  Valid:         {result.is_valid}")
-    typer.echo(f"  Errors:        {len(result.errors)}")
-    typer.echo(f"  Warnings:      {len(result.warnings)}")
+    typer.echo(f"  Violations:    {len(result.violations)}")
     typer.echo(f"  Network calls: {result.network_calls}")
     typer.echo(f"  Model calls:   {result.model_calls}")
     if not result.is_valid:
         raise typer.Exit(code=1)
 
 
-@app.command(name="validate-resource-map")
-def validate_resource_map_cmd(
-    snapshot: Path = typer.Option(
-        ...,
-        help="Pinned resource-map snapshot JSON or YAML file.",
-    ),
-    resource_map: Path = typer.Option(
-        ...,
-        "--map",
-        help="SystemResourceMap JSON or YAML file to validate.",
-    ),
-    output_dir: Path = typer.Option(
-        ...,
-        help="Directory for published validation and canonical map artifacts.",
-    ),
-    format: str = typer.Option(
-        "both",
-        "--format",
-        help="Published artifact format: yaml, json, or both.",
-    ),
-    context_hint: str | None = typer.Option(
-        None,
-        "--context-hint",
-        help="Optional validation context hint (for example dangling_reference).",
-    ),
-) -> None:
-    """Validate a SystemResourceMap against a pinned snapshot.
-
-    This is a file-to-file user-interface affordance. It is not generate
-    or stpa-run and it makes no network or model calls.
-    """
-    from asago_scenario_generator.pipeline.system_resource_map import (
-        validate_resource_map,
-    )
-
-    _print_banner("validate-resource-map")
-    _validate_file(snapshot, "resource-map snapshot")
-    _validate_file(resource_map, "resource map")
-    formats = _requested_formats(format)
-    try:
-        result = validate_resource_map(
-            _load_payload(resource_map, "resource map"),
-            _load_payload(snapshot, "resource-map snapshot"),
-            context_hint=_normalized_hint(context_hint),
-        )
-        output_dir.mkdir(parents=True, exist_ok=True)
-        payload = result.model_dump(mode="json")
-        payload.pop("canonical_map", None)
-        written = _publish_validation(output_dir, payload, formats)
-        written.extend(_publish_canonical(output_dir, result.canonical_map, formats))
-    except Exception as exc:  # noqa: BLE001 - CLI validation boundary
-        _abort(exc)
-    _announce(result, written)
+__all__ = ["validate_system_resource_map_cmd"]

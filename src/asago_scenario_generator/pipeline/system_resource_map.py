@@ -1,518 +1,519 @@
-"""Deterministic offline validation for SystemResourceMap."""
+"""Pure validation of the Phase 2 system-resource-map domain contract."""
 
 from __future__ import annotations
 
-import re
+import json
+from collections import defaultdict
+from collections.abc import Iterable
 from typing import Any
 
+from asago_scenario_generator.models.attack_pattern_projection import (
+    AgentInternalResourceReference,
+    EntryPointResourceReference,
+    IntegrationResourceReference,
+    OutputSurfaceResourceReference,
+    ToolResourceReference,
+    TrustBoundaryResourceReference,
+)
 from asago_scenario_generator.models.system_resource_map import (
-    ResourceMapSnapshot,
-    ResourceMapValidationIssue,
-    ResourceMapValidationResult,
+    ControlStructureReference,
+    ResourceLink,
+    ResourceMapViolation,
     SystemResourceMap,
-    VALID_ENTITY_FAMILIES,
-    VALID_PROVENANCE_KINDS,
-    VALID_RESOLUTION_STATUSES,
+    SystemResourceMapValidation,
 )
-
-_UNSTABLE_ID_PATTERNS = (
-    re.compile(r"^idx-\d+", re.IGNORECASE),
-    re.compile(r"^index-\d+", re.IGNORECASE),
-    re.compile(r"^pos-\d+", re.IGNORECASE),
-    re.compile(r"^item-\d+", re.IGNORECASE),
+from asago_scenario_generator.pipeline.projection_contracts import (
+    CapabilityFactSnapshot,
 )
+from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 
-# SystemResourceMap collections sorted by element_id in the canonical map.
-_CANONICAL_COLLECTIONS = (
-    "system_resources",
-    "actor_controllers",
-    "controlled_processes",
-    "control_actions",
-    "feedback_paths",
-    "trust_boundaries",
-    "data_flows",
-    "loss_links",
-    "use_case_facts",
-    "assertions",
-)
+# A relation's source/target namespaces are intentionally closed. Adding a
+# new relation or namespace is a schema change, not a permissive fallback.
+_RELATION_COMPATIBILITY: dict[str, tuple[frozenset[str], frozenset[str]]] = {
+    "receives_from": (
+        frozenset({"FB", "PM"}),
+        frozenset(
+            {
+                "entry_point",
+                "tool",
+                "integration",
+                "output_surface",
+                "trust_boundary",
+                "agent_internal",
+            }
+        ),
+    ),
+    "acts_on": (
+        frozenset({"CA"}),
+        frozenset(
+            {
+                "entry_point",
+                "tool",
+                "integration",
+                "output_surface",
+                "trust_boundary",
+                "agent_internal",
+            }
+        ),
+    ),
+    "represents": (
+        frozenset({"CP", "PM"}),
+        frozenset(
+            {
+                "entry_point",
+                "tool",
+                "integration",
+                "output_surface",
+                "trust_boundary",
+                "agent_internal",
+            }
+        ),
+    ),
+    "emits_to": (
+        frozenset({"CA", "CP"}),
+        frozenset({"output_surface", "integration"}),
+    ),
+    "crosses": (
+        frozenset({"CA", "FB"}),
+        frozenset({"trust_boundary"}),
+    ),
+    "coordinates_via": (
+        frozenset({"CL", "CM"}),
+        frozenset({"tool", "integration", "agent_internal"}),
+    ),
+}
+
+# ``represents`` is the only one-to-one assertion in v1. The other relations
+# are intentionally many-to-many: a controller can act on several resources,
+# and one resource can participate in several control paths.
+_CARDINALITY_RULES: dict[str, str] = {"represents": "one_capability_per_control"}
 
 
-def _is_unstable_id(element_id: str) -> bool:
-    """Return True if element_id appears to be a positional or unstable index."""
-    return any(p.match(element_id) for p in _UNSTABLE_ID_PATTERNS)
-
-
-def _endpoint_reference_errors(
-    entry: Any,
-    endpoint_field: str,
-    label: str,
-    known_stpa: set[str],
-    seen_ids: set[str],
-) -> list[ResourceMapValidationIssue]:
-    """Collect dangling-reference issues for one endpoint of a linked entry."""
-    endpoint_id = getattr(entry, endpoint_field)
-    if endpoint_id in known_stpa or endpoint_id in seen_ids:
-        return []
-    return [
-        ResourceMapValidationIssue(
-            code="dangling_reference",
-            message=f"{label} reference {endpoint_id} not in snapshot",
-            element_id=endpoint_id,
-        )
-    ]
-
-
-def _missing_endpoint_error(
-    entry: Any,
-    label: str,
-) -> ResourceMapValidationIssue:
-    """Build the issue for a linked entry missing a controller or process ref."""
-    return ResourceMapValidationIssue(
-        code="invalid_control_action_link",
-        message=f"{label} {entry.element_id} missing controller or process reference",
-        element_id=entry.element_id,
+def _issue(
+    code: str,
+    message: str,
+    *,
+    link_id: str | None = None,
+    field: str | None = None,
+) -> ResourceMapViolation:
+    """Create one typed deterministic violation."""
+    return ResourceMapViolation(
+        code=code,
+        message=message,
+        link_id=link_id,
+        field=field,
     )
 
 
-def _version_pin_errors(
-    srm: SystemResourceMap, snap: ResourceMapSnapshot
-) -> list[ResourceMapValidationIssue]:
-    """Collect source-version pin mismatches against the snapshot."""
-    errors: list[ResourceMapValidationIssue] = []
-    if str(srm.stpa_version) != str(snap.stpa_version):
-        errors.append(
-            ResourceMapValidationIssue(
-                code="source_version_mismatch",
-                message=f"STPA version mismatch: {srm.stpa_version} != {snap.stpa_version}",
-                field="stpa_version",
+def _attribute_ids(items: Iterable[Any], field_name: str) -> set[str]:
+    """Collect one namespace's identifiers from typed STPA records."""
+    return {getattr(item, field_name) for item in items}
+
+
+def _nested_attribute_ids(
+    responsibilities: Iterable[Any], collection_name: str, field_name: str
+) -> set[str]:
+    """Collect identifiers from one nested responsibility collection."""
+    return _attribute_ids(
+        (
+            item
+            for responsibility in responsibilities
+            for item in getattr(responsibility, collection_name)
+        ),
+        field_name,
+    )
+
+
+def _control_structure_ids(control_structure: ControlStructure) -> dict[str, set[str]]:
+    """Collect every supported STPA namespace from one control structure."""
+    responsibilities = control_structure.responsibilities
+    coordination_links = control_structure.coordination_links
+    return {
+        "RESP": _attribute_ids(responsibilities, "resp_id"),
+        "CP": _attribute_ids(control_structure.controlled_processes, "cp_id"),
+        "PM": _nested_attribute_ids(responsibilities, "process_model_parts", "pm_id"),
+        "CA": _nested_attribute_ids(responsibilities, "control_actions", "ca_id"),
+        "FB": _nested_attribute_ids(responsibilities, "feedback_channels", "fb_id"),
+        "CL": _attribute_ids(coordination_links, "link_id"),
+        "CM": _attribute_ids(
+            (link.coordination_mechanism for link in coordination_links), "cm_id"
+        ),
+    }
+
+
+def _control_ref_key(reference: ControlStructureReference) -> tuple[str, str]:
+    """Return a stable namespace/identifier pair for a control reference."""
+    return reference.kind, reference.id
+
+
+def _resource_ref_key(reference: Any) -> tuple[str, str | None]:
+    """Return a stable kind/identifier pair for a capability reference."""
+    kind = reference.kind
+    identifier = next(
+        (
+            getattr(reference, field, None)
+            for field in (
+                "entry_point_id",
+                "tool_id",
+                "integration_id",
+                "trust_boundary_id",
+            )
+            if hasattr(reference, field)
+        ),
+        None,
+    )
+    return kind, identifier
+
+
+_RESOURCE_RESOLVERS: tuple[tuple[type, str, str], ...] = (
+    (EntryPointResourceReference, "resolve_entry_point", "entry_point_id"),
+    (OutputSurfaceResourceReference, "resolve_output_surface", "entry_point_id"),
+    (ToolResourceReference, "resolve_tool", "tool_id"),
+    (IntegrationResourceReference, "resolve_integration", "integration_id"),
+    (TrustBoundaryResourceReference, "resolve_trust_boundary", "trust_boundary_id"),
+)
+
+
+def _resource_exists(snapshot: CapabilityFactSnapshot, reference: Any) -> bool:
+    """Resolve a canonical capability reference against the pinned profile."""
+    profile = snapshot.profile
+    for reference_type, resolver_name, identifier_name in _RESOURCE_RESOLVERS:
+        if isinstance(reference, reference_type):
+            resolver = getattr(profile, resolver_name)
+            return resolver(getattr(reference, identifier_name)) is not None
+    if not isinstance(reference, AgentInternalResourceReference):
+        return False
+    return "reasoning" in profile.zones_active
+
+
+def _unstable_link_id(link_id: str) -> bool:
+    """Reject positional IDs that cannot survive authoring reorderings."""
+    lowered = link_id.lower()
+    return lowered.startswith(("idx-", "index-", "pos-", "item-"))
+
+
+def _validate_pins(
+    resource_map: SystemResourceMap,
+    capability_snapshot: CapabilityFactSnapshot,
+    control_structure: ControlStructure,
+) -> list[ResourceMapViolation]:
+    """Validate all content-addressed source pins without repairing them."""
+    violations: list[ResourceMapViolation] = []
+    try:
+        capability_snapshot.assert_integrity()
+    except ValueError as exc:
+        violations.append(
+            _issue(
+                "invalid_capability_snapshot",
+                str(exc),
+                field="capability_snapshot_digest",
             )
         )
-    if str(srm.taxonomy_version) != str(snap.taxonomy_version):
-        errors.append(
-            ResourceMapValidationIssue(
-                code="source_version_mismatch",
-                message=f"Taxonomy version mismatch: {srm.taxonomy_version} != {snap.taxonomy_version}",
-                field="taxonomy_version",
+    if resource_map.capability_snapshot_digest != capability_snapshot.snapshot_digest:
+        violations.append(
+            _issue(
+                "capability_snapshot_digest_mismatch",
+                "resource map capability_snapshot_digest does not match the supplied snapshot",
+                field="capability_snapshot_digest",
             )
         )
-    return errors
 
+    from asago_scenario_generator.models.system_resource_map import (
+        compute_control_structure_digest,
+    )
 
-def _identifier_errors(
-    all_entries: list[Any],
-) -> tuple[list[ResourceMapValidationIssue], set[str]]:
-    """Validate identifier uniqueness, stability, and entity families.
-
-    Returns the issues found and the set of non-empty ids seen (for
-    endpoint-reference resolution). Entries with empty element ids are
-    exempt from duplicate detection.
-    """
-    errors: list[ResourceMapValidationIssue] = []
-    seen_ids: set[str] = set()
-
-    for entry in all_entries:
-        eid = entry.element_id
-        if not eid:
-            continue
-        if eid in seen_ids:
-            errors.append(
-                ResourceMapValidationIssue(
-                    code="duplicate_identifier",
-                    message=f"Duplicate identifier {eid}",
-                    element_id=eid,
-                )
+    expected_control_digest = compute_control_structure_digest(control_structure)
+    if resource_map.control_structure_digest != expected_control_digest:
+        violations.append(
+            _issue(
+                "control_structure_digest_mismatch",
+                "resource map control_structure_digest does not match the supplied control structure",
+                field="control_structure_digest",
             )
-        else:
-            seen_ids.add(eid)
-
-        if _is_unstable_id(eid):
-            errors.append(
-                ResourceMapValidationIssue(
-                    code="unstable_identifier",
-                    message=f"Unstable identifier {eid}",
-                    element_id=eid,
-                )
-            )
-
-        # Entity family validation
-        fam = getattr(entry, "entity_family", None)
-        if fam and fam not in VALID_ENTITY_FAMILIES and fam != "assertion":
-            errors.append(
-                ResourceMapValidationIssue(
-                    code="invalid_enum",
-                    message=f"Invalid entity_family: {fam}",
-                    element_id=eid,
-                    field="entity_family",
-                )
-            )
-
-    return errors, seen_ids
-
-
-def _provenance_issues(
-    element_id: str,
-    provenance_kind: str | None,
-    label: str,
-) -> tuple[list[ResourceMapValidationIssue], list[ResourceMapValidationIssue]]:
-    """Validate one optional provenance kind; return (errors, warnings)."""
-    if provenance_kind and provenance_kind not in VALID_PROVENANCE_KINDS:
-        return (
-            [
-                ResourceMapValidationIssue(
-                    code="invalid_enum",
-                    message=f"Invalid provenance_kind: {provenance_kind}",
-                    element_id=element_id,
-                    field="provenance_kind",
-                )
-            ],
-            [],
         )
-    if not provenance_kind:
-        return (
-            [],
-            [
-                ResourceMapValidationIssue(
-                    code="missing_optional_provenance",
-                    message=f"{label} {element_id} omits optional provenance",
-                    element_id=element_id,
-                    field="provenance_kind",
-                )
-            ],
+    try:
+        resource_map.assert_integrity()
+    except ValueError as exc:
+        violations.append(
+            _issue("semantic_digest_mismatch", str(exc), field="semantic_digest")
         )
-    return [], []
+    return violations
 
 
-def _taxonomy_reference_errors(
-    taxonomy_ref: str | None,
-    known_taxonomy: set[str],
-    label: str,
-) -> list[ResourceMapValidationIssue]:
-    """Collect dangling-taxonomy-reference issues for one entry field."""
-    if taxonomy_ref and taxonomy_ref not in known_taxonomy:
+def _validate_link_identity(
+    links: Iterable[ResourceLink],
+) -> tuple[
+    list[ResourceMapViolation],
+    dict[str, list[ResourceLink]],
+    dict[str, list[ResourceLink]],
+]:
+    """Detect unstable IDs, duplicate IDs, and semantic duplicates."""
+    by_id, by_semantics, violations = _index_link_identity(links)
+    for link_id, matches in sorted(by_id.items()):
+        issue = _duplicate_link_id_issue(link_id, matches)
+        if issue is not None:
+            violations.append(issue)
+    for matches in by_semantics.values():
+        issue = _duplicate_semantic_issue(matches)
+        if issue is not None:
+            violations.append(issue)
+    return violations, by_id, by_semantics
+
+
+def _index_link_identity(
+    links: Iterable[ResourceLink],
+) -> tuple[
+    dict[str, list[ResourceLink]],
+    dict[str, list[ResourceLink]],
+    list[ResourceMapViolation],
+]:
+    """Index links by ID and semantic identity while flagging unstable IDs."""
+    violations: list[ResourceMapViolation] = []
+    by_id: dict[str, list[ResourceLink]] = defaultdict(list)
+    by_semantics: dict[str, list[ResourceLink]] = defaultdict(list)
+    for link in links:
+        by_id[link.link_id].append(link)
+        semantic_key = _semantic_link_key(link)
+        by_semantics[semantic_key].append(link)
+        if _unstable_link_id(link.link_id):
+            violations.append(
+                _issue(
+                    "unstable_identifier",
+                    f"link identifier {link.link_id} is positional and unstable",
+                    link_id=link.link_id,
+                    field="link_id",
+                )
+            )
+    return by_id, by_semantics, violations
+
+
+def _semantic_link_key(link: ResourceLink) -> str:
+    """Return a stable key for duplicate semantic-link detection."""
+    return json.dumps(
+        {
+            "capability_resource_ref": link.capability_resource_ref.model_dump(
+                mode="json"
+            ),
+            "control_structure_ref": link.control_structure_ref.model_dump(mode="json"),
+            "relation_kind": link.relation_kind,
+        },
+        sort_keys=True,
+    )
+
+
+def _duplicate_link_id_issue(
+    link_id: str, matches: list[ResourceLink]
+) -> ResourceMapViolation | None:
+    """Build a duplicate-ID issue when one ID appears more than once."""
+    if len(matches) <= 1:
+        return None
+    return _issue(
+        "duplicate_link_id",
+        f"link_id {link_id} occurs {len(matches)} times",
+        link_id=link_id,
+        field="link_id",
+    )
+
+
+def _duplicate_semantic_issue(
+    matches: list[ResourceLink],
+) -> ResourceMapViolation | None:
+    """Build an issue when equivalent links use different identifiers."""
+    if len(matches) <= 1:
+        return None
+    ids = ", ".join(sorted(link.link_id for link in matches))
+    return _issue(
+        "duplicate_semantic_link",
+        f"links {ids} assert the same capability/control relation",
+        link_id=sorted(link.link_id for link in matches)[0],
+    )
+
+
+def _validate_link_reference(
+    link: ResourceLink,
+    known_ids: dict[str, set[str]],
+    snapshot: CapabilityFactSnapshot,
+) -> list[ResourceMapViolation]:
+    """Validate both endpoint identities, namespaces, and relation legality."""
+    violations: list[ResourceMapViolation] = []
+    control_kind, control_id = _control_ref_key(link.control_structure_ref)
+    if control_id not in known_ids.get(control_kind, set()):
+        violations.append(
+            _issue(
+                "unknown_control_structure_reference",
+                f"{control_kind} identifier {control_id} is not present in the control structure",
+                link_id=link.link_id,
+                field="control_structure_ref",
+            )
+        )
+    if not _resource_exists(snapshot, link.capability_resource_ref):
+        kind, identifier = _resource_ref_key(link.capability_resource_ref)
+        violations.append(
+            _issue(
+                "unknown_capability_resource",
+                f"{kind} resource {identifier or '<agent-internal>'} is not present in the capability snapshot",
+                link_id=link.link_id,
+                field="capability_resource_ref",
+            )
+        )
+    allowed_control, allowed_capability = _RELATION_COMPATIBILITY[link.relation_kind]
+    capability_kind = link.capability_resource_ref.kind
+    if control_kind not in allowed_control or capability_kind not in allowed_capability:
+        violations.append(
+            _issue(
+                "incompatible_relation_kind",
+                f"relation {link.relation_kind} cannot connect {control_kind} to {capability_kind}",
+                link_id=link.link_id,
+                field="relation_kind",
+            )
+        )
+    return violations
+
+
+def _validate_authority(link: ResourceLink) -> list[ResourceMapViolation]:
+    """Enforce the provenance/authority matrix for one link."""
+    if link.authority_status == "authoritative" and link.provenance == "model_proposed":
         return [
-            ResourceMapValidationIssue(
-                code="dangling_reference",
-                message=f"Taxonomy reference {taxonomy_ref} not in snapshot",
-                element_id=taxonomy_ref,
+            _issue(
+                "model_proposed_authoritative",
+                "model_proposed links may only be advisory or rejected",
+                link_id=link.link_id,
+                field="authority_status",
+            )
+        ]
+    if link.authority_status == "authoritative" and not link.evidence_refs:
+        return [
+            _issue(
+                "authoritative_link_without_evidence",
+                "authoritative links require at least one evidence reference",
+                link_id=link.link_id,
+                field="evidence_refs",
             )
         ]
     return []
 
 
-def _endpoint_errors(
-    entry: Any,
-    entry_label: str,
-    known_stpa: set[str],
-    seen_ids: set[str],
-) -> list[ResourceMapValidationIssue]:
-    """Validate controller/process endpoints for one linked entry."""
-    if not entry.controller_id or not entry.process_id:
-        return [_missing_endpoint_error(entry, entry_label)]
-    return [
-        *_endpoint_reference_errors(
-            entry, "controller_id", "Controller", known_stpa, seen_ids
-        ),
-        *_endpoint_reference_errors(
-            entry, "process_id", "Process", known_stpa, seen_ids
-        ),
-    ]
+def _validate_cardinality(links: Iterable[ResourceLink]) -> list[ResourceMapViolation]:
+    """Detect conflicting authoritative targets under the v1 rule table."""
+    groups = _cardinality_groups(links)
+    violations: list[ResourceMapViolation] = []
+    for group_key, matches in sorted(groups.items()):
+        issue = _cardinality_issue(group_key, matches)
+        if issue is not None:
+            violations.append(issue)
+    return violations
 
 
-def _resource_link_error(
-    entry_label: str,
-    element_id: str,
-    field_label: str,
-    ref_id: str,
-) -> ResourceMapValidationIssue:
-    """Build the issue for a link to an unknown system resource."""
-    return ResourceMapValidationIssue(
-        code="unknown_resource_link",
-        message=f"{entry_label} {element_id} references unknown {field_label} {ref_id}",
-        element_id=element_id,
+def _cardinality_groups(
+    links: Iterable[ResourceLink],
+) -> dict[tuple[str, str, str], list[ResourceLink]]:
+    """Group authoritative links governed by a v1 cardinality rule."""
+    groups: dict[tuple[str, str, str], list[ResourceLink]] = defaultdict(list)
+    for link in links:
+        if (
+            link.authority_status != "authoritative"
+            or link.relation_kind not in _CARDINALITY_RULES
+        ):
+            continue
+        control_kind, control_id = _control_ref_key(link.control_structure_ref)
+        groups[(link.relation_kind, control_kind, control_id)].append(link)
+    return groups
+
+
+def _cardinality_issue(
+    group_key: tuple[str, str, str], matches: list[ResourceLink]
+) -> ResourceMapViolation | None:
+    """Build a conflict issue when a cardinality group has many targets."""
+    targets = {
+        json.dumps(link.capability_resource_ref.model_dump(mode="json"), sort_keys=True)
+        for link in matches
+    }
+    if len(targets) <= 1:
+        return None
+    relation, control_kind, control_id = group_key
+    ids = ", ".join(sorted(link.link_id for link in matches))
+    return _issue(
+        "contradictory_authoritative_link",
+        f"{relation} cardinality permits one capability target for {control_kind} {control_id}; links {ids} conflict",
+        link_id=sorted(link.link_id for link in matches)[0],
+        field="authority_status",
     )
 
 
-def _resource_link_errors(
-    entry: Any,
-    entry_label: str,
-    field_name: str,
-    known_system_resources: set[str],
-) -> list[ResourceMapValidationIssue]:
-    """Collect unknown-resource-link issues for one entry's resource field."""
-    ref_id = getattr(entry, field_name)
-    if ref_id in known_system_resources:
-        return []
-    return [_resource_link_error(entry_label, entry.element_id, field_name, ref_id)]
-
-
-def _loss_link_reference_errors(
-    ll: Any,
-    ref_field: str,
-    ref_label: str,
-    known_stpa: set[str],
-    context_hint: str | None,
-) -> list[ResourceMapValidationIssue]:
-    """Collect loss/hazard reference issues for one loss link."""
-    ref_id = getattr(ll, ref_field)
-    if ref_id in known_stpa:
-        return []
-    return [
-        ResourceMapValidationIssue(
-            code=_unknown_stpa_reference_code(context_hint),
-            message=f"Loss link {ll.element_id} references unknown {ref_label} {ref_id}",
-            element_id=ref_id,
-        )
-    ]
-
-
-def _unknown_stpa_reference_code(context_hint: str | None) -> str:
-    """Resolve the issue code for loss/hazard references outside the snapshot."""
-    is_dangling = context_hint == "dangling_reference"
-    return "dangling_reference" if is_dangling else "unknown_loss_link"
-
-
-def _coerce_resource_map_inputs(
-    resource_map: SystemResourceMap | dict[str, Any],
-    snapshot: ResourceMapSnapshot | dict[str, Any],
-) -> tuple[SystemResourceMap, ResourceMapSnapshot]:
-    """Normalize dict payloads into typed models."""
-    srm = (
-        SystemResourceMap.model_validate(resource_map)
-        if isinstance(resource_map, dict)
-        else resource_map
+def _validate_typed_inputs(
+    resource_map: Any,
+    capability_snapshot: Any,
+    control_structure: Any,
+) -> None:
+    """Reject calls that bypass the typed public validation seam."""
+    expected = (
+        (resource_map, SystemResourceMap, "resource_map"),
+        (capability_snapshot, CapabilityFactSnapshot, "capability_snapshot"),
+        (control_structure, ControlStructure, "control_structure"),
     )
-    snap = (
-        ResourceMapSnapshot.model_validate(snapshot)
-        if isinstance(snapshot, dict)
-        else snapshot
-    )
-    return srm, snap
+    for value, expected_type, name in expected:
+        if not isinstance(value, expected_type):
+            raise TypeError(f"{name} must be a {expected_type.__name__}")
 
 
-def _provenance_section_errors(
-    srm: SystemResourceMap,
-) -> tuple[list[ResourceMapValidationIssue], list[ResourceMapValidationIssue]]:
-    """Validate resolution status and provenance for facts and assertions."""
-    errors: list[ResourceMapValidationIssue] = []
-    warnings: list[ResourceMapValidationIssue] = []
-    for uf in srm.use_case_facts:
-        if uf.resolution_status not in VALID_RESOLUTION_STATUSES:
-            errors.append(
-                ResourceMapValidationIssue(
-                    code="invalid_enum",
-                    message=f"Invalid resolution_status: {uf.resolution_status}",
-                    element_id=uf.element_id,
-                    field="resolution_status",
-                )
-            )
-        prov_errors, prov_warnings = _provenance_issues(
-            uf.element_id, uf.provenance_kind, "Use case fact"
-        )
-        errors.extend(prov_errors)
-        warnings.extend(prov_warnings)
-
-    for a in srm.assertions:
-        prov_errors, prov_warnings = _provenance_issues(
-            a.element_id, a.provenance_kind, "Assertion"
-        )
-        errors.extend(prov_errors)
-        warnings.extend(prov_warnings)
-    return errors, warnings
+def _validate_links(
+    links: Iterable[ResourceLink],
+    known_ids: dict[str, set[str]],
+    snapshot: CapabilityFactSnapshot,
+) -> list[ResourceMapViolation]:
+    """Validate every link endpoint and authority declaration."""
+    violations: list[ResourceMapViolation] = []
+    for link in links:
+        violations.extend(_validate_link_reference(link, known_ids, snapshot))
+        violations.extend(_validate_authority(link))
+    return violations
 
 
-def _system_resource_section_errors(
-    srm: SystemResourceMap,
-    known_taxonomy: set[str],
-) -> list[ResourceMapValidationIssue]:
-    """Collect dangling taxonomy references for system resources."""
-    errors: list[ResourceMapValidationIssue] = []
-    for sr in srm.system_resources:
-        errors.extend(
-            _taxonomy_reference_errors(
-                sr.taxonomy_ref, known_taxonomy, "System resource"
-            )
-        )
-    return errors
+def _violation_sort_key(
+    violation: ResourceMapViolation,
+) -> tuple[str, str, str]:
+    """Sort diagnostics by optional link/field values without mixed types."""
+    link_id = violation.link_id if violation.link_id is not None else ""
+    field = violation.field if violation.field is not None else ""
+    return link_id, violation.code, field
 
 
-def _endpoint_section_errors(
-    srm: SystemResourceMap,
-    known_stpa: set[str],
-    seen_ids: set[str],
-) -> list[ResourceMapValidationIssue]:
-    """Validate control-action and feedback-path endpoints."""
-    errors: list[ResourceMapValidationIssue] = []
-    for ca in srm.control_actions:
-        errors.extend(_endpoint_errors(ca, "Control action", known_stpa, seen_ids))
-    for fb in srm.feedback_paths:
-        errors.extend(_endpoint_errors(fb, "Feedback path", known_stpa, seen_ids))
-    return errors
+def validate_system_resource_map(
+    resource_map: SystemResourceMap,
+    capability_snapshot: CapabilityFactSnapshot,
+    control_structure: ControlStructure,
+) -> SystemResourceMapValidation:
+    """Validate one map against its exact capability and STPA authorities.
 
-
-def _trust_boundary_section_errors(
-    srm: SystemResourceMap,
-    known_taxonomy: set[str],
-    known_system_resources: set[str],
-) -> list[ResourceMapValidationIssue]:
-    """Validate trust-boundary taxonomy and resource memberships."""
-    errors: list[ResourceMapValidationIssue] = []
-    for tb in srm.trust_boundaries:
-        errors.extend(
-            _taxonomy_reference_errors(
-                tb.taxonomy_ref, known_taxonomy, "Trust boundary"
-            )
-        )
-        for rid in tb.resource_ids:
-            if rid not in known_system_resources:
-                errors.append(
-                    ResourceMapValidationIssue(
-                        code="unknown_resource_link",
-                        message=f"Trust boundary {tb.element_id} references unknown resource {rid}",
-                        element_id=tb.element_id,
-                    )
-                )
-    return errors
-
-
-def _data_flow_section_errors(
-    srm: SystemResourceMap,
-    known_system_resources: set[str],
-) -> list[ResourceMapValidationIssue]:
-    """Validate data-flow source and target resource links."""
-    errors: list[ResourceMapValidationIssue] = []
-    for df in srm.data_flows:
-        errors.extend(
-            _resource_link_errors(
-                df, "Data flow", "source_resource_id", known_system_resources
-            )
-        )
-        errors.extend(
-            _resource_link_errors(
-                df, "Data flow", "target_resource_id", known_system_resources
-            )
-        )
-    return errors
-
-
-def _loss_link_section_errors(
-    srm: SystemResourceMap,
-    known_stpa: set[str],
-    context_hint: str | None,
-) -> list[ResourceMapValidationIssue]:
-    """Validate loss and hazard references for all loss links."""
-    errors: list[ResourceMapValidationIssue] = []
-    for ll in srm.loss_links:
-        errors.extend(
-            _loss_link_reference_errors(ll, "loss_id", "loss", known_stpa, context_hint)
-        )
-        errors.extend(
-            _loss_link_reference_errors(
-                ll, "hazard_id", "hazard", known_stpa, context_hint
-            )
-        )
-    return errors
-
-
-def _alias_errors(srm: SystemResourceMap) -> list[ResourceMapValidationIssue]:
-    """Collect ambiguous-alias issues for the map's alias bindings."""
-    errors: list[ResourceMapValidationIssue] = []
-    for alias_name, targets in srm.aliases.items():
-        if isinstance(targets, list) and len(set(targets)) > 1:
-            errors.append(
-                ResourceMapValidationIssue(
-                    code="ambiguous_alias",
-                    message=f"Alias {alias_name} is bound to multiple targets: {targets}",
-                    element_id=alias_name,
-                )
-            )
-        elif isinstance(targets, str) and "," in targets:
-            errors.append(
-                ResourceMapValidationIssue(
-                    code="ambiguous_alias",
-                    message=f"Alias {alias_name} is bound to multiple targets: {targets}",
-                    element_id=alias_name,
-                )
-            )
-    return errors
-
-
-def validate_resource_map(
-    resource_map: SystemResourceMap | dict[str, Any],
-    snapshot: ResourceMapSnapshot | dict[str, Any],
-    *,
-    context_hint: str | None = None,
-) -> ResourceMapValidationResult:
-    """Validate a SystemResourceMap against a pinned ResourceMapSnapshot.
-
-    Performs deterministic offline validation with zero network and model calls.
+    The function is pure and observational: it performs no repair, proposal
+    generation, correspondence inference, network calls, or model calls.
     """
-    srm, snap = _coerce_resource_map_inputs(resource_map, snapshot)
+    _validate_typed_inputs(resource_map, capability_snapshot, control_structure)
 
-    # Collect known valid identifiers
-    known_stpa = set(snap.stpa_identifiers)
-    known_taxonomy = set(snap.taxonomy_identifiers)
-    known_system_resources = {r.element_id for r in srm.system_resources}
+    violations = _validate_pins(resource_map, capability_snapshot, control_structure)
+    identity_violations, _, _ = _validate_link_identity(resource_map.links)
+    violations.extend(identity_violations)
+    known_ids = _control_structure_ids(control_structure)
+    violations.extend(
+        _validate_links(resource_map.links, known_ids, capability_snapshot)
+    )
+    violations.extend(_validate_cardinality(resource_map.links))
 
-    all_entries: list[Any] = []
-    for collection in _CANONICAL_COLLECTIONS:
-        all_entries.extend(getattr(srm, collection))
-
-    errors: list[ResourceMapValidationIssue] = []
-    warnings: list[ResourceMapValidationIssue] = []
-
-    # 1. Source version pin validation
-    errors.extend(_version_pin_errors(srm, snap))
-
-    # 2. Identifier uniqueness and stability
-    id_errors, seen_ids = _identifier_errors(all_entries)
-    errors.extend(id_errors)
-
-    # 3. Use-case facts and assertions (resolution status, provenance)
-    prov_errors, prov_warnings = _provenance_section_errors(srm)
-    errors.extend(prov_errors)
-    warnings.extend(prov_warnings)
-
-    # 4. System resource references
-    errors.extend(_system_resource_section_errors(srm, known_taxonomy))
-
-    # 5-6. Control action and feedback path endpoints
-    errors.extend(_endpoint_section_errors(srm, known_stpa, seen_ids))
-
-    # 7. Trust boundaries
-    errors.extend(
-        _trust_boundary_section_errors(srm, known_taxonomy, known_system_resources)
+    # Keep deterministic ordering so diagnostics and artifacts are stable.
+    violations.sort(key=_violation_sort_key)
+    valid = not violations
+    return SystemResourceMapValidation(
+        is_valid=valid,
+        violations=tuple(violations),
+        warnings=(),
+        canonical_map=resource_map if valid else None,
+        entry_point_completeness=(capability_snapshot.profile.entry_point_completeness),
+        tool_inventory_completeness=(
+            capability_snapshot.profile.tool_inventory_completeness
+        ),
     )
 
-    # 8. Data flows
-    errors.extend(_data_flow_section_errors(srm, known_system_resources))
 
-    # 9. Loss links
-    errors.extend(_loss_link_section_errors(srm, known_stpa, context_hint))
-
-    # 10. Ambiguous aliases
-    errors.extend(_alias_errors(srm))
-
-    # Build canonical map if valid
-    canonical = None
-    if len(errors) == 0:
-        canonical = SystemResourceMap.model_validate(srm.model_dump(mode="json"))
-        # Entries with empty element ids are exempt from duplicate detection,
-        # so the sort key alone is not total; the serialized entry is the
-        # final tiebreaker and canonical order never depends on presentation.
-        for collection in _CANONICAL_COLLECTIONS:
-            getattr(canonical, collection).sort(
-                key=lambda x: (x.element_id, x.model_dump_json())
-            )
-
-    zero_network_calls = 0
-    zero_model_calls = 0
-    no_errors = len(errors) == 0
-    return ResourceMapValidationResult(
-        is_valid=no_errors,
-        errors=errors,
-        warnings=warnings,
-        correspondence_relations=[],
-        canonical_map=canonical,
-        network_calls=zero_network_calls,
-        model_calls=zero_model_calls,
-    )
+__all__ = [
+    "validate_system_resource_map",
+]

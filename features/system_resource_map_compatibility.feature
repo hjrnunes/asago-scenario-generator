@@ -1,26 +1,21 @@
-# mutation-stamp: sha256=e67b915c5c35bde4c639bf9a2331fbdd8c1faaa97fa3bea91a4747fd1ae7852c
+# mutation-stamp: sha256=d5727e3278645922a699ca0b33e54f6c3c6041db9ea897e2539ee3742f5113ef
 # acceptance-mutation-manifest-begin
-# {"version":1,"tested_at":"2026-08-27T22:31:25.234246Z","feature_name":"System resource map compatibility","feature_path":"features/system_resource_map_compatibility.feature","background_hash":"3f880bd9aa430dbcf0d9cf449c55e33f7573e7e1aaeadeda250b5f1be49c7503","implementation_hash":"unknown","scenarios":[{"index":0,"name":"System resource map compatibility 01 leaves default workflow outputs unchanged","scenario_hash":"1549b3679d7694a772c8558df4ccdaabb9a2593b979cbaba1827a10fabc000ca","mutation_count":4,"result":{"Total":4,"Killed":4,"Survived":0,"Errors":0},"tested_at":"2026-08-27T21:26:34.904341Z"}]}
+# {"version":1,"tested_at":"2026-08-29T13:35:12.469228Z","feature_name":"System resource map compatibility","feature_path":"features/system_resource_map_compatibility.feature","background_hash":"74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b","implementation_hash":"sha256:2e3365be85e34e06d8eca88457929efdbc56596efc73214455f9cda0972af8a4","scenarios":[{"index":0,"name":"existing workflow remains byte-stable with the sidecar present","scenario_hash":"820e922c6c36a23ea11f92cbae3d6438951df0eac048743e832c0fd5dfdebd17","mutation_count":4,"result":{"Total":4,"Killed":4,"Survived":0,"Errors":0},"tested_at":"2026-08-29T13:35:12.469228Z"}]}
 # acceptance-mutation-manifest-end
 
 Feature: System resource map compatibility
-  Adding the SystemResourceMap does not change default taxonomy/risk or
-  STPA scenario generation. Existing commands keep their artifacts,
-  prompts, and generation counts.
+  The resource-map sidecar is an independent Phase 2 surface. Existing
+  generation workflows retain their default commands and do not consume the
+  sidecar implicitly.
 
-  Background:
-    Given the system resource map is present
-    And default generation commands are invoked without resource-map flags
-
-  # System resource map compatibility 01 leaves default workflow outputs unchanged
-  Scenario Outline: System resource map compatibility 01 leaves default workflow outputs unchanged
-    Given a deterministic offline "<workflow>" fixture
-    When the default "<command>" runs
-    Then published scenario artifacts match the fixture
-    And generation counts are unchanged
-    And scenario prompts are unchanged
-    And no resource-map artifact is added to the run outputs
-    And existing STPA control-structure artifacts are not replaced
+  Scenario Outline: existing workflow remains byte-stable with the sidecar present
+    Given a deterministic resource-map compatibility fixture includes valid Phase 2 sidecars for "<workflow>"
+    When resource-map "<command>" runs before and after Phase 2 sidecars
+    Then the resource-map "<command>" exit status is unchanged
+    And the resource-map "<command>" scenario artifacts are identical after normalization of known volatile fields
+    And the resource-map "<command>" generation counts are identical
+    And the resource-map "<command>" prompt contracts are identical
+    And no resource-map Phase 2 artifact is written into either workflow output
 
     Examples:
       | workflow      | command  |

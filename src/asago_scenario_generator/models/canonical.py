@@ -117,6 +117,11 @@ def canonical_json_bytes(value: Any) -> bytes:
     ).encode("utf-8")
 
 
+def canonical_json_text(value: Any) -> str:
+    """Encode diagnostic JSON with the repository's stable readable layout."""
+    return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+
+
 def compute_framed_digest(domain: str, value: Any) -> str:
     """Hash one payload with an explicit versioned NUL-separated domain frame."""
     return hashlib.sha256(
@@ -128,6 +133,7 @@ __all__ = [
     "FrozenDict",
     "FrozenList",
     "canonical_json_bytes",
+    "canonical_json_text",
     "compute_framed_digest",
     "normalize_unicode",
 ]

@@ -48,6 +48,28 @@ changing acceptance behavior, or running the quality sequence.
   inward observation seam may retain only concrete, validated budget-deferred
   candidates and typed condition/precondition/missing-fact evidence; public
   generation projection remains `ProjectionBatch`-compatible.
+- Keep Phase 2 observational and offline. Validate the closed
+  `system-resource-map-v1` sidecar against exact capability/control-structure
+  digests; produce correspondence only from typed authority/evidence and
+  explicit adjudication; and derive `hybrid-coverage-assessment-v1` through
+  the exact-artifact `reconcile_taxonomy_and_stpa` facade or its delegated pure
+  `assess_hybrid_coverage` seam. Only accepted relations backed by accepted,
+  confirmed proposals count as taxonomy correspondence. Preserve the three
+  independent denominators exactly: one structural-consideration row per UCA
+  slot, one taxonomy-correspondence row per obligation, and one
+  scenario-realization row per accepted relation. Rejected, unresolved,
+  contradictory, and noncoverage evidence stays in separate traceable
+  diagnostics; never derive a blended score or rate. Structural
+  inapplicability requires explicit reviewed evidence, and a relevant
+  `inferred_partial` capability inventory requires explicit other authoritative
+  evidence before an inapplicability decision is eligible. The assessment seam
+  consumes only a successful `SystemResourceMapValidation` attestation;
+  defective nonaccepted proposals remain global traceable diagnostics, and
+  missing resource-map evidence is assessed against each obligation's exact
+  candidate resource references. Publish the normative
+  YAML artifacts atomically. Neither existing generation workflow may import
+  or require Phase 2 artifacts, and Phase 2 must not construct provider clients
+  or contact endpoints.
 - Keep harness installations and runtime state local; the repository owns only
   portable methodology, configuration, and scripts.
 - Update `README.md`, this file, and linked documentation when an interface or

@@ -1,4 +1,4 @@
-"""Offline file-to-file correspondence proposal and reconciliation commands."""
+"""Offline YAML adapters for typed correspondence proposals and decisions."""
 
 from __future__ import annotations
 
@@ -16,37 +16,61 @@ from asago_scenario_generator.cli._shared import (
 )
 
 _ZERO_CALLS = 0
-_MAP_COLLECTIONS = (
-    "system_resources",
-    "control_actions",
-    "loss_links",
-    "trust_boundaries",
-    "actor_controllers",
-    "controlled_processes",
-)
-
-
-def _typed_resource_map(payload: dict):
-    """Return a typed map when the payload carries map collections."""
-    from asago_scenario_generator.models.system_resource_map import SystemResourceMap
-
-    if any(key in payload for key in _MAP_COLLECTIONS):
-        return SystemResourceMap.model_validate(payload)
-    return payload
 
 
 def _load_resource_map(path: Path):
-    """Parse a resource map or snapshot fixture from JSON or YAML."""
-    return _typed_resource_map(_load_payload(path, "resource map"))
+    """Parse and integrity-check the normative resource-map artifact."""
+    from asago_scenario_generator.models.system_resource_map import SystemResourceMap
+
+    if path.suffix.lower() == ".json":
+        return SystemResourceMap.from_json(path.read_bytes())
+    return SystemResourceMap.from_yaml(path.read_bytes())
 
 
-def _load_adjudications(path: Path | None) -> dict[str, str]:
-    """Parse an optional proposal-id to adjudication mapping."""
+def _validated_resource_map(
+    resource_map: Path,
+    capability_snapshot: Path,
+    control_structure: Path,
+):
+    """Validate a map against exact capability and control authorities."""
+    from asago_scenario_generator.pipeline.projection_contracts import (
+        CapabilityFactSnapshot,
+    )
+    from asago_scenario_generator.pipeline.system_resource_map import (
+        validate_system_resource_map,
+    )
+    from asago_scenario_generator.stpa.models.control_structure import ControlStructure
+
+    snapshot = CapabilityFactSnapshot.model_validate(
+        _load_payload(capability_snapshot, "capability snapshot")
+    )
+    control = ControlStructure.model_validate(
+        _load_payload(control_structure, "control structure")
+    )
+    return validate_system_resource_map(
+        _load_resource_map(resource_map), snapshot, control
+    )
+
+
+def _load_proposals(path: Path):
+    """Parse one canonical YAML or JSON proposal artifact."""
+    from asago_scenario_generator.models.correspondence import ProposalSet
+
+    loader = {".json": ProposalSet.from_json}.get(
+        path.suffix.lower(), ProposalSet.from_yaml
+    )
+    return loader(path.read_bytes())
+
+
+def _load_adjudications(path: Path | None):
+    """Parse an optional typed adjudication artifact."""
     if path is None:
-        return {}
+        return None
+    from asago_scenario_generator.models.correspondence import AdjudicationSet
+
     _validate_file(path, "adjudications")
     payload = _load_payload(path, "adjudications")
-    return {str(key): str(value) for key, value in payload.items()}
+    return AdjudicationSet.model_validate(payload)
 
 
 def _publish(
@@ -111,6 +135,16 @@ def propose_correspondence_cmd(
         "--artifacts",
         help="Source-artifact JSON or YAML file with evidence items.",
     ),
+    capability_snapshot: Path = typer.Option(
+        ...,
+        "--capability-snapshot",
+        help="Exact CapabilityFactSnapshot JSON or YAML authority.",
+    ),
+    control_structure: Path = typer.Option(
+        ...,
+        "--control-structure",
+        help="Exact STPA ControlStructure JSON or YAML authority.",
+    ),
     output_dir: Path = typer.Option(
         ...,
         help="Directory for published YAML and JSON proposal-set artifacts.",
@@ -131,21 +165,35 @@ def propose_correspondence_cmd(
     _print_banner("propose-correspondence")
     _validate_file(resource_map, "resource map")
     _validate_file(artifacts, "source artifacts")
+    _validate_file(capability_snapshot, "capability snapshot")
+    _validate_file(control_structure, "control structure")
     formats = _requested_formats(format)
     try:
         proposal_set = propose_correspondence(
-            _load_resource_map(resource_map),
+            _validated_resource_map(
+                resource_map, capability_snapshot, control_structure
+            ),
             source_artifacts=_load_payload(artifacts, "source artifacts"),
         )
         output_dir.mkdir(parents=True, exist_ok=True)
-        written = _publish(
-            output_dir,
-            yaml_name="proposal-set.yaml",
-            json_name="proposal-set.json",
-            yaml_text=proposal_set.to_yaml(),
-            json_text=proposal_set.to_json(),
-            formats=formats,
+        from asago_scenario_generator.pipeline.correspondence_persistence import (
+            write_correspondence_proposals,
         )
+
+        written = []
+        if "yaml" in formats:
+            written.append(write_correspondence_proposals(output_dir, proposal_set))
+        if "json" in formats:
+            written.extend(
+                _publish(
+                    output_dir,
+                    yaml_name="correspondence-proposals.yaml",
+                    json_name="correspondence-proposals.json",
+                    yaml_text=proposal_set.to_yaml(),
+                    json_text=proposal_set.to_json(),
+                    formats=("json",),
+                )
+            )
     except Exception as exc:  # noqa: BLE001 - CLI validation boundary
         _abort(exc)
     _announce_proposal(proposal_set, written)
@@ -163,6 +211,16 @@ def reconcile_correspondence_cmd(
         "--proposals",
         help="ProposalSet JSON or YAML file.",
     ),
+    capability_snapshot: Path = typer.Option(
+        ...,
+        "--capability-snapshot",
+        help="Exact CapabilityFactSnapshot JSON or YAML authority.",
+    ),
+    control_structure: Path = typer.Option(
+        ...,
+        "--control-structure",
+        help="Exact STPA ControlStructure JSON or YAML authority.",
+    ),
     output_dir: Path = typer.Option(
         ...,
         help="Directory for published YAML and JSON reconciliation artifacts.",
@@ -170,7 +228,7 @@ def reconcile_correspondence_cmd(
     adjudications: Path | None = typer.Option(
         None,
         "--adjudications",
-        help="Optional JSON or YAML mapping of proposal id to adjudication.",
+        help="Optional JSON or YAML AdjudicationSet envelope with decisions[].",
     ),
     format: str = typer.Option(
         "both",
@@ -184,7 +242,6 @@ def reconcile_correspondence_cmd(
     or stpa-run and it makes no network or model calls. Confirmation is
     never inferred from proposal strength.
     """
-    from asago_scenario_generator.models.correspondence import ProposalSet
     from asago_scenario_generator.pipeline.correspondence import (
         reconcile_correspondence,
     )
@@ -192,22 +249,36 @@ def reconcile_correspondence_cmd(
     _print_banner("reconcile-correspondence")
     _validate_file(resource_map, "resource map")
     _validate_file(proposals, "proposal set")
+    _validate_file(capability_snapshot, "capability snapshot")
+    _validate_file(control_structure, "control structure")
     formats = _requested_formats(format)
     try:
         result = reconcile_correspondence(
-            _load_resource_map(resource_map),
-            ProposalSet.model_validate(_load_payload(proposals, "proposal set")),
+            _validated_resource_map(
+                resource_map, capability_snapshot, control_structure
+            ),
+            _load_proposals(proposals),
             adjudications=_load_adjudications(adjudications),
         )
         output_dir.mkdir(parents=True, exist_ok=True)
-        written = _publish(
-            output_dir,
-            yaml_name="reconciliation-result.yaml",
-            json_name="reconciliation-result.json",
-            yaml_text=result.to_yaml(),
-            json_text=result.to_json(),
-            formats=formats,
+        from asago_scenario_generator.pipeline.correspondence_persistence import (
+            write_correspondence_reconciliation,
         )
+
+        written = []
+        if "yaml" in formats:
+            written.append(write_correspondence_reconciliation(output_dir, result))
+        if "json" in formats:
+            written.extend(
+                _publish(
+                    output_dir,
+                    yaml_name="correspondence-reconciliation.yaml",
+                    json_name="correspondence-reconciliation.json",
+                    yaml_text=result.to_yaml(),
+                    json_text=result.to_json(),
+                    formats=("json",),
+                )
+            )
     except Exception as exc:  # noqa: BLE001 - CLI validation boundary
         _abort(exc)
     _announce_reconciliation(result, written)

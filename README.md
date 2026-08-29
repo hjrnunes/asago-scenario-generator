@@ -136,7 +136,7 @@ per-attempt evidence. The HTML report renders those stage outcomes and identifie
 presentation fallback separately.
 
 Useful companion commands include `projection-preflight`, `plan-obligations`,
-`validate-resource-map`, `propose-correspondence`,
+`validate-system-resource-map`, `propose-correspondence`,
 `reconcile-correspondence`, `profile`, `resume`, `eval`, `report`,
 `qualify-catalog`, `validate-catalog-qualification`, and
 `validate-stpa-projection`. Run `asago-scenario-generator --help` for the
@@ -196,31 +196,133 @@ There is no separate `validate-obligation-plan` CLI command. Consumers should
 load a persisted artifact through the typed plan model/persistence adapter,
 which enforces the closed schema and digest before accepting it.
 
-Validate an analyst-authored system resource map against a pinned snapshot
-without contacting an LLM endpoint:
+Validate an analyst-authored system-resource map against the exact capability
+fact snapshot and STPA control structure without contacting an LLM endpoint:
 
 ```bash
-asago-scenario-generator validate-resource-map \
-  --snapshot resource-map-snapshot.yaml \
-  --map resource-map.yaml \
-  --output-dir output/resource-map
+asago-scenario-generator validate-system-resource-map \
+  --capability-snapshot capability-fact-snapshot.yaml \
+  --control-structure control-structure.yaml \
+  --map system-resource-map.yaml \
+  --output-dir output/system-resource-map
 ```
+
+The validator consumes the closed `system-resource-map-v1` contract, checks
+both source digests and every typed link, and publishes diagnostics plus the
+canonical `system-resource-map.yaml` atomically when validation succeeds. It
+never infers correspondence or contacts a model.
 
 Propose and reconcile STPA-to-taxonomy correspondence from a resource map
 and source artifacts without contacting an LLM endpoint:
 
 ```bash
 asago-scenario-generator propose-correspondence \
-  --map resource-map.yaml \
+  --map system-resource-map.yaml \
   --artifacts correspondence-artifacts.yaml \
+  --capability-snapshot capability-snapshot.yaml \
+  --control-structure control-structure.yaml \
   --output-dir output/correspondence
 
 asago-scenario-generator reconcile-correspondence \
-  --map resource-map.yaml \
-  --proposals output/correspondence/proposal-set.yaml \
+  --map system-resource-map.yaml \
+  --proposals output/correspondence/correspondence-proposals.yaml \
   --adjudications correspondence-adjudications.yaml \
+  --capability-snapshot capability-snapshot.yaml \
+  --control-structure control-structure.yaml \
   --output-dir output/correspondence
 ```
+
+Both adapters validate the map against the exact capability snapshot and
+control structure before proposing or reconciling. The optional adjudication
+file is a typed `AdjudicationSet` envelope with a `decisions` collection; both
+JSON and YAML inputs are accepted according to the file suffix.
+
+The Phase 2 pure interfaces remain separate from both generation commands:
+
+```python
+resource_map_validation = validate_system_resource_map(
+    resource_map,
+    capability_snapshot,
+    control_structure,
+)
+proposal_set = propose_correspondence(resource_map_validation, source_artifacts)
+reconciliation = reconcile_correspondence(
+    resource_map_validation,
+    proposal_set,
+    adjudications,
+)
+assessment = assess_hybrid_coverage(
+    obligation_plan,
+    resource_map_validation,
+    reconciliation,
+    taxonomy_coverage_input,
+    stpa_coverage_input,
+)
+
+# The source-spec facade performs the same deterministic composition while
+# binding proposals to the exact plan, loss, control, ICA, and map artifacts.
+assessment = reconcile_taxonomy_and_stpa(hybrid_reconciliation_inputs)
+```
+
+Proposals retain exact obligation, risk, attack-pattern, taxonomy-candidate,
+ICA slot, ICA, execution-candidate, resource-link, hazard, constraint, evidence,
+and source-pin identities. The proposal source pins, proposal artifact,
+reconciliation artifact, and final assessment explicitly retain the exact
+`capability_snapshot_digest` shared by the Phase 1 plan and validated resource
+map; it is bound into each canonical artifact digest. Reconciliation
+alone can materialize an accepted relation, and only a relation backed by an
+accepted, confirmed proposal can establish hybrid coverage. Rejected,
+unresolved, contradictory, and `related_but_not_coverage` evidence remains
+visible without being promoted.
+
+`HybridCoverageAssessment` is the closed, immutable
+`hybrid-coverage-assessment-v1` domain artifact. Its structural-consideration
+matrix contains one row per deterministic UCA slot (`ica`, `justified_na`, or
+`unresolved`). Its taxonomy-correspondence matrix contains one row per Phase 1
+obligation with the exact scope, qualification, accepted-relation, disposition,
+and typed-gap fields. Its scenario-realization matrix contains one row per
+accepted relation and retains its exact supporting proposal, obligation, risk,
+attack-pattern, and taxonomy-candidate identities. The public assessment seam
+requires the successful `SystemResourceMapValidation` attestation, not a raw
+map. Rejected and unresolved proposal diagnostics remain visible even when
+their cross-artifact references are defective, but those records never receive
+coverage credit. Missing resource-map evidence is evaluated against each
+obligation's candidate resource references rather than global map presence.
+`StpaCoverageInput.from_ica_enumeration(...)` is the
+deterministic adapter from the real ICA enumeration into the complete
+structural denominator; optional scenario observations must resolve to an
+exact slot, ICA, and canonical `EXEC:*` identity.
+`HybridReconciliationInputs` is the closed, immutable orchestration envelope.
+`reconcile_taxonomy_and_stpa(...)` verifies its exact proposal authority,
+performs explicit deterministic reconciliation, adapts the real ICA
+enumeration, and delegates matrix construction to `assess_hybrid_coverage`.
+The lower-level proposal, reconciliation, and assessment seams remain public
+for testing and staged workflows; the facade adds no inference, persistence,
+provider, or network behavior.
+
+Rejected and unresolved proposals, contradictions, and noncoverage relations
+remain separate traceable diagnostics and cannot satisfy an obligation.
+Explicit structural inapplicability requires reviewed evidence and cannot be
+inferred from an absent relation. The validated resource-map attestation
+carries the capability snapshot's entry-point and tool inventory completeness;
+when an obligation's candidate resources depend on an `inferred_partial`
+inventory, structural inapplicability additionally requires explicit other
+authoritative evidence. Every matrix row and diagnostic cell carries
+exact upstream artifact pins and record traces. Existing STPA scenario links
+remain explicitly legacy observations; hybrid generation is `not_attempted`
+and hybrid admission is `not_assessed` in v1. The artifact exposes separate
+counts for review but no rate or blended score.
+Its pin universe includes an explicit `capability-fact-snapshot-v1` artifact
+pin matching the top-level `capability_snapshot_digest`.
+
+The persistence adapter atomically writes
+`hybrid-coverage-assessment.yaml`, and
+`report.hybrid_coverage.render_hybrid_coverage_report` renders only those domain
+rows and traces. There is intentionally no assessment CLI command: callers
+adapt completed typed artifacts at the Python seam. Assessment, proposal, and
+reconciliation are deterministic and construct neither a model client nor a
+network connection. `generate` and `stpa-run` continue to work independently
+without any Phase 2 inputs or outputs.
 
 ## STPA-based generation
 

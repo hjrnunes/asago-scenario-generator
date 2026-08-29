@@ -23,6 +23,7 @@ from asago_scenario_generator.models.attack_pattern_projection import (
 )
 from asago_scenario_generator.models.canonical import (
     FrozenDict,
+    canonical_json_text,
     compute_framed_digest as _compute_framed_digest,
     normalize_unicode,
 )
@@ -478,15 +479,7 @@ class TaxonomyObligationPlan(_ContractModel):
 
     def to_json(self) -> str:
         """Serialize canonical JSON for diagnostics."""
-        return (
-            json.dumps(
-                self.model_dump(mode="json"),
-                indent=2,
-                sort_keys=True,
-                ensure_ascii=False,
-            )
-            + "\n"
-        )
+        return canonical_json_text(self.model_dump(mode="json"))
 
     @classmethod
     def from_yaml(cls, text: str | bytes) -> TaxonomyObligationPlan:

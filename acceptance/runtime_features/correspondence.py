@@ -1,4 +1,4 @@
-"""Deterministic acceptance handlers for correspondence proposal, reconciliation, artifacts, and compatibility."""
+"""Offline acceptance handlers for normative Task 3 correspondence."""
 
 from __future__ import annotations
 
@@ -7,2079 +7,1168 @@ from typing import Any
 
 from runtime_shared import World
 
+from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.models.correspondence import (
-    AdjudicationHistoryItem,
-    CorrespondenceProposal,
-    ReconciledProposal,
-    ReconciliationResult,
+    AdjudicationSet,
+    CorrespondenceAdjudication,
+    CorrespondenceAuthority,
+    CorrespondenceEvidence,
+    CorrespondenceSourceArtifacts,
+    ObligationAuthorityRecord,
+    SourceArtifactPins,
+    StructuralAuthorityRecord,
 )
 from asago_scenario_generator.models.system_resource_map import (
-    ControlActionEntry,
-    LossLinkEntry,
-    SystemResourceEntry,
+    ResourceLink,
     SystemResourceMap,
-    TrustBoundaryEntry,
+    compute_control_structure_digest,
+    compute_resource_map_semantic_digest,
 )
 from asago_scenario_generator.pipeline.correspondence import (
     propose_correspondence,
     reconcile_correspondence,
 )
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlAction,
+    ControlStructure,
+    ControlledProcess,
+    ProcessModelPart,
+    Responsibility,
+)
+from asago_scenario_generator.pipeline.projection_contracts import (
+    capture_capability_snapshot,
+)
+from asago_scenario_generator.pipeline.system_resource_map import (
+    validate_system_resource_map,
+)
+from acceptance.qa.taxonomy_risk.correspondence_support import (
+    run_workflow_compatibility,
+)
 
 FEATURE_ID = "correspondence"
+OBLIGATION_ID = "ob:v1:" + "1" * 64
+ICA_SLOT_ID = "RESP-1:CA-1-1:WRONG_TIMING"
+ICA_ID = ICA_SLOT_ID + ":1"
+EXEC_ID = "EXEC:RESP-1:CA-1-1:WRONG_TIMING"
+OBLIGATION_ID_2 = "ob:v1:" + "2" * 64
+ICA_ID_2 = ICA_SLOT_ID + ":2"
+ICA_SLOT_ID_2 = "RESP-1:CA-1-1:NOT_PROVIDED"
+RISK_ID = "risk-1"
+ATTACK_PATTERN_ID = "AML.T0001"
+TAXONOMY_CANDIDATE_ID = "cand:v2:" + "a" * 32
 
 
-def _make_default_resource_map(
-    stpa_version: str = "stpa-v1",
-    taxonomy_version: str = "atlas-2026.05",
-) -> SystemResourceMap:
-    return SystemResourceMap(
-        schema_version="1",
-        stpa_version=stpa_version,
-        taxonomy_version=taxonomy_version,
-        system_resources=[
-            SystemResourceEntry(
-                element_id="SR-1",
-                name="Primary Database",
-                description="Database hosting user records",
-                taxonomy_ref="ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            ),
-            SystemResourceEntry(
-                element_id="SR-2",
-                name="Attack Pattern Reference",
-                description="Taxonomy attack pattern",
-                taxonomy_ref="AP-T6-01",
-            ),
-        ],
-        control_actions=[
-            ControlActionEntry(
-                element_id="CA-1-1",
-                controller_id="RESP-1",
-                process_id="CP-2",
-                action_name="Issue Payment",
-            )
-        ],
-        loss_links=[
-            LossLinkEntry(
-                element_id="LL-1",
-                loss_id="L-1",
-                hazard_id="H-1",
-            )
-        ],
-        trust_boundaries=[
-            TrustBoundaryEntry(
-                element_id="TB-1",
-                name="DMZ Boundary",
-                resource_ids=["SR-1"],
-                taxonomy_ref="tb:v1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            )
-        ],
-    )
-
-
-def _get_corr_state(world: World) -> dict[str, Any]:
-    """Return this feature's per-scenario state, initializing it on first use."""
+def _state(world: World) -> dict[str, Any]:
+    """Return isolated correspondence state for one scenario."""
     state = getattr(world, "correspondence_state", None)
     if state is None:
         state = {
-            "resource_map": _make_default_resource_map(),
-            "source_artifacts": {},
-            "raw_proposals": {},
+            "resource_map": None,
             "proposal_set": None,
-            "adjudications": {},
-            "reconciliation_result": None,
-            "result_a": None,
-            "result_b": None,
-            "serialized_a": None,
-            "serialized_b": None,
-            "serialized_twice": [],
-            "deserialized_result": None,
-            "last_error": None,
-            "prose": None,
-            "proposer_meta": {},
-            "existing_ids": [],
-            "new_id": None,
-            "new_adjudication": None,
-            "source_artifact_snapshots": {},
+            "result": None,
+            "serialized": None,
+            "error": None,
+            "compatibility": None,
+            "gap_reason": None,
+            "structural_ids": (),
         }
         world.correspondence_state = state
     return state
 
 
-def _require_reconciliation_result(
-    state: dict[str, Any],
-) -> tuple[ReconciliationResult | None, str | None]:
-    """Return the reconciliation result, or a failure message when missing."""
-    result = state.get("reconciliation_result")
-    if result is None:
-        return None, "Reconciliation result missing"
-    return result, None
-
-
-def _require_proposal_set(
-    state: dict[str, Any],
-) -> tuple[Any, str | None]:
-    """Return the proposal set, or a failure message when missing."""
-    pset = state.get("proposal_set")
-    if pset is None:
-        return None, "Proposal set missing"
-    return pset, None
-
-
-def _proposal_by_id(
-    proposals: list[Any],
-    prop_id: str,
-) -> tuple[Any | None, str | None]:
-    """Find one proposal by id, or a failure message when absent."""
-    prop = next((p for p in proposals if p.proposal_id == prop_id), None)
-    if prop is None:
-        return None, f"Proposal {prop_id} missing"
-    return prop, None
-
-
-def _make_proposal(
-    state: dict[str, Any],
-    prop_id: str,
-    **overrides: Any,
-) -> CorrespondenceProposal:
-    """Build a proposal pinned to the state's resource-map versions."""
-    srm = state["resource_map"]
-    fields: dict[str, Any] = {
-        "proposal_id": prop_id,
-        "left_ref": "CA-1-1",
-        "right_ref": "ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "relation_type": "supports",
-        "evidence_source": "exact-id",
-        "strength": "high",
-        "evidence_refs": ["CA-1-1"],
-        "stpa_version": str(srm.stpa_version),
-        "taxonomy_version": str(srm.taxonomy_version),
-    }
-    fields.update(overrides)
-    return CorrespondenceProposal(**fields)
-
-
-def _proposals_for_ids(
-    state: dict[str, Any],
-    ids: list[str],
-) -> list[CorrespondenceProposal]:
-    """Build one canonical proposal per id for presentation-order scenarios."""
-    return [_make_proposal(state, pid) for pid in ids]
-
-
-def _serialize_result(result: ReconciliationResult, fmt: str) -> str:
-    """Serialize a reconciliation result in the requested format (YAML or JSON)."""
-    if fmt == "YAML":
-        return result.to_yaml()
-    if fmt == "JSON":
-        return result.to_json()
-    raise ValueError(f"Unsupported serialization format: {fmt}")
-
-
-def _deserialize_result(text: str, fmt: str) -> ReconciliationResult:
-    """Deserialize a reconciliation result from the requested format (YAML or JSON)."""
-    if fmt == "YAML":
-        return ReconciliationResult.from_yaml(text)
-    if fmt == "JSON":
-        return ReconciliationResult.from_json(text)
-    raise ValueError(f"Unsupported serialization format: {fmt}")
-
-
-# -----------------------------------------------------------------------------
-# Background steps
-# -----------------------------------------------------------------------------
-
-
-def _h_valid_srm_available(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    state["resource_map"] = _make_default_resource_map()
-    return True, ""
-
-
-def _h_reconciliation_depends_on_srm(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
-def _h_no_network_or_model_calls(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
-def _h_proposal_and_reconciliation_present(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
-def _h_default_commands_no_flags(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
-
-
-# -----------------------------------------------------------------------------
-# Reconciliation Feature Handlers
-# -----------------------------------------------------------------------------
-
-
-def _h_proposal_has_relation_type(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'proposal "([^"]*)" has relation type "([^"]*)"$', text)
-    if match:
-        prop_id, rel_type = match.group(1), match.group(2)
-    else:
-        prop_id = examples.get("proposal_id", "P-1")
-        rel_type = examples.get("relation_type", "supports")
-
-    prop = _make_proposal(state, prop_id, relation_type=rel_type)
-    state["raw_proposals"][prop_id] = prop
-    return True, ""
-
-
-def _h_proposal_has_relation_type_and_strength(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(
-        r'proposal "([^"]*)" has relation type "([^"]*)" and strength "([^"]*)"', text
+def _map() -> SystemResourceMap:
+    """Build a minimal valid map with one authoritative resource link."""
+    snapshot, control = _map_inputs()
+    link = ResourceLink(
+        link_id="srm:v1:1",
+        capability_resource_ref={
+            "kind": "tool",
+            "tool_id": snapshot.profile.tool_inventory[0].tool_id,
+        },
+        control_structure_ref={"kind": "CA", "id": "CA-1-1"},
+        relation_kind="acts_on",
+        provenance="operator_declared",
+        evidence_refs=("review:resource-link",),
+        confidence=1.0,
+        authority_status="authoritative",
     )
-    if match:
-        prop_id, rel_type, strength = match.group(1), match.group(2), match.group(3)
-    else:
-        prop_id = examples.get("proposal_id", "P-1")
-        rel_type = examples.get("relation_type", "supports")
-        strength = examples.get("strength", "high")
-
-    prop = _make_proposal(
-        state,
-        prop_id,
-        relation_type=rel_type,
-        evidence_source="exact-id" if strength == "high" else "resource-overlap",
-        strength=strength,
+    control_digest = compute_control_structure_digest(control)
+    map_digest = compute_resource_map_semantic_digest(
+        schema_version="system-resource-map-v1",
+        capability_snapshot_digest=snapshot.snapshot_digest,
+        control_structure_digest=control_digest,
+        links=(link,),
     )
-    state["raw_proposals"][prop_id] = prop
-    return True, ""
-
-
-def _h_reconciliation_assigns_adjudication(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(
-        r'reconciliation input assigns adjudication "([^"]*)" to "([^"]*)"', text
+    return SystemResourceMap(
+        schema_version="system-resource-map-v1",
+        semantic_digest=map_digest,
+        capability_snapshot_digest=snapshot.snapshot_digest,
+        control_structure_digest=control_digest,
+        links=(link,),
     )
-    if match:
-        adjudication, prop_id = match.group(1), match.group(2)
-    else:
-        adjudication = examples.get("adjudication", "confirmed")
-        prop_id = examples.get("proposal_id", "P-1")
-
-    state["adjudications"][prop_id] = adjudication
-    return True, ""
 
 
-def _h_correspondence_is_reconciled(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    srm = state["resource_map"]
-    proposals = list(state["raw_proposals"].values())
-    adjudications = dict(state["adjudications"])
-    res = reconcile_correspondence(srm, proposals, adjudications=adjudications)
-    state["reconciliation_result"] = res
-    return True, ""
-
-
-def _h_result_retains_proposal(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'the result retains proposal "([^"]*)"', text)
-    prop_id = match.group(1) if match else examples.get("proposal_id", "")
-    res, failure = _require_reconciliation_result(state)
-    if failure:
-        return False, failure
-    found = any(p.proposal_id == prop_id for p in res.proposals)
-    if not found:
-        return False, f"Proposal {prop_id} not retained in result"
-    return True, ""
-
-
-def _h_result_records_adjudication(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'the result records adjudication "([^"]*)" for "([^"]*)"', text)
-    if match:
-        expected_adj, prop_id = match.group(1), match.group(2)
-    else:
-        expected_adj = examples.get("adjudication", "")
-        prop_id = examples.get("proposal_id", "")
-
-    res, failure = _require_reconciliation_result(state)
-    if failure:
-        return False, failure
-    prop, failure = _proposal_by_id(res.proposals, prop_id)
-    if failure:
-        return False, f"Proposal {prop_id} not found in result"
-    if prop.adjudication != expected_adj:
-        return (
-            False,
-            f"Proposal {prop_id} adjudication '{prop.adjudication}' != expected '{expected_adj}'",
-        )
-    return True, ""
-
-
-def _h_result_records_relation_type(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'the result records relation type "([^"]*)" for "([^"]*)"', text)
-    if match:
-        expected_rel, prop_id = match.group(1), match.group(2)
-    else:
-        expected_rel = examples.get("relation_type", "")
-        prop_id = examples.get("proposal_id", "")
-
-    res, failure = _require_reconciliation_result(state)
-    if failure:
-        return False, failure
-    prop, failure = _proposal_by_id(res.proposals, prop_id)
-    if failure:
-        return False, f"Proposal {prop_id} not found in result"
-    if prop.relation_type != expected_rel:
-        return (
-            False,
-            f"Proposal {prop_id} relation_type '{prop.relation_type}' != expected '{expected_rel}'",
-        )
-    return True, ""
-
-
-def _h_proposal_has_relation_type_check(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'proposal "([^"]*)" has relation type "([^"]*)"$', text)
-    if match:
-        prop_id, expected_rel = match.group(1), match.group(2)
-    else:
-        prop_id = examples.get("proposal_id", "")
-        expected_rel = examples.get("relation_type", "")
-
-    res, failure = _require_reconciliation_result(state)
-    if failure:
-        return False, failure
-    prop, failure = _proposal_by_id(res.proposals, prop_id)
-    if failure:
-        return False, f"Proposal {prop_id} not found in result"
-    if prop.relation_type != expected_rel:
-        return (
-            False,
-            f"Proposal {prop_id} relation_type '{prop.relation_type}' != expected '{expected_rel}'",
-        )
-    return True, ""
-
-
-def _h_proposal_has_strength_check(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'proposal "([^"]*)" has strength "([^"]*)"', text)
-    if match:
-        prop_id, expected_strength = match.group(1), match.group(2)
-    else:
-        prop_id = examples.get("proposal_id", "")
-        expected_strength = examples.get("strength", "")
-
-    res, failure = _require_reconciliation_result(state)
-    if failure:
-        return False, failure
-    prop, failure = _proposal_by_id(res.proposals, prop_id)
-    if failure:
-        return False, f"Proposal {prop_id} not found in result"
-    if prop.strength != expected_strength:
-        return (
-            False,
-            f"Proposal {prop_id} strength '{prop.strength}' != expected '{expected_strength}'",
-        )
-    return True, ""
-
-
-def _h_proposal_has_adjudication_check(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'proposal "([^"]*)" has adjudication "([^"]*)"', text)
-    if match:
-        prop_id, expected_adj = match.group(1), match.group(2)
-    else:
-        prop_id = examples.get("proposal_id", "")
-        expected_adj = examples.get("adjudication", "")
-
-    res, failure = _require_reconciliation_result(state)
-    if failure:
-        return False, failure
-    prop, failure = _proposal_by_id(res.proposals, prop_id)
-    if failure:
-        return False, f"Proposal {prop_id} not found in result"
-    if prop.adjudication != expected_adj:
-        return (
-            False,
-            f"Proposal {prop_id} adjudication '{prop.adjudication}' != expected '{expected_adj}'",
-        )
-    return True, ""
-
-
-def _h_relation_type_not_equal_adjudication(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    res, failure = _require_reconciliation_result(state)
-    if failure:
-        return False, failure
-    for p in res.proposals:
-        if p.relation_type == p.adjudication:
-            return (
-                False,
-                f"Proposal {p.proposal_id} relation_type equals adjudication '{p.relation_type}'",
+def _map_inputs() -> tuple[Any, ControlStructure]:
+    """Build the exact capability and STPA authorities for the map fixture."""
+    profile = CapabilityProfile.model_validate(
+        {
+            "zones_active": ["input", "reasoning", "tool_execution"],
+            "entry_points": [
+                {
+                    "name": "Customer input",
+                    "entry_point_type": "user_input",
+                    "direction": "input",
+                    "controllability": "direct",
+                    "ingress_zone": "input",
+                }
+            ],
+            "confidence": "high",
+            "kc_subcodes": ["KC1.1", "KC5.3"],
+            "tool_inventory": [
+                {"name": "Payment API", "description": "Mutates payments"}
+            ],
+        }
+    )
+    snapshot = capture_capability_snapshot(profile)
+    control = ControlStructure(
+        responsibilities=[
+            Responsibility(
+                resp_id="RESP-1",
+                description="Payment controller",
+                process_model_parts=[
+                    ProcessModelPart(pm_id="PM-1-1", description="Payment state")
+                ],
+                control_actions=[
+                    ControlAction(ca_id="CA-1-1", description="Authorize payment")
+                ],
             )
-    return True, ""
-
-
-def _h_relation_type_not_equal_strength(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    res, failure = _require_reconciliation_result(state)
-    if failure:
-        return False, failure
-    for p in res.proposals:
-        if p.relation_type == p.strength:
-            return (
-                False,
-                f"Proposal {p.proposal_id} relation_type equals strength '{p.relation_type}'",
-            )
-    return True, ""
-
-
-def _h_conflicting_proposals(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(
-        r'conflicting proposals "([^"]*)" with type "([^"]*)" and "([^"]*)" with type "([^"]*)" for "([^"]*)" and "([^"]*)"',
-        text,
-    )
-    if match:
-        prop_a, type_a, prop_b, type_b, left_ref, right_ref = match.groups()
-    else:
-        prop_a = examples.get("proposal_a", "P-1")
-        type_a = examples.get("type_a", "supports")
-        prop_b = examples.get("proposal_b", "P-4")
-        type_b = examples.get("type_b", "contradicts")
-        left_ref = examples.get("left_ref", "CA-1-1")
-        right_ref = examples.get("right_ref", "ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-
-    p_a = _make_proposal(
-        state,
-        prop_a,
-        left_ref=left_ref,
-        right_ref=right_ref,
-        relation_type=type_a,
-        evidence_refs=[left_ref],
-    )
-    p_b = _make_proposal(
-        state,
-        prop_b,
-        left_ref=left_ref,
-        right_ref=right_ref,
-        relation_type=type_b,
-        evidence_refs=[left_ref],
-    )
-    state["raw_proposals"] = {prop_a: p_a, prop_b: p_b}
-    state["adjudications"] = {prop_a: "confirmed", prop_b: "confirmed"}
-    return True, ""
-
-
-def _h_proposals_presented_in_order(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'the proposals are presented in order "([^"]*)"', text)
-    order_csv = match.group(1) if match else examples.get("order", "")
-    ordered_ids = [x.strip() for x in order_csv.split(",") if x.strip()]
-    ordered_props = [
-        state["raw_proposals"][pid]
-        for pid in ordered_ids
-        if pid in state["raw_proposals"]
-    ]
-    # Re-order the dictionary keys
-    state["raw_proposals"] = {p.proposal_id: p for p in ordered_props}
-    return True, ""
-
-
-def _h_both_proposals_retained(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    res = state["reconciliation_result"]
-    if res is None:
-        return False, "Reconciliation result is missing"
-    if len(res.proposals) < 2:
-        return False, f"Expected both proposals retained, got {len(res.proposals)}"
-    return True, ""
-
-
-def _h_pair_has_adjudication(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'the pair has adjudication "([^"]*)"', text)
-    expected_adj = match.group(1) if match else examples.get("adjudication", "")
-    res, failure = _require_reconciliation_result(state)
-    if failure:
-        return False, failure
-    for p in res.proposals:
-        if p.adjudication != expected_adj:
-            return (
-                False,
-                f"Proposal {p.proposal_id} in pair has adjudication '{p.adjudication}' != '{expected_adj}'",
-            )
-    return True, ""
-
-
-def _h_pair_has_conflict_reason(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'the pair has conflict reason "([^"]*)"', text)
-    expected_reason = match.group(1) if match else examples.get("conflict_reason", "")
-    res, failure = _require_reconciliation_result(state)
-    if failure:
-        return False, failure
-    for p in res.proposals:
-        if p.conflict_reason != expected_reason:
-            return (
-                False,
-                f"Proposal {p.proposal_id} in pair has conflict_reason '{p.conflict_reason}' != '{expected_reason}'",
-            )
-    return True, ""
-
-
-def _h_neither_proposal_confirmed_by_order(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    res, failure = _require_reconciliation_result(state)
-    if failure:
-        return False, failure
-    for p in res.proposals:
-        if p.adjudication == "confirmed":
-            return False, f"Proposal {p.proposal_id} was confirmed by order"
-    return True, ""
-
-
-def _h_proposal_has_confirmation_defect(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'proposal "([^"]*)" has confirmation defect "([^"]*)"', text)
-    if match:
-        prop_id, defect = match.group(1), match.group(2)
-    else:
-        prop_id = examples.get("proposal_id", "P-9")
-        defect = examples.get("defect", "")
-
-    if defect == "dangling-left":
-        prop = _make_proposal(
-            state,
-            prop_id,
-            left_ref="NON-EXISTENT-LEFT",
-            evidence_refs=["NON-EXISTENT-LEFT"],
-        )
-    elif defect == "dangling-right":
-        prop = _make_proposal(
-            state,
-            prop_id,
-            right_ref="NON-EXISTENT-RIGHT",
-        )
-    elif defect == "stale-version":
-        prop = _make_proposal(
-            state,
-            prop_id,
-            stpa_version="stpa-v0-outdated",
-        )
-    elif defect == "evidence-free":
-        prop = _make_proposal(
-            state,
-            prop_id,
-            evidence_source="",
-            evidence_refs=[],
-        )
-    else:
-        return False, f"Unknown confirmation defect: {defect}"
-
-    state["raw_proposals"] = {prop_id: prop}
-    state["adjudications"] = {prop_id: "confirmed"}
-    return True, ""
-
-
-def _h_reconciliation_fails(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    res = state["reconciliation_result"]
-    if res is None:
-        return False, "Reconciliation result is missing"
-    if res.is_valid:
-        return False, "Expected reconciliation to fail, but is_valid was True"
-    return True, ""
-
-
-def _h_no_confirmed_relation_written(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'no confirmed relation is written for "([^"]*)"', text)
-    prop_id = match.group(1) if match else examples.get("proposal_id", "")
-    res = state["reconciliation_result"]
-    if res is None:
-        return False, "Reconciliation result is missing"
-    prop = next((p for p in res.proposals if p.proposal_id == prop_id), None)
-    if prop and prop.adjudication == "confirmed":
-        return False, f"Proposal {prop_id} has confirmed relation written"
-    return True, ""
-
-
-def _h_proposals_order_a_reconciled(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'proposals "([^"]*)" are reconciled to a result', text)
-    order_a = match.group(1) if match else examples.get("order_a", "P-1,P-2,P-3")
-    ids = [x.strip() for x in order_a.split(",") if x.strip()]
-
-    srm = state["resource_map"]
-    props = _proposals_for_ids(state, ids)
-    adjudications = {pid: "confirmed" for pid in ids}
-    state["result_a"] = reconcile_correspondence(
-        srm, props, adjudications=adjudications
-    )
-    return True, ""
-
-
-def _h_same_proposals_presented_as_order_b(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'the same proposals are presented as "([^"]*)"', text)
-    order_b = match.group(1) if match else examples.get("order_b", "P-3,P-1,P-2")
-    ids = [x.strip() for x in order_b.split(",") if x.strip()]
-
-    state["raw_proposals_b"] = _proposals_for_ids(state, ids)
-    state["adjudications_b"] = {pid: "confirmed" for pid in ids}
-    return True, ""
-
-
-def _h_correspondence_reconciled_again(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    srm = state["resource_map"]
-    props_b = state["raw_proposals_b"]
-    adjs_b = state["adjudications_b"]
-    state["result_b"] = reconcile_correspondence(srm, props_b, adjudications=adjs_b)
-    return True, ""
-
-
-def _h_both_results_identical_identities(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    res_a = state["result_a"]
-    res_b = state["result_b"]
-    if res_a is None or res_b is None:
-        return False, "Results A or B missing"
-    ids_a = [p.proposal_id for p in res_a.proposals]
-    ids_b = [p.proposal_id for p in res_b.proposals]
-    if ids_a != ids_b:
-        return False, f"Identities mismatch: {ids_a} != {ids_b}"
-    return True, ""
-
-
-def _h_both_results_identical_adjudications(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    res_a = state["result_a"]
-    res_b = state["result_b"]
-    if res_a is None or res_b is None:
-        return False, "Results A or B missing"
-    adjs_a = [p.adjudication for p in res_a.proposals]
-    adjs_b = [p.adjudication for p in res_b.proposals]
-    if adjs_a != adjs_b:
-        return False, f"Adjudications mismatch: {adjs_a} != {adjs_b}"
-    return True, ""
-
-
-def _h_repeating_reconciliation_no_change(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    res_a = state["result_a"]
-    srm = state["resource_map"]
-    res_repeat = reconcile_correspondence(srm, res_a.proposals)
-    if res_repeat.to_yaml() != res_a.to_yaml():
-        return False, "Repeating reconciliation changed the result"
-    return True, ""
-
-
-def _h_scenario_prose_contains(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'scenario prose contains "([^"]*)"', text)
-    prose = match.group(1) if match else examples.get("prose", "")
-    state["prose"] = prose
-    return True, ""
-
-
-def _h_no_explicit_proposal_cites_prose(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    state["raw_proposals"] = {}
-    return True, ""
-
-
-def _h_result_contains_proposal_count(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r"the result contains (\d+) proposals", text)
-    expected_count = (
-        int(match.group(1)) if match else int(examples.get("proposal_count", 0))
-    )
-    res, failure = _require_reconciliation_result(state)
-    if failure:
-        return False, failure
-    if len(res.proposals) != expected_count:
-        return (
-            False,
-            f"Expected {expected_count} proposals, got {len(res.proposals)}",
-        )
-    return True, ""
-
-
-def _h_no_relation_inferred_from_wording(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    res, failure = _require_reconciliation_result(state)
-    if failure:
-        return False, failure
-    if len(res.proposals) > 0:
-        return False, "Relation was inferred from wording"
-    return True, ""
-
-
-def _h_source_stpa_and_taxonomy_artifacts(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(
-        r'source STPA artifact "([^"]*)" and taxonomy artifact "([^"]*)"', text
-    )
-    if match:
-        stpa_art, tax_art = match.group(1), match.group(2)
-    else:
-        stpa_art = examples.get("stpa_artifact", "control-structure.yaml")
-        tax_art = examples.get("taxonomy_artifact", "attack-patterns.sssom.tsv")
-
-    content_stpa = f"dummy stpa content for {stpa_art}"
-    content_tax = f"dummy taxonomy content for {tax_art}"
-    state["source_artifact_snapshots"] = {
-        stpa_art: content_stpa,
-        tax_art: content_tax,
-    }
-    state["source_artifacts"] = {
-        "stpa_file": stpa_art,
-        "stpa_content": content_stpa,
-        "tax_file": tax_art,
-        "tax_content": content_tax,
-        "evidence": [],
-    }
-    return True, ""
-
-
-def _h_source_artifacts_unchanged(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(
-        r'source STPA artifact "([^"]*)" and taxonomy artifact "([^"]*)" are unchanged',
-        text,
-    )
-    if match:
-        stpa_art, tax_art = match.group(1), match.group(2)
-    else:
-        stpa_art = examples.get("stpa_artifact", "control-structure.yaml")
-        tax_art = examples.get("taxonomy_artifact", "attack-patterns.sssom.tsv")
-
-    orig = state["source_artifact_snapshots"]
-    current = state["source_artifacts"]
-    if current.get("stpa_content") != orig.get(stpa_art):
-        return False, f"STPA artifact {stpa_art} changed"
-    if current.get("tax_content") != orig.get(tax_art):
-        return False, f"Taxonomy artifact {tax_art} changed"
-    return True, ""
-
-
-# -----------------------------------------------------------------------------
-# Proposal Feature Handlers
-# -----------------------------------------------------------------------------
-
-
-def _h_source_evidence_linking(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(
-        r'source artifacts contain "([^"]*)" evidence linking "([^"]*)" to "([^"]*)"',
-        text,
-    )
-    if match:
-        ev_source, left_ref, right_ref = (
-            match.group(1),
-            match.group(2),
-            match.group(3),
-        )
-    else:
-        ev_source = examples.get("evidence_source", "exact-id")
-        left_ref = examples.get("left_ref", "CA-1-1")
-        right_ref = examples.get("right_ref", "ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-
-    prop_id = examples.get("proposal_id", "P-1")
-    strength = examples.get(
-        "strength", "high" if ev_source in ("exact-id", "curated-map") else "weak"
-    )
-    rel_type = examples.get(
-        "relation_type",
-        "supports"
-        if ev_source == "exact-id"
-        else ("addresses" if ev_source == "curated-map" else "overlaps"),
-    )
-
-    item = {
-        "proposal_id": prop_id,
-        "left_ref": left_ref,
-        "right_ref": right_ref,
-        "evidence_source": ev_source,
-        "strength": strength,
-        "relation_type": rel_type,
-    }
-    state.setdefault("source_artifacts", {}).setdefault("evidence", []).append(item)
-    return True, ""
-
-
-def _h_correspondence_proposals_produced(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    srm = state["resource_map"]
-    src = state.get("source_artifacts", {})
-    pset = propose_correspondence(srm, source_artifacts=src)
-    state["proposal_set"] = pset
-    state["raw_proposals"] = {p.proposal_id: p for p in pset.proposals}
-    return True, ""
-
-
-def _h_proposal_set_contains_proposal(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'the proposal set contains proposal "([^"]*)"', text)
-    prop_id = match.group(1) if match else examples.get("proposal_id", "")
-    pset, failure = _require_proposal_set(state)
-    if failure:
-        return False, failure
-    found = any(p.proposal_id == prop_id for p in pset.proposals)
-    if not found:
-        return False, f"Proposal {prop_id} not in proposal set"
-    return True, ""
-
-
-def _h_that_proposal_has_evidence_source(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'that proposal has evidence source "([^"]*)"', text)
-    expected_src = match.group(1) if match else examples.get("evidence_source", "")
-    prop_id = examples.get("proposal_id", "P-1")
-    pset, failure = _require_proposal_set(state)
-    if failure:
-        return False, failure
-    prop, failure = _proposal_by_id(pset.proposals, prop_id)
-    if failure:
-        return False, failure
-    if prop.evidence_source != expected_src:
-        return (
-            False,
-            f"Proposal {prop_id} evidence_source '{prop.evidence_source}' != expected '{expected_src}'",
-        )
-    return True, ""
-
-
-def _h_that_proposal_has_strength(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'that proposal has strength "([^"]*)"', text)
-    expected_strength = match.group(1) if match else examples.get("strength", "")
-    prop_id = examples.get("proposal_id", "P-1")
-    pset, failure = _require_proposal_set(state)
-    if failure:
-        return False, failure
-    prop, failure = _proposal_by_id(pset.proposals, prop_id)
-    if failure:
-        return False, failure
-    if prop.strength != expected_strength:
-        return (
-            False,
-            f"Proposal {prop_id} strength '{prop.strength}' != expected '{expected_strength}'",
-        )
-    return True, ""
-
-
-def _h_that_proposal_has_relation_type(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'that proposal has relation type "([^"]*)"', text)
-    expected_rel = match.group(1) if match else examples.get("relation_type", "")
-    prop_id = examples.get("proposal_id", "P-1")
-    pset, failure = _require_proposal_set(state)
-    if failure:
-        return False, failure
-    prop, failure = _proposal_by_id(pset.proposals, prop_id)
-    if failure:
-        return False, failure
-    if prop.relation_type != expected_rel:
-        return (
-            False,
-            f"Proposal {prop_id} relation_type '{prop.relation_type}' != expected '{expected_rel}'",
-        )
-    return True, ""
-
-
-def _h_that_proposal_not_confirmed(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    prop_id = examples.get("proposal_id", "P-1")
-    pset, failure = _require_proposal_set(state)
-    if failure:
-        return False, failure
-    prop, failure = _proposal_by_id(pset.proposals, prop_id)
-    if failure:
-        return False, failure
-    if prop.is_confirmed:
-        return False, f"Proposal {prop_id} was confirmed"
-    return True, ""
-
-
-def _h_that_proposal_not_classified_as_other(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(
-        r'that proposal is not classified as evidence source "([^"]*)"', text
-    )
-    other_src = match.group(1) if match else examples.get("other_source", "")
-    prop_id = examples.get("proposal_id", "P-3")
-    pset, failure = _require_proposal_set(state)
-    if failure:
-        return False, failure
-    prop, failure = _proposal_by_id(pset.proposals, prop_id)
-    if failure:
-        return False, failure
-    if prop.evidence_source == other_src:
-        return False, f"Proposal {prop_id} classified as other source '{other_src}'"
-    return True, ""
-
-
-def _h_proposer_emits_proposal(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(
-        r'proposer "([^"]*)" version "([^"]*)" emits a proposal for "([^"]*)" and "([^"]*)"',
-        text,
-    )
-    if match:
-        proposer_id, ver, left_ref, right_ref = match.groups()
-    else:
-        proposer_id = examples.get("proposer_id", "exact-id-adapter")
-        ver = examples.get("proposer_version", "1")
-        left_ref = examples.get("left_ref", "CA-1-1")
-        right_ref = examples.get("right_ref", "ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-
-    prop_id = examples.get("proposal_id", "P-1")
-    state["proposer_meta"] = {
-        "proposal_id": prop_id,
-        "proposer_id": proposer_id,
-        "proposer_version": ver,
-        "left_ref": left_ref,
-        "right_ref": right_ref,
-    }
-    return True, ""
-
-
-def _h_proposal_cites_evidence_refs(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'the proposal cites evidence references "([^"]*)"', text)
-    refs_csv = match.group(1) if match else examples.get("evidence_refs", "")
-    refs = [x.strip() for x in refs_csv.split(",") if x.strip()]
-    state.setdefault("proposer_meta", {})["evidence_refs"] = refs
-    return True, ""
-
-
-def _h_proposal_pins_versions(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(
-        r'the proposal pins STPA version "([^"]*)" and taxonomy version "([^"]*)"',
-        text,
-    )
-    if match:
-        stpa_v, tax_v = match.group(1), match.group(2)
-    else:
-        stpa_v = examples.get("stpa_version", "stpa-v1")
-        tax_v = examples.get("taxonomy_version", "atlas-2026.05")
-
-    state.setdefault("proposer_meta", {})["stpa_version"] = stpa_v
-    state.setdefault("proposer_meta", {})["taxonomy_version"] = tax_v
-    return True, ""
-
-
-def _h_proposal_rationale_is(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'the proposal rationale is "([^"]*)"', text)
-    rationale = match.group(1) if match else examples.get("rationale", "")
-    meta = state.setdefault("proposer_meta", {})
-    meta["rationale"] = rationale
-    meta["evidence_source"] = "exact-id"
-    meta["strength"] = "high"
-    meta["relation_type"] = "supports"
-
-    state.setdefault("source_artifacts", {}).setdefault("evidence", []).append(meta)
-    return True, ""
-
-
-def _h_proposal_has_left_and_right_ref(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(
-        r'proposal "([^"]*)" has left ref "([^"]*)" and right ref "([^"]*)"', text
-    )
-    if match:
-        prop_id, left_ref, right_ref = match.groups()
-    else:
-        prop_id = examples.get("proposal_id", "P-1")
-        left_ref = examples.get("left_ref", "")
-        right_ref = examples.get("right_ref", "")
-
-    pset, failure = _require_proposal_set(state)
-    if failure:
-        return False, failure
-    prop, failure = _proposal_by_id(pset.proposals, prop_id)
-    if failure:
-        return False, failure
-    if prop.left_ref != left_ref or prop.right_ref != right_ref:
-        return (
-            False,
-            f"Proposal {prop_id} refs ({prop.left_ref}, {prop.right_ref}) != ({left_ref}, {right_ref})",
-        )
-    return True, ""
-
-
-def _h_proposal_records_proposer_and_ver(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(
-        r'proposal "([^"]*)" records proposer "([^"]*)" version "([^"]*)"', text
-    )
-    if match:
-        prop_id, proposer_id, ver = match.groups()
-    else:
-        prop_id = examples.get("proposal_id", "P-1")
-        proposer_id = examples.get("proposer_id", "")
-        ver = examples.get("proposer_version", "")
-
-    pset, failure = _require_proposal_set(state)
-    if failure:
-        return False, failure
-    prop, failure = _proposal_by_id(pset.proposals, prop_id)
-    if failure:
-        return False, failure
-    if prop.proposer_id != proposer_id or str(prop.proposer_version) != str(ver):
-        return (
-            False,
-            f"Proposal {prop_id} proposer ({prop.proposer_id}, {prop.proposer_version}) != ({proposer_id}, {ver})",
-        )
-    return True, ""
-
-
-def _h_proposal_records_evidence_refs(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'proposal "([^"]*)" records evidence references "([^"]*)"', text)
-    if match:
-        prop_id, refs_csv = match.group(1), match.group(2)
-    else:
-        prop_id = examples.get("proposal_id", "P-1")
-        refs_csv = examples.get("evidence_refs", "")
-
-    expected_refs = [x.strip() for x in refs_csv.split(",") if x.strip()]
-    pset, failure = _require_proposal_set(state)
-    if failure:
-        return False, failure
-    prop, failure = _proposal_by_id(pset.proposals, prop_id)
-    if failure:
-        return False, failure
-    if prop.evidence_refs != expected_refs:
-        return (
-            False,
-            f"Proposal {prop_id} evidence_refs {prop.evidence_refs} != {expected_refs}",
-        )
-    return True, ""
-
-
-def _h_proposal_records_stpa_and_tax_ver(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(
-        r'proposal "([^"]*)" records STPA version "([^"]*)" and taxonomy version "([^"]*)"',
-        text,
-    )
-    if match:
-        prop_id, stpa_v, tax_v = match.groups()
-    else:
-        prop_id = examples.get("proposal_id", "P-1")
-        stpa_v = examples.get("stpa_version", "")
-        tax_v = examples.get("taxonomy_version", "")
-
-    pset, failure = _require_proposal_set(state)
-    if failure:
-        return False, failure
-    prop, failure = _proposal_by_id(pset.proposals, prop_id)
-    if failure:
-        return False, failure
-    if prop.stpa_version != stpa_v or prop.taxonomy_version != tax_v:
-        return (
-            False,
-            f"Proposal {prop_id} versions ({prop.stpa_version}, {prop.taxonomy_version}) != ({stpa_v}, {tax_v})",
-        )
-    return True, ""
-
-
-def _h_proposal_records_rationale(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'proposal "([^"]*)" records rationale "([^"]*)"', text)
-    if match:
-        prop_id, rationale = match.group(1), match.group(2)
-    else:
-        prop_id = examples.get("proposal_id", "P-1")
-        rationale = examples.get("rationale", "")
-
-    pset, failure = _require_proposal_set(state)
-    if failure:
-        return False, failure
-    prop, failure = _proposal_by_id(pset.proposals, prop_id)
-    if failure:
-        return False, failure
-    if prop.rationale != rationale:
-        return (
-            False,
-            f"Proposal {prop_id} rationale '{prop.rationale}' != expected '{rationale}'",
-        )
-    return True, ""
-
-
-def _h_proposer_is_adapter_kind(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'proposer "([^"]*)" is a "([^"]*)" adapter', text)
-    if match:
-        proposer_id, kind = match.group(1), match.group(2)
-    else:
-        proposer_id = examples.get("proposer_id", "heuristic-adapter")
-        kind = examples.get("adapter_kind", "heuristic")
-
-    ev_source = examples.get("evidence_source", kind)
-    item = {
-        "proposal_id": f"P-{proposer_id}",
-        "left_ref": "CA-1-1",
-        "right_ref": "ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "proposer_id": proposer_id,
-        "adapter_kind": kind,
-        "evidence_source": ev_source,
-        "strength": "weak",
-        "relation_type": "supports",
-    }
-    state.setdefault("source_artifacts", {}).setdefault("evidence", []).append(item)
-    return True, ""
-
-
-def _h_every_proposal_from_proposer_has_evidence_source(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(
-        r'every proposal from "([^"]*)" has evidence source "([^"]*)"', text
-    )
-    if match:
-        proposer_id, expected_src = match.group(1), match.group(2)
-    else:
-        proposer_id = examples.get("proposer_id", "")
-        expected_src = examples.get("evidence_source", "")
-
-    pset, failure = _require_proposal_set(state)
-    if failure:
-        return False, failure
-    props = [p for p in pset.proposals if p.proposer_id == proposer_id]
-    for p in props:
-        if p.evidence_source != expected_src:
-            return (
-                False,
-                f"Proposal {p.proposal_id} evidence_source '{p.evidence_source}' != '{expected_src}'",
-            )
-    return True, ""
-
-
-def _h_no_confirmed_relation_written_by_proposer(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'no confirmed relation is written by "([^"]*)"', text)
-    proposer_id = match.group(1) if match else examples.get("proposer_id", "")
-    pset, failure = _require_proposal_set(state)
-    if failure:
-        return False, failure
-    props = [p for p in pset.proposals if p.proposer_id == proposer_id]
-    for p in props:
-        if p.is_confirmed:
-            return (
-                False,
-                f"Proposal {p.proposal_id} from {proposer_id} was confirmed",
-            )
-    return True, ""
-
-
-# -----------------------------------------------------------------------------
-# Artifact Feature Handlers
-# -----------------------------------------------------------------------------
-
-
-def _h_every_proposal_records_stpa_ver(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'every proposal records STPA version "([^"]*)"', text)
-    expected_v = match.group(1) if match else examples.get("stpa_version", "")
-    pset, failure = _require_proposal_set(state)
-    if failure:
-        return False, failure
-    for p in pset.proposals:
-        if p.stpa_version != expected_v:
-            return (
-                False,
-                f"Proposal {p.proposal_id} stpa_version '{p.stpa_version}' != '{expected_v}'",
-            )
-    return True, ""
-
-
-def _h_every_proposal_records_tax_ver(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'every proposal records taxonomy version "([^"]*)"', text)
-    expected_v = match.group(1) if match else examples.get("taxonomy_version", "")
-    pset, failure = _require_proposal_set(state)
-    if failure:
-        return False, failure
-    for p in pset.proposals:
-        if p.taxonomy_version != expected_v:
-            return (
-                False,
-                f"Proposal {p.proposal_id} taxonomy_version '{p.taxonomy_version}' != '{expected_v}'",
-            )
-    return True, ""
-
-
-def _h_reconciliation_result_with_varied_outcomes(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    rec1 = ReconciledProposal(
-        proposal_id="P-1",
-        left_ref="CA-1-1",
-        right_ref="ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        relation_type="supports",
-        evidence_source="exact-id",
-        strength="high",
-        adjudication="confirmed",
-        stpa_version="stpa-v1",
-        taxonomy_version="atlas-2026.05",
-        adjudication_history=[
-            AdjudicationHistoryItem(adjudication="confirmed", reason="verified")
+        ],
+        controlled_processes=[
+            ControlledProcess(cp_id="CP-1", description="Payment process")
         ],
     )
-    rec2 = ReconciledProposal(
-        proposal_id="P-2",
-        left_ref="L-1",
-        right_ref="AP-T6-01",
-        relation_type="addresses",
-        evidence_source="curated-map",
-        strength="high",
-        adjudication="rejected",
+    return snapshot, control
+
+
+def _validated_map(resource_map: SystemResourceMap) -> Any:
+    """Return the typed attestation required by the correspondence seam."""
+    snapshot, control = _map_inputs()
+    return validate_system_resource_map(resource_map, snapshot, control)
+
+
+def _propose(
+    resource_map: SystemResourceMap, source: CorrespondenceSourceArtifacts | dict
+) -> Any:
+    """Propose only through the validated-map boundary."""
+    return propose_correspondence(_validated_map(resource_map), source)
+
+
+def _reconcile(
+    resource_map: SystemResourceMap,
+    proposal_set: Any,
+    adjudications: AdjudicationSet | None = None,
+) -> Any:
+    """Reconcile only through the validated-map boundary."""
+    return reconcile_correspondence(
+        _validated_map(resource_map), proposal_set, adjudications
+    )
+
+
+def _pins(map_value: SystemResourceMap) -> SourceArtifactPins:
+    """Build stable source pins for one correspondence fixture."""
+    return SourceArtifactPins(
+        resource_map_semantic_digest=map_value.semantic_digest,
+        capability_snapshot_digest=map_value.capability_snapshot_digest,
+        obligation_plan_semantic_digest="2" * 64,
+        control_structure_digest=map_value.control_structure_digest,
+        ica_enumeration_digest="3" * 64,
+        loss_analysis_digest="4" * 64,
+        taxonomy_version="atlas-v1",
         stpa_version="stpa-v1",
-        taxonomy_version="atlas-2026.05",
-    )
-    rec3 = ReconciledProposal(
-        proposal_id="P-3",
-        left_ref="CP-2",
-        right_ref="tb:v1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        relation_type="overlaps",
-        evidence_source="resource-overlap",
-        strength="weak",
-        adjudication="unresolved",
-        stpa_version="stpa-v1",
-        taxonomy_version="atlas-2026.05",
     )
 
-    result = ReconciliationResult(
-        schema_version="1",
-        stpa_version="stpa-v1",
-        taxonomy_version="atlas-2026.05",
-        is_valid=True,
-        proposals=[rec1, rec2, rec3],
-        errors=[],
-        network_calls=0,
-        model_calls=0,
-    )
-    state["reconciliation_result"] = result
-    return True, ""
 
-
-def _h_result_serialized_and_deserialized(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'the result is serialized as "([^"]*)" and deserialized', text)
-    fmt = match.group(1) if match else examples.get("format", "YAML")
-    if fmt not in ("YAML", "JSON"):
-        return False, f"Unsupported serialization format: {fmt}"
-    res, failure = _require_reconciliation_result(state)
-    if failure:
-        return False, failure
-
-    state["deserialized_result"] = _deserialize_result(_serialize_result(res, fmt), fmt)
-    return True, ""
-
-
-def _h_proposal_identities_preserved(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    orig = state["reconciliation_result"]
-    deserialized = state["deserialized_result"]
-    if orig is None or deserialized is None:
-        return False, "Original or deserialized result missing"
-    orig_ids = [p.proposal_id for p in orig.proposals]
-    deser_ids = [p.proposal_id for p in deserialized.proposals]
-    if orig_ids != deser_ids:
-        return False, f"Identities {deser_ids} != {orig_ids}"
-    return True, ""
-
-
-def _h_evidence_provenance_preserved(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    orig = state["reconciliation_result"]
-    deserialized = state["deserialized_result"]
-    if orig is None or deserialized is None:
-        return False, "Original or deserialized result missing"
-    for o, d in zip(orig.proposals, deserialized.proposals):
-        if (
-            o.evidence_source != d.evidence_source
-            or o.strength != d.strength
-            or o.evidence_refs != d.evidence_refs
-        ):
-            return False, f"Evidence provenance mismatch on {o.proposal_id}"
-    return True, ""
-
-
-def _h_adjudication_history_preserved(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    orig = state["reconciliation_result"]
-    deserialized = state["deserialized_result"]
-    if orig is None or deserialized is None:
-        return False, "Original or deserialized result missing"
-    for o, d in zip(orig.proposals, deserialized.proposals):
-        if o.adjudication != d.adjudication:
-            return False, f"Adjudication mismatch on {o.proposal_id}"
-        if len(o.adjudication_history) != len(d.adjudication_history):
-            return False, f"Adjudication history length mismatch on {o.proposal_id}"
-    return True, ""
-
-
-def _h_relation_types_preserved(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    orig = state["reconciliation_result"]
-    deserialized = state["deserialized_result"]
-    if orig is None or deserialized is None:
-        return False, "Original or deserialized result missing"
-    for o, d in zip(orig.proposals, deserialized.proposals):
-        if o.relation_type != d.relation_type:
-            return False, f"Relation type mismatch on {o.proposal_id}"
-    return True, ""
-
-
-def _h_result_serialized_twice(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'the result is serialized as "([^"]*)" twice', text)
-    fmt = match.group(1) if match else examples.get("format", "YAML")
-    if fmt not in ("YAML", "JSON"):
-        return False, f"Unsupported serialization format: {fmt}"
-    res, failure = _require_reconciliation_result(state)
-    if failure:
-        return False, failure
-
-    state["serialized_twice"] = [
-        _serialize_result(res, fmt),
-        _serialize_result(res, fmt),
-    ]
-    return True, ""
-
-
-def _h_one_proposal_set_presents_order_a(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'one proposal set presents identities in order "([^"]*)"', text)
-    order_a = match.group(1) if match else examples.get("order_a", "P-1,P-2,P-3")
-    ids = [x.strip() for x in order_a.split(",") if x.strip()]
-
-    state["set_a_proposals"] = _proposals_for_ids(state, ids)
-    return True, ""
-
-
-def _h_another_proposal_set_presents_order_b(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(
-        r'another proposal set presents the same identities in order "([^"]*)"',
-        text,
-    )
-    order_b = match.group(1) if match else examples.get("order_b", "P-3,P-2,P-1")
-    ids = [x.strip() for x in order_b.split(",") if x.strip()]
-
-    state["set_b_proposals"] = _proposals_for_ids(state, ids)
-    return True, ""
-
-
-def _h_each_set_reconciled_and_serialized(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    srm = state["resource_map"]
-    res_a = reconcile_correspondence(srm, state["set_a_proposals"])
-    res_b = reconcile_correspondence(srm, state["set_b_proposals"])
-    state["result_a"] = res_a
-    state["result_b"] = res_b
-    state["serialized_a"] = res_a.to_yaml()
-    state["serialized_b"] = res_b.to_yaml()
-    return True, ""
-
-
-def _h_both_results_identical_canonical_order(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    res_a = state["result_a"]
-    res_b = state["result_b"]
-    if res_a is None or res_b is None:
-        return False, "Results A or B missing"
-    ids_a = [p.proposal_id for p in res_a.proposals]
-    ids_b = [p.proposal_id for p in res_b.proposals]
-    if ids_a != ids_b:
-        return False, f"Canonical order mismatch: {ids_a} != {ids_b}"
-    return True, ""
-
-
-def _h_both_serialized_canonically_equivalent(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    ser_a = state["serialized_a"]
-    ser_b = state["serialized_b"]
-    if ser_a != ser_b:
-        return False, "Serialized artifacts are not canonically equivalent"
-    return True, ""
-
-
-def _h_proposer_emits_shared_contract(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'proposer "([^"]*)" emits the shared proposal contract', text)
-    proposer_id = (
-        match.group(1) if match else examples.get("proposer_id", "overlap-adapter")
-    )
-    new_id = examples.get("new_id", "P-3")
-    new_adj = examples.get("new_adjudication", "unresolved")
-
-    prop_new = _make_proposal(
-        state,
-        new_id,
-        left_ref="CP-2",
-        right_ref="tb:v1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        relation_type="overlaps",
-        evidence_source="resource-overlap",
-        strength="weak",
-        proposer_id=proposer_id,
-        evidence_refs=["CP-2"],
-    )
-    state["raw_proposals"][new_id] = prop_new
-    state["new_id"] = new_id
-    state["new_adjudication"] = new_adj
-    return True, ""
-
-
-def _h_existing_proposals_already_have_adjudications(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'existing proposals "([^"]*)" already have adjudications', text)
-    existing_csv = match.group(1) if match else examples.get("existing_ids", "P-1,P-2")
-    existing_ids = [x.strip() for x in existing_csv.split(",") if x.strip()]
-    state["existing_ids"] = existing_ids
-
-    p1 = _make_proposal(state, "P-1")
-    p2 = _make_proposal(
-        state,
-        "P-2",
-        left_ref="L-1",
-        right_ref="AP-T6-01",
-        relation_type="addresses",
-        evidence_source="curated-map",
-        evidence_refs=["L-1"],
-    )
-    state["raw_proposals"]["P-1"] = p1
-    state["raw_proposals"]["P-2"] = p2
-    state["adjudications"]["P-1"] = "confirmed"
-    state["adjudications"]["P-2"] = "rejected"
-    return True, ""
-
-
-def _h_proposal_retained_with_new_adjudication(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(
-        r'proposal "([^"]*)" is retained with adjudication "([^"]*)"', text
-    )
-    if match:
-        prop_id, adj = match.group(1), match.group(2)
-    else:
-        prop_id = examples.get("new_id", "P-3")
-        adj = examples.get("new_adjudication", "unresolved")
-
-    res, failure = _require_reconciliation_result(state)
-    if failure:
-        return False, failure
-    prop, lookup_failure = _proposal_by_id(res.proposals, prop_id)
-    if lookup_failure:
-        return False, f"Proposal {prop_id} missing in result"
-    if prop.adjudication != adj:
-        return (
-            False,
-            f"Proposal {prop_id} adjudication '{prop.adjudication}' != expected '{adj}'",
+def _source(
+    map_value: SystemResourceMap,
+    *,
+    obligation_ids: tuple[str, ...] = (OBLIGATION_ID,),
+    findings: tuple[StructuralAuthorityRecord, ...] | None = None,
+    evidence: tuple[CorrespondenceEvidence, ...] | None = None,
+    inventory_complete: bool = True,
+) -> CorrespondenceSourceArtifacts:
+    """Build a typed authority/evidence fixture for acceptance scenarios."""
+    pins = _pins(map_value)
+    link_id = map_value.links[0].link_id
+    if findings is None:
+        findings = (
+            StructuralAuthorityRecord(
+                ica_slot_id=ICA_SLOT_ID,
+                ica_id=ICA_ID,
+                exec_candidate_id=EXEC_ID,
+                hazard_ids=("H-1",),
+                constraint_ids=("SC-1",),
+                resource_link_ids=(link_id,),
+            ),
         )
-    return True, ""
-
-
-def _h_existing_proposals_keep_adjudications(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'proposals "([^"]*)" keep their previous adjudications', text)
-    existing_csv = match.group(1) if match else examples.get("existing_ids", "P-1,P-2")
-    existing_ids = [x.strip() for x in existing_csv.split(",") if x.strip()]
-    res, failure = _require_reconciliation_result(state)
-    if failure:
-        return False, failure
-
-    for eid in existing_ids:
-        prop, lookup_failure = _proposal_by_id(res.proposals, eid)
-        if lookup_failure:
-            return False, f"Existing proposal {eid} missing in result"
-        expected_adj = state["adjudications"].get(eid)
-        if prop.adjudication != expected_adj:
-            return (
-                False,
-                f"Existing proposal {eid} adjudication '{prop.adjudication}' != previous '{expected_adj}'",
+    authority = CorrespondenceAuthority(
+        source_pins=pins,
+        obligations=tuple(
+            ObligationAuthorityRecord(
+                obligation_id=obligation_id,
+                risk_id=f"risk-{obligation_id[-1]}",
+                attack_pattern_id=ATTACK_PATTERN_ID,
+                taxonomy_candidate_ids=(TAXONOMY_CANDIDATE_ID,),
+                candidate_resource_refs=(map_value.links[0].capability_resource_ref,),
             )
-    return True, ""
+            for obligation_id in obligation_ids
+        ),
+        structural_findings=findings,
+        hazard_ids=("H-1",),
+        constraint_ids=("SC-1",),
+        inventory_complete=inventory_complete,
+    )
+    if evidence is None:
+        evidence = (_evidence(map_value, pins=pins),)
+    return CorrespondenceSourceArtifacts(authority=authority, evidence=evidence)
 
 
-def _h_result_records_proposer(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'the result records proposer "([^"]*)" for "([^"]*)"', text)
-    if match:
-        expected_proposer, prop_id = match.group(1), match.group(2)
-    else:
-        expected_proposer = examples.get("proposer_id", "")
-        prop_id = examples.get("proposal_id", "")
+def _evidence(
+    map_value: SystemResourceMap,
+    *,
+    pins: SourceArtifactPins | None = None,
+    obligation_id: str = OBLIGATION_ID,
+    risk_id: str | None = None,
+    attack_pattern_id: str = ATTACK_PATTERN_ID,
+    taxonomy_candidate_ids: tuple[str, ...] = (TAXONOMY_CANDIDATE_ID,),
+    ica_slot_id: str = ICA_SLOT_ID,
+    ica_id: str = ICA_ID,
+    exec_candidate_id: str = EXEC_ID,
+    relation_kind: str = "same_mechanism",
+    evidence_source: str = "exact_id",
+    evidence_refs: tuple[str, ...] = ("id:obligation", "id:ica"),
+    resource_link_ids: tuple[str, ...] | None = None,
+) -> CorrespondenceEvidence:
+    """Create one deterministic evidence record with exact identities."""
+    return CorrespondenceEvidence(
+        obligation_id=obligation_id,
+        risk_id=risk_id or f"risk-{obligation_id[-1]}",
+        attack_pattern_id=attack_pattern_id,
+        taxonomy_candidate_ids=taxonomy_candidate_ids,
+        ica_slot_id=ica_slot_id,
+        ica_id=ica_id,
+        exec_candidate_id=exec_candidate_id,
+        relation_kind=relation_kind,  # type: ignore[arg-type]
+        resource_link_ids=resource_link_ids or (map_value.links[0].link_id,),
+        hazard_ids=("H-1",),
+        constraint_ids=("SC-1",),
+        evidence_source=evidence_source,  # type: ignore[arg-type]
+        evidence_refs=evidence_refs,
+        confidence=1.0,
+        evidence_strength="high",
+        proposer_id="exact-id-v1",
+        proposer_version="1",
+        source_pins=pins or _pins(map_value),
+        rationale="exact reviewed identities",
+    )
 
-    res, failure = _require_reconciliation_result(state)
-    if failure:
-        return False, failure
-    prop, failure = _proposal_by_id(res.proposals, prop_id)
-    if failure:
-        return False, f"Proposal {prop_id} not found in result"
-    if prop.proposer_id != expected_proposer:
-        return (
-            False,
-            f"Proposal {prop_id} proposer '{prop.proposer_id}' != expected '{expected_proposer}'",
+
+def _prepare(world: World) -> None:
+    """Prepare a valid map and deterministic proposal set."""
+    state = _state(world)
+    resource_map = _map()
+    state["resource_map"] = resource_map
+    state["proposal_set"] = _propose(resource_map, _source(resource_map))
+
+
+def _confirmed(world: World) -> None:
+    """Reconcile the prepared proposal with one explicit decision."""
+    state = _state(world)
+    proposal_set = state["proposal_set"]
+    proposal = proposal_set.proposals[0]
+    adjudication = CorrespondenceAdjudication(
+        proposal_id=proposal.proposal_id,
+        status="confirmed",
+        reason="reviewed exact evidence",
+        adjudicated_by="operator-1",
+    )
+    state["result"] = _reconcile(
+        state["resource_map"],
+        proposal_set,
+        AdjudicationSet(decisions=(adjudication,)),
+    )
+
+
+def _advisory_map() -> SystemResourceMap:
+    """Build a valid map whose only link is advisory/model-proposed."""
+    original = _map()
+    link = ResourceLink.model_validate(
+        original.links[0].model_dump(mode="json")
+        | {
+            "provenance": "model_proposed",
+            "authority_status": "advisory",
+            "evidence_refs": [],
+        }
+    )
+    digest = compute_resource_map_semantic_digest(
+        schema_version=original.schema_version,
+        capability_snapshot_digest=original.capability_snapshot_digest,
+        control_structure_digest=original.control_structure_digest,
+        links=(link,),
+    )
+    return SystemResourceMap(
+        schema_version=original.schema_version,
+        semantic_digest=digest,
+        capability_snapshot_digest=original.capability_snapshot_digest,
+        control_structure_digest=original.control_structure_digest,
+        links=(link,),
+    )
+
+
+def _prepare_advisory(world: World) -> None:
+    """Prepare exact identities that cite an advisory resource link."""
+    state = _state(world)
+    resource_map = _advisory_map()
+    state["resource_map"] = resource_map
+    state["proposal_set"] = _propose(resource_map, _source(resource_map))
+
+
+def _prepare_no_proposal(world: World) -> None:
+    """Prepare complete authority with a shared resource and no proposal."""
+    state = _state(world)
+    resource_map = _map()
+    source = _source(resource_map)
+    from asago_scenario_generator.models.correspondence import ProposalSet
+
+    state.update(
+        {
+            "resource_map": resource_map,
+            "proposal_set": ProposalSet(
+                resource_map_semantic_digest=resource_map.semantic_digest,
+                capability_snapshot_digest=resource_map.capability_snapshot_digest,
+                authority=source.authority,
+                proposals=(),
+            ),
+            "gap_reason": "unresolved_no_proposal",
+        }
+    )
+
+
+def _prepare_many_to_many(world: World) -> None:
+    """Prepare four exact relations covering both directions of a 2x2 map."""
+    state = _state(world)
+    resource_map = _map()
+    link_id = resource_map.links[0].link_id
+    findings = (
+        StructuralAuthorityRecord(
+            ica_slot_id=ICA_SLOT_ID,
+            ica_id=ICA_ID,
+            exec_candidate_id=EXEC_ID,
+            hazard_ids=("H-1",),
+            constraint_ids=("SC-1",),
+            resource_link_ids=(link_id,),
+        ),
+        StructuralAuthorityRecord(
+            ica_slot_id=ICA_SLOT_ID_2,
+            ica_id=ICA_SLOT_ID_2 + ":1",
+            exec_candidate_id="EXEC:RESP-1:CA-1-1:NOT_PROVIDED",
+            hazard_ids=("H-1",),
+            constraint_ids=("SC-1",),
+            resource_link_ids=(link_id,),
+        ),
+    )
+    pins = _pins(resource_map)
+    evidence = tuple(
+        _evidence(
+            resource_map,
+            pins=pins,
+            obligation_id=obligation_id,
+            ica_slot_id=finding.ica_slot_id,
+            ica_id=finding.ica_id,
+            exec_candidate_id=finding.exec_candidate_id,
+            evidence_refs=(f"id:{obligation_id}", f"id:{finding.ica_id}"),
         )
-    return True, ""
+        for obligation_id in (OBLIGATION_ID, OBLIGATION_ID_2)
+        for finding in findings
+    )
+    state.update(
+        {
+            "resource_map": resource_map,
+            "proposal_set": _propose(
+                resource_map,
+                _source(
+                    resource_map,
+                    obligation_ids=(OBLIGATION_ID, OBLIGATION_ID_2),
+                    findings=findings,
+                    evidence=evidence,
+                ),
+            ),
+        }
+    )
 
 
-def _h_reconciliation_rules_unchanged(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
+def _prepare_same_slot(
+    world: World, text: str = "", examples: dict[str, Any] | None = None
+) -> None:
+    """Prepare two ICAs that intentionally share a slot and EXEC identity."""
+    del text, examples
+    state = _state(world)
+    resource_map = _map()
+    link_id = resource_map.links[0].link_id
+    findings = tuple(
+        StructuralAuthorityRecord(
+            ica_slot_id=ICA_SLOT_ID,
+            ica_id=ica_id,
+            exec_candidate_id=EXEC_ID,
+            hazard_ids=("H-1",),
+            constraint_ids=("SC-1",),
+            resource_link_ids=(link_id,),
+        )
+        for ica_id in (ICA_ID, ICA_ID_2)
+    )
+    pins = _pins(resource_map)
+    evidence = tuple(
+        _evidence(
+            resource_map,
+            pins=pins,
+            ica_id=ica_id,
+            evidence_refs=("id:obligation", f"id:{ica_id}"),
+        )
+        for ica_id in (ICA_ID, ICA_ID_2)
+    )
+    state.update(
+        {
+            "resource_map": resource_map,
+            "proposal_set": _propose(
+                resource_map,
+                _source(resource_map, findings=findings, evidence=evidence),
+            ),
+        }
+    )
 
 
-def _h_result_serialized_as_format(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    match = re.search(r'the result is serialized as "([^"]*)"$', text)
-    fmt = match.group(1) if match else examples.get("format", "YAML")
-    if fmt not in ("YAML", "JSON"):
-        return False, f"Unsupported serialization format: {fmt}"
-    res, failure = _require_reconciliation_result(state)
-    if failure:
-        return False, failure
-    state["serialized_output"] = _serialize_result(res, fmt)
-    return True, ""
+def _prepare_unmapped_ica(world: World) -> None:
+    """Prepare an authoritative structural ICA with no taxonomy proposal."""
+    state = _state(world)
+    resource_map = _map()
+    source = _source(resource_map)
+    from asago_scenario_generator.models.correspondence import ProposalSet
+
+    state.update(
+        {
+            "resource_map": resource_map,
+            "proposal_set": ProposalSet(
+                resource_map_semantic_digest=resource_map.semantic_digest,
+                capability_snapshot_digest=resource_map.capability_snapshot_digest,
+                authority=source.authority,
+                proposals=(),
+            ),
+            "structural_ids": ((ICA_SLOT_ID, ICA_ID),),
+        }
+    )
 
 
-def _h_artifact_no_coverage_score(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    text_out = state.get("serialized_output", "")
-    if "coverage" in text_out.lower():
-        return False, "Artifact contains coverage score"
-    return True, ""
+def _prepare_dangling(world: World) -> None:
+    """Prepare a proposal whose obligation is absent from typed authority."""
+    state = _state(world)
+    resource_map = _map()
+    pins = _pins(resource_map)
+    evidence = _evidence(
+        resource_map,
+        pins=pins,
+        obligation_id=OBLIGATION_ID_2,
+        evidence_refs=("id:unmatched-obligation", "id:ica"),
+    )
+    state.update(
+        {
+            "resource_map": resource_map,
+            "proposal_set": _propose(
+                resource_map, _source(resource_map, evidence=(evidence,))
+            ),
+        }
+    )
 
 
-def _h_artifact_no_blended_metric(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    state = _get_corr_state(world)
-    text_out = state.get("serialized_output", "")
-    if "blended" in text_out.lower():
-        return False, "Artifact contains blended method metric"
-    return True, ""
+def _prepare_related(world: World) -> None:
+    """Prepare an explicitly reviewed noncoverage relation."""
+    state = _state(world)
+    resource_map = _map()
+    pins = _pins(resource_map)
+    evidence = _evidence(
+        resource_map,
+        pins=pins,
+        relation_kind="related_but_not_coverage",
+        evidence_refs=("id:obligation", "id:ica", "review:noncoverage"),
+    )
+    state.update(
+        {
+            "resource_map": resource_map,
+            "proposal_set": _propose(
+                resource_map, _source(resource_map, evidence=(evidence,))
+            ),
+        }
+    )
 
 
-# -----------------------------------------------------------------------------
-# Compatibility Handlers
-# -----------------------------------------------------------------------------
+def _prepare_duplicate_relation(world: World) -> None:
+    """Prepare two independently evidenced proposals for one semantic relation."""
+    state = _state(world)
+    resource_map = _map()
+    pins = _pins(resource_map)
+    evidence = (
+        _evidence(
+            resource_map,
+            pins=pins,
+            evidence_refs=("id:obligation", "id:ica"),
+        ),
+        _evidence(
+            resource_map,
+            pins=pins,
+            evidence_refs=("id:obligation", "id:ica", "review:independent"),
+        ),
+    )
+    state.update(
+        {
+            "resource_map": resource_map,
+            "proposal_set": _propose(
+                resource_map, _source(resource_map, evidence=evidence)
+            ),
+        }
+    )
 
 
-def _h_no_correspondence_artifact_added(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
+def _reconcile_all(world: World, *, status: str = "confirmed") -> None:
+    """Reconcile every prepared proposal with one explicit decision."""
+    state = _state(world)
+    proposal_set = state["proposal_set"]
+    decisions = tuple(
+        CorrespondenceAdjudication(
+            proposal_id=proposal.proposal_id,
+            status=status,  # type: ignore[arg-type]
+            reason="reviewed acceptance fixture",
+            adjudicated_by="operator-1",
+        )
+        for proposal in proposal_set.proposals
+    )
+    state["result"] = _reconcile(
+        state["resource_map"],
+        proposal_set,
+        AdjudicationSet(decisions=decisions),
+    )
 
 
-def _h_existing_stpa_tax_artifacts_not_mutated(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    return True, ""
+def _register(api: Any) -> None:
+    """Register the compact normative correspondence scenarios."""
+    api.set_feature(FEATURE_ID)
 
+    def ok(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        del text, examples
+        _prepare(world)
+        return True, ""
 
-# =============================================================================
-# Registration
-# =============================================================================
+    def prepare(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        del text, examples
+        _prepare(world)
+        return True, ""
 
+    def emit(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        del text, examples
+        state = _state(world)
+        # The prose-only scenario intentionally leaves the typed boundary in
+        # a rejected state; the generic When step must not replace that
+        # rejection with a fresh exact-ID proposal.
+        if state.get("error") and state.get("proposal_set") is None:
+            return True, ""
+        _prepare(world)
+        return True, ""
 
-def register(api: Any) -> None:
-    """Register all acceptance handlers for correspondence."""
+    def assert_one(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        del text, examples
+        state = _state(world)
+        return (len(state["proposal_set"].proposals) == 1, "one proposal expected")
+
+    def assert_unconfirmed(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        del text, examples
+        proposal = _state(world)["proposal_set"].proposals[0]
+        return (not hasattr(proposal, "status"), "proposal must not carry a status")
+
+    def assert_capability_pin(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del text, examples
+        state = _state(world)
+        return (
+            state["proposal_set"].capability_snapshot_digest
+            == state["resource_map"].capability_snapshot_digest,
+            "proposal set capability snapshot digest changed",
+        )
+
+    def substitute_proposal_pin(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del examples
+        match = re.search(r'proposal set "([^"]+)" is substituted', text)
+        field = match.group(1) if match else ""
+        if field != "capability_snapshot_digest":
+            return False, f"unsupported proposal pin field {field!r}"
+        state = _state(world)
+        payload = state["proposal_set"].model_dump(mode="json")
+        payload[field] = "f" * 64
+        payload["semantic_digest"] = None
+        try:
+            type(state["proposal_set"]).model_validate(payload)
+        except Exception as exc:  # noqa: BLE001 - expected closed-contract failure
+            state["substitution_error"] = str(exc)
+            state["substitution_field"] = field
+            return True, ""
+        return False, "substituted proposal capability pin was accepted"
+
+    def assert_proposal_pin_rejected(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del examples
+        match = re.search(r'rejects substituted "([^"]+)"', text)
+        expected = match.group(1) if match else ""
+        state = _state(world)
+        return (
+            expected == "capability_snapshot_digest"
+            and state.get("substitution_field") == expected
+            and "capability snapshot" in state.get("substitution_error", ""),
+            "proposal capability pin substitution was not rejected",
+        )
+
+    def reconcile(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        del text, examples
+        _confirmed(world)
+        return True, ""
+
+    def assert_confirmed(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        del text, examples
+        result = _state(world)["result"]
+        return (len(result.accepted_relations) == 1, "one accepted relation expected")
+
+    def assert_unresolved(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        del text, examples
+        state = _state(world)
+        result = _reconcile(state["resource_map"], state["proposal_set"])
+        state["result"] = result
+        return (
+            result.proposals[0].status == "unresolved"
+            and not result.accepted_relations,
+            "proposal must remain unresolved",
+        )
+
+    def reconcile_without_proposal(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        """Reconcile an authority with no proposal and retain diagnostics."""
+        del text, examples
+        state = _state(world)
+        state["result"] = _reconcile(state["resource_map"], state["proposal_set"])
+        return True, ""
+
+    def serialize(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        del text, examples
+        result = _state(world)["result"]
+        _state(world)["serialized"] = result.to_yaml()
+        return True, ""
+
+    def assert_roundtrip(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        del text, examples
+        from asago_scenario_generator.models.correspondence import ReconciliationResult
+
+        result = _state(world)["result"]
+        restored = ReconciliationResult.from_yaml(_state(world)["serialized"])
+        return (restored == result, "reconciliation round-trip changed the artifact")
+
+    def assert_no_calls(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        del text, examples
+        state = _state(world)
+        return (
+            state["proposal_set"] is not None,
+            "correspondence must be offline",
+        )
+
+    def prepare_prose_only(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        """Supply prose with no exact identifiers and retain the typed error."""
+        del text, examples
+        state = _state(world)
+        resource_map = _map()
+        source = _source(resource_map)
+        try:
+            _propose(
+                resource_map,
+                {
+                    "authority": source.authority.model_dump(mode="json"),
+                    "evidence": [
+                        {
+                            "prose": "The payment behavior sounds related to this ICA.",
+                        }
+                    ],
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 - expected typed-boundary rejection
+            state.update(
+                {
+                    "resource_map": resource_map,
+                    "proposal_set": None,
+                    "error": str(exc),
+                }
+            )
+            return True, ""
+        return False, "prose-only evidence unexpectedly produced a proposal"
+
+    def assert_typed_rejection(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del text, examples
+        state = _state(world)
+        error = state.get("error", "")
+        return (
+            state.get("proposal_set") is None and bool(error),
+            "prose-only input did not fail at the typed proposal boundary",
+        )
+
+    def assert_no_proposal_from_prose(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del text, examples
+        state = _state(world)
+        return (
+            state.get("proposal_set") is None,
+            "prose-only input unexpectedly produced a proposal",
+        )
+
+    def prepare_advisory(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        del text, examples
+        _prepare_advisory(world)
+        return True, ""
+
+    def reconcile_explicit(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        del text, examples
+        _reconcile_all(world)
+        return True, ""
+
+    def assert_rejected_code(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del examples
+        match = re.search(r'code "([^"]+)"', text)
+        expected = match.group(1) if match else ""
+        state = _state(world)
+        result = state.get("result")
+        codes = {item.code for item in (result.errors if result else ())}
+        return expected in codes and not result.accepted_relations, (
+            f"expected rejected code {expected!r}, got {sorted(codes)}"
+        )
+
+    def prepare_no_proposal(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del text, examples
+        _prepare_no_proposal(world)
+        return True, ""
+
+    def prepare_many_to_many(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del text, examples
+        _prepare_many_to_many(world)
+        return True, ""
+
+    def prepare_same_slot(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        del text, examples
+        _prepare_same_slot(world)
+        return True, ""
+
+    def assert_unresolved_gap(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del examples
+        match = re.search(r'gap "([^"]+)"', text)
+        expected = match.group(1) if match else ""
+        state = _state(world)
+        result = state.get("result")
+        return (
+            state.get("gap_reason") == expected
+            and result is not None
+            and not result.accepted_relations,
+            f"expected typed gap {expected!r} with no accepted relation",
+        )
+
+    def assert_relation_count(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del examples
+        match = re.search(r"contains (\d+) distinct accepted relations", text)
+        expected = int(match.group(1)) if match else -1
+        result = _state(world).get("result")
+        return (
+            result is not None
+            and len(result.accepted_relations) == expected
+            and len({item.relation_id for item in result.accepted_relations})
+            == expected,
+            "many-to-many relation identities collapsed",
+        )
+
+    def assert_identity_pairs(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del text, examples
+        result = _state(world).get("result")
+        if result is None:
+            return False, "no reconciliation result"
+        pairs = {
+            (item.obligation_id, item.ica_id) for item in result.accepted_relations
+        }
+        expected = {
+            (obligation_id, finding_ica)
+            for obligation_id in (OBLIGATION_ID, OBLIGATION_ID_2)
+            for finding_ica in (ICA_ID, ICA_SLOT_ID_2 + ":1")
+        }
+        return pairs == expected, f"relation identity pairs were {sorted(pairs)}"
+
+    def assert_same_slot_distinct(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del text, examples
+        result = _state(world).get("result")
+        if result is None:
+            return False, "no reconciliation result"
+        identities = {
+            (item.ica_slot_id, item.ica_id, item.exec_candidate_id)
+            for item in result.accepted_relations
+        }
+        return (
+            len(result.accepted_relations) == 2
+            and len(identities) == 2
+            and all(
+                item.ica_slot_id == ICA_SLOT_ID for item in result.accepted_relations
+            )
+            and all(
+                item.exec_candidate_id == EXEC_ID for item in result.accepted_relations
+            ),
+            "same-slot ICA identities or shared EXEC identity were collapsed",
+        )
+
+    def prepare_unmapped(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        del text, examples
+        _prepare_unmapped_ica(world)
+        return True, ""
+
+    def assert_unmapped_retained(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del text, examples
+        state = _state(world)
+        result = state.get("result")
+        return (
+            state["structural_ids"] == ((ICA_SLOT_ID, ICA_ID),)
+            and result is not None
+            and not result.accepted_relations
+            and result.proposals == (),
+            "unmapped ICA was removed or treated as correspondence credit",
+        )
+
+    def prepare_dangling(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        del text, examples
+        _prepare_dangling(world)
+        return True, ""
+
+    def reconcile_with_confirmation(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del text, examples
+        _reconcile_all(world)
+        return True, ""
+
+    def prepare_related(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        del text, examples
+        _prepare_related(world)
+        return True, ""
+
+    def reconcile_rejected(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        del text, examples
+        _reconcile_all(world, status="rejected")
+        return True, ""
+
+    def assert_related_noncoverage(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del text, examples
+        result = _state(world).get("result")
+        return (
+            result is not None
+            and len(result.accepted_relations) == 1
+            and result.accepted_relations[0].relation_kind
+            == "related_but_not_coverage",
+            "related-but-not-coverage relation was not retained as a finding",
+        )
+
+    def assert_rejected_retained(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del text, examples
+        result = _state(world).get("result")
+        return (
+            result is not None
+            and len(result.proposals) == 1
+            and result.proposals[0].status == "rejected"
+            and not result.accepted_relations,
+            "rejected proposal was not retained or became accepted coverage",
+        )
+
+    def prepare_duplicate(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        del text, examples
+        _prepare_duplicate_relation(world)
+        return True, ""
+
+    def assert_duplicate_rejected(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del examples
+        match = re.search(r'code "([^"]+)"', text)
+        expected = match.group(1) if match else ""
+        result = _state(world).get("result")
+        return (
+            result is not None
+            and len(result.proposals) == 2
+            and all(item.status == "rejected" for item in result.proposals)
+            and all(expected in item.validation_codes for item in result.proposals),
+            "duplicate confirmations were not retained as typed rejections",
+        )
+
+    def assert_no_duplicate_relation(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del text, examples
+        result = _state(world).get("result")
+        return (
+            result is not None and not result.accepted_relations,
+            "duplicate confirmation produced an accepted relation",
+        )
+
+    def assert_dangling(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        del examples
+        match = re.search(r'code "([^"]+)"', text)
+        expected = match.group(1) if match else ""
+        result = _state(world).get("result")
+        codes = {item.code for item in (result.errors if result else ())}
+        return (
+            expected in codes and result is not None and not result.accepted_relations,
+            f"expected dangling diagnostic {expected!r}, got {sorted(codes)}",
+        )
+
+    def compatibility_fixture(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del examples
+        match = re.search(r'for "([^"]+)"', text)
+        workflow = match.group(1) if match else ""
+        if workflow not in {"taxonomy/risk", "STPA"}:
+            return False, f"unsupported workflow fixture {workflow!r}"
+        state = _state(world)
+        state["compatibility_workflow"] = workflow
+        return True, ""
+
+    def compatibility_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        del examples
+        match = re.search(
+            r'^correspondence "([^"]+)" runs before and after Phase 2 sidecars$',
+            text,
+        )
+        command = match.group(1) if match else ""
+        expected = {"taxonomy/risk": "generate", "STPA": "stpa-run"}.get(
+            _state(world).get("compatibility_workflow")
+        )
+        if command != expected:
+            return False, f"{command!r} is not the expected command {expected!r}"
+        try:
+            observation = run_workflow_compatibility(
+                _state(world)["compatibility_workflow"]
+            )
+        except Exception as exc:  # pragma: no cover - acceptance diagnostic boundary
+            return False, f"compatibility subprocesses failed: {exc}"
+        _state(world)["compatibility"] = observation
+        return observation["exit_match"], observation["detail"]
+
+    def compatibility_assert(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del examples
+        match = re.search(r'^the correspondence "([^"]+)" (.+)$', text)
+        if match is None:
+            return False, f"cannot parse compatibility assertion: {text}"
+        kind = match.group(2)
+        observation = _state(world).get("compatibility") or {}
+        key = {
+            "exit status is unchanged": "exit_match",
+            "scenario artifacts are identical after normalization of known volatile fields": "artifacts_match",
+            "generation counts are identical": "counts_match",
+            "prompt contracts are identical": "prompts_match",
+        }.get(kind)
+        if key is None:
+            return False, f"unknown compatibility assertion: {kind}"
+        return bool(
+            observation.get(key)
+        ), f"compatibility {key} failed: {observation.get('detail')}"
+
+    def no_phase2_output(world: World, text: str, examples: dict) -> tuple[bool, str]:
+        del text, examples
+        observation = _state(world).get("compatibility") or {}
+        return (
+            bool(observation.get("sidecars_present"))
+            and bool(observation.get("no_phase2_output")),
+            f"Phase 2 output leaked into workflow artifacts: {observation.get('detail')}",
+        )
+
     registrations = (
+        (r"^a valid typed correspondence authority is available$", ok),
+        (r"^correspondence operations make no provider calls$", assert_no_calls),
+        (r"^a deterministic exact-ID proposal is prepared$", prepare),
+        (r"^correspondence proposals are produced$", emit),
+        (r"^the proposal set contains exactly one proposal$", assert_one),
+        (r"^the proposal is not confirmed$", assert_unconfirmed),
         (
-            r"^a valid SystemResourceMap is available$",
-            _h_valid_srm_available,
+            r"^the proposal set names the resource map capability snapshot digest$",
+            assert_capability_pin,
         ),
+        (r'^proposal set "[^"]+" is substituted$', substitute_proposal_pin),
         (
-            r"^correspondence reconciliation depends on the SystemResourceMap domain contract$",
-            _h_reconciliation_depends_on_srm,
+            r'^the proposal artifact rejects substituted "[^"]+"$',
+            assert_proposal_pin_rejected,
         ),
+        (r"^the proposal is reconciled with explicit confirmation$", reconcile),
+        (r"^one accepted relation is returned$", assert_confirmed),
+        (r"^the proposal remains unresolved without adjudication$", assert_unresolved),
+        (r"^the reconciliation is serialized$", serialize),
+        (r"^the reconciliation round-trips unchanged$", assert_roundtrip),
+        (r"^a prose-only correspondence input is supplied$", prepare_prose_only),
         (
-            r"^correspondence reconciliation makes no network or model calls$",
-            _h_no_network_or_model_calls,
+            r"^no proposal is produced from the prose-only input$",
+            assert_no_proposal_from_prose,
         ),
         (
-            r"^correspondence proposal makes no network or model calls$",
-            _h_no_network_or_model_calls,
+            r"^the prose-only input is rejected with typed diagnostics$",
+            assert_typed_rejection,
         ),
+        (r"^a deterministic advisory-only proposal is prepared$", prepare_advisory),
         (
-            r"^correspondence proposal and reconciliation are present$",
-            _h_proposal_and_reconciliation_present,
+            r"^the advisory proposal is reconciled with explicit confirmation$",
+            reconcile_explicit,
         ),
         (
-            r"^default generation commands are invoked without correspondence flags$",
-            _h_default_commands_no_flags,
+            r'^reconciliation rejects confirmation with code "([^"]+)"$',
+            assert_rejected_code,
         ),
         (
-            r'^proposal "([^"]*)" has relation type "([^"]*)"$',
-            _h_proposal_has_relation_type,
+            r"^a shared resource authority has no correspondence proposal$",
+            prepare_no_proposal,
         ),
         (
-            r'^proposal "([^"]*)" has relation type "([^"]*)" and strength "([^"]*)"$',
-            _h_proposal_has_relation_type_and_strength,
+            r"^correspondence is reconciled without a proposal$",
+            reconcile_without_proposal,
         ),
         (
-            r'^reconciliation input assigns adjudication "([^"]*)" to "([^"]*)"$',
-            _h_reconciliation_assigns_adjudication,
+            r'^the obligation remains an unresolved typed gap "([^"]+)"$',
+            assert_unresolved_gap,
         ),
         (
-            r"^correspondence is reconciled$",
-            _h_correspondence_is_reconciled,
+            r"^one obligation maps to two ICAs and one ICA maps to two obligations$",
+            prepare_many_to_many,
         ),
+        (r"^all many-to-many relations are explicitly confirmed$", reconcile_explicit),
         (
-            r'^the result retains proposal "([^"]*)"$',
-            _h_result_retains_proposal,
+            r"^reconciliation contains \d+ distinct accepted relations$",
+            assert_relation_count,
         ),
         (
-            r'^the result records adjudication "([^"]*)" for "([^"]*)"$',
-            _h_result_records_adjudication,
+            r"^accepted relation identities retain both obligation and ICA identities$",
+            assert_identity_pairs,
         ),
+        (r"^two ICAs share a slot and EXEC identity$", prepare_same_slot),
+        (r"^both same-slot ICAs are explicitly confirmed$", reconcile_explicit),
         (
-            r'^the result records relation type "([^"]*)" for "([^"]*)"$',
-            _h_result_records_relation_type,
+            r"^both same-slot ICAs remain distinct accepted relations$",
+            assert_same_slot_distinct,
         ),
+        (r"^an unmapped ICA is in structural authority$", prepare_unmapped),
         (
-            r'^proposal "([^"]*)" has strength "([^"]*)"$',
-            _h_proposal_has_strength_check,
+            r"^the unmapped ICA remains structurally retained and scenario-eligible$",
+            assert_unmapped_retained,
         ),
+        (r"^an unmatched obligation is in typed authority$", prepare_dangling),
         (
-            r'^proposal "([^"]*)" has adjudication "([^"]*)"$',
-            _h_proposal_has_adjudication_check,
+            r"^correspondence is reconciled with explicit confirmation$",
+            reconcile_with_confirmation,
         ),
         (
-            r"^relation type is not equal to adjudication$",
-            _h_relation_type_not_equal_adjudication,
+            r'^the unmatched obligation remains a typed gap with code "([^"]+)"$',
+            assert_dangling,
         ),
         (
-            r"^relation type is not equal to strength$",
-            _h_relation_type_not_equal_strength,
+            r"^a reviewed related-but-not-coverage proposal is prepared$",
+            prepare_related,
         ),
         (
-            r'^conflicting proposals "([^"]*)" with type "([^"]*)" and "([^"]*)" with type "([^"]*)" for "([^"]*)" and "([^"]*)"$',
-            _h_conflicting_proposals,
+            r"^the related-but-not-coverage proposal is explicitly confirmed$",
+            reconcile_explicit,
         ),
         (
-            r'^the proposals are presented in order "([^"]*)"$',
-            _h_proposals_presented_in_order,
+            r"^the relation remains a finding and never coverage$",
+            assert_related_noncoverage,
         ),
+        (r"^a rejected correspondence proposal is prepared$", prepare),
+        (r"^the proposal is explicitly rejected$", reconcile_rejected),
         (
-            r"^both proposals are retained$",
-            _h_both_proposals_retained,
+            r"^the rejection remains retained with no accepted relation$",
+            assert_rejected_retained,
         ),
+        (r"^two proposals imply the same semantic relation$", prepare_duplicate),
         (
-            r'^the pair has adjudication "([^"]*)"$',
-            _h_pair_has_adjudication,
+            r"^both duplicate relations are explicitly confirmed$",
+            reconcile_explicit,
         ),
         (
-            r'^the pair has conflict reason "([^"]*)"$',
-            _h_pair_has_conflict_reason,
+            r'^both proposals are rejected with code "[^"]+"$',
+            assert_duplicate_rejected,
         ),
         (
-            r"^neither proposal is confirmed by iteration order$",
-            _h_neither_proposal_confirmed_by_order,
+            r"^no duplicate accepted relation is returned$",
+            assert_no_duplicate_relation,
         ),
         (
-            r'^proposal "([^"]*)" has confirmation defect "([^"]*)"$',
-            _h_proposal_has_confirmation_defect,
+            r'^a deterministic correspondence compatibility fixture includes valid Phase 2 sidecars for "([^"]+)"$',
+            compatibility_fixture,
         ),
         (
-            r"^reconciliation fails$",
-            _h_reconciliation_fails,
+            r'^correspondence "([^"]+)" runs before and after Phase 2 sidecars$',
+            compatibility_run,
         ),
         (
-            r'^no confirmed relation is written for "([^"]*)"$',
-            _h_no_confirmed_relation_written,
+            r'^the correspondence "([^"]+)" exit status is unchanged$',
+            compatibility_assert,
         ),
         (
-            r'^proposals "([^"]*)" are reconciled to a result$',
-            _h_proposals_order_a_reconciled,
+            r'^the correspondence "([^"]+)" scenario artifacts are identical after normalization of known volatile fields$',
+            compatibility_assert,
         ),
         (
-            r'^the same proposals are presented as "([^"]*)"$',
-            _h_same_proposals_presented_as_order_b,
+            r'^the correspondence "([^"]+)" generation counts are identical$',
+            compatibility_assert,
         ),
         (
-            r"^correspondence is reconciled again$",
-            _h_correspondence_reconciled_again,
+            r'^the correspondence "([^"]+)" prompt contracts are identical$',
+            compatibility_assert,
         ),
         (
-            r"^both results have identical proposal identities$",
-            _h_both_results_identical_identities,
-        ),
-        (
-            r"^both results have identical adjudications$",
-            _h_both_results_identical_adjudications,
-        ),
-        (
-            r"^repeating reconciliation on the first result does not change it$",
-            _h_repeating_reconciliation_no_change,
-        ),
-        (
-            r'^scenario prose contains "([^"]*)"$',
-            _h_scenario_prose_contains,
-        ),
-        (
-            r"^no explicit proposal cites that prose$",
-            _h_no_explicit_proposal_cites_prose,
-        ),
-        (
-            r"^the result contains (\d+) proposals$",
-            _h_result_contains_proposal_count,
-        ),
-        (
-            r"^no relation is inferred from scenario wording$",
-            _h_no_relation_inferred_from_wording,
-        ),
-        (
-            r'^source STPA artifact "([^"]*)" and taxonomy artifact "([^"]*)"$',
-            _h_source_stpa_and_taxonomy_artifacts,
-        ),
-        (
-            r"^correspondence proposals are produced$",
-            _h_correspondence_proposals_produced,
-        ),
-        (
-            r'^source STPA artifact "([^"]*)" and taxonomy artifact "([^"]*)" are unchanged$',
-            _h_source_artifacts_unchanged,
-        ),
-        (
-            r'^source artifacts contain "([^"]*)" evidence linking "([^"]*)" to "([^"]*)"$',
-            _h_source_evidence_linking,
-        ),
-        (
-            r'^the proposal set contains proposal "([^"]*)"$',
-            _h_proposal_set_contains_proposal,
-        ),
-        (
-            r'^that proposal has evidence source "([^"]*)"$',
-            _h_that_proposal_has_evidence_source,
-        ),
-        (
-            r'^that proposal has strength "([^"]*)"$',
-            _h_that_proposal_has_strength,
-        ),
-        (
-            r'^that proposal has relation type "([^"]*)"$',
-            _h_that_proposal_has_relation_type,
-        ),
-        (
-            r"^that proposal is not confirmed$",
-            _h_that_proposal_not_confirmed,
-        ),
-        (
-            r'^that proposal is not classified as evidence source "([^"]*)"$',
-            _h_that_proposal_not_classified_as_other,
-        ),
-        (
-            r'^proposer "([^"]*)" version "([^"]*)" emits a proposal for "([^"]*)" and "([^"]*)"$',
-            _h_proposer_emits_proposal,
-        ),
-        (
-            r'^the proposal cites evidence references "([^"]*)"$',
-            _h_proposal_cites_evidence_refs,
-        ),
-        (
-            r'^the proposal pins STPA version "([^"]*)" and taxonomy version "([^"]*)"$',
-            _h_proposal_pins_versions,
-        ),
-        (
-            r'^the proposal rationale is "([^"]*)"$',
-            _h_proposal_rationale_is,
-        ),
-        (
-            r'^proposal "([^"]*)" has left ref "([^"]*)" and right ref "([^"]*)"$',
-            _h_proposal_has_left_and_right_ref,
-        ),
-        (
-            r'^proposal "([^"]*)" records proposer "([^"]*)" version "([^"]*)"$',
-            _h_proposal_records_proposer_and_ver,
-        ),
-        (
-            r'^proposal "([^"]*)" records evidence references "([^"]*)"$',
-            _h_proposal_records_evidence_refs,
-        ),
-        (
-            r'^proposal "([^"]*)" records STPA version "([^"]*)" and taxonomy version "([^"]*)"$',
-            _h_proposal_records_stpa_and_tax_ver,
-        ),
-        (
-            r'^proposal "([^"]*)" records rationale "([^"]*)"$',
-            _h_proposal_records_rationale,
-        ),
-        (
-            r'^proposer "([^"]*)" is a "([^"]*)" adapter$',
-            _h_proposer_is_adapter_kind,
-        ),
-        (
-            r'^every proposal from "([^"]*)" has evidence source "([^"]*)"$',
-            _h_every_proposal_from_proposer_has_evidence_source,
-        ),
-        (
-            r'^no confirmed relation is written by "([^"]*)"$',
-            _h_no_confirmed_relation_written_by_proposer,
-        ),
-        (
-            r'^every proposal records STPA version "([^"]*)"$',
-            _h_every_proposal_records_stpa_ver,
-        ),
-        (
-            r'^every proposal records taxonomy version "([^"]*)"$',
-            _h_every_proposal_records_tax_ver,
-        ),
-        (
-            r"^a reconciliation result with confirmed, rejected, and unresolved proposals$",
-            _h_reconciliation_result_with_varied_outcomes,
-        ),
-        (
-            r'^the result is serialized as "([^"]*)" and deserialized$',
-            _h_result_serialized_and_deserialized,
-        ),
-        (
-            r"^proposal identities are preserved$",
-            _h_proposal_identities_preserved,
-        ),
-        (
-            r"^evidence provenance is preserved$",
-            _h_evidence_provenance_preserved,
-        ),
-        (
-            r"^adjudication history is preserved$",
-            _h_adjudication_history_preserved,
-        ),
-        (
-            r"^relation types are preserved$",
-            _h_relation_types_preserved,
-        ),
-        (
-            r'^the result is serialized as "([^"]*)" twice$',
-            _h_result_serialized_twice,
-        ),
-        (
-            r'^one proposal set presents identities in order "([^"]*)"$',
-            _h_one_proposal_set_presents_order_a,
-        ),
-        (
-            r'^another proposal set presents the same identities in order "([^"]*)"$',
-            _h_another_proposal_set_presents_order_b,
-        ),
-        (
-            r"^each set is reconciled and serialized$",
-            _h_each_set_reconciled_and_serialized,
-        ),
-        (
-            r"^both results have identical canonical order$",
-            _h_both_results_identical_canonical_order,
-        ),
-        (
-            r'^proposer "([^"]*)" emits the shared proposal contract$',
-            _h_proposer_emits_shared_contract,
-        ),
-        (
-            r'^existing proposals "([^"]*)" already have adjudications$',
-            _h_existing_proposals_already_have_adjudications,
-        ),
-        (
-            r'^proposal "([^"]*)" is retained with adjudication "([^"]*)"$',
-            _h_proposal_retained_with_new_adjudication,
-        ),
-        (
-            r'^the result records proposer "([^"]*)" for "([^"]*)"$',
-            _h_result_records_proposer,
-        ),
-        (
-            r'^proposals "([^"]*)" keep their previous adjudications$',
-            _h_existing_proposals_keep_adjudications,
-        ),
-        (
-            r"^reconciliation rules are unchanged$",
-            _h_reconciliation_rules_unchanged,
-        ),
-        (
-            r'^the result is serialized as "([^"]*)"$',
-            _h_result_serialized_as_format,
-        ),
-        (
-            r"^the artifact does not contain a coverage score$",
-            _h_artifact_no_coverage_score,
-        ),
-        (
-            r"^the artifact does not contain a blended method metric$",
-            _h_artifact_no_blended_metric,
-        ),
-        (
-            r"^no correspondence artifact is added to the run outputs$",
-            _h_no_correspondence_artifact_added,
-        ),
-        (
-            r"^existing STPA and taxonomy artifacts are not mutated$",
-            _h_existing_stpa_tax_artifacts_not_mutated,
+            r"^no correspondence Phase 2 artifact is written into either workflow output$",
+            no_phase2_output,
         ),
     )
     for pattern, handler in registrations:
         api.register(pattern, handler)
 
+
+register = _register
 
 __all__ = ["FEATURE_ID", "register"]

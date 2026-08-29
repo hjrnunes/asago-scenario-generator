@@ -413,14 +413,14 @@ def run_static_checks(runner: QARunner) -> None:
             f"Function {fname} not found",
         )
 
-    # --- _track_registration raises RuntimeError on duplicates --------------
+    # --- _track_registration delegates duplicate rejection to the registry --
     track_func = _find_function(tree, "_track_registration")
     if track_func is not None:
         src = ast.get_source_segment(_read(ACCEPTANCE_RUNTIME), track_func) or ""
         runner.check(
-            "sc-static-02: _track_registration raises RuntimeError on duplicate",
-            "RuntimeError" in src and "_REGISTERED_PATTERN_KEYS" in src,
-            "Must raise RuntimeError when (pattern, handler, scope) key is duplicate",
+            "sc-static-02: _track_registration delegates duplicate rejection",
+            "track_registration" in src and "_REGISTERED_PATTERN_KEYS" in src,
+            "Must delegate (pattern, handler, scope) duplicate rejection to the registry",
         )
 
     # --- _register appends; _register_first inserts at 0 --------------------

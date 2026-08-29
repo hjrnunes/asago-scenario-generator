@@ -1,0 +1,69 @@
+facts: []
+profile:
+  confidence: high
+  data_flows: null
+  entry_point_completeness: inferred_partial
+  entry_point_evidence: []
+  entry_points:
+    - controllability: direct
+      direction: input
+      entry_point_id: ep:v1:fffa3f4a31d11afe1853bea8c3a28eec
+      entry_point_type: user_input
+      ingress_zone: input
+      name: Customer conversational interface (App/Web)
+    - controllability: indirect
+      direction: input
+      entry_point_id: ep:v1:24e34a88b323415a54c1879732244f92
+      entry_point_type: external_content
+      ingress_zone: memory
+      name: Retrieval-Augmented Generation (RAG) knowledge base (Policies/Terms)
+    - controllability: indirect
+      direction: input
+      entry_point_id: ep:v1:73b74a9467de89ab3b2a1f0d422ef557
+      entry_point_type: external_content
+      ingress_zone: tool_execution
+      name: Klarna Backend System API responses
+    - controllability: indirect
+      direction: input
+      entry_point_id: ep:v1:824caec0be1f2fd47f0f645798b8f879
+      entry_point_type: external_content
+      ingress_zone: memory
+      name: Authenticated user context (Purchase/Payment history)
+  external_integrations: null
+  has_persistent_memory: false
+  hitl: true
+  kc_subcodes:
+    - KC1.1
+    - KC2.1
+    - KC3.3
+    - KC5.3
+    - KC6.1.2
+    - KC6.3.3
+    - KCX-HITL
+  memory_mechanisms: null
+  multi_agent: false
+  tool_inventory:
+    - description: Retrieves customer account details and transaction history from Klarna backend.
+      name: Customer account detail lookup API
+      tool_id: tool:v1:b4d90d8b336d9a8ecc3551334fa83f5c
+    - description: Executes refund transactions for specific orders.
+      name: Refund processing API
+      tool_id: tool:v1:686a177b0b683316d0df4a9d41038239
+    - description: Schedules or modifies payment plans and schedules.
+      name: Payment management API
+      tool_id: tool:v1:2b3bd1e56392e6df19912afc06c8aa15
+    - description: Retrieves specific order details and merchant metadata.
+      name: Order and merchant information API
+      tool_id: tool:v1:f3bd06389442483845dda887e49d406e
+    - description: Retrieves current status of payments and existing payment plans.
+      name: Payment status and plan details API
+      tool_id: tool:v1:c0362bfd1f23d6c42ed7ef834f52332f
+  tool_inventory_completeness: inferred_partial
+  tool_inventory_evidence: []
+  tool_types: null
+  trust_boundaries: null
+  zones_active:
+    - input
+    - reasoning
+    - tool_execution
+snapshot_digest: 0bcb258053e659d6e7d380bfd73fc2bb90b49fdeedb48957bfd243dcddde9305

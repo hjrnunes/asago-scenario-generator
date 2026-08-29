@@ -1,42 +1,17 @@
-# End-to-end QA: correspondence compatibility
+# Correspondence compatibility QA
 
-Drive only the existing public commands
-`uv run asago-scenario-generator generate` and
-`uv run asago-scenario-generator stpa-run`. Use deterministic local
-OpenAI-compatible fixture endpoints, fresh output collections, and valid
-offline inputs. Inspect console output, published run files, and request
-logs. Do not import project modules. Do not add correspondence flags.
-Never set `ASAGO_SCENARIO_GENERATOR_QA_PIPELINE`; these cases remain
-offline.
+Run:
 
-Compare each run against a captured fixture of existing workflow
-outputs from the same inputs.
+    uv run python acceptance/qa/taxonomy_risk/correspondence_compatibility.py
 
-## QA-CC-01: default taxonomy generate outputs are unchanged
+The driver runs both public workflows as real subprocesses twice: once with
+the normal fixture and once with valid Phase 2 sidecars present beside the
+inputs. It compares exit status, normalized scenario artifacts, public
+generation counts, and the exact selected prompt contracts. Normalization is
+limited to documented run-local IDs, timestamps, and duration telemetry. The
+sidecars are never passed as workflow options and no Phase 2 artifact may be
+written to either workflow's output.
 
-1. Capture a deterministic offline `generate` fixture: use-case,
-   risk-extraction, SSSOM, reviewed profile, qualification facts, and
-   fixture endpoint responses.
-2. Run `uv run asago-scenario-generator generate` without
-   correspondence flags into a fresh output collection.
-3. Compare published scenario YAML, `.feature` files, run-manifest,
-   generation counts, and provider request bodies against the fixture.
-
-**Expected:** Published scenario artifacts match the fixture.
-Generation counts are unchanged. Scenario prompts in the request log
-are unchanged. No correspondence artifact is added to the run outputs.
-Existing STPA and taxonomy artifacts are not mutated.
-
-## QA-CC-02: default STPA stpa-run outputs are unchanged
-
-1. Capture a deterministic offline `stpa-run` fixture with valid
-   use-case, risk-extraction, and stub LLM responses.
-2. Run `uv run asago-scenario-generator stpa-run` without
-   correspondence flags into a fresh output directory.
-3. Compare published STPA scenario artifacts, generation counts,
-   prompts, and control-structure files against the fixture.
-
-**Expected:** Published scenario artifacts match the fixture.
-Generation counts are unchanged. Scenario prompts are unchanged. No
-correspondence artifact is added to the run outputs. Existing STPA and
-taxonomy artifacts are not mutated.
+The fixture uses a localhost deterministic responder for `generate` and
+resume-mode artifacts for `stpa-run`; it never enables the live-model QA path.
+Both workflows remain independent and offline.

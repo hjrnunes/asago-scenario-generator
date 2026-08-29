@@ -42,6 +42,7 @@ MODULES = (
     "taxonomy_obligation_planner",
     "system_resource_map",
     "correspondence",
+    "hybrid_coverage_assessment",
     "stpa",
 )
 

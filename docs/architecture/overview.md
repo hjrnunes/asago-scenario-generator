@@ -186,12 +186,99 @@ success; no partial file is a valid plan.
 
 Phase 2 consumes the plan through its model interface and adds a separately
 versioned `SystemResourceMap`, explicit evidence-bearing correspondence
-proposals, and deterministic reconciliation. The resource map links canonical
-capability resources to STPA RESP/PM/CA/FB/CP/CL/CM identities; it does not
+proposals, and deterministic reconciliation. The resource map is the closed
+`system-resource-map-v1` sidecar with `links[]`, exact capability and control
+structure digest pins, typed `CanonicalResourceReference` and RESP/PM/CA/FB/
+CP/CL/CM references, relation-kind compatibility, provenance, evidence, and
+authority. `validate_system_resource_map` accepts the map, one immutable
+`CapabilityFactSnapshot`, and one `ControlStructure`; it performs no repair or
+inference. `model_proposed` links can remain advisory but can never be
+authoritative, and incomplete inventories remain unresolved rather than
+receiving fuzzy fallbacks. The persistence adapter writes the canonical
+`system-resource-map.yaml` artifact atomically. The resource map does not
 change STPA artifacts or infer correspondence from prose. This dependency
-direction keeps taxonomy planning, STPA generation, persistence, and later
-hybrid reporting replaceable and prevents either workflow from importing the
-other workflow's implementation.
+direction keeps taxonomy planning, STPA generation, persistence, and hybrid
+reporting replaceable and prevents either workflow from importing the other
+workflow's implementation.
+
+Correspondence is split into reviewable `correspondence-proposals-v1` and
+`correspondence-reconciliation-v1` artifacts. A proposal names exact obligation,
+ICA slot, ICA, canonical `EXEC:*` candidate, resource-link, hazard, constraint,
+evidence, and upstream-pin identities. Deterministic validation and explicit
+adjudication are both required before reconciliation materializes an accepted
+relation. The source-pin record, proposal set, and reconciliation result each
+name the same `capability_snapshot_digest` as the validated resource map and
+Phase 1 plan; the field participates in each artifact's canonical digest and
+substitution fails closed. Duplicate confirmations that imply one semantic
+relation remain rejected typed audit records rather than collapsing or
+crashing. Prose, advisory links, rejected proposals, unresolved proposals, and
+`related_but_not_coverage` never become coverage. The proposal and
+reconciliation YAML adapters publish `correspondence-proposals.yaml` and
+`correspondence-reconciliation.yaml` atomically.
+
+`pipeline.hybrid_coverage.assess_hybrid_coverage` is the final observational
+projection seam. It consumes an intact obligation plan, a successful typed
+resource-map validation attestation, a reconciliation result, a typed taxonomy
+observation bundle, and a typed STPA
+coverage bundle. `StpaCoverageInput.from_ica_enumeration` deterministically
+projects the real ICA enumeration and pins its exact content digest; legacy
+scenario observations must resolve to a slot, ICA, and canonical `EXEC:*`
+identity. The seam returns one closed `hybrid-coverage-assessment-v1` value
+with the three independent matrices from the source specification:
+
+1. Structural consideration retains every deterministic UCA slot with its
+   controller, action, UCA type, ICA identities, evidence, and one of `ica`,
+   `justified_na`, or `unresolved`.
+2. Taxonomy correspondence retains every Phase 1 obligation with risk/pattern
+   identity, scope and qualification dispositions, accepted relation IDs,
+   normative correspondence disposition, and typed gap.
+3. Scenario realization retains every accepted relation together with its
+   exact supporting proposal, obligation, risk, attack-pattern, and taxonomy
+   candidate identities, plus observed legacy STPA scenario IDs, while hybrid
+   generation remains `not_attempted` and hybrid admission remains
+   `not_assessed`.
+
+Only an accepted relation with matching accepted/confirmed reconciliation
+evidence satisfies a cross-method row. Contradictions and
+`related_but_not_coverage` remain findings. Rejected and unresolved proposal
+outcomes are retained outside all coverage credit, and structural
+inapplicability requires an explicit eligible decision. The successful
+resource-map validation attestation carries the exact entry-point and tool
+inventory completeness from its capability snapshot. Candidate resource kinds
+select the relevant inventory per obligation; `inferred_partial` cannot support
+a closed-world inapplicability decision without explicit other authoritative
+evidence. Every row and
+diagnostic cell carries upstream schema/digest pins and record traces.
+The assessment names that same capability snapshot digest and includes an
+explicit `capability-fact-snapshot-v1` artifact pin in every traceable pin
+universe; both participate in its canonical digest.
+The second public argument is the closed, successful
+`SystemResourceMapValidation` attestation; a raw or invalid map fails closed.
+Strict cross-artifact resolution applies to accepted relations. Defective
+rejected/unresolved proposals remain global reconciliation diagnostics and do
+not create coverage. Resource-map gaps are evaluated per obligation against
+the canonical resource references on its candidate records; unrelated
+authoritative links cannot close the gap.
+Canonicalization makes slot and scenario observation order irrelevant; the
+persistence adapter atomically publishes `hybrid-coverage-assessment.yaml`.
+The report adapter renders that assessment directly and calculates no parallel
+status, rate, or blended score.
+
+`pipeline.hybrid_reconciliation.reconcile_taxonomy_and_stpa` is the external
+composition facade from source spec §8.7. Its closed
+`HybridReconciliationInputs` envelope contains the exact obligation plan, loss
+analysis, control structure, ICA enumeration, validated-map attestation,
+proposal set, explicit adjudications, and optional scenario observations. The
+facade recomputes the proposal authority from those artifacts and fails closed
+on substitution. It then calls deterministic correspondence reconciliation,
+adapts the ICA enumeration with the same canonical digest used by authority,
+and delegates only matrix construction to `assess_hybrid_coverage`. The pure
+proposal, reconciliation, and assessment seams remain independently usable.
+
+The assessment module imports shared domain artifacts only. It does not import
+either generation runner, construct a provider client, or perform IO. Existing
+taxonomy coverage sections remain generation-workflow reports; they are not a
+Phase 2 reconciliation surface and are not reused to infer hybrid coverage.
 
 ## Taxonomy and risk-driven workflow
 

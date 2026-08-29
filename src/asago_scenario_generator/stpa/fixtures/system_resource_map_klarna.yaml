@@ -1,0 +1,21 @@
+# Normative Phase 2 resource-map sidecar for the Klarna fixtures.
+# The two source digests pin the exact capability snapshot and STPA control
+# structure used with this map. The link is an operator-reviewed assertion.
+capability_snapshot_digest: "0bcb258053e659d6e7d380bfd73fc2bb90b49fdeedb48957bfd243dcddde9305"
+control_structure_digest: "415d775a6093c1e29a23ea5d21c1a493b01fc164ef03bdb7416578bb0a3983ca"
+links:
+  - authority_status: "authoritative"
+    capability_resource_ref:
+      kind: "tool"
+      tool_id: "tool:v1:686a177b0b683316d0df4a9d41038239"
+    confidence: 0.95
+    control_structure_ref:
+      id: "CA-1-1"
+      kind: "CA"
+    evidence_refs:
+      - "fixture:klarna-review"
+    link_id: "srm:v1:klarna-payment-action"
+    provenance: "operator_declared"
+    relation_kind: "acts_on"
+schema_version: "system-resource-map-v1"
+semantic_digest: "95d85c34e9278a60c140aab7a778f24931c003b8bb5b49c0cd9d5ac2f4672480"

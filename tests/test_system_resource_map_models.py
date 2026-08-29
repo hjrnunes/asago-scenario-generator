@@ -1,220 +1,138 @@
-"""Focused unit tests for SystemResourceMap data contracts and serialization."""
+"""Model-level tests for the normative system-resource-map contract."""
 
 from __future__ import annotations
 
 import json
 
+import pytest
 import yaml
+from pydantic import ValidationError
 
 from asago_scenario_generator.models.system_resource_map import (
-    ActorControllerEntry,
-    ControlActionEntry,
-    ControlledProcessEntry,
-    DataFlowEntry,
-    FeedbackPathEntry,
-    LossLinkEntry,
-    ResourceAssertionEntry,
-    SystemResourceEntry,
+    CAReference,
+    CLReference,
+    CMReference,
+    CPReference,
+    FBReference,
+    PMReference,
+    RESPReference,
+    ResourceLink,
+    ResourceMapViolation,
     SystemResourceMap,
-    TrustBoundaryEntry,
-    UseCaseFactEntry,
+)
+from tests.system_resource_map_support import (
+    make_link,
+    make_map,
 )
 
 
-def _make_sample_map() -> SystemResourceMap:
-    return SystemResourceMap(
-        schema_version="1",
-        stpa_version="stpa-v1",
-        taxonomy_version="atlas-2026.05",
-        system_resources=[
-            SystemResourceEntry(
-                element_id="SR-1",
-                name="Primary Database",
-                description="Database hosting user records",
-                taxonomy_ref="ep:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            )
-        ],
-        actor_controllers=[
-            ActorControllerEntry(
-                element_id="RESP-1",
-                name="Agent Controller",
-                description="Controller handling agent decisions",
-            )
-        ],
-        controlled_processes=[
-            ControlledProcessEntry(
-                element_id="CP-2",
-                name="Payment Pipeline",
-                description="Process executing transactions",
-            )
-        ],
-        control_actions=[
-            ControlActionEntry(
-                element_id="CA-1-1",
-                controller_id="RESP-1",
-                process_id="CP-2",
-                action_name="Authorize Payment",
-            )
-        ],
-        feedback_paths=[
-            FeedbackPathEntry(
-                element_id="FB-1-1",
-                controller_id="RESP-1",
-                process_id="CP-2",
-                feedback_name="Payment Status Confirmation",
-            )
-        ],
-        trust_boundaries=[
-            TrustBoundaryEntry(
-                element_id="TB-1",
-                name="Boundary 1",
-                resource_ids=["SR-1"],
-                taxonomy_ref="tb:v1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            )
-        ],
-        data_flows=[
-            DataFlowEntry(
-                element_id="DF-1",
-                name="Flow 1",
-                source_resource_id="SR-1",
-                target_resource_id="SR-1",
-            )
-        ],
-        loss_links=[
-            LossLinkEntry(
-                element_id="LL-1",
-                loss_id="L-1",
-                hazard_id="H-1",
-            )
-        ],
-        use_case_facts=[
-            UseCaseFactEntry(
-                element_id="UF-1",
-                fact_key="auth.token_validation",
-                resolution_status="unknown",
-                provenance_kind="analyst",
-            ),
-            UseCaseFactEntry(
-                element_id="UF-2",
-                fact_key="storage.encryption_at_rest",
-                resolution_status="absent",
-                provenance_kind="imported-source",
-            ),
-        ],
-        assertions=[
-            ResourceAssertionEntry(
-                element_id="A-1",
-                description="Analyst assertion 1",
-                provenance_kind="analyst",
-            )
-        ],
+def test_system_resource_map_is_closed_immutable_and_content_addressed() -> None:
+    resource_map = make_map()
+
+    assert set(resource_map.model_dump(mode="json")) == {
+        "schema_version",
+        "semantic_digest",
+        "capability_snapshot_digest",
+        "control_structure_digest",
+        "links",
+    }
+    assert resource_map.schema_version == "system-resource-map-v1"
+
+    with pytest.raises((TypeError, ValidationError)):
+        resource_map.links += (resource_map.links[0],)  # type: ignore[misc]
+    with pytest.raises(ValidationError):
+        SystemResourceMap.model_validate(
+            {**resource_map.model_dump(mode="json"), "unexpected": True}
+        )
+    with pytest.raises(ValidationError):
+        ResourceMapViolation.model_validate({"code": "x", "message": "y", "extra": 1})
+
+
+def test_resource_link_has_closed_typed_references_and_evidence_set() -> None:
+    link = make_link(evidence_refs=("review:z", "review:a"))
+    assert link.evidence_refs == ("review:a", "review:z")
+    assert link.capability_resource_ref.kind == "tool"
+    assert link.control_structure_ref.kind == "CA"
+
+    with pytest.raises(ValidationError):
+        ResourceLink.model_validate(
+            {
+                **link.model_dump(mode="json"),
+                "unexpected": True,
+            }
+        )
+    with pytest.raises(ValidationError):
+        make_link(evidence_refs=("review:1", "review:1"))
+    with pytest.raises(ValidationError):
+        make_link(control_structure_ref={"kind": "CA", "id": "CP-1"})
+
+
+def test_all_control_structure_reference_namespaces_are_closed_and_canonical() -> None:
+    references = (
+        RESPReference(resp_id="RESP-1"),
+        PMReference(pm_id="PM-1-1"),
+        CAReference(ca_id="CA-1-1"),
+        FBReference(fb_id="FB-1-1"),
+        CPReference(cp_id="CP-1"),
+        CLReference(link_id="CL-1"),
+        CMReference(cm_id="CM-1"),
     )
 
-
-def test_system_resource_map_construction() -> None:
-    srm = _make_sample_map()
-    assert srm.schema_version == "1"
-    assert srm.stpa_version == "stpa-v1"
-    assert srm.taxonomy_version == "atlas-2026.05"
-    assert len(srm.system_resources) == 1
-    assert len(srm.control_actions) == 1
-
-
-def test_system_resource_map_yaml_round_trip() -> None:
-    srm = _make_sample_map()
-    yaml_text = srm.to_yaml()
-    assert "schema_version" in yaml_text
-    assert "SR-1" in yaml_text
-    restored = SystemResourceMap.from_yaml(yaml_text)
-    assert restored.schema_version == srm.schema_version
-    assert restored.stpa_version == srm.stpa_version
-    assert restored.taxonomy_version == srm.taxonomy_version
-    assert len(restored.control_actions) == len(srm.control_actions)
-    assert restored.control_actions[0].element_id == srm.control_actions[0].element_id
-    assert restored.use_case_facts[0].resolution_status == "unknown"
-    assert restored.use_case_facts[1].resolution_status == "absent"
+    assert [(reference.kind, reference.id) for reference in references] == [
+        ("RESP", "RESP-1"),
+        ("PM", "PM-1-1"),
+        ("CA", "CA-1-1"),
+        ("FB", "FB-1-1"),
+        ("CP", "CP-1"),
+        ("CL", "CL-1"),
+        ("CM", "CM-1"),
+    ]
+    assert references[2].ca_id == "CA-1-1"
+    assert references[5].link_id == "CL-1"
 
 
-def test_system_resource_map_json_is_sorted_and_deterministic() -> None:
-    srm = _make_sample_map()
-    json_text = srm.to_json()
+def test_yaml_and_json_round_trips_are_byte_stable() -> None:
+    resource_map = make_map()
 
-    parsed = json.loads(json_text)
-    top_keys = list(parsed)
-    assert top_keys == sorted(top_keys)
-    # Keys are emitted in sorted order, so re-dumping the parsed payload is
-    # byte-identical: no serialization detail depends on field order.
-    assert json.dumps(parsed, indent=2, sort_keys=True) + "\n" == json_text
+    yaml_text = resource_map.to_yaml()
+    json_text = resource_map.to_json()
+    assert SystemResourceMap.from_yaml(yaml_text) == resource_map
+    assert SystemResourceMap.from_json(json_text) == resource_map
+    assert yaml_text == resource_map.to_yaml()
+    assert json_text == resource_map.to_json()
+    assert '\n- "authority_status"' in yaml_text
 
-
-def test_system_resource_map_json_round_trip() -> None:
-    srm = _make_sample_map()
-    json_text = srm.to_json()
-    assert "schema_version" in json_text
-    assert "SR-1" in json_text
-    restored = SystemResourceMap.from_json(json_text)
-    assert restored.schema_version == srm.schema_version
-    assert restored.stpa_version == srm.stpa_version
-    assert restored.taxonomy_version == srm.taxonomy_version
-    assert len(restored.control_actions) == len(srm.control_actions)
-    assert restored.control_actions[0].element_id == srm.control_actions[0].element_id
+    parsed_json = json.loads(json_text)
+    assert list(parsed_json) == sorted(parsed_json)
+    assert json.dumps(
+        parsed_json, indent=2, sort_keys=True, ensure_ascii=False
+    ) + "\n" == (json_text)
+    parsed_yaml = yaml.safe_load(yaml_text)
+    assert list(parsed_yaml) == sorted(parsed_yaml)
 
 
-def test_system_resource_map_yaml_is_block_style_with_sorted_keys() -> None:
-    srm = _make_sample_map()
-    text = srm.to_yaml()
+def test_link_order_does_not_change_map_identity_or_serialization() -> None:
+    first = make_link(
+        link_id="srm:v1:2",
+        control_structure_ref={"kind": "CA", "id": "CA-1-1"},
+    )
+    second = make_link(
+        link_id="srm:v1:1",
+        control_structure_ref={"kind": "RESP", "id": "RESP-1"},
+        relation_kind="represents",
+    )
 
-    parsed = yaml.safe_load(text)
-    top_keys = list(parsed)
-    assert top_keys == sorted(top_keys)
-    # Keys are emitted in sorted order: sorting them again is a no-op, so
-    # re-serializing from a dict built in sorted order must be identical.
-    assert yaml.dump(
-        parsed, default_flow_style=False, sort_keys=False, allow_unicode=True,
-        default_style='"',
-    ) == text
-    # Block sequences remain blocks, not inline flow style.
-    assert "\n- " in text or text.startswith("- ")
-    assert "[]" not in text
-
-
-def test_system_resource_map_yaml_preserves_unicode_line_separator() -> None:
-    # PyYAML's plain/single-quoted styles silently corrupt U+0085 (NEL):
-    # the reader treats it as a line break, so a naive dump round trip
-    # loses characters. The double-quoted dumper style escapes it.
-    srm = _make_sample_map()
-    srm.data_flows[0].name = "flow\x85name"
-
-    restored = SystemResourceMap.from_yaml(srm.to_yaml())
-    assert restored.data_flows[0].name == "flow\x85name"
-    assert restored == srm
+    map_a = make_map(first, second)
+    map_b = make_map(second, first)
+    assert map_a == map_b
+    assert map_a.to_yaml() == map_b.to_yaml()
+    assert map_a.compute_semantic_digest() == map_b.compute_semantic_digest()
 
 
-def test_system_resource_map_yaml_keeps_unicode_unescaped() -> None:
-    # allow_unicode=True keeps non-ASCII readable instead of \\u-escaping it.
-    srm = _make_sample_map()
-    srm.data_flows[0].name = "café"
+def test_digest_tampering_is_rejected_on_load() -> None:
+    resource_map = make_map()
+    payload = yaml.safe_load(resource_map.to_yaml())
+    payload["semantic_digest"] = "f" * 64
 
-    text = srm.to_yaml()
-    assert "café" in text
-    assert SystemResourceMap.from_yaml(text) == srm
-
-
-def test_system_resource_map_byte_stability() -> None:
-    srm = _make_sample_map()
-    y1 = srm.to_yaml()
-    y2 = srm.to_yaml()
-    assert y1 == y2
-    j1 = srm.to_json()
-    j2 = srm.to_json()
-    assert j1 == j2
-
-
-def test_system_resource_map_family_access() -> None:
-    srm = _make_sample_map()
-    ca = srm.get_family("control-action")
-    assert len(ca) == 1
-    assert ca[0]["element_id"] == "CA-1-1"
-    tb = srm.get_family("trust-boundary")
-    assert len(tb) == 1
-    assert tb[0]["element_id"] == "TB-1"
+    with pytest.raises(ValueError, match="semantic_digest|Digest mismatch"):
+        SystemResourceMap.from_yaml(yaml.safe_dump(payload))
