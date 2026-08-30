@@ -39,6 +39,9 @@ from asago_scenario_generator.models.system_resource_map import (
     ResourceLink,
     SystemResourceMapValidation,
 )
+from asago_scenario_generator.models.scenario import (
+    ScenarioEnvelope as TaxonomyScenarioEnvelope,
+)
 from asago_scenario_generator.pipeline.correspondence import (
     propose_correspondence,
     reconcile_correspondence,
@@ -66,6 +69,13 @@ from asago_scenario_generator.stpa.models.ica_enumeration import (
     ICAEnumeration,
     ICASlot,
     UCAType,
+)
+from asago_scenario_generator.stpa.models.scenario_envelope import (
+    ScenarioEnvelope as StpaScenarioEnvelope,
+)
+from asago_scenario_generator.stpa.models.scenario_spec import (
+    ScenarioSpec as StpaScenarioSpec,
+    ThreatSource,
 )
 from tests.helpers.obligation_factory import make_inputs
 from tests.system_resource_map_support import make_control_structure, make_map
@@ -455,6 +465,162 @@ def test_real_ica_enumeration_adapter_preserves_complete_slot_denominator() -> N
     assert {item.disposition for item in adapted.slots} == {"ica", "justified_na"}
     assert len({item.source_artifact for item in adapted.slots}) == 1
     assert adapted.slots[0].source_artifact.semantic_digest != "0" * 64
+
+
+def test_real_taxonomy_envelopes_join_through_candidate_and_obligation_identity() -> (
+    None
+):
+    """One admitted candidate can truthfully realize several risk obligations."""
+    plan = plan_taxonomy_obligations(make_inputs(risk_ids=("risk-a", "risk-b")))
+    candidate_id = plan.obligations[0].candidate_records[0].candidate_id
+    scenario = TaxonomyScenarioEnvelope.model_construct(
+        scenario_id="scenario:v2:" + "a" * 64,
+        candidate_id=candidate_id,
+    )
+
+    adapted = TaxonomyCoverageInput.from_scenario_envelopes(plan, (scenario,))
+
+    assert len(adapted.scenarios) == 2
+    assert {item.obligation_id for item in adapted.scenarios} == {
+        item.obligation_id for item in plan.obligations
+    }
+    assert {item.scenario_id for item in adapted.scenarios} == {scenario.scenario_id}
+    assert {item.candidate_id for item in adapted.scenarios} == {candidate_id}
+    assert len({item.source_artifact for item in adapted.scenarios}) == 1
+
+
+def test_taxonomy_envelope_adapter_rejects_unplanned_candidates() -> None:
+    """An admitted envelope cannot be attached by prose or approximate identity."""
+    plan = plan_taxonomy_obligations(make_inputs())
+    scenario = TaxonomyScenarioEnvelope.model_construct(
+        scenario_id="scenario:v2:" + "b" * 64,
+        candidate_id="cand:v2:" + "f" * 32,
+    )
+
+    with pytest.raises(ValueError, match="unknown projectable candidate"):
+        TaxonomyCoverageInput.from_scenario_envelopes(plan, (scenario,))
+
+
+def test_taxonomy_envelope_adapter_requires_typed_unique_scenario_identities() -> None:
+    """The real-envelope seam rejects loose, missing, and duplicate identities."""
+    plan = plan_taxonomy_obligations(make_inputs())
+    candidate_id = plan.obligations[0].candidate_records[0].candidate_id
+    scenario = TaxonomyScenarioEnvelope.model_construct(
+        scenario_id="scenario:v2:" + "c" * 64,
+        candidate_id=candidate_id,
+    )
+
+    with pytest.raises(TypeError, match="ScenarioEnvelope records"):
+        TaxonomyCoverageInput.from_scenario_envelopes(plan, ({},))
+    with pytest.raises(ValueError, match="requires scenario_id"):
+        TaxonomyCoverageInput.from_scenario_envelopes(
+            plan,
+            (TaxonomyScenarioEnvelope.model_construct(candidate_id=candidate_id),),
+        )
+    with pytest.raises(ValueError, match="IDs must be unique"):
+        TaxonomyCoverageInput.from_scenario_envelopes(plan, (scenario, scenario))
+
+
+def test_real_stpa_envelopes_join_through_slot_ica_and_exec_identity() -> None:
+    """The adapter extracts only exact structural identities from real envelopes."""
+    enumeration = ICAEnumeration(
+        slots=[
+            ICASlot(
+                slot_id=ICA_SLOT,
+                responsibility="RESP-1",
+                control_action="CA-1-1",
+                uca_type=UCAType.wrong_timing,
+                is_na=False,
+                icas=[
+                    ICA(
+                        ica_id=ICA_ID,
+                        ica_text="Unsafe timing",
+                        hazardous_context="Payment pending",
+                        loss_scenario="Unauthorized payment",
+                    )
+                ],
+            )
+        ]
+    )
+    scenario = StpaScenarioEnvelope.model_construct(
+        scenario_id="SCN-001",
+        scenario_spec=StpaScenarioSpec.model_construct(
+            threat_source=ThreatSource(
+                ica_slot_id=ICA_SLOT,
+                ica_id=ICA_ID,
+                provenance="structural",
+            )
+        ),
+    )
+
+    adapted = StpaCoverageInput.from_scenario_envelopes(enumeration, (scenario,))
+
+    assert adapted.scenarios[0].scenario_id == "SCN-001"
+    assert adapted.scenarios[0].ica_slot_id == ICA_SLOT
+    assert adapted.scenarios[0].ica_id == ICA_ID
+    assert adapted.scenarios[0].exec_candidate_id == EXEC_ID
+    assert adapted.scenarios[0].source_artifact.artifact_id == "stpa-scenarios"
+
+
+@pytest.mark.parametrize(
+    ("scenario_spec", "message"),
+    (
+        (None, "typed scenario_spec"),
+        (StpaScenarioSpec.model_construct(), "typed threat_source"),
+        (
+            StpaScenarioSpec.model_construct(
+                threat_source=ThreatSource.model_construct()
+            ),
+            "exact ICA slot and ICA identities",
+        ),
+        (
+            StpaScenarioSpec.model_construct(
+                threat_source=ThreatSource.model_construct(ica_slot_id=ICA_SLOT)
+            ),
+            "exact ICA slot and ICA identities",
+        ),
+        (
+            StpaScenarioSpec.model_construct(
+                threat_source=ThreatSource(
+                    ica_slot_id="RESP-UNKNOWN:CA-1-1:WRONG_TIMING",
+                    ica_id=ICA_ID,
+                    provenance="structural",
+                )
+            ),
+            "unknown ICA slot",
+        ),
+    ),
+)
+def test_stpa_envelope_adapter_rejects_incomplete_structural_lineage(
+    scenario_spec: object, message: str
+) -> None:
+    """No STPA scenario is observed without its exact slot and ICA lineage."""
+    enumeration = ICAEnumeration(
+        slots=[
+            ICASlot(
+                slot_id=ICA_SLOT,
+                responsibility="RESP-1",
+                control_action="CA-1-1",
+                uca_type=UCAType.wrong_timing,
+                is_na=False,
+                icas=[
+                    ICA(
+                        ica_id=ICA_ID,
+                        ica_text="Unsafe timing",
+                        hazardous_context="Payment pending",
+                        loss_scenario="Unauthorized payment",
+                    )
+                ],
+            )
+        ]
+    )
+    scenario_kwargs = {} if scenario_spec is None else {"scenario_spec": scenario_spec}
+    scenario = StpaScenarioEnvelope.model_construct(
+        scenario_id="SCN-INVALID", **scenario_kwargs
+    )
+
+    with pytest.raises(ValueError, match=message):
+        StpaCoverageInput.from_scenario_envelopes(enumeration, (scenario,))
 
 
 def test_real_ica_adapter_and_scenario_identity_graph_fail_closed() -> None:

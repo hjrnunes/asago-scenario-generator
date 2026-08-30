@@ -215,6 +215,15 @@ crashing. Prose, advisory links, rejected proposals, unresolved proposals, and
 `related_but_not_coverage` never become coverage. The proposal and
 reconciliation YAML adapters publish `correspondence-proposals.yaml` and
 `correspondence-reconciliation.yaml` atomically.
+An `accepted_resource_link` evidence source establishes only shared system
+identity. The closed evidence model therefore permits that source only with
+`related_but_not_coverage`; a coverage-bearing relation requires independently
+reviewed exact-ID or curated mechanism evidence. This prevents resource-map
+joins from becoming a Cartesian semantic-coverage claim.
+`pipeline.correspondence.summarize_correspondence_calibration` projects an
+independent adjudication set into exact review buckets and a precision
+numerator/denominator. It grants no coverage and deliberately excludes
+unresolved and unreviewed proposals from that denominator.
 
 `pipeline.hybrid_coverage.assess_hybrid_coverage` is the final observational
 projection seam. It consumes an intact obligation plan, a successful typed
@@ -263,6 +272,15 @@ Canonicalization makes slot and scenario observation order irrelevant; the
 persistence adapter atomically publishes `hybrid-coverage-assessment.yaml`.
 The report adapter renders that assessment directly and calculates no parallel
 status, rate, or blended score.
+
+`TaxonomyCoverageInput.from_scenario_envelopes(...)` observes admitted taxonomy
+envelopes through their exact `cand:v2` identity and expands one scenario into
+each Phase 1 obligation that contains that projectable candidate. Unknown
+candidates fail closed rather than receiving a pattern- or prose-based match.
+`StpaCoverageInput.from_scenario_envelopes(...)` observes real STPA envelopes
+through the exact slot, ICA, and canonically derived `EXEC:*` identity. Both
+adapters content-pin the complete supplied envelope collection and retain
+record traces; they do not change either generation workflow.
 
 `pipeline.hybrid_reconciliation.reconcile_taxonomy_and_stpa` is the external
 composition facade from source spec §8.7. Its closed

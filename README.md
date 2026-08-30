@@ -237,6 +237,12 @@ control structure before proposing or reconciling. The optional adjudication
 file is a typed `AdjudicationSet` envelope with a `decisions` collection; both
 JSON and YAML inputs are accepted according to the file suffix.
 
+`summarize_correspondence_calibration(...)` keeps proposer evaluation outside
+the coverage matrices. It reports exact confirmed, rejected, unresolved, and
+unreviewed counts for coverage-bearing and noncoverage proposals. Precision is
+retained as `confirmed / (confirmed + rejected)` with the exact numerator and
+denominator; unresolved and unreviewed records are not silently scored.
+
 The Phase 2 pure interfaces remain separate from both generation commands:
 
 ```python
@@ -246,6 +252,10 @@ resource_map_validation = validate_system_resource_map(
     control_structure,
 )
 proposal_set = propose_correspondence(resource_map_validation, source_artifacts)
+calibration = summarize_correspondence_calibration(
+    proposal_set,
+    reviewed_adjudications,
+)
 reconciliation = reconcile_correspondence(
     resource_map_validation,
     proposal_set,
@@ -292,6 +302,12 @@ obligation's candidate resource references rather than global map presence.
 deterministic adapter from the real ICA enumeration into the complete
 structural denominator; optional scenario observations must resolve to an
 exact slot, ICA, and canonical `EXEC:*` identity.
+`TaxonomyCoverageInput.from_scenario_envelopes(...)` and
+`StpaCoverageInput.from_scenario_envelopes(...)` adapt the real admitted
+scenario envelopes into content-pinned observations. Taxonomy scenarios join
+only through exact projectable `cand:v2` identities and may realize several
+risk obligations; STPA scenarios join only through exact slot/ICA/`EXEC:*`
+identity. An unknown identity fails closed.
 `HybridReconciliationInputs` is the closed, immutable orchestration envelope.
 `reconcile_taxonomy_and_stpa(...)` verifies its exact proposal authority,
 performs explicit deterministic reconciliation, adapts the real ICA
@@ -302,6 +318,10 @@ provider, or network behavior.
 
 Rejected and unresolved proposals, contradictions, and noncoverage relations
 remain separate traceable diagnostics and cannot satisfy an obligation.
+In particular, `accepted_resource_link` evidence proves shared resource
+identity only and is restricted to `related_but_not_coverage`. Coverage-bearing
+relations require independently reviewed exact-ID or curated mechanism
+evidence; sharing a resource map link is never sufficient.
 Explicit structural inapplicability requires reviewed evidence and cannot be
 inferred from an absent relation. The validated resource-map attestation
 carries the capability snapshot's entry-point and tool inventory completeness;

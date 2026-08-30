@@ -26,6 +26,12 @@ HYBRID_COVERAGE_ASSESSMENT_DIGEST_DOMAIN = (
     "asago-scenario-generator:hybrid-coverage-assessment:v1"
 )
 ICA_ENUMERATION_DIGEST_DOMAIN = "asago-scenario-generator:ica-enumeration:v1"
+TAXONOMY_SCENARIO_COLLECTION_DIGEST_DOMAIN = (
+    "asago-scenario-generator:taxonomy-scenario-collection:v1"
+)
+STPA_SCENARIO_COLLECTION_DIGEST_DOMAIN = (
+    "asago-scenario-generator:stpa-scenario-collection:v1"
+)
 
 InventoryStatus = Literal["complete", "partial", "unknown"]
 UcaType = Literal[
@@ -152,10 +158,69 @@ class TaxonomyCoverageInput(_AssessmentModel):
         StructuralInapplicabilityDecision, ...
     ] = ()
 
+    @classmethod
+    def from_scenario_envelopes(
+        cls,
+        obligation_plan: Any,
+        scenarios: Sequence[Any],
+        *,
+        artifact_id: str = "taxonomy-scenarios",
+        schema_version: str = "taxonomy-scenario-collection-v1",
+    ) -> "TaxonomyCoverageInput":
+        """Adapt admitted taxonomy envelopes through exact candidate identity."""
+        from asago_scenario_generator.models.obligation_plan import (
+            TaxonomyObligationPlan,
+        )
+        from asago_scenario_generator.models.scenario import ScenarioEnvelope
+
+        if not isinstance(obligation_plan, TaxonomyObligationPlan):
+            raise TypeError("obligation_plan must be a TaxonomyObligationPlan")
+        obligation_plan.assert_integrity()
+        ordered = _typed_scenario_payloads(
+            scenarios, ScenarioEnvelope, "taxonomy scenario"
+        )
+        pin = _scenario_collection_pin(
+            artifact_id,
+            schema_version,
+            TAXONOMY_SCENARIO_COLLECTION_DIGEST_DOMAIN,
+            ordered,
+        )
+        obligations_by_candidate = _obligations_by_projectable_candidate(
+            obligation_plan
+        )
+        observations = []
+        for _scenario, payload in ordered:
+            candidate_id = payload["candidate_id"]
+            obligations = obligations_by_candidate.get(candidate_id, ())
+            if not obligations:
+                raise ValueError(
+                    "taxonomy scenario references an unknown projectable candidate"
+                )
+            observations.extend(
+                TaxonomyScenarioObservation(
+                    scenario_id=payload["scenario_id"],
+                    obligation_id=obligation.obligation_id,
+                    candidate_id=candidate_id,
+                    source_artifact=pin,
+                    trace_refs=(f"{artifact_id}#{payload['scenario_id']}",),
+                )
+                for obligation in obligations
+            )
+        return cls(scenarios=tuple(observations))
+
     @model_validator(mode="after")
     def canonicalize(self) -> "TaxonomyCoverageInput":
         """Keep one scenario and at most one decision per exact identity."""
-        scenarios = tuple(sorted(self.scenarios, key=lambda item: item.scenario_id))
+        scenarios = tuple(
+            sorted(
+                self.scenarios,
+                key=lambda item: (
+                    item.scenario_id,
+                    item.obligation_id,
+                    item.candidate_id,
+                ),
+            )
+        )
         decisions = tuple(
             sorted(
                 self.structural_inapplicability_decisions,
@@ -163,8 +228,11 @@ class TaxonomyCoverageInput(_AssessmentModel):
             )
         )
         _require_unique(
-            tuple(item.scenario_id for item in scenarios),
-            "taxonomy scenario IDs must be unique",
+            tuple(
+                (item.scenario_id, item.obligation_id, item.candidate_id)
+                for item in scenarios
+            ),
+            "taxonomy scenario observation identities must be unique",
         )
         _require_unique(
             tuple(item.decision_id for item in decisions),
@@ -177,6 +245,68 @@ class TaxonomyCoverageInput(_AssessmentModel):
         object.__setattr__(self, "scenarios", scenarios)
         object.__setattr__(self, "structural_inapplicability_decisions", decisions)
         return self
+
+
+def _typed_scenario_payloads(
+    scenarios: Sequence[Any], expected_type: type[Any], label: str
+) -> tuple[tuple[Any, dict[str, Any]], ...]:
+    """Return canonical typed envelope payloads without accepting loose mappings."""
+    typed = tuple(scenarios)
+    _require_typed_scenario_records(typed, expected_type, label)
+    payloads = tuple(
+        (item, item.model_dump(mode="json", exclude_none=False)) for item in typed
+    )
+    _require_scenario_identities(payloads, label)
+    ordered = tuple(sorted(payloads, key=lambda item: item[1]["scenario_id"]))
+    return ordered
+
+
+def _require_typed_scenario_records(
+    scenarios: Sequence[Any], expected_type: type[Any], label: str
+) -> None:
+    """Reject loose dictionaries and envelopes from the wrong workflow."""
+    if any(not isinstance(item, expected_type) for item in scenarios):
+        raise TypeError(f"{label}s must contain {expected_type.__name__} records")
+
+
+def _require_scenario_identities(
+    scenarios: Sequence[tuple[Any, dict[str, Any]]], label: str
+) -> None:
+    """Require one non-empty, unique identity per typed scenario envelope."""
+    if any(not payload.get("scenario_id") for _, payload in scenarios):
+        raise ValueError(f"{label} requires scenario_id")
+    _require_unique(
+        tuple(payload["scenario_id"] for _, payload in scenarios),
+        f"{label} IDs must be unique",
+    )
+
+
+def _scenario_collection_pin(
+    artifact_id: str,
+    schema_version: str,
+    digest_domain: str,
+    scenarios: Sequence[tuple[Any, dict[str, Any]]],
+) -> ArtifactPin:
+    """Pin the exact canonical content of one observed scenario collection."""
+    return ArtifactPin(
+        artifact_id=artifact_id,
+        schema_version=schema_version,
+        semantic_digest=compute_framed_digest(
+            digest_domain, [payload for _, payload in scenarios]
+        ),
+    )
+
+
+def _obligations_by_projectable_candidate(
+    obligation_plan: Any,
+) -> dict[str, tuple[Any, ...]]:
+    """Index every obligation reached by one concrete runnable candidate."""
+    indexed: dict[str, list[Any]] = {}
+    for obligation in obligation_plan.obligations:
+        for candidate in obligation.candidate_records:
+            if candidate.projection_disposition == "projectable":
+                indexed.setdefault(candidate.candidate_id, []).append(obligation)
+    return {key: tuple(values) for key, values in indexed.items()}
 
 
 class StpaScenarioObservation(_AssessmentModel):
@@ -265,6 +395,47 @@ class StpaCoverageInput(_AssessmentModel):
             inventory_status=inventory_status,
         )
 
+    @classmethod
+    def from_scenario_envelopes(
+        cls,
+        ica_enumeration: Any,
+        scenarios: Sequence[Any],
+        *,
+        enumeration_artifact_id: str = "ica-enumeration",
+        enumeration_schema_version: str = "ica-enumeration-v1",
+        scenario_artifact_id: str = "stpa-scenarios",
+        scenario_schema_version: str = "stpa-scenario-collection-v1",
+        inventory_status: InventoryStatus = "complete",
+    ) -> "StpaCoverageInput":
+        """Adapt real STPA envelopes through exact slot, ICA, and EXEC identity."""
+        from asago_scenario_generator.stpa.models.scenario_envelope import (
+            ScenarioEnvelope,
+        )
+
+        structural = cls.from_ica_enumeration(
+            ica_enumeration,
+            artifact_id=enumeration_artifact_id,
+            schema_version=enumeration_schema_version,
+            inventory_status=inventory_status,
+        )
+        ordered = _typed_scenario_payloads(scenarios, ScenarioEnvelope, "STPA scenario")
+        pin = _scenario_collection_pin(
+            scenario_artifact_id,
+            scenario_schema_version,
+            STPA_SCENARIO_COLLECTION_DIGEST_DOMAIN,
+            ordered,
+        )
+        slots = {item.slot_id: item for item in structural.slots}
+        observations = tuple(
+            _stpa_observation_from_payload(payload, pin, slots)
+            for _, payload in ordered
+        )
+        return cls(
+            slots=structural.slots,
+            scenarios=observations,
+            inventory_status=inventory_status,
+        )
+
     @model_validator(mode="after")
     def canonicalize_and_validate(self) -> "StpaCoverageInput":
         """Validate the complete slot/ICA/EXEC identity graph."""
@@ -275,6 +446,36 @@ class StpaCoverageInput(_AssessmentModel):
         object.__setattr__(self, "slots", slots)
         object.__setattr__(self, "scenarios", scenarios)
         return self
+
+
+def _stpa_observation_from_payload(
+    payload: dict[str, Any],
+    pin: ArtifactPin,
+    slots: dict[str, StructuralSlotObservation],
+) -> StpaScenarioObservation:
+    """Project one STPA envelope only through its exact structural references."""
+    scenario_spec = payload.get("scenario_spec")
+    if not isinstance(scenario_spec, dict):
+        raise ValueError("STPA scenario requires a typed scenario_spec")
+    threat_source = scenario_spec.get("threat_source")
+    if not isinstance(threat_source, dict):
+        raise ValueError("STPA scenario requires a typed threat_source")
+    slot_id = threat_source.get("ica_slot_id")
+    ica_id = threat_source.get("ica_id")
+    if not slot_id or not ica_id:
+        raise ValueError("STPA scenario requires exact ICA slot and ICA identities")
+    slot = slots.get(slot_id)
+    if slot is None:
+        raise ValueError("STPA scenario references an unknown ICA slot")
+    scenario_id = payload["scenario_id"]
+    return StpaScenarioObservation(
+        scenario_id=scenario_id,
+        ica_slot_id=slot_id,
+        ica_id=ica_id,
+        exec_candidate_id=_exec_candidate_id(slot),
+        source_artifact=pin,
+        trace_refs=(f"{pin.artifact_id}#{scenario_id}",),
+    )
 
 
 def _canonical_slots(

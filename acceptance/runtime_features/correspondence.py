@@ -27,6 +27,7 @@ from asago_scenario_generator.models.system_resource_map import (
 from asago_scenario_generator.pipeline.correspondence import (
     propose_correspondence,
     reconcile_correspondence,
+    summarize_correspondence_calibration,
 )
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
@@ -743,6 +744,43 @@ def _register(api: Any) -> None:
         _prepare_advisory(world)
         return True, ""
 
+    def prepare_shared_resource_claim(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del examples
+        match = re.search(r'claims "([^"]+)"', text)
+        if match is None:
+            return False, "shared-resource step did not expose a relation kind"
+        state = _state(world)
+        state["resource_map"] = _map()
+        state["shared_resource_relation_kind"] = match.group(1)
+        return True, ""
+
+    def validate_shared_resource_claim(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del text, examples
+        state = _state(world)
+        try:
+            _evidence(
+                state["resource_map"],
+                evidence_source="accepted_resource_link",
+                relation_kind=state["shared_resource_relation_kind"],
+            )
+        except ValueError as exc:
+            state["error"] = str(exc)
+            return True, ""
+        return False, "shared-resource evidence asserted coverage"
+
+    def assert_shared_resource_rejected(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del examples
+        match = re.search(r'diagnostic "([^"]+)"', text)
+        expected = match.group(1) if match else ""
+        error = _state(world).get("error") or ""
+        return expected in error, f"expected {expected!r} in {error!r}"
+
     def reconcile_explicit(world: World, text: str, examples: dict) -> tuple[bool, str]:
         del text, examples
         _reconcile_all(world)
@@ -947,6 +985,57 @@ def _register(api: Any) -> None:
             "duplicate confirmation produced an accepted relation",
         )
 
+    def prepare_calibration(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del text, examples
+        _prepare_many_to_many(world)
+        return True, ""
+
+    def summarize_calibration(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del text, examples
+        state = _state(world)
+        proposals = state["proposal_set"].proposals
+        statuses = ("confirmed", "rejected", "unresolved")
+        decisions = tuple(
+            CorrespondenceAdjudication(
+                proposal_id=proposal.proposal_id,
+                status=status,
+                reason=f"independent review: {status}",
+                adjudicated_by="reviewer-1",
+            )
+            for proposal, status in zip(proposals[:3], statuses, strict=True)
+        )
+        state["calibration"] = summarize_correspondence_calibration(
+            state["proposal_set"], AdjudicationSet(decisions=decisions)
+        )
+        return True, ""
+
+    def assert_calibration_precision(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del examples
+        match = re.search(r"is (\d+) of (\d+) resolved coverage", text)
+        summary = _state(world).get("calibration")
+        expected = tuple(map(int, match.groups())) if match else (-1, -1)
+        actual = (summary.precision_numerator, summary.precision_denominator)
+        return actual == expected, f"calibration precision evidence was {actual}"
+
+    def assert_calibration_open_counts(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del examples
+        match = re.search(r"retains (\d+) unresolved and (\d+) unreviewed", text)
+        summary = _state(world).get("calibration")
+        expected = tuple(map(int, match.groups())) if match else (-1, -1)
+        actual = (
+            summary.coverage_bearing.unresolved,
+            summary.coverage_bearing.unreviewed,
+        )
+        return actual == expected, f"calibration open counts were {actual}"
+
     def assert_dangling(world: World, text: str, examples: dict) -> tuple[bool, str]:
         del examples
         match = re.search(r'code "([^"]+)"', text)
@@ -1061,6 +1150,18 @@ def _register(api: Any) -> None:
             assert_rejected_code,
         ),
         (
+            r'^accepted-resource-link evidence claims "[^"]+"$',
+            prepare_shared_resource_claim,
+        ),
+        (
+            r"^the shared-resource correspondence evidence is validated$",
+            validate_shared_resource_claim,
+        ),
+        (
+            r'^the coverage claim is rejected with diagnostic "[^"]+"$',
+            assert_shared_resource_rejected,
+        ),
+        (
             r"^a shared resource authority has no correspondence proposal$",
             prepare_no_proposal,
         ),
@@ -1135,6 +1236,22 @@ def _register(api: Any) -> None:
         (
             r"^no duplicate accepted relation is returned$",
             assert_no_duplicate_relation,
+        ),
+        (
+            r"^four coverage-bearing proposals await independent review$",
+            prepare_calibration,
+        ),
+        (
+            r"^calibration records one confirmed one rejected one unresolved and one unreviewed$",
+            summarize_calibration,
+        ),
+        (
+            r"^calibration precision evidence is \d+ of \d+ resolved coverage proposals$",
+            assert_calibration_precision,
+        ),
+        (
+            r"^calibration retains \d+ unresolved and \d+ unreviewed proposal$",
+            assert_calibration_open_counts,
         ),
         (
             r'^a deterministic correspondence compatibility fixture includes valid Phase 2 sidecars for "([^"]+)"$',

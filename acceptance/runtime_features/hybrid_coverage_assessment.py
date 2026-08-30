@@ -45,6 +45,9 @@ from asago_scenario_generator.models.system_resource_map import (
     compute_control_structure_digest,
     compute_resource_map_semantic_digest,
 )
+from asago_scenario_generator.models.scenario import (
+    ScenarioEnvelope as TaxonomyScenarioEnvelope,
+)
 from asago_scenario_generator.pipeline.correspondence import (
     propose_correspondence,
     reconcile_correspondence,
@@ -86,6 +89,13 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysis,
     LossProvenance,
     SecurityConstraint,
+)
+from asago_scenario_generator.stpa.models.scenario_envelope import (
+    ScenarioEnvelope as StpaScenarioEnvelope,
+)
+from asago_scenario_generator.stpa.models.scenario_spec import (
+    ScenarioSpec as StpaScenarioSpec,
+    ThreatSource,
 )
 
 FEATURE_ID = "hybrid_coverage_assessment"
@@ -650,6 +660,83 @@ def _register(api: Any) -> None:
         _assess_facade(world)
         return True, ""
 
+    def real_scenario_envelopes(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del text, examples
+        inputs = _facade_inputs()
+        obligation = inputs.obligation_plan.obligations[0]
+        candidate = next(
+            item
+            for item in obligation.candidate_records
+            if item.projection_disposition == "projectable"
+        )
+        taxonomy_envelope = TaxonomyScenarioEnvelope.model_construct(
+            scenario_id="scenario:v2:" + "a" * 64,
+            candidate_id=candidate.candidate_id,
+        )
+        stpa_envelope = StpaScenarioEnvelope.model_construct(
+            scenario_id="SCN-001",
+            scenario_spec=StpaScenarioSpec.model_construct(
+                threat_source=ThreatSource(
+                    ica_slot_id=ICA_SLOT,
+                    ica_id=ICA_ID,
+                    provenance="structural",
+                )
+            ),
+        )
+        _state(world).update(
+            {
+                "facade_inputs": inputs,
+                "taxonomy_envelopes": (taxonomy_envelope,),
+                "stpa_envelopes": (stpa_envelope,),
+            }
+        )
+        return True, ""
+
+    def adapt_real_scenario_envelopes(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del text, examples
+        state = _state(world)
+        inputs = state["facade_inputs"]
+        state["taxonomy"] = TaxonomyCoverageInput.from_scenario_envelopes(
+            inputs.obligation_plan, state["taxonomy_envelopes"]
+        )
+        state["stpa"] = StpaCoverageInput.from_scenario_envelopes(
+            inputs.ica_enumeration, state["stpa_envelopes"]
+        )
+        return True, ""
+
+    def taxonomy_observation_count(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del examples
+        match = re.search(r"contain (\d+) exact obligation link", text)
+        observations = _state(world)["taxonomy"].scenarios
+        expected = int(match.group(1)) if match else -1
+        valid = all(item.obligation_id and item.candidate_id for item in observations)
+        return (
+            len(observations) == expected and valid,
+            f"taxonomy observations were {len(observations)}",
+        )
+
+    def stpa_observation_count(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del examples
+        match = re.search(r"contain (\d+) exact slot ICA and EXEC link", text)
+        observations = _state(world)["stpa"].scenarios
+        expected = int(match.group(1)) if match else -1
+        valid = all(
+            item.ica_slot_id and item.ica_id and item.exec_candidate_id
+            for item in observations
+        )
+        return (
+            len(observations) == expected and valid,
+            f"STPA observations were {len(observations)}",
+        )
+
     def proposal(world: World, text: str, examples: dict) -> tuple[bool, str]:
         del examples
         match = re.search(r'one "([^"]+)" proposal is explicitly "([^"]+)"', text)
@@ -1108,6 +1195,22 @@ def _register(api: Any) -> None:
         (
             r"^taxonomy and STPA are reconciled through the hybrid facade$",
             facade_assess,
+        ),
+        (
+            r"^real admitted taxonomy and STPA scenario envelopes are available$",
+            real_scenario_envelopes,
+        ),
+        (
+            r"^the real scenario envelopes are adapted for hybrid assessment$",
+            adapt_real_scenario_envelopes,
+        ),
+        (
+            r"^taxonomy observations contain \d+ exact obligation link$",
+            taxonomy_observation_count,
+        ),
+        (
+            r"^STPA observations contain \d+ exact slot ICA and EXEC link$",
+            stpa_observation_count,
         ),
         (r'^one "[^"]+" proposal is explicitly "[^"]+"$', proposal),
         (

@@ -35,6 +35,7 @@ from asago_scenario_generator.models.system_resource_map import (
 from asago_scenario_generator.pipeline.correspondence import (
     propose_correspondence,
     reconcile_correspondence,
+    summarize_correspondence_calibration,
 )
 from asago_scenario_generator.pipeline.obligation_planner import (
     plan_taxonomy_obligations,
@@ -467,6 +468,130 @@ def test_proposer_emits_closed_unconfirmed_typed_proposals() -> None:
     assert proposal_set.semantic_digest is not None
     with pytest.raises((TypeError, ValueError)):
         proposal.relation_kind = "mechanism_enables_ica"  # type: ignore[misc]
+
+
+def test_shared_resource_evidence_cannot_assert_semantic_coverage() -> None:
+    """A resource bridge proves shared identity, not a shared mechanism."""
+    resource_map = make_map()
+
+    with pytest.raises(ValueError, match="accepted resource link.*noncoverage"):
+        _evidence(resource_map, evidence_source="accepted_resource_link")
+
+    evidence = _evidence(
+        resource_map,
+        evidence_source="accepted_resource_link",
+        relation_kind="related_but_not_coverage",
+        rationale="Both records concern the reviewed resource; mechanism unreviewed",
+    )
+    proposal_set = _proposal_set(resource_map, evidence)
+
+    assert proposal_set.proposals[0].relation_kind == "related_but_not_coverage"
+
+
+def test_calibration_reports_exact_resolved_coverage_precision() -> None:
+    """Precision excludes unreviewed/unresolved and never changes coverage state."""
+    resource_map = make_map()
+    proposal_set = _proposal_set(
+        resource_map,
+        _evidence(
+            resource_map,
+            relation_kind="same_mechanism",
+            evidence_refs=("review:confirmed",),
+        ),
+        _evidence(
+            resource_map,
+            relation_kind="mechanism_enables_ica",
+            evidence_refs=("review:rejected",),
+        ),
+        _evidence(
+            resource_map,
+            relation_kind="ica_specializes_mechanism",
+            evidence_refs=("review:unresolved",),
+        ),
+        _evidence(
+            resource_map,
+            relation_kind="related_but_not_coverage",
+            evidence_refs=("review:unreviewed",),
+        ),
+    )
+    by_kind = {item.relation_kind: item for item in proposal_set.proposals}
+    adjudications = AdjudicationSet(
+        decisions=(
+            CorrespondenceAdjudication(
+                proposal_id=by_kind["same_mechanism"].proposal_id,
+                status="confirmed",
+                reason="reviewed same mechanism",
+                adjudicated_by="reviewer-1",
+            ),
+            CorrespondenceAdjudication(
+                proposal_id=by_kind["mechanism_enables_ica"].proposal_id,
+                status="rejected",
+                reason="review disproved the proposed mechanism dependency",
+                adjudicated_by="reviewer-1",
+            ),
+            CorrespondenceAdjudication(
+                proposal_id=by_kind["ica_specializes_mechanism"].proposal_id,
+                status="unresolved",
+                reason="available evidence cannot distinguish specialization",
+                adjudicated_by="reviewer-1",
+            ),
+        )
+    )
+
+    summary = summarize_correspondence_calibration(proposal_set, adjudications)
+
+    assert summary.all_proposals.proposed == 4
+    assert summary.all_proposals.reviewed == 3
+    assert summary.all_proposals.unreviewed == 1
+    assert summary.coverage_bearing.confirmed == 1
+    assert summary.coverage_bearing.rejected == 1
+    assert summary.coverage_bearing.unresolved == 1
+    assert summary.noncoverage.unreviewed == 1
+    assert (summary.precision_numerator, summary.precision_denominator) == (1, 2)
+    assert not hasattr(summary, "accepted_relations")
+
+
+def test_calibration_preserves_zero_precision_when_no_coverage_hypothesis_is_reviewed() -> (
+    None
+):
+    """An unreviewed noncoverage proposal yields an explicit zero-over-zero record."""
+    resource_map = make_map()
+    proposal_set = _proposal_set(
+        resource_map,
+        _evidence(
+            resource_map,
+            relation_kind="related_but_not_coverage",
+            evidence_refs=("review:unreviewed-only",),
+        ),
+    )
+
+    summary = summarize_correspondence_calibration(proposal_set, AdjudicationSet())
+
+    assert summary.all_proposals.unreviewed == 1
+    assert summary.coverage_bearing.proposed == 0
+    assert summary.precision_numerator == 0
+    assert summary.precision_denominator == 0
+
+
+@pytest.mark.parametrize(
+    ("proposals", "adjudications", "message"),
+    (
+        (object(), AdjudicationSet(), "proposals must be a ProposalSet"),
+        (
+            _proposal_set(make_map()),
+            object(),
+            "adjudications must be an AdjudicationSet",
+        ),
+    ),
+)
+def test_calibration_requires_closed_typed_inputs(
+    proposals: object, adjudications: object, message: str
+) -> None:
+    """Calibration cannot summarize loose or structurally unverified records."""
+    with pytest.raises(TypeError, match=message):
+        summarize_correspondence_calibration(  # type: ignore[arg-type]
+            proposals, adjudications
+        )
 
 
 def test_public_seams_require_validated_map_attestation() -> None:

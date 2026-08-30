@@ -66,7 +66,14 @@ changing acceptance behavior, or running the quality sequence.
   consumes only a successful `SystemResourceMapValidation` attestation;
   defective nonaccepted proposals remain global traceable diagnostics, and
   missing resource-map evidence is assessed against each obligation's exact
-  candidate resource references. Publish the normative
+  candidate resource references. Treat `accepted_resource_link` evidence as
+  shared identity only: it may produce `related_but_not_coverage`, never a
+  coverage-bearing relation without independent exact-ID or curated mechanism
+  evidence. Adapt legacy taxonomy and STPA scenario envelopes only through
+  exact candidate and slot/ICA/`EXEC:*` identities; unknown identities fail
+  closed. Keep proposer calibration separate from coverage and retain exact
+  confirmed/rejected/unresolved/unreviewed counts rather than a score without
+  its denominator. Publish the normative
   YAML artifacts atomically. Neither existing generation workflow may import
   or require Phase 2 artifacts, and Phase 2 must not construct provider clients
   or contact endpoints.

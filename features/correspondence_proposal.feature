@@ -1,6 +1,6 @@
-# mutation-stamp: sha256=d83609f81442ea76411cbe4c8f28a831a472704b7a484edb2de3c36e518df15e
+# mutation-stamp: sha256=6cf0f46247c5687f8d136ef53e5c2861f6d82787e42b3bbbaed2ca3628f26fe2
 # acceptance-mutation-manifest-begin
-# {"version":1,"tested_at":"2026-08-29T14:32:25.661176Z","feature_name":"Normative correspondence proposals","feature_path":"features/correspondence_proposal.feature","background_hash":"78aceb8c7ed78f6df84f4589ce6da7176d0565b9385733fa516f4783ad40532f","implementation_hash":"sha256:cb65ca606474103bfe2d0c0379518b34a7bc7ffe68d1a2bf6610cf175210063e","scenarios":[{"index":1,"name":"capability snapshot substitution fails closed","scenario_hash":"0219364e8827cd32b348b3e73614ddfe4450daba1df343cacc6aa7e6a9e777a3","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-29T14:32:25.661176Z"}]}
+# {"version":1,"tested_at":"2026-08-30T00:27:09.440651Z","feature_name":"Normative correspondence proposals","feature_path":"features/correspondence_proposal.feature","background_hash":"78aceb8c7ed78f6df84f4589ce6da7176d0565b9385733fa516f4783ad40532f","implementation_hash":"sha256:cb65ca606474103bfe2d0c0379518b34a7bc7ffe68d1a2bf6610cf175210063e","scenarios":[{"index":1,"name":"capability snapshot substitution fails closed","scenario_hash":"0219364e8827cd32b348b3e73614ddfe4450daba1df343cacc6aa7e6a9e777a3","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-30T00:27:09.440651Z"},{"index":4,"name":"shared resource identity is not mechanism evidence","scenario_hash":"6ac29757ab2c592c071e33bbe595b7039cafb96c7b31281d098b2cbdcf19fcde","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-30T00:27:09.440651Z"}]}
 # acceptance-mutation-manifest-end
 
 Feature: Normative correspondence proposals
@@ -39,3 +39,12 @@ Feature: Normative correspondence proposals
     When the advisory proposal is reconciled with explicit confirmation
     Then reconciliation rejects confirmation with code "non_authoritative_resource_link"
     And the proposal is not confirmed
+
+  Scenario Outline: shared resource identity is not mechanism evidence
+    Given accepted-resource-link evidence claims "<relation_kind>"
+    When the shared-resource correspondence evidence is validated
+    Then the coverage claim is rejected with diagnostic "<diagnostic>"
+
+    Examples:
+      | relation_kind  | diagnostic                                        |
+      | same_mechanism | accepted resource link evidence supports noncoverage only |

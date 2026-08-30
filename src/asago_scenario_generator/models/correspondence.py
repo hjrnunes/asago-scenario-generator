@@ -594,7 +594,7 @@ class CorrespondenceEvidence(_CorrespondenceModel):
 
     @model_validator(mode="after")
     def canonicalize_evidence(self) -> "CorrespondenceEvidence":
-        """Canonicalize set-like fields and reject duplicate references."""
+        """Canonicalize references and keep shared-resource evidence advisory."""
         _set_canonical_fields(
             self,
             (
@@ -605,6 +605,15 @@ class CorrespondenceEvidence(_CorrespondenceModel):
                 "evidence_refs",
             ),
         )
+        if (
+            self.evidence_source == "accepted_resource_link"
+            and self.relation_kind != "related_but_not_coverage"
+        ):
+            raise ValueError(
+                "accepted resource link evidence supports noncoverage only; "
+                "coverage-bearing correspondence requires exact-ID or curated "
+                "mechanism evidence"
+            )
         return self
 
 
@@ -944,6 +953,55 @@ class AdjudicationSet(_CorrespondenceModel):
         if len({item.proposal_id for item in ordered}) != len(ordered):
             raise ValueError("adjudications must contain one decision per proposal")
         object.__setattr__(self, "decisions", ordered)
+        return self
+
+
+class CorrespondenceCalibrationBucket(_CorrespondenceModel):
+    """Exact adjudication counts for one proposal class."""
+
+    proposed: int = Field(ge=0)
+    reviewed: int = Field(ge=0)
+    confirmed: int = Field(ge=0)
+    rejected: int = Field(ge=0)
+    unresolved: int = Field(ge=0)
+    unreviewed: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def reconcile_counts(self) -> "CorrespondenceCalibrationBucket":
+        """Require proposed and reviewed populations to reconcile exactly."""
+        if self.reviewed != self.confirmed + self.rejected + self.unresolved:
+            raise ValueError("reviewed calibration counts do not reconcile")
+        if self.proposed != self.reviewed + self.unreviewed:
+            raise ValueError("proposed calibration counts do not reconcile")
+        return self
+
+
+class CorrespondenceCalibrationSummary(_CorrespondenceModel):
+    """Review evidence for a proposer, kept separate from coverage matrices."""
+
+    all_proposals: CorrespondenceCalibrationBucket
+    coverage_bearing: CorrespondenceCalibrationBucket
+    noncoverage: CorrespondenceCalibrationBucket
+    precision_numerator: int = Field(ge=0)
+    precision_denominator: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def reconcile_summary(self) -> "CorrespondenceCalibrationSummary":
+        """Pin precision to resolved reviews of coverage-bearing proposals."""
+        for field_name in CorrespondenceCalibrationBucket.model_fields:
+            if getattr(self.all_proposals, field_name) != getattr(
+                self.coverage_bearing, field_name
+            ) + getattr(self.noncoverage, field_name):
+                raise ValueError("calibration proposal classes do not reconcile")
+        expected_numerator = self.coverage_bearing.confirmed
+        expected_denominator = (
+            self.coverage_bearing.confirmed + self.coverage_bearing.rejected
+        )
+        if (
+            self.precision_numerator != expected_numerator
+            or self.precision_denominator != expected_denominator
+        ):
+            raise ValueError("calibration precision evidence does not reconcile")
         return self
 
 
