@@ -60,6 +60,8 @@ CONFIRMED_COVERAGE_REVIEW_SCHEMA_VERSION = "confirmed-coverage-review-v1"
 HYBRID_BRIDGE_LINK_SCHEMA_VERSION = "hybrid-bridge-link-v1"
 HYBRID_BRIDGE_EVIDENCE_SCHEMA_VERSION = "hybrid-bridge-evidence-v1"
 CAPABILITY_FACT_ATTESTATION_SCHEMA_VERSION = "capability-fact-attestation-v1"
+HYBRID_SCENARIO_PROJECTION_SCHEMA_VERSION = "hybrid-scenario-projection-v1"
+HYBRID_SCENARIO_PROJECTION_SET_SCHEMA_VERSION = "hybrid-scenario-projection-set-v1"
 
 _MECHANISM_DIGEST_DOMAIN = "asago.taxonomy-mechanism-projection.v1"
 _CAUSAL_DIGEST_DOMAIN = "asago.stpa-causal-projection.v1"
@@ -69,6 +71,7 @@ _REVIEW_DIGEST_DOMAIN = "asago.confirmed-coverage-review.v1"
 _BRIDGE_EVIDENCE_DIGEST_DOMAIN = "asago.hybrid-bridge-evidence.v1"
 _BRIDGE_LINK_DIGEST_DOMAIN = "asago.hybrid-bridge-link.v1"
 _PROJECTION_DIGEST_DOMAIN = "asago.hybrid-scenario-projection.v1"
+_PROJECTION_ID_DOMAIN = "asago.hybrid-scenario-projection.v1.identity.v1"
 _PROJECTION_SET_DIGEST_DOMAIN = "asago.hybrid-scenario-projection-set.v1"
 PHASE1_CANDIDATE_RECORD_DIGEST_DOMAIN = "asago.phase1-candidate-record.v1"
 STPA_EXECUTION_PROJECTION_DIGEST_DOMAIN = "asago.stpa-execution-projection.v1"
@@ -1341,6 +1344,20 @@ class ProjectionExclusion(_ProjectionModel):
         object.__setattr__(self, "exclusion_id", expected)
         return self
 
+    def assert_integrity(self) -> None:
+        """Verify the exclusion identity and its canonical source pins."""
+        if len(self.unit_identity) != 5 or self.unit_identity[0] != self.relation_id:
+            raise ValueError("exclusion unit identity is invalid")
+        if tuple(self.source_pins) != _canonical_projection_source_pins(
+            self.source_pins
+        ):
+            raise ValueError("exclusion source pins are not canonical")
+        expected = _derive_id(
+            self, "exclusion:v1:", _PROJECTION_SET_DIGEST_DOMAIN, "exclusion_id"
+        )
+        if self.exclusion_id != expected:
+            raise ValueError("exclusion ID does not match content")
+
 
 class ProjectionDiagnostic(_ProjectionModel):
     """A traceable diagnostic that does not count as a projection."""
@@ -1367,6 +1384,18 @@ class ProjectionDiagnostic(_ProjectionModel):
             raise ValueError("diagnostic ID does not match content")
         object.__setattr__(self, "diagnostic_id", expected)
         return self
+
+    def assert_integrity(self) -> None:
+        """Verify the diagnostic identity and its canonical source pins."""
+        if tuple(self.source_pins) != _canonical_projection_source_pins(
+            self.source_pins
+        ):
+            raise ValueError("diagnostic source pins are not canonical")
+        expected = _derive_id(
+            self, "diagnostic:v1:", _PROJECTION_SET_DIGEST_DOMAIN, "diagnostic_id"
+        )
+        if self.diagnostic_id != expected:
+            raise ValueError("diagnostic ID does not match content")
 
 
 class HybridProjectionUnit(_ProjectionModel):
@@ -1600,6 +1629,414 @@ def _set_resolution_digest(value: HybridProjectionResolution) -> None:
     object.__setattr__(value, "semantic_digest", expected)
 
 
+class HybridScenarioProjection(_ProjectionModel):
+    """One complete, bridge-connected taxonomy/STPA projection.
+
+    The model deliberately contains only the two already-authoritative local
+    projections and their explicit bridges.  It is a validated projection,
+    not a scenario, execution result, readiness verdict, or admission claim.
+    """
+
+    schema_version: Literal[HYBRID_SCENARIO_PROJECTION_SCHEMA_VERSION] = (
+        HYBRID_SCENARIO_PROJECTION_SCHEMA_VERSION
+    )
+    projection_id: str = ""
+    relation_id: RelationId
+    obligation_id: ObligationId
+    risk_id: Identifier
+    attack_pattern_id: Identifier
+    selected_candidate_id: CandidateId
+    ica_slot_id: Identifier
+    ica_id: Identifier
+    exec_candidate_id: ExecCandidateId
+    relation_kind: CorrespondenceRelationKind
+    evidence_class: Literal[
+        "normative_bookkeeping_fixture", "reviewed_semantic_evidence"
+    ]
+    causal_projection: CausalProjection
+    mechanism_projection: MechanismProjection
+    bridge_links: tuple[BridgeLink, ...] = Field(min_length=1)
+    confirmed_review: ConfirmedCoverageReview
+    risk_trace: tuple[ProjectionTraceReference, ...] = Field(min_length=1)
+    source_pins: tuple[ProjectionSourcePin, ...] = Field(min_length=1)
+    semantic_digest: Digest | None = None
+
+    @model_validator(mode="after")
+    def canonicalize_and_verify(self) -> "HybridScenarioProjection":
+        _validate_projection_identity(self)
+        _validate_projection_bridges(self)
+        object.__setattr__(
+            self,
+            "bridge_links",
+            tuple(
+                sorted(
+                    self.bridge_links,
+                    key=lambda item: (item.bridge_kind, item.bridge_id),
+                )
+            ),
+        )
+        object.__setattr__(
+            self,
+            "risk_trace",
+            tuple(
+                sorted(
+                    self.risk_trace,
+                    key=lambda item: (
+                        item.source_kind,
+                        item.record_id,
+                        item.artifact_pin.artifact_id,
+                        item.artifact_pin.schema_version,
+                        item.artifact_pin.semantic_digest,
+                    ),
+                )
+            ),
+        )
+        object.__setattr__(
+            self,
+            "source_pins",
+            _canonical_projection_source_pins(self.source_pins),
+        )
+        _set_projection_id(self)
+        _set_projection_digest(self)
+        return self
+
+    def assert_integrity(self) -> None:
+        """Verify local authorities, bridges, and the projection digest."""
+        self.causal_projection.assert_integrity()
+        self.mechanism_projection.assert_integrity()
+        self.confirmed_review.assert_integrity()
+        for bridge in self.bridge_links:
+            bridge.assert_integrity()
+        if self.semantic_digest != _semantic_digest(self, _PROJECTION_DIGEST_DOMAIN):
+            raise ValueError("hybrid scenario projection semantic digest mismatch")
+
+
+def _validate_projection_identity(value: HybridScenarioProjection) -> None:
+    """Require both complete local projections to retain the exact relation."""
+    mechanism = value.mechanism_projection
+    causal = value.causal_projection
+    checks = (
+        (value.obligation_id, mechanism.obligation_id, "obligation"),
+        (value.risk_id, mechanism.risk_id, "risk"),
+        (value.attack_pattern_id, mechanism.attack_pattern_id, "attack pattern"),
+        (value.selected_candidate_id, mechanism.selected_candidate_id, "candidate"),
+        (value.ica_slot_id, causal.uca_slot_id, "ICA slot"),
+        (value.ica_id, causal.ica_id, "ICA"),
+        (value.exec_candidate_id, causal.exec_candidate_id, "EXEC candidate"),
+    )
+    for expected, actual, label in checks:
+        if expected != actual:
+            raise ValueError(f"hybrid projection {label} identity does not match")
+    if value.confirmed_review.relation_id != value.relation_id:
+        raise ValueError("hybrid projection review does not match relation")
+
+
+def _validate_projection_bridges(value: HybridScenarioProjection) -> None:
+    """Require every composed bridge to belong to this accepted relation."""
+    if any(bridge.relation_id != value.relation_id for bridge in value.bridge_links):
+        raise ValueError("hybrid projection bridge does not match relation")
+
+
+def _canonical_projection_source_pins(
+    pins: Sequence[ProjectionSourcePin],
+) -> tuple[ProjectionSourcePin, ...]:
+    """Sort pins and reject duplicate source identities with new digests."""
+    by_identity: dict[tuple[str, ...], ProjectionSourcePin] = {}
+    by_source: dict[tuple[str, ...], ProjectionSourcePin] = {}
+    for pin in pins:
+        _record_projection_source_pin(pin, by_identity, by_source)
+    return tuple(sorted(by_identity.values(), key=_source_pin_key))
+
+
+def _record_projection_source_pin(
+    pin: ProjectionSourcePin,
+    by_identity: dict[tuple[str, ...], ProjectionSourcePin],
+    by_source: dict[tuple[str, ...], ProjectionSourcePin],
+) -> None:
+    """Record one pin after checking role and underlying-source conflicts."""
+    identity = _projection_pin_identity(pin)
+    source = _projection_pin_source(pin)
+    _reject_pin_identity_conflict(by_identity.get(identity), pin)
+    _reject_pin_source_conflict(by_source.get(source), pin)
+    by_identity[identity] = pin
+    by_source[source] = pin
+
+
+def _reject_pin_identity_conflict(
+    previous: ProjectionSourcePin | None, pin: ProjectionSourcePin
+) -> None:
+    """Reject two different digests for one role-labelled pin."""
+    if previous is not None and previous != pin:
+        raise ValueError("projection source pin identity has conflicting digests")
+
+
+def _reject_pin_source_conflict(
+    previous: ProjectionSourcePin | None, pin: ProjectionSourcePin
+) -> None:
+    """Reject different digests for one underlying source identity."""
+    if previous is not None and _projection_pin_digest(
+        previous
+    ) != _projection_pin_digest(pin):
+        raise ValueError("projection source identity has conflicting digests")
+
+
+def _projection_pin_identity(pin: ProjectionSourcePin) -> tuple[str, ...]:
+    """Return one role-labelled pin identity without its digest."""
+    if isinstance(pin, ArtifactProjectionSourcePin):
+        return ("artifact", pin.role, pin.pin.artifact_id, pin.pin.schema_version)
+    return ("taxonomy", pin.role, pin.taxonomy_id, pin.pin.release)
+
+
+def _projection_pin_source(pin: ProjectionSourcePin) -> tuple[str, ...]:
+    """Return one underlying pin identity independent of role."""
+    if isinstance(pin, ArtifactProjectionSourcePin):
+        return ("artifact", pin.pin.artifact_id, pin.pin.schema_version)
+    return ("taxonomy", pin.taxonomy_id, pin.pin.release)
+
+
+def _projection_pin_digest(pin: ProjectionSourcePin) -> str:
+    """Return the content digest carried by one source pin."""
+    if isinstance(pin, ArtifactProjectionSourcePin):
+        return pin.pin.semantic_digest
+    return pin.pin.digest
+
+
+def _set_projection_id(value: HybridScenarioProjection) -> None:
+    """Derive and validate one content-addressed projection identity."""
+    expected = _derive_id(
+        value, "projection:v1:", _PROJECTION_ID_DOMAIN, "projection_id"
+    )
+    _validate_optional_derived_value(value.projection_id, expected, "projection_id")
+    object.__setattr__(value, "projection_id", expected)
+
+
+def _set_projection_digest(value: HybridScenarioProjection) -> None:
+    """Derive and validate the complete projection semantic digest."""
+    expected = _semantic_digest(value, _PROJECTION_DIGEST_DOMAIN)
+    _validate_optional_derived_value(
+        value.semantic_digest, expected, "projection semantic_digest"
+    )
+    object.__setattr__(value, "semantic_digest", expected)
+
+
+class HybridScenarioProjectionSet(_ProjectionModel):
+    """Canonical in-memory collection of composed Phase 4 projections."""
+
+    schema_version: Literal[HYBRID_SCENARIO_PROJECTION_SET_SCHEMA_VERSION] = (
+        HYBRID_SCENARIO_PROJECTION_SET_SCHEMA_VERSION
+    )
+    assessment_digest: Digest
+    projection_contract_version: Literal[HYBRID_SCENARIO_PROJECTION_SCHEMA_VERSION] = (
+        HYBRID_SCENARIO_PROJECTION_SCHEMA_VERSION
+    )
+    source_pins: tuple[ProjectionSourcePin, ...] = Field(min_length=1)
+    projections: tuple[HybridScenarioProjection, ...] = ()
+    exclusions: tuple[ProjectionExclusion, ...] = ()
+    diagnostics: tuple[ProjectionDiagnostic, ...] = ()
+    evidence_class: Literal[
+        "normative_bookkeeping_fixture", "reviewed_semantic_evidence"
+    ]
+    semantic_digest: Digest | None = None
+
+    @model_validator(mode="after")
+    def canonicalize_and_verify(self) -> "HybridScenarioProjectionSet":
+        _canonicalize_projection_set_values(self)
+        _validate_projection_set_collections(self)
+        _require_projection_pin_closure(
+            self.source_pins,
+            (*self.projections, *self.exclusions, *self.diagnostics),
+        )
+        _set_projection_set_digest(self)
+        return self
+
+    def assert_integrity(self) -> None:
+        """Verify every projection and the enclosing set digest."""
+        for projection in self.projections:
+            projection.assert_integrity()
+        for exclusion in self.exclusions:
+            exclusion.assert_integrity()
+        for diagnostic in self.diagnostics:
+            diagnostic.assert_integrity()
+        _validate_projection_set_collections(self)
+        _require_projection_pin_closure(
+            self.source_pins,
+            (*self.projections, *self.exclusions, *self.diagnostics),
+        )
+        if self.semantic_digest != _semantic_digest(
+            self, _PROJECTION_SET_DIGEST_DOMAIN
+        ):
+            raise ValueError("hybrid scenario projection set digest mismatch")
+
+
+def _canonicalize_projection_set_values(value: HybridScenarioProjectionSet) -> None:
+    """Sort every set collection and canonicalize its source pins."""
+    object.__setattr__(
+        value,
+        "projections",
+        tuple(sorted(value.projections, key=_projection_sort_key)),
+    )
+    object.__setattr__(
+        value,
+        "exclusions",
+        tuple(sorted(value.exclusions, key=_exclusion_sort_key)),
+    )
+    object.__setattr__(
+        value,
+        "diagnostics",
+        tuple(sorted(value.diagnostics, key=_diagnostic_sort_key)),
+    )
+    object.__setattr__(
+        value,
+        "source_pins",
+        _canonical_projection_source_pins(value.source_pins),
+    )
+
+
+def _projection_sort_key(value: HybridScenarioProjection) -> tuple[str, ...]:
+    """Return the normative five-part projection ordering key."""
+    return (
+        value.relation_id,
+        value.obligation_id,
+        value.selected_candidate_id,
+        value.ica_id,
+        value.exec_candidate_id,
+    )
+
+
+def _exclusion_sort_key(value: ProjectionExclusion) -> tuple[str, ...]:
+    """Return the normative exclusion ordering key."""
+    return (value.relation_id, value.reason, value.exclusion_id)
+
+
+def _diagnostic_sort_key(value: ProjectionDiagnostic) -> tuple[str, ...]:
+    """Return the normative diagnostic ordering key."""
+    return (value.relation_id or "", value.kind, value.diagnostic_id)
+
+
+def _validate_projection_set_collections(value: HybridScenarioProjectionSet) -> None:
+    """Validate IDs, relation exclusivity, and homogeneous evidence class."""
+    _validate_projection_set_ids(value)
+    _validate_projection_set_relation_exclusivity(value)
+    _validate_projection_set_evidence_class(value)
+
+
+def _validate_projection_set_ids(value: HybridScenarioProjectionSet) -> None:
+    """Require unique identifiers in each set collection."""
+    _require_unique(
+        tuple(item.projection_id for item in value.projections),
+        "projection IDs must be unique",
+    )
+    _require_unique(
+        tuple(item.relation_id for item in value.projections),
+        "projection relation IDs must be unique",
+    )
+    _require_unique(
+        tuple(item.exclusion_id for item in value.exclusions),
+        "exclusion IDs must be unique",
+    )
+    _require_unique(
+        tuple(item.diagnostic_id for item in value.diagnostics),
+        "diagnostic IDs must be unique",
+    )
+
+
+def _validate_projection_set_relation_exclusivity(
+    value: HybridScenarioProjectionSet,
+) -> None:
+    """Prevent one relation from being both projected and excluded."""
+    projection_relations = {item.relation_id for item in value.projections}
+    excluded_relations = {item.relation_id for item in value.exclusions}
+    if projection_relations & excluded_relations:
+        raise ValueError("projection and exclusion relation IDs conflict")
+
+
+def _validate_projection_set_evidence_class(
+    value: HybridScenarioProjectionSet,
+) -> None:
+    """Require all projections in one set to share its evidence class."""
+    if any(item.evidence_class != value.evidence_class for item in value.projections):
+        raise ValueError("projection evidence classes must be homogeneous")
+
+
+def _require_projection_pin_closure(
+    set_pins: Sequence[ProjectionSourcePin],
+    records: Sequence[
+        HybridScenarioProjection | ProjectionExclusion | ProjectionDiagnostic
+    ],
+) -> None:
+    """Require exact record pins and every nested artifact pin in the set."""
+    expected = _canonical_projection_source_pins(
+        tuple(pin for record in records for pin in record.source_pins)
+    )
+    if tuple(set_pins) != expected:
+        raise ValueError(
+            "projection set source pins are not an exact source-pin closure"
+        )
+    _require_nested_artifact_pins(records, set_pins)
+
+
+def _require_nested_artifact_pins(
+    records: Sequence[
+        HybridScenarioProjection | ProjectionExclusion | ProjectionDiagnostic
+    ],
+    set_pins: Sequence[ProjectionSourcePin],
+) -> None:
+    """Require unlabelled traces and bridge evidence to match a set pin."""
+    for record in records:
+        _require_record_trace_pins(record, set_pins)
+        _require_record_bridge_pins(record, set_pins)
+
+
+def _require_record_trace_pins(
+    record: HybridScenarioProjection | ProjectionExclusion | ProjectionDiagnostic,
+    set_pins: Sequence[ProjectionSourcePin],
+) -> None:
+    """Require every trace attached to one set record to be pinned."""
+    traces = (
+        record.trace
+        if isinstance(record, ProjectionExclusion | ProjectionDiagnostic)
+        else record.risk_trace
+    )
+    for trace in traces:
+        _require_artifact_pin_match(trace.artifact_pin, set_pins, "trace artifact pin")
+
+
+def _require_record_bridge_pins(
+    record: HybridScenarioProjection | ProjectionExclusion | ProjectionDiagnostic,
+    set_pins: Sequence[ProjectionSourcePin],
+) -> None:
+    """Require every bridge evidence artifact to be present in the set pins."""
+    if not isinstance(record, HybridScenarioProjection):
+        return
+    for bridge in record.bridge_links:
+        for evidence in bridge.evidence:
+            _require_artifact_pin_match(
+                evidence.artifact_pin, set_pins, "bridge evidence artifact pin"
+            )
+
+
+def _require_artifact_pin_match(
+    artifact: ArtifactPin,
+    set_pins: Sequence[ProjectionSourcePin],
+    label: str,
+) -> None:
+    """Require one unlabelled artifact pin to match a labelled source pin."""
+    if not any(
+        isinstance(pin, ArtifactProjectionSourcePin) and pin.pin == artifact
+        for pin in set_pins
+    ):
+        raise ValueError(f"projection set omits {label}")
+
+
+def _set_projection_set_digest(value: HybridScenarioProjectionSet) -> None:
+    """Derive and validate the complete projection-set semantic digest."""
+    expected = _semantic_digest(value, _PROJECTION_SET_DIGEST_DOMAIN)
+    _validate_optional_derived_value(
+        value.semantic_digest, expected, "projection set semantic_digest"
+    )
+    object.__setattr__(value, "semantic_digest", expected)
+
+
 __all__ = [
     "ArtifactProjectionSourcePin",
     "BridgeAuthorityIdentity",
@@ -1616,6 +2053,8 @@ __all__ = [
     "HybridCorrespondenceAttestation",
     "HybridProjectionResolution",
     "HybridProjectionUnit",
+    "HybridScenarioProjection",
+    "HybridScenarioProjectionSet",
     "MechanismProjection",
     "MechanismEvidenceAttestation",
     "ProjectionDiagnostic",
@@ -1631,6 +2070,8 @@ __all__ = [
     "HYBRID_BRIDGE_EVIDENCE_SCHEMA_VERSION",
     "HYBRID_BRIDGE_LINK_SCHEMA_VERSION",
     "HYBRID_CORRESPONDENCE_ATTESTATION_SCHEMA_VERSION",
+    "HYBRID_SCENARIO_PROJECTION_SCHEMA_VERSION",
+    "HYBRID_SCENARIO_PROJECTION_SET_SCHEMA_VERSION",
     "MECHANISM_PROJECTION_SCHEMA_VERSION",
     "PHASE1_CANDIDATE_RECORD_DIGEST_DOMAIN",
     "PINNED_STPA_PROJECTION_ATTESTATION_SCHEMA_VERSION",

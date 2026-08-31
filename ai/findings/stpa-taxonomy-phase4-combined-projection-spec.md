@@ -817,7 +817,7 @@ The first release uses this closed relation-local exclusion vocabulary:
 
 ```text
 relation_not_accepted
-related_but_not_coverage
+relation_not_coverage
 relation_unresolved
 relation_contradictory
 challenge_outcome_not_correspondence

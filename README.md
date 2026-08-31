@@ -425,7 +425,7 @@ correspondence and coverage changes and retains hybrid generation/admission as
 Klarna/NHS fixture retains the old taxonomy IDs only as lineage evidence and
 infers zero challenge targets from them.
 
-### Phase 4 exact projection resolution
+### Phase 4 exact projection resolution and composition
 
 Phase 4 starts with a deliberately narrow, offline resolver. It does not yet
 build or run a combined scenario. `resolve_hybrid_projection_units(...)`
@@ -443,9 +443,15 @@ resolver. A coverage-bearing relation either becomes one content-addressed
 `relation_not_coverage` exclusion. Cross-paired, substituted, malformed, or
 unverified top-level authorities fail closed.
 
-This Task 1 seam performs no graph composition, persistence, reporting, CLI
-work, model calls, or network access. Task 2 owns bridge and whole-graph
-composition; Task 3 will own the durable combined artifact. Ordinary
+The in-memory Task 2 composition seam is
+`build_hybrid_scenario_projection_set(...)`. It consumes the same closed input,
+uses the Task 1 resolver, applies the fixed typed bridge table, and validates
+the combined taxonomy, STPA, and bridge graph as one DAG. It returns
+content-addressed projections alongside the unchanged typed exclusions and
+diagnostics; it does not turn them into scores or execution decisions.
+
+These seams perform no persistence, reporting, CLI work, model calls, or
+network access. Durable publication remains a separate Phase 4 slice. Ordinary
 `generate` and `stpa-run` remain independent of Phase 4.
 
 ## STPA-based generation

@@ -53,6 +53,8 @@ from asago_scenario_generator.models.hybrid_scenario_projection import (
     HybridCorrespondenceAttestation,
     HybridProjectionResolution,
     HybridProjectionUnit,
+    HybridScenarioProjection,
+    HybridScenarioProjectionSet,
     MechanismEvidenceAttestation,
     MechanismProjection,
     PinnedStpaProjectionAttestation,
@@ -60,7 +62,7 @@ from asago_scenario_generator.models.hybrid_scenario_projection import (
     ProjectionSourcePin,
     ProjectionTraceReference,
     TaxonomyProjectionSourcePin,
-    _source_pin_key,
+    _canonical_projection_source_pins,
 )
 from asago_scenario_generator.models.obligation_plan import (
     CandidateRecord,
@@ -369,63 +371,8 @@ def _as_taxonomy_source_pin(
 def _canonical_source_pins(
     pins: Iterable[ProjectionSourcePin],
 ) -> tuple[ProjectionSourcePin, ...]:
-    """Canonicalize source pins and reject conflicting duplicate identities."""
-    by_identity: dict[tuple[str, ...], ProjectionSourcePin] = {}
-    by_source: dict[tuple[str, ...], ProjectionSourcePin] = {}
-    for pin in pins:
-        _record_source_pin(pin, by_identity, by_source)
-    return tuple(sorted(by_identity.values(), key=_source_pin_key))
-
-
-def _record_source_pin(
-    pin: ProjectionSourcePin,
-    by_identity: dict[tuple[str, ...], ProjectionSourcePin],
-    by_source: dict[tuple[str, ...], ProjectionSourcePin],
-) -> None:
-    """Add one source pin after checking role and source identity conflicts."""
-    key = _source_pin_identity(pin)
-    _reject_pin_identity_conflict(pin, by_identity.get(key))
-    source_key = _source_identity_without_role(pin)
-    _reject_source_identity_conflict(pin, by_source.get(source_key))
-    by_identity[key] = pin
-    by_source[source_key] = pin
-
-
-def _reject_pin_identity_conflict(
-    pin: ProjectionSourcePin, previous: ProjectionSourcePin | None
-) -> None:
-    """Reject the same role-labelled identity with a different digest."""
-    if previous is not None and previous != pin:
-        raise ValueError("source pin identity has conflicting digests")
-
-
-def _reject_source_identity_conflict(
-    pin: ProjectionSourcePin, previous: ProjectionSourcePin | None
-) -> None:
-    """Reject an underlying source identity with a different digest."""
-    if previous is not None and _source_pin_digest(previous) != _source_pin_digest(pin):
-        raise ValueError("source identity has conflicting digests")
-
-
-def _source_pin_identity(pin: ProjectionSourcePin) -> tuple[str, ...]:
-    """Return the identity tuple excluding the content digest."""
-    if isinstance(pin, ArtifactProjectionSourcePin):
-        return ("artifact", pin.role, pin.pin.artifact_id, pin.pin.schema_version)
-    return ("taxonomy", pin.role, pin.taxonomy_id, pin.pin.release)
-
-
-def _source_identity_without_role(pin: ProjectionSourcePin) -> tuple[str, ...]:
-    """Return the underlying source identity independent of its local role."""
-    if isinstance(pin, ArtifactProjectionSourcePin):
-        return ("artifact", pin.pin.artifact_id, pin.pin.schema_version)
-    return ("taxonomy", pin.taxonomy_id, pin.pin.release)
-
-
-def _source_pin_digest(pin: ProjectionSourcePin) -> str:
-    """Return the digest carried by one source pin."""
-    if isinstance(pin, ArtifactProjectionSourcePin):
-        return pin.pin.semantic_digest
-    return pin.pin.digest
+    """Reuse the inward canonicalizer for every adapter source-pin union."""
+    return _canonical_projection_source_pins(tuple(pins))
 
 
 def _candidate_record_digest(record: CandidateRecord) -> str:
@@ -2237,7 +2184,7 @@ def _taxonomy_endpoint_ids(
             for postcondition in step.observable_postconditions
         ),
     }
-    return identifiers[kind]
+    return identifiers.get(kind, ())
 
 
 def _stpa_endpoint_is_local(bridge: BridgeLink, causal: CausalProjection) -> bool:
@@ -2935,12 +2882,436 @@ def resolve_hybrid_projection_units(
     return result
 
 
+def build_hybrid_scenario_projection_set(
+    inputs: HybridProjectionInputs,
+) -> HybridScenarioProjectionSet:
+    """Compose resolved units into one closed in-memory projection set.
+
+    Task 2 owns the composition boundary.  It first runs the Task 1 resolver,
+    then creates one complete projection for each resolved relation.  No
+    provider, network, persistence, or generation path is involved here.
+    """
+    envelope = _require_type(inputs, HybridProjectionInputs, "inputs")
+    resolution = resolve_hybrid_projection_units(envelope)
+    projections: list[HybridScenarioProjection] = []
+    exclusions = list(resolution.exclusions)
+    for unit in resolution.units:
+        try:
+            projections.append(_compose_projection(unit, envelope))
+        except _CompositionFailure as failure:
+            exclusions.append(
+                _relation_exclusion(
+                    unit.relation_id,
+                    _relation_for_unit(unit, envelope),
+                    failure.reason,
+                    unit.source_pins,
+                )
+            )
+    return HybridScenarioProjectionSet(
+        assessment_digest=resolution.assessment_digest,
+        source_pins=resolution.source_pins,
+        projections=tuple(projections),
+        exclusions=tuple(exclusions),
+        diagnostics=resolution.diagnostics,
+        evidence_class=resolution.evidence_class,
+    )
+
+
+def _compose_projection(
+    unit: HybridProjectionUnit, inputs: HybridProjectionInputs
+) -> HybridScenarioProjection:
+    """Build one final projection from one already-authorized unit."""
+    _validate_union_graph(unit)
+    return HybridScenarioProjection(
+        relation_id=unit.relation_id,
+        obligation_id=unit.obligation_id,
+        risk_id=unit.risk_id,
+        attack_pattern_id=unit.attack_pattern_id,
+        selected_candidate_id=unit.selected_candidate_id,
+        ica_slot_id=unit.ica_slot_id,
+        ica_id=unit.ica_id,
+        exec_candidate_id=unit.exec_candidate_id,
+        relation_kind=unit.relation_kind,
+        evidence_class=unit.evidence_class,
+        causal_projection=unit.causal_projection,
+        mechanism_projection=unit.mechanism_projection,
+        bridge_links=unit.bridge_links,
+        confirmed_review=unit.confirmed_review,
+        risk_trace=_projection_risk_trace(unit, inputs),
+        source_pins=unit.source_pins,
+    )
+
+
+class _CompositionFailure(ValueError):
+    """Internal relation-local graph failure with a closed exclusion reason."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _relation_for_unit(
+    unit: HybridProjectionUnit, inputs: HybridProjectionInputs
+) -> AcceptedCorrespondenceRelation | None:
+    """Find the exact accepted relation retained by one resolved unit."""
+    return next(
+        (
+            relation
+            for relation in inputs.correspondence.accepted_relations
+            if relation.relation_id == unit.relation_id
+        ),
+        None,
+    )
+
+
+_COMPOSITION_BRIDGE_KINDS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
+    "corrupts_process_model": (
+        frozenset(
+            {"mechanism_step", "mechanism_precondition", "mechanism_postcondition"}
+        ),
+        frozenset({"process_model"}),
+    ),
+    "delays_feedback": (
+        frozenset({"mechanism_step", "mechanism_postcondition"}),
+        frozenset({"feedback"}),
+    ),
+    "perturbs_control_action": (
+        frozenset({"mechanism_step", "mechanism_postcondition"}),
+        frozenset({"control_action"}),
+    ),
+    "enables_unsafe_action": (
+        frozenset({"mechanism_step", "mechanism_postcondition"}),
+        frozenset({"uca", "ica"}),
+    ),
+    "realizes_unsafe_outcome": (
+        frozenset({"mechanism_step", "mechanism_postcondition"}),
+        frozenset({"hazard", "loss"}),
+    ),
+}
+
+_STPA_TARGET_ORDER: dict[str, tuple[str, ...]] = {
+    "loss": (
+        "hazard",
+        "constraint",
+        "controller",
+        "coordination_link",
+        "control_action",
+        "coordination_mechanism",
+        "uca",
+        "ica",
+        "exec",
+    ),
+    "hazard": (
+        "constraint",
+        "controller",
+        "coordination_link",
+        "control_action",
+        "coordination_mechanism",
+        "uca",
+        "ica",
+        "exec",
+    ),
+    "process_model": ("uca", "ica", "exec"),
+    "feedback": ("control_action", "coordination_mechanism", "uca", "ica", "exec"),
+    "control_action": ("uca", "ica", "exec"),
+    "uca": ("ica", "exec"),
+    "ica": ("exec",),
+    "exec": (),
+}
+
+
+_GraphKey = tuple[str, str, str]
+_GraphEdge = tuple[_GraphKey, _GraphKey, str]
+
+
+def _validate_union_graph(unit: HybridProjectionUnit) -> None:
+    """Validate both local graphs and their explicit taxonomy-to-STPA union."""
+    unit.assert_integrity()
+    taxonomy_nodes, taxonomy_edges = _taxonomy_graph(unit.mechanism_projection)
+    stpa_nodes, stpa_edges = _stpa_graph(unit.causal_projection)
+    edges: list[_GraphEdge] = [*taxonomy_edges, *stpa_edges]
+    bridge_keys: set[tuple[_GraphKey, _GraphKey]] = set()
+    authorized = False
+    for bridge in unit.bridge_links:
+        source, target = _validate_composition_bridge(
+            bridge, taxonomy_nodes, stpa_nodes, unit.causal_projection
+        )
+        if not bridge.is_authorized:
+            raise _CompositionFailure("bridge_unreviewed")
+        authorized = True
+        key = (source, target)
+        if key in bridge_keys:
+            raise _CompositionFailure("bridge_duplicate")
+        bridge_keys.add(key)
+        edges.append((source, target, "bridge"))
+    if not authorized:
+        raise _CompositionFailure("bridge_missing")
+    _validate_unique_graph_edges(edges)
+    _validate_acyclic_graph(edges)
+
+
+def _taxonomy_graph(
+    mechanism: MechanismProjection,
+) -> tuple[dict[tuple[str, str], _GraphKey], tuple[_GraphEdge, ...]]:
+    """Build typed taxonomy nodes and preserve canonical chain order."""
+    steps = mechanism.steps
+    nodes: dict[tuple[str, str], _GraphKey] = {}
+    edges: list[_GraphEdge] = []
+    for step in steps:
+        step_key = _taxonomy_key("mechanism_step", step.step_id)
+        nodes["mechanism_step", step.step_id] = step_key
+        for precondition in step.preconditions:
+            pre_key = _taxonomy_key("mechanism_precondition", precondition.condition_id)
+            nodes["mechanism_precondition", precondition.condition_id] = pre_key
+            edges.append((pre_key, step_key, "taxonomy"))
+        for postcondition in step.observable_postconditions:
+            post_key = _taxonomy_key(
+                "mechanism_postcondition", postcondition.postcondition_id
+            )
+            nodes["mechanism_postcondition", postcondition.postcondition_id] = post_key
+            edges.append((step_key, post_key, "taxonomy"))
+    for previous, following in zip(steps, steps[1:], strict=False):
+        edges.append(
+            (
+                _taxonomy_key("mechanism_step", previous.step_id),
+                _taxonomy_key("mechanism_step", following.step_id),
+                "taxonomy",
+            )
+        )
+    return nodes, tuple(edges)
+
+
+def _taxonomy_key(kind: str, record_id: str) -> _GraphKey:
+    """Return a namespace-qualified taxonomy graph identity."""
+    return ("taxonomy", kind, record_id)
+
+
+def _stpa_graph(
+    causal: CausalProjection,
+) -> tuple[dict[tuple[str, str], _GraphKey], tuple[_GraphEdge, ...]]:
+    """Copy exact STPA nodes and causal edges into the union namespace."""
+    nodes_by_id = {node.node_id: node for node in causal.nodes}
+    nodes = {
+        (node.kind, node.node_id): ("stpa", node.kind, node.node_id)
+        for node in causal.nodes
+    }
+    return nodes, tuple(_stpa_graph_edge(edge, nodes_by_id) for edge in causal.edges)
+
+
+def _stpa_graph_edge(
+    edge: CausalEdge, nodes_by_id: dict[str, CausalNode]
+) -> _GraphEdge:
+    """Translate one already-validated causal edge into union identities."""
+    source = nodes_by_id[edge.from_node_id]
+    target = nodes_by_id[edge.to_node_id]
+    return (
+        ("stpa", source.kind, source.node_id),
+        ("stpa", target.kind, target.node_id),
+        edge.kind,
+    )
+
+
+def _validate_composition_bridge(
+    bridge: BridgeLink,
+    taxonomy_nodes: dict[tuple[str, str], _GraphKey],
+    stpa_nodes: dict[tuple[str, str], _GraphKey],
+    causal: CausalProjection,
+) -> tuple[_GraphKey, _GraphKey]:
+    """Validate one exact endpoint-table bridge and its local order."""
+    source_kind, target_kind = _validated_bridge_endpoint_kinds(bridge)
+    source, target = _resolved_bridge_endpoints(
+        bridge, source_kind, target_kind, taxonomy_nodes, stpa_nodes
+    )
+    target_node = _causal_node_for_key(causal, target)
+    _validate_stpa_target_order(target_node, causal.nodes)
+    return source, target
+
+
+def _validated_bridge_endpoint_kinds(bridge: BridgeLink) -> tuple[str, str]:
+    """Validate the bridge table before resolving either endpoint."""
+    allowed = _COMPOSITION_BRIDGE_KINDS.get(bridge.bridge_kind)
+    if allowed is None:
+        raise _CompositionFailure("bridge_invalid_endpoint")
+    source_kind = bridge.taxonomy_endpoint.kind
+    target_kind = bridge.stpa_endpoint.kind
+    if source_kind not in allowed[0] or target_kind not in allowed[1]:
+        raise _CompositionFailure("bridge_invalid_endpoint")
+    return source_kind, target_kind
+
+
+def _resolved_bridge_endpoints(
+    bridge: BridgeLink,
+    source_kind: str,
+    target_kind: str,
+    taxonomy_nodes: dict[tuple[str, str], _GraphKey],
+    stpa_nodes: dict[tuple[str, str], _GraphKey],
+) -> tuple[_GraphKey, _GraphKey]:
+    """Resolve the exact namespace-qualified endpoints from the table."""
+    source = taxonomy_nodes.get((source_kind, bridge.taxonomy_endpoint.record_id))
+    target = stpa_nodes.get((target_kind, bridge.stpa_endpoint.record_id))
+    if source is None or target is None:
+        raise _CompositionFailure("bridge_invalid_endpoint")
+    return source, target
+
+
+def _causal_node_for_key(causal: CausalProjection, key: _GraphKey) -> CausalNode:
+    """Return the exact causal node represented by a namespaced graph key."""
+    for node in causal.nodes:
+        if node.kind == key[1] and node.node_id == key[2]:
+            return node
+    raise _CompositionFailure("bridge_invalid_endpoint")
+
+
+def _validate_stpa_target_order(
+    target: CausalNode, nodes: Sequence[CausalNode]
+) -> None:
+    """Require a bridged STPA target to precede its authority descendants."""
+    required_followers = _STPA_TARGET_ORDER.get(target.kind, ())
+    if any(
+        target.ordinal >= node.ordinal
+        for node in nodes
+        if node.kind in required_followers
+    ):
+        raise _CompositionFailure("ordering_violation")
+
+
+def _stpa_target_key(
+    nodes: dict[tuple[str, str], _GraphKey], endpoint: Any
+) -> _GraphKey | None:
+    """Resolve a typed STPA endpoint without crossing namespaces."""
+    return nodes.get((endpoint.kind, endpoint.record_id))
+
+
+def _validate_unique_graph_edges(edges: Sequence[_GraphEdge]) -> None:
+    """Reject duplicate semantic edges in the composed graph."""
+    keys = {(source, target) for source, target, _kind in edges}
+    if len(keys) != len(edges):
+        raise _CompositionFailure("bridge_duplicate")
+
+
+def _validate_acyclic_graph(edges: Sequence[_GraphEdge]) -> None:
+    """Reject a cycle in the namespace-qualified union graph."""
+    adjacency: dict[_GraphKey, list[_GraphKey]] = {}
+    for source, target, _kind in edges:
+        adjacency.setdefault(source, []).append(target)
+    visiting: set[_GraphKey] = set()
+    visited: set[_GraphKey] = set()
+    for node in adjacency:
+        _visit_union_node(node, adjacency, visiting, visited)
+
+
+def _visit_union_node(
+    node: _GraphKey,
+    adjacency: dict[_GraphKey, list[_GraphKey]],
+    visiting: set[_GraphKey],
+    visited: set[_GraphKey],
+) -> None:
+    """Depth-first visit used by the union cycle guard."""
+    if node in visiting:
+        raise _CompositionFailure("ordering_cycle")
+    if node in visited:
+        return
+    visiting.add(node)
+    for child in adjacency.get(node, ()):
+        _visit_union_node(child, adjacency, visiting, visited)
+    visiting.remove(node)
+    visited.add(node)
+
+
+def _projection_risk_trace(
+    unit: HybridProjectionUnit, inputs: HybridProjectionInputs
+) -> tuple[ProjectionTraceReference, ...]:
+    """Retain exact source records that explain one composed projection."""
+    plan = inputs.obligation_plan
+    materializations = inputs.candidate_materializations
+    stpa = inputs.stpa_projection_authority
+    plan_pin = _artifact_pin(
+        "taxonomy-obligation-plan", plan.schema_version, plan.semantic_digest
+    )
+    materialization_pin = _artifact_pin(
+        "taxonomy-candidate-materialization-set",
+        materializations.schema_version,
+        materializations.semantic_digest,
+    )
+    traces: list[ProjectionTraceReference] = [
+        ProjectionTraceReference(
+            source_kind="phase1_obligation",
+            record_id=unit.obligation_id,
+            artifact_pin=plan_pin,
+        ),
+        ProjectionTraceReference(
+            source_kind="phase1_candidate",
+            record_id=unit.selected_candidate_id,
+            artifact_pin=materialization_pin,
+        ),
+        ProjectionTraceReference(
+            source_kind="phase2_relation",
+            record_id=unit.relation_id,
+            artifact_pin=inputs.correspondence.reconciliation_pin,
+        ),
+    ]
+    traces.extend(
+        ProjectionTraceReference(
+            source_kind="stpa_loss",
+            record_id=record_id,
+            artifact_pin=stpa.loss_analysis_pin,
+        )
+        for record_id in unit.causal_projection.loss_ids
+    )
+    traces.extend(
+        ProjectionTraceReference(
+            source_kind="stpa_hazard",
+            record_id=record_id,
+            artifact_pin=stpa.loss_analysis_pin,
+        )
+        for record_id in unit.causal_projection.hazard_ids
+    )
+    traces.extend(
+        ProjectionTraceReference(
+            source_kind="stpa_constraint",
+            record_id=record_id,
+            artifact_pin=stpa.loss_analysis_pin,
+        )
+        for record_id in unit.causal_projection.constraint_ids
+    )
+    traces.extend(
+        (
+            ProjectionTraceReference(
+                source_kind="stpa_slot",
+                record_id=unit.ica_slot_id,
+                artifact_pin=stpa.ica_enumeration_pin,
+            ),
+            ProjectionTraceReference(
+                source_kind="stpa_ica",
+                record_id=unit.ica_id,
+                artifact_pin=stpa.ica_enumeration_pin,
+            ),
+            ProjectionTraceReference(
+                source_kind="stpa_exec",
+                record_id=unit.exec_candidate_id,
+                artifact_pin=stpa.execution_projection_pin,
+            ),
+        )
+    )
+    traces.extend(
+        ProjectionTraceReference(
+            source_kind="bridge_evidence",
+            record_id=evidence.evidence_id,
+            artifact_pin=evidence.artifact_pin,
+        )
+        for bridge in unit.bridge_links
+        for evidence in bridge.evidence
+    )
+    return tuple(traces)
+
+
 __all__ = [
     "PHASE1_CANDIDATE_RECORD_DIGEST_DOMAIN",
     "STPA_EXECUTION_PROJECTION_DIGEST_DOMAIN",
     "build_candidate_materialization_set",
     "build_confirmed_coverage_review",
     "build_hybrid_correspondence_attestation",
+    "build_hybrid_scenario_projection_set",
     "build_pinned_stpa_projection_attestation",
     "candidate_materialization_set_from_artifacts",
     "capability_fact_attestation_from_artifacts",

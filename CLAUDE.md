@@ -130,6 +130,13 @@ changing acceptance behavior, or running the quality sequence.
   unverified top-level authority. Task 1 must not compose the final graph,
   persist or render an artifact, add a CLI, contact a model or network, or
   change ordinary `generate`/`stpa-run`.
+- Keep Phase 4 in-memory composition at the pure
+  `build_hybrid_scenario_projection_set` seam. Resolve exact units through the
+  Task 1 boundary, apply only the fixed typed bridge endpoint table, validate
+  the taxonomy/STPA/bridge union as one DAG, and require exact source-pin,
+  trace, and bridge-evidence closure. Preserve typed exclusions and diagnostics
+  without scores or execution decisions. Persistence, reporting, CLI, model
+  calls, and network access remain outside this slice.
 - Keep harness installations and runtime state local; the repository owns only
   portable methodology, configuration, and scripts.
 - Update `README.md`, this file, and linked documentation when an interface or

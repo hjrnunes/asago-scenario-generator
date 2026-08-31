@@ -387,7 +387,7 @@ verifies it after reload. Neither the composition model nor seam imports a
 generation runner, CLI, report, or persistence module. Ordinary `generate` and
 `stpa-run` remain unaware of all Phase 3 modules and artifacts.
 
-## Phase 4 exact projection boundary
+## Phase 4 exact projection and composition boundary
 
 Phase 4 Task 1 introduces the pure
 `pipeline.hybrid_scenario_projection.resolve_hybrid_projection_units` seam.
@@ -415,12 +415,20 @@ typed `relation_not_coverage` exclusion. Missing or non-projectable
 relation-local material also produces a typed exclusion; substituted or
 malformed top-level authority fails closed.
 
-The result is a content-addressed collection of exact projection units and
-exclusions. Task 1 deliberately performs no cross-subgraph bridge validation,
-whole-graph DAG composition, persistence, report rendering, CLI work, model
-call, or network access. Those composition and publication responsibilities
-belong to later Phase 4 tasks. Neither existing generation workflow imports or
-requires the Phase 4 boundary.
+The Task 1 result is a content-addressed collection of exact projection units
+and exclusions. The pure
+`pipeline.hybrid_scenario_projection.build_hybrid_scenario_projection_set`
+seam then performs the in-memory Task 2 composition: it resolves through that
+Task 1 boundary, applies the fixed bridge-kind/endpoint table, validates the
+taxonomy, STPA, and bridge union as one directed acyclic graph, and returns
+content-addressed projections with typed exclusions and diagnostics. Source
+pins, trace references, and bridge evidence must close exactly over each
+projection's authority set.
+
+The composition seam does not persist or render an artifact, add a CLI, make a
+model or network call, assign a score, or decide execution readiness. Durable
+publication remains a separate Phase 4 slice. Neither existing generation
+workflow imports or requires the Phase 4 boundary.
 
 ## Taxonomy and risk-driven workflow
 
