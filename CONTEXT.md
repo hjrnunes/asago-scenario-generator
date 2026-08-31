@@ -82,3 +82,32 @@ One content-addressed record containing the exact challenge ledger, pending
 selected targets, completed or technical reconsideration attempts, and their
 separate counts. It has no blended success or coverage status.
 _Avoid_: rewritten assessment, combined scenario run, aggregate score
+
+**Hybrid scenario projection**:
+One immutable graph that joins an already accepted taxonomy mechanism to its
+exact STPA causal path through reviewed, typed bridge evidence.
+_Avoid_: generated scenario, blended coverage result, inferred match
+
+**Normative bookkeeping fixture**:
+Synthetic evidence used only to prove deterministic identity, validation, and
+persistence behavior. It is never semantic evidence that a real system is
+covered or ready.
+_Avoid_: pilot result, reviewed production evidence
+
+**Target-scoped semantic pilot**:
+A future, explicitly bounded qualification run for named
+`(relation_id, selected_candidate_id)` targets backed by fresh corrected
+taxonomy scenarios and exact Phase 1, Phase 2, STPA, review, and run evidence.
+_Avoid_: complete-corpus claim, automatic generation run
+
+**Pilot readiness**:
+The offline determination that a target-scoped semantic pilot has all required
+exact evidence. A negative result retains typed blockers and exact counts; it
+does not repair identities or start the pilot.
+_Avoid_: execution readiness, scenario admission, aggregate score
+
+**Pilot provenance bundle**:
+The content-addressed record binding one generation run, its inputs, model-call
+evidence, scenario artifacts, expected targets, outcomes, and exact join
+counts.
+_Avoid_: collection of caller assertions, raw prompt log

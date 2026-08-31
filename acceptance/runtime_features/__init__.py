@@ -36,4 +36,5 @@ __all__ = (
     "closed_loop_stpa",
     "stpa",
     "phase4_task1_hybrid_projection",
+    "hybrid_scenario_projection",
 )

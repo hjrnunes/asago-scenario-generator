@@ -383,6 +383,13 @@ def _candidate_record_digest(record: CandidateRecord) -> str:
     )
 
 
+def compute_candidate_record_digest(record: CandidateRecord) -> str:
+    """Return the canonical digest for one typed Phase 1 candidate record."""
+    if not isinstance(record, CandidateRecord):
+        raise TypeError("record must be a CandidateRecord")
+    return _candidate_record_digest(record)
+
+
 def _qualification_facts_digest(snapshot: CapabilityFactSnapshot) -> str:
     """Reuse the Phase 1 qualification-facts canonical contract."""
     return QualificationFactsInput(
@@ -3315,6 +3322,7 @@ __all__ = [
     "build_pinned_stpa_projection_attestation",
     "candidate_materialization_set_from_artifacts",
     "capability_fact_attestation_from_artifacts",
+    "compute_candidate_record_digest",
     "confirmed_coverage_review_from_artifacts",
     "hybrid_correspondence_attestation_from_artifacts",
     "mechanism_evidence_attestation_from_artifacts",

@@ -139,8 +139,14 @@ changing acceptance behavior, or running the quality sequence.
   through `write_hybrid_scenario_projection_set` and
   `read_hybrid_scenario_projection_set`, using the exact
   `hybrid-scenario-projection-set.yaml` filename and atomic verified reload.
-  Reporting, CLI, model calls, network access, and acceptance remain outside
-  this slice; acceptance is the next Phase 4 task.
+  Task 3 acceptance must exercise the complete contract and independently
+  verify the YAML identities, digests, ordering, pins, and exclusions. Keep
+  `assess_hybrid_pilot_readiness` pure and target-scoped: accept one closed
+  typed authority graph, require factory-verified run provenance and exact
+  Phase 1/2/STPA/review evidence, and return typed blockers plus exact counts.
+  Bookkeeping, copied, relabelled, shared-resource-only, or fake evidence must
+  never make a semantic pilot ready. Reporting, CLI, model calls, network
+  access, generation, and scenario finalization remain outside Phase 4.
 - Keep harness installations and runtime state local; the repository owns only
   portable methodology, configuration, and scripts.
 - Update `README.md`, this file, and linked documentation when an interface or

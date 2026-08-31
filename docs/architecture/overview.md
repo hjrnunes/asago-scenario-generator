@@ -431,9 +431,19 @@ the separate Python persistence adapter through
 `write_hybrid_scenario_projection_set(...)` and
 `read_hybrid_scenario_projection_set(...)`. It atomically publishes the exact
 `hybrid-scenario-projection-set.yaml` filename and verifies the closed-model
-reload, semantic digest, canonical bytes, and equality. Acceptance remains the
-next Phase 4 task; neither existing generation workflow imports or requires the
-Phase 4 boundary.
+reload, semantic digest, canonical bytes, and equality. Neither existing
+generation workflow imports or requires the Phase 4 boundary.
+
+Task 3 adds two independent offline checks. The acceptance path exercises the
+complete projection and persistence behavior while an application-independent
+reader recomputes artifact identities, digests, ordering, pin closure, and
+typed exclusions. Separately,
+`pipeline.hybrid_pilot.assess_hybrid_pilot_readiness` consumes one closed typed
+authority graph and returns only exact readiness blockers and counts. Complete
+semantic evidence must be bound through the verified provenance factory;
+copying or relabelling the normative bookkeeping fixture cannot promote it.
+The evaluator neither reads files nor creates provider or network clients.
+Ordinary `generate` and `stpa-run` remain unaware of both checks.
 
 ## Taxonomy and risk-driven workflow
 

@@ -456,8 +456,21 @@ Task 2b provides the Python persistence seam:
 `hybrid-scenario-projection-set.yaml` filename, reloads through the closed
 model, and verifies the semantic digest, canonical bytes, and equality before
 reporting success. Persistence remains offline and has no reporting, CLI,
-model-call, or network behavior; acceptance is the next Phase 4 task. Ordinary
-`generate` and `stpa-run` remain independent of Phase 4.
+model-call, or network behavior. Ordinary `generate` and `stpa-run` remain
+independent of Phase 4.
+
+Task 3 proves that complete contract through deterministic Gherkin and an
+independent YAML reader. The pure
+`assess_hybrid_pilot_readiness(...)` seam separately checks whether an exact,
+target-scoped future semantic pilot has fresh scenario identities, complete
+Phase 1/2/STPA/review authority, and verified run provenance. It reports typed
+blockers and exact counts; it never runs generation or contacts a provider.
+The committed projection fixture is bookkeeping evidence only and cannot make
+a pilot ready. The current Klarna and NHS evidence remains not ready because
+the old taxonomy envelopes have zero corrected-plan joins and the corrected
+assessments contain no accepted coverage-bearing relations. The required
+future procedure is recorded in
+`ai/findings/stpa-taxonomy-phase4-live-pilot-runbook.md`.
 
 ## STPA-based generation
 

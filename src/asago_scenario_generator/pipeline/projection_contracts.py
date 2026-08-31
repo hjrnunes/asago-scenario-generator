@@ -1115,6 +1115,11 @@ def _candidate_v2_id(pattern_id: str, projection: ProjectionSnapshot) -> str:
     return f"cand:v2:{_digest('asago-scenario-generator:candidate:v2', identity)[:32]}"
 
 
+def compute_candidate_v2_id(pattern_id: str, projection: ProjectionSnapshot) -> str:
+    """Return the canonical candidate-v2 identity for a typed projection."""
+    return _candidate_v2_id(pattern_id, projection)
+
+
 def _rejected_candidate_v2_id(
     pattern_id: str,
     issue: ProjectionIssue,

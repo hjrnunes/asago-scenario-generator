@@ -66,6 +66,7 @@ ai/findings/*
 !ai/findings/stpa-taxonomy-phase3-swarmforge-tasks.md
 !ai/findings/stpa-taxonomy-phase4-combined-projection-spec.md
 !ai/findings/stpa-taxonomy-phase4-swarmforge-tasks.md
+!ai/findings/stpa-taxonomy-phase4-live-pilot-runbook.md
 opencode.json
 
 # Preserve the organization-managed Claude project scaffold only
