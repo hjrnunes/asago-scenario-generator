@@ -234,6 +234,17 @@ from asago_scenario_generator.models.hybrid_coverage import (
 from asago_scenario_generator.models.hybrid_reconciliation import (
     HybridReconciliationInputs,
 )
+from asago_scenario_generator.models.challenge_ledger import (
+    EXPLICIT_PRIORITY_POLICY_VERSION,
+    STPA_CHALLENGE_LEDGER_SCHEMA_VERSION,
+    ChallengeEligibility,
+    ChallengeLedgerDiagnostics,
+    ChallengeOutcome,
+    ChallengeRecord,
+    OriginalStpaDecision,
+    StpaChallengeLedger,
+    compute_challenge_id,
+)
 from asago_scenario_generator.models.threat_scope import (
     OutOfScopeEntry,
     ThreatScope,
@@ -420,6 +431,10 @@ __all__ = [
     "AdjudicationSet",
     "AcceptedCorrespondenceRelation",
     "ArtifactPin",
+    "ChallengeEligibility",
+    "ChallengeLedgerDiagnostics",
+    "ChallengeOutcome",
+    "ChallengeRecord",
     "CAReference",
     "CLReference",
     "CMReference",
@@ -445,6 +460,7 @@ __all__ = [
     "HybridReconciliationInputs",
     "InventoryStatus",
     "ObligationAuthorityRecord",
+    "OriginalStpaDecision",
     "FBReference",
     "FeedbackPathReference",
     "LinkProvenance",
@@ -460,6 +476,7 @@ __all__ = [
     "SourceArtifactPins",
     "ScenarioRealizationRow",
     "StpaCoverageInput",
+    "StpaChallengeLedger",
     "StructuralAuthorityRecord",
     "StructuralConsiderationRow",
     "StructuralDisposition",
@@ -475,6 +492,7 @@ __all__ = [
     "SystemResourceMap",
     "SystemResourceMapValidation",
     "compute_control_structure_digest",
+    "compute_challenge_id",
     "compute_loss_analysis_digest",
     "compute_resource_map_semantic_digest",
     "compute_proposal_id",
@@ -518,4 +536,6 @@ __all__ = [
     "validate_legacy_attack_pattern",
     "validate_projection_snapshot",
     "derive_obligation_summary",
+    "EXPLICIT_PRIORITY_POLICY_VERSION",
+    "STPA_CHALLENGE_LEDGER_SCHEMA_VERSION",
 ]

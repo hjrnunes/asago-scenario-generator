@@ -318,6 +318,32 @@ either generation runner, construct a provider client, or perform IO. Existing
 taxonomy coverage sections remain generation-workflow reports; they are not a
 Phase 2 reconciliation surface and are not reused to infer hybrid coverage.
 
+## Phase 3 offline challenge ledger
+
+Phase 3 begins behind a separate deterministic boundary. The public
+`pipeline.challenge_ledger.build_stpa_challenge_ledger` seam consumes an intact
+`HybridCoverageAssessment`, explicit `ChallengeEligibility` values naming one
+exact obligation/STPA-slot pair each, an explicit non-negative budget, the
+versioned `explicit-priority-v1` policy, and the assessment artifact identity.
+It never infers a target from prose, a missing relation, or a shared resource.
+
+Selection orders the explicit records by ascending supplied priority and then
+by exact obligation and slot identity. Each target is retained once. Selected
+and budget-excluded records both snapshot the original Phase 2 structural row,
+including its ICA/N/A/unresolved disposition, ICA identities, evidence, trace
+references, assessment digest, and upstream source pins. The closed
+`stpa-obligation-challenge-ledger-v1` model derives its diagnostics and target
+IDs from those records and rejects forged selection state, duplicated targets,
+substituted pins, and digest mismatches.
+
+The pure builder imports no provider, network, filesystem, generation runner,
+or STPA orchestration module. The separate persistence adapter atomically
+publishes `stpa-obligation-challenge-ledger.yaml` and reloads it through the
+closed model. This Task 1 artifact records future work only: it performs no
+reconsideration, writes no challenge outcome, changes no Phase 2 matrix, and
+creates no correspondence, coverage credit, projection, or scenario. Neither
+`generate` nor ordinary `stpa-run` imports or requires it.
+
 ## Taxonomy and risk-driven workflow
 
 The `generate` workflow consumes a use-case description, policy risk

@@ -43,6 +43,7 @@ MODULES = (
     "system_resource_map",
     "correspondence",
     "hybrid_coverage_assessment",
+    "stpa_challenge_ledger",
     "stpa",
 )
 

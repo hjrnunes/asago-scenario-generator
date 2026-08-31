@@ -1,7 +1,8 @@
 # STPA–taxonomy synthesis: Phase 3 closed-loop challenge contract
 
-**Status:** Draft for issue discussion. This document proposes a Phase 3
-contract; it is not an approved work item and changes no production contract.
+**Status:** Task 1 approved on 2026-08-31. The provider-capable Task 2 and
+end-to-end Task 3 remain draft until their remaining operational decisions are
+approved.
 
 **Scope:** The third delivery phase of the STPA-led, taxonomy-audited workflow:
 use the exact Phase 2 assessment to make a bounded, opt-in request for STPA to
@@ -54,9 +55,10 @@ Phase 3 therefore has two products with different authority:
    snapshots, reconsideration evidence, and one of the three challenge
    outcomes for each completed reconsideration.
 
-The exact name, version, and publication location of the challenge record are
-still an approval decision. Until that decision is made, the phrase **challenge
-record** is conceptual and does not prescribe a repository filename.
+For the approved offline ledger slice, the record is the closed
+`stpa-obligation-challenge-ledger-v1` artifact published atomically as
+`stpa-obligation-challenge-ledger.yaml`. Later adapter evidence may extend the
+record only through a separately approved compatible contract.
 
 ## 2. Approved invariants
 
@@ -232,16 +234,16 @@ This seam must fail closed on unknown or duplicate identities and must enforce
 the once-only rule. It does not decide eligibility by scanning obligation
 text, hazard prose, resource names, or scenario wording.
 
-The target union, eligibility trigger, ordering, and relation between an
-obligation and a target are intentionally left to the decisions in §8.
+The approved target is one exact `(obligation_id, slot_id)` pair. Eligibility
+is supplied explicitly, smaller priority values sort first, and exact
+obligation/slot identities break ties as recorded in §8.
 
 ### 3.3 STPA analysis adapter
 
 The adapter is the sole provider-capable boundary. It receives one selected
-target at a time or another explicitly approved grouping, the immutable
+obligation/STPA-slot pair at a time, the immutable
 original-decision snapshot, exact Phase 2 evidence, and approved STPA context.
-It returns one typed challenge outcome and evidence. The grouping/call
-cardinality is not fixed by this document.
+It returns one typed challenge outcome and evidence.
 
 The adapter MUST preserve the existing STPA causal requirements. A returned
 ICA must remain grounded in the loss/hazard/constraint/control-structure
@@ -415,9 +417,9 @@ Feature: opt-in closed-loop STPA obligation challenge
     And the returned outcome is validated and persisted without changing Phase 2
 ```
 
-The examples intentionally avoid choosing the real trigger, target union,
-provider retry behavior, or public command. Those choices are approval items,
-not facts implied by the examples.
+The examples use the approved explicit trigger and exact pair target. Provider
+controls, the technical-failure record, live fixtures, and any public command
+remain approval items rather than facts implied by the examples.
 
 ## 6. Explicit exclusions
 
@@ -501,50 +503,48 @@ No Phase 3 implementation may proceed with guessed identity mappings. The
 lineage audit is a contract input, and a fresh taxonomy generation is a later
 Phase 4 fixture gate rather than a Phase 3 ledger prerequisite.
 
-## 8. Decisions requiring explicit approval
+## 8. Approved Task 1 decisions and remaining decisions
 
-This draft intentionally does not invent the following product decisions.
-Resolve them in a GitHub Issue before a coder task is approved.
+The following decisions were approved for Task 1 on 2026-08-31:
 
-1. **Challenge trigger:** Which Phase 2 correspondence dispositions, gap
-   reasons, structural dispositions, or explicit analyst findings may make a
-   target eligible? Is eligibility always supplied by review, or can an
-   approved policy derive it from typed rows?
-2. **Target granularity:** Is the eligible target a UCA slot, an ICA, an
-   obligation, an obligation/slot pair, or another exact identity? How is the
-   original decision selected when a slot contains multiple ICAs?
-3. **Selection/cardinality:** How are multiple eligible targets ordered and
-   tie-broken under a budget? Does one challenge call cover one target or an
-   approved group? Does one ICA outcome satisfy one target or several? The
-   invariant remains at most one challenge per eligible target.
-4. **Budget semantics:** What is the allowed range and scope of the explicit
-   budget? Does budget exhaustion produce non-selected records only, or a
-   separately named deferred state?
-5. **Failure policy:** How are provider timeout, transport failure, malformed
-   structured output, deterministic validation failure, and adapter
-   exhaustion represented? Which, if any, consume the once-only allowance?
-6. **Provider controls:** Which model profile, controls, call deadline, and
-   opt-in environment gate authorize the STPA analysis adapter? Does a bounded
-   adapter retry count as the same challenge or as a separate attempt?
-7. **Outcome shape:** For `ica`, may the adapter add an ICA, revise an
-   existing ICA, or only provide a recommendation for later review? What
-   evidence is mandatory for each of the three outcomes beyond existing STPA
-   validators?
-8. **Persistence/schema:** What is the challenge record's schema version,
-   filename, run-directory placement, resume/idempotence key, and report
-   projection? Is the original Phase 2 assessment copied, referenced by pin,
-   or both?
-9. **Assessment presentation:** Should a later report show challenge outcomes
-   beside the unchanged Phase 2 matrices, or should it remain a separate
-   report until a later phase? No Phase 3 view may alter Phase 2 denominators.
-10. **Challenge-fixture lineage use:** Which exact audited STPA target fixtures
-    are approved first, and which Phase 2 eligibility evidence may cite them?
-    The taxonomy-envelope audit classifications are fixed by §7; old taxonomy
-    scenario observations remain unavailable to corrected assessment and any
-    later scenario-realization claim.
-11. **Operational severity:** Does an unresolved challenge leave an opt-in run
-    completed with a typed unresolved result, or does a future command expose
-    degraded/failed status? Phase 3 does not assume either policy.
+1. **Eligibility is explicit.** A caller supplies typed eligibility records;
+   Phase 2 gaps, dispositions, prose, and resource overlap do not create them.
+2. **One target is one exact pair.** A target is `(obligation_id, slot_id)`.
+   Its original-decision snapshot retains every ICA already attached to that
+   slot rather than selecting one ICA by prose.
+3. **Selection is deterministic.** Smaller caller-supplied priority values are
+   selected first; exact obligation and slot IDs break ties. One record and at
+   most one later attempt belong to each exact pair.
+4. **The budget is explicit.** It is a strict non-negative integer scoped to
+   one ledger. Exhausted eligible pairs remain `not_selected_budget`; they do
+   not become unresolved STPA decisions.
+5. **Task 1 persistence is separate.** The closed
+   `stpa-obligation-challenge-ledger-v1` artifact is written atomically as
+   `stpa-obligation-challenge-ledger.yaml`. It pins the assessment and its
+   upstream artifacts and snapshots the original decision. Task 1 has no CLI
+   or report.
+6. **Execution is once-only.** A later adapter gets one analysis attempt for a
+   selected pair and performs no automatic retry. A technical failure is a
+   separate attempt result, never an ICA, justified N/A, or unresolved STPA
+   conclusion.
+7. **An ICA result is additive.** It is retained as a proposed ICA in the
+   challenge record and never overwrites the original STPA analysis.
+8. **Ordinary STPA is unchanged.** The normal `stpa-run` command neither reads
+   nor requires the challenge ledger.
+
+Tasks 2 and 3 still require explicit approval for:
+
+1. the model profile, effective controls, deadline, and opt-in surface for the
+   provider-capable STPA analysis adapter;
+2. the exact typed technical-failure record and evidence required for all
+   three completed challenge outcomes;
+3. run-directory placement, resume/idempotence behavior, and any public
+   orchestration command;
+4. whether and where challenge outcomes are presented alongside the unchanged
+   Phase 2 matrices;
+5. the first audited Klarna/NHS STPA pairs used for live qualification; and
+6. whether unresolved or technically failed opt-in runs are reported as
+   completed, degraded, or failed.
 
 ## 9. Exit criteria for Phase 3
 

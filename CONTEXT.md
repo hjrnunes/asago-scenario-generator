@@ -22,8 +22,8 @@ eligible taxonomy obligation remains to be accounted for.
 _Avoid_: taxonomy scenario, automatic match, coverage assignment
 
 **Challenge target**:
-The exact STPA structural identity selected for a possible obligation
-challenge.
+One exact taxonomy-obligation and STPA-slot pair selected for a possible
+obligation challenge.
 _Avoid_: candidate guess, prose match
 
 **Eligibility**:

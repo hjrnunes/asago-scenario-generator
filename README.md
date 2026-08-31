@@ -365,6 +365,30 @@ reconciliation are deterministic and construct neither a model client nor a
 network connection. `generate` and `stpa-run` continue to work independently
 without any Phase 2 inputs or outputs.
 
+### Phase 3 offline challenge ledger
+
+The first Phase 3 slice records a bounded request for STPA to reconsider an
+exact taxonomy-obligation/STPA-slot pair. It does not run the reconsideration.
+`build_stpa_challenge_ledger(...)` consumes one intact
+`HybridCoverageAssessment`, explicit `ChallengeEligibility` records, an
+explicit non-negative budget, the fixed `explicit-priority-v1` policy, and an
+artifact ID for the assessment. Smaller supplied priority values are selected
+first, with obligation and slot identity as deterministic tie-breakers.
+
+Every selected or budget-excluded record retains the original structural row,
+ICA identities, disposition, evidence, traces, and all Phase 2 source pins.
+The builder never derives eligibility from an unresolved row or prose. It
+cannot create correspondence, coverage credit, or a hybrid scenario, and it
+constructs no provider client. A budget-excluded target remains visible as
+`not_selected_budget`; it is not relabelled as an unresolved STPA decision.
+
+`write_stpa_challenge_ledger(...)` atomically publishes the closed,
+digest-verified `stpa-obligation-challenge-ledger-v1` artifact as
+`stpa-obligation-challenge-ledger.yaml`; `read_stpa_challenge_ledger(...)`
+requires that normative filename and verifies the digest on load. The normal
+`generate` and `stpa-run` commands do not read or require this artifact. Task 1
+has no CLI and performs no STPA/model call.
+
 ## STPA-based generation
 
 ```bash

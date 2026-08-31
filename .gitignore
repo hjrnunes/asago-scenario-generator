@@ -58,7 +58,12 @@ config/model-profiles.yaml.backup
 swarmforge/
 swarm
 close-swarm
-ai/
+ai/*
+!ai/findings/
+ai/findings/*
+!ai/findings/phase12-live-run-klarna-nhs-2026-08-29.md
+!ai/findings/stpa-taxonomy-phase3-closed-loop-spec.md
+!ai/findings/stpa-taxonomy-phase3-swarmforge-tasks.md
 opencode.json
 
 # Preserve the organization-managed Claude project scaffold only

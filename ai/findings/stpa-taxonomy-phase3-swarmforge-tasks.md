@@ -1,8 +1,9 @@
 # SwarmForge task sequence: STPA–taxonomy synthesis, Phase 3
 
-**Status:** Proposed task decomposition. No task below is approved for
-implementation until the Phase 3 product decisions are resolved and the
-completed lineage-audit findings below are incorporated.
+**Status:** Task 1 approved on 2026-08-31 with explicit eligibility,
+obligation/STPA-slot targets, priority ordering, a caller-supplied budget, and
+separate atomic persistence. Tasks 2 and 3 remain proposed until their
+remaining operational decisions are approved.
 
 **Source specification:**
 [stpa-taxonomy-phase3-closed-loop-spec.md](stpa-taxonomy-phase3-closed-loop-spec.md)
@@ -50,9 +51,10 @@ The six-pack is a sequence of responsibilities. The task handoff must identify
 the evidence for each role, even when one contributor performs several roles.
 
 1. **Specifier:** Convert the approved issue into observable behavior and
-   acceptance examples. Record unresolved trigger, target-cardinality,
-   selection, provider-failure, and persistence choices rather than silently
-   choosing them.
+   acceptance examples. Retain the approved explicit trigger, exact-pair
+   target, selection, and Task 1 persistence choices; record remaining
+   provider-failure and orchestration choices rather than silently choosing
+   them.
 2. **Coder:** Work test-first against the smallest vertical slice. Keep pure
    selection and validation independent from STPA/provider orchestration.
 3. **Cleaner:** Remove duplicate state, ambiguous names, prose joins, and
@@ -115,15 +117,16 @@ Implement the domain and persistence seam described in the Phase 3 contract:
   absent from the corrected plan are rejected or omitted rather than adapted;
 - reserve the closed challenge-outcome vocabulary `ica`, `justified_na`, and
   `unresolved`, with typed evidence and exact STPA references;
-- persist an immutable challenge record (the final schema name and filename
-  require the approval item in the source specification) with a canonical,
-  digest-verified, atomic round trip;
+- persist the immutable `stpa-obligation-challenge-ledger-v1` record as
+  `stpa-obligation-challenge-ledger.yaml` with a canonical, digest-verified,
+  atomic round trip;
 - derive diagnostics from retained records rather than hand-maintained
   counters; and
 - make no provider/model/network calls.
 
-The target union, trigger policy, call grouping, and failure/retry policy must
-be explicit inputs or approved issue decisions. This task must not guess them.
+The approved target, trigger, ordering, budget, and persistence decisions are
+fixed inputs to this task. Provider controls and the technical-failure record
+remain deferred to Task 2 and must not leak into the ledger builder.
 
 ## Acceptance criteria
 
@@ -160,8 +163,7 @@ be explicit inputs or approved issue decisions. This task must not guess them.
 
 - No provider-capable STPA adapter.
 - No policy-derived trigger unless an approved issue supplies that policy.
-- No choice of target granularity or relation cardinality beyond the
-  once-only per eligible target invariant.
+- No target granularity beyond the approved exact obligation/STPA-slot pair.
 - No provider retry, timeout, malformed-response, or failure classification
   policy.
 - No correspondence proposal/reconciliation or Phase 2 assessment rewrite.
@@ -169,7 +171,7 @@ be explicit inputs or approved issue decisions. This task must not guess them.
   coverage credit.
 - No adaptation of old taxonomy scenario observations into corrected-plan
   rows or scenario-realization claims.
-- No public CLI name or artifact filename unless separately approved.
+- No public CLI; Task 1 uses the approved normative artifact filename only.
 
 ## Six-pack evidence gates
 
@@ -179,8 +181,9 @@ be explicit inputs or approved issue decisions. This task must not guess them.
   completed lineage-audit revision used by fixtures, including the corrected
   plan and exact STPA lineage.
 - Eligibility input, budget, and selection policy are explicit.
-- Deferred trigger, target-cardinality, provider-failure, and persistence
-  decisions are listed as unresolved rather than hidden in test helpers.
+- The approved explicit trigger, exact pair target, ordering, budget, and
+  persistence decisions are asserted directly; deferred provider controls and
+  technical-failure shape are not hidden in test helpers.
 - Gherkin examples cover stale assessment, explicit eligibility, budget,
   once-only selection, original-decision preservation, and rejection of old
   taxonomy scenario identities.
@@ -314,8 +317,9 @@ be resolved in the issue before the Coder gate.
 - No Phase 1/Phase 2 rerun, correspondence inference, proposal confirmation,
   or assessment mutation.
 - No implicit trigger from an unresolved or N/A row.
-- No choice of target/cardinality, provider controls, retry, timeout, or
-  failure policy without issue approval.
+- No alternative target/cardinality, provider controls, timeout, or technical
+  failure schema without issue approval; the approved one-attempt/no-retry
+  rule remains binding.
 - No hybrid projection, scenario generation, finalization, admission,
   quarantine, evaluation, or coverage report.
 
@@ -489,9 +493,9 @@ adapter until that decision is approved.
 
 - The issue approves the orchestration opt-in surface or explicitly keeps it
   internal for this slice.
-- The final trigger, target granularity/cardinality, provider-failure, and
-  persistence/report choices are written down; unresolved choices remain
-  blocked rather than inferred.
+- The approved explicit trigger, exact pair target, once-only policy, and Task
+  1 persistence contract are retained; remaining provider-failure,
+  orchestration, and presentation choices stay blocked rather than inferred.
 - The completed lineage classifications and exact STPA fixture IDs are
   attached to the issue; old taxonomy scenario IDs are explicitly excluded.
 - End-to-end Gherkin examples cover opt-in, stale input, budget, three

@@ -1,0 +1,70 @@
+assessment_pin:
+  artifact_id: representative-hybrid-coverage-assessment
+  schema_version: hybrid-coverage-assessment-v1
+  semantic_digest: d4d4f7cb4b12c90f50bf3f67d3c27ccd0ec7ca16cd967ecf5db90f5b9cb2b7d5
+challenge_budget: 1
+diagnostics:
+  eligible_targets: 1
+  not_selected_budget: 0
+  selected_targets: 1
+model_calls: 0
+network_calls: 0
+records:
+- challenge_id: challenge:v1:97156d7294fbefbbbcdd48b080026a3e9b0d030cf0d31fcf3f783147eb5a2944
+  eligibility_evidence_refs:
+  - review:phase3:representative
+  eligibility_rationale: Approved representative Phase 3 challenge.
+  obligation_id: ob:v1:741b678e5ed0aae16ceb83ee81db90e98fc10b78f7cb90a5e4628a67ab727727
+  original_decision:
+    control_action_id: CA-1-1
+    controller_id: RESP-1
+    disposition: ica
+    evidence:
+    - ica-enumeration.yaml#RESP-1:CA-1-1:WRONG_TIMING:1
+    ica_ids:
+    - RESP-1:CA-1-1:WRONG_TIMING:1
+    row_id: hca-struct:v1:5e125a96eeec2d8191349f5b5040dfc1bc9b87de131197a1ac24f92230273e78
+    slot_id: RESP-1:CA-1-1:WRONG_TIMING
+    trace_refs:
+    - artifact_id: ica-enumeration
+      record_id: RESP-1:CA-1-1:WRONG_TIMING
+      schema_version: ica-enumeration-v1
+      semantic_digest: '3333333333333333333333333333333333333333333333333333333333333333'
+    - artifact_id: ica-enumeration
+      record_id: RESP-1:CA-1-1:WRONG_TIMING:1
+      schema_version: ica-enumeration-v1
+      semantic_digest: '3333333333333333333333333333333333333333333333333333333333333333'
+    - artifact_id: ica-enumeration
+      record_id: ica-enumeration.yaml#RESP-1:CA-1-1:WRONG_TIMING
+      schema_version: ica-enumeration-v1
+      semantic_digest: '3333333333333333333333333333333333333333333333333333333333333333'
+    uca_type: WRONG_TIMING
+  outcome: null
+  priority: 10
+  selection_status: selected
+  slot_id: RESP-1:CA-1-1:WRONG_TIMING
+schema_version: stpa-obligation-challenge-ledger-v1
+selection_policy_version: explicit-priority-v1
+semantic_digest: efcaedafe6bbd0698dfda29f2d341f54e1c8d539481615d097bfccfb6b055a3b
+source_pins:
+- artifact_id: capability-fact-snapshot
+  schema_version: capability-fact-snapshot-v1
+  semantic_digest: 1a23098699d8be1f5b14cd208a8e4642e349e7d82abd6eac7deb3b2134fd2a46
+- artifact_id: correspondence-reconciliation
+  schema_version: correspondence-reconciliation-v1
+  semantic_digest: 9cf78772ad0d22dcfe583cad1e10d4d8200937589542b24f3550794b287cf45e
+- artifact_id: ica-enumeration
+  schema_version: ica-enumeration-v1
+  semantic_digest: '3333333333333333333333333333333333333333333333333333333333333333'
+- artifact_id: stpa-scenarios
+  schema_version: stpa-scenarios-v1
+  semantic_digest: '8888888888888888888888888888888888888888888888888888888888888888'
+- artifact_id: system-resource-map
+  schema_version: system-resource-map-v1
+  semantic_digest: 5c56bdc51585c2caa242f9ddbc986c8c5bdd6fd929ce360bd6ad8d33216d9a26
+- artifact_id: taxonomy-obligation-plan
+  schema_version: taxonomy-obligation-plan-v1
+  semantic_digest: 52be64e238118460cc11628eed19ab3864c7ae5c9fa9041486bd8b0b61294195
+- artifact_id: taxonomy-scenarios
+  schema_version: taxonomy-scenarios-v1
+  semantic_digest: '7777777777777777777777777777777777777777777777777777777777777777'

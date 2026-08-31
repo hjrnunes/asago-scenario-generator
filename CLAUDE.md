@@ -84,6 +84,16 @@ changing acceptance behavior, or running the quality sequence.
   YAML artifacts atomically. Neither existing generation workflow may import
   or require Phase 2 artifacts, and Phase 2 must not construct provider clients
   or contact endpoints.
+- Keep the Phase 3 challenge ledger separate, deterministic, and offline. It
+  consumes one intact Phase 2 assessment plus explicitly supplied exact
+  obligation/STPA-slot pairs, an explicit non-negative budget, and the pinned
+  `explicit-priority-v1` policy. Select smaller priorities first with exact-ID
+  tie-breakers; retain selected and budget-excluded targets, their immutable
+  original ICA/N/A/unresolved decisions, evidence, traces, assessment digest,
+  and upstream pins. The ledger must not infer eligibility, call a provider,
+  change Phase 2 matrices, create correspondence or coverage, generate a
+  scenario, or alter ordinary `generate`/`stpa-run`. Publish the closed
+  `stpa-obligation-challenge-ledger-v1` YAML atomically through its adapter.
 - Keep harness installations and runtime state local; the repository owns only
   portable methodology, configuration, and scripts.
 - Update `README.md`, this file, and linked documentation when an interface or
