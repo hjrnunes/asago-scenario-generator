@@ -1,9 +1,11 @@
 # SwarmForge task sequence: STPA–taxonomy synthesis, Phase 3
 
-**Status:** Task 1 approved on 2026-08-31 with explicit eligibility,
-obligation/STPA-slot targets, priority ordering, a caller-supplied budget, and
-separate atomic persistence. Tasks 2 and 3 remain proposed until their
-remaining operational decisions are approved.
+**Status:** Tasks 1 and 2 approved on 2026-08-31. Task 1 fixes explicit
+eligibility, exact obligation/STPA-slot targets, priority ordering, budget, and
+separate atomic persistence. Task 2 fixes the internal opt-in seam, explicit
+controls, one attempt with no retry, typed outcomes, and separate technical
+failure. Task 3 remains proposed until its orchestration decisions are
+approved.
 
 **Source specification:**
 [stpa-taxonomy-phase3-closed-loop-spec.md](stpa-taxonomy-phase3-closed-loop-spec.md)
@@ -52,9 +54,8 @@ the evidence for each role, even when one contributor performs several roles.
 
 1. **Specifier:** Convert the approved issue into observable behavior and
    acceptance examples. Retain the approved explicit trigger, exact-pair
-   target, selection, and Task 1 persistence choices; record remaining
-   provider-failure and orchestration choices rather than silently choosing
-   them.
+   target, selection, Task 1 persistence, and Task 2 adapter/failure choices;
+   record remaining orchestration choices rather than silently choosing them.
 2. **Coder:** Work test-first against the smallest vertical slice. Keep pure
    selection and validation independent from STPA/provider orchestration.
 3. **Cleaner:** Remove duplicate state, ambiguous names, prose joins, and
@@ -282,9 +283,14 @@ the provider interaction and keeps all challenge evidence in a separate record.
   the approved STPA adapter contract; and
 - leave Phase 2 relation state, matrices, digests, and artifacts unchanged.
 
-The adapter's call grouping, model profile, timeout, retry/exhaustion behavior,
-and treatment of provider failures are not chosen by this task body. They must
-be resolved in the issue before the Coder gate.
+The approved Task 2 seam is internal and one-target-at-a-time. It requires an
+explicit boolean opt-in and caller-supplied adapter factory; records the named
+profile, resolved model, positive deadline, and explicit temperature; permits
+one attempt and zero automatic retries; and records technical failure outside
+the ICA/N/A/unresolved vocabulary. The closed failure kinds are
+`provider_initialization`, `provider_timeout`, `provider_error`,
+`invalid_response`, and `identity_validation_failed`. Task 2 adds no public
+command, run-directory placement, report, or live qualification call.
 
 ## Acceptance criteria
 
@@ -318,8 +324,8 @@ be resolved in the issue before the Coder gate.
   or assessment mutation.
 - No implicit trigger from an unresolved or N/A row.
 - No alternative target/cardinality, provider controls, timeout, or technical
-  failure schema without issue approval; the approved one-attempt/no-retry
-  rule remains binding.
+  failure vocabulary; the approved explicit-controls and one-attempt/no-retry
+  rules remain binding.
 - No hybrid projection, scenario generation, finalization, admission,
   quarantine, evaluation, or coverage report.
 

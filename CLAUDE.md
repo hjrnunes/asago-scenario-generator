@@ -94,6 +94,18 @@ changing acceptance behavior, or running the quality sequence.
   change Phase 2 matrices, create correspondence or coverage, generate a
   scenario, or alter ordinary `generate`/`stpa-run`. Publish the closed
   `stpa-obligation-challenge-ledger-v1` YAML atomically through its adapter.
+- Keep Phase 3 challenge analysis behind the explicit
+  `reconsider_stpa_challenge` opt-in seam. It accepts only a selected exact
+  ledger target, intact assessment, typed STPA authority, explicit named-model
+  controls/deadline/temperature, and a caller-supplied adapter factory. Opt-out
+  must return before adapter construction; opt-in permits one attempt and zero
+  automatic retries. Validate ICA results as additive canonical slot/`EXEC:*`
+  identities against authoritative hazards and constraints; require explicit
+  evidence for justified N/A and a typed reason for unresolved. Record
+  provider/protocol/identity failures separately from structural outcomes.
+  Preserve the original decision and Phase 2 artifact, fix correspondence and
+  coverage changes at zero, start no hybrid generation, add no Task 2 CLI or
+  run placement, and leave ordinary `stpa-run` unchanged.
 - Keep harness installations and runtime state local; the repository owns only
   portable methodology, configuration, and scripts.
 - Update `README.md`, this file, and linked documentation when an interface or

@@ -389,6 +389,25 @@ requires that normative filename and verifies the digest on load. The normal
 `generate` and `stpa-run` commands do not read or require this artifact. Task 1
 has no CLI and performs no STPA/model call.
 
+The second Phase 3 slice adds the only provider-capable extension point:
+`reconsider_stpa_challenge(...)`. It receives one selected ledger target, the
+exact Phase 2 assessment, typed loss/control-structure authority, explicit
+`ChallengeAnalysisControls`, and a caller-supplied adapter factory. When
+`opted_in=False`, it returns before constructing the adapter. When enabled, it
+makes one adapter attempt with zero automatic retries and validates one ICA,
+justified N/A, or unresolved result.
+
+An ICA is additive: it uses the next canonical slot-relative ICA identity,
+retains the exact `EXEC:*` identity, and validates hazard/constraint references
+through the existing STPA structural validator. Provider, protocol, or identity
+failures are separate typed technical failures; they are never rewritten as an
+STPA conclusion. The content-addressed
+`stpa-obligation-challenge-analysis-v1` result retains the request/response
+evidence, effective controls, and original decision while fixing
+correspondence/coverage changes at zero and hybrid generation/admission at
+`not_attempted`/`not_assessed`. Task 2 remains an internal Python seam: it adds
+no CLI, report, run-directory policy, or change to ordinary `stpa-run`.
+
 ## STPA-based generation
 
 ```bash

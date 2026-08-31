@@ -13,7 +13,19 @@ import json
 import unicodedata
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, model_validator
+
+
+class ClosedCanonicalModel(BaseModel):
+    """Closed immutable model whose inputs use the canonical Unicode form."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_input(cls, value: Any) -> Any:
+        """Normalize Unicode before validating identities or digests."""
+        return normalize_unicode(value)
 
 
 class FrozenDict(dict[str, Any]):
@@ -93,6 +105,15 @@ def normalize_unicode(value: Any) -> Any:
     return value
 
 
+def unique_sorted_strings(values: tuple[str, ...], label: str) -> tuple[str, ...]:
+    """Return non-empty unique strings in their canonical order."""
+    if any(not value for value in values):
+        raise ValueError(f"{label} must contain non-empty values")
+    if len(values) != len(set(values)):
+        raise ValueError(f"{label} must contain unique values")
+    return tuple(sorted(values))
+
+
 def _normalize_mapping(value: dict[Any, Any]) -> dict[str, Any]:
     """Normalize one mapping while preserving unique canonical key identity."""
     normalized: dict[str, Any] = {}
@@ -130,10 +151,12 @@ def compute_framed_digest(domain: str, value: Any) -> str:
 
 
 __all__ = [
+    "ClosedCanonicalModel",
     "FrozenDict",
     "FrozenList",
     "canonical_json_bytes",
     "canonical_json_text",
     "compute_framed_digest",
     "normalize_unicode",
+    "unique_sorted_strings",
 ]

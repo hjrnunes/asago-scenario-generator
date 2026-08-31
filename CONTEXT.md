@@ -45,6 +45,16 @@ _Avoid_: retry, replacement, regeneration
 The result of a reconsideration, limited to ICA, justified N/A, or unresolved.
 _Avoid_: correspondence result, scenario result
 
+**Challenge analysis controls**:
+The explicit named model profile, resolved model, deadline, and temperature
+recorded for one opted-in, no-retry reconsideration attempt.
+_Avoid_: inherited defaults, hidden provider settings
+
+**Technical challenge failure**:
+A provider, protocol, or identity-validation failure before a valid structural
+outcome exists. It is separate from ICA, justified N/A, and unresolved.
+_Avoid_: unresolved STPA result, implicit N/A
+
 **Bounded once-only behavior**:
 The rule that, for one exact Phase 2 assessment and explicit challenge budget,
 each eligible target is considered at most once and the selected target count

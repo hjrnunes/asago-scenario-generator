@@ -344,6 +344,32 @@ reconsideration, writes no challenge outcome, changes no Phase 2 matrix, and
 creates no correspondence, coverage credit, projection, or scenario. Neither
 `generate` nor ordinary `stpa-run` imports or requires it.
 
+Task 2 adds the adjacent `pipeline.challenge_analysis.reconsider_stpa_challenge`
+boundary. Its explicit boolean opt-in is evaluated before any adapter factory
+is called. Offline preflight verifies the ledger, assessment digest/source
+pins, selected challenge identity, prior-attempt set, exact taxonomy row, and
+typed loss/control-structure authority. It then builds one content-addressed
+`stpa-obligation-challenge-request-v1` containing the immutable original
+decision, canonical `EXEC:*` identity, Phase 2 taxonomy context, and exact
+loss, hazard, constraint, controller, and control-action context.
+
+The caller-supplied adapter is the only provider-capable extension point. Its
+effective controls name the profile, resolved model, positive deadline, and
+temperature, with an attempt limit of one and zero automatic retries. A
+completed response is exactly ICA, justified N/A, or unresolved. Additive ICA
+validation reuses the STPA `ICAEnumeration.validate_against` seam and requires
+the next canonical slot-relative ICA ID plus exact `EXEC:*`, hazard, and
+constraint identities. Provider, protocol, and structural-validation failures
+become a separate closed technical-failure result, never N/A or unresolved.
+
+The canonical `stpa-obligation-challenge-analysis-v1` value retains exact
+request/response digests and references, effective controls, call counts, and
+the byte-equivalent original decision. Its schema permits zero correspondence
+and coverage changes only and keeps hybrid generation/admission at
+`not_attempted`/`not_assessed`. This Task 2 module performs no filesystem IO and
+adds no CLI, report, run-directory placement, or import from ordinary
+`stpa-run`; Task 3 owns any later composition and persistence placement.
+
 ## Taxonomy and risk-driven workflow
 
 The `generate` workflow consumes a use-case description, policy risk

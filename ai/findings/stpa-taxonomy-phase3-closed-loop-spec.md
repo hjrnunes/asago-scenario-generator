@@ -1,8 +1,7 @@
 # STPA–taxonomy synthesis: Phase 3 closed-loop challenge contract
 
-**Status:** Task 1 approved on 2026-08-31. The provider-capable Task 2 and
-end-to-end Task 3 remain draft until their remaining operational decisions are
-approved.
+**Status:** Tasks 1 and 2 approved on 2026-08-31. End-to-end Task 3 remains
+draft until its orchestration and live-qualification decisions are approved.
 
 **Scope:** The third delivery phase of the STPA-led, taxonomy-audited workflow:
 use the exact Phase 2 assessment to make a bounded, opt-in request for STPA to
@@ -417,9 +416,10 @@ Feature: opt-in closed-loop STPA obligation challenge
     And the returned outcome is validated and persisted without changing Phase 2
 ```
 
-The examples use the approved explicit trigger and exact pair target. Provider
-controls, the technical-failure record, live fixtures, and any public command
-remain approval items rather than facts implied by the examples.
+The examples use the approved explicit trigger and exact pair target. Task 2's
+typed controls and technical-failure record are fixed in §8. Live fixtures and
+any public command remain Task 3 approval items rather than facts implied by
+the examples.
 
 ## 6. Explicit exclusions
 
@@ -503,7 +503,7 @@ No Phase 3 implementation may proceed with guessed identity mappings. The
 lineage audit is a contract input, and a fresh taxonomy generation is a later
 Phase 4 fixture gate rather than a Phase 3 ledger prerequisite.
 
-## 8. Approved Task 1 decisions and remaining decisions
+## 8. Approved Task 1–2 decisions and remaining Task 3 decisions
 
 The following decisions were approved for Task 1 on 2026-08-31:
 
@@ -532,18 +532,49 @@ The following decisions were approved for Task 1 on 2026-08-31:
 8. **Ordinary STPA is unchanged.** The normal `stpa-run` command neither reads
    nor requires the challenge ledger.
 
-Tasks 2 and 3 still require explicit approval for:
+The following Task 2 decisions were approved on 2026-08-31:
 
-1. the model profile, effective controls, deadline, and opt-in surface for the
-   provider-capable STPA analysis adapter;
-2. the exact typed technical-failure record and evidence required for all
-   three completed challenge outcomes;
-3. run-directory placement, resume/idempotence behavior, and any public
+1. **Opt-in is a typed internal seam.**
+   `reconsider_stpa_challenge(...)` accepts an explicit boolean opt-in and a
+   caller-supplied adapter factory. Opt-out returns before constructing the
+   adapter. Task 2 adds no CLI, implicit environment trigger, or change to
+   ordinary `stpa-run`.
+2. **Controls are explicit and retained.** Every request records the required
+   named model profile, resolved model name, positive deadline, and explicit
+   temperature. The attempt limit is one and automatic retries are zero.
+3. **The adapter is one target at a time.** It receives a content-addressed
+   request containing the selected ledger record, original decision, exact
+   Phase 2 taxonomy row, canonical `EXEC:*` identity, and typed loss, hazard,
+   constraint, controller, and control-action context. It returns one
+   discriminated typed response.
+4. **Completed results remain closed.** ICA, justified N/A, and unresolved are
+   the only completed dispositions. A proposed ICA uses the next canonical
+   slot-relative ICA identity, retains the exact canonical `EXEC:*` identity,
+   and validates its hazard and constraint references through the existing
+   STPA structural validator.
+5. **Technical failure is separate.** The closed failure kinds are
+   `provider_initialization`, `provider_timeout`, `provider_error`,
+   `invalid_response`, and `identity_validation_failed`. A technical failure
+   has no structural outcome and cannot be interpreted as N/A or unresolved.
+6. **Call evidence is exact.** The result retains request/response digests and
+   references, effective controls, adapter kind, adapter-attempt count, and
+   provider/network-call counts. Deterministic fake adapters report zero
+   provider and network calls.
+7. **Task 2 output is adjacent history.** The closed
+   `stpa-obligation-challenge-analysis-v1` result repeats the immutable
+   original decision and records zero correspondence and coverage changes with
+   hybrid generation/admission still `not_attempted`/`not_assessed`. Task 2
+   defines canonical YAML/JSON encoding but no run-directory filename or
+   report placement.
+
+Task 3 still requires explicit approval for:
+
+1. run-directory placement, resume/idempotence behavior, and any public
    orchestration command;
-4. whether and where challenge outcomes are presented alongside the unchanged
+2. whether and where challenge outcomes are presented alongside the unchanged
    Phase 2 matrices;
-5. the first audited Klarna/NHS STPA pairs used for live qualification; and
-6. whether unresolved or technically failed opt-in runs are reported as
+3. the first audited Klarna/NHS STPA pairs used for live qualification; and
+4. whether unresolved or technically failed composed runs are reported as
    completed, degraded, or failed.
 
 ## 9. Exit criteria for Phase 3

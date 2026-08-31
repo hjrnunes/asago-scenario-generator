@@ -32,5 +32,6 @@ __all__ = (
     "correspondence",
     "hybrid_coverage_assessment",
     "stpa_challenge_ledger",
+    "stpa_challenge_analysis",
     "stpa",
 )

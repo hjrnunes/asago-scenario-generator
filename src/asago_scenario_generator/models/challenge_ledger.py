@@ -6,13 +6,14 @@ import json
 from typing import Annotated, Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from asago_scenario_generator.models.canonical import (
+    ClosedCanonicalModel,
     canonical_json_bytes,
     canonical_json_text,
     compute_framed_digest,
-    normalize_unicode,
+    unique_sorted_strings,
 )
 from asago_scenario_generator.models.hybrid_coverage import (
     ArtifactPin,
@@ -36,24 +37,8 @@ ChallengeId = Annotated[str, Field(pattern=r"^challenge:v1:[0-9a-f]{64}$")]
 SelectionStatus = Literal["selected", "not_selected_budget"]
 
 
-class _ChallengeModel(BaseModel):
+class _ChallengeModel(ClosedCanonicalModel):
     """Common closed and immutable challenge-ledger model configuration."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    @model_validator(mode="before")
-    @classmethod
-    def normalize_input(cls, value: Any) -> Any:
-        """Normalize Unicode before validating identities or digests."""
-        return normalize_unicode(value)
-
-
-def _unique_sorted(values: tuple[str, ...], field_name: str) -> tuple[str, ...]:
-    if any(not value for value in values):
-        raise ValueError(f"{field_name} must contain non-empty values")
-    if len(values) != len(set(values)):
-        raise ValueError(f"{field_name} must contain unique values")
-    return tuple(sorted(values))
 
 
 class ChallengeEligibility(_ChallengeModel):
@@ -70,7 +55,7 @@ class ChallengeEligibility(_ChallengeModel):
         object.__setattr__(
             self,
             "evidence_refs",
-            _unique_sorted(self.evidence_refs, "evidence_refs"),
+            unique_sorted_strings(self.evidence_refs, "evidence_refs"),
         )
         return self
 
@@ -90,8 +75,12 @@ class OriginalStpaDecision(_ChallengeModel):
 
     @model_validator(mode="after")
     def validate_decision(self) -> "OriginalStpaDecision":
-        object.__setattr__(self, "ica_ids", _unique_sorted(self.ica_ids, "ica_ids"))
-        object.__setattr__(self, "evidence", _unique_sorted(self.evidence, "evidence"))
+        object.__setattr__(
+            self, "ica_ids", unique_sorted_strings(self.ica_ids, "ica_ids")
+        )
+        object.__setattr__(
+            self, "evidence", unique_sorted_strings(self.evidence, "evidence")
+        )
         traces = tuple(
             sorted(
                 self.trace_refs,
@@ -127,11 +116,13 @@ class ChallengeOutcome(_ChallengeModel):
 
     @model_validator(mode="after")
     def validate_outcome(self) -> "ChallengeOutcome":
-        object.__setattr__(self, "ica_ids", _unique_sorted(self.ica_ids, "ica_ids"))
+        object.__setattr__(
+            self, "ica_ids", unique_sorted_strings(self.ica_ids, "ica_ids")
+        )
         object.__setattr__(
             self,
             "evidence_refs",
-            _unique_sorted(self.evidence_refs, "evidence_refs"),
+            unique_sorted_strings(self.evidence_refs, "evidence_refs"),
         )
         if self.disposition == "ica" and not self.ica_ids:
             raise ValueError("ICA outcome requires at least one ICA identity")
@@ -158,7 +149,9 @@ class ChallengeRecord(_ChallengeModel):
         object.__setattr__(
             self,
             "eligibility_evidence_refs",
-            _unique_sorted(self.eligibility_evidence_refs, "eligibility_evidence_refs"),
+            unique_sorted_strings(
+                self.eligibility_evidence_refs, "eligibility_evidence_refs"
+            ),
         )
         if self.slot_id != self.original_decision.slot_id:
             raise ValueError("challenge slot does not match original STPA decision")

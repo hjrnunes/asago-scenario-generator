@@ -1,0 +1,137 @@
+call_evidence:
+  adapter_attempts: 1
+  adapter_kind: fake
+  effective_controls:
+    attempt_limit: 1
+    automatic_retries: 0
+    deadline_seconds: 30.0
+    model_name: fake-stpa-analyst
+    model_profile: phase3-review
+    temperature: 0.0
+  network_calls: 0
+  provider_calls: 0
+  request_digest: 88fbb3751aed254beac01d3a74c1096653ba7e6116a0a3abcaaf8f9761357baf
+  request_ref: fixture://challenge/request
+  response_digest: a4e163a25d607005f75cacdb84670877537215bf980158d5d59ee75dff02c9a5
+  response_ref: fixture://challenge/response
+  validation_status: accepted
+correspondence_changes: 0
+coverage_changes: 0
+hybrid_admission_status: not_assessed
+hybrid_generation_status: not_attempted
+original_decision:
+  control_action_id: CA-1-1
+  controller_id: RESP-1
+  disposition: justified_na
+  evidence:
+  - baseline:timing-reviewed
+  ica_ids: []
+  row_id: hca-struct:v1:5e125a96eeec2d8191349f5b5040dfc1bc9b87de131197a1ac24f92230273e78
+  slot_id: RESP-1:CA-1-1:WRONG_TIMING
+  trace_refs:
+  - artifact_id: ica-enumeration
+    record_id: RESP-1:CA-1-1:WRONG_TIMING
+    schema_version: ica-enumeration-v1
+    semantic_digest: '3333333333333333333333333333333333333333333333333333333333333333'
+  uca_type: WRONG_TIMING
+outcome:
+  disposition: unresolved
+  evidence_refs:
+  - H-1
+  ica_ids: []
+  rationale: The bounded reconsideration could not resolve the causal path.
+proposed_ica: null
+request:
+  assessment_pin:
+    artifact_id: assessment
+    schema_version: hybrid-coverage-assessment-v1
+    semantic_digest: b37cd1cb31d29bd6373f3a85f13cdc7a6c814f2677136985cbfd7dc4cb7be9e4
+  attempt_number: 1
+  challenge_id: challenge:v1:f95c4f4439a77d6490b4dcdc549927558a130630e74dc472cdfa19d3e4730987
+  context:
+    constraints:
+    - constraint_id: RC-1-1
+      description: Check timing before payment.
+      related_hazards: []
+    - constraint_id: SC-1
+      description: Payment timing must be checked.
+      related_hazards:
+      - H-1
+    control_structure_pin:
+      artifact_id: phase3-control-structure
+      schema_version: control-structure-v1
+      semantic_digest: d4c0b55a07d8f6c097a11744ac9189389c31b68ae6ba65bc1680d1ad612ca599
+    controller:
+      control_action_description: Execute payment.
+      control_action_id: CA-1-1
+      controller_description: Select safe payment actions.
+      controller_id: RESP-1
+      responsibility_constraint_ids:
+      - RC-1-1
+    exec_candidate_id: EXEC:RESP-1:CA-1-1:WRONG_TIMING
+    hazards:
+    - description: A payment is executed at an unsafe time.
+      hazard_id: H-1
+      related_losses:
+      - L-1
+    loss_analysis_pin:
+      artifact_id: phase3-loss-analysis
+      schema_version: loss-analysis-v1
+      semantic_digest: a26140bd315dde756bcb97e9f4749c7d4c8e22fb7da017b21beb617a83b9e143
+    losses:
+    - description: Customer funds are lost.
+      loss_id: L-1
+    taxonomy:
+      accepted_relation_ids: []
+      attack_pattern_id: AP-1
+      attack_pattern_semantic_digest: '4444444444444444444444444444444444444444444444444444444444444444'
+      correspondence_disposition: unresolved_no_proposal
+      gap_reason: no_accepted_proposal
+      obligation_id: ob:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      qualification_disposition: ready
+      risk_id: R-1
+      scope_disposition: applicable
+      trace_refs:
+      - artifact_id: taxonomy-obligation-plan
+        record_id: ob:v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        schema_version: taxonomy-obligation-plan-v1
+        semantic_digest: '2222222222222222222222222222222222222222222222222222222222222222'
+  controls:
+    attempt_limit: 1
+    automatic_retries: 0
+    deadline_seconds: 30.0
+    model_name: fake-stpa-analyst
+    model_profile: phase3-review
+    temperature: 0.0
+  original_decision:
+    control_action_id: CA-1-1
+    controller_id: RESP-1
+    disposition: justified_na
+    evidence:
+    - baseline:timing-reviewed
+    ica_ids: []
+    row_id: hca-struct:v1:5e125a96eeec2d8191349f5b5040dfc1bc9b87de131197a1ac24f92230273e78
+    slot_id: RESP-1:CA-1-1:WRONG_TIMING
+    trace_refs:
+    - artifact_id: ica-enumeration
+      record_id: RESP-1:CA-1-1:WRONG_TIMING
+      schema_version: ica-enumeration-v1
+      semantic_digest: '3333333333333333333333333333333333333333333333333333333333333333'
+    uca_type: WRONG_TIMING
+  schema_version: stpa-obligation-challenge-request-v1
+  semantic_digest: 88fbb3751aed254beac01d3a74c1096653ba7e6116a0a3abcaaf8f9761357baf
+  source_pins:
+  - artifact_id: capability-fact-snapshot
+    schema_version: capability-fact-snapshot-v1
+    semantic_digest: '1111111111111111111111111111111111111111111111111111111111111111'
+  - artifact_id: ica-enumeration
+    schema_version: ica-enumeration-v1
+    semantic_digest: '3333333333333333333333333333333333333333333333333333333333333333'
+  - artifact_id: taxonomy-obligation-plan
+    schema_version: taxonomy-obligation-plan-v1
+    semantic_digest: '2222222222222222222222222222222222222222222222222222222222222222'
+schema_version: stpa-obligation-challenge-analysis-v1
+semantic_digest: 48c3b8caea5b3d8b9cf35e0627b1b8425fea0eb49ce75e8f36eed96ce4bcf7b7
+status: completed
+technical_failure: null
+unresolved_reason: missing_evidence
