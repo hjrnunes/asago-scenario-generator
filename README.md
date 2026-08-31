@@ -425,6 +425,29 @@ correspondence and coverage changes and retains hybrid generation/admission as
 Klarna/NHS fixture retains the old taxonomy IDs only as lineage evidence and
 infers zero challenge targets from them.
 
+### Phase 4 exact projection resolution
+
+Phase 4 starts with a deliberately narrow, offline resolver. It does not yet
+build or run a combined scenario. `resolve_hybrid_projection_units(...)`
+checks whether an already accepted Phase 2 relation has all of the exact
+material needed for later composition: the Phase 1 obligation and projected
+candidate, the matching STPA slot/ICA/`EXEC:*` path, the successful resource
+map, the confirmed review, and independently pinned bridge evidence.
+
+Callers first use the typed artifact factories in
+`pipeline.hybrid_scenario_projection` to copy and pin those existing
+authorities, then pass one closed `HybridProjectionInputs` value to the
+resolver. A coverage-bearing relation either becomes one content-addressed
+`HybridProjectionUnit` or one typed, traceable exclusion. A confirmed
+`related_but_not_coverage` relation always remains a
+`relation_not_coverage` exclusion. Cross-paired, substituted, malformed, or
+unverified top-level authorities fail closed.
+
+This Task 1 seam performs no graph composition, persistence, reporting, CLI
+work, model calls, or network access. Task 2 owns bridge and whole-graph
+composition; Task 3 will own the durable combined artifact. Ordinary
+`generate` and `stpa-run` remain independent of Phase 4.
+
 ## STPA-based generation
 
 ```bash

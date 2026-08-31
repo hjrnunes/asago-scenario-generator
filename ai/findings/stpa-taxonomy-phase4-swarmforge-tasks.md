@@ -1,8 +1,8 @@
 # SwarmForge task sequence: STPA–taxonomy synthesis, Phase 4
 
-**Status:** Proposed — pending user approval. This plan is not an approved
-work item. Do not submit implementation tasks until the Phase 4 contract issue
-accepts or changes the companion specification.
+**Status:** Tasks 1–3 approved on 2026-08-31. The deterministic implementation
+may proceed in dependency order. The semantic pilot and Phase 5 generation
+remain separately gated.
 
 **Source contract:**
 [`stpa-taxonomy-phase4-combined-projection-spec.md`](stpa-taxonomy-phase4-combined-projection-spec.md)
@@ -46,7 +46,7 @@ do not run them as an equal-priority batch.
 
 | Order | Stable task name | Delivers | Depends on |
 |---|---|---|---|
-| 1 | `phase4-projection-authority` | Closed inward models, one `HybridProjectionInputs` envelope, exact authority/materialization resolution, confirmed review evidence, and typed exclusions | Approved Phase 4 contract; accepted Phase 1/2 models; exact STPA authority |
+| 1 | `phase4-projection-authority` | Closed inward models, one `HybridProjectionInputs` envelope, exact authority/materialization resolution, confirmed review evidence, resolved units, and typed exclusions | Approved Phase 4 contract; accepted Phase 1/2 models; exact STPA authority |
 | 2 | `phase4-bridge-composition-persistence` | Closed bridge evidence/endpoints, deterministic DAG composition, canonical digests, and atomic YAML persistence | Task 1 and the fixed bridge endpoint table |
 | 3 | `phase4-acceptance-pilot-gate` | Gherkin/runtime, independent QA, compatibility proof, and an offline target-scoped pilot-readiness harness | Tasks 1–2 and later corrected-plan/review evidence for a pilot |
 
@@ -101,7 +101,11 @@ remain ignored.
 
 Create the closed inward domain boundary for one exact combined projection and
 its typed omissions. Resolve every identity through intact Phase 1/2 and STPA
-authorities without composing bridges or writing a file yet.
+authorities without composing bridges or writing a file yet. Task 1 exposes
+`resolve_hybrid_projection_units(inputs) -> HybridProjectionResolution`;
+Task 2 adds the approved final
+`build_hybrid_scenario_projection_set(inputs)` seam after bridge/DAG validation
+exists.
 
 ## Owned paths
 
@@ -126,9 +130,11 @@ Phase 1/2/3 models, public CLI modules, or reports.
 ## Required behavior
 
 - Define closed, immutable `MechanismProjection`, `CausalProjection`,
-  `CandidateMaterializationSet`, `PinnedStpaProjectionAttestation`,
-  `HybridCorrespondenceAttestation`, `ConfirmedCoverageReview`, `BridgeLink`, and
-  `HybridProjectionInputs` models with the exact fields in the companion
+  `CandidateMaterializationSet`, `CapabilityFactAttestation`, discriminated
+  artifact/taxonomy source pins, `PinnedStpaProjectionAttestation`,
+  `HybridCorrespondenceAttestation`, `MechanismEvidenceAttestation`,
+  `ConfirmedCoverageReview`, `BridgeLink`, `HybridProjectionInputs`, and
+  `HybridProjectionResolution` models with the exact fields in the companion
   contract.
 - Use the exact unit identity
   `(relation_id, obligation_id, selected_candidate_id, ica_id,
@@ -139,15 +145,37 @@ Phase 1/2/3 models, public CLI modules, or reports.
   selected candidate, disposition, and the framed
   `asago.phase1-candidate-record.v1` digest over the complete canonical record.
   Do not depend on old live scenario envelopes.
+- Reuse the existing inward `ProjectionSnapshot`, `CanonicalChainStep`, typed
+  condition AST, resource binding, and `ExecutionRequirement` contracts inside
+  `MechanismProjection`; do not invent an operation ID or duplicate the
+  taxonomy condition language.
 - Resolve the exact accepted Phase 2 relation, obligation, risk, pattern,
   selected candidate, slot, ICA, `EXEC:*`, resource links, hazards, and
   constraints across the supplied artifacts.
 - Require exact proposal-set/reconciliation pins and a successful resource-map
   attestation, plus a pinned STPA projection wrapper.
+- Require the exact `CapabilityFactSnapshot` at the outer adapter, deep-copy
+  and revalidate it, and match both its snapshot and qualification-facts
+  digests to the Phase 1 plan and resource-map attestation.
 - Construct materialization, correspondence, STPA, and confirmed-review
   attestations only through verified `from_artifacts` adapters over the exact
   typed source artifacts and their recomputed pins; the builder rejects raw
   dictionaries and directly assembled authority lists.
+- Derive accepted relations only from an integrity-checked
+  `ReconciliationResult`; cross-check the exact Phase 2 scenario-realization
+  row. Coverage-bearing relations require `coverage_bearing: true` and the
+  matching taxonomy row's accepted relation ID. A valid
+  `related_but_not_coverage` relation instead requires its exact noncoverage
+  row and remains a typed relation-local exclusion. Do not rerun
+  reconciliation.
+- Derive review evidence from existing
+  `ReviewedCorrespondenceAdjudications` plus independently pinned mechanism
+  evidence; do not restore the deleted browser review tool.
+- Deep-copy/revalidate mutable STPA source models and compute a canonical
+  execution-projection digest before producing the frozen neutral attestation.
+- Preserve responsibility-slot `RESP/CA` and coordination-slot `CL/CM`
+  namespaces explicitly in causal nodes; do not relabel coordination records
+  as controller/control-action records.
 - Retain exact source pins and the required homogeneous evidence class
   (`normative_bookkeeping_fixture` or `reviewed_semantic_evidence`).
 - Require typed confirmed review/mechanism evidence with reviewer identity and
@@ -161,11 +189,10 @@ Phase 1/2/3 models, public CLI modules, or reports.
   relation-local ineligibility becomes an exclusion.
 - Keep models free of pipeline, filesystem, provider, and generation-runner
   imports.
-- Enforce closed typed mechanism predicates and complete local referential
-  integrity for mechanism steps/conditions/bindings and causal
-  nodes/edges/trace paths; reject arbitrary predicate strings, dangling
-  references, wrong-kind edges, duplicate IDs, multiple/nonterminal `EXEC:*`
-  nodes, and cycles.
+- Preserve the existing typed mechanism condition/reference validators and
+  enforce complete local referential integrity for causal nodes/edges/trace
+  paths; reject dangling references, wrong-kind edges, duplicate IDs,
+  multiple/nonterminal `EXEC:*` nodes, and cycles.
 
 ## Red tests and Gherkin obligations
 
@@ -180,12 +207,16 @@ Write failing tests first for:
 5. proposal-set/reconciliation and STPA-wrapper digest substitution as fatal;
 6. relation/obligation/candidate/ICA/`EXEC:*`/hazard/constraint mismatch;
 7. related-only, unresolved, contradictory, or Phase 3-only relation;
-8. same `EXEC:*` with distinct ICA identities remaining distinct; and
+8. same `EXEC:*` with distinct ICA identities, and multiple relations sharing
+   the same ICA/`EXEC:*`, remaining distinct; and
 9. reviewer/digest mismatch or bridge evidence reused as mechanism evidence.
 10. direct wrapper construction bypass, arbitrary source pins, an incorrect
     Phase 1 candidate-record digest, and a factory/source-artifact mismatch;
-11. free-form predicates, dangling mechanism references, wrong-kind causal
-    edges, missing loss-to-`EXEC:*` trace members, and nonterminal `EXEC:*`.
+11. invalid existing condition ASTs, dangling mechanism references, wrong-kind
+    causal edges, missing loss-to-`EXEC:*` trace members, and nonterminal
+    `EXEC:*`;
+12. `TaxonomyPin` retained without conversion to `ArtifactPin`, missing exact
+    qualification facts, and assessment/reconciliation row disagreement.
 
 The first Gherkin examples may describe in-memory construction, but they must
 not imply persistence or scenario generation until Task 2 exists.

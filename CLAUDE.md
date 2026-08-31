@@ -117,6 +117,19 @@ changing acceptance behavior, or running the quality sequence.
   inventing an aggregate status. Add no Phase 3 CLI or report, infer no targets
   from the lineage audit, and leave ordinary generation workflows unaware of
   Phase 3.
+- Keep Phase 4 Task 1 at the typed, offline
+  `resolve_hybrid_projection_units` boundary. Accept one closed
+  `HybridProjectionInputs` graph assembled only through exact artifact
+  factories; preserve Phase 1 taxonomy pins without silently converting them,
+  bind complete candidate projections to exact Phase 1 candidate records, and
+  derive correspondence only from the paired `ProposalSet`,
+  `ReconciliationResult`, and `HybridCoverageAssessment` authorities. Require
+  the exact coverage-bearing scenario-realization row and matching
+  obligation-row relation ID. Retain `related_but_not_coverage` and
+  relation-local missing material as typed exclusions; reject substituted or
+  unverified top-level authority. Task 1 must not compose the final graph,
+  persist or render an artifact, add a CLI, contact a model or network, or
+  change ordinary `generate`/`stpa-run`.
 - Keep harness installations and runtime state local; the repository owns only
   portable methodology, configuration, and scripts.
 - Update `README.md`, this file, and linked documentation when an interface or

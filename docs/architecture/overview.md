@@ -387,6 +387,41 @@ verifies it after reload. Neither the composition model nor seam imports a
 generation runner, CLI, report, or persistence module. Ordinary `generate` and
 `stpa-run` remain unaware of all Phase 3 modules and artifacts.
 
+## Phase 4 exact projection boundary
+
+Phase 4 Task 1 introduces the pure
+`pipeline.hybrid_scenario_projection.resolve_hybrid_projection_units` seam.
+It consumes one closed `HybridProjectionInputs` authority graph and resolves
+only explicitly requested, already accepted Phase 2 relations. The seam does
+not reconcile correspondence again and does not infer a relation from prose,
+shared resources, counts, or taxonomy-row disposition.
+
+The input graph keeps each source in its native identity scheme. Phase 1
+taxonomy pins remain release/digest pins; ordinary artifacts use
+artifact/schema/digest pins. Candidate materializations bind a complete
+existing `ProjectionSnapshot` to the exact Phase 1 candidate-record digest.
+The STPA attestation deep-copies and pins loss analysis, control structure,
+ICA enumeration, and execution envelopes before they enter the neutral model.
+Correspondence comes only from a verified `ReconciliationResult`, paired with
+the exact `ProposalSet` and `HybridCoverageAssessment`. Confirmed review and
+bridge evidence are separately pinned and cannot reuse each other as
+independent evidence.
+
+For each requested relation, the resolver verifies the exact
+scenario-realization row is coverage-bearing and matches the obligation and
+selected candidate, then checks that the corresponding obligation row names
+the same accepted relation. `related_but_not_coverage` is retained as the
+typed `relation_not_coverage` exclusion. Missing or non-projectable
+relation-local material also produces a typed exclusion; substituted or
+malformed top-level authority fails closed.
+
+The result is a content-addressed collection of exact projection units and
+exclusions. Task 1 deliberately performs no cross-subgraph bridge validation,
+whole-graph DAG composition, persistence, report rendering, CLI work, model
+call, or network access. Those composition and publication responsibilities
+belong to later Phase 4 tasks. Neither existing generation workflow imports or
+requires the Phase 4 boundary.
+
 ## Taxonomy and risk-driven workflow
 
 The `generate` workflow consumes a use-case description, policy risk

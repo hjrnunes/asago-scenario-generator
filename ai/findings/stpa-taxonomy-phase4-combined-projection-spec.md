@@ -1,7 +1,7 @@
 # STPA–taxonomy synthesis: Phase 4 combined-projection contract
 
-**Status:** Proposed — pending user approval. This document is not an approved
-work item and must not be treated as permission to change production behavior.
+**Status:** Approved on 2026-08-31 for the deterministic Phase 4 Tasks 1–3.
+The later semantic pilot and Phase 5 generation remain separately gated.
 
 **Scope:** Phase 4 is the first phase that may compose an accepted taxonomy/STPA
 relation into one executable-shaped, but not yet executable, projection. It
@@ -12,8 +12,9 @@ This proposal is based on the recommended combined-projection step in
 [`stpa-taxonomy-synthesis.md`](stpa-taxonomy-synthesis.md), the approved Phase
 1–3 contracts, the corrected Klarna/NHS lineage audit, and the repository
 architecture rules. The synthesis document remains an investigation rather
-than an approved contract; the choices in this document therefore require
-explicit approval in a GitHub issue before implementation.
+than an approved contract; this narrower Phase 4 document records the user's
+approved implementation choices. A durable issue may mirror those choices but
+does not reopen them implicitly.
 
 ## 1. Purpose and boundary
 
@@ -115,9 +116,9 @@ Phase 4 MUST NOT:
 Scenario generation and finalization are explicitly a later Phase 5. A valid
 Phase 4 projection is not automatically executable.
 
-## 4. Proposed defaults for approval
+## 4. Approved defaults
 
-These are deliberate defaults, not silently resolved decisions:
+These are the deliberate choices approved for Tasks 1–3:
 
 1. **Composition surface:** one internal typed seam first; no CLI or report.
 2. **Unit of composition:** at most one projection per requested accepted Phase
@@ -168,6 +169,7 @@ this exact top-level shape:
 HybridProjectionInputs {
   schema_version = hybrid-projection-inputs-v1
   obligation_plan: TaxonomyObligationPlan
+  capability_facts: CapabilityFactAttestation
   candidate_materializations: CandidateMaterializationSet
   phase2_assessment: HybridCoverageAssessment
   correspondence: HybridCorrespondenceAttestation
@@ -187,7 +189,52 @@ reconciliation, the Phase 1 plan, the resource-map attestation, and the exact
 STPA authorities needed to resolve loss/hazard/constraint, slot/ICA, and
 `EXEC:*` identities.
 
-### 5.1 Phase 1 plan and candidate materialization
+### 5.1 Source-pin and capability/fact attestation
+
+Phase 4 does not flatten the existing Phase 1 `TaxonomyPin(release, digest)`
+into `ArtifactPin(artifact_id, schema_version, semantic_digest)`. Source pins
+use a closed discriminated union:
+
+```text
+ArtifactProjectionSourcePin {
+  kind = artifact
+  role
+  pin: ArtifactPin
+}
+
+TaxonomyProjectionSourcePin {
+  kind = taxonomy
+  role: catalog | mapping
+  taxonomy_id
+  pin: TaxonomyPin
+}
+
+ProjectionSourcePin = ArtifactProjectionSourcePin | TaxonomyProjectionSourcePin
+```
+
+The adapter retains `TaxonomyPin.release` and `TaxonomyPin.digest` exactly;
+neither value is repurposed as an artifact ID or schema version.
+
+The Phase 1 plan contains only `qualification_facts_digest`, so exact facts are
+supplied separately through:
+
+```text
+CapabilityFactAttestation {
+  schema_version = capability-fact-attestation-v1
+  capability_snapshot_digest
+  qualification_facts_digest
+  source_pin: ArtifactPin
+  semantic_digest
+}
+```
+
+`CapabilityFactAttestation.from_snapshot(...)` accepts an exact typed
+`CapabilityFactSnapshot`, asserts its integrity, deep-copies and revalidates
+its profile/facts immediately, computes the qualification-facts digest from
+those facts, and verifies both digests against the Phase 1 plan and successful
+resource-map validation. Raw mappings are not accepted.
+
+### 5.2 Phase 1 plan and candidate materialization
 
 The Phase 1 plan is authoritative for obligation and candidate identity,
 disposition, qualification facts, and upstream pins. It does **not** contain a
@@ -199,7 +246,7 @@ CandidateMaterializationSet {
   schema_version = taxonomy-candidate-materialization-set-v1
   obligation_plan_pin: ArtifactPin
   entries: [CandidateMaterialization]
-  source_pins: [ArtifactPin]
+  source_pins: [ProjectionSourcePin]
   semantic_digest
 }
 
@@ -211,7 +258,7 @@ CandidateMaterialization {
   selected_candidate_id
   phase1_candidate_record_digest
   mechanism_projection: MechanismProjection
-  source_pins: [ArtifactPin]
+  source_pins: [ProjectionSourcePin]
   semantic_digest
 }
 ```
@@ -231,11 +278,13 @@ bindings, disposition, reason, and evidence). The adapter recomputes it from
 the row selected under `obligation_plan_pin`; callers cannot supply a detached
 digest as authority.
 
-### 5.2 Neutral canonical mechanism projection
+### 5.3 Neutral canonical mechanism projection
 
 `MechanismProjection` is a closed immutable inward model. The model layer must
 not import pipeline types, filesystem code, provider clients, or generation
-runners. Its exact serialized fields are:
+runners. It reuses the existing closed inward attack-pattern contracts instead
+of translating them into a second step or condition language. Its exact
+serialized fields are:
 
 ```text
 MechanismProjection {
@@ -245,77 +294,35 @@ MechanismProjection {
   risk_id
   attack_pattern_id
   selected_candidate_id
-  steps: [MechanismStep]
-  conditions: [MechanismCondition]
-  ingress: [MechanismIngress]
-  resource_bindings: [MechanismResourceBinding]
+  projection: ProjectionSnapshot
+  canonical_ingress: EntryPointResourceReference
+  ingress_controllability: direct | indirect
+  execution_requirements: [ExecutionRequirement]
+  execution_requirements_digest
   semantic_digest
-}
-
-MechanismStep {
-  step_id
-  ordinal: non-negative integer
-  operation_id
-  precondition_ids: [string]
-  postcondition_ids: [string]
-  resource_binding_ids: [string]
-}
-
-MechanismCondition {
-  condition_id
-  kind: precondition | postcondition
-  fact_ids: [string]
-  predicate: MechanismPredicate
-}
-
-MechanismPredicate {
-  operator: fact_present | fact_absent | fact_equals | operation_available
-  fact_id: string | null
-  resource_id: string | null
-  operation_id: string | null
-  expected_value: null | boolean | integer | finite_number | string
-}
-
-MechanismIngress {
-  ingress_id
-  kind: entry_point | tool | integration | trust_boundary | output_surface | agent_internal
-  resource_id
-}
-
-MechanismResourceBinding {
-  binding_id
-  resource_id
-  role
-  operation_ids: [string]
 }
 ```
 
-All IDs are non-empty. Steps sort by `(ordinal, step_id)`; conditions,
-ingress, and bindings sort by their IDs. `predicate` is a normalized typed
-condition value, not a prose bridge or authority claim.
-
-The predicate union is discriminated by `operator`: `fact_present` and
-`fact_absent` require only `fact_id`; `fact_equals` requires `fact_id` and one
-JSON-scalar `expected_value`; `operation_available` requires only
-`resource_id` and `operation_id`. Every other field is null. Free-form
-predicate text is rejected.
-
-Within one mechanism projection, step, condition, ingress, and binding IDs are
-unique. Every step precondition/postcondition ID resolves to a condition of
-the matching kind; every `resource_binding_id` resolves locally; and each step
-operation is listed by at least one of its referenced bindings. Every ingress
-resource resolves to one of the candidate's own bindings. Step ordinals are
-unique and their sorted order is authoritative. Dangling, cross-candidate, or
-duplicate references fail closed.
+`ProjectionSnapshot` retains the complete source chain, selected steps,
+existing typed condition AST (`equality`, `membership`, `existence`,
+`property_match`, `all`, `any`, and `not`), omissions, exact resource-slot
+bindings, catalog/pattern/snapshot pins, and projection digest. The existing
+`CanonicalChainStep` and `ExecutionRequirement` contracts retain action kind,
+consumed/produced references, preconditions, observable postconditions,
+resource links, mappings, and required operations. Their existing validators
+remain authoritative. Phase 4 does not invent an `operation_id`, flatten a
+condition to prose, or duplicate those reference rules.
 
 An outer pipeline adapter may consume a **complete** current
 `ProjectedCandidate` record (never only its ID) and verify its candidate-v2
 identity, ingress, conditions, and resource bindings before constructing this
-record. That adapter is explicit and cannot silently fetch, rebuild, or
-substitute a candidate. No current pipeline type is imported by the inward
-model.
+record. It copies and revalidates the `ProjectionSnapshot`, ingress, and
+`ExecutionRequirement` model leaves, recomputes candidate and requirements
+digests, and checks them against the Phase 1 candidate record. That adapter is
+explicit and cannot silently fetch, rebuild, or substitute a candidate. No
+current pipeline type is imported by the inward model.
 
-### 5.3 Neutral canonical causal projection
+### 5.4 Neutral canonical causal projection
 
 `CausalProjection` is a closed immutable inward model. Its exact serialized
 fields are:
@@ -340,7 +347,8 @@ CausalProjection {
 CausalNode {
   node_id
   kind: loss | hazard | constraint | controller | control_action | feedback |
-        process_model | uca | ica | exec
+        process_model | coordination_link | coordination_mechanism | uca |
+        ica | exec
   ordinal: non-negative integer
 }
 
@@ -362,7 +370,7 @@ PinnedStpaProjectionAttestation {
   ica_enumeration_pin: ArtifactPin
   execution_projection_pin: ArtifactPin
   projections: [CausalProjection]
-  source_pins: [ArtifactPin]
+  source_pins: [ProjectionSourcePin]
   semantic_digest
 }
 ```
@@ -378,13 +386,14 @@ endpoint resolves locally. The closed edge-kind table is:
 
 | Edge kind | Permitted source → target kinds |
 |---|---|
-| `projection` | `loss → hazard`, `hazard → constraint`, `constraint → controller/control_action`, `controller/control_action → uca`, `uca → ica`, `ica → exec` |
-| `control` | `controller → control_action`, `control_action → uca` |
+| `projection` | `loss → hazard`, `hazard → constraint`, `constraint → controller/control_action/coordination_link/coordination_mechanism`, `controller/control_action/coordination_link/coordination_mechanism → uca`, `uca → ica`, `ica → exec` |
+| `control` | `controller → control_action`, `coordination_link → coordination_mechanism`, `control_action/coordination_mechanism → uca` |
 | `feedback` | `feedback → controller/process_model` |
 | `causal` | `process_model/feedback/control_action → uca/ica` |
 
 Every causal projection contains the exact referenced loss, hazard,
-constraint, controller, control-action, UCA, ICA, and `EXEC:*` nodes and at
+constraint, controller/control-action or coordination-link/mechanism, UCA,
+ICA, and `EXEC:*` nodes and at
 least one authoritative `projection` trace path through those identities in
 the order shown. Optional process-model and feedback nodes join only through
 the permitted causal/feedback edges. The `exec` node is unique and terminal;
@@ -393,7 +402,14 @@ cannot reverse their order. Dangling nodes, wrong-kind edges, duplicate
 semantic edges, missing trace members, multiple terminal `exec` nodes, and
 cycles fail closed.
 
-### 5.4 Correspondence authority and independent review
+For a responsibility slot, `controller_id`/`control_action_id` contain exact
+`RESP:*`/`CA:*` identities and their nodes use `controller`/`control_action`.
+For a coordination slot, those same scalar role fields contain exact
+`CL:*`/`CM:*` identities and their nodes use
+`coordination_link`/`coordination_mechanism`; Phase 4 must not relabel CL/CM
+records as RESP/CA records.
+
+### 5.5 Correspondence authority and independent review
 
 Phase 4 chooses the exact Phase 2 reconciliation as the sole authority for
 accepted relations. The proposal set is not re-adjudicated here, but its
@@ -422,19 +438,32 @@ ConfirmedCoverageReview {
   reviewer_id
   review_artifact_pin: ArtifactPin
   review_artifact_digest
-  mechanism_evidence_pin: ArtifactPin
-  mechanism_record_id
-  source_pins: [ArtifactPin]
+  mechanism_evidence: MechanismEvidenceAttestation
+  source_pins: [ProjectionSourcePin]
+  semantic_digest
+}
+
+MechanismEvidenceAttestation {
+  schema_version = mechanism-evidence-attestation-v1
+  artifact_pin: ArtifactPin
+  record_id
+  evidence_kind: exact_id | curated_mechanism_mapping
   semantic_digest
 }
 ```
 
-The review identity and digest must resolve to the exact confirmed relation.
-The mechanism evidence pin/record must be independent of bridge evidence; a
-bridge cannot cite itself as independent evidence. Rejected, unresolved,
-contradictory, or unreviewed records cannot become confirmed here.
+The review factory consumes the existing
+`ReviewedCorrespondenceAdjudications` and exact
+`ReviewedCorrespondenceDecision`; it checks packet/proposal-set digests,
+`status == confirmed`, relation kind, proposal ID, `adjudicated_by`, and
+evidence references against the accepted relation. `review_artifact_pin` is
+computed from that complete canonical reviewed-adjudications value; no deleted
+browser-review packet or UI type is required. The separate mechanism evidence
+record must be independently pinned and cannot be the bridge artifact itself.
+Rejected, unresolved, contradictory, or unreviewed records cannot become
+confirmed here.
 
-### 5.5 Required source pins and historical Phase 3
+### 5.6 Required source pins and historical Phase 3
 
 The envelope retains and verifies pins for the plan, candidate materialization
 set, capability/fact snapshot, taxonomy catalog/chain/mapping/lineage,
@@ -448,7 +477,7 @@ intact `stpa-obligation-closed-loop-run-v1` record with matching pins. It may
 explain history or an exclusion, but can never create a relation, bridge,
 projection, or coverage credit.
 
-### 5.6 Verified construction boundary
+### 5.7 Verified construction boundary
 
 These wrappers are attestations, not caller-authored summaries. The public
 pipeline exposes verified factories and the builder accepts only their
@@ -459,16 +488,25 @@ validated outputs:
   recomputes every `cand:v2` identity and candidate-record digest.
 - `HybridCorrespondenceAttestation.from_artifacts(...)` consumes the exact
   typed proposal set, reconciliation result, Phase 2 assessment, and their
-  pins; it reruns reconciliation integrity checks and derives accepted
-  relations rather than accepting a caller-supplied relation list.
+  pins; it calls each artifact's integrity validator, verifies their shared
+  digests/pins, and derives accepted relations only from
+  `ReconciliationResult.accepted_relations`. It does not rerun reconciliation
+  or accept a caller-supplied relation list.
 - `PinnedStpaProjectionAttestation.from_artifacts(...)` consumes the exact
   typed loss analysis, control structure, ICA enumeration, execution
-  projections, and their pins; it verifies each pin against canonical source
-  content and derives every neutral causal projection.
+  projections, accepted-relation contexts, and their pins. It deep-copies and
+  revalidates the mutable source models immediately, verifies each pin against
+  canonical source content, and derives the loss/hazard/constraint path from
+  typed references plus the slot/ICA/`EXEC:*` and causal-factor projection.
+  The execution projection pin uses domain
+  `asago.stpa-execution-projection.v1` over the existing canonical standalone
+  execution-projection value; the source envelope is not assumed to contain a
+  digest or a prebuilt causal DAG.
 - `ConfirmedCoverageReview.from_artifacts(...)` consumes the exact typed
-  adjudication/finalization artifact and independently pinned mechanism
-  evidence; it derives the relation/reviewer record and rejects a bridge
-  artifact reused as mechanism evidence.
+  existing `ReviewedCorrespondenceAdjudications`, its exact confirmed decision,
+  and independently pinned `MechanismEvidenceAttestation`; it derives the
+  relation/reviewer record and rejects a bridge artifact reused as mechanism
+  evidence.
 
 Deserialization may recreate a persisted attestation, but it must recompute
 its semantic digest and is not sufficient by itself for a new build. The
@@ -481,9 +519,18 @@ factories.
 
 For each requested relation ID, the builder MUST verify all of the following:
 
-1. The relation exists in the Phase 2 assessment and reconciliation result.
-2. The relation is accepted, explicitly confirmed, and coverage-bearing under
-   the closed Phase 2 relation vocabulary.
+1. The full relation exists in `ReconciliationResult.accepted_relations`. The
+   matching Phase 2 `scenario_realization` row has the same
+   obligation/candidate identity. For a coverage-bearing relation the row has
+   `coverage_bearing: true` and the corresponding taxonomy row contains the
+   relation ID in `accepted_relation_ids`. For
+   `related_but_not_coverage`, the row has `coverage_bearing: false`, the
+   taxonomy row does not claim that relation as accepted coverage, and Task 1
+   retains a typed relation-local exclusion.
+2. A relation emits a unit only when it is accepted, explicitly confirmed,
+   and coverage-bearing under the closed Phase 2 relation vocabulary. An
+   intact accepted noncoverage relation is not a malformed authority; it is
+   excluded with `relation_not_coverage`.
 3. The relation's obligation, risk, attack-pattern, selected candidate, ICA
    slot, ICA, `EXEC:*`, resource-link, hazard, and constraint identities agree
    across all supplied authorities.
@@ -561,7 +608,7 @@ BridgeLink {
   taxonomy_endpoint: TaxonomyEndpoint
   stpa_endpoint: StpaEndpoint
   evidence: [BridgeEvidence]
-  source_pins: [ArtifactPin]
+  source_pins: [ProjectionSourcePin]
   semantic_digest
 }
 ```
@@ -701,7 +748,7 @@ ProjectionExclusion {
   relation_id
   unit_identity: [relation_id, obligation_id, selected_candidate_id, ica_id, exec_candidate_id]
   reason: ExclusionReason
-  source_pins: [ArtifactPin]
+  source_pins: [ProjectionSourcePin]
   trace: [ProjectionTraceReference]
 }
 
@@ -710,7 +757,7 @@ ProjectionDiagnostic {
   relation_id: string | null
   kind: bridge_unreviewed | bridge_not_authoritative |
         challenge_outcome_not_correspondence
-  source_pins: [ArtifactPin]
+  source_pins: [ProjectionSourcePin]
   trace: [ProjectionTraceReference]
 }
 ```
@@ -839,26 +886,35 @@ Lists are sorted by the stated canonical key before either payload is encoded:
 
 | Value | Semantic domain | Derived-ID prefix | Canonical order |
 |---|---|---|---|
-| `MechanismProjection` | `asago.taxonomy-mechanism-projection.v1` | `mech:v1:` | Steps by `(ordinal, step_id)`, conditions by `condition_id`, ingress by `ingress_id`, bindings by `binding_id` |
+| `MechanismProjection` | `asago.taxonomy-mechanism-projection.v1` | `mech:v1:` | Existing `ProjectionSnapshot` canonical order; execution requirements by `requirement_id` |
 | `CausalProjection` | `asago.stpa-causal-projection.v1` | `causal:v1:` | Nodes by `(ordinal, node_id)`, edges by `edge_id` |
+| `CapabilityFactAttestation` | `asago.capability-fact-attestation.v1` | none | Scalar digest/pin fields |
 | `CandidateMaterialization` | `asago.taxonomy-candidate-materialization.v1` | `materialization:v1:` | Pins by artifact identity |
 | `CandidateMaterializationSet` | `asago.taxonomy-candidate-materialization-set.v1` | none | Entries by `(obligation_id, selected_candidate_id)`, pins by artifact identity |
 | `PinnedStpaProjectionAttestation` | `asago.pinned-stpa-projection-attestation.v1` | none | Projections by `(ica_id, exec_candidate_id)`, pins by artifact identity |
 | `HybridCorrespondenceAttestation` | `asago.hybrid-correspondence-attestation.v1` | none | Accepted relations by `relation_id`; proposal/reconciliation pins and digests are scalar authority fields |
+| `MechanismEvidenceAttestation` | `asago.mechanism-evidence-attestation.v1` | none | Scalar exact evidence fields |
 | `ConfirmedCoverageReview` | `asago.confirmed-coverage-review.v1` | none | Source pins by artifact identity; all review and mechanism-evidence fields are semantic |
 | `BridgeEvidence` | `asago.hybrid-bridge-evidence.v1` | `bridge-evidence:v1:` | Scalar fields; rationale remains part of the identity and digest |
 | `BridgeLink` | `asago.hybrid-bridge-link.v1` | `bridge:v1:` | Evidence by `evidence_id`, pins by artifact identity |
 | `HybridScenarioProjection` | `asago.hybrid-scenario-projection.v1` | `projection:v1:` | Bridges by `bridge_id`, trace and pins by `(source_kind, record_id, artifact identity)` |
 | `HybridScenarioProjectionSet` | `asago.hybrid-scenario-projection-set.v1` | none | Projections by exact unit identity, exclusions by `(relation_id, exclusion_id)`, diagnostics by `diagnostic_id`, pins by artifact identity |
 
-For every payload, pins sort by `(schema_version, artifact_id,
-semantic_digest)`, relation IDs sort lexicographically, bridge evidence sorts by
+For every payload, artifact source pins sort by
+`(kind, role, artifact_id, schema_version, semantic_digest)` and taxonomy
+source pins by `(kind, role, taxonomy_id, release, digest)`. Relation IDs sort
+lexicographically, bridge evidence sorts by
 `evidence_id`, bridge links by `(relation_id, bridge_kind, bridge_id)`,
 projections by the five-part unit identity, exclusions by
 `(relation_id, reason, exclusion_id)`, and diagnostics by
 `(relation_id-or-empty, kind, diagnostic_id)`. Tuples are encoded as JSON arrays
 after this ordering. These rules also apply to nested `source_pins` and the
 requested relation list.
+
+The canonical source digest used by `execution_projection_pin` is separately
+framed in domain `asago.stpa-execution-projection.v1` over the complete
+standalone execution-projection value derived from the revalidated
+`CandidateExecutionEnvelope`; it is not copied from the mutable source model.
 
 `ProjectionExclusion.exclusion_id` and
 `ProjectionDiagnostic.diagnostic_id` use the same complete-record identity
@@ -1015,8 +1071,10 @@ pilot gate.
 The Phase 4 work item is complete only when the six responsibilities have
 independent evidence:
 
-- **Specifier:** this proposal is approved in an issue, including bridge
-  vocabulary, evidence authority, identity, artifact, and pilot decisions.
+- **Specifier:** this proposal has explicit user approval for the deterministic
+  Tasks 1–3, including bridge vocabulary, evidence authority, identity, and
+  artifact decisions. Link that approval from the durable issue or PR before
+  merge; the later semantic pilot still requires its own decision.
 - **Coder:** the smallest typed model/validator/persistence slice is implemented
   test-first, without importing either generation runner.
 - **Cleaner:** no duplicate relation identity, bridge logic, digest path, or
@@ -1042,22 +1100,25 @@ QA: independent typed-artifact checks and zero provider/network calls
 compatibility: generate and stpa-run unchanged
 ```
 
-## 15. Open decisions before implementation
+## 15. Approved and deferred decisions
 
-The following product choices must be explicitly accepted or changed in the
-Phase 4 issue:
+The Phase 4 approval fixes the following implementation choice:
 
-1. The exact Python symbol name (the proposed name is
-   `build_hybrid_scenario_projection_set`).
-2. The first use case for a later target-scoped semantic pilot after its gate
+1. The public symbol is `build_hybrid_scenario_projection_set` and accepts one
+   closed `HybridProjectionInputs` value.
+
+The following decisions are deliberately deferred and do not block the
+deterministic Phase 4 tasks:
+
+1. The first use case for a later target-scoped semantic pilot after its gate
    is met.
-3. Whether a later consumer-facing projection artifact should receive a new
+2. Whether a later consumer-facing projection artifact should receive a new
    version; artifact-generator work remains outside Phase 4.
 
 The bridge endpoint table, bridge evidence authority, one-relation
 cardinality, reconciliation authority, digest domains, fatal/exclusion
-boundary, evidence classes, and Phase 5 exclusion are contract defaults in
-this proposal, not unresolved implementation choices.
+boundary, evidence classes, and Phase 5 exclusion are approved contract
+choices, not unresolved implementation choices.
 
 ## 16. References and authority
 
