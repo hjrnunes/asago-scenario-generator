@@ -101,6 +101,7 @@ def _valid_responsibility_set_dict() -> dict:
             {
                 "resp_id": "RESP-1",
                 "description": "Payment authorization controller",
+                "security_constraint_refs": ["SC-1"],
                 "responsibility_constraints": [
                     {"rc_id": "RC-1-1", "description": "Must verify user identity"}
                 ],
@@ -111,6 +112,7 @@ def _valid_responsibility_set_dict() -> dict:
             {
                 "resp_id": "RESP-2",
                 "description": "Output verification controller",
+                "security_constraint_refs": ["SC-2"],
                 "responsibility_constraints": [],
                 "process_model_parts": [
                     {"pm_id": "PM-2-1", "description": "Response content state"}

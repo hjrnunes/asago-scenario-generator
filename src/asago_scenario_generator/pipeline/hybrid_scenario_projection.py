@@ -930,6 +930,9 @@ def _causal_projection_for_relation(
     hazard_ids, constraint_ids, loss_ids = _stpa_relation_context(
         relation, _ica_in_slot(slot, relation.ica_id), loss_analysis
     )
+    _validate_controller_constraint_ownership(
+        controller_id, constraint_ids, control_structure
+    )
     hazards_by_id = {item.hazard_id: item for item in loss_analysis.hazards}
     constraints_by_id = {
         item.constraint_id: item for item in loss_analysis.security_constraints
@@ -976,6 +979,32 @@ def _causal_projection_for_relation(
             for edge_id, source, target, kind in edge_specs
         ),
     )
+
+
+def _validate_controller_constraint_ownership(
+    controller_id: str,
+    constraint_ids: Sequence[str],
+    control_structure: ControlStructure,
+) -> None:
+    """Require the causal controller to own every selected constraint."""
+    by_responsibility = {
+        item.resp_id: set(item.security_constraint_refs)
+        for item in control_structure.responsibilities
+    }
+    assigned = by_responsibility.get(controller_id)
+    if assigned is None:
+        for link in control_structure.coordination_links:
+            if link.link_id == controller_id:
+                assigned = by_responsibility.get(
+                    link.source, set()
+                ) | by_responsibility.get(link.target, set())
+                break
+    missing = sorted(set(constraint_ids) - (assigned or set()))
+    if missing:
+        raise ValueError(
+            "security constraint(s) are not recorded on controller "
+            f"{controller_id}: {', '.join(missing)}"
+        )
 
 
 def _resolve_causal_structure(

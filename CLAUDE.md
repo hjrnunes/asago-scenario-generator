@@ -127,7 +127,9 @@ changing acceptance behavior, or running the quality sequence.
   the exact coverage-bearing scenario-realization row and matching
   obligation-row relation ID. Retain `related_but_not_coverage` and
   relation-local missing material as typed exclusions; reject substituted or
-  unverified top-level authority. Task 1 must not compose the final graph,
+  unverified top-level authority. Require each accepted relation's security
+  constraints to be owned by its selected causal controller; never infer that
+  ownership during Phase 4. Task 1 must not compose the final graph,
   persist or render an artifact, add a CLI, contact a model or network, or
   change ordinary `generate`/`stpa-run`.
 - Keep Phase 4 in-memory composition at the pure

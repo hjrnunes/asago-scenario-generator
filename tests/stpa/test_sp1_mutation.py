@@ -396,6 +396,7 @@ def _valid_responsibility_set_dict() -> dict:
             {
                 "resp_id": "RESP-1",
                 "description": "Authorization controller",
+                "security_constraint_refs": ["SC-1"],
                 "responsibility_constraints": [
                     {"rc_id": "RC-1-1", "description": "Must confirm before action"}
                 ],
@@ -482,17 +483,19 @@ def _make_mock_client(
     if revised_cs is not None:
         # Queue all responses in call order for the revision path
         # New ordering: 1b → 1a-1 (risk) → 1a-2 (gap) → Stage 2 → critic → revision
-        client.set_response_queue([
-            _valid_stage1_profile_dict(),               # Stage 1b
-            _valid_loss_analysis_dict(),                # Stage 1a risk_derivation
-            _valid_gap_draft_dict(),                    # Stage 1a gap_analysis
-            _valid_requirement_set_dict(),              # Stage 2 Call 1
-            _valid_responsibility_set_dict(),           # Stage 2 Call 2a
-            valid_control_element_set_dict(),           # Stage 2 Call 2b
-            valid_empty_coordination_analysis_dict(),   # Stage 2 Call 3
-            findings,                                   # Critic
-            revised_cs,                                 # Revision
-        ])
+        client.set_response_queue(
+            [
+                _valid_stage1_profile_dict(),  # Stage 1b
+                _valid_loss_analysis_dict(),  # Stage 1a risk_derivation
+                _valid_gap_draft_dict(),  # Stage 1a gap_analysis
+                _valid_requirement_set_dict(),  # Stage 2 Call 1
+                _valid_responsibility_set_dict(),  # Stage 2 Call 2a
+                valid_control_element_set_dict(),  # Stage 2 Call 2b
+                valid_empty_coordination_analysis_dict(),  # Stage 2 Call 3
+                findings,  # Critic
+                revised_cs,  # Revision
+            ]
+        )
     else:
         client.set_response_for(
             LossAnalysisDraft,
@@ -543,11 +546,15 @@ class TestSP1RunResultDefault:
                     )
                 ],
                 hazards=[
-                    Hazard(hazard_id="H-1", description="A hazard", related_losses=["L-1"]),
+                    Hazard(
+                        hazard_id="H-1", description="A hazard", related_losses=["L-1"]
+                    ),
                 ],
                 security_constraints=[
                     SecurityConstraint(
-                        constraint_id="SC-1", description="A constraint", related_hazards=["H-1"]
+                        constraint_id="SC-1",
+                        description="A constraint",
+                        related_hazards=["H-1"],
                     ),
                 ],
             ),

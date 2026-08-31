@@ -121,7 +121,10 @@ class MockLLMClient:
         # Determine which response to return
         if self._response_queue:
             content = self._response_queue.pop(0)
-        elif response_format is not None and response_format in self._invalid_response_types:
+        elif (
+            response_format is not None
+            and response_format in self._invalid_response_types
+        ):
             # Return a non-JSON string that will fail parsing/validation
             content = "THIS_IS_NOT_VALID_JSON{{{"
         elif response_format is not None and response_format in self._response_map:
@@ -342,6 +345,7 @@ def valid_responsibility_set_dict() -> dict:
             {
                 "resp_id": "RESP-1",
                 "description": "Authorization controller",
+                "security_constraint_refs": ["SC-1"],
                 "responsibility_constraints": [
                     {"rc_id": "RC-1-1", "description": "Must confirm before action"}
                 ],
@@ -360,9 +364,7 @@ def valid_control_element_set_dict() -> dict:
     ``valid_responsibility_set_dict``.
     """
     return {
-        "control_actions": [
-            {"ca_id": "CA-1-1", "description": "Execute action"}
-        ],
+        "control_actions": [{"ca_id": "CA-1-1", "description": "Execute action"}],
         "feedback_channels": [
             {
                 "fb_id": "FB-1-1",
@@ -407,12 +409,16 @@ def setup_sp1_mock_client() -> MockLLMClient:
     client = MockLLMClient()
     # Stage 1a: two calls (risk_derivation + gap_analysis) both use LossAnalysisDraft.
     # Provide a list so the first call gets the risk draft and the second gets the gap draft.
-    client.set_response_for(LossAnalysisDraft, [valid_risk_draft_dict(), valid_gap_draft_dict()])
+    client.set_response_for(
+        LossAnalysisDraft, [valid_risk_draft_dict(), valid_gap_draft_dict()]
+    )
     # Stage 1b: Stage1Profile (no loss_analysis parameter)
     client.set_response_for(Stage1Profile, valid_stage1_profile_dict())
     client.set_response_for(RequirementSet, valid_requirement_set_dict())
     client.set_response_for(ResponsibilitySet, valid_responsibility_set_dict())
     client.set_response_for(ControlElementSet, valid_control_element_set_dict())
-    client.set_response_for(CoordinationAnalysis, valid_empty_coordination_analysis_dict())
+    client.set_response_for(
+        CoordinationAnalysis, valid_empty_coordination_analysis_dict()
+    )
     client.set_response_for(CriticFindings, valid_critic_findings_dict_no_gaps())
     return client

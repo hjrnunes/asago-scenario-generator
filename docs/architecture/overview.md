@@ -402,6 +402,11 @@ artifact/schema/digest pins. Candidate materializations bind a complete
 existing `ProjectionSnapshot` to the exact Phase 1 candidate-record digest.
 The STPA attestation deep-copies and pins loss analysis, control structure,
 ICA enumeration, and execution envelopes before they enter the neutral model.
+Its source control structure must assign every loss-analysis security
+constraint to at least one responsibility. Resolution additionally requires
+the selected causal controller to carry every constraint named by the accepted
+relation; absent ownership fails closed rather than being inferred from later
+artifacts.
 Correspondence comes only from a verified `ReconciliationResult`, paired with
 the exact `ProposalSet` and `HybridCoverageAssessment`. Confirmed review and
 bridge evidence are separately pinned and cannot reuse each other as

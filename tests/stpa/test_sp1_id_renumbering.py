@@ -38,8 +38,16 @@ def _raw_payload() -> dict:
                     {"ca_id": "action-b", "description": "Action B"},
                 ],
                 "feedback_channels": [
-                    {"fb_id": "feedback-a", "description": "Feedback A", "updates": "state-a"},
-                    {"fb_id": "feedback-b", "description": "Feedback B", "updates": "state-b"},
+                    {
+                        "fb_id": "feedback-a",
+                        "description": "Feedback A",
+                        "updates": "state-a",
+                    },
+                    {
+                        "fb_id": "feedback-b",
+                        "description": "Feedback B",
+                        "updates": "state-b",
+                    },
                 ],
             },
             {
@@ -56,7 +64,11 @@ def _raw_payload() -> dict:
                     {"ca_id": "action-c", "description": "Action C"},
                 ],
                 "feedback_channels": [
-                    {"fb_id": "feedback-c", "description": "Feedback C", "updates": "state-c"},
+                    {
+                        "fb_id": "feedback-c",
+                        "description": "Feedback C",
+                        "updates": "state-c",
+                    },
                 ],
             },
         ],
@@ -103,17 +115,26 @@ def test_normalization_assigns_ids_from_structural_position() -> None:
         "RESP-1",
         "RESP-2",
     ]
-    assert [rc["rc_id"] for rc in normalized["responsibilities"][1]["responsibility_constraints"]] == [
+    assert [
+        rc["rc_id"]
+        for rc in normalized["responsibilities"][1]["responsibility_constraints"]
+    ] == [
         "RC-2-1",
     ]
-    assert [pm["pm_id"] for pm in normalized["responsibilities"][0]["process_model_parts"]] == [
+    assert [
+        pm["pm_id"] for pm in normalized["responsibilities"][0]["process_model_parts"]
+    ] == [
         "PM-1-1",
         "PM-1-2",
     ]
-    assert [ca["ca_id"] for ca in normalized["responsibilities"][1]["control_actions"]] == [
+    assert [
+        ca["ca_id"] for ca in normalized["responsibilities"][1]["control_actions"]
+    ] == [
         "CA-2-1",
     ]
-    assert [fb["fb_id"] for fb in normalized["responsibilities"][0]["feedback_channels"]] == [
+    assert [
+        fb["fb_id"] for fb in normalized["responsibilities"][0]["feedback_channels"]
+    ] == [
         "FB-1-1",
         "FB-1-2",
     ]
@@ -209,16 +230,22 @@ def test_normalization_repairs_malformed_colliding_ids_before_validation() -> No
     result = normalize_control_structure_payload(payload)
     control_structure = ControlStructure.model_validate(result.payload)
 
-    assert control_structure.responsibilities[0].process_model_parts[0].pm_id == "PM-1-1"
-    assert control_structure.responsibilities[0].process_model_parts[1].pm_id == "PM-1-2"
-    assert control_structure.responsibilities[0].responsibility_constraints[0].rc_id == "RC-1-1"
+    assert (
+        control_structure.responsibilities[0].process_model_parts[0].pm_id == "PM-1-1"
+    )
+    assert (
+        control_structure.responsibilities[0].process_model_parts[1].pm_id == "PM-1-2"
+    )
+    assert (
+        control_structure.responsibilities[0].responsibility_constraints[0].rc_id
+        == "RC-1-1"
+    )
 
 
 def test_normalization_preserves_order_and_non_id_fields() -> None:
     payload = _raw_payload()
     original_descriptions = [
-        responsibility["description"]
-        for responsibility in payload["responsibilities"]
+        responsibility["description"] for responsibility in payload["responsibilities"]
     ]
     original_payloads = [
         link["coordination_mechanism"]["payload"]
@@ -235,9 +262,10 @@ def test_normalization_preserves_order_and_non_id_fields() -> None:
         link["coordination_mechanism"]["payload"]
         for link in result.payload["coordination_links"]
     ] == original_payloads
-    assert [
-        link["description"] for link in result.payload["coordination_links"]
-    ] == ["Connection A", "Connection B"]
+    assert [link["description"] for link in result.payload["coordination_links"]] == [
+        "Connection A",
+        "Connection B",
+    ]
 
 
 def test_normalization_handles_non_mapping_children_and_links() -> None:
@@ -273,7 +301,9 @@ def test_normalization_handles_non_mapping_children_and_links() -> None:
     assert payload["responsibilities"][0]["resp_id"] == "controller"
 
 
-def test_stage2_uses_tolerant_decode_then_normalizes_before_validation(tmp_path) -> None:
+def test_stage2_uses_tolerant_decode_then_normalizes_before_validation(
+    tmp_path,
+) -> None:
     client = MockLLMClient()
     client.set_response_for(
         RequirementSet,
@@ -295,6 +325,7 @@ def test_stage2_uses_tolerant_decode_then_normalizes_before_validation(tmp_path)
                 {
                     "resp_id": "RESP-90",
                     "description": "First controller",
+                    "security_constraint_refs": ["SC-1"],
                     "responsibility_constraints": [
                         {"rc_id": "RC-9-9", "description": "Constraint one"}
                     ],
@@ -305,6 +336,7 @@ def test_stage2_uses_tolerant_decode_then_normalizes_before_validation(tmp_path)
                 {
                     "resp_id": "RESP-3",
                     "description": "Second controller",
+                    "security_constraint_refs": ["SC-1"],
                     "responsibility_constraints": [
                         {"rc_id": "RC-9-9", "description": "Constraint two"}
                     ],
@@ -388,8 +420,12 @@ def test_stage2_uses_tolerant_decode_then_normalizes_before_validation(tmp_path)
         "RESP-1",
         "RESP-2",
     ]
-    assert normalized.responsibilities[0].responsibility_constraints[0].rc_id == "RC-1-1"
-    assert normalized.responsibilities[1].responsibility_constraints[0].rc_id == "RC-2-1"
+    assert (
+        normalized.responsibilities[0].responsibility_constraints[0].rc_id == "RC-1-1"
+    )
+    assert (
+        normalized.responsibilities[1].responsibility_constraints[0].rc_id == "RC-2-1"
+    )
     assert normalized.responsibilities[0].control_actions[0].ca_id == "CA-1-1"
     assert normalized.responsibilities[1].feedback_channels[0].fb_id == "FB-2-1"
     assert normalized.responsibilities[0].control_actions[0].target is not None

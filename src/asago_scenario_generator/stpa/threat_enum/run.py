@@ -47,7 +47,7 @@ from .slot_filling import fill_all_slots
 
 DEFAULT_TEMPERATURE = LLM_DEFAULT_TEMPERATURE
 
-__all__ = ["SP2RunResult", "run_sp2"]
+__all__ = ["SP2RunResult", "run_sp2", "validate_security_constraints_assigned"]
 
 
 @dataclass
@@ -65,6 +65,32 @@ class SP2RunResult:
     enriched_threat_set: EnrichedThreatSet | None = None
     na_quality_result: Any = None
     stage_errors: list[str] = field(default_factory=list)
+
+
+def validate_security_constraints_assigned(
+    control_structure: ControlStructure,
+    loss_analysis: LossAnalysis,
+) -> None:
+    """Require every loss-analysis constraint to reach a responsibility.
+
+    Stage 3 creates ICA slots from the control structure.  Refusing to start
+    that work when a generated security constraint has no responsible
+    controller keeps the later ICA trace grounded in the Stage 2 output.
+    """
+    assigned = {
+        constraint_id
+        for responsibility in control_structure.responsibilities
+        for constraint_id in responsibility.security_constraint_refs
+    }
+    expected = {
+        constraint.constraint_id for constraint in loss_analysis.security_constraints
+    }
+    missing = sorted(expected - assigned)
+    if missing:
+        raise ValueError(
+            "security constraints are not assigned to any responsibility "
+            "before ICA generation: " + ", ".join(missing)
+        )
 
 
 def run_sp2(
@@ -97,6 +123,8 @@ def run_sp2(
     temperature = effective_temperature(llm_client, temperature)
 
     stage_errors: list[str] = []
+
+    validate_security_constraints_assigned(control_structure, loss_analysis)
 
     # --- Stage 3 Phase 1: Deterministic slot creation ---
     slots = create_slots(control_structure)

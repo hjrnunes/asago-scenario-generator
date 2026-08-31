@@ -55,10 +55,14 @@ def _make_loss_analysis() -> LossAnalysis:
         ],
         security_constraints=[
             SecurityConstraint(
-                constraint_id="SC-1", description="Constraint 1", related_hazards=["H-1"]
+                constraint_id="SC-1",
+                description="Constraint 1",
+                related_hazards=["H-1"],
             ),
             SecurityConstraint(
-                constraint_id="SC-2", description="Constraint 2", related_hazards=["H-2"]
+                constraint_id="SC-2",
+                description="Constraint 2",
+                related_hazards=["H-2"],
             ),
         ],
     )
@@ -90,6 +94,7 @@ def _valid_responsibility_set_dict() -> dict:
             {
                 "resp_id": "RESP-1",
                 "description": "Payment authorization controller",
+                "security_constraint_refs": ["SC-1"],
                 "responsibility_constraints": [
                     {"rc_id": "RC-1-1", "description": "Must verify user identity"}
                 ],
@@ -103,6 +108,7 @@ def _valid_responsibility_set_dict() -> dict:
             {
                 "resp_id": "RESP-2",
                 "description": "Output verification controller",
+                "security_constraint_refs": ["SC-2"],
                 "responsibility_constraints": [],
                 "process_model_parts": [
                     {"pm_id": "PM-2-1", "description": "Response content state"}
@@ -171,11 +177,15 @@ def _valid_control_structure_dict() -> dict:
             {
                 "resp_id": "RESP-1",
                 "description": "Payment authorization controller",
+                "security_constraint_refs": ["SC-1"],
                 "responsibility_constraints": [
                     {"rc_id": "RC-1-1", "description": "Must verify user identity"}
                 ],
                 "process_model_parts": [
-                    {"pm_id": "PM-1-1", "description": "User intent and payment request state"}
+                    {
+                        "pm_id": "PM-1-1",
+                        "description": "User intent and payment request state",
+                    }
                 ],
                 "control_actions": [
                     {
@@ -196,6 +206,7 @@ def _valid_control_structure_dict() -> dict:
             {
                 "resp_id": "RESP-2",
                 "description": "Output verification controller",
+                "security_constraint_refs": ["SC-2"],
                 "responsibility_constraints": [],
                 "process_model_parts": [
                     {"pm_id": "PM-2-1", "description": "Response content state"}

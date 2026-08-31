@@ -472,6 +472,13 @@ assessments contain no accepted coverage-bearing relations. The required
 future procedure is recorded in
 `ai/findings/stpa-taxonomy-phase4-live-pilot-runbook.md`.
 
+The STPA source chain must preserve security-constraint ownership explicitly:
+Stage 2 accepts one closed responsibility collection with exact constraint
+references, and ICA enumeration stops if any loss-analysis constraint has no
+responsible controller. Phase 4 also verifies that each relation's constraint
+is recorded on its selected causal controller; it never repairs or infers that
+trace later.
+
 ## STPA-based generation
 
 ```bash

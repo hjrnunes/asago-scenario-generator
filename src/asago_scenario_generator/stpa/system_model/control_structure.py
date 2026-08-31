@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import copy
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, TypeVar
 
@@ -130,6 +131,51 @@ def _validate_stage2_intermediate(model: BaseModel) -> None:
         raise ValueError("requirements must contain at least one item")
     if isinstance(model, ResponsibilitySet) and not model.responsibilities:
         raise ValueError("responsibilities must contain at least one item")
+
+
+def _validate_responsibility_payload(value: Any) -> None:
+    """Reject Call 2a fields tolerant decoding would silently discard.
+
+    Call 2a deliberately retains tolerant ID normalization for malformed
+    nested IDs, but its top-level collection and security-trace fields are
+    normative. Validate those raw fields before the tolerant parser can drop
+    unknown responsibility collections or omitted constraint references.
+    """
+    if not isinstance(value, dict):
+        return
+    unexpected = set(value) - {"responsibilities"}
+    if unexpected:
+        names = ", ".join(sorted(str(item) for item in unexpected))
+        raise ValueError(f"unexpected responsibility collection(s): {names}")
+    responsibilities = value.get("responsibilities")
+    if not isinstance(responsibilities, list):
+        return
+    allowed_fields = {
+        "resp_id",
+        "id",
+        "description",
+        "responsibility_constraints",
+        "security_constraint_refs",
+        "process_model_parts",
+    }
+    for index, responsibility in enumerate(responsibilities):
+        if not isinstance(responsibility, dict):
+            continue
+        unexpected_fields = set(responsibility) - allowed_fields
+        if unexpected_fields:
+            names = ", ".join(sorted(str(item) for item in unexpected_fields))
+            raise ValueError(
+                f"unexpected responsibility collection field(s) at index {index}: "
+                f"{names}"
+            )
+        if "security_constraint_refs" not in responsibility:
+            raise ValueError(
+                f"responsibility is missing security_constraint_refs at index {index}"
+            )
+        if not isinstance(responsibility["security_constraint_refs"], list):
+            raise ValueError(
+                f"security_constraint_refs must be a list at index {index}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -899,6 +945,7 @@ def _run_stage2_llm_call(
     response_format: type[_Stage2ModelT],
     step: str,
     allow_unvalidated: bool = False,
+    raw_result_validator: Callable[[Any], None] | None = None,
 ) -> _Stage2ModelT:
     """Render prompts, call the LLM, validate, and raise StageError on failure.
 
@@ -920,6 +967,7 @@ def _run_stage2_llm_call(
         step=step,
         temperature=temperature,
         allow_unvalidated=allow_unvalidated,
+        raw_result_validator=raw_result_validator,
         result_validator=_validate_stage2_intermediate,
         json_decode_retries=JSON_DECODE_RETRIES,
         validation_retries=1,
@@ -1000,6 +1048,7 @@ def _call_2a_responsibilities(
         response_format=ResponsibilitySet,
         step="call_2a_responsibilities",
         allow_unvalidated=True,
+        raw_result_validator=_validate_responsibility_payload,
     )
 
 

@@ -7,6 +7,8 @@ import yaml
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import pytest
+
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     EntryPoint,
@@ -49,6 +51,7 @@ def _make_test_control_structure() -> ControlStructure:
     resp1 = Responsibility(
         resp_id="RESP-1",
         description="R1",
+        security_constraint_refs=["SC-1"],
         responsibility_constraints=[
             {"rc_id": "RC-1-1", "description": "Must validate"}
         ],
@@ -400,6 +403,7 @@ class TestSlotCountInOutput:
                 Responsibility(
                     resp_id=f"RESP-{i + 1}",
                     description=f"R{i + 1}",
+                    security_constraint_refs=["SC-1"] if i == 0 else [],
                     process_model_parts=[
                         ProcessModelPart(pm_id=f"PM-{i + 1}-1", description="S")
                     ],
@@ -607,6 +611,24 @@ class TestCLIScript:
 
 class TestRunMutationHardening:
     """Additional tests to kill surviving mutants in run.py."""
+
+    def test_unassigned_security_constraints_stop_before_ica_generation(self):
+        """Stage 3 must not call the model without a responsible controller."""
+        cs = _make_test_control_structure()
+        cs.responsibilities[0].security_constraint_refs = []
+        client = _setup_mock_client()
+
+        with TemporaryDirectory() as tmpdir:
+            with pytest.raises(ValueError, match="security constraint"):
+                run_sp2(
+                    llm_client=client,
+                    control_structure=cs,
+                    capability_profile=_make_test_capability_profile(),
+                    loss_analysis=_make_test_loss_analysis(),
+                    run_dir=Path(tmpdir),
+                )
+
+        assert client.calls == []
 
     def test_run_creates_nested_directory(self):
         """run_sp2 creates nested run_dir even when parent does not exist."""

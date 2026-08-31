@@ -267,6 +267,7 @@ def safe_llm_call(
     temperature: float = 0.4,
     max_completion_tokens: int | None = None,
     allow_unvalidated: bool = False,
+    raw_result_validator: Callable[[Any], None] | None = None,
     result_validator: Callable[[_T], None] | None = None,
     json_decode_retries: int = 0,
     validation_retries: int = 0,
@@ -295,6 +296,9 @@ def safe_llm_call(
             nested models without field validators if normal validation
             fails.  Callers must validate the resulting structure after
             deterministic normalization.
+        raw_result_validator: Optional validation to run on the decoded
+            response before Pydantic parsing. This is useful when tolerant
+            decoding would otherwise discard unknown fields.
         result_validator: Optional additional validation to run on the parsed
             model before the call is logged as successful. This also applies
             to models built through the tolerant unvalidated path.
@@ -317,6 +321,7 @@ def safe_llm_call(
     attempt_user_prompt = user_prompt
     while True:
         result: LLMResult | None = None
+        raw_result_validation_failed = False
         result_validation_failed = False
         try:
             completion_kwargs = _build_completion_kwargs(
@@ -334,6 +339,13 @@ def safe_llm_call(
                     raise
                 completion_kwargs.pop("allow_unvalidated", None)
                 result = llm_client.complete(**completion_kwargs)
+            if raw_result_validator is not None:
+                decoded_content = _decode_llm_content(result)
+                try:
+                    raw_result_validator(decoded_content)
+                except Exception:
+                    raw_result_validation_failed = True
+                    raise
             model = _parse_structured_result(
                 result,
                 response_format,
@@ -366,7 +378,9 @@ def safe_llm_call(
                 json_retries_remaining -= 1
                 continue
             if (
-                isinstance(exc, ValidationError) or result_validation_failed
+                isinstance(exc, ValidationError)
+                or raw_result_validation_failed
+                or result_validation_failed
             ) and validation_retries_remaining:
                 validation_retries_remaining -= 1
                 if validation_retry_feedback:

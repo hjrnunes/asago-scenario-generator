@@ -47,7 +47,9 @@ from asago_scenario_generator.stpa.system_model.critic import (
     run_completeness_critic,
     run_revision,
 )
-from asago_scenario_generator.stpa.system_model.loss_analysis import derive_loss_analysis
+from asago_scenario_generator.stpa.system_model.loss_analysis import (
+    derive_loss_analysis,
+)
 from asago_scenario_generator.stpa.system_model.profile import derive_capability_profile
 from asago_scenario_generator.stpa.system_model.run import SP1RunResult, run_sp1
 from tests.stpa.sp1_helpers import (
@@ -84,7 +86,9 @@ def _make_loss_analysis() -> LossAnalysis:
             )
         ],
         hazards=[
-            Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1", "L-2"]),
+            Hazard(
+                hazard_id="H-1", description="Hazard", related_losses=["L-1", "L-2"]
+            ),
         ],
         security_constraints=[
             SecurityConstraint(
@@ -114,9 +118,7 @@ def _make_control_structure() -> ControlStructure:
                 process_model_parts=[
                     ProcessModelPart(pm_id="PM-1-1", description="State 1")
                 ],
-                control_actions=[
-                    ControlAction(ca_id="CA-1-1", description="Action 1")
-                ],
+                control_actions=[ControlAction(ca_id="CA-1-1", description="Action 1")],
                 feedback_channels=[
                     FeedbackChannel(
                         fb_id="FB-1-1",
@@ -209,6 +211,7 @@ def _valid_responsibility_set_dict() -> dict:
             {
                 "resp_id": "RESP-1",
                 "description": "Authorization controller",
+                "security_constraint_refs": ["SC-1"],
                 "responsibility_constraints": [
                     {"rc_id": "RC-1-1", "description": "Must confirm before action"}
                 ],
@@ -251,7 +254,8 @@ def _setup_valid_mock_client() -> MockLLMClient:
     """Set up a mock LLM client with valid responses for all stages."""
     client = MockLLMClient()
     client.set_response_for(
-        LossAnalysisDraft, [_valid_loss_analysis_dict(), _valid_gap_draft_dict()],
+        LossAnalysisDraft,
+        [_valid_loss_analysis_dict(), _valid_gap_draft_dict()],
     )
     client.set_response_for(Stage1Profile, valid_stage1_profile_dict())
     client.set_response_for(RequirementSet, _valid_requirement_set_dict())
@@ -424,10 +428,30 @@ class TestDerivationStageFailure:
         [
             ("stage_1a", "stage_1a", "risk_derivation", "_setup_stage_1a_failure"),
             ("stage_1b", "stage_1b", "capability_profile", "_setup_stage_1b_failure"),
-            ("stage_2_call_1", "stage_2", "call_1_requirements", "_setup_stage_2_call_1_failure"),
-            ("stage_2_call_2a", "stage_2", "call_2a_responsibilities", "_setup_stage_2_call_2_failure"),
-            ("stage_2_call_2b", "stage_2", "call_2b_control_elements", "_setup_stage_2_call_2b_failure"),
-            ("stage_2_call_3", "stage_2", "call_3_coordination", "_setup_stage_2_call_3_failure"),
+            (
+                "stage_2_call_1",
+                "stage_2",
+                "call_1_requirements",
+                "_setup_stage_2_call_1_failure",
+            ),
+            (
+                "stage_2_call_2a",
+                "stage_2",
+                "call_2a_responsibilities",
+                "_setup_stage_2_call_2_failure",
+            ),
+            (
+                "stage_2_call_2b",
+                "stage_2",
+                "call_2b_control_elements",
+                "_setup_stage_2_call_2b_failure",
+            ),
+            (
+                "stage_2_call_3",
+                "stage_2",
+                "call_3_coordination",
+                "_setup_stage_2_call_3_failure",
+            ),
         ],
     )
     def test_gd_08_derivation_failure_raises_stage_error(
@@ -449,6 +473,7 @@ class TestDerivationStageFailure:
     def _setup_stage_1a_failure(self, tmp_path):
         client = MockLLMClient()
         client.set_invalid_response_for(LossAnalysisDraft)
+
         def invoke(c, d):
             derive_loss_analysis(
                 llm_client=c,
@@ -456,25 +481,30 @@ class TestDerivationStageFailure:
                 risk_cards=make_risk_cards(),
                 run_dir=d,
             )
+
         return client, invoke
 
     def _setup_stage_1b_failure(self, tmp_path):
         client = MockLLMClient()
         client.set_response_for(
-            LossAnalysisDraft, [_valid_loss_analysis_dict(), _valid_gap_draft_dict()],
+            LossAnalysisDraft,
+            [_valid_loss_analysis_dict(), _valid_gap_draft_dict()],
         )
         client.set_invalid_response_for(Stage1Profile)
+
         def invoke(c, d):
             derive_capability_profile(
                 llm_client=c,
                 use_case_text="Test",
                 run_dir=d,
             )
+
         return client, invoke
 
     def _setup_stage_2_call_1_failure(self, tmp_path):
         client = MockLLMClient()
         client.set_invalid_response_for(RequirementSet)
+
         def invoke(c, d):
             derive_control_structure(
                 llm_client=c,
@@ -482,12 +512,14 @@ class TestDerivationStageFailure:
                 loss_analysis=_make_loss_analysis(),
                 run_dir=d,
             )
+
         return client, invoke
 
     def _setup_stage_2_call_2_failure(self, tmp_path):
         client = MockLLMClient()
         client.set_response_for(RequirementSet, _valid_requirement_set_dict())
         client.set_invalid_response_for(ResponsibilitySet)
+
         def invoke(c, d):
             derive_control_structure(
                 llm_client=c,
@@ -495,6 +527,7 @@ class TestDerivationStageFailure:
                 loss_analysis=_make_loss_analysis(),
                 run_dir=d,
             )
+
         return client, invoke
 
     def _setup_stage_2_call_2b_failure(self, tmp_path):
@@ -502,6 +535,7 @@ class TestDerivationStageFailure:
         client.set_response_for(RequirementSet, _valid_requirement_set_dict())
         client.set_response_for(ResponsibilitySet, _valid_responsibility_set_dict())
         client.set_invalid_response_for(ControlElementSet)
+
         def invoke(c, d):
             derive_control_structure(
                 llm_client=c,
@@ -509,6 +543,7 @@ class TestDerivationStageFailure:
                 loss_analysis=_make_loss_analysis(),
                 run_dir=d,
             )
+
         return client, invoke
 
     def _setup_stage_2_call_3_failure(self, tmp_path):
@@ -517,6 +552,7 @@ class TestDerivationStageFailure:
         client.set_response_for(ResponsibilitySet, _valid_responsibility_set_dict())
         client.set_response_for(ControlElementSet, valid_control_element_set_dict())
         client.set_invalid_response_for(CoordinationAnalysis)
+
         def invoke(c, d):
             derive_control_structure(
                 llm_client=c,
@@ -524,6 +560,7 @@ class TestDerivationStageFailure:
                 loss_analysis=_make_loss_analysis(),
                 run_dir=d,
             )
+
         return client, invoke
 
 
@@ -728,4 +765,3 @@ class TestCallLogTimestampDefault:
         )
         assert entry["timestamp"] is not None
         assert len(entry["timestamp"]) > 0
-

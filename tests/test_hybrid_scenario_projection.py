@@ -112,13 +112,16 @@ from tests.helpers.projection_factory import get_projected_candidate, get_test_s
 from tests.system_resource_map_support import make_control_structure, make_map
 
 
-def _task1_authority_fixture() -> tuple[object, ...]:
+def _task1_authority_fixture(control_structure_override=None) -> tuple[object, ...]:
     """Build one complete Task 1 graph through current public model seams."""
     plan_inputs = make_inputs()
     plan = plan_taxonomy_obligations(plan_inputs)
     candidate = get_projected_candidate()
     snapshot = get_test_snapshot()
-    control_structure = make_control_structure()
+    control_structure = control_structure_override
+    if control_structure is None:
+        control_structure = make_control_structure()
+        control_structure.responsibilities[0].security_constraint_refs = ["SC-1"]
     resource_map = make_map(
         ResourceLink(
             link_id="srm:v1:assessment-link",
@@ -1091,9 +1094,11 @@ def test_stpa_factory_keeps_multiple_relations_sharing_ica_and_exec() -> None:
             ),
         ),
     )
+    control_structure = make_control_structure()
+    control_structure.responsibilities[0].security_constraint_refs = ["SC-1"]
     attestation = build_pinned_stpa_projection_attestation(
         loss_analysis,
-        make_control_structure(),
+        control_structure,
         ICAEnumeration(
             slots=(
                 ICASlot(
@@ -1137,6 +1142,7 @@ def test_stpa_factory_retains_coordination_namespaces_in_causal_nodes() -> None:
     from asago_scenario_generator.models.correspondence import compute_relation_id
 
     control_structure = make_control_structure()
+    control_structure.responsibilities[0].security_constraint_refs = ["SC-1"]
     control_structure.coordination_links.append(
         CoordinationLink(
             link_id="CL-1",

@@ -8,6 +8,8 @@ You are performing the second step of a behavioral design process: grouping requ
 
 2. **For each responsibility, derive process model parts (PM-*)**: What information does the controller need to make its decisions correctly? Each PM part represents a piece of knowledge the controller must maintain. Think: "if this information were wrong, stale, or missing, what decision would the controller get wrong?"
 
+3. **Preserve the security trace**: Every responsibility must include `security_constraint_refs`, a list of the exact `SC-*` IDs from the supplied requirements/loss analysis that it implements. Use `[]` only when that responsibility implements no security constraint. The references are required trace data and must not be omitted.
+
 ## Zone-driven responsibilities
 
 Check the capability profile's active zones. Each active zone implies a mandatory responsibility:
@@ -35,4 +37,7 @@ Produce a ResponsibilitySet with:
 - responsibilities: list of Responsibility objects, each with:
   - resp_id, description
   - responsibility_constraints: list of RC objects
+  - security_constraint_refs: list of exact SC-* IDs implemented by this responsibility
   - process_model_parts: list of PM objects (feedback_source left null — assigned later)
+
+The response must contain exactly one top-level `responsibilities` collection. Do not add alternate or suffixed responsibility collections. Do not include control actions, feedback channels, or controlled processes here; those are supplied by Call 2b.
