@@ -31,6 +31,8 @@ from pydantic import (
     model_validator,
 )
 
+from .resource_operations import ResourceOperation
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -358,6 +360,17 @@ class AuthMethod(str, Enum):
 # ---------------------------------------------------------------------------
 
 
+def _canonical_supported_operations(
+    value: tuple[ResourceOperation, ...] | None,
+) -> tuple[ResourceOperation, ...] | None:
+    """Keep reviewed operation sets unique and serialization-stable."""
+    if value is None:
+        return None
+    if len(value) != len(set(value)):
+        raise ValueError("supported_operations must be unique")
+    return tuple(sorted(value))
+
+
 class ToolInventoryEntry(BaseModel):
     """A tool in the system's tool inventory (Stage 1).
 
@@ -373,6 +386,17 @@ class ToolInventoryEntry(BaseModel):
 
     name: str = Field(description="Tool or API name")
     description: str = Field(description="What the tool does (one line)")
+    supported_operations: tuple[ResourceOperation, ...] | None = Field(
+        default=None,
+        description=(
+            "Complete reviewed operation set; null means operation support is unknown"
+        ),
+        exclude_if=lambda value: value is None,
+    )
+
+    _validate_supported_operations = field_validator("supported_operations")(
+        _canonical_supported_operations
+    )
 
     @computed_field
     @property
@@ -473,6 +497,17 @@ class ExternalIntegration(BaseModel):
     auth_method: AuthMethod = Field(description="Authentication mechanism used")
     data_sensitivity: DataSensitivity = Field(
         description="Sensitivity of data accessible through this integration",
+    )
+    supported_operations: tuple[ResourceOperation, ...] | None = Field(
+        default=None,
+        description=(
+            "Complete reviewed operation set; null means operation support is unknown"
+        ),
+        exclude_if=lambda value: value is None,
+    )
+
+    _validate_supported_operations = field_validator("supported_operations")(
+        _canonical_supported_operations
     )
 
     @computed_field
@@ -868,6 +903,11 @@ def _reject_tool_conflict(
             f"'{existing.description}'). Use the exact same "
             f"description or disambiguate the name."
         )
+    if tool.supported_operations != existing.supported_operations:
+        raise ValueError(
+            f"Ambiguous semantic duplicate tool '{tool.name}': "
+            f"tool_id {tid} has conflicting supported_operations metadata."
+        )
 
 
 # --- Canonical integration identity ---
@@ -1043,6 +1083,7 @@ def deduplicate_external_integrations(
                     f"data-sensitivity metadata. Use a distinct name or reconcile "
                     f"the metadata."
                 )
+            _reject_integration_operation_conflict(integ, existing_integ, iid)
             logger.debug(
                 "Deduplicating integration '%s' (same identity as '%s')",
                 integ.name,
@@ -1051,6 +1092,19 @@ def deduplicate_external_integrations(
             continue
         seen[iid] = (identity_tuple, integ)
     return [integ for _, integ in seen.values()]
+
+
+def _reject_integration_operation_conflict(
+    integration: ExternalIntegration,
+    existing: ExternalIntegration,
+    integration_id: str,
+) -> None:
+    if integration.supported_operations != existing.supported_operations:
+        raise ValueError(
+            f"Ambiguous semantic duplicate integration '{integration.name}': "
+            f"integration_id {integration_id} has conflicting "
+            "supported_operations metadata."
+        )
 
 
 # --- Inventory completeness / evidence state ---

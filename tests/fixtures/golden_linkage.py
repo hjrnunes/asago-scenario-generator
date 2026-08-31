@@ -2519,7 +2519,7 @@ GOLDEN_LINKAGE: dict[str, dict] = {
         "observable_outcome_links": [
             {
                 "postcondition_id": "post.execute_unintended_actions",
-                "observation": "persistent_state",
+                "observation": "agent_state",
                 "binding_slot_id": "agent_goal",
             },
         ],
@@ -2548,7 +2548,7 @@ GOLDEN_LINKAGE: dict[str, dict] = {
         "observable_outcome_links": [
             {
                 "postcondition_id": "post.redirect_agent_goal",
-                "observation": "persistent_state",
+                "observation": "agent_state",
                 "binding_slot_id": "agent_goal",
             },
         ],

@@ -9,6 +9,9 @@ from asago_scenario_generator.models.attack_pattern_contracts import TaxonomyRes
 from asago_scenario_generator.pipeline.projection_contracts import (
     AuthoritativeProjectionObservation,
     CapabilityFactSnapshot,
+    PLANNER_PROJECTION_RESOURCE_POLICY,
+    ProjectionResourcePolicy,
+    PUBLIC_PROJECTION_RESOURCE_POLICY,
     ProjectionBatch,
     ProjectionBudget,
     ProjectionIssue,
@@ -107,6 +110,7 @@ def _qualification_traces(
 _REJECTED_PROJECTION_CODES = frozenset(
     {
         "missing_compatible_resource",
+        "unsupported_resource_operation",
         "unsupported_requirement_derivation",
         "inapplicable_projection",
         "source_influence_relation_infeasible",
@@ -165,6 +169,8 @@ def _qualified_projection_groups(
     records: Sequence[dict[str, Any]],
     taxonomy_resolver: TaxonomyResolver,
     snapshot: CapabilityFactSnapshot,
+    *,
+    resource_policy: ProjectionResourcePolicy = PUBLIC_PROJECTION_RESOURCE_POLICY,
 ) -> tuple[list[_PatternProjectionState], list[ProjectionIssue]]:
     """Qualify records and project every pattern into allocator state."""
     qualified = _qualify_authoritative_records(records, taxonomy_resolver)
@@ -179,6 +185,7 @@ def _qualified_projection_groups(
             catalog_pin,
             candidate_groups,
             issues,
+            resource_policy=resource_policy,
         )
     return candidate_groups, issues
 
@@ -245,13 +252,17 @@ def _project_authoritative_observation(
     budget: ProjectionBudget | None,
     coverage_target_ids: set[str] | None,
     retain_deferred: bool,
+    resource_policy: ProjectionResourcePolicy = PUBLIC_PROJECTION_RESOURCE_POLICY,
 ) -> AuthoritativeProjectionObservation:
     """Run one authoritative projection with an optional observation tail."""
     _authoritative_records_type_check(records)
     resolved_budget = _resolve_projection_budget(budget)
     snapshot.assert_integrity()
     candidate_groups, issues = _qualified_projection_groups(
-        records, taxonomy_resolver, snapshot
+        records,
+        taxonomy_resolver,
+        snapshot,
+        resource_policy=resource_policy,
     )
     allocator, batch = _allocate_authoritative_batch(
         resolved_budget,
@@ -281,7 +292,9 @@ def project_authoritative_candidate_observations(
     Candidate emission remains capped by ``max_candidates``.  Once that cap
     fills, derivation continues lazily only until the existing
     ``max_derivation_work`` limit so every returned deferred identity and
-    binding is an actually validated candidate.
+    binding is an actually validated candidate.  This is the planner-v1
+    operation-aware seam; the public generation projection remains on the
+    separate public-v1 resource policy.
     """
     return _project_authoritative_observation(
         records,
@@ -290,4 +303,5 @@ def project_authoritative_candidate_observations(
         budget=budget,
         coverage_target_ids=None,
         retain_deferred=True,
+        resource_policy=PLANNER_PROJECTION_RESOURCE_POLICY,
     )

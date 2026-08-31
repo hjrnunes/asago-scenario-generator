@@ -20,6 +20,8 @@ from asago_scenario_generator.models.attack_pattern_projection import (
 )
 from asago_scenario_generator.pipeline.projection_contracts import (
     CapabilityFactSnapshot,
+    ProjectionResourcePolicy,
+    PUBLIC_PROJECTION_RESOURCE_POLICY,
     PreconditionEvaluationResult,
     ProjectedCandidate,
     ProjectionIssue,
@@ -31,6 +33,7 @@ from asago_scenario_generator.pipeline.projection_qualification import (
 from asago_scenario_generator.pipeline.projection_resources import (
     _count_compatible_combinations,
     _iter_compatible_combinations,
+    _missing_slot_operation_state,
     _references_for_slot,
 )
 
@@ -109,7 +112,9 @@ def _ingress_slot_index(chain: CanonicalAttackChain) -> int:
 def _gather_slot_options(
     chain: CanonicalAttackChain,
     snapshot: CapabilityFactSnapshot,
-) -> tuple[list[tuple[CanonicalResourceReference, ...]], list[Any]]:
+    *,
+    resource_policy: ProjectionResourcePolicy = PUBLIC_PROJECTION_RESOURCE_POLICY,
+) -> tuple[list[tuple[CanonicalResourceReference, ...]], list[tuple[Any, str | None]]]:
     """Return per-slot option sets plus any slots with no options."""
     option_sets: list[tuple[CanonicalResourceReference, ...]] = []
     missing_slots = []
@@ -118,10 +123,18 @@ def _gather_slot_options(
             slot,
             snapshot,
             initial_ingress=slot.slot_id == chain.initial_ingress_slot_id,
+            resource_policy=resource_policy,
         )
         option_sets.append(options)
         if not options:
-            missing_slots.append(slot)
+            missing_slots.append(
+                (
+                    slot,
+                    _missing_slot_operation_state(
+                        slot, snapshot, resource_policy=resource_policy
+                    ),
+                )
+            )
     return option_sets, missing_slots
 
 
@@ -165,11 +178,22 @@ def _source_influence_relation_state(
 
 def _check_simple_missing_slot(
     slot: Any,
+    operation_state: str | None,
     relation_slot_ids: set[str],
     relation_has_explicit_ids: bool,
     pattern: AttackPattern,
 ) -> ProjectionIssue | None:
     """Return the simple missing-resource issue, or None for relation slots."""
+    if operation_state is not None:
+        return ProjectionIssue(
+            code=f"{operation_state}_resource_operation",
+            pattern_id=pattern.id,
+            slot_id=slot.slot_id,
+            detail=(
+                f"canonical {slot.kind} resources have {operation_state} support "
+                f"for required operations {list(slot.required_operations)}"
+            ),
+        )
     if slot.slot_id not in relation_slot_ids or not relation_has_explicit_ids:
         return ProjectionIssue(
             code="missing_compatible_resource",
@@ -251,16 +275,20 @@ def _record_missing_slot_issues(
     selected: tuple[str, ...],
     option_sets: list[tuple[CanonicalResourceReference, ...]],
     ingress_index: int,
-    missing_slots: list[Any],
+    missing_slots: list[tuple[Any, str | None]],
     issues: list[ProjectionIssue],
 ) -> None:
     """Record missing-resource or infeasible relation issues per slot."""
     relation_links, relation_slot_ids, relation_has_explicit_ids = (
         _source_influence_relation_state(chain, selected)
     )
-    for slot in missing_slots:
+    for slot, operation_state in missing_slots:
         simple_issue = _check_simple_missing_slot(
-            slot, relation_slot_ids, relation_has_explicit_ids, pattern
+            slot,
+            operation_state,
+            relation_slot_ids,
+            relation_has_explicit_ids,
+            pattern,
         )
         if simple_issue is not None:
             issues.append(simple_issue)
@@ -422,10 +450,14 @@ def _assemble_pattern_state(
     precondition_results: Any,
     candidate_groups: list[_PatternProjectionState],
     issues: list[ProjectionIssue],
+    *,
+    resource_policy: ProjectionResourcePolicy = PUBLIC_PROJECTION_RESOURCE_POLICY,
 ) -> bool:
     """Enqueue the pattern's lazy projection state when slot gates pass."""
     ingress_index = _ingress_slot_index(chain)
-    option_sets, missing_slots = _gather_slot_options(chain, snapshot)
+    option_sets, missing_slots = _gather_slot_options(
+        chain, snapshot, resource_policy=resource_policy
+    )
     if missing_slots:
         _record_missing_slot_issues(
             pattern,
@@ -477,6 +509,8 @@ def _project_authoritative_pattern(
     catalog_pin: str,
     candidate_groups: list[_PatternProjectionState],
     issues: list[ProjectionIssue],
+    *,
+    resource_policy: ProjectionResourcePolicy = PUBLIC_PROJECTION_RESOURCE_POLICY,
 ) -> bool:
     """Qualify one pattern and enqueue its lazy projection state."""
     chain = pattern.canonical_chain
@@ -496,6 +530,7 @@ def _project_authoritative_pattern(
         precondition_results,
         candidate_groups,
         issues,
+        resource_policy=resource_policy,
     )
 
 

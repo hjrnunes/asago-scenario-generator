@@ -377,27 +377,105 @@ def _obligation_link_errors(
     """Require a cited link to connect an obligation resource when pinned."""
     if obligation is None:
         return []
-    if not obligation.candidate_resource_refs:
+    candidate, candidate_errors = _selected_candidate(proposal, obligation)
+    if candidate_errors:
+        return candidate_errors
+    required_refs = _selected_candidate_resource_refs(obligation, candidate)
+    if not required_refs:
         return [
             _error(
                 proposal,
                 "missing_candidate_resource_authority",
-                "the obligation has no authoritative candidate resource identity",
+                "the selected candidate has no authoritative resource bindings",
                 "resource_link_ids",
             )
         ]
     matching_refs = _matching_link_refs(proposal, by_id)
-    required_refs = _required_obligation_refs(obligation)
-    if matching_refs & required_refs:
+    if matching_refs and matching_refs <= required_refs:
         return []
     return [
         _error(
             proposal,
-            "resource_link_not_required_by_obligation",
-            "resource links do not connect a resource required by the obligation",
+            "resource_link_not_on_selected_candidate",
+            "resource links do not touch the selected candidate's exact binding",
             "resource_link_ids",
         )
     ]
+
+
+def _selected_candidate(
+    proposal: CorrespondenceProposal, obligation: Any
+) -> tuple[Any, list[ReconciliationError]]:
+    """Resolve one explicit projectable candidate witness, failing closed."""
+    selected = proposal.selected_candidate_id
+    if not selected:
+        return None, _candidate_witness_error(
+            proposal,
+            "selected_candidate_required",
+            "confirmation requires one explicit selected candidate witness",
+        )
+    reference_errors = _candidate_reference_errors(proposal, selected)
+    if reference_errors:
+        return None, reference_errors
+    candidates = {item.candidate_id: item for item in obligation.candidates}
+    candidate = candidates.get(selected)
+    if candidate is None:
+        return _legacy_selected_candidate(proposal, obligation, bool(candidates))
+    if candidate.projection_disposition != "projectable":
+        return None, _candidate_witness_error(
+            proposal,
+            "selected_candidate_not_projectable",
+            "selected candidate has no projectable Phase 1 projection",
+        )
+    return candidate, []
+
+
+def _candidate_reference_errors(
+    proposal: CorrespondenceProposal, selected: str
+) -> list[ReconciliationError]:
+    """Reject provenance that names a different candidate witness."""
+    referenced = {
+        item.removeprefix("candidate:")
+        for item in proposal.provenance.evidence_refs
+        if item.startswith("candidate:")
+    }
+    if not referenced or referenced == {selected}:
+        return []
+    return _candidate_witness_error(
+        proposal,
+        "selected_candidate_evidence_mismatch",
+        "candidate evidence refs do not identify the selected candidate",
+    )
+
+
+def _legacy_selected_candidate(
+    proposal: CorrespondenceProposal, obligation: Any, has_typed_candidates: bool
+) -> tuple[None, list[ReconciliationError]]:
+    """Accept only the exact singleton identity carried by a legacy authority."""
+    selected = proposal.selected_candidate_id
+    if has_typed_candidates:
+        return None, _missing_candidate_authority_error(proposal)
+    if obligation.taxonomy_candidate_ids != (selected,):
+        return None, _missing_candidate_authority_error(proposal)
+    return None, []
+
+
+def _missing_candidate_authority_error(
+    proposal: CorrespondenceProposal,
+) -> list[ReconciliationError]:
+    """Describe a selected candidate absent from typed authority."""
+    return _candidate_witness_error(
+        proposal,
+        "selected_candidate_not_authoritative",
+        "selected candidate is absent from the obligation authority",
+    )
+
+
+def _candidate_witness_error(
+    proposal: CorrespondenceProposal, code: str, message: str
+) -> list[ReconciliationError]:
+    """Build one selected-candidate diagnostic."""
+    return [_error(proposal, code, message, "selected_candidate_id")]
 
 
 def _matching_link_refs(
@@ -411,11 +489,15 @@ def _matching_link_refs(
     }
 
 
-def _required_obligation_refs(obligation: Any) -> set[bytes]:
-    """Return canonical capability references required by an obligation."""
+def _selected_candidate_resource_refs(obligation: Any, candidate: Any) -> set[bytes]:
+    """Return exact capability references bound to the selected candidate."""
+    if candidate is not None:
+        references = tuple(item.resource_ref for item in candidate.resource_bindings)
+    else:
+        references = obligation.candidate_resource_refs
     return {
         canonical_json_bytes(reference.model_dump(mode="json"))
-        for reference in obligation.candidate_resource_refs
+        for reference in references
     }
 
 
@@ -697,6 +779,7 @@ def _reconciled_proposal(
         risk_id=proposal.risk_id,
         attack_pattern_id=proposal.attack_pattern_id,
         taxonomy_candidate_ids=proposal.taxonomy_candidate_ids,
+        selected_candidate_id=proposal.selected_candidate_id,
         ica_slot_id=proposal.ica_slot_id,
         ica_id=proposal.ica_id,
         exec_candidate_id=proposal.exec_candidate_id,
@@ -749,6 +832,7 @@ def _accepted_relation(
         risk_id=proposal.risk_id,
         attack_pattern_id=proposal.attack_pattern_id,
         taxonomy_candidate_ids=proposal.taxonomy_candidate_ids,
+        selected_candidate_id=proposal.selected_candidate_id,
         ica_slot_id=proposal.ica_slot_id,
         ica_id=proposal.ica_id,
         exec_candidate_id=proposal.exec_candidate_id,

@@ -1,6 +1,6 @@
-# mutation-stamp: sha256=93967a56d1e487e986aca442d29faaaa3e09cd6f1fc3b2d9016b6f2b1943fe6e
+# mutation-stamp: sha256=2bd9a2c2178009dc298f08049eca702f9bf2a607c53972ac3effea057fa7703d
 # acceptance-mutation-manifest-begin
-# {"version":1,"tested_at":"2026-08-30T00:27:18.961313Z","feature_name":"Normative correspondence reconciliation","feature_path":"features/correspondence_reconciliation.feature","background_hash":"78aceb8c7ed78f6df84f4589ce6da7176d0565b9385733fa516f4783ad40532f","implementation_hash":"sha256:907292f70ae427c170e988f371cf8ec0a0b220fe41bffb9bb5592b79b343ca81","scenarios":[{"index":9,"name":"duplicate confirmations fail closed as typed audits","scenario_hash":"8933d5f09ca26f660e579f6ed1a1a27ae7813880bce320629e24513893fc3aff","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-30T00:27:18.961313Z"},{"index":10,"name":"reviewed calibration remains separate from coverage","scenario_hash":"ac76446a546acdac8b26ed196dc001918595c716dce84bd38e7f47d81f1dda6a","mutation_count":4,"result":{"Total":4,"Killed":4,"Survived":0,"Errors":0},"tested_at":"2026-08-30T00:27:18.961313Z"}]}
+# {"version":1,"tested_at":"2026-08-31T01:00:59.738844Z","feature_name":"Normative correspondence reconciliation","feature_path":"features/correspondence_reconciliation.feature","background_hash":"78aceb8c7ed78f6df84f4589ce6da7176d0565b9385733fa516f4783ad40532f","implementation_hash":"sha256:907292f70ae427c170e988f371cf8ec0a0b220fe41bffb9bb5592b79b343ca81","scenarios":[{"index":8,"name":"selected candidate identity is preserved and mismatched links fail closed","scenario_hash":"45feb42d3ff9efe1fb2704be4fb3a22ffec59c49381e6a49ed855fb4aca63cbc","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-08-31T01:00:59.738844Z"},{"index":10,"name":"duplicate confirmations fail closed as typed audits","scenario_hash":"8933d5f09ca26f660e579f6ed1a1a27ae7813880bce320629e24513893fc3aff","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-08-31T01:00:59.738844Z"},{"index":11,"name":"reviewed calibration remains separate from coverage","scenario_hash":"ac76446a546acdac8b26ed196dc001918595c716dce84bd38e7f47d81f1dda6a","mutation_count":4,"result":{"Total":4,"Killed":4,"Survived":0,"Errors":0},"tested_at":"2026-08-31T01:00:59.738844Z"}]}
 # acceptance-mutation-manifest-end
 
 Feature: Normative correspondence reconciliation
@@ -52,6 +52,17 @@ Feature: Normative correspondence reconciliation
     Given a reviewed related-but-not-coverage proposal is prepared
     When the related-but-not-coverage proposal is explicitly confirmed
     Then the relation remains a finding and never coverage
+
+  Scenario Outline: selected candidate identity is preserved and mismatched links fail closed
+    Given a deterministic correspondence proposal has two candidates and selects "<selected_candidate_id>"
+    When the selected-candidate correspondence proposal is produced
+    Then the proposal retains selected candidate "<selected_candidate_id>"
+    When selected-candidate correspondence is reconciled with explicit confirmation
+    Then reconciliation preserves selected candidate "<selected_candidate_id>" and rejects resource link with code "<validation_code>"
+
+    Examples:
+      | selected_candidate_id                   | validation_code                         |
+      | cand:v2:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb | resource_link_not_on_selected_candidate |
 
   Scenario: rejected correspondence remains auditable
     Given a rejected correspondence proposal is prepared

@@ -1,5 +1,5 @@
 schema_version: "1"
-catalog_sha256: fc825827d32ed17f3b11409171c9d368248c99510431856ead98e44248a084f2
+catalog_sha256: af83a0e1fda9e468e506d0895a873f9d5d5c4fcb30eb6bb23242ca135f930c2b
 catalog_denominator: 49
 profiles:
   - profile_id: direct-conversational
@@ -75,8 +75,10 @@ profiles:
           direction: input
           controllability: direct
         - name: reviewed upstream corpus
+          entry_point_type: external_content
           direction: input
           controllability: indirect
+          ingress_zone: reasoning
         - name: reviewed rendered output
           direction: output
           controllability: system
@@ -85,6 +87,7 @@ profiles:
       tool_inventory:
         - name: reviewed retrieval API
           description: Reads and updates the reviewed retrieval corpus
+          supported_operations: [retrieve_data]
       entry_point_completeness: operator_confirmed_complete
       entry_point_evidence: [422o.5 reviewed retrieval surfaces]
       tool_inventory_completeness: operator_confirmed_complete
@@ -110,6 +113,7 @@ profiles:
           integration_type: database
           auth_method: service_account
           data_sensitivity: high
+          supported_operations: [retrieve_data]
     facts:
       - fact:
           namespace: profile
@@ -195,13 +199,22 @@ profiles:
       confidence: high
       kc_subcodes: [KC1.1, KC5.1, KC6.1.1, KC6.1.2, KC6.2.2]
       tool_inventory:
+        - name: reviewed retrieval API
+          description: Reads reviewed external records
+          supported_operations: [retrieve_data]
         - name: reviewed state-changing API
           description: Performs reviewed external writes and code execution
+          supported_operations: [execute_code, transmit_data]
       entry_point_completeness: operator_confirmed_complete
       entry_point_evidence: [422o.5 reviewed tool ingress]
       tool_inventory_completeness: operator_confirmed_complete
       tool_inventory_evidence: [422o.5 reviewed state-changing tool]
       tool_types:
+        - name: reviewed retrieval API
+          zone: tool_execution
+          can_modify_state: false
+          data_sensitivity: high
+          code_execution: false
         - name: reviewed state-changing API
           zone: tool_execution
           can_modify_state: true

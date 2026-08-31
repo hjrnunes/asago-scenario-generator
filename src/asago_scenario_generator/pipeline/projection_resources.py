@@ -21,9 +21,14 @@ from asago_scenario_generator.models.capability_profile import (
     is_attacker_accessible_ingress,
 )
 from asago_scenario_generator.pipeline.projection_contracts import (
+    PLANNER_PROJECTION_RESOURCE_POLICY,
+    PUBLIC_PROJECTION_RESOURCE_POLICY,
+    ProjectionResourcePolicy,
+    _reference_operation_support,
     _resource_id_allowed,
     _resource_key,
     _slot_reference_compatible,
+    _slot_reference_structurally_compatible,
 )
 from asago_scenario_generator.pipeline.projection_snapshot import (
     CapabilityFactSnapshot,
@@ -159,8 +164,9 @@ def _references_for_slot(
     snapshot: CapabilityFactSnapshot,
     *,
     initial_ingress: bool,
+    resource_policy: ProjectionResourcePolicy = PUBLIC_PROJECTION_RESOURCE_POLICY,
 ) -> tuple[CanonicalResourceReference, ...]:
-    """Resolve one slot using only its typed, adapter-neutral constraints."""
+    """Resolve one slot under an explicit public or planner policy."""
     allowed_resource_ids = set(slot.allowed_resource_ids)
     references = _references_for_kind(
         slot.kind,
@@ -174,8 +180,50 @@ def _references_for_slot(
         reference
         for reference in references
         if _resource_id_allowed(reference, allowed_resource_ids)
-        and _slot_reference_compatible(reference, slot, snapshot)
+        and _slot_reference_compatible(
+            reference, slot, snapshot, resource_policy=resource_policy
+        )
     )
+
+
+def _missing_slot_operation_state(
+    slot: ResourceSlot,
+    snapshot: CapabilityFactSnapshot,
+    *,
+    resource_policy: ProjectionResourcePolicy = PUBLIC_PROJECTION_RESOURCE_POLICY,
+) -> str | None:
+    """Explain an empty operation-constrained slot without parsing prose."""
+    if (
+        resource_policy != PLANNER_PROJECTION_RESOURCE_POLICY
+        or not slot.required_operations
+    ):
+        return None
+    states = _eligible_operation_states(slot, snapshot)
+    if "unknown" in states:
+        return "unknown"
+    if "unsupported" in states:
+        return "unsupported"
+    return None
+
+
+def _eligible_operation_states(
+    slot: ResourceSlot,
+    snapshot: CapabilityFactSnapshot,
+) -> set[str]:
+    """Return operation evidence only for structurally eligible resources."""
+    allowed_resource_ids = set(slot.allowed_resource_ids)
+    references = _references_for_kind(
+        slot.kind,
+        snapshot,
+        initial_ingress=False,
+        attacker_influence_required=False,
+    )
+    return {
+        _reference_operation_support(reference, slot, snapshot)
+        for reference in references
+        if _resource_id_allowed(reference, allowed_resource_ids)
+        and _slot_reference_structurally_compatible(reference, slot, snapshot)
+    }
 
 
 def _combination_satisfies_distinctness(

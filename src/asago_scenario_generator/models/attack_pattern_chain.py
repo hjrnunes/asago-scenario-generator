@@ -28,6 +28,7 @@ from .attack_pattern_contracts import (
     _check_condition,
 )
 from .attack_pattern_digests import compute_chain_semantic_digest
+from .resource_operations import ResourceOperation
 
 
 class CanonicalChainStep(ContractModel):
@@ -232,6 +233,7 @@ class ResourceSlot(ContractModel):
         ...,
     ] = ()
     allowed_resource_ids: tuple[Identifier, ...] = ()
+    required_operations: tuple[ResourceOperation, ...] = ()
     distinct_from_slot_ids: tuple[Identifier, ...] = ()
 
     @model_validator(mode="after")
@@ -256,11 +258,18 @@ def _check_slot_constraint_kinds(slot: ResourceSlot) -> None:
             slot.allowed_trust_boundary_from_zones
             + slot.allowed_trust_boundary_to_zones
         ),
+        "tool_or_integration": slot.required_operations,
     }
     for constrained_kind, values in groups.items():
-        if values and slot.kind != constrained_kind:
+        allowed_kinds = (
+            {"tool", "integration"}
+            if constrained_kind == "tool_or_integration"
+            else {constrained_kind}
+        )
+        if values and slot.kind not in allowed_kinds:
             raise ValueError(
-                f"{constrained_kind} constraints require a {constrained_kind} slot"
+                f"{constrained_kind} constraints require one of "
+                f"{sorted(allowed_kinds)} slot kinds"
             )
 
 
@@ -275,6 +284,7 @@ def _check_slot_constraint_lists_unique(slot: ResourceSlot) -> None:
         slot.allowed_trust_boundary_from_zones,
         slot.allowed_trust_boundary_to_zones,
         slot.allowed_resource_ids,
+        slot.required_operations,
     )
     if any(len(values) != len(set(values)) for values in constraint_groups):
         raise ValueError("each resource-slot constraint list must be unique")

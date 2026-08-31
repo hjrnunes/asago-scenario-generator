@@ -1,0 +1,68 @@
+# Historical manual decisions for the original Klarna Phase 2 review packet.
+# The recorded packet and proposal-set digests are intentionally not pins for
+# a corrected or regenerated run.
+schema_version: correspondence-reviewed-adjudications-v1
+packet_digest: 257429214a3ce276962dd992812f67a8bf70cc54eacb3b597e6be708d46ff66f
+proposal_set_semantic_digest: 5be166cd5dac27cad1c350c1f967b47ef904c87fb94a4ec5262a780638e4df5b
+semantic_digest: 6179a0a520e2c9c688f6b240fc63489a1c0484d994bfa26be127cc92649ff79b
+decisions:
+- proposal_id: corrp:v1:05255597e8be0ab50cdee3408b9cd7ceef9de617344ff50cfaa30fd72af50a35
+  relation_kind: related_but_not_coverage
+  status: confirmed
+  reason: The account API and control action form a useful exact operational association; no shared mechanism or coverage is claimed.
+  adjudicated_by: operator:phase12-live-review
+  evidence_refs: [manual-review:klarna:case-1]
+- proposal_id: corrp:v1:16d94458e3b47884256828d1d779ea526fbf0583dd310abea8e430027e19eec5
+  relation_kind: related_but_not_coverage
+  status: confirmed
+  reason: The reviewed input and control path is a useful association; the attack and missing authorization check do not cover each other.
+  adjudicated_by: operator:phase12-live-review
+  evidence_refs: [manual-review:klarna:case-2]
+- proposal_id: corrp:v1:3fa561e14fb7eef320efb83cfec180bec5cfabafe80638d417ffbbd8c2d2905f
+  relation_kind: related_but_not_coverage
+  status: rejected
+  reason: A generic customer-input boundary does not connect the licensing mass-action path to late refund authorization.
+  adjudicated_by: operator:phase12-live-review
+  evidence_refs: [manual-review:klarna:case-3]
+- proposal_id: corrp:v1:74d4f673c807d753e001e7c5458f7d201983e5dd4bd4c9d138ee30a68847e54c
+  relation_kind: related_but_not_coverage
+  status: confirmed
+  reason: Both paths use the exact order-lookup API and tool-control path; their failure mechanisms remain distinct.
+  adjudicated_by: operator:phase12-live-review
+  evidence_refs: [manual-review:klarna:case-4]
+- proposal_id: corrp:v1:a5a754cee16928438a241e31c142d639a1d9234d3fe7be4cdf93e34ea470d5c6
+  relation_kind: related_but_not_coverage
+  status: confirmed
+  reason: Both paths involve the exact payment-scheduling API; their failure mechanisms remain distinct.
+  adjudicated_by: operator:phase12-live-review
+  evidence_refs: [manual-review:klarna:case-5]
+- proposal_id: corrp:v1:a6308c385ea116822f093a4e6ac3f9b504659fd41ecb3da9970c18f5de99288f
+  relation_kind: related_but_not_coverage
+  status: confirmed
+  reason: Both paths involve the exact account API and control action; their failure mechanisms remain distinct.
+  adjudicated_by: operator:phase12-live-review
+  evidence_refs: [manual-review:klarna:case-6]
+- proposal_id: corrp:v1:b18d4b91f2f06df381966eece262b570fea46d1349d4d6f1c5df69581187bac6
+  relation_kind: related_but_not_coverage
+  status: rejected
+  reason: The generic customer-input boundary does not connect poisoned retrieval to late payment-change authorization.
+  adjudicated_by: operator:phase12-live-review
+  evidence_refs: [manual-review:klarna:case-7]
+- proposal_id: corrp:v1:cd94ac8bec5b5a692fc549cc9845a240cb4a546f89ef662584376e094c99dc7e
+  relation_kind: related_but_not_coverage
+  status: rejected
+  reason: The generic input boundary and mismatched candidate tool do not connect licensing, poisoned memory, and a missing identity check.
+  adjudicated_by: operator:phase12-live-review
+  evidence_refs: [manual-review:klarna:case-8]
+- proposal_id: corrp:v1:ce02d78198c7f61285aa88deb06cc660bfbf7e6303ec53e9d5f075e1e83e681e
+  relation_kind: related_but_not_coverage
+  status: rejected
+  reason: Sharing the order-lookup API does not connect licensing restrictions to late tool-result validation without path evidence.
+  adjudicated_by: operator:phase12-live-review
+  evidence_refs: [manual-review:klarna:case-9]
+- proposal_id: corrp:v1:e85da6dfed7d4970fd056764eee2518d824b37b7bd2b3e9ea2e2e01a49bbdcf2
+  relation_kind: related_but_not_coverage
+  status: rejected
+  reason: The shared order-lookup path and mismatched STPA evidence do not connect licensing restrictions to poisoned memory or late validation.
+  adjudicated_by: operator:phase12-live-review
+  evidence_refs: [manual-review:klarna:case-10]

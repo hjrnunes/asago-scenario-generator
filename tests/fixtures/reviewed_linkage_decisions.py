@@ -299,4 +299,33 @@ REVIEWED_DECISIONS: list[dict] = [
             "integration slot is the destination the data arrives at."
         ),
     },
+    {
+        "pattern_id": "AP-T6-03",
+        "step_id": "redirect_agent_goal",
+        "postcondition_id": "post.redirect_agent_goal",
+        "observation": "agent_state",
+        "binding_slot_id": "agent_goal",
+        "category": AGENT_STATE,
+        "rationale": (
+            "Postcondition: the injected instruction redirects the agent's "
+            "operational objective. The affected surface is the agent's own "
+            "active goal state, not durable state in an external integration. "
+            "The agent_state observation therefore binds to the intrinsic "
+            "agent_internal goal resource."
+        ),
+    },
+    {
+        "pattern_id": "AP-T6-03",
+        "step_id": "execute_unintended_actions",
+        "postcondition_id": "post.execute_unintended_actions",
+        "observation": "agent_state",
+        "binding_slot_id": "agent_goal",
+        "category": AGENT_STATE,
+        "rationale": (
+            "Postcondition: the agent adopts the injected objective and first "
+            "acts under it. This remains an observable change in the agent's "
+            "active goal state; it does not establish persistence in a tool, "
+            "memory store, or external integration."
+        ),
+    },
 ]

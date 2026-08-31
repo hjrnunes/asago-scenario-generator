@@ -164,6 +164,24 @@ def test_ap_t6_07_config_modification_outcome_is_persistent_state() -> None:
     assert ol[0]["binding_slot_id"] == "agent_config"
 
 
+def test_ap_t6_03_goal_outcomes_are_intrinsic_agent_state() -> None:
+    """Goal redirection is agent state, not fabricated external persistence."""
+    raw = _load_raw_patterns()
+    chain = raw["AP-T6-03"]["canonical_chain"]
+    slots = {item["slot_id"]: item for item in chain["resource_slots"]}
+
+    assert slots["agent_goal"]["kind"] == "agent_internal"
+    for step_id in ("redirect_agent_goal", "execute_unintended_actions"):
+        step = next(item for item in chain["steps"] if item["step_id"] == step_id)
+        assert step["observable_outcome_links"] == [
+            {
+                "postcondition_id": f"post.{step_id}",
+                "observation": "agent_state",
+                "binding_slot_id": "agent_goal",
+            }
+        ]
+
+
 def test_all_49_patterns_validate_and_digests_match() -> None:
     """All 49 patterns must pass model validation and have matching digests."""
     resolver = load_taxonomy_resolver()
@@ -219,12 +237,12 @@ def test_observation_kind_counts() -> None:
             for ol in s.get("observable_outcome_links", []):
                 kinds[ol["observation"]] += 1
     assert dict(kinds) == {
-        "persistent_state": 141,
+        "persistent_state": 139,
         "model_context": 41,
         "tool_invocation": 29,
         "rendered_output": 1,
         "endpoint_receipt": 2,
-        "agent_state": 1,
+        "agent_state": 3,
     }
 
 

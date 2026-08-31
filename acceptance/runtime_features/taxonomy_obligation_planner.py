@@ -119,6 +119,70 @@ def _typed_projection_infeasible_snapshot(resource_kind: str) -> Any:
     return capture_capability_snapshot(profile, get_test_snapshot().facts)
 
 
+def _typed_resource_operation_input(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Prepare a typed operation-support fixture for the planner boundary."""
+    del examples
+    match = re.search(
+        r'normative typed planner inputs require "([^"]+)" with "([^"]+)" resource support',
+        text,
+    )
+    operation, support_state = match.groups() if match else ("retrieve_data", "unknown")
+    if operation not in {"retrieve_data", "transmit_data", "execute_code"}:
+        return False, f"Unsupported operation fixture: {operation}"
+    if support_state not in {"unknown", "unsupported"}:
+        return False, f"Unsupported operation-support fixture: {support_state}"
+
+    from asago_scenario_generator.models.attack_pattern import (
+        compute_chain_semantic_digest,
+    )
+    from asago_scenario_generator.pipeline.projection import (
+        capture_capability_snapshot,
+    )
+    from tests.helpers.projection_factory import get_test_profile, get_test_snapshot
+
+    _candidate, raw_pattern, _snapshot = _typed_authoritative_fixture()
+    raw_pattern = deepcopy(raw_pattern)
+    tool_slot = next(
+        slot
+        for slot in raw_pattern["canonical_chain"]["resource_slots"]
+        if slot["kind"] == "tool"
+    )
+    tool_slot["required_operations"] = [operation]
+    raw_pattern["canonical_chain"]["semantic_digest"] = compute_chain_semantic_digest(
+        raw_pattern["canonical_chain"]
+    )
+
+    if support_state == "unknown":
+        snapshot = get_test_snapshot()
+    else:
+        profile_payload = get_test_profile().model_dump(mode="json")
+        unsupported_operation = next(
+            candidate
+            for candidate in ("retrieve_data", "transmit_data", "execute_code")
+            if candidate != operation
+        )
+        profile_payload["tool_inventory"][0]["supported_operations"] = [
+            unsupported_operation
+        ]
+        snapshot = capture_capability_snapshot(
+            get_test_profile().model_validate(profile_payload),
+            get_test_snapshot().facts,
+        )
+
+    state = _planner_state(world)
+    state["typed_inputs"] = _typed_payload(
+        pattern_record=raw_pattern,
+        capability_snapshot=snapshot,
+    )
+    state["typed_expected_pattern_id"] = raw_pattern["id"]
+    state["typed_operation_support_state"] = support_state
+    state["typed_plan"] = None
+    state["typed_error"] = None
+    return True, ""
+
+
 def _typed_plan_from_payload(payload: dict[str, Any]) -> Any:
     """Plan typed inputs through the public normative planner seam."""
     from asago_scenario_generator.pipeline.obligation_planner import (
@@ -400,6 +464,50 @@ def _h_typed_projection_evidence(
     if not any(item.source == expected_source for item in evidence):
         return False, f"Projection source {expected_source!r} not found: {evidence}"
     return True, ""
+
+
+def _h_typed_resource_operation_evidence(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Assert the planner retains the exact operation-support diagnostic."""
+    del examples
+    match = re.search(
+        r'typed row retains resource-operation evidence from "([^"]+)"', text
+    )
+    expected_source = match.group(1) if match else "unknown_resource_operation"
+    plan = _planner_state(world).get("typed_plan")
+    if plan is None or len(plan.obligations) != 1:
+        return False, "Expected one typed obligation"
+    sources = {
+        evidence.source
+        for evidence in plan.obligations[0].evidence
+        if evidence.source is not None
+    }
+    if expected_source not in sources:
+        return (
+            False,
+            f"Operation source {expected_source!r} not found: {sorted(sources)}",
+        )
+    return True, ""
+
+
+def _h_typed_resource_operation_outcome(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Assert unknown support emits no candidate while unsupported support does."""
+    del examples
+    match = re.search(r'typed row has candidate outcome "([^"]+)"', text)
+    expected = match.group(1) if match else "no_candidates"
+    plan = _planner_state(world).get("typed_plan")
+    if plan is None or len(plan.obligations) != 1:
+        return False, "Expected one typed obligation"
+    candidates = plan.obligations[0].candidate_records
+    if expected == "no_candidates" and not candidates:
+        return True, ""
+    if expected == "projection_infeasible" and len(candidates) == 1:
+        if candidates[0].projection_disposition == "projection_infeasible":
+            return True, ""
+    return False, f"Unexpected candidate outcome {expected}: {candidates}"
 
 
 def _h_typed_planning_runs(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -1882,6 +1990,18 @@ def register(api: Any) -> None:
         (
             r'typed row retains projection evidence from "([^\"]+)"',
             _h_typed_projection_evidence,
+        ),
+        (
+            r'normative typed planner inputs require "([^\"]+)" with "([^\"]+)" resource support',
+            _typed_resource_operation_input,
+        ),
+        (
+            r'typed row retains resource-operation evidence from "([^\"]+)"',
+            _h_typed_resource_operation_evidence,
+        ),
+        (
+            r'typed row has candidate outcome "([^\"]+)"',
+            _h_typed_resource_operation_outcome,
         ),
         (r"the typed plan contains one obligation row", _h_typed_plan_contains_one_row),
         (

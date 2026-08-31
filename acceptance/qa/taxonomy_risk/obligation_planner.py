@@ -39,6 +39,45 @@ if str(REPO_ROOT) not in sys.path:
 _SEARCH_PATH = f"/opt/homebrew/bin:/usr/local/bin:{os.environ.get('PATH', '')}"
 _UV = shutil.which("uv", path=_SEARCH_PATH) or "uv"
 _ZERO = "0" * 64
+_GUARD_ACTIVE_ENV = "ASAGO_OBLIGATION_QA_GUARD_ACTIVE"
+_GUARD_PROVIDER_ENV = "ASAGO_OBLIGATION_QA_GUARD_PROVIDER"
+_GUARD_SOCKET_ENV = "ASAGO_OBLIGATION_QA_GUARD_SOCKET"
+_POISON_ENDPOINT = "http://127.0.0.1:9/poisoned-obligation-planner-endpoint"
+_OFFLINE_GUARD_SOURCE = """
+import os
+import socket
+from pathlib import Path
+
+from asago_scenario_generator.llm.client import LLMClient as TaxonomyLLMClient
+from asago_scenario_generator.stpa.infra.llm import LLMClient as StpaLLMClient
+
+_active = os.environ.get("ASAGO_OBLIGATION_QA_GUARD_ACTIVE")
+_provider = os.environ.get("ASAGO_OBLIGATION_QA_GUARD_PROVIDER")
+_socket = os.environ.get("ASAGO_OBLIGATION_QA_GUARD_SOCKET")
+
+
+def _mark(path, value):
+    if path:
+        Path(path).write_text(value + "\\n", encoding="utf-8")
+
+
+def _block_provider(*args, **kwargs):
+    _mark(_provider, "provider")
+    raise RuntimeError("obligation planner provider guard blocked construction")
+
+
+def _block_connect(*args, **kwargs):
+    _mark(_socket, "socket")
+    raise RuntimeError("obligation planner socket guard blocked a connection")
+
+
+TaxonomyLLMClient.__init__ = _block_provider
+StpaLLMClient.__init__ = _block_provider
+socket.socket.connect = _block_connect
+socket.socket.connect_ex = _block_connect
+socket.create_connection = _block_connect
+_mark(_active, "active")
+"""
 
 
 def _authoritative_fixture() -> tuple[Any, dict[str, Any], Any]:
@@ -176,6 +215,26 @@ def _typed_pattern_variant(pattern_id: str) -> dict[str, Any]:
     return variant
 
 
+def _typed_resource_operation_pattern(operation: str) -> dict[str, Any]:
+    """Return the authoritative pattern with one required tool operation."""
+    from asago_scenario_generator.models.attack_pattern import (
+        compute_chain_semantic_digest,
+    )
+
+    _candidate, raw_pattern, _snapshot = _authoritative_fixture()
+    pattern = deepcopy(raw_pattern)
+    tool_slot = next(
+        slot
+        for slot in pattern["canonical_chain"]["resource_slots"]
+        if slot["kind"] == "tool"
+    )
+    tool_slot["required_operations"] = [operation]
+    pattern["canonical_chain"]["semantic_digest"] = compute_chain_semantic_digest(
+        pattern["canonical_chain"]
+    )
+    return pattern
+
+
 def _typed_capability_variant() -> Any:
     """Return a complete capability snapshot with changed authoritative facts."""
     from asago_scenario_generator.pipeline.projection import (
@@ -186,6 +245,22 @@ def _typed_capability_variant() -> Any:
     _candidate, _raw_pattern, snapshot = _authoritative_fixture()
     changed_fact = snapshot.facts[0].model_copy(update={"value": "inactive"})
     return capture_capability_snapshot(get_test_profile(), (changed_fact,))
+
+
+def _typed_operation_snapshot(supported_operations: tuple[str, ...]) -> Any:
+    """Return a snapshot with reviewed support for exact tool operations."""
+    from asago_scenario_generator.models.capability_profile import CapabilityProfile
+    from asago_scenario_generator.pipeline.projection import (
+        capture_capability_snapshot,
+    )
+    from tests.helpers.projection_factory import get_test_profile
+
+    _candidate, _raw_pattern, snapshot = _authoritative_fixture()
+    profile = get_test_profile().model_dump(mode="json")
+    profile["tool_inventory"][0]["supported_operations"] = list(supported_operations)
+    return capture_capability_snapshot(
+        CapabilityProfile.model_validate(profile), snapshot.facts
+    )
 
 
 def _typed_catalog_pin(pattern: dict[str, Any]) -> str:
@@ -306,12 +381,15 @@ def _run_cli(
     output_dir: Path,
     *,
     format_name: str = "yaml",
+    environment: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     capture_dir = RUN_ROOT / "captures" / case
     capture_dir.mkdir(parents=True, exist_ok=True)
-    environment = os.environ.copy()
+    supplied_environment = environment is not None
+    environment = dict(environment) if supplied_environment else os.environ.copy()
     environment.pop(QA_PIPELINE_ENV, None)
-    environment.pop("ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL", None)
+    if not supplied_environment:
+        environment.pop("ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL", None)
     argv = [
         *_command(),
         "plan-obligations",
@@ -338,15 +416,57 @@ def _run_cli(
     return completed
 
 
+def _install_offline_guard(workspace: Path) -> dict[str, Path]:
+    """Install child-process guards for both provider and socket activity."""
+    guard_dir = workspace / "offline-guard"
+    guard_dir.mkdir(parents=True, exist_ok=True)
+    markers = {
+        "directory": guard_dir,
+        "active": workspace / ".offline-guard-active",
+        "provider": workspace / ".offline-guard-provider",
+        "socket": workspace / ".offline-guard-socket",
+    }
+    for marker in markers.values():
+        if marker != guard_dir:
+            marker.unlink(missing_ok=True)
+    (guard_dir / "sitecustomize.py").write_text(
+        _OFFLINE_GUARD_SOURCE,
+        encoding="utf-8",
+    )
+    return markers
+
+
+def _guard_environment(workspace: Path, guard: dict[str, Path]) -> dict[str, str]:
+    """Return an isolated child environment with poison endpoint settings."""
+    environment = os.environ.copy()
+    environment.pop(QA_PIPELINE_ENV, None)
+    environment["UV_CACHE_DIR"] = str(workspace / "uv-cache")
+    environment[_GUARD_ACTIVE_ENV] = str(guard["active"])
+    environment[_GUARD_PROVIDER_ENV] = str(guard["provider"])
+    environment[_GUARD_SOCKET_ENV] = str(guard["socket"])
+    environment["ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL"] = _POISON_ENDPOINT
+    environment["OPENAI_BASE_URL"] = _POISON_ENDPOINT
+    previous_pythonpath = environment.get("PYTHONPATH")
+    environment["PYTHONPATH"] = os.pathsep.join(
+        part for part in (str(guard["directory"]), previous_pythonpath) if part
+    )
+    return environment
+
+
 def _check(case: str, condition: bool, message: str) -> None:
     if not condition:
         failures.append(f"{case}: {message}")
 
 
 def _produce(
-    case: str, payload: dict[str, Any]
+    case: str,
+    payload: dict[str, Any],
+    *,
+    sidecars: dict[str, str] | None = None,
 ) -> tuple[Path, dict[str, Any], subprocess.CompletedProcess[str]]:
     workspace = _new_workspace(case)
+    for name, content in (sidecars or {}).items():
+        (workspace / name).write_text(content, encoding="utf-8")
     snapshot = _write_payload(workspace, payload)
     output_dir = workspace / "plan"
     completed = _run_cli(case, snapshot, output_dir)
@@ -740,6 +860,193 @@ def qa_top_10() -> None:
     )
 
 
+def qa_top_11() -> None:
+    """Canonically equivalent Unicode inputs publish the same plan."""
+    case = "TOP-11"
+    composed = "risk-é"
+    decomposed = "risk-e\u0301"
+    _artifact, first, _completed = _produce(
+        f"{case}-composed", _typed_payload(risk_ids=(composed,))
+    )
+    _artifact, second, _completed = _produce(
+        f"{case}-decomposed", _typed_payload(risk_ids=(decomposed,))
+    )
+    _check(
+        case,
+        _canonical_json(first) == _canonical_json(second),
+        "normalized plans differ in canonical bytes",
+    )
+    _check(
+        case,
+        first.get("semantic_digest") == second.get("semantic_digest"),
+        "normalized plan semantic digests differ",
+    )
+    obligation_ids = tuple(
+        tuple(row.get("obligation_id") for row in _rows(plan))
+        for plan in (first, second)
+    )
+    _check(
+        case,
+        obligation_ids[0] == obligation_ids[1],
+        "normalized obligation IDs differ",
+    )
+    candidate_ids = tuple(
+        tuple(
+            candidate.get("candidate_id")
+            for row in _rows(plan)
+            for candidate in row.get("candidate_records", [])
+            if isinstance(candidate, dict)
+        )
+        for plan in (first, second)
+    )
+    _check(
+        case,
+        candidate_ids[0] == candidate_ids[1],
+        "normalized candidate IDs differ",
+    )
+
+
+def qa_top_12() -> None:
+    """Ambient ICA and scenario prose cannot enter the typed plan."""
+    case = "TOP-12"
+    payload = _typed_payload()
+    _check(
+        case,
+        not (
+            {"ica", "ica_prose", "scenario_keywords", "scenario_prose"} & payload.keys()
+        ),
+        "workflow prose leaked into TaxonomyObligationInputs",
+    )
+    _artifact, baseline, _completed = _produce(
+        f"{case}-baseline",
+        payload,
+        sidecars={
+            "ica-prose.txt": "baseline ICA wording",
+            "scenario-keywords.txt": "Given baseline When baseline Then baseline",
+        },
+    )
+    _artifact, changed, _completed = _produce(
+        f"{case}-changed",
+        payload,
+        sidecars={
+            "ica-prose.txt": "unrelated ICA phrasing with different tokens",
+            "scenario-keywords.txt": "Then rearranged Given prose When changed",
+        },
+    )
+    _check(
+        case,
+        _canonical_json(baseline) == _canonical_json(changed),
+        "ambient ICA/scenario prose changed canonical plan bytes",
+    )
+    _check(
+        case,
+        baseline.get("semantic_digest") == changed.get("semantic_digest"),
+        "ambient ICA/scenario prose changed the plan digest",
+    )
+    _check(
+        case,
+        tuple(row.get("obligation_id") for row in _rows(baseline))
+        == tuple(row.get("obligation_id") for row in _rows(changed)),
+        "ambient ICA/scenario prose changed obligation IDs",
+    )
+
+
+def qa_top_13() -> None:
+    """The public planner constructs no provider client and opens no socket."""
+    case = "TOP-13"
+    workspace = _new_workspace(case)
+    guard = _install_offline_guard(workspace)
+    snapshot = _write_payload(workspace, _typed_payload())
+    output_dir = workspace / "plan"
+    completed = _run_cli(
+        case,
+        snapshot,
+        output_dir,
+        environment=_guard_environment(workspace, guard),
+    )
+    _check(
+        case,
+        completed.returncode == 0,
+        f"guarded CLI failed: {completed.stderr[-300:]!r}",
+    )
+    _check(case, guard["active"].is_file(), "offline guard did not activate")
+    _check(
+        case,
+        not guard["provider"].is_file(),
+        "planner constructed a provider client",
+    )
+    _check(case, not guard["socket"].is_file(), "planner contacted an endpoint")
+    _check(
+        case,
+        (output_dir / "taxonomy-obligation-plan.yaml").is_file(),
+        "guarded planner did not publish its YAML artifact",
+    )
+
+
+def qa_top_14() -> None:
+    """Unknown and explicitly unsupported operations remain distinguishable."""
+    case = "TOP-14"
+    pattern = _typed_resource_operation_pattern("retrieve_data")
+    _artifact, unknown, _completed = _produce(
+        f"{case}-unknown",
+        _typed_payload(pattern_record=pattern),
+    )
+    _artifact, unsupported, _completed = _produce(
+        f"{case}-unsupported",
+        _typed_payload(
+            pattern_record=pattern,
+            capability_snapshot=_typed_operation_snapshot(("transmit_data",)),
+        ),
+    )
+    unknown_row = _row(unknown, "risk-a", "AP-T1-01") or {}
+    unsupported_row = _row(unsupported, "risk-a", "AP-T1-01") or {}
+    _check(
+        case,
+        unknown_row.get("qualification_disposition") == "missing_evidence",
+        "unknown operation support did not retain missing_evidence",
+    )
+    _check(
+        case,
+        not unknown_row.get("candidate_records"),
+        "unknown operation support invented a candidate record",
+    )
+    _check(
+        case,
+        any(
+            evidence.get("source") == "unknown_resource_operation"
+            for evidence in unknown_row.get("evidence", [])
+            if isinstance(evidence, dict)
+        ),
+        "unknown_resource_operation evidence is missing",
+    )
+    _check(
+        case,
+        unsupported_row.get("qualification_disposition") == "structurally_infeasible",
+        "reviewed operation mismatch was not structurally infeasible",
+    )
+    rejected = [
+        candidate
+        for candidate in unsupported_row.get("candidate_records", [])
+        if isinstance(candidate, dict)
+        and candidate.get("projection_disposition") == "projection_infeasible"
+    ]
+    _check(
+        case,
+        len(rejected) == 1,
+        f"expected one typed infeasible candidate, got {rejected}",
+    )
+    _check(
+        case,
+        bool(rejected)
+        and any(
+            evidence.get("source") == "unsupported_resource_operation"
+            for evidence in rejected[0].get("evidence", [])
+            if isinstance(evidence, dict)
+        ),
+        "unsupported_resource_operation evidence is missing",
+    )
+
+
 def main() -> int:
     if os.environ.get(QA_PIPELINE_ENV):
         print(f"Refusing to run: {QA_PIPELINE_ENV} must not be set.", file=sys.stderr)
@@ -756,6 +1063,10 @@ def main() -> int:
         qa_top_08,
         qa_top_09,
         qa_top_10,
+        qa_top_11,
+        qa_top_12,
+        qa_top_13,
+        qa_top_14,
     ):
         procedure()
         print(f"  [done] {procedure.__name__}", flush=True)

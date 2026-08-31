@@ -9,6 +9,7 @@ import pytest
 
 from asago_scenario_generator.models.correspondence import (
     AdjudicationSet,
+    CandidateAuthorityRecord,
     CorrespondenceAdjudication,
     CorrespondenceAuthority,
     CorrespondenceEvidence,
@@ -179,6 +180,14 @@ def _proposal_set(plan, resource_map_validation, *, relation_kind="same_mechanis
                     for item in obligation.candidate_records
                     for binding in item.resource_bindings
                 ),
+                candidates=tuple(
+                    CandidateAuthorityRecord(
+                        candidate_id=item.candidate_id,
+                        resource_bindings=item.resource_bindings,
+                        projection_disposition=item.projection_disposition,
+                    )
+                    for item in obligation.candidate_records
+                ),
             ),
         ),
         structural_findings=(
@@ -205,6 +214,7 @@ def _proposal_set(plan, resource_map_validation, *, relation_kind="same_mechanis
             taxonomy_candidate_ids=tuple(
                 candidate.candidate_id for candidate in obligation.candidate_records
             ),
+            selected_candidate_id=projectable.candidate_id,
             ica_slot_id=ICA_SLOT,
             ica_id=ICA_ID,
             exec_candidate_id=EXEC_ID,
@@ -270,6 +280,9 @@ def _defective_reconciliation(plan, resource_map_validation, **overrides):
         ),
         taxonomy_candidate_ids=overrides.get(
             "taxonomy_candidate_ids", proposal.taxonomy_candidate_ids
+        ),
+        selected_candidate_id=overrides.get(
+            "selected_candidate_id", proposal.selected_candidate_id
         ),
         ica_slot_id=overrides.get("ica_slot_id", proposal.ica_slot_id),
         ica_id=overrides.get("ica_id", proposal.ica_id),

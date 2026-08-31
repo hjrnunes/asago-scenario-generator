@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 import yaml
@@ -13,6 +14,7 @@ from asago_scenario_generator.cli import app
 from asago_scenario_generator.models.correspondence import (
     AcceptedCorrespondenceRelation,
     AdjudicationSet,
+    CandidateAuthorityRecord,
     CorrespondenceAdjudication,
     CorrespondenceAuthority,
     CorrespondenceEvidence,
@@ -22,6 +24,8 @@ from asago_scenario_generator.models.correspondence import (
     ProposalSet,
     ReconciliationError,
     ReconciliationResult,
+    ReviewedCorrespondenceAdjudications,
+    ReviewedCorrespondenceDecision,
     SourceArtifactPins,
     StructuralAuthorityRecord,
     compute_loss_analysis_digest,
@@ -36,6 +40,9 @@ from asago_scenario_generator.pipeline.correspondence import (
     propose_correspondence,
     reconcile_correspondence,
     summarize_correspondence_calibration,
+)
+from asago_scenario_generator.pipeline.correspondence_evidence import (
+    derive_resource_link_correspondence_evidence,
 )
 from asago_scenario_generator.pipeline.obligation_planner import (
     plan_taxonomy_obligations,
@@ -381,6 +388,18 @@ def _authority(resource_map, *, complete: bool = True) -> CorrespondenceAuthorit
                 attack_pattern_id=ATTACK_PATTERN,
                 taxonomy_candidate_ids=(TAXONOMY_CANDIDATE,),
                 candidate_resource_refs=({"kind": "tool", "tool_id": TOOL},),
+                candidates=(
+                    CandidateAuthorityRecord(
+                        candidate_id=TAXONOMY_CANDIDATE,
+                        resource_bindings=(
+                            {
+                                "slot_id": "resource:tool",
+                                "resource_ref": {"kind": "tool", "tool_id": TOOL},
+                            },
+                        ),
+                        projection_disposition="projectable",
+                    ),
+                ),
             ),
         ),
         structural_findings=(
@@ -417,6 +436,7 @@ def _evidence(resource_map, **overrides):
         "risk_id": RISK,
         "attack_pattern_id": ATTACK_PATTERN,
         "taxonomy_candidate_ids": (TAXONOMY_CANDIDATE,),
+        "selected_candidate_id": TAXONOMY_CANDIDATE,
         "ica_slot_id": ICA_SLOT,
         "ica_id": ICA_ID,
         "exec_candidate_id": EXEC,
@@ -435,6 +455,714 @@ def _evidence(resource_map, **overrides):
     }
     fields.update(overrides)
     return CorrespondenceEvidence(**fields)
+
+
+def test_proposal_retains_explicit_candidate_witness_without_changing_v1_id() -> None:
+    resource_map = make_map()
+    evidence = _evidence(
+        resource_map,
+        evidence_refs=(f"candidate:{TAXONOMY_CANDIDATE}", "resource-link:srm:v1:1"),
+    )
+
+    proposal = _proposal_set(resource_map, evidence).proposals[0]
+
+    assert proposal.selected_candidate_id == TAXONOMY_CANDIDATE
+    assert proposal.proposal_id == compute_proposal_id(
+        obligation_id=proposal.obligation_id,
+        ica_slot_id=proposal.ica_slot_id,
+        ica_id=proposal.ica_id,
+        exec_candidate_id=proposal.exec_candidate_id,
+        relation_kind=proposal.relation_kind,
+        resource_link_ids=proposal.resource_link_ids,
+        hazard_ids=proposal.hazard_ids,
+        constraint_ids=proposal.constraint_ids,
+        evidence_source=proposal.provenance.evidence_source,
+        evidence_refs=proposal.provenance.evidence_refs,
+    )
+
+
+def test_reconciliation_rejects_candidate_ref_for_a_different_witness() -> None:
+    resource_map = make_map()
+    evidence = _evidence(
+        resource_map,
+        evidence_refs=("candidate:cand:v2:" + "b" * 32, "resource-link:srm:v1:1"),
+    )
+    proposal_set = _proposal_set(resource_map, evidence)
+    proposal = proposal_set.proposals[0]
+
+    result = reconcile_correspondence(
+        _validated_map(resource_map),
+        proposal_set,
+        AdjudicationSet(
+            decisions=(
+                CorrespondenceAdjudication(
+                    proposal_id=proposal.proposal_id,
+                    status="confirmed",
+                    reason="reviewed",
+                    adjudicated_by="reviewer",
+                ),
+            )
+        ),
+    )
+
+    assert (
+        "selected_candidate_evidence_mismatch" in result.proposals[0].validation_codes
+    )
+
+
+@pytest.mark.parametrize(
+    ("candidate_id", "disposition", "expected_code"),
+    (
+        ("cand:v2:" + "b" * 32, "projectable", "selected_candidate_not_authoritative"),
+        (
+            TAXONOMY_CANDIDATE,
+            "projection_infeasible",
+            "selected_candidate_not_projectable",
+        ),
+    ),
+)
+def test_reconciliation_rejects_absent_or_nonprojectable_candidate_witness(
+    candidate_id: str, disposition: str, expected_code: str
+) -> None:
+    resource_map = make_map()
+    authority = _authority(resource_map)
+    if disposition != "projectable":
+        candidate = (
+            authority.obligations[0]
+            .candidates[0]
+            .model_copy(update={"projection_disposition": disposition})
+        )
+        obligation = authority.obligations[0].model_copy(
+            update={"candidates": (candidate,)}
+        )
+        authority = authority.model_copy(update={"obligations": (obligation,)})
+    evidence = _evidence(resource_map, selected_candidate_id=candidate_id)
+    proposal_set = propose_correspondence(
+        _validated_map(resource_map),
+        CorrespondenceSourceArtifacts(authority=authority, evidence=(evidence,)),
+    )
+    proposal = proposal_set.proposals[0]
+
+    result = reconcile_correspondence(
+        _validated_map(resource_map),
+        proposal_set,
+        AdjudicationSet(
+            decisions=(
+                CorrespondenceAdjudication(
+                    proposal_id=proposal.proposal_id,
+                    status="confirmed",
+                    reason="reviewed",
+                    adjudicated_by="reviewer",
+                ),
+            )
+        ),
+    )
+
+    assert result.accepted_relations == ()
+    assert expected_code in result.proposals[0].validation_codes
+
+
+def test_reconciliation_checks_link_against_selected_candidates_exact_binding() -> None:
+    resource_map = make_map()
+    authority = _authority(resource_map)
+    other_candidate = CandidateAuthorityRecord(
+        candidate_id="cand:v2:" + "b" * 32,
+        resource_bindings=(
+            {
+                "slot_id": "resource:ingress",
+                "resource_ref": {
+                    "kind": "entry_point",
+                    "entry_point_id": "ep:v1:" + "a" * 32,
+                },
+            },
+        ),
+        projection_disposition="projectable",
+    )
+    obligation = authority.obligations[0].model_copy(
+        update={
+            "taxonomy_candidate_ids": (
+                TAXONOMY_CANDIDATE,
+                other_candidate.candidate_id,
+            ),
+            "candidates": authority.obligations[0].candidates + (other_candidate,),
+        }
+    )
+    authority = authority.model_copy(update={"obligations": (obligation,)})
+    evidence = _evidence(
+        resource_map,
+        taxonomy_candidate_ids=obligation.taxonomy_candidate_ids,
+        selected_candidate_id=other_candidate.candidate_id,
+    )
+    proposal_set = propose_correspondence(
+        _validated_map(resource_map),
+        CorrespondenceSourceArtifacts(authority=authority, evidence=(evidence,)),
+    )
+    proposal = proposal_set.proposals[0]
+
+    result = reconcile_correspondence(
+        _validated_map(resource_map),
+        proposal_set,
+        AdjudicationSet(
+            decisions=(
+                CorrespondenceAdjudication(
+                    proposal_id=proposal.proposal_id,
+                    status="confirmed",
+                    reason="reviewed",
+                    adjudicated_by="reviewer",
+                ),
+            )
+        ),
+    )
+
+    assert result.accepted_relations == ()
+    assert (
+        "resource_link_not_on_selected_candidate"
+        in result.proposals[0].validation_codes
+    )
+
+
+def test_reconciliation_rejects_mixed_selected_candidate_resource_links() -> None:
+    """Every cited link must belong to the selected candidate, not just one."""
+    snapshot = make_snapshot()
+    entry_point_id = snapshot.profile.entry_points[0].entry_point_id
+    resource_map = make_map(
+        make_link(link_id="srm:v1:1"),
+        make_link(
+            link_id="srm:v1:2",
+            capability_resource_ref={
+                "kind": "entry_point",
+                "entry_point_id": entry_point_id,
+            },
+        ),
+        snapshot=snapshot,
+    )
+    authority = _authority(resource_map)
+    finding = authority.structural_findings[0].model_copy(
+        update={"resource_link_ids": ("srm:v1:1", "srm:v1:2")}
+    )
+    authority = authority.model_copy(update={"structural_findings": (finding,)})
+    evidence = _evidence(
+        resource_map,
+        resource_link_ids=("srm:v1:1", "srm:v1:2"),
+    )
+    proposal_set = propose_correspondence(
+        _validated_map(resource_map, snapshot=snapshot),
+        CorrespondenceSourceArtifacts(authority=authority, evidence=(evidence,)),
+    )
+    proposal = proposal_set.proposals[0]
+
+    result = reconcile_correspondence(
+        _validated_map(resource_map, snapshot=snapshot),
+        proposal_set,
+        AdjudicationSet(
+            decisions=(
+                CorrespondenceAdjudication(
+                    proposal_id=proposal.proposal_id,
+                    status="confirmed",
+                    reason="reviewed",
+                    adjudicated_by="reviewer",
+                ),
+            )
+        ),
+    )
+
+    assert result.accepted_relations == ()
+    assert (
+        "resource_link_not_on_selected_candidate"
+        in result.proposals[0].validation_codes
+    )
+
+
+def test_resource_link_evidence_derivation_is_exact_noncoverage_and_order_independent() -> (
+    None
+):
+    first = make_link(link_id="srm:v1:1")
+    second = make_link(
+        link_id="srm:v1:2",
+        control_structure_ref={"kind": "CP", "id": "CP-1"},
+        relation_kind="represents",
+    )
+    resource_map = make_map(first, second)
+    authority = _authority(resource_map)
+    finding = authority.structural_findings[0].model_copy(
+        update={"resource_link_ids": ("srm:v1:2", "srm:v1:1")}
+    )
+    authority = authority.model_copy(update={"structural_findings": (finding,)})
+
+    forward = derive_resource_link_correspondence_evidence(
+        _validated_map(resource_map), authority
+    )
+    reverse_map = make_map(second, first)
+    reverse = derive_resource_link_correspondence_evidence(
+        _validated_map(reverse_map), authority
+    )
+
+    assert forward == reverse
+    assert len(forward) == 2
+    assert {item.resource_link_ids for item in forward} == {
+        ("srm:v1:1",),
+        ("srm:v1:2",),
+    }
+    assert {item.selected_candidate_id for item in forward} == {TAXONOMY_CANDIDATE}
+    assert {item.relation_kind for item in forward} == {"related_but_not_coverage"}
+    assert {item.confidence for item in forward} == {0.9}
+    assert {item.evidence_strength for item in forward} == {"high"}
+
+
+def test_resource_link_evidence_derivation_rejects_invalid_public_inputs() -> None:
+    resource_map = make_map()
+    validation = _validated_map(resource_map)
+    authority = _authority(resource_map)
+
+    with pytest.raises(TypeError, match="SystemResourceMapValidation"):
+        derive_resource_link_correspondence_evidence(object(), authority)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="blocking violations"):
+        derive_resource_link_correspondence_evidence(
+            validation.model_copy(update={"is_valid": False}), authority
+        )
+    with pytest.raises(ValueError, match="no canonical map"):
+        derive_resource_link_correspondence_evidence(
+            validation.model_copy(update={"canonical_map": None}), authority
+        )
+    with pytest.raises(TypeError, match="CorrespondenceAuthority"):
+        derive_resource_link_correspondence_evidence(
+            validation,
+            object(),  # type: ignore[arg-type]
+        )
+    with pytest.raises(ValueError, match="complete authority"):
+        derive_resource_link_correspondence_evidence(
+            validation, authority.model_copy(update={"inventory_complete": False})
+        )
+    wrong_pins = authority.source_pins.model_copy(
+        update={"resource_map_semantic_digest": "f" * 64}
+    )
+    with pytest.raises(ValueError, match="different resource map"):
+        derive_resource_link_correspondence_evidence(
+            validation, authority.model_copy(update={"source_pins": wrong_pins})
+        )
+
+
+def test_resource_link_evidence_derivation_filters_non_witnesses() -> None:
+    resource_map = make_map()
+    validation = _validated_map(resource_map)
+    authority = _authority(resource_map)
+    candidate = (
+        authority.obligations[0]
+        .candidates[0]
+        .model_copy(update={"projection_disposition": "budget_deferred"})
+    )
+    obligation = authority.obligations[0].model_copy(
+        update={"candidates": (candidate,)}
+    )
+
+    assert (
+        derive_resource_link_correspondence_evidence(
+            validation, authority.model_copy(update={"obligations": (obligation,)})
+        )
+        == ()
+    )
+    unbound = (
+        authority.obligations[0]
+        .candidates[0]
+        .model_copy(update={"resource_bindings": ()})
+    )
+    unbound_obligation = authority.obligations[0].model_copy(
+        update={"candidates": (unbound,)}
+    )
+    assert (
+        derive_resource_link_correspondence_evidence(
+            validation,
+            authority.model_copy(update={"obligations": (unbound_obligation,)}),
+        )
+        == ()
+    )
+    unrelated_finding = authority.structural_findings[0].model_copy(
+        update={"resource_link_ids": ("srm:v1:other",)}
+    )
+    assert (
+        derive_resource_link_correspondence_evidence(
+            validation,
+            authority.model_copy(update={"structural_findings": (unrelated_finding,)}),
+        )
+        == ()
+    )
+    governance = authority.obligations[0].model_copy(
+        update={"scope_disposition": "governance_only"}
+    )
+    assert (
+        derive_resource_link_correspondence_evidence(
+            validation, authority.model_copy(update={"obligations": (governance,)})
+        )
+        == ()
+    )
+
+
+def test_resource_link_evidence_filters_unaccepted_links_and_uses_derived_defaults() -> (
+    None
+):
+    advisory = make_link(authority_status="advisory")
+    advisory_map = make_map(advisory)
+    assert (
+        derive_resource_link_correspondence_evidence(
+            _validated_map(advisory_map), _authority(advisory_map)
+        )
+        == ()
+    )
+
+    model_link = make_link(
+        provenance="model_proposed", authority_status="advisory", confidence=None
+    )
+    model_map = make_map(model_link)
+    assert (
+        derive_resource_link_correspondence_evidence(
+            _validated_map(model_map), _authority(model_map)
+        )
+        == ()
+    )
+
+    derived_link = make_link(provenance="deterministically_derived", confidence=None)
+    derived_map = make_map(derived_link)
+    evidence = derive_resource_link_correspondence_evidence(
+        _validated_map(derived_map), _authority(derived_map)
+    )
+
+    assert evidence[0].confidence == 0.5
+    assert evidence[0].evidence_strength == "medium"
+
+
+def test_resource_link_evidence_requires_candidate_resource_identity_match() -> None:
+    entry_link = make_link(capability_resource_ref={"kind": "agent_internal"})
+    resource_map = make_map(entry_link)
+
+    assert (
+        derive_resource_link_correspondence_evidence(
+            _validated_map(resource_map), _authority(resource_map)
+        )
+        == ()
+    )
+
+
+def test_ambiguous_legacy_evidence_requires_explicit_selected_candidate() -> None:
+    resource_map = make_map()
+    other_candidate = "cand:v2:" + "b" * 32
+    evidence = _evidence(
+        resource_map,
+        taxonomy_candidate_ids=(TAXONOMY_CANDIDATE, other_candidate),
+        selected_candidate_id=None,
+    )
+    assert evidence.selected_candidate_id is None
+    proposal_set = _proposal_set(resource_map, evidence)
+    proposal = proposal_set.proposals[0]
+
+    result = reconcile_correspondence(
+        _validated_map(resource_map),
+        proposal_set,
+        AdjudicationSet(
+            decisions=(
+                CorrespondenceAdjudication(
+                    proposal_id=proposal.proposal_id,
+                    status="confirmed",
+                    reason="reviewed",
+                    adjudicated_by="reviewer",
+                ),
+            )
+        ),
+    )
+
+    assert "selected_candidate_required" in result.proposals[0].validation_codes
+
+
+def test_singleton_legacy_evidence_infers_the_only_candidate_witness() -> None:
+    evidence = _evidence(
+        make_map(), selected_candidate_id=None, evidence_refs=("id:obligation",)
+    )
+
+    assert evidence.selected_candidate_id == TAXONOMY_CANDIDATE
+
+
+def test_exact_singleton_legacy_authority_remains_reconcilable() -> None:
+    resource_map = make_map()
+    payload = _authority(resource_map).model_dump(mode="python")
+    payload["obligations"][0]["candidates"] = []
+    authority = CorrespondenceAuthority.model_validate(payload)
+    proposal_set = propose_correspondence(
+        _validated_map(resource_map),
+        CorrespondenceSourceArtifacts(
+            authority=authority, evidence=(_evidence(resource_map),)
+        ),
+    )
+    proposal = proposal_set.proposals[0]
+
+    result = reconcile_correspondence(
+        _validated_map(resource_map),
+        proposal_set,
+        AdjudicationSet(
+            decisions=(
+                CorrespondenceAdjudication(
+                    proposal_id=proposal.proposal_id,
+                    status="confirmed",
+                    reason="reviewed",
+                    adjudicated_by="reviewer",
+                ),
+            )
+        ),
+    )
+
+    assert len(result.accepted_relations) == 1
+
+
+_REVIEWED_OUTCOME_CASES = (
+    (
+        "klarna-phase12-reviewed-adjudications.yaml",
+        "257429214a3ce276962dd992812f67a8bf70cc54eacb3b597e6be708d46ff66f",
+        {
+            "corrp:v1:05255597e8be0ab50cdee3408b9cd7ceef9de617344ff50cfaa30fd72af50a35",
+            "corrp:v1:16d94458e3b47884256828d1d779ea526fbf0583dd310abea8e430027e19eec5",
+            "corrp:v1:74d4f673c807d753e001e7c5458f7d201983e5dd4bd4c9d138ee30a68847e54c",
+            "corrp:v1:a5a754cee16928438a241e31c142d639a1d9234d3fe7be4cdf93e34ea470d5c6",
+            "corrp:v1:a6308c385ea116822f093a4e6ac3f9b504659fd41ecb3da9970c18f5de99288f",
+        },
+        5,
+    ),
+    (
+        "nhs-phase12-reviewed-adjudications.yaml",
+        "e7eceef1f4b5348e375679009a8e20af113b00768b8fcbd078d73391591e593f",
+        {
+            "corrp:v1:1bd40420caed9939cd31b53c34eaf5f16c659d81568b8b5d324c592a683568db",
+            "corrp:v1:c8986c8fe5020b8d4246d9595808d03b807739555037303b2321200bb3eb1c73",
+        },
+        8,
+    ),
+)
+
+
+def _reviewed_outcomes(name: str) -> ReviewedCorrespondenceAdjudications:
+    path = Path(__file__).parent / "fixtures" / name
+    return ReviewedCorrespondenceAdjudications.from_yaml(path.read_bytes())
+
+
+@pytest.mark.parametrize(
+    ("fixture_name", "packet_digest", "confirmed_ids", "rejected_count"),
+    _REVIEWED_OUTCOME_CASES,
+)
+def test_live_reviewed_outcomes_are_canonical_literal_noncoverage_decisions(
+    fixture_name: str,
+    packet_digest: str,
+    confirmed_ids: set[str],
+    rejected_count: int,
+) -> None:
+    outcomes = _reviewed_outcomes(fixture_name)
+
+    assert outcomes.packet_digest == packet_digest
+    assert {
+        item.proposal_id for item in outcomes.decisions if item.status == "confirmed"
+    } == confirmed_ids
+    assert (
+        sum(item.status == "rejected" for item in outcomes.decisions) == rejected_count
+    )
+    assert len(outcomes.decisions) == 10
+    assert {item.relation_kind for item in outcomes.decisions} == {
+        "related_but_not_coverage"
+    }
+    assert outcomes.as_adjudication_set(
+        packet_digest=packet_digest,
+        proposal_set_semantic_digest=outcomes.proposal_set_semantic_digest,
+    ).decisions
+
+    tampered = outcomes.model_dump(mode="python")
+    tampered["decisions"][0]["status"] = "unresolved"
+    with pytest.raises(ValueError, match="semantic_digest"):
+        ReviewedCorrespondenceAdjudications.model_validate(tampered)
+
+
+def test_reviewed_outcomes_require_exact_pins_before_adjudication_projection() -> None:
+    outcomes = _reviewed_outcomes("klarna-phase12-reviewed-adjudications.yaml")
+
+    with pytest.raises(ValueError, match="packet_digest"):
+        outcomes.as_adjudication_set(
+            packet_digest="0" * 64,
+            proposal_set_semantic_digest=outcomes.proposal_set_semantic_digest,
+        )
+    with pytest.raises(ValueError, match="proposal_set_semantic_digest"):
+        outcomes.as_adjudication_set(
+            packet_digest=outcomes.packet_digest,
+            proposal_set_semantic_digest="0" * 64,
+        )
+
+
+def test_reviewed_outcomes_are_historical_pins_not_corrected_run_authority() -> None:
+    outcomes = _reviewed_outcomes("klarna-phase12-reviewed-adjudications.yaml")
+
+    assert (
+        outcomes.packet_digest
+        == "257429214a3ce276962dd992812f67a8bf70cc54eacb3b597e6be708d46ff66f"
+    )
+    assert (
+        outcomes.proposal_set_semantic_digest
+        == "5be166cd5dac27cad1c350c1f967b47ef904c87fb94a4ec5262a780638e4df5b"
+    )
+
+
+def test_persisted_reconciliation_rejects_accepted_relation_for_other_candidate() -> (
+    None
+):
+    resource_map = make_map()
+    proposal_set = _proposal_set(resource_map)
+    proposal = proposal_set.proposals[0]
+    confirmed = reconcile_correspondence(
+        _validated_map(resource_map),
+        proposal_set,
+        AdjudicationSet(
+            decisions=(
+                CorrespondenceAdjudication(
+                    proposal_id=proposal.proposal_id,
+                    status="confirmed",
+                    reason="reviewed",
+                    adjudicated_by="operator",
+                ),
+            )
+        ),
+    )
+
+    payload = confirmed.model_dump(mode="json")
+    payload["accepted_relations"][0]["selected_candidate_id"] = "cand:v2:" + "b" * 32
+    payload["semantic_digest"] = None
+
+    with pytest.raises(ValueError, match="does not match its confirmed proposal"):
+        ReconciliationResult.from_yaml(yaml.safe_dump(payload))
+
+
+@pytest.mark.parametrize("field", ("reason", "adjudicated_by"))
+def test_reviewed_decision_requires_human_audit_text(field: str) -> None:
+    payload = (
+        _reviewed_outcomes("klarna-phase12-reviewed-adjudications.yaml")
+        .decisions[0]
+        .model_dump(mode="python")
+    )
+    payload[field] = ""
+
+    with pytest.raises(ValueError):
+        ReviewedCorrespondenceDecision.model_validate(payload)
+
+
+def test_reviewed_outcome_artifact_requires_at_least_one_decision() -> None:
+    outcomes = _reviewed_outcomes("klarna-phase12-reviewed-adjudications.yaml")
+    payload = outcomes.model_dump(mode="python")
+    payload["decisions"] = []
+
+    with pytest.raises(ValueError):
+        ReviewedCorrespondenceAdjudications.model_validate(payload)
+    with pytest.raises(ValueError):
+        ReviewedCorrespondenceAdjudications.create(
+            packet_digest=outcomes.packet_digest,
+            proposal_set_semantic_digest=outcomes.proposal_set_semantic_digest,
+            decisions=(),
+        )
+
+
+@pytest.mark.parametrize(
+    ("fixture_name", "_packet_digest", "confirmed_ids", "rejected_count"),
+    _REVIEWED_OUTCOME_CASES,
+)
+def test_live_decisions_drive_public_calibration_without_granting_coverage(
+    fixture_name: str,
+    _packet_digest: str,
+    confirmed_ids: set[str],
+    rejected_count: int,
+) -> None:
+    outcomes = _reviewed_outcomes(fixture_name)
+    resource_map = make_map()
+    evidence = tuple(
+        _evidence(
+            resource_map,
+            evidence_source="accepted_resource_link",
+            relation_kind="related_but_not_coverage",
+            evidence_refs=(f"recorded:{item.proposal_id}",),
+        )
+        for item in outcomes.decisions
+    )
+    proposal_set = _proposal_set(resource_map, *evidence)
+    proposals_by_recorded_id = {
+        item.provenance.evidence_refs[0].removeprefix("recorded:"): item
+        for item in proposal_set.proposals
+    }
+    adjudications = AdjudicationSet(
+        decisions=tuple(
+            CorrespondenceAdjudication(
+                proposal_id=proposals_by_recorded_id[item.proposal_id].proposal_id,
+                status=item.status,
+                reason=item.reason,
+                adjudicated_by=item.adjudicated_by,
+                evidence_refs=item.evidence_refs,
+            )
+            for item in outcomes.decisions
+        )
+    )
+
+    summary = summarize_correspondence_calibration(proposal_set, adjudications)
+
+    assert summary.all_proposals.confirmed == len(confirmed_ids)
+    assert summary.all_proposals.rejected == rejected_count
+    assert summary.all_proposals.unresolved == 0
+    assert summary.all_proposals.unreviewed == 0
+    assert summary.coverage_bearing.proposed == 0
+    assert summary.noncoverage == summary.all_proposals
+    assert (summary.precision_numerator, summary.precision_denominator) == (0, 0)
+
+
+def test_literal_review_outcomes_reconcile_confirm_reject_and_unreviewed_separately() -> (
+    None
+):
+    outcomes = _reviewed_outcomes("klarna-phase12-reviewed-adjudications.yaml")
+    confirmed = next(item for item in outcomes.decisions if item.status == "confirmed")
+    rejected = next(item for item in outcomes.decisions if item.status == "rejected")
+    resource_map = make_map()
+    proposal_set = _proposal_set(
+        resource_map,
+        *(
+            _evidence(
+                resource_map,
+                evidence_source="accepted_resource_link",
+                relation_kind="related_but_not_coverage",
+                evidence_refs=(f"recorded:{identifier}",),
+            )
+            for identifier in (
+                confirmed.proposal_id,
+                rejected.proposal_id,
+                "unreviewed",
+            )
+        ),
+    )
+    proposals_by_ref = {
+        item.provenance.evidence_refs[0].removeprefix("recorded:"): item
+        for item in proposal_set.proposals
+    }
+    adjudications = AdjudicationSet(
+        decisions=(
+            CorrespondenceAdjudication(
+                proposal_id=proposals_by_ref[confirmed.proposal_id].proposal_id,
+                status=confirmed.status,
+                reason=confirmed.reason,
+                adjudicated_by=confirmed.adjudicated_by,
+            ),
+            CorrespondenceAdjudication(
+                proposal_id=proposals_by_ref[rejected.proposal_id].proposal_id,
+                status=rejected.status,
+                reason=rejected.reason,
+                adjudicated_by=rejected.adjudicated_by,
+            ),
+        )
+    )
+
+    result = reconcile_correspondence(
+        _validated_map(resource_map), proposal_set, adjudications
+    )
+
+    assert [item.status for item in result.proposals].count("confirmed") == 1
+    assert [item.status for item in result.proposals].count("rejected") == 1
+    assert [item.status for item in result.proposals].count("unresolved") == 1
+    assert len(result.accepted_relations) == 1
+    assert result.accepted_relations[0].relation_kind == "related_but_not_coverage"
 
 
 def _proposal_set(resource_map, *evidence, complete: bool = True) -> ProposalSet:
@@ -1009,6 +1737,7 @@ def test_missing_candidate_resource_authority_rejects_confirmation() -> None:
     resource_map = make_map()
     payload = _authority(resource_map).model_dump(mode="json")
     payload["obligations"][0]["candidate_resource_refs"] = []
+    payload["obligations"][0]["candidates"][0]["resource_bindings"] = []
     authority = CorrespondenceAuthority.model_validate(payload)
     proposal_set = propose_correspondence(
         _validated_map(resource_map),
@@ -1356,6 +2085,7 @@ def test_accepted_relation_retains_exact_taxonomy_identity() -> None:
         risk_id=obligation.risk_id,
         attack_pattern_id=obligation.attack_pattern_id,
         taxonomy_candidate_ids=obligation.taxonomy_candidate_ids,
+        selected_candidate_id=obligation.candidates[0].candidate_id,
         ica_slot_id=ICA_SLOT,
         ica_id=ICA_ID,
         exec_candidate_id=EXEC,

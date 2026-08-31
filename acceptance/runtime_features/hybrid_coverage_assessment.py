@@ -17,6 +17,7 @@ from runtime_obligation_fixture import (
 
 from asago_scenario_generator.models.correspondence import (
     AdjudicationSet,
+    CandidateAuthorityRecord,
     CorrespondenceAdjudication,
     CorrespondenceAuthority,
     CorrespondenceEvidence,
@@ -231,6 +232,11 @@ def _reconciliation(
     resource_map = resource_map_validation.canonical_map
     assert resource_map is not None
     obligation = plan.obligations[0]
+    selected_candidate = next(
+        item
+        for item in obligation.candidate_records
+        if item.projection_disposition == "projectable"
+    )
     pins = SourceArtifactPins(
         resource_map_semantic_digest=resource_map.semantic_digest,
         capability_snapshot_digest=resource_map.capability_snapshot_digest,
@@ -256,6 +262,14 @@ def _reconciliation(
                     for item in obligation.candidate_records
                     for binding in item.resource_bindings
                 ),
+                candidates=tuple(
+                    CandidateAuthorityRecord(
+                        candidate_id=item.candidate_id,
+                        resource_bindings=item.resource_bindings,
+                        projection_disposition=item.projection_disposition,
+                    )
+                    for item in obligation.candidate_records
+                ),
             ),
         ),
         structural_findings=(
@@ -278,6 +292,7 @@ def _reconciliation(
         taxonomy_candidate_ids=tuple(
             item.candidate_id for item in obligation.candidate_records
         ),
+        selected_candidate_id=selected_candidate.candidate_id,
         ica_slot_id=ICA_SLOT,
         ica_id=ICA_ID,
         exec_candidate_id=EXEC_ID,
@@ -286,7 +301,12 @@ def _reconciliation(
         hazard_ids=("H-1",),
         constraint_ids=("SC-1",),
         evidence_source="exact_id",
-        evidence_refs=("id:obligation", "id:ica", f"kind:{relation_kind}"),
+        evidence_refs=(
+            f"candidate:{selected_candidate.candidate_id}",
+            "id:obligation",
+            "id:ica",
+            f"kind:{relation_kind}",
+        ),
         confidence=1.0,
         evidence_strength="high",
         proposer_id="exact-id-v1",
@@ -483,10 +503,14 @@ def _facade_inputs() -> HybridReconciliationInputs:
     plan = plan_taxonomy_obligations(obligation_inputs)
     obligation = plan.obligations[0]
     control = _control_structure()
+    selected_candidate = next(
+        candidate
+        for candidate in obligation.candidate_records
+        if candidate.projection_disposition == "projectable"
+    )
     candidate_resource = next(
         binding.resource_ref
-        for candidate in obligation.candidate_records
-        for binding in candidate.resource_bindings
+        for binding in selected_candidate.resource_bindings
         if binding.resource_ref.kind == "tool"
     )
     link = ResourceLink(
@@ -567,6 +591,7 @@ def _facade_inputs() -> HybridReconciliationInputs:
         risk_id=authority_obligation.risk_id,
         attack_pattern_id=authority_obligation.attack_pattern_id,
         taxonomy_candidate_ids=authority_obligation.taxonomy_candidate_ids,
+        selected_candidate_id=selected_candidate.candidate_id,
         ica_slot_id=structural.ica_slot_id,
         ica_id=structural.ica_id,
         exec_candidate_id=structural.exec_candidate_id,
@@ -575,7 +600,11 @@ def _facade_inputs() -> HybridReconciliationInputs:
         hazard_ids=structural.hazard_ids,
         constraint_ids=("SC-1",),
         evidence_source="exact_id",
-        evidence_refs=("id:obligation", "id:ica"),
+        evidence_refs=(
+            f"candidate:{selected_candidate.candidate_id}",
+            "id:obligation",
+            "id:ica",
+        ),
         confidence=1.0,
         evidence_strength="high",
         proposer_id="exact-id-v1",

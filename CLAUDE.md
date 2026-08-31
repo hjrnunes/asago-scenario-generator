@@ -47,7 +47,10 @@ changing acceptance behavior, or running the quality sequence.
   `mapping_pins.obligation_edges` binds the supplied typed edge bundle. The
   inward observation seam may retain only concrete, validated budget-deferred
   candidates and typed condition/precondition/missing-fact evidence; public
-  generation projection remains `ProjectionBatch`-compatible.
+  generation projection remains `ProjectionBatch`-compatible. Keep resource
+  feasibility typed: a missing tool/integration operation inventory is unknown
+  evidence, an explicitly omitted required operation is structural
+  infeasibility, and distinct pattern roles cannot share one resource.
 - Keep Phase 2 observational and offline. Validate the closed
   `system-resource-map-v1` sidecar against exact capability/control-structure
   digests; produce correspondence only from typed authority/evidence and
@@ -71,7 +74,11 @@ changing acceptance behavior, or running the quality sequence.
   coverage-bearing relation without independent exact-ID or curated mechanism
   evidence. Adapt legacy taxonomy and STPA scenario envelopes only through
   exact candidate and slot/ICA/`EXEC:*` identities; unknown identities fail
-  closed. Keep proposer calibration separate from coverage and retain exact
+  closed. Resource-link evidence must retain the exact selected projectable
+  candidate and each link must resolve to that candidate's own bindings. The
+  deterministic resource-link adapter may propose association-only
+  `related_but_not_coverage`; it must not infer mechanism equivalence. Keep
+  proposer calibration separate from coverage and retain exact
   confirmed/rejected/unresolved/unreviewed counts rather than a score without
   its denominator. Publish the normative
   YAML artifacts atomically. Neither existing generation workflow may import

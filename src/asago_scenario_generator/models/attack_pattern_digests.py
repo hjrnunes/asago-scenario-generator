@@ -43,6 +43,7 @@ _UNORDERED_FIELDS = {
     "min_zones",
     "resource_links",
     "observable_outcome_links",
+    "required_operations",
 }
 
 
@@ -112,6 +113,7 @@ _SLOT_CONSTRAINT_FIELDS = frozenset(
         "allowed_trust_boundary_to_zones",
         "allowed_resource_ids",
         "distinct_from_slot_ids",
+        "required_operations",
     }
 )
 

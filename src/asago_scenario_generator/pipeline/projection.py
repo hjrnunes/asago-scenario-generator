@@ -34,6 +34,7 @@ from asago_scenario_generator.pipeline.projection_contracts import (  # noqa: F4
     ProjectionIssue,
     ProjectionLimitation,
     ProjectionModel,
+    PUBLIC_PROJECTION_RESOURCE_POLICY,
     RejectedProjectionCandidate,
     AuthoritativeProjectionObservation,
     _canonical_json,
@@ -478,6 +479,7 @@ def project_authoritative_candidates(
         budget=budget,
         coverage_target_ids=coverage_target_ids,
         retain_deferred=False,
+        resource_policy=PUBLIC_PROJECTION_RESOURCE_POLICY,
     ).batch
 
 

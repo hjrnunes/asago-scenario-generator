@@ -419,9 +419,11 @@ _PROJECTION_QUALIFICATION_PRIORITY = {
     "incompatible_profile": 0,
     "unresolved_condition": 1,
     "unresolved_precondition": 1,
+    "unknown_resource_operation": 1,
     "precondition_not_satisfied": 2,
     "unsupported_requirement_derivation": 3,
     "missing_compatible_resource": 3,
+    "unsupported_resource_operation": 3,
     "source_influence_relation_infeasible": 3,
     "inapplicable_projection": 3,
 }
@@ -438,6 +440,10 @@ _PROJECTION_QUALIFICATION_OUTCOMES = {
         "missing_evidence",
         "authoritative qualification fact is unresolved",
     ),
+    "unknown_resource_operation": (
+        "missing_evidence",
+        "authoritative resource operation support is unresolved",
+    ),
     "precondition_not_satisfied": (
         "contradictory_evidence",
         "authoritative precondition is not satisfied",
@@ -447,6 +453,10 @@ _PROJECTION_QUALIFICATION_OUTCOMES = {
         "authoritative projection is infeasible",
     ),
     "missing_compatible_resource": (
+        "structurally_infeasible",
+        "authoritative projection is infeasible",
+    ),
+    "unsupported_resource_operation": (
         "structurally_infeasible",
         "authoritative projection is infeasible",
     ),
@@ -515,10 +525,13 @@ def _qualification_from_projection(
     has_candidates: bool,
     qualification_facts_state: Literal["complete", "missing", "contradictory"],
 ) -> tuple[str, str | None]:
-    """Translate gates, giving capability exclusion precedence over fact gaps."""
+    """Translate gates, preserving concrete exclusion or contradiction."""
     if not has_candidates:
         without_candidates = _qualification_without_candidates(batch, pattern_id)
-        if without_candidates[0] == "capability_excluded":
+        if without_candidates[0] in {
+            "capability_excluded",
+            "contradictory_evidence",
+        }:
             return without_candidates
     fact_outcome = _QUALIFICATION_FACT_OUTCOMES.get(qualification_facts_state)
     if fact_outcome:

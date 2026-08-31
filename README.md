@@ -165,6 +165,15 @@ sets, qualification facts, a bounded projection budget, and the compatibility
 policy. It does not accept file paths or an LLM client. Malformed, incomplete,
 or contradictory global inputs fail before a partial plan is returned.
 
+Reviewed tools and integrations may declare `supported_operations` using the
+closed `retrieve_data`, `transmit_data`, and `execute_code` vocabulary.
+Attack-pattern resource slots declare their `required_operations`. A missing
+operation inventory is an evidence gap; a complete inventory that omits a
+required operation is a structural mismatch. Slot kind, operation support, and
+distinct-role constraints are checked separately, so an upload-only tool
+cannot stand in for a retrieval tool or fill two roles that the pattern says
+must be different.
+
 The mapping pins have two distinct authorities: `mapping_pins.sssom` retains
 the authoritative taxonomy-context `mapping_set_digest`, while
 `mapping_pins.obligation_edges` uses release `obligation-mapping-bundle-v1` to
@@ -237,6 +246,10 @@ control structure before proposing or reconciling. The optional adjudication
 file is a typed `AdjudicationSet` envelope with a `decisions` collection; both
 JSON and YAML inputs are accepted according to the file suffix.
 
+Reviewed decision files are historical records for the exact packet and proposal
+set they name. Before applying one to reconciliation, convert it to an
+`AdjudicationSet` only after supplying both exact recorded digests; a mismatch is
+rejected, so decisions cannot silently be applied to a corrected run.
 `summarize_correspondence_calibration(...)` keeps proposer evaluation outside
 the coverage matrices. It reports exact confirmed, rejected, unresolved, and
 unreviewed counts for coverage-bearing and noncoverage proposals. Precision is
@@ -284,6 +297,14 @@ alone can materialize an accepted relation, and only a relation backed by an
 accepted, confirmed proposal can establish hybrid coverage. Rejected,
 unresolved, contradictory, and `related_but_not_coverage` evidence remains
 visible without being promoted.
+
+Every resource-link proposal also identifies the one selected projectable
+candidate whose own resource binding supports the link. Reconciliation rejects
+a missing, unknown, infeasible, or mismatched candidate/link witness. The
+deterministic `derive_resource_link_correspondence_evidence(...)` adapter emits
+only `related_but_not_coverage`: it finds exact shared-resource associations
+for review but never decides that the taxonomy and STPA mechanisms provide the
+same coverage.
 
 `HybridCoverageAssessment` is the closed, immutable
 `hybrid-coverage-assessment-v1` domain artifact. Its structural-consideration

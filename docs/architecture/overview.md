@@ -184,6 +184,15 @@ load. The persistence adapter writes via an atomic temporary-file rename and
 loads the written artifact back through the closed model before reporting
 success; no partial file is a valid plan.
 
+Canonical tool and integration resources carry an optional reviewed
+`supported_operations` set. Canonical-chain slots carry a closed
+`required_operations` set and may require resources to be distinct from named
+sibling slots. Projection first validates resource kind and typed compatibility,
+then operation support: absent operation metadata produces
+`unknown_resource_operation`, while a complete set that omits a requirement
+produces `unsupported_resource_operation`. The obligation planner retains the
+former as `missing_evidence` and the latter as `structurally_infeasible`.
+
 Phase 2 consumes the plan through its model interface and adds a separately
 versioned `SystemResourceMap`, explicit evidence-bearing correspondence
 proposals, and deterministic reconciliation. The resource map is the closed
@@ -203,10 +212,13 @@ workflow's implementation.
 
 Correspondence is split into reviewable `correspondence-proposals-v1` and
 `correspondence-reconciliation-v1` artifacts. A proposal names exact obligation,
-ICA slot, ICA, canonical `EXEC:*` candidate, resource-link, hazard, constraint,
-evidence, and upstream-pin identities. Deterministic validation and explicit
-adjudication are both required before reconciliation materializes an accepted
-relation. The source-pin record, proposal set, and reconciliation result each
+the selected projectable taxonomy candidate, ICA slot, ICA, canonical `EXEC:*`
+candidate, resource-link, hazard, constraint, evidence, and upstream-pin
+identities. Reconciliation verifies that every claimed link belongs to that
+selected candidate's own canonical bindings; missing, unknown, infeasible, or
+substituted candidate witnesses fail closed. Deterministic validation and
+explicit adjudication are both required before reconciliation materializes an
+accepted relation. The source-pin record, proposal set, and reconciliation result each
 name the same `capability_snapshot_digest` as the validated resource map and
 Phase 1 plan; the field participates in each artifact's canonical digest and
 substitution fails closed. Duplicate confirmations that imply one semantic
@@ -220,11 +232,19 @@ identity. The closed evidence model therefore permits that source only with
 `related_but_not_coverage`; a coverage-bearing relation requires independently
 reviewed exact-ID or curated mechanism evidence. This prevents resource-map
 joins from becoming a Cartesian semantic-coverage claim.
+`pipeline.correspondence_evidence.derive_resource_link_correspondence_evidence`
+is the deterministic adapter for this narrow join. It emits one exact
+candidate/link/path witness at a time, ignores advisory and model-proposed map
+links, and can emit only `related_but_not_coverage`.
 `pipeline.correspondence.summarize_correspondence_calibration` projects an
 independent adjudication set into exact review buckets and a precision
 numerator/denominator. It grants no coverage and deliberately excludes
 unresolved and unreviewed proposals from that denominator.
 
+Reviewed decision artifacts are historical records bound to their recorded
+packet and proposal-set digests. The `as_adjudication_set` projection requires
+callers to provide both exact pins and rejects either mismatch before dropping
+those pins into the reconciliation-only `AdjudicationSet`.
 `pipeline.hybrid_coverage.assess_hybrid_coverage` is the final observational
 projection seam. It consumes an intact obligation plan, a successful typed
 resource-map validation attestation, a reconciliation result, a typed taxonomy

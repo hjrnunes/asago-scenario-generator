@@ -1872,7 +1872,7 @@ patterns:
       pattern_id: AP-T6-03
       chain_id: AP-T6-03.chain.1
       semantic_revision: 1
-      semantic_digest: 5cbe22a13435c37bc198b9542dfb5d6d9caf06826810350fcfe7d41705e2dd92
+      semantic_digest: baeee6c2a308348ce9dbb86ec3b11baab51d3d5dffb317116fb1384db1c4b966
       taxonomy_context:
         atlas:
           release: '2026.05'
@@ -2044,7 +2044,7 @@ patterns:
         resource_links: []
         observable_outcome_links:
         - postcondition_id: post.redirect_agent_goal
-          observation: persistent_state
+          observation: agent_state
           binding_slot_id: agent_goal
         order: 4
         attacker_controlled: false
@@ -2084,7 +2084,7 @@ patterns:
         resource_links: []
         observable_outcome_links:
         - postcondition_id: post.execute_unintended_actions
-          observation: persistent_state
+          observation: agent_state
           binding_slot_id: agent_goal
         order: 5
         attacker_controlled: false
@@ -2106,11 +2106,20 @@ patterns:
       - slot_id: ingress
         kind: entry_point
         purpose: initial_ingress
+        allowed_entry_point_types:
+        - external_content
+        allowed_entry_point_directions:
+        - input
+        - bidirectional
+        allowed_entry_point_controllability:
+        - indirect
       - slot_id: poisoned_source
         kind: integration
         purpose: intermediate
+        required_operations:
+        - retrieve_data
       - slot_id: agent_goal
-        kind: integration
+        kind: agent_internal
         purpose: target
       - slot_id: boundary
         kind: trust_boundary

@@ -16,6 +16,10 @@ from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 from asago_scenario_generator.models.attack_pattern_digests import (
     compute_chain_semantic_digest,
 )
+from asago_scenario_generator.models.attack_pattern_contracts import (
+    AuthoritativeFactReference,
+    EvaluatedFactEvidence,
+)
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.pipeline.obligation_contracts import (
     TaxonomyObligationInputs,
@@ -46,6 +50,40 @@ from tests.helpers.projection_factory import (
     get_test_resolver,
     get_test_snapshot,
 )
+
+
+def _pattern_requiring_code_interpreter() -> tuple[
+    AttackPattern, str, AuthoritativeFactReference
+]:
+    code_interpreter = AuthoritativeFactReference(
+        namespace="profile",
+        fact_id="capabilities.code_interpreter",
+        value_type="boolean",
+        property_path=(),
+    )
+    raw_pattern = deepcopy(get_test_raw_pattern())
+    raw_pattern["canonical_chain"]["steps"][-1]["preconditions"] = [
+        {
+            "condition_id": "pre.code_interpreter",
+            "condition": {
+                "op": "existence",
+                "schema_version": "1",
+                "fact": code_interpreter.model_dump(mode="json"),
+                "exists": True,
+            },
+        }
+    ]
+    raw_pattern["canonical_chain"]["semantic_digest"] = compute_chain_semantic_digest(
+        raw_pattern["canonical_chain"]
+    )
+    pattern = AttackPattern.model_validate(raw_pattern)
+    return (
+        pattern,
+        compute_authoritative_catalog_pin(
+            [pattern.model_dump(mode="json")], get_test_resolver()
+        ),
+        code_interpreter,
+    )
 
 
 def test_shared_pattern_keeps_distinct_risk_scoped_obligations() -> None:
@@ -271,6 +309,68 @@ def test_projection_rejections_are_retained_as_typed_candidate_records() -> None
     assert len(record.evidence) == 1
     assert record.evidence[0].source == "missing_compatible_resource"
     assert plan.summary.projection_infeasible == 1
+
+
+def test_unknown_resource_operation_is_retained_as_missing_evidence() -> None:
+    """Unreviewed operation support is an evidence gap, not impossibility."""
+    raw_pattern = deepcopy(get_test_raw_pattern())
+    raw_pattern["canonical_chain"]["resource_slots"][1]["required_operations"] = [
+        "retrieve_data"
+    ]
+    raw_pattern["canonical_chain"]["semantic_digest"] = compute_chain_semantic_digest(
+        raw_pattern["canonical_chain"]
+    )
+    pattern = AttackPattern.model_validate(raw_pattern)
+    catalog_digest = compute_authoritative_catalog_pin(
+        [pattern.model_dump(mode="json")], get_test_resolver()
+    )
+
+    row = plan_taxonomy_obligations(
+        make_inputs(
+            pattern=pattern,
+            catalog_pins={"atlas": {"release": "v1", "digest": catalog_digest}},
+        )
+    ).obligations[0]
+
+    assert row.qualification_disposition == "missing_evidence"
+    assert row.candidate_records == ()
+    assert any(
+        evidence.source == "unknown_resource_operation" for evidence in row.evidence
+    )
+
+
+def test_unsupported_resource_operation_is_structurally_infeasible() -> None:
+    """A reviewed operation mismatch is a concrete feasibility rejection."""
+    raw_pattern = deepcopy(get_test_raw_pattern())
+    raw_pattern["canonical_chain"]["resource_slots"][1]["required_operations"] = [
+        "retrieve_data"
+    ]
+    raw_pattern["canonical_chain"]["semantic_digest"] = compute_chain_semantic_digest(
+        raw_pattern["canonical_chain"]
+    )
+    pattern = AttackPattern.model_validate(raw_pattern)
+    catalog_digest = compute_authoritative_catalog_pin(
+        [pattern.model_dump(mode="json")], get_test_resolver()
+    )
+    profile_payload = get_test_profile().model_dump(mode="json")
+    profile_payload["tool_inventory"][0]["supported_operations"] = ["transmit_data"]
+    snapshot = capture_capability_snapshot(
+        CapabilityProfile.model_validate(profile_payload), get_test_snapshot().facts
+    )
+
+    row = plan_taxonomy_obligations(
+        make_inputs(
+            pattern=pattern,
+            capability_snapshot=snapshot,
+            catalog_pins={"atlas": {"release": "v1", "digest": catalog_digest}},
+        )
+    ).obligations[0]
+
+    assert row.qualification_disposition == "structurally_infeasible"
+    assert len(row.candidate_records) == 1
+    assert row.candidate_records[0].evidence[0].source == (
+        "unsupported_resource_operation"
+    )
 
 
 def test_unsupported_projection_is_retained_with_concrete_rejection_evidence() -> None:
@@ -576,6 +676,63 @@ def test_failed_precondition_persists_typed_projection_fact_evidence() -> None:
     assert precondition.rationale == (
         "one or more selected-step preconditions are false"
     )
+
+
+def test_explicitly_absent_precondition_precedes_generic_fact_gap() -> None:
+    """A concrete false precondition is contradiction, not missing evidence."""
+    pattern, catalog_digest, code_interpreter = _pattern_requiring_code_interpreter()
+    snapshot = capture_capability_snapshot(
+        get_test_profile(),
+        (
+            *get_test_snapshot().facts,
+            EvaluatedFactEvidence(fact=code_interpreter, status="absent"),
+        ),
+    )
+
+    row = plan_taxonomy_obligations(
+        make_inputs(
+            pattern=pattern,
+            capability_snapshot=snapshot,
+            catalog_pins={"atlas": {"release": "v1", "digest": catalog_digest}},
+        )
+    ).obligations[0]
+
+    assert row.qualification_disposition == "contradictory_evidence"
+    assert row.candidate_records == ()
+    rejection = next(
+        evidence
+        for evidence in row.evidence
+        if evidence.source == "precondition_not_satisfied"
+    )
+    precondition = next(
+        evaluation
+        for evaluation in rejection.fact_evaluations
+        if evaluation.evaluation_type == "precondition"
+        and evaluation.condition_id == "pre.code_interpreter"
+    )
+    assert precondition.result == "false"
+    assert precondition.facts[0].status == "absent"
+
+
+def test_unknown_precondition_fact_remains_missing_evidence() -> None:
+    """No authoritative reading remains an evidence gap, not contradiction."""
+    pattern, catalog_digest, _ = _pattern_requiring_code_interpreter()
+
+    row = plan_taxonomy_obligations(
+        make_inputs(
+            pattern=pattern,
+            catalog_pins={"atlas": {"release": "v1", "digest": catalog_digest}},
+        )
+    ).obligations[0]
+
+    assert row.qualification_disposition == "missing_evidence"
+    assert row.candidate_records == ()
+    qualification = next(
+        evidence
+        for evidence in row.evidence
+        if evidence.source == "qualification-facts"
+    )
+    assert qualification.fact_evaluations[0].facts[0].status == "absent"
 
 
 def test_planner_accepts_only_complete_typed_inputs() -> None:

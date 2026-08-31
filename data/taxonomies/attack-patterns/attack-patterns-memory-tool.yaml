@@ -1375,7 +1375,7 @@ patterns:
       pattern_id: AP-T2-02
       chain_id: chain.1
       semantic_revision: 1
-      semantic_digest: 0cf04134106e59dc46b1c06c8c5e289eb9dbeec8414b37688ad68a48aabad368
+      semantic_digest: 75bf8e5b099e78e0faac293db601fb2fe6f663456d261542763d0993c9e9ea07
       taxonomy_context: *id001
       mappings:
       - decision: exact
@@ -1676,9 +1676,17 @@ patterns:
       - slot_id: retrieval_tool
         kind: tool
         purpose: intermediate
+        required_operations:
+        - retrieve_data
+        distinct_from_slot_ids:
+        - delivery_tool
       - slot_id: delivery_tool
         kind: tool
         purpose: target
+        required_operations:
+        - transmit_data
+        distinct_from_slot_ids:
+        - retrieval_tool
       - slot_id: boundary
         kind: trust_boundary
         purpose: supporting
@@ -2502,7 +2510,7 @@ patterns:
       pattern_id: AP-T2-06
       chain_id: chain.1
       semantic_revision: 1
-      semantic_digest: 6f9f0be711522e605507aa495f50020abe8d94be35467d5fdbd6477b44401e5d
+      semantic_digest: ec8d4f7f7a9ec52c90ebad0a99c671f3cb76a7dfc3cc14d9d37d0a249393f59f
       taxonomy_context: *id001
       mappings:
       - decision: exact
@@ -2769,7 +2777,17 @@ patterns:
         - kind: effect
           ref_id: outcome.unauthorized.execution
           value_type: boolean
-        preconditions: []
+        preconditions:
+        - condition_id: cond.code_interpreter
+          condition:
+            op: existence
+            schema_version: '1'
+            fact:
+              namespace: profile
+              fact_id: capabilities.code_interpreter
+              value_type: boolean
+              property_path: []
+            exists: true
         observable_postconditions:
         - postcondition_id: post.invoke.tool
           description: 'The hijacked tool executes the attacker-chosen command through the command/scripting
@@ -2813,6 +2831,8 @@ patterns:
       - slot_id: execution_tool
         kind: tool
         purpose: target
+        required_operations:
+        - execute_code
       - slot_id: boundary
         kind: trust_boundary
         purpose: supporting

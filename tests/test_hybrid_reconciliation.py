@@ -56,12 +56,13 @@ def _source_artifacts():
     plan = plan_taxonomy_obligations(obligation_inputs)
     control = make_control_structure()
     obligation = plan.obligations[0]
-    resource_ref = next(
-        binding.resource_ref.model_dump(mode="json")
+    selected_candidate, selected_binding = next(
+        (candidate, binding)
         for candidate in obligation.candidate_records
         for binding in candidate.resource_bindings
         if binding.resource_ref.kind == "tool"
     )
+    resource_ref = selected_binding.resource_ref.model_dump(mode="json")
     resource_map = make_map(
         make_link(capability_resource_ref=resource_ref),
         snapshot=obligation_inputs.capability_snapshot,
@@ -120,6 +121,7 @@ def _source_artifacts():
         risk_id=authority_obligation.risk_id,
         attack_pattern_id=authority_obligation.attack_pattern_id,
         taxonomy_candidate_ids=authority_obligation.taxonomy_candidate_ids,
+        selected_candidate_id=selected_candidate.candidate_id,
         ica_slot_id=finding.ica_slot_id,
         ica_id=finding.ica_id,
         exec_candidate_id=finding.exec_candidate_id,

@@ -277,6 +277,11 @@ $defs:
         uniqueItems: true
         items:
           enum: [input, reasoning, tool_execution, memory, inter_agent]
+      required_operations:
+        type: array
+        uniqueItems: true
+        items:
+          enum: [retrieve_data, transmit_data, execute_code]
       distinct_from_slot_ids:
         type: array
         uniqueItems: true

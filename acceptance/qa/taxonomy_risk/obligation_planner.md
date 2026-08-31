@@ -140,9 +140,9 @@ same identities after input normalization.
 
 ## QA-TOP-12: ICA and scenario keyword prose is outside obligation planning
 
-1. Plan one typed input while carrying a baseline ICA/scenario prose fixture.
-2. Plan the same typed input while carrying different ICA and scenario
-   keyword prose.
+1. Place baseline ICA/scenario prose sidecars beside one typed input snapshot,
+   without adding those fields to `TaxonomyObligationInputs`, and publish it.
+2. Publish the same typed input with only those ambient sidecars changed.
 3. Compare the canonical plan bytes, semantic digest, and obligation IDs.
 
 Expected: changing either prose value has no effect on the obligation plan;
@@ -150,16 +150,32 @@ the planner receives only `TaxonomyObligationInputs`.
 
 ## QA-TOP-13: typed planning constructs no provider client and contacts no endpoint
 
-1. Run one real typed planner call with provider-client constructors patched to
-   fail and socket connection functions patched to fail while recording any
-   attempted activity.
+1. Run the public adapter in a guarded child process where both project
+   provider-client constructors and socket connection functions fail while
+   recording any attempted activity.
 2. Inspect the recorded construction and connection counts.
 
 Expected: both counts are zero. The check is deterministic and does not
    require a reachable endpoint or live-model opt-in.
 
+## QA-TOP-14: resource operation support distinguishes unknown from unsupported
+
+1. Require `retrieve_data` on the canonical tool slot with operation support
+   left unknown.
+2. Publish the typed plan and inspect the row disposition and evidence.
+3. Repeat with a reviewed tool that supports only `transmit_data`.
+
+Expected: unknown operation support retains the obligation as
+`missing_evidence` with `unknown_resource_operation` evidence and no candidate
+record. A reviewed operation mismatch retains the obligation as
+`structurally_infeasible` with `unsupported_resource_operation` evidence and a
+typed projection-infeasible candidate record. This external check drives the
+public file adapter for both cases; the committed acceptance scenario exercises
+the same public typed planner seam.
+
 ## Completion evidence
 
 The executable checks are in
 `acceptance/qa/taxonomy_risk/obligation_planner.py`. A successful run prints
-`Result: PASS` and leaves only untracked diagnostic evidence under `tmp/`.
+14 completed procedures and `Result: PASS`, and leaves only untracked
+diagnostic evidence under `tmp/`.

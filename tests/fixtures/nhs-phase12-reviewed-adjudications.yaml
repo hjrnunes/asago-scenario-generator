@@ -1,0 +1,68 @@
+# Historical manual decisions for the original NHS Phase 2 review packet.
+# The recorded packet and proposal-set digests are intentionally not pins for
+# a corrected or regenerated run.
+schema_version: correspondence-reviewed-adjudications-v1
+packet_digest: e7eceef1f4b5348e375679009a8e20af113b00768b8fcbd078d73391591e593f
+proposal_set_semantic_digest: a9cf8c266ff1488d0bcd7df1b37f8dd361ba9a9e0435b4e60d7764df196e2d68
+semantic_digest: a4799a1092c3beacdc2bec0fabf542adad5e2ac100219b75b71d9bd36c11f733
+decisions:
+- proposal_id: corrp:v1:03ae0898983627e5a3162e5cfb9f4653aba916e90eac01fbd78989e0dec5505e
+  relation_kind: related_but_not_coverage
+  status: rejected
+  reason: A generic input-validation boundary does not connect manipulated tool parameters to outdated PII-detection patterns.
+  adjudicated_by: operator:phase12-live-review
+  evidence_refs: [manual-review:nhs:case-1]
+- proposal_id: corrp:v1:1bd40420caed9939cd31b53c34eaf5f16c659d81568b8b5d324c592a683568db
+  relation_kind: related_but_not_coverage
+  status: confirmed
+  reason: The evidence traces a specific patient-questionnaire, staff-escalation, input-boundary, and validation-control path; no coverage is claimed.
+  adjudicated_by: operator:phase12-live-review
+  evidence_refs: [manual-review:nhs:case-2]
+- proposal_id: corrp:v1:4cc0651a9ab93cb8ec779eed4aeca422feb613b245695e6b34bc49451559f3a4
+  relation_kind: related_but_not_coverage
+  status: rejected
+  reason: The staff-escalation candidate does not establish the relevant EHR-upload path and the mechanisms are distinct.
+  adjudicated_by: operator:phase12-live-review
+  evidence_refs: [manual-review:nhs:case-3]
+- proposal_id: corrp:v1:8c265de3ae391318be8459dbf91bf7a6b3913784f838605829291f1346dc03a9
+  relation_kind: related_but_not_coverage
+  status: rejected
+  reason: The staff-escalation tool is not the required command interpreter and no path connects injection to PII exposure.
+  adjudicated_by: operator:phase12-live-review
+  evidence_refs: [manual-review:nhs:case-4]
+- proposal_id: corrp:v1:c8986c8fe5020b8d4246d9595808d03b807739555037303b2321200bb3eb1c73
+  relation_kind: related_but_not_coverage
+  status: confirmed
+  reason: The evidence traces a specific patient-chat, EHR-upload, input-boundary, and validation-control path; no coverage is claimed.
+  adjudicated_by: operator:phase12-live-review
+  evidence_refs: [manual-review:nhs:case-5]
+- proposal_id: corrp:v1:cb48d478cd1424ab6c08d047da7ea53e0b9a7528a000b53576ef1e86a350bed0
+  relation_kind: related_but_not_coverage
+  status: rejected
+  reason: An upload-only EHR API cannot satisfy both retrieve and transmit roles and does not connect to the patient-output redaction control.
+  adjudicated_by: operator:phase12-live-review
+  evidence_refs: [manual-review:nhs:case-6]
+- proposal_id: corrp:v1:d77bf02737076310bce84e8e702698fe5a88c0f91f012e2ca69f912228298492
+  relation_kind: related_but_not_coverage
+  status: rejected
+  reason: NHS has no command-interpreter capability and the generic shared boundary does not connect licensing, injection, and redaction failure.
+  adjudicated_by: operator:phase12-live-review
+  evidence_refs: [manual-review:nhs:case-7]
+- proposal_id: corrp:v1:d85a803607d91e52f769ceadd46ded996c75288e49e8f701acc1e498f04e57dc
+  relation_kind: related_but_not_coverage
+  status: rejected
+  reason: The upload-only EHR API cannot establish a retrieve-and-exfiltrate path to the patient-facing redaction control.
+  adjudicated_by: operator:phase12-live-review
+  evidence_refs: [manual-review:nhs:case-8]
+- proposal_id: corrp:v1:dbc026a516b5bbbcbc277aee3724a06c13abe0fdbb5052120d007d035639c57b
+  relation_kind: related_but_not_coverage
+  status: rejected
+  reason: The upload-only EHR API cannot return the poisoned content required by the proposed path.
+  adjudicated_by: operator:phase12-live-review
+  evidence_refs: [manual-review:nhs:case-9]
+- proposal_id: corrp:v1:e337cabdf1244bb929228d32139a1ffe8f35390b740808c532fae2b86e31b712
+  relation_kind: related_but_not_coverage
+  status: rejected
+  reason: NHS has no documented command interpreter and neither cited resource can perform the required attack.
+  adjudicated_by: operator:phase12-live-review
+  evidence_refs: [manual-review:nhs:case-10]

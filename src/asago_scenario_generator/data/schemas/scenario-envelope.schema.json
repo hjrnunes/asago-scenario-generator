@@ -2940,6 +2940,19 @@
           "title": "Allowed Resource Ids",
           "type": "array"
         },
+        "required_operations": {
+          "default": [],
+          "items": {
+            "enum": [
+              "retrieve_data",
+              "transmit_data",
+              "execute_code"
+            ],
+            "type": "string"
+          },
+          "title": "Required Operations",
+          "type": "array"
+        },
         "distinct_from_slot_ids": {
           "default": [],
           "items": {
@@ -5145,6 +5158,27 @@
         "data_sensitivity": {
           "$ref": "#/$defs/DataSensitivity",
           "description": "Sensitivity of data accessible through this integration"
+        },
+        "supported_operations": {
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "retrieve_data",
+                  "transmit_data",
+                  "execute_code"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Complete reviewed operation set; null means operation support is unknown",
+          "title": "Supported Operations"
         }
       },
       "required": [
@@ -5198,6 +5232,27 @@
           "description": "What the tool does (one line)",
           "title": "Description",
           "type": "string"
+        },
+        "supported_operations": {
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "retrieve_data",
+                  "transmit_data",
+                  "execute_code"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Complete reviewed operation set; null means operation support is unknown",
+          "title": "Supported Operations"
         }
       },
       "required": [

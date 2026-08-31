@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from asago_scenario_generator.models.attack_pattern_projection import (
     CanonicalResourceReference,
+    ResourceBinding,
 )
 from asago_scenario_generator.models.canonical import (
     canonical_json_bytes,
@@ -34,7 +35,11 @@ Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
 CORRESPONDENCE_PROPOSALS_SCHEMA_VERSION = "correspondence-proposals-v1"
 CORRESPONDENCE_RECONCILIATION_SCHEMA_VERSION = "correspondence-reconciliation-v1"
+REVIEWED_ADJUDICATIONS_SCHEMA_VERSION = "correspondence-reviewed-adjudications-v1"
 CORRESPONDENCE_DIGEST_DOMAIN = "asago-scenario-generator:correspondence:v1"
+REVIEWED_ADJUDICATIONS_DIGEST_DOMAIN = (
+    "asago-scenario-generator:correspondence-reviewed-adjudications:v1"
+)
 CORRESPONDENCE_RELATION_DIGEST_DOMAIN = (
     "asago-scenario-generator:correspondence-relation:v1"
 )
@@ -54,6 +59,49 @@ EvidenceSource = Literal[
 EvidenceStrength = Literal["high", "medium", "weak"]
 AdjudicationStatus = Literal["confirmed", "rejected", "unresolved"]
 ValidationResult = Literal["accepted", "rejected", "unresolved"]
+
+_RESOURCE_LINK_RELATION_ERROR = (
+    "accepted resource link evidence supports noncoverage only; "
+    "coverage-bearing correspondence requires exact-ID or curated "
+    "mechanism evidence"
+)
+
+
+def validate_evidence_relation_pair(
+    evidence_source: EvidenceSource, relation_kind: RelationKind
+) -> None:
+    """Require shared-resource evidence to remain explicitly noncoverage."""
+    if (
+        evidence_source == "accepted_resource_link"
+        and relation_kind != "related_but_not_coverage"
+    ):
+        raise ValueError(_RESOURCE_LINK_RELATION_ERROR)
+
+
+def _set_selected_candidate_witness(model: Any, evidence_refs: Sequence[str]) -> None:
+    """Fill a legacy unambiguous candidate witness without changing v1 identity."""
+    if model.selected_candidate_id is not None:
+        return
+    referenced = _candidate_evidence_refs(evidence_refs)
+    candidates = tuple(model.taxonomy_candidate_ids)
+    if len(referenced) == 1:
+        object.__setattr__(model, "selected_candidate_id", referenced[0])
+        return
+    if len(candidates) == 1:
+        object.__setattr__(model, "selected_candidate_id", candidates[0])
+
+
+def _candidate_evidence_refs(evidence_refs: Sequence[str]) -> tuple[str, ...]:
+    """Return canonical candidate identities encoded by legacy evidence refs."""
+    return tuple(
+        sorted(
+            {
+                ref.removeprefix("candidate:")
+                for ref in evidence_refs
+                if ref.startswith("candidate:")
+            }
+        )
+    )
 
 
 def _load_canonical_artifact(
@@ -125,6 +173,33 @@ class SourceArtifactPins(_CorrespondenceModel):
     stpa_version: str | None = None
 
 
+class CandidateAuthorityRecord(_CorrespondenceModel):
+    """One exact Phase 1 candidate and its projection bindings."""
+
+    candidate_id: str = Field(pattern=r"^cand:v2:[0-9a-f]{32}$")
+    resource_bindings: tuple[ResourceBinding, ...] = ()
+    projection_disposition: Literal[
+        "projectable", "projection_infeasible", "budget_deferred", "not_attempted"
+    ] = "projectable"
+
+    @model_validator(mode="after")
+    def canonicalize_candidate_authority(self) -> "CandidateAuthorityRecord":
+        """Keep each candidate's exact binding inventory deterministic."""
+        bindings = tuple(
+            sorted(
+                self.resource_bindings,
+                key=lambda item: canonical_json_bytes(item.model_dump(mode="json")),
+            )
+        )
+        _require_unique_keys(
+            bindings,
+            lambda item: item.slot_id,
+            "candidate authority bindings must have unique slot_id values",
+        )
+        object.__setattr__(self, "resource_bindings", bindings)
+        return self
+
+
 class ObligationAuthorityRecord(_CorrespondenceModel):
     """The subset of a Phase 1 obligation needed for reconciliation."""
 
@@ -133,6 +208,7 @@ class ObligationAuthorityRecord(_CorrespondenceModel):
     attack_pattern_id: str | None = Field(default=None, min_length=1)
     taxonomy_candidate_ids: tuple[str, ...] = ()
     candidate_resource_refs: tuple[CanonicalResourceReference, ...] = ()
+    candidates: tuple[CandidateAuthorityRecord, ...] = ()
     scope_disposition: Literal[
         "applicable", "capability_excluded", "governance_only"
     ] = "applicable"
@@ -154,6 +230,19 @@ class ObligationAuthorityRecord(_CorrespondenceModel):
             )
         )
         object.__setattr__(self, "candidate_resource_refs", refs)
+        candidates = tuple(sorted(self.candidates, key=lambda item: item.candidate_id))
+        _require_unique_keys(
+            candidates,
+            lambda item: item.candidate_id,
+            "candidate authority records must have unique candidate_id values",
+        )
+        if candidates and tuple(item.candidate_id for item in candidates) != tuple(
+            self.taxonomy_candidate_ids
+        ):
+            raise ValueError(
+                "candidate authority records must match taxonomy_candidate_ids"
+            )
+        object.__setattr__(self, "candidates", candidates)
         return self
 
 
@@ -412,6 +501,14 @@ def _obligation_authority_records(obligation_plan: Any) -> tuple[Any, ...]:
                     for candidate in candidates
                     for binding in candidate.resource_bindings
                 ),
+                candidates=tuple(
+                    CandidateAuthorityRecord(
+                        candidate_id=candidate.candidate_id,
+                        resource_bindings=candidate.resource_bindings,
+                        projection_disposition=candidate.projection_disposition,
+                    )
+                    for candidate in candidates
+                ),
                 scope_disposition=row.scope_disposition,
             )
         )
@@ -576,6 +673,9 @@ class CorrespondenceEvidence(_CorrespondenceModel):
     risk_id: str = Field(min_length=1)
     attack_pattern_id: str = Field(min_length=1)
     taxonomy_candidate_ids: tuple[str, ...] = Field(min_length=1)
+    selected_candidate_id: str | None = Field(
+        default=None, pattern=r"^cand:v2:[0-9a-f]{32}$"
+    )
     ica_slot_id: str = Field(min_length=1)
     ica_id: str = Field(min_length=1)
     exec_candidate_id: str = Field(pattern=r"^EXEC:[^:]+:[^:]+:[A-Z_]+$")
@@ -605,15 +705,8 @@ class CorrespondenceEvidence(_CorrespondenceModel):
                 "evidence_refs",
             ),
         )
-        if (
-            self.evidence_source == "accepted_resource_link"
-            and self.relation_kind != "related_but_not_coverage"
-        ):
-            raise ValueError(
-                "accepted resource link evidence supports noncoverage only; "
-                "coverage-bearing correspondence requires exact-ID or curated "
-                "mechanism evidence"
-            )
+        validate_evidence_relation_pair(self.evidence_source, self.relation_kind)
+        _set_selected_candidate_witness(self, self.evidence_refs)
         return self
 
 
@@ -719,6 +812,9 @@ class CorrespondenceProposal(_CorrespondenceModel):
     risk_id: str = Field(min_length=1)
     attack_pattern_id: str = Field(min_length=1)
     taxonomy_candidate_ids: tuple[str, ...] = Field(min_length=1)
+    selected_candidate_id: str | None = Field(
+        default=None, pattern=r"^cand:v2:[0-9a-f]{32}$"
+    )
     ica_slot_id: str = Field(min_length=1)
     ica_id: str = Field(min_length=1)
     exec_candidate_id: str = Field(pattern=r"^EXEC:[^:]+:[^:]+:[A-Z_]+$")
@@ -742,6 +838,10 @@ class CorrespondenceProposal(_CorrespondenceModel):
                 "constraint_ids",
             ),
         )
+        validate_evidence_relation_pair(
+            self.provenance.evidence_source, self.relation_kind
+        )
+        _set_selected_candidate_witness(self, self.provenance.evidence_refs)
         expected = compute_proposal_id(
             obligation_id=self.obligation_id,
             ica_slot_id=self.ica_slot_id,
@@ -770,6 +870,7 @@ class CorrespondenceProposal(_CorrespondenceModel):
             risk_id=evidence.risk_id,
             attack_pattern_id=evidence.attack_pattern_id,
             taxonomy_candidate_ids=evidence.taxonomy_candidate_ids,
+            selected_candidate_id=evidence.selected_candidate_id,
             ica_slot_id=evidence.ica_slot_id,
             ica_id=evidence.ica_id,
             exec_candidate_id=evidence.exec_candidate_id,
@@ -956,6 +1057,143 @@ class AdjudicationSet(_CorrespondenceModel):
         return self
 
 
+class ReviewedCorrespondenceDecision(_CorrespondenceModel):
+    """One literal human outcome tied to the proposal reviewed in a packet."""
+
+    proposal_id: str = Field(pattern=r"^corrp:v1:[0-9a-f]{64}$")
+    relation_kind: RelationKind
+    status: AdjudicationStatus
+    reason: str = Field(min_length=1)
+    adjudicated_by: str = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = ()
+
+    def as_adjudication(self) -> CorrespondenceAdjudication:
+        """Project the recorded outcome into the public reconciliation input."""
+        return CorrespondenceAdjudication(
+            proposal_id=self.proposal_id,
+            status=self.status,
+            reason=self.reason,
+            adjudicated_by=self.adjudicated_by,
+            evidence_refs=self.evidence_refs,
+        )
+
+
+def _reviewed_adjudications_digest(
+    packet_digest: str,
+    proposal_set_semantic_digest: str,
+    decisions: Sequence[ReviewedCorrespondenceDecision],
+) -> str:
+    """Compute the canonical identity of reviewed packet outcomes."""
+    return compute_framed_digest(
+        REVIEWED_ADJUDICATIONS_DIGEST_DOMAIN,
+        {
+            "schema_version": REVIEWED_ADJUDICATIONS_SCHEMA_VERSION,
+            "packet_digest": packet_digest,
+            "proposal_set_semantic_digest": proposal_set_semantic_digest,
+            "decisions": [item.model_dump(mode="json") for item in decisions],
+        },
+    )
+
+
+class ReviewedCorrespondenceAdjudications(_CorrespondenceModel):
+    """Historical outcomes for one exact review packet and proposal set.
+
+    These outcomes remain bound to the packet and proposal-set digests from
+    the run they reviewed.  They are not implicitly reusable for a corrected
+    or regenerated artifact with different identities.
+    """
+
+    schema_version: Literal[REVIEWED_ADJUDICATIONS_SCHEMA_VERSION] = (
+        REVIEWED_ADJUDICATIONS_SCHEMA_VERSION
+    )
+    packet_digest: Digest
+    proposal_set_semantic_digest: Digest
+    decisions: tuple[ReviewedCorrespondenceDecision, ...] = Field(min_length=1)
+    semantic_digest: Digest
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        packet_digest: str,
+        proposal_set_semantic_digest: str,
+        decisions: Sequence[ReviewedCorrespondenceDecision],
+    ) -> "ReviewedCorrespondenceAdjudications":
+        """Build a canonical artifact and compute its content digest."""
+        ordered = tuple(sorted(decisions, key=lambda item: item.proposal_id))
+        digest = _reviewed_adjudications_digest(
+            packet_digest,
+            proposal_set_semantic_digest,
+            ordered,
+        )
+        return cls(
+            packet_digest=packet_digest,
+            proposal_set_semantic_digest=proposal_set_semantic_digest,
+            decisions=ordered,
+            semantic_digest=digest,
+        )
+
+    @model_validator(mode="after")
+    def canonicalize_and_verify(self) -> "ReviewedCorrespondenceAdjudications":
+        """Reject duplicate proposals and any changed recorded outcome."""
+        ordered = tuple(sorted(self.decisions, key=lambda item: item.proposal_id))
+        _require_unique_keys(
+            ordered,
+            lambda item: item.proposal_id,
+            "reviewed adjudications must contain one decision per proposal",
+        )
+        object.__setattr__(self, "decisions", ordered)
+        expected = _reviewed_adjudications_digest(
+            self.packet_digest, self.proposal_set_semantic_digest, ordered
+        )
+        if self.semantic_digest != expected:
+            raise ValueError(
+                "reviewed adjudication semantic_digest does not match content"
+            )
+        return self
+
+    def as_adjudication_set(
+        self,
+        *,
+        packet_digest: str,
+        proposal_set_semantic_digest: str,
+    ) -> AdjudicationSet:
+        """Project outcomes only after the caller confirms both exact pins."""
+        if packet_digest != self.packet_digest:
+            raise ValueError("packet_digest does not match reviewed outcomes")
+        if proposal_set_semantic_digest != self.proposal_set_semantic_digest:
+            raise ValueError(
+                "proposal_set_semantic_digest does not match reviewed outcomes"
+            )
+        return AdjudicationSet(
+            decisions=tuple(item.as_adjudication() for item in self.decisions)
+        )
+
+    def to_yaml(self) -> str:
+        """Serialize the canonical reviewed outcomes."""
+        return yaml.dump(
+            self.model_dump(mode="json"),
+            default_flow_style=False,
+            sort_keys=True,
+            allow_unicode=True,
+        )
+
+    @classmethod
+    def from_yaml(cls, text: str | bytes) -> "ReviewedCorrespondenceAdjudications":
+        """Load and verify a canonical reviewed-outcome artifact."""
+        return _load_canonical_artifact(
+            cls,
+            text,
+            schema_version=REVIEWED_ADJUDICATIONS_SCHEMA_VERSION,
+            artifact_name="reviewed adjudication",
+            loader=yaml.safe_load,
+        )
+
+    def assert_integrity(self) -> None:
+        """Revalidate the artifact so callers can enforce a durable pin."""
+        type(self).model_validate(self.model_dump(mode="python"))
+
+
 class CorrespondenceCalibrationBucket(_CorrespondenceModel):
     """Exact adjudication counts for one proposal class."""
 
@@ -1107,6 +1345,9 @@ class ReconciledProposal(_CorrespondenceModel):
     risk_id: str = Field(min_length=1)
     attack_pattern_id: str = Field(min_length=1)
     taxonomy_candidate_ids: tuple[str, ...] = Field(min_length=1)
+    selected_candidate_id: str | None = Field(
+        default=None, pattern=r"^cand:v2:[0-9a-f]{32}$"
+    )
     ica_slot_id: str = Field(min_length=1)
     ica_id: str = Field(min_length=1)
     exec_candidate_id: str = Field(pattern=r"^EXEC:[^:]+:[^:]+:[A-Z_]+$")
@@ -1136,6 +1377,7 @@ class ReconciledProposal(_CorrespondenceModel):
             ),
         )
         _verify_reconciled_proposal_identity(self)
+        _set_selected_candidate_witness(self, self.provenance.evidence_refs)
         _validate_reconciled_history(self)
         _validate_confirmed_reconciliation(self)
         _validate_rejected_reconciliation(self)
@@ -1152,6 +1394,9 @@ class AcceptedCorrespondenceRelation(_CorrespondenceModel):
     risk_id: str = Field(min_length=1)
     attack_pattern_id: str = Field(min_length=1)
     taxonomy_candidate_ids: tuple[str, ...] = Field(min_length=1)
+    selected_candidate_id: str | None = Field(
+        default=None, pattern=r"^cand:v2:[0-9a-f]{32}$"
+    )
     ica_slot_id: str = Field(min_length=1)
     ica_id: str = Field(min_length=1)
     exec_candidate_id: str = Field(pattern=r"^EXEC:[^:]+:[^:]+:[A-Z_]+$")
@@ -1186,6 +1431,7 @@ class AcceptedCorrespondenceRelation(_CorrespondenceModel):
         )
         if expected != self.relation_id:
             raise ValueError("relation_id does not match accepted relation content")
+        _set_selected_candidate_witness(self, self.evidence_refs)
         return self
 
 
@@ -1228,6 +1474,7 @@ def _relation_support_key(relation: AcceptedCorrespondenceRelation) -> tuple[Any
         relation.risk_id,
         relation.attack_pattern_id,
         relation.taxonomy_candidate_ids,
+        relation.selected_candidate_id,
         relation.ica_slot_id,
         relation.ica_id,
         relation.exec_candidate_id,
@@ -1248,6 +1495,7 @@ def _proposal_support_key(proposal: ReconciledProposal) -> tuple[Any, ...]:
         proposal.risk_id,
         proposal.attack_pattern_id,
         proposal.taxonomy_candidate_ids,
+        proposal.selected_candidate_id,
         proposal.ica_slot_id,
         proposal.ica_id,
         proposal.exec_candidate_id,

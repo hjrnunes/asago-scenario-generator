@@ -10,6 +10,7 @@ from runtime_shared import World
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.models.correspondence import (
     AdjudicationSet,
+    CandidateAuthorityRecord,
     CorrespondenceAdjudication,
     CorrespondenceAuthority,
     CorrespondenceEvidence,
@@ -24,10 +25,16 @@ from asago_scenario_generator.models.system_resource_map import (
     compute_control_structure_digest,
     compute_resource_map_semantic_digest,
 )
+from asago_scenario_generator.models.attack_pattern_projection import (
+    EntryPointResourceReference,
+)
 from asago_scenario_generator.pipeline.correspondence import (
     propose_correspondence,
     reconcile_correspondence,
     summarize_correspondence_calibration,
+)
+from asago_scenario_generator.pipeline.correspondence_evidence import (
+    derive_resource_link_correspondence_evidence,
 )
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
@@ -57,6 +64,7 @@ ICA_SLOT_ID_2 = "RESP-1:CA-1-1:NOT_PROVIDED"
 RISK_ID = "risk-1"
 ATTACK_PATTERN_ID = "AML.T0001"
 TAXONOMY_CANDIDATE_ID = "cand:v2:" + "a" * 32
+TAXONOMY_CANDIDATE_ID_2 = "cand:v2:" + "b" * 32
 
 
 def _state(world: World) -> dict[str, Any]:
@@ -72,6 +80,8 @@ def _state(world: World) -> dict[str, Any]:
             "compatibility": None,
             "gap_reason": None,
             "structural_ids": (),
+            "resource_link_evidence": (),
+            "selected_candidate": None,
         }
         world.correspondence_state = state
     return state
@@ -233,6 +243,54 @@ def _source(
     return CorrespondenceSourceArtifacts(authority=authority, evidence=evidence)
 
 
+def _candidate_source(
+    map_value: SystemResourceMap,
+    *,
+    selected_candidate_id: str = TAXONOMY_CANDIDATE_ID,
+) -> CorrespondenceSourceArtifacts:
+    """Build two typed candidates so selection and link binding are testable."""
+    base = _source(map_value)
+    tool_ref = map_value.links[0].capability_resource_ref
+    alternate_ref = EntryPointResourceReference(
+        kind="entry_point",
+        entry_point_id="ep:v1:" + "b" * 32,
+    )
+    candidates = (
+        CandidateAuthorityRecord(
+            candidate_id=TAXONOMY_CANDIDATE_ID,
+            resource_bindings=({"slot_id": "resource:tool", "resource_ref": tool_ref},),
+            projection_disposition="projectable",
+        ),
+        CandidateAuthorityRecord(
+            candidate_id=TAXONOMY_CANDIDATE_ID_2,
+            resource_bindings=(
+                {"slot_id": "resource:entry", "resource_ref": alternate_ref},
+            ),
+            projection_disposition="projectable",
+        ),
+    )
+    obligation = base.authority.obligations[0].model_copy(
+        update={
+            "taxonomy_candidate_ids": tuple(
+                candidate.candidate_id for candidate in candidates
+            ),
+            "candidate_resource_refs": (tool_ref, alternate_ref),
+            "candidates": candidates,
+        }
+    )
+    authority = base.authority.model_copy(update={"obligations": (obligation,)})
+    evidence = _evidence(
+        map_value,
+        taxonomy_candidate_ids=obligation.taxonomy_candidate_ids,
+        selected_candidate_id=selected_candidate_id,
+        evidence_refs=(
+            f"candidate:{selected_candidate_id}",
+            f"resource-link:{map_value.links[0].link_id}",
+        ),
+    )
+    return CorrespondenceSourceArtifacts(authority=authority, evidence=(evidence,))
+
+
 def _evidence(
     map_value: SystemResourceMap,
     *,
@@ -248,6 +306,7 @@ def _evidence(
     evidence_source: str = "exact_id",
     evidence_refs: tuple[str, ...] = ("id:obligation", "id:ica"),
     resource_link_ids: tuple[str, ...] | None = None,
+    selected_candidate_id: str | None = None,
 ) -> CorrespondenceEvidence:
     """Create one deterministic evidence record with exact identities."""
     return CorrespondenceEvidence(
@@ -255,6 +314,7 @@ def _evidence(
         risk_id=risk_id or f"risk-{obligation_id[-1]}",
         attack_pattern_id=attack_pattern_id,
         taxonomy_candidate_ids=taxonomy_candidate_ids,
+        selected_candidate_id=selected_candidate_id,
         ica_slot_id=ica_slot_id,
         ica_id=ica_id,
         exec_candidate_id=exec_candidate_id,
@@ -279,6 +339,34 @@ def _prepare(world: World) -> None:
     resource_map = _map()
     state["resource_map"] = resource_map
     state["proposal_set"] = _propose(resource_map, _source(resource_map))
+
+
+def _prepare_candidate_witness(world: World, *, selected: str) -> None:
+    """Prepare a proposal whose selected candidate is explicit and typed."""
+    state = _state(world)
+    resource_map = _map()
+    state["resource_map"] = resource_map
+    state["candidate_source"] = _candidate_source(
+        resource_map,
+        selected_candidate_id=selected,
+    )
+    state["proposal_set"] = _propose(
+        resource_map,
+        state["candidate_source"],
+    )
+
+
+def _prepare_resource_link_adapter(world: World) -> None:
+    """Prepare exact candidate/link authority for the offline evidence adapter."""
+    state = _state(world)
+    resource_map = _map()
+    source = _candidate_source(resource_map)
+    state["resource_map"] = resource_map
+    state["candidate_source"] = source
+    state["resource_link_evidence"] = derive_resource_link_correspondence_evidence(
+        _validated_map(resource_map),
+        source.authority,
+    )
 
 
 def _confirmed(world: World) -> None:
@@ -718,6 +806,152 @@ def _register(api: Any) -> None:
             return True, ""
         return False, "prose-only evidence unexpectedly produced a proposal"
 
+    def prepare_candidate_witness(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        """Prepare two candidates and select the candidate named by the step."""
+        del examples
+        match = re.search(r'selects "([^"]+)"', text)
+        selected = match.group(1) if match else TAXONOMY_CANDIDATE_ID_2
+        if selected not in {TAXONOMY_CANDIDATE_ID, TAXONOMY_CANDIDATE_ID_2}:
+            return False, f"unknown candidate fixture {selected!r}"
+        _prepare_candidate_witness(world, selected=selected)
+        _state(world)["selected_candidate"] = selected
+        return True, ""
+
+    def produce_candidate_witness(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        """Produce the selected-candidate proposal without changing its witness."""
+        del text, examples
+        state = _state(world)
+        source = state.get("candidate_source")
+        if source is None:
+            return False, "selected-candidate authority was not prepared"
+        state["proposal_set"] = _propose(state["resource_map"], source)
+        return True, ""
+
+    def assert_proposal_selected_candidate(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del examples
+        match = re.search(r'proposal retains selected candidate "([^"]+)"', text)
+        expected = match.group(1) if match else ""
+        state = _state(world)
+        proposals = state.get("proposal_set")
+        actual = (
+            proposals.proposals[0].selected_candidate_id
+            if proposals and proposals.proposals
+            else None
+        )
+        return actual == expected, f"proposal selected candidate was {actual!r}"
+
+    def reconcile_candidate_witness(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        """Run explicit reconciliation for the selected-candidate fixture."""
+        del text, examples
+        state = _state(world)
+        proposal = state["proposal_set"].proposals[0]
+        state["result"] = _reconcile(
+            state["resource_map"],
+            state["proposal_set"],
+            AdjudicationSet(
+                decisions=(
+                    CorrespondenceAdjudication(
+                        proposal_id=proposal.proposal_id,
+                        status="confirmed",
+                        reason="reviewed exact candidate witness",
+                        adjudicated_by="operator-1",
+                    ),
+                )
+            ),
+        )
+        return True, ""
+
+    def assert_reconciled_candidate_rejected(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del examples
+        candidate_match = re.search(r'preserves selected candidate "([^"]+)"', text)
+        code_match = re.search(r'code "([^"]+)"', text)
+        expected_candidate = candidate_match.group(1) if candidate_match else ""
+        expected_code = code_match.group(1) if code_match else ""
+        result = _state(world).get("result")
+        if result is None or len(result.proposals) != 1:
+            return False, "selected-candidate reconciliation result is missing"
+        proposal = result.proposals[0]
+        return (
+            proposal.selected_candidate_id == expected_candidate
+            and expected_code in proposal.validation_codes
+            and not result.accepted_relations,
+            f"candidate={proposal.selected_candidate_id!r}, codes={proposal.validation_codes}",
+        )
+
+    def prepare_resource_link_adapter(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del text, examples
+        _prepare_resource_link_adapter(world)
+        return True, ""
+
+    def derive_resource_link_adapter(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del text, examples
+        state = _state(world)
+        source = state.get("candidate_source")
+        if source is None:
+            return False, "resource-link adapter authority was not prepared"
+        state["resource_link_evidence"] = derive_resource_link_correspondence_evidence(
+            _validated_map(state["resource_map"]),
+            source.authority,
+        )
+        return True, ""
+
+    def assert_resource_link_witness(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del examples
+        match = re.search(
+            r'one evidence item is produced for selected candidate "([^"]+)" and resource link "([^"]+)"',
+            text,
+        )
+        if match is None:
+            return False, "resource-link witness expectation was not rendered"
+        expected_candidate, expected_link = match.groups()
+        evidence = _state(world).get("resource_link_evidence", ())
+        matching = [
+            item
+            for item in evidence
+            if item.selected_candidate_id == expected_candidate
+            and item.resource_link_ids == (expected_link,)
+        ]
+        return len(evidence) == 1 and len(matching) == 1, (
+            f"unexpected resource-link evidence: {evidence}"
+        )
+
+    def assert_resource_link_noncoverage(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del examples
+        match = re.search(r'relation is "([^"]+)"', text)
+        expected = match.group(1) if match else ""
+        evidence = _state(world).get("resource_link_evidence", ())
+        return (
+            bool(evidence) and all(item.relation_kind == expected for item in evidence),
+            f"resource-link relation kinds were {[item.relation_kind for item in evidence]}",
+        )
+
+    def assert_no_resource_link_coverage(
+        world: World, text: str, examples: dict
+    ) -> tuple[bool, str]:
+        del text, examples
+        evidence = _state(world).get("resource_link_evidence", ())
+        return bool(evidence) and all(
+            item.relation_kind == "related_but_not_coverage" for item in evidence
+        ), "resource-link adapter emitted coverage-bearing evidence"
+
     def assert_typed_rejection(
         world: World, text: str, examples: dict
     ) -> tuple[bool, str]:
@@ -1133,6 +1367,26 @@ def _register(api: Any) -> None:
         (r"^the reconciliation round-trips unchanged$", assert_roundtrip),
         (r"^a prose-only correspondence input is supplied$", prepare_prose_only),
         (
+            r'^a deterministic correspondence proposal has two candidates and selects "([^"]+)"$',
+            prepare_candidate_witness,
+        ),
+        (
+            r"^the selected-candidate correspondence proposal is produced$",
+            produce_candidate_witness,
+        ),
+        (
+            r'^the proposal retains selected candidate "([^"]+)"$',
+            assert_proposal_selected_candidate,
+        ),
+        (
+            r"^selected-candidate correspondence is reconciled with explicit confirmation$",
+            reconcile_candidate_witness,
+        ),
+        (
+            r'^reconciliation preserves selected candidate "([^"]+)" and rejects resource link with code "([^"]+)"$',
+            assert_reconciled_candidate_rejected,
+        ),
+        (
             r"^no proposal is produced from the prose-only input$",
             assert_no_proposal_from_prose,
         ),
@@ -1152,6 +1406,26 @@ def _register(api: Any) -> None:
         (
             r'^accepted-resource-link evidence claims "[^"]+"$',
             prepare_shared_resource_claim,
+        ),
+        (
+            r"^an exact candidate and resource-link witness is prepared$",
+            prepare_resource_link_adapter,
+        ),
+        (
+            r"^deterministic resource-link evidence is derived$",
+            derive_resource_link_adapter,
+        ),
+        (
+            r'^one evidence item is produced for selected candidate "([^"]+)" and resource link "([^"]+)"$',
+            assert_resource_link_witness,
+        ),
+        (
+            r'^the derived evidence relation is "([^"]+)"$',
+            assert_resource_link_noncoverage,
+        ),
+        (
+            r"^no coverage relation is proposed by the resource-link adapter$",
+            assert_no_resource_link_coverage,
         ),
         (
             r"^the shared-resource correspondence evidence is validated$",
