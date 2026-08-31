@@ -1,7 +1,7 @@
 # STPA–taxonomy synthesis: Phase 3 closed-loop challenge contract
 
-**Status:** Tasks 1 and 2 approved on 2026-08-31. End-to-end Task 3 remains
-draft until its orchestration and live-qualification decisions are approved.
+**Status:** Tasks 1–3 approved on 2026-08-31. Phase 3 is implemented as a
+typed internal boundary; later combined generation remains out of scope.
 
 **Scope:** The third delivery phase of the STPA-led, taxonomy-audited workflow:
 use the exact Phase 2 assessment to make a bounded, opt-in request for STPA to
@@ -567,15 +567,28 @@ The following Task 2 decisions were approved on 2026-08-31:
    defines canonical YAML/JSON encoding but no run-directory filename or
    report placement.
 
-Task 3 still requires explicit approval for:
+The following Task 3 decisions were approved on 2026-08-31:
 
-1. run-directory placement, resume/idempotence behavior, and any public
-   orchestration command;
-2. whether and where challenge outcomes are presented alongside the unchanged
-   Phase 2 matrices;
-3. the first audited Klarna/NHS STPA pairs used for live qualification; and
-4. whether unresolved or technically failed composed runs are reported as
-   completed, degraded, or failed.
+1. **Composition remains internal.** `run_closed_loop_stpa(...)` is the only
+   orchestration surface in this slice. It adds no CLI or report and accepts
+   all policy and provider choices from its caller.
+2. **Persistence is one adjacent record.** A caller chooses the output
+   directory and `write_closed_loop_stpa_run(...)` atomically publishes
+   `stpa-obligation-closed-loop-run.yaml`. The closed aggregate contains the
+   exact ledger and its analysis results; it does not replace the separate
+   Task 1 or Task 2 domain contracts.
+3. **Resume is exact reuse.** A prior run is accepted only when its digest,
+   ledger, controls, loss-analysis digest, and control-structure digest match.
+   Existing attempts are reused byte-for-byte and the adapter is not called
+   again. Any mismatch fails before adapter construction.
+4. **There is no aggregate run verdict.** Pending, completed, technical, ICA,
+   justified-N/A, unresolved, and call counts remain separate. Unresolved and
+   technical results are not collapsed into completed/degraded/failed.
+5. **The lineage audit is evidence, not target policy.** The committed
+   Klarna/NHS audit fixture retains exact taxonomy classifications and
+   slot/ICA/`EXEC:*` joins while listing zero inferred eligibility targets.
+   Selecting any live qualification pair requires a later explicit eligibility
+   decision; this composition slice guesses none.
 
 ## 9. Exit criteria for Phase 3
 

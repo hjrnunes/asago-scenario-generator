@@ -265,6 +265,11 @@ from asago_scenario_generator.models.challenge_analysis import (
     ProposedIca,
     UnresolvedChallengeDraft,
 )
+from asago_scenario_generator.models.closed_loop_stpa import (
+    STPA_CLOSED_LOOP_RUN_SCHEMA_VERSION,
+    ClosedLoopRunDiagnostics,
+    ClosedLoopStpaRun,
+)
 from asago_scenario_generator.models.threat_scope import (
     OutOfScopeEntry,
     ThreatScope,
@@ -468,6 +473,8 @@ __all__ = [
     "ChallengeRecord",
     "ChallengeTaxonomyContext",
     "ChallengeTechnicalFailure",
+    "ClosedLoopRunDiagnostics",
+    "ClosedLoopStpaRun",
     "CAReference",
     "CLReference",
     "CMReference",
@@ -514,6 +521,7 @@ __all__ = [
     "StpaCoverageInput",
     "StpaChallengeLedger",
     "STPA_CHALLENGE_ANALYSIS_SCHEMA_VERSION",
+    "STPA_CLOSED_LOOP_RUN_SCHEMA_VERSION",
     "StructuralAuthorityRecord",
     "StructuralConsiderationRow",
     "StructuralDisposition",

@@ -106,6 +106,17 @@ changing acceptance behavior, or running the quality sequence.
   Preserve the original decision and Phase 2 artifact, fix correspondence and
   coverage changes at zero, start no hybrid generation, add no Task 2 CLI or
   run placement, and leave ordinary `stpa-run` unchanged.
+- Keep Phase 3 composition at the typed internal `run_closed_loop_stpa` seam.
+  It must delegate exact selection and each reconsideration to the Task 1 and
+  Task 2 seams, respectively. Opt-out retains selected targets as pending and
+  constructs no adapter. Resume may reuse only an intact prior run with the
+  exact ledger, controls, loss analysis, and control structure; it must not
+  retry prior attempts. Publish the single closed
+  `stpa-obligation-closed-loop-run-v1` YAML atomically in a caller-chosen
+  directory. Keep exact counts and typed outcomes separate rather than
+  inventing an aggregate status. Add no Phase 3 CLI or report, infer no targets
+  from the lineage audit, and leave ordinary generation workflows unaware of
+  Phase 3.
 - Keep harness installations and runtime state local; the repository owns only
   portable methodology, configuration, and scripts.
 - Update `README.md`, this file, and linked documentation when an interface or

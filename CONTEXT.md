@@ -76,3 +76,9 @@ An explicitly opted-in STPA analysis that uses a Phase 2 assessment to
 consider eligible obligation challenges while preserving the original STPA
 analysis as history.
 _Avoid_: ordinary stpa-run, hybrid generation
+
+**Closed-loop run record**:
+One content-addressed record containing the exact challenge ledger, pending
+selected targets, completed or technical reconsideration attempts, and their
+separate counts. It has no blended success or coverage status.
+_Avoid_: rewritten assessment, combined scenario run, aggregate score

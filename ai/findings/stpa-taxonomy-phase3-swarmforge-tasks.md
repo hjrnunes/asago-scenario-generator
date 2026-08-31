@@ -1,11 +1,11 @@
 # SwarmForge task sequence: STPA–taxonomy synthesis, Phase 3
 
-**Status:** Tasks 1 and 2 approved on 2026-08-31. Task 1 fixes explicit
+**Status:** Tasks 1–3 approved on 2026-08-31. Task 1 fixes explicit
 eligibility, exact obligation/STPA-slot targets, priority ordering, budget, and
 separate atomic persistence. Task 2 fixes the internal opt-in seam, explicit
 controls, one attempt with no retry, typed outcomes, and separate technical
-failure. Task 3 remains proposed until its orchestration decisions are
-approved.
+failure. Task 3 fixes the narrow internal composition seam, exact resume,
+single atomic aggregate record, separate diagnostics, and no CLI or report.
 
 **Source specification:**
 [stpa-taxonomy-phase3-closed-loop-spec.md](stpa-taxonomy-phase3-closed-loop-spec.md)

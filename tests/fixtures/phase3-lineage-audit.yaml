@@ -1,0 +1,85 @@
+schema_version: phase3-lineage-audit-v1
+source_document: ai/findings/phase12-live-run-klarna-nhs-2026-08-29.md
+use_cases:
+  klarna:
+    source_audit_sha256: 2ab1537679046c37088f7f88f40a86d77aeaa4fa2505d71bcb8734135c91713c
+    corrected_assessment_digest: a73d09ea0ffcba5fbb5a30bc338e2df4aaccf98c2e62d9d502740de8cba1f5ea
+    corrected_obligation_count: 92
+    ready_obligation_count: 38
+    taxonomy:
+      envelope_count: 94
+      identity_recomputed_count: 94
+      corrected_plan_join_count: 0
+      corrected_observation_count: 0
+      identity_lineage_bug_count: 0
+      classifications:
+        inconsistent_planning_input: 77
+        expected_extra_candidate: 17
+    stpa:
+      enumeration_digest: 25c3c481eea10c2c909a49c1a206d95c0fff197943d9cc0adc50f70a87a510b4
+      scenario_count: 16
+      slot_count: 20
+      exact_join_count: 16
+      records:
+        - [SCN-001, RESP-1:CA-1-1:NOT_PROVIDED, RESP-1:CA-1-1:NOT_PROVIDED:1, EXEC:RESP-1:CA-1-1:NOT_PROVIDED]
+        - [SCN-002, RESP-1:CA-1-1:INCORRECT, RESP-1:CA-1-1:INCORRECT:1, EXEC:RESP-1:CA-1-1:INCORRECT]
+        - [SCN-003, RESP-1:CA-1-1:WRONG_TIMING, RESP-1:CA-1-1:WRONG_TIMING:1, EXEC:RESP-1:CA-1-1:WRONG_TIMING]
+        - [SCN-004, RESP-1:CA-1-2:NOT_PROVIDED, RESP-1:CA-1-2:NOT_PROVIDED:1, EXEC:RESP-1:CA-1-2:NOT_PROVIDED]
+        - [SCN-005, RESP-1:CA-1-2:INCORRECT, RESP-1:CA-1-2:INCORRECT:1, EXEC:RESP-1:CA-1-2:INCORRECT]
+        - [SCN-006, RESP-1:CA-1-2:WRONG_TIMING, RESP-1:CA-1-2:WRONG_TIMING:1, EXEC:RESP-1:CA-1-2:WRONG_TIMING]
+        - [SCN-007, RESP-1:CA-1-2:WRONG_DURATION, RESP-1:CA-1-2:WRONG_DURATION:1, EXEC:RESP-1:CA-1-2:WRONG_DURATION]
+        - [SCN-008, RESP-1:CA-1-3:NOT_PROVIDED, RESP-1:CA-1-3:NOT_PROVIDED:1, EXEC:RESP-1:CA-1-3:NOT_PROVIDED]
+        - [SCN-009, RESP-1:CA-1-3:INCORRECT, RESP-1:CA-1-3:INCORRECT:1, EXEC:RESP-1:CA-1-3:INCORRECT]
+        - [SCN-010, RESP-1:CA-1-3:WRONG_TIMING, RESP-1:CA-1-3:WRONG_TIMING:1, EXEC:RESP-1:CA-1-3:WRONG_TIMING]
+        - [SCN-011, RESP-2:CA-2-1:NOT_PROVIDED, RESP-2:CA-2-1:NOT_PROVIDED:1, EXEC:RESP-2:CA-2-1:NOT_PROVIDED]
+        - [SCN-012, RESP-2:CA-2-1:INCORRECT, RESP-2:CA-2-1:INCORRECT:1, EXEC:RESP-2:CA-2-1:INCORRECT]
+        - [SCN-013, RESP-2:CA-2-1:WRONG_TIMING, RESP-2:CA-2-1:WRONG_TIMING:1, EXEC:RESP-2:CA-2-1:WRONG_TIMING]
+        - [SCN-014, RESP-2:CA-2-2:NOT_PROVIDED, RESP-2:CA-2-2:NOT_PROVIDED:1, EXEC:RESP-2:CA-2-2:NOT_PROVIDED]
+        - [SCN-015, RESP-2:CA-2-2:INCORRECT, RESP-2:CA-2-2:INCORRECT:1, EXEC:RESP-2:CA-2-2:INCORRECT]
+        - [SCN-016, RESP-2:CA-2-2:WRONG_TIMING, RESP-2:CA-2-2:WRONG_TIMING:1, EXEC:RESP-2:CA-2-2:WRONG_TIMING]
+    structural_warning_context:
+      untraced_hazard_count: 4
+      unreferenced_controlled_process_count: 2
+    explicit_eligibility_targets: []
+  nhs:
+    source_audit_sha256: 50d67b0b5c2b59e59c23b946ac1a0c5ee6667b7fdfb87b94883d713fe1948afa
+    corrected_assessment_digest: 35fbf0ea43fe5a106403b744ff402e995281c0e73c8334ae1211fda796da6f59
+    corrected_obligation_count: 152
+    ready_obligation_count: 20
+    taxonomy:
+      envelope_count: 27
+      identity_recomputed_count: 27
+      corrected_plan_join_count: 0
+      corrected_observation_count: 0
+      identity_lineage_bug_count: 0
+      classifications:
+        inconsistent_planning_input: 13
+        expected_extra_candidate: 14
+    stpa:
+      enumeration_digest: a8766679a4c17a87d3d82e12ceaa64f9cc74aec417fa23d90dd481347095a783
+      scenario_count: 18
+      slot_count: 24
+      exact_join_count: 18
+      records:
+        - [SCN-001, RESP-1:CA-1-1:NOT_PROVIDED, RESP-1:CA-1-1:NOT_PROVIDED:1, EXEC:RESP-1:CA-1-1:NOT_PROVIDED]
+        - [SCN-002, RESP-1:CA-1-1:INCORRECT, RESP-1:CA-1-1:INCORRECT:1, EXEC:RESP-1:CA-1-1:INCORRECT]
+        - [SCN-003, RESP-1:CA-1-1:WRONG_TIMING, RESP-1:CA-1-1:WRONG_TIMING:1, EXEC:RESP-1:CA-1-1:WRONG_TIMING]
+        - [SCN-004, RESP-1:CA-1-2:NOT_PROVIDED, RESP-1:CA-1-2:NOT_PROVIDED:1, EXEC:RESP-1:CA-1-2:NOT_PROVIDED]
+        - [SCN-005, RESP-1:CA-1-2:INCORRECT, RESP-1:CA-1-2:INCORRECT:1, EXEC:RESP-1:CA-1-2:INCORRECT]
+        - [SCN-006, RESP-1:CA-1-2:WRONG_TIMING, RESP-1:CA-1-2:WRONG_TIMING:1, EXEC:RESP-1:CA-1-2:WRONG_TIMING]
+        - [SCN-007, RESP-2:CA-2-1:NOT_PROVIDED, RESP-2:CA-2-1:NOT_PROVIDED:1, EXEC:RESP-2:CA-2-1:NOT_PROVIDED]
+        - [SCN-008, RESP-2:CA-2-1:INCORRECT, RESP-2:CA-2-1:INCORRECT:1, EXEC:RESP-2:CA-2-1:INCORRECT]
+        - [SCN-009, RESP-2:CA-2-1:WRONG_TIMING, RESP-2:CA-2-1:WRONG_TIMING:1, EXEC:RESP-2:CA-2-1:WRONG_TIMING]
+        - [SCN-010, RESP-2:CA-2-2:NOT_PROVIDED, RESP-2:CA-2-2:NOT_PROVIDED:1, EXEC:RESP-2:CA-2-2:NOT_PROVIDED]
+        - [SCN-011, RESP-2:CA-2-2:INCORRECT, RESP-2:CA-2-2:INCORRECT:1, EXEC:RESP-2:CA-2-2:INCORRECT]
+        - [SCN-012, RESP-2:CA-2-2:WRONG_TIMING, RESP-2:CA-2-2:WRONG_TIMING:1, EXEC:RESP-2:CA-2-2:WRONG_TIMING]
+        - [SCN-013, RESP-3:CA-3-1:NOT_PROVIDED, RESP-3:CA-3-1:NOT_PROVIDED:1, EXEC:RESP-3:CA-3-1:NOT_PROVIDED]
+        - [SCN-014, RESP-3:CA-3-1:INCORRECT, RESP-3:CA-3-1:INCORRECT:1, EXEC:RESP-3:CA-3-1:INCORRECT]
+        - [SCN-015, RESP-3:CA-3-1:WRONG_TIMING, RESP-3:CA-3-1:WRONG_TIMING:1, EXEC:RESP-3:CA-3-1:WRONG_TIMING]
+        - [SCN-016, RESP-3:CA-3-2:NOT_PROVIDED, RESP-3:CA-3-2:NOT_PROVIDED:1, EXEC:RESP-3:CA-3-2:NOT_PROVIDED]
+        - [SCN-017, RESP-3:CA-3-2:INCORRECT, RESP-3:CA-3-2:INCORRECT:1, EXEC:RESP-3:CA-3-2:INCORRECT]
+        - [SCN-018, RESP-3:CA-3-2:WRONG_TIMING, RESP-3:CA-3-2:WRONG_TIMING:1, EXEC:RESP-3:CA-3-2:WRONG_TIMING]
+    structural_warning_context:
+      untraced_hazard_count: 0
+      unreferenced_controlled_process_count: 0
+    explicit_eligibility_targets: []

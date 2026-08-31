@@ -368,7 +368,24 @@ the byte-equivalent original decision. Its schema permits zero correspondence
 and coverage changes only and keeps hybrid generation/admission at
 `not_attempted`/`not_assessed`. This Task 2 module performs no filesystem IO and
 adds no CLI, report, run-directory placement, or import from ordinary
-`stpa-run`; Task 3 owns any later composition and persistence placement.
+`stpa-run`.
+
+Task 3 adds `pipeline.closed_loop_stpa.run_closed_loop_stpa` as the narrow
+composition boundary. Its dependency direction is strictly Phase 2 assessment
+to Task 1 ledger to Task 2 reconsideration. The caller supplies every policy
+input and the adapter factory. Opt-out records selected targets as pending;
+opt-in accounts for each selected target with one completed or technical Task
+2 result. Exact resume accepts only a digest-valid prior run with the same
+ledger, controls, loss analysis, and control structure, then reuses its results
+without adapter construction.
+
+The adjacent `stpa-obligation-closed-loop-run-v1` aggregate derives separate
+selection, pending, attempt, outcome, technical-failure, and call counts. It
+does not invent an overall status. The persistence leaf atomically writes one
+`stpa-obligation-closed-loop-run.yaml` into a caller-chosen directory and
+verifies it after reload. Neither the composition model nor seam imports a
+generation runner, CLI, report, or persistence module. Ordinary `generate` and
+`stpa-run` remain unaware of all Phase 3 modules and artifacts.
 
 ## Taxonomy and risk-driven workflow
 

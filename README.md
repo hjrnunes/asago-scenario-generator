@@ -408,6 +408,23 @@ correspondence/coverage changes at zero and hybrid generation/admission at
 `not_attempted`/`not_assessed`. Task 2 remains an internal Python seam: it adds
 no CLI, report, run-directory policy, or change to ordinary `stpa-run`.
 
+The final Phase 3 slice composes those boundaries through
+`run_closed_loop_stpa(...)`. A caller supplies the exact assessment, explicit
+eligibility, budget, opt-in, STPA authority, controls, and adapter factory. The
+seam delegates selection to Task 1 and each selected attempt to Task 2. Opt-out
+retains selected targets as pending without constructing an adapter. An exact
+rerun may supply its prior `ClosedLoopStpaRun`; validated attempts are reused
+and never retried.
+
+`write_closed_loop_stpa_run(...)` atomically publishes the single canonical
+`stpa-obligation-closed-loop-run.yaml` record in a caller-chosen directory.
+That record contains the ledger, adjacent results, and separate exact counts;
+it deliberately has no combined success/degraded score. It permits only zero
+correspondence and coverage changes and retains hybrid generation/admission as
+`not_attempted`/`not_assessed`. Phase 3 adds no CLI or report. The audited
+Klarna/NHS fixture retains the old taxonomy IDs only as lineage evidence and
+infers zero challenge targets from them.
+
 ## STPA-based generation
 
 ```bash
