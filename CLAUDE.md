@@ -135,8 +135,12 @@ changing acceptance behavior, or running the quality sequence.
   Task 1 boundary, apply only the fixed typed bridge endpoint table, validate
   the taxonomy/STPA/bridge union as one DAG, and require exact source-pin,
   trace, and bridge-evidence closure. Preserve typed exclusions and diagnostics
-  without scores or execution decisions. Persistence, reporting, CLI, model
-  calls, and network access remain outside this slice.
+  without scores or execution decisions. Task 2b provides offline persistence
+  through `write_hybrid_scenario_projection_set` and
+  `read_hybrid_scenario_projection_set`, using the exact
+  `hybrid-scenario-projection-set.yaml` filename and atomic verified reload.
+  Reporting, CLI, model calls, network access, and acceptance remain outside
+  this slice; acceptance is the next Phase 4 task.
 - Keep harness installations and runtime state local; the repository owns only
   portable methodology, configuration, and scripts.
 - Update `README.md`, this file, and linked documentation when an interface or

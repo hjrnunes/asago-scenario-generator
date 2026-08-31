@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Annotated, Any, Literal, TypeAlias
 
+import yaml
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -75,6 +76,36 @@ _PROJECTION_ID_DOMAIN = "asago.hybrid-scenario-projection.v1.identity.v1"
 _PROJECTION_SET_DIGEST_DOMAIN = "asago.hybrid-scenario-projection-set.v1"
 PHASE1_CANDIDATE_RECORD_DIGEST_DOMAIN = "asago.phase1-candidate-record.v1"
 STPA_EXECUTION_PROJECTION_DIGEST_DOMAIN = "asago.stpa-execution-projection.v1"
+
+
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """Safe YAML loader that rejects duplicate mapping keys."""
+
+
+def _construct_unique_mapping(
+    loader: _UniqueKeyLoader,
+    node: yaml.MappingNode,
+    deep: bool = False,
+) -> dict[Any, Any]:
+    """Construct one YAML mapping without silently overwriting a key."""
+    mapping: dict[Any, Any] = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                f"found duplicate key {key!r}",
+                key_node.start_mark,
+            )
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_UniqueKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    _construct_unique_mapping,
+)
 
 
 class _ProjectionModel(BaseModel):
@@ -1866,6 +1897,80 @@ class HybridScenarioProjectionSet(_ProjectionModel):
             self, _PROJECTION_SET_DIGEST_DOMAIN
         ):
             raise ValueError("hybrid scenario projection set digest mismatch")
+
+    def to_yaml(self) -> str:
+        """Serialize this intact projection set as deterministic YAML."""
+        self.assert_integrity()
+        return yaml.dump(
+            self.model_dump(mode="json"),
+            default_flow_style=False,
+            sort_keys=True,
+            allow_unicode=True,
+        )
+
+    @classmethod
+    def from_yaml(cls, text: str | bytes) -> "HybridScenarioProjectionSet":
+        """Load one persisted projection set without repairing its digest."""
+        try:
+            data = yaml.load(text, Loader=_UniqueKeyLoader)
+        except yaml.YAMLError as exc:
+            raise ValueError(f"invalid hybrid projection-set YAML: {exc}") from exc
+        return cls._load(data)
+
+    @classmethod
+    def _load(cls, data: Any) -> "HybridScenarioProjectionSet":
+        """Apply closed-schema and persisted-digest checks before integrity."""
+        if not isinstance(data, dict):
+            raise ValueError("hybrid projection-set artifact must be a mapping")
+        if data.get("schema_version") != HYBRID_SCENARIO_PROJECTION_SET_SCHEMA_VERSION:
+            raise ValueError("unsupported hybrid projection-set schema version")
+        if not isinstance(data.get("semantic_digest"), str):
+            raise ValueError("hybrid projection-set artifact requires semantic_digest")
+        result = cls.model_validate(data)
+        _require_persisted_semantic_digests(data, result.model_dump(mode="json"))
+        result.assert_integrity()
+        return result
+
+
+def _require_persisted_semantic_digests(raw: Any, normalized: Any) -> None:
+    """Reject omitted nested derived digests instead of silently rebuilding them."""
+    if isinstance(normalized, dict):
+        _require_mapping_semantic_digest(raw, normalized)
+        _walk_persisted_mapping(raw, normalized)
+        return
+    if isinstance(normalized, list):
+        _walk_persisted_sequence(raw, normalized)
+
+
+def _require_mapping_semantic_digest(raw: Any, normalized: dict[str, Any]) -> None:
+    """Require one mapping's derived digest to have been persisted."""
+    if normalized.get("semantic_digest") is None:
+        return
+    if not isinstance(raw, dict):
+        raise ValueError(
+            "hybrid projection-set artifact requires semantic_digest on every record"
+        )
+    if raw.get("semantic_digest") is None:
+        raise ValueError(
+            "hybrid projection-set artifact requires semantic_digest on every record"
+        )
+
+
+def _walk_persisted_mapping(raw: Any, normalized: dict[str, Any]) -> None:
+    """Visit nested mappings whose values were present in the YAML input."""
+    if not isinstance(raw, dict):
+        return
+    for key, value in normalized.items():
+        if key in raw:
+            _require_persisted_semantic_digests(raw[key], value)
+
+
+def _walk_persisted_sequence(raw: Any, normalized: list[Any]) -> None:
+    """Visit each list item while preserving model-normalized structure."""
+    if not isinstance(raw, list):
+        return
+    for raw_item, normalized_item in zip(raw, normalized):
+        _require_persisted_semantic_digests(raw_item, normalized_item)
 
 
 def _canonicalize_projection_set_values(value: HybridScenarioProjectionSet) -> None:

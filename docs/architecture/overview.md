@@ -425,10 +425,15 @@ content-addressed projections with typed exclusions and diagnostics. Source
 pins, trace references, and bridge evidence must close exactly over each
 projection's authority set.
 
-The composition seam does not persist or render an artifact, add a CLI, make a
-model or network call, assign a score, or decide execution readiness. Durable
-publication remains a separate Phase 4 slice. Neither existing generation
-workflow imports or requires the Phase 4 boundary.
+The composition seam does not render an artifact, add a CLI, make a model or
+network call, assign a score, or decide execution readiness. Task 2b provides
+the separate Python persistence adapter through
+`write_hybrid_scenario_projection_set(...)` and
+`read_hybrid_scenario_projection_set(...)`. It atomically publishes the exact
+`hybrid-scenario-projection-set.yaml` filename and verifies the closed-model
+reload, semantic digest, canonical bytes, and equality. Acceptance remains the
+next Phase 4 task; neither existing generation workflow imports or requires the
+Phase 4 boundary.
 
 ## Taxonomy and risk-driven workflow
 

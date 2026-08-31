@@ -450,8 +450,13 @@ the combined taxonomy, STPA, and bridge graph as one DAG. It returns
 content-addressed projections alongside the unchanged typed exclusions and
 diagnostics; it does not turn them into scores or execution decisions.
 
-These seams perform no persistence, reporting, CLI work, model calls, or
-network access. Durable publication remains a separate Phase 4 slice. Ordinary
+Task 2b provides the Python persistence seam:
+`write_hybrid_scenario_projection_set(...)` and
+`read_hybrid_scenario_projection_set(...)`. It atomically publishes the exact
+`hybrid-scenario-projection-set.yaml` filename, reloads through the closed
+model, and verifies the semantic digest, canonical bytes, and equality before
+reporting success. Persistence remains offline and has no reporting, CLI,
+model-call, or network behavior; acceptance is the next Phase 4 task. Ordinary
 `generate` and `stpa-run` remain independent of Phase 4.
 
 ## STPA-based generation

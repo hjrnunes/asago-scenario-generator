@@ -1,0 +1,810 @@
+assessment_digest: 432571484f7964e508bbcee0685b37af353c48aef376345c012aae762d0e38d4
+diagnostics: []
+evidence_class: normative_bookkeeping_fixture
+exclusions: []
+projection_contract_version: hybrid-scenario-projection-v1
+projections:
+- attack_pattern_id: AP-T1-01
+  bridge_links:
+  - bridge_id: bridge:v1:588e86d1f0cefe1da075cb66ca18f574faefde017ae4e57720241dc36cb6fc1f
+    bridge_kind: perturbs_control_action
+    evidence:
+    - artifact_pin:
+        artifact_id: taxonomy-candidate-materialization-set
+        schema_version: taxonomy-candidate-materialization-set-v1
+        semantic_digest: 630c8dd2fb1494bfda6dca393062b89821017e2a385dc8bf3b5051c9c02b9bd4
+      authority_identity:
+        id: operator-1
+        kind: reviewer
+      evidence_id: bridge-evidence:v1:52639571dc8f7aec39eb8da931011b42bb91c129600d4a06cfaa3dbe3aa8a6e4
+      evidence_kind: operator_bridge_review
+      provenance: operator_declared
+      rationale: The mechanism step perturbs the exact control action.
+      record_id: step.1
+      schema_version: hybrid-bridge-evidence-v1
+      semantic_digest: d77f0c7feeb622ef577168c0ec589a85b7aac6155ad3434c84f3f76aaa4efde4
+    relation_id: correlation:v1:ea7ad1b470a32d2fbd42e17e1583cb8f186aaf3379766a7cf39056886387cc23
+    schema_version: hybrid-bridge-link-v1
+    semantic_digest: e095e42af46ec3bec800ae37cda03c519086097c2b62fbde6170602869b79752
+    source_pins:
+    - kind: artifact
+      pin:
+        artifact_id: taxonomy-candidate-materialization-set
+        schema_version: taxonomy-candidate-materialization-set-v1
+        semantic_digest: 630c8dd2fb1494bfda6dca393062b89821017e2a385dc8bf3b5051c9c02b9bd4
+      role: bridge-evidence
+    stpa_endpoint:
+      kind: control_action
+      namespace: stpa
+      record_id: CA-1-1
+    taxonomy_endpoint:
+      kind: mechanism_step
+      namespace: taxonomy
+      record_id: step.1
+  causal_projection:
+    causal_projection_id: causal:v1:d0011c8138f25694e16814389b375eb4984abcf0e351b27226a3895226b24517
+    constraint_ids:
+    - SC-1
+    control_action_id: CA-1-1
+    controller_id: RESP-1
+    edges:
+    - edge_id: edge-0
+      from_node_id: L-1
+      kind: projection
+      to_node_id: H-1
+    - edge_id: edge-1
+      from_node_id: H-1
+      kind: projection
+      to_node_id: SC-1
+    - edge_id: edge-2
+      from_node_id: SC-1
+      kind: projection
+      to_node_id: RESP-1
+    - edge_id: edge-3
+      from_node_id: RESP-1
+      kind: control
+      to_node_id: CA-1-1
+    - edge_id: edge-4
+      from_node_id: CA-1-1
+      kind: projection
+      to_node_id: RESP-1:CA-1-1:WRONG_TIMING
+    - edge_id: edge-5
+      from_node_id: RESP-1:CA-1-1:WRONG_TIMING
+      kind: projection
+      to_node_id: RESP-1:CA-1-1:WRONG_TIMING:1
+    - edge_id: edge-6
+      from_node_id: RESP-1:CA-1-1:WRONG_TIMING:1
+      kind: projection
+      to_node_id: EXEC:RESP-1:CA-1-1:WRONG_TIMING
+    exec_candidate_id: EXEC:RESP-1:CA-1-1:WRONG_TIMING
+    hazard_ids:
+    - H-1
+    ica_id: RESP-1:CA-1-1:WRONG_TIMING:1
+    loss_ids:
+    - L-1
+    nodes:
+    - kind: loss
+      node_id: L-1
+      ordinal: 0
+    - kind: hazard
+      node_id: H-1
+      ordinal: 1
+    - kind: constraint
+      node_id: SC-1
+      ordinal: 2
+    - kind: controller
+      node_id: RESP-1
+      ordinal: 3
+    - kind: control_action
+      node_id: CA-1-1
+      ordinal: 4
+    - kind: uca
+      node_id: RESP-1:CA-1-1:WRONG_TIMING
+      ordinal: 5
+    - kind: ica
+      node_id: RESP-1:CA-1-1:WRONG_TIMING:1
+      ordinal: 6
+    - kind: exec
+      node_id: EXEC:RESP-1:CA-1-1:WRONG_TIMING
+      ordinal: 7
+    schema_version: stpa-causal-projection-v1
+    semantic_digest: 887b967b1fd4d6bc3aa48385ac3c44bb4e350a69664dd1a03f9825cbbf5a0288
+    uca_slot_id: RESP-1:CA-1-1:WRONG_TIMING
+  confirmed_review:
+    adjudication: confirmed
+    mechanism_evidence:
+      artifact_pin:
+        artifact_id: correspondence-proposals
+        schema_version: correspondence-proposals-v1
+        semantic_digest: 49326fe0e71a8c516d6a1bb85afb6602af4a1e84e0e54c090cf1e10f2178eec3
+      evidence_kind: exact_id
+      record_id: corrp:v1:1b0b1d97d2d70bd3a8e746914eee3ce09046102f34ec61652254500bddc3cab5
+      schema_version: mechanism-evidence-attestation-v1
+      semantic_digest: d4e36a421bb1b811688adfa7a11ab71fcb1f32d77f6d26ec41928bd01b9e0689
+    relation_id: correlation:v1:ea7ad1b470a32d2fbd42e17e1583cb8f186aaf3379766a7cf39056886387cc23
+    review_artifact_digest: 389bf1fdfd3095bcbd5ad4deac1015448bcfb51d409862722c1661165bef8697
+    review_artifact_pin:
+      artifact_id: reviewed-correspondence-adjudications
+      schema_version: correspondence-reviewed-adjudications-v1
+      semantic_digest: 389bf1fdfd3095bcbd5ad4deac1015448bcfb51d409862722c1661165bef8697
+    reviewer_id: operator-1
+    schema_version: confirmed-coverage-review-v1
+    semantic_digest: 5e25916e661e2e0309b1b7a64938ddd35483b62510aa015ba458a69a08b7a5f4
+    source_pins:
+    - kind: artifact
+      pin:
+        artifact_id: correspondence-proposals
+        schema_version: correspondence-proposals-v1
+        semantic_digest: 49326fe0e71a8c516d6a1bb85afb6602af4a1e84e0e54c090cf1e10f2178eec3
+      role: mechanism-evidence
+    - kind: artifact
+      pin:
+        artifact_id: reviewed-correspondence-adjudications
+        schema_version: correspondence-reviewed-adjudications-v1
+        semantic_digest: 389bf1fdfd3095bcbd5ad4deac1015448bcfb51d409862722c1661165bef8697
+      role: review
+  evidence_class: normative_bookkeeping_fixture
+  exec_candidate_id: EXEC:RESP-1:CA-1-1:WRONG_TIMING
+  ica_id: RESP-1:CA-1-1:WRONG_TIMING:1
+  ica_slot_id: RESP-1:CA-1-1:WRONG_TIMING
+  mechanism_projection:
+    attack_pattern_id: AP-T1-01
+    canonical_ingress:
+      entry_point_id: ep:v1:51220354a529a6a08ce8bd995e149164
+      kind: entry_point
+    execution_requirements:
+    - entry_point_slot_id: ingress
+      kind: direct_input_control
+      requirement_id: req.direct-input.696e6772657373
+      schema_version: '1'
+    - binding_slot_id: ingress
+      kind: observation
+      observation: model_context
+      requirement_id: req.observation.737465702e33:706f73742e33
+      schema_version: '1'
+    - kind: security_outcome_assertion
+      postcondition_id: post.3
+      requirement_id: req.security-outcome.737465702e33:706f73742e33
+      schema_version: '1'
+      source_step_id: step.3
+    - kind: state_changing_tool_fixture
+      requirement_id: req.tool-fixture.737465702e32:746f6f6c
+      schema_version: '1'
+      tool_slot_id: tool
+    execution_requirements_digest: b5568545b4e9d0d9c385082f5d464c814f6080d6f34a248a62bc9dd62f161cc1
+    ingress_controllability: direct
+    mechanism_projection_id: mech:v1:043c6ed6e6ced3f92894b31327706c637e20234f88be68b1aebe024aa16b79ff
+    obligation_id: ob:v1:741b678e5ed0aae16ceb83ee81db90e98fc10b78f7cb90a5e4628a67ab727727
+    projection:
+      bindings:
+      - resource_ref:
+          entry_point_id: ep:v1:51220354a529a6a08ce8bd995e149164
+          kind: entry_point
+        slot_id: ingress
+      - resource_ref:
+          integration_id: int:v1:6abb941a0d1112346cd1b3bde9af24af
+          kind: integration
+        slot_id: source
+      - resource_ref:
+          kind: tool
+          tool_id: tool:v1:b93006774cbdd4b299389a03ac3d88c3
+        slot_id: tool
+      - resource_ref:
+          kind: trust_boundary
+          trust_boundary_id: tb:v1:41a75fea1864f16e89f7c0e66ea48258
+        slot_id: boundary
+      capability_fact_snapshot_digest: 1a23098699d8be1f5b14cd208a8e4642e349e7d82abd6eac7deb3b2134fd2a46
+      catalog_pin: 3f2e0e8abe7e508293b95324c5a92ac6966df32f322451f6ba736bd031d53bad
+      condition_results:
+      - condition_step_id: step.2
+        evidence:
+        - fact:
+            fact_id: mode
+            namespace: profile
+            property_path: []
+            value_type: string
+          status: present
+          value: active
+        result: 'true'
+      omissions: []
+      pattern_pin: be00081f0f8a73e83a847ea46d4f0adea2ac6e61407b89906e96fb23c57e4f7a
+      projection_digest: 96a93f8f80d23b50ec217d13537bdb1dca1afad78b0b4773d8e917306a08ad46
+      schema_version: '1'
+      selected_step_ids:
+      - step.1
+      - step.2
+      - step.3
+      source_chain:
+        chain_id: chain.1
+        earliest_attacker_controlled_step_id: step.1
+        initial_ingress_slot_id: ingress
+        mappings:
+        - decision: exact
+          ids:
+          - AML.T0001
+          taxonomy: ATLAS
+        pattern_id: AP-T1-01
+        resource_slots:
+        - allowed_entry_point_controllability: []
+          allowed_entry_point_directions: []
+          allowed_entry_point_ingress_zones: []
+          allowed_entry_point_types: []
+          allowed_integration_types: []
+          allowed_resource_ids: []
+          allowed_trust_boundary_from_zones: []
+          allowed_trust_boundary_to_zones: []
+          distinct_from_slot_ids: []
+          kind: entry_point
+          purpose: initial_ingress
+          required_operations: []
+          slot_id: ingress
+        - allowed_entry_point_controllability: []
+          allowed_entry_point_directions: []
+          allowed_entry_point_ingress_zones: []
+          allowed_entry_point_types: []
+          allowed_integration_types: []
+          allowed_resource_ids: []
+          allowed_trust_boundary_from_zones: []
+          allowed_trust_boundary_to_zones: []
+          distinct_from_slot_ids: []
+          kind: integration
+          purpose: supporting
+          required_operations: []
+          slot_id: source
+        - allowed_entry_point_controllability: []
+          allowed_entry_point_directions: []
+          allowed_entry_point_ingress_zones: []
+          allowed_entry_point_types: []
+          allowed_integration_types: []
+          allowed_resource_ids: []
+          allowed_trust_boundary_from_zones: []
+          allowed_trust_boundary_to_zones: []
+          distinct_from_slot_ids: []
+          kind: tool
+          purpose: supporting
+          required_operations: []
+          slot_id: tool
+        - allowed_entry_point_controllability: []
+          allowed_entry_point_directions: []
+          allowed_entry_point_ingress_zones: []
+          allowed_entry_point_types: []
+          allowed_integration_types: []
+          allowed_resource_ids: []
+          allowed_trust_boundary_from_zones: []
+          allowed_trust_boundary_to_zones: []
+          distinct_from_slot_ids: []
+          kind: trust_boundary
+          purpose: intermediate
+          required_operations: []
+          slot_id: boundary
+        schema_version: v1
+        semantic_digest: 359dc0c3f24b1733408ba0da689a2c8afb7a6d7d87241ffb469c09f1165b1604
+        semantic_revision: 1
+        steps:
+        - action_kind: prepare
+          attacker_controlled: true
+          boundary_position: crossing
+          condition: null
+          consumed: []
+          executor_role: attacker
+          mappings:
+          - decision: exact
+            ids:
+            - AML.T0001
+            taxonomy: ATLAS
+          observable_outcome_links: []
+          observable_postconditions:
+          - description: observable
+            postcondition_id: post.1
+            security_relevant: false
+            terminal: false
+          order: 1
+          preconditions: []
+          produced:
+          - kind: effect
+            ref_id: effect.1
+            value_type: boolean
+          provenance:
+            adaptation_rationale: represented
+            confidence: 90
+            references:
+            - reference_id: case-1
+              reference_type: catalog
+            tier: observed
+          requirement: required
+          resource_links:
+          - role: ingress
+            slot_id: ingress
+            source_identity_kind: null
+            target_ingress_slot_id: null
+            trust_boundary_slot_id: null
+          step_id: step.1
+        - action_kind: observe
+          attacker_controlled: false
+          boundary_position: inside
+          condition:
+            fact:
+              fact_id: mode
+              namespace: profile
+              property_path: []
+              value_type: string
+            op: equality
+            schema_version: '1'
+            value: active
+          consumed:
+          - kind: state
+            ref_id: state.1
+            value_type: boolean
+          executor_role: system
+          mappings:
+          - decision: not_applicable
+            taxonomy: ATLAS
+          observable_outcome_links: []
+          observable_postconditions:
+          - description: observable
+            postcondition_id: post.2
+            security_relevant: false
+            terminal: false
+          order: 2
+          preconditions: []
+          produced:
+          - kind: effect
+            ref_id: effect.2
+            value_type: boolean
+          provenance:
+            adaptation_rationale: represented
+            confidence: 90
+            references:
+            - reference_id: case-2
+              reference_type: catalog
+            tier: observed
+          requirement: conditional
+          resource_links:
+          - role: tool_fixture
+            slot_id: tool
+            source_identity_kind: null
+            target_ingress_slot_id: null
+            trust_boundary_slot_id: null
+          step_id: step.2
+        - action_kind: impact
+          attacker_controlled: false
+          boundary_position: inside
+          condition: null
+          consumed: []
+          executor_role: system
+          mappings:
+          - decision: not_applicable
+            taxonomy: ATLAS
+          observable_outcome_links:
+          - binding_slot_id: ingress
+            observation: model_context
+            postcondition_id: post.3
+          observable_postconditions:
+          - description: observable
+            postcondition_id: post.3
+            security_relevant: true
+            terminal: true
+          order: 3
+          preconditions: []
+          produced:
+          - kind: effect
+            ref_id: effect.3
+            value_type: boolean
+          provenance:
+            adaptation_rationale: represented
+            confidence: 90
+            references:
+            - reference_id: case-3
+              reference_type: catalog
+            tier: observed
+          requirement: required
+          resource_links: []
+          step_id: step.3
+        taxonomy_context:
+          atlas:
+            digest: '0000000000000000000000000000000000000000000000000000000000000000'
+            release: v1
+          laaf: null
+          mapping_set_digest: '0000000000000000000000000000000000000000000000000000000000000000'
+      source_influence_paths: []
+    risk_id: risk-a
+    schema_version: taxonomy-mechanism-projection-v1
+    selected_candidate_id: cand:v2:c1ce1e48c8fcea147f0c57d7552d041a
+    semantic_digest: ebe2af1dc785d0071e96589308eb4449993a5068fa4ba459290ca1404ad0491b
+  obligation_id: ob:v1:741b678e5ed0aae16ceb83ee81db90e98fc10b78f7cb90a5e4628a67ab727727
+  projection_id: projection:v1:b246c3dfcdbaa82f1bb05e3c9f5acc54b85d83a4642dfdafbb3f65d8c65b09d4
+  relation_id: correlation:v1:ea7ad1b470a32d2fbd42e17e1583cb8f186aaf3379766a7cf39056886387cc23
+  relation_kind: same_mechanism
+  risk_id: risk-a
+  risk_trace:
+  - artifact_pin:
+      artifact_id: taxonomy-candidate-materialization-set
+      schema_version: taxonomy-candidate-materialization-set-v1
+      semantic_digest: 630c8dd2fb1494bfda6dca393062b89821017e2a385dc8bf3b5051c9c02b9bd4
+    record_id: bridge-evidence:v1:52639571dc8f7aec39eb8da931011b42bb91c129600d4a06cfaa3dbe3aa8a6e4
+    source_kind: bridge_evidence
+  - artifact_pin:
+      artifact_id: taxonomy-candidate-materialization-set
+      schema_version: taxonomy-candidate-materialization-set-v1
+      semantic_digest: 630c8dd2fb1494bfda6dca393062b89821017e2a385dc8bf3b5051c9c02b9bd4
+    record_id: cand:v2:c1ce1e48c8fcea147f0c57d7552d041a
+    source_kind: phase1_candidate
+  - artifact_pin:
+      artifact_id: taxonomy-obligation-plan
+      schema_version: taxonomy-obligation-plan-v1
+      semantic_digest: 52be64e238118460cc11628eed19ab3864c7ae5c9fa9041486bd8b0b61294195
+    record_id: ob:v1:741b678e5ed0aae16ceb83ee81db90e98fc10b78f7cb90a5e4628a67ab727727
+    source_kind: phase1_obligation
+  - artifact_pin:
+      artifact_id: correspondence-reconciliation
+      schema_version: correspondence-reconciliation-v1
+      semantic_digest: eabf271fbae976f19ca74bde7a0a30eace4b55295157ead3f2705c35df2173d7
+    record_id: correlation:v1:ea7ad1b470a32d2fbd42e17e1583cb8f186aaf3379766a7cf39056886387cc23
+    source_kind: phase2_relation
+  - artifact_pin:
+      artifact_id: loss-analysis
+      schema_version: loss-analysis-v1
+      semantic_digest: 6ae9c8374eafdee3b6c93c438d5468c8db0c9b5e79f57224912790207cc8e360
+    record_id: SC-1
+    source_kind: stpa_constraint
+  - artifact_pin:
+      artifact_id: stpa-execution-projection
+      schema_version: stpa-execution-projection-v1
+      semantic_digest: 3a5ca1705a0be5746b4a78137c1b4e942e69466ef9fbd6b74243c1eaea60caee
+    record_id: EXEC:RESP-1:CA-1-1:WRONG_TIMING
+    source_kind: stpa_exec
+  - artifact_pin:
+      artifact_id: loss-analysis
+      schema_version: loss-analysis-v1
+      semantic_digest: 6ae9c8374eafdee3b6c93c438d5468c8db0c9b5e79f57224912790207cc8e360
+    record_id: H-1
+    source_kind: stpa_hazard
+  - artifact_pin:
+      artifact_id: ica-enumeration
+      schema_version: ica-enumeration-v1
+      semantic_digest: a970a189d7e8a1ad4a509e52cda376ed114e30e802b2478976da0c80cccce29b
+    record_id: RESP-1:CA-1-1:WRONG_TIMING:1
+    source_kind: stpa_ica
+  - artifact_pin:
+      artifact_id: loss-analysis
+      schema_version: loss-analysis-v1
+      semantic_digest: 6ae9c8374eafdee3b6c93c438d5468c8db0c9b5e79f57224912790207cc8e360
+    record_id: L-1
+    source_kind: stpa_loss
+  - artifact_pin:
+      artifact_id: ica-enumeration
+      schema_version: ica-enumeration-v1
+      semantic_digest: a970a189d7e8a1ad4a509e52cda376ed114e30e802b2478976da0c80cccce29b
+    record_id: RESP-1:CA-1-1:WRONG_TIMING
+    source_kind: stpa_slot
+  schema_version: hybrid-scenario-projection-v1
+  selected_candidate_id: cand:v2:c1ce1e48c8fcea147f0c57d7552d041a
+  semantic_digest: 8b98abe4ade5a65ddf2f429ba92d5a90249dec26f077a6f2695336d5ae183eeb
+  source_pins:
+  - kind: artifact
+    pin:
+      artifact_id: control-structure
+      schema_version: control-structure-v1
+      semantic_digest: fb68323896802a1b4819a4709c0be2f389d4b17ebc6f50a21bda83efbb6ce818
+    role: artifact
+  - kind: artifact
+    pin:
+      artifact_id: ica-enumeration
+      schema_version: ica-enumeration-v1
+      semantic_digest: a970a189d7e8a1ad4a509e52cda376ed114e30e802b2478976da0c80cccce29b
+    role: artifact
+  - kind: artifact
+    pin:
+      artifact_id: loss-analysis
+      schema_version: loss-analysis-v1
+      semantic_digest: 6ae9c8374eafdee3b6c93c438d5468c8db0c9b5e79f57224912790207cc8e360
+    role: artifact
+  - kind: artifact
+    pin:
+      artifact_id: stpa-execution-projection
+      schema_version: stpa-execution-projection-v1
+      semantic_digest: 3a5ca1705a0be5746b4a78137c1b4e942e69466ef9fbd6b74243c1eaea60caee
+    role: artifact
+  - kind: artifact
+    pin:
+      artifact_id: taxonomy-candidate-materialization-set
+      schema_version: taxonomy-candidate-materialization-set-v1
+      semantic_digest: 630c8dd2fb1494bfda6dca393062b89821017e2a385dc8bf3b5051c9c02b9bd4
+    role: bridge-evidence
+  - kind: artifact
+    pin:
+      artifact_id: capability-fact-attestation
+      schema_version: capability-fact-attestation-v1
+      semantic_digest: 0797175921f8f2b3d11bb613c39382ad1b4a97ce51e3258bbbaaddc49743cfde
+    role: capability-facts
+  - kind: artifact
+    pin:
+      artifact_id: capability-fact-snapshot
+      schema_version: capability-fact-snapshot-v1
+      semantic_digest: 1a23098699d8be1f5b14cd208a8e4642e349e7d82abd6eac7deb3b2134fd2a46
+    role: capability-facts
+  - kind: artifact
+    pin:
+      artifact_id: confirmed-coverage-review:correlation:v1:ea7ad1b470a32d2fbd42e17e1583cb8f186aaf3379766a7cf39056886387cc23
+      schema_version: confirmed-coverage-review-v1
+      semantic_digest: 5e25916e661e2e0309b1b7a64938ddd35483b62510aa015ba458a69a08b7a5f4
+    role: confirmed-review
+  - kind: artifact
+    pin:
+      artifact_id: control-structure
+      schema_version: control-structure-v1
+      semantic_digest: fb68323896802a1b4819a4709c0be2f389d4b17ebc6f50a21bda83efbb6ce818
+    role: control-structure
+  - kind: artifact
+    pin:
+      artifact_id: hybrid-correspondence-attestation
+      schema_version: hybrid-correspondence-attestation-v1
+      semantic_digest: f0fd4f7d7969ff64f09c7391448ae2349dcc505cf1afe031f49067189afde362
+    role: correspondence-attestation
+  - kind: artifact
+    pin:
+      artifact_id: stpa-execution-projection
+      schema_version: stpa-execution-projection-v1
+      semantic_digest: 3a5ca1705a0be5746b4a78137c1b4e942e69466ef9fbd6b74243c1eaea60caee
+    role: execution-projection
+  - kind: artifact
+    pin:
+      artifact_id: ica-enumeration
+      schema_version: ica-enumeration-v1
+      semantic_digest: a970a189d7e8a1ad4a509e52cda376ed114e30e802b2478976da0c80cccce29b
+    role: ica-enumeration
+  - kind: artifact
+    pin:
+      artifact_id: loss-analysis
+      schema_version: loss-analysis-v1
+      semantic_digest: 6ae9c8374eafdee3b6c93c438d5468c8db0c9b5e79f57224912790207cc8e360
+    role: loss-analysis
+  - kind: artifact
+    pin:
+      artifact_id: taxonomy-candidate-materialization-set
+      schema_version: taxonomy-candidate-materialization-set-v1
+      semantic_digest: 630c8dd2fb1494bfda6dca393062b89821017e2a385dc8bf3b5051c9c02b9bd4
+    role: materializations
+  - kind: artifact
+    pin:
+      artifact_id: correspondence-proposals
+      schema_version: correspondence-proposals-v1
+      semantic_digest: 49326fe0e71a8c516d6a1bb85afb6602af4a1e84e0e54c090cf1e10f2178eec3
+    role: mechanism-evidence
+  - kind: artifact
+    pin:
+      artifact_id: mechanism-evidence-attestation:correlation:v1:ea7ad1b470a32d2fbd42e17e1583cb8f186aaf3379766a7cf39056886387cc23
+      schema_version: mechanism-evidence-attestation-v1
+      semantic_digest: d4e36a421bb1b811688adfa7a11ab71fcb1f32d77f6d26ec41928bd01b9e0689
+    role: mechanism-evidence
+  - kind: artifact
+    pin:
+      artifact_id: taxonomy-obligation-plan
+      schema_version: taxonomy-obligation-plan-v1
+      semantic_digest: 52be64e238118460cc11628eed19ab3864c7ae5c9fa9041486bd8b0b61294195
+    role: obligation-plan
+  - kind: artifact
+    pin:
+      artifact_id: hybrid-coverage-assessment
+      schema_version: hybrid-coverage-assessment-v1
+      semantic_digest: 432571484f7964e508bbcee0685b37af353c48aef376345c012aae762d0e38d4
+    role: phase2-assessment
+  - kind: artifact
+    pin:
+      artifact_id: correspondence-proposals
+      schema_version: correspondence-proposals-v1
+      semantic_digest: 49326fe0e71a8c516d6a1bb85afb6602af4a1e84e0e54c090cf1e10f2178eec3
+    role: proposal-set
+  - kind: artifact
+    pin:
+      artifact_id: qualification-facts
+      schema_version: qualification-facts-v1
+      semantic_digest: f8a146214b0044320bfaa927ae9ff546a5cce3613f40d3bf98e3cc8a0d688420
+    role: qualification-facts
+  - kind: artifact
+    pin:
+      artifact_id: correspondence-reconciliation
+      schema_version: correspondence-reconciliation-v1
+      semantic_digest: eabf271fbae976f19ca74bde7a0a30eace4b55295157ead3f2705c35df2173d7
+    role: reconciliation
+  - kind: artifact
+    pin:
+      artifact_id: system-resource-map
+      schema_version: system-resource-map-v1
+      semantic_digest: 5c56bdc51585c2caa242f9ddbc986c8c5bdd6fd929ce360bd6ad8d33216d9a26
+    role: resource-map
+  - kind: artifact
+    pin:
+      artifact_id: reviewed-correspondence-adjudications
+      schema_version: correspondence-reviewed-adjudications-v1
+      semantic_digest: 389bf1fdfd3095bcbd5ad4deac1015448bcfb51d409862722c1661165bef8697
+    role: review
+  - kind: artifact
+    pin:
+      artifact_id: pinned-stpa-projection-attestation
+      schema_version: pinned-stpa-projection-attestation-v1
+      semantic_digest: 0c48894f5a4698d6dc6764792822f7499af4b1ed6b1c40cdf4c421d7215b7cbe
+    role: stpa-attestation
+  - kind: taxonomy
+    pin:
+      digest: 3f2e0e8abe7e508293b95324c5a92ac6966df32f322451f6ba736bd031d53bad
+      release: v1
+    role: catalog
+    taxonomy_id: atlas
+  - kind: taxonomy
+    pin:
+      digest: e9663ef93f02bb8982d632d0aca4cd7ec2ef60f9b098af395ca7d8c3b84b3337
+      release: obligation-mapping-bundle-v1
+    role: mapping
+    taxonomy_id: obligation_edges
+  - kind: taxonomy
+    pin:
+      digest: '0000000000000000000000000000000000000000000000000000000000000000'
+      release: v1
+    role: mapping
+    taxonomy_id: sssom
+schema_version: hybrid-scenario-projection-set-v1
+semantic_digest: 802a802115f01402bbcec74a6c9ff94733d19f515e7e8697e5a08903c8767df0
+source_pins:
+- kind: artifact
+  pin:
+    artifact_id: control-structure
+    schema_version: control-structure-v1
+    semantic_digest: fb68323896802a1b4819a4709c0be2f389d4b17ebc6f50a21bda83efbb6ce818
+  role: artifact
+- kind: artifact
+  pin:
+    artifact_id: ica-enumeration
+    schema_version: ica-enumeration-v1
+    semantic_digest: a970a189d7e8a1ad4a509e52cda376ed114e30e802b2478976da0c80cccce29b
+  role: artifact
+- kind: artifact
+  pin:
+    artifact_id: loss-analysis
+    schema_version: loss-analysis-v1
+    semantic_digest: 6ae9c8374eafdee3b6c93c438d5468c8db0c9b5e79f57224912790207cc8e360
+  role: artifact
+- kind: artifact
+  pin:
+    artifact_id: stpa-execution-projection
+    schema_version: stpa-execution-projection-v1
+    semantic_digest: 3a5ca1705a0be5746b4a78137c1b4e942e69466ef9fbd6b74243c1eaea60caee
+  role: artifact
+- kind: artifact
+  pin:
+    artifact_id: taxonomy-candidate-materialization-set
+    schema_version: taxonomy-candidate-materialization-set-v1
+    semantic_digest: 630c8dd2fb1494bfda6dca393062b89821017e2a385dc8bf3b5051c9c02b9bd4
+  role: bridge-evidence
+- kind: artifact
+  pin:
+    artifact_id: capability-fact-attestation
+    schema_version: capability-fact-attestation-v1
+    semantic_digest: 0797175921f8f2b3d11bb613c39382ad1b4a97ce51e3258bbbaaddc49743cfde
+  role: capability-facts
+- kind: artifact
+  pin:
+    artifact_id: capability-fact-snapshot
+    schema_version: capability-fact-snapshot-v1
+    semantic_digest: 1a23098699d8be1f5b14cd208a8e4642e349e7d82abd6eac7deb3b2134fd2a46
+  role: capability-facts
+- kind: artifact
+  pin:
+    artifact_id: confirmed-coverage-review:correlation:v1:ea7ad1b470a32d2fbd42e17e1583cb8f186aaf3379766a7cf39056886387cc23
+    schema_version: confirmed-coverage-review-v1
+    semantic_digest: 5e25916e661e2e0309b1b7a64938ddd35483b62510aa015ba458a69a08b7a5f4
+  role: confirmed-review
+- kind: artifact
+  pin:
+    artifact_id: control-structure
+    schema_version: control-structure-v1
+    semantic_digest: fb68323896802a1b4819a4709c0be2f389d4b17ebc6f50a21bda83efbb6ce818
+  role: control-structure
+- kind: artifact
+  pin:
+    artifact_id: hybrid-correspondence-attestation
+    schema_version: hybrid-correspondence-attestation-v1
+    semantic_digest: f0fd4f7d7969ff64f09c7391448ae2349dcc505cf1afe031f49067189afde362
+  role: correspondence-attestation
+- kind: artifact
+  pin:
+    artifact_id: stpa-execution-projection
+    schema_version: stpa-execution-projection-v1
+    semantic_digest: 3a5ca1705a0be5746b4a78137c1b4e942e69466ef9fbd6b74243c1eaea60caee
+  role: execution-projection
+- kind: artifact
+  pin:
+    artifact_id: ica-enumeration
+    schema_version: ica-enumeration-v1
+    semantic_digest: a970a189d7e8a1ad4a509e52cda376ed114e30e802b2478976da0c80cccce29b
+  role: ica-enumeration
+- kind: artifact
+  pin:
+    artifact_id: loss-analysis
+    schema_version: loss-analysis-v1
+    semantic_digest: 6ae9c8374eafdee3b6c93c438d5468c8db0c9b5e79f57224912790207cc8e360
+  role: loss-analysis
+- kind: artifact
+  pin:
+    artifact_id: taxonomy-candidate-materialization-set
+    schema_version: taxonomy-candidate-materialization-set-v1
+    semantic_digest: 630c8dd2fb1494bfda6dca393062b89821017e2a385dc8bf3b5051c9c02b9bd4
+  role: materializations
+- kind: artifact
+  pin:
+    artifact_id: correspondence-proposals
+    schema_version: correspondence-proposals-v1
+    semantic_digest: 49326fe0e71a8c516d6a1bb85afb6602af4a1e84e0e54c090cf1e10f2178eec3
+  role: mechanism-evidence
+- kind: artifact
+  pin:
+    artifact_id: mechanism-evidence-attestation:correlation:v1:ea7ad1b470a32d2fbd42e17e1583cb8f186aaf3379766a7cf39056886387cc23
+    schema_version: mechanism-evidence-attestation-v1
+    semantic_digest: d4e36a421bb1b811688adfa7a11ab71fcb1f32d77f6d26ec41928bd01b9e0689
+  role: mechanism-evidence
+- kind: artifact
+  pin:
+    artifact_id: taxonomy-obligation-plan
+    schema_version: taxonomy-obligation-plan-v1
+    semantic_digest: 52be64e238118460cc11628eed19ab3864c7ae5c9fa9041486bd8b0b61294195
+  role: obligation-plan
+- kind: artifact
+  pin:
+    artifact_id: hybrid-coverage-assessment
+    schema_version: hybrid-coverage-assessment-v1
+    semantic_digest: 432571484f7964e508bbcee0685b37af353c48aef376345c012aae762d0e38d4
+  role: phase2-assessment
+- kind: artifact
+  pin:
+    artifact_id: correspondence-proposals
+    schema_version: correspondence-proposals-v1
+    semantic_digest: 49326fe0e71a8c516d6a1bb85afb6602af4a1e84e0e54c090cf1e10f2178eec3
+  role: proposal-set
+- kind: artifact
+  pin:
+    artifact_id: qualification-facts
+    schema_version: qualification-facts-v1
+    semantic_digest: f8a146214b0044320bfaa927ae9ff546a5cce3613f40d3bf98e3cc8a0d688420
+  role: qualification-facts
+- kind: artifact
+  pin:
+    artifact_id: correspondence-reconciliation
+    schema_version: correspondence-reconciliation-v1
+    semantic_digest: eabf271fbae976f19ca74bde7a0a30eace4b55295157ead3f2705c35df2173d7
+  role: reconciliation
+- kind: artifact
+  pin:
+    artifact_id: system-resource-map
+    schema_version: system-resource-map-v1
+    semantic_digest: 5c56bdc51585c2caa242f9ddbc986c8c5bdd6fd929ce360bd6ad8d33216d9a26
+  role: resource-map
+- kind: artifact
+  pin:
+    artifact_id: reviewed-correspondence-adjudications
+    schema_version: correspondence-reviewed-adjudications-v1
+    semantic_digest: 389bf1fdfd3095bcbd5ad4deac1015448bcfb51d409862722c1661165bef8697
+  role: review
+- kind: artifact
+  pin:
+    artifact_id: pinned-stpa-projection-attestation
+    schema_version: pinned-stpa-projection-attestation-v1
+    semantic_digest: 0c48894f5a4698d6dc6764792822f7499af4b1ed6b1c40cdf4c421d7215b7cbe
+  role: stpa-attestation
+- kind: taxonomy
+  pin:
+    digest: 3f2e0e8abe7e508293b95324c5a92ac6966df32f322451f6ba736bd031d53bad
+    release: v1
+  role: catalog
+  taxonomy_id: atlas
+- kind: taxonomy
+  pin:
+    digest: e9663ef93f02bb8982d632d0aca4cd7ec2ef60f9b098af395ca7d8c3b84b3337
+    release: obligation-mapping-bundle-v1
+  role: mapping
+  taxonomy_id: obligation_edges
+- kind: taxonomy
+  pin:
+    digest: '0000000000000000000000000000000000000000000000000000000000000000'
+    release: v1
+  role: mapping
+  taxonomy_id: sssom
