@@ -39,8 +39,8 @@ or suppress valid scenarios merely because their prose needs editing.
 
 ### 2.1 ICA writing
 
-The newer ICA contract removed extreme run-on responses, but current prose is
-still repetitive.
+At the observed baseline, the newer ICA contract had removed extreme run-on
+responses, but the compiled prose was still repetitive.
 
 | Run | Scenarios | Median ICA | Longest ICA | More than 300 characters |
 | --- | ---: | ---: | ---: | ---: |
@@ -61,6 +61,14 @@ The prompt asks only for a non-empty deviation. The model often repeats the
 action and unsafe-action category already supplied by the compiler. Prompt
 views also contain duplicate loss records in some target calls; one NHS call
 listed L-1 four times and L-2 six times.
+
+The implemented Jinja contract and compiler diagnostics materially improved
+this baseline. In the live semantic-quality runs, model-authored deviations
+had medians of 13 words (Klarna) and 14 words (NHS), maxima of 20 and 24 words,
+and no 32-word or 220-character warning. Complete compiled ICA text had medians
+of 233 characters / 33 words and 251 / 36 respectively. The remaining length
+comes from the deterministic responsibility/action frame rather than an
+ineffective model-writing instruction.
 
 ### 2.2 Stage 5 source selection
 

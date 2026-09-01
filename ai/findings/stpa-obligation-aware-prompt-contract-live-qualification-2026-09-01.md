@@ -282,11 +282,11 @@ constraint, ICA, and obligation evidence. Invalid causal source identities are
 rejected instead of being silently published, and one bad scenario case no
 longer discards valid siblings.
 
-Quality is still uneven:
+The prompt-contract v1/v13 baseline was still uneven:
 
 - ICA prose is often much too long and repetitive. Exact meaning is preserved,
   but the human-facing text needs a tighter semantic writing contract.
-- The current model frequently chooses the wrong causal-source namespace in
+- The model frequently chose the wrong causal-source namespace in
   Stage 5. Those cases fail closed, but this caused most of the 18 failed
   scenario cases.
 - Some taxonomy risk-to-pattern pairings are weak before STPA sees them. For
@@ -296,6 +296,27 @@ Quality is still uneven:
 - Many applicable obligations remain unresolved. This is visible rather than
   hidden, but it shows that the current model is not yet reliable enough for a
   production completeness claim.
+
+The subsequent semantic-quality runs changed the first two findings:
+
+- In Klarna semantic-quality v2, model-authored ICA deviations have a median of
+  13 words, a maximum of 20 words, and no 32-word or 220-character warning.
+  NHS semantic-quality v1 has a median of 14 words, a maximum of 24 words, and
+  likewise no warning. The complete compiled ICA remains longer because it
+  deliberately includes the authoritative responsibility, action, and unsafe-
+  action frame: its median is 233 characters / 33 words for Klarna and 251 / 36
+  for NHS. The tightening was effective; further shortening would concern the
+  deterministic frame, not model compliance with the deviation contract.
+- Compiler-owned causal handles eliminated causal-source namespace mismatches
+  in the current saved runs: zero mismatches across 82 published causal
+  factors. The three remaining NHS scenario errors are missing exact
+  controlled-process targets, not model-selected namespace errors.
+- Weak upstream taxonomy pairings remain. They are now decided explicitly:
+  45 Klarna and 38 NHS applicable obligations ended as
+  `risk_pattern_mismatch` rather than receiving scenario credit.
+- The completeness concern also remains. Only 1 of 52 Klarna and 2 of 52 NHS
+  applicable obligations received scenario realization credit; aggregate
+  accounting retains 51 and 50 respectively as unresolved/uncredited.
 
 The Klarna live files also exposed model-authored titles such as
 `Feature: Feature: ...`. The parser now removes renderer-owned `Feature:` and
@@ -314,8 +335,9 @@ The corrected contract is functionally demonstrated:
 - valid sibling cases continue; and
 - consideration and realization are accounted for separately.
 
-It should not yet be described as production-ready with `gemma4-oc`. The next
-hardening target is provider compliance, not another architectural redesign:
-make the ICA text concise, improve causal-source selection in Stage 5, and add
-an upstream semantic check for obviously mismatched risk/pattern obligations.
-Those improvements must retain the current fail-closed contracts.
+It should not yet be described as production-ready with `gemma4-oc`. ICA
+deviation length, causal-source selection, and explicit risk/pattern mismatch
+handling are now implemented and live-qualified. The remaining quality target
+is completeness: improve the evidence and model decisions that currently leave
+most applicable obligations without credit, while retaining the current
+fail-closed contracts and without forcing scenarios from obligations.
