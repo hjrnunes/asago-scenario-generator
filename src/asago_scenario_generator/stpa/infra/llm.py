@@ -20,6 +20,8 @@ from asago_scenario_generator.model_profiles import DEFAULT_REQUEST_TIMEOUT_SECO
 DEFAULT_TEMPERATURE: float = 0.4
 
 _ENV_MAX_COMPLETION_TOKENS = "ASAGO_SCENARIO_GENERATOR_MAX_COMPLETION_TOKENS"
+_ENV_CONTEXT_WINDOW = "ASAGO_SCENARIO_GENERATOR_CONTEXT_WINDOW"
+_ENV_SAFETY_MARGIN = "ASAGO_SCENARIO_GENERATOR_PROMPT_SAFETY_MARGIN"
 _ENV_TEMPERATURE = "ASAGO_SCENARIO_GENERATOR_TEMPERATURE"
 _ENV_TOP_P = "ASAGO_SCENARIO_GENERATOR_TOP_P"
 _ENV_TOP_K = "ASAGO_SCENARIO_GENERATOR_TOP_K"
@@ -206,6 +208,37 @@ def _guided_json_enabled(
     return use_guided_decoding and allow_unvalidated and response_format is not None
 
 
+def _json_object_compatibility(
+    base_url: str | None, response_format: type[BaseModel] | None
+) -> bool:
+    """Use portable JSON-object requests for OpenRouter structured output."""
+    return bool(
+        response_format is not None and base_url and "openrouter.ai" in base_url
+    )
+
+
+def _openrouter_schema_prompt(
+    user_prompt: str,
+    base_url: str | None,
+    response_format: type[BaseModel] | None,
+) -> str:
+    """Carry the exact Pydantic schema when OpenRouter uses JSON-object mode."""
+    if not _json_object_compatibility(base_url, response_format):
+        return user_prompt
+    if response_format is None or not issubclass(response_format, BaseModel):
+        return user_prompt
+    schema = json.dumps(
+        response_format.model_json_schema(),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return (
+        f"{user_prompt}\n\nReturn exactly one JSON object matching this JSON Schema. "
+        f"Use the property names exactly as written:\n{schema}"
+    )
+
+
 def _apply_legacy_json_fallback(
     extra_kwargs: dict[str, Any],
     allow_unvalidated: bool,
@@ -264,6 +297,8 @@ class LLMClient:
         base_url: str | None = None,
         api_key: str | None = None,
         model: str | None = None,
+        context_window: int | None = None,
+        safety_margin: int | None = None,
         max_completion_tokens: int | None = None,
         temperature: float | None = None,
         extra_headers: dict[str, str] | None = None,
@@ -275,6 +310,12 @@ class LLMClient:
         self.base_url = _resolve_base_url(base_url)
         self.api_key = _resolve_api_key(api_key)
         self.model = _resolve_model(model)
+        self.context_window = _resolve_optional_int(
+            context_window, _ENV_CONTEXT_WINDOW, minimum=1
+        )
+        self.safety_margin = _resolve_optional_int(
+            safety_margin, _ENV_SAFETY_MARGIN, minimum=0
+        )
         self.max_completion_tokens = _resolve_max_tokens(
             max_completion_tokens,
             os.environ.get(_ENV_MAX_COMPLETION_TOKENS),
@@ -381,25 +422,32 @@ class LLMClient:
         effective_max = max_completion_tokens or self.max_completion_tokens
         effective_temp = temperature if temperature is not None else self.temperature
 
+        request_unvalidated = allow_unvalidated or _json_object_compatibility(
+            self.base_url, response_format
+        )
+        effective_user_prompt = _openrouter_schema_prompt(
+            user_prompt, self.base_url, response_format
+        )
+
         # Use vLLM guided_json for strict schema enforcement when enabled via profile
         # This enables guided decoding which masks invalid tokens during generation
         # Only enabled when use_guided_decoding=True in model profile
         use_guided_json = _guided_json_enabled(
-            self.use_guided_decoding, allow_unvalidated, response_format
+            self.use_guided_decoding, request_unvalidated, response_format
         )
         extra_kwargs = self._build_extra_kwargs(
             effective_max, effective_temp, response_format, use_guided_json
         )
         _apply_legacy_json_fallback(
-            extra_kwargs, allow_unvalidated, response_format, use_guided_json
+            extra_kwargs, request_unvalidated, response_format, use_guided_json
         )
 
         t0 = time.perf_counter_ns()
         response, content = self._request_completion(
-            _prompt_messages(system_prompt, user_prompt),
+            _prompt_messages(system_prompt, effective_user_prompt),
             response_format,
             extra_kwargs,
-            allow_unvalidated,
+            request_unvalidated,
         )
 
         duration_ms = (time.perf_counter_ns() - t0) // 1_000_000
@@ -411,7 +459,7 @@ class LLMClient:
             completion_tokens=usage.completion_tokens,
             duration_ms=duration_ms,
             system_prompt=system_prompt,
-            user_prompt=user_prompt,
+            user_prompt=effective_user_prompt,
         )
 
 
@@ -424,6 +472,8 @@ def effective_model_config(
     return {
         "model": client.model,
         "base_url": client.base_url,
+        "context_window": getattr(client, "context_window", None),
+        "safety_margin": getattr(client, "safety_margin", None),
         "max_completion_tokens": getattr(client, "max_completion_tokens", None),
         "temperature": effective_temperature(client, temperature),
         "top_p": getattr(client, "top_p", None),

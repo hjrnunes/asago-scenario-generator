@@ -2,11 +2,21 @@
 
 {{ scenario_spec_yaml }}
 
+{% if scenario_context_yaml %}
+---
+
+## Immutable Scenario Generation Context
+
+{{ scenario_context_yaml }}
+{% endif %}
+
+{% if control_structure_yaml %}
 ---
 
 ## Control Structure Context
 
 {{ control_structure_yaml }}
+{% endif %}
 
 ---
 
@@ -21,5 +31,13 @@ Produce an attack tree using the STPA two-level causal taxonomy defined in the s
 4. Reference specific PM-*, FB-*, CA-*, RESP-* IDs where applicable.
 5. The root node MUST be exactly: "Induce ICA {{ ica_type }} on {{ control_action }}". Use the exact ICA type enum value — do not substitute or paraphrase.
 6. Temporal-factor leaf references (PM-*, FB-*, CA-*) must preserve the projection order defined in the alignment table: earlier rows before later rows, with the unsafe control action row last.
+7. Do not introduce a new primary cause, action, hazard, loss, constraint, target, or obligation mechanism. Branches and leaves must map to declared causal factors or be explicitly labelled as assumptions.
+8. Use the causal-factor evidence status from the immutable context. With
+   `reachable_capabilities: []`, no attacker-access path is established: do
+   not claim that an attacker suppresses or manipulates feedback, poisons an
+   audit output, injects guidelines, or uses a tool/input surface. Describe
+   the existing structural condition and its consequence. Include an active
+   manipulation leaf only for an exact reachable capability and its own access
+   references; label every bounded assumption explicitly.
 
 Return the attack tree as a YAML-serializable dictionary matching the structure defined in the system prompt.

@@ -56,6 +56,8 @@ _TREE_ID_SPECS: list[tuple[str, str]] = [
     (r"FB-\d+-\d+", "FB"),
     (r"CA-\d+-\d+", "CA"),
     (r"RESP-\d+", "RESP"),
+    (r"CL-\d+", "CL"),
+    (r"CM-\d+", "CM"),
 ]
 
 
@@ -401,12 +403,14 @@ def validate_tree_id_references(
 
 
 def collect_valid_tree_ids(cs: ControlStructure) -> dict[str, set[str]]:
-    """Collect all valid PM, FB, CA, and RESP IDs from the control structure."""
+    """Collect all valid structural IDs from the control structure."""
     return {
         "PM": _flatten_nested_ids(cs.responsibilities, "process_model_parts", "pm_id"),
         "FB": _flatten_nested_ids(cs.responsibilities, "feedback_channels", "fb_id"),
         "CA": _flatten_nested_ids(cs.responsibilities, "control_actions", "ca_id"),
         "RESP": {r.resp_id for r in cs.responsibilities},
+        "CL": {item.link_id for item in cs.coordination_links},
+        "CM": {item.coordination_mechanism.cm_id for item in cs.coordination_links},
     }
 
 
@@ -483,6 +487,9 @@ class _TraceabilityLookups:
     constraint_ids: set[str]
     resp_ids: set[str]
     all_ca_ids: set[str]
+    coordination_link_ids: set[str]
+    coordination_mechanism_ids: set[str]
+    coordination_mechanism_by_link: dict[str, str]
     threat_by_ica_id: dict[str, StructuralThreat]
 
 
@@ -498,6 +505,12 @@ def _build_traceability_lookups(
         constraint_ids={sc.constraint_id for sc in loss_analysis.security_constraints},
         resp_ids=cs_ids["RESP"],
         all_ca_ids=cs_ids["CA"],
+        coordination_link_ids=cs_ids["CL"],
+        coordination_mechanism_ids=cs_ids["CM"],
+        coordination_mechanism_by_link={
+            item.link_id: item.coordination_mechanism.cm_id
+            for item in control_structure.coordination_links
+        },
         threat_by_ica_id={
             t.ica_id: t for t in enriched_threat_set.structural_threats if t.ica_id
         },
@@ -550,25 +563,65 @@ def _check_scenario_links(
             )
         )
 
-    if spec.target_controller not in lookups.resp_ids:
-        errors.append(
-            TraceabilityError(
-                scenario_id=sid,
-                broken_link="responsibility",
-                expected=f"valid RESP ID from {sorted(lookups.resp_ids)}",
-                actual=spec.target_controller,
+    if spec.target_controller.startswith("CL-"):
+        if spec.target_controller not in lookups.coordination_link_ids:
+            errors.append(
+                TraceabilityError(
+                    scenario_id=sid,
+                    broken_link="coordination_link",
+                    expected=(
+                        f"valid CL ID from {sorted(lookups.coordination_link_ids)}"
+                    ),
+                    actual=spec.target_controller,
+                )
             )
-        )
+        if spec.target_control_action not in lookups.coordination_mechanism_ids:
+            errors.append(
+                TraceabilityError(
+                    scenario_id=sid,
+                    broken_link="coordination_mechanism",
+                    expected=(
+                        f"valid CM ID from {sorted(lookups.coordination_mechanism_ids)}"
+                    ),
+                    actual=spec.target_control_action,
+                )
+            )
+        elif (
+            lookups.coordination_mechanism_by_link.get(spec.target_controller)
+            != spec.target_control_action
+        ):
+            errors.append(
+                TraceabilityError(
+                    scenario_id=sid,
+                    broken_link="coordination_mechanism",
+                    expected=(
+                        "mechanism paired with "
+                        f"{spec.target_controller}: "
+                        f"{lookups.coordination_mechanism_by_link.get(spec.target_controller)}"
+                    ),
+                    actual=spec.target_control_action,
+                )
+            )
+    else:
+        if spec.target_controller not in lookups.resp_ids:
+            errors.append(
+                TraceabilityError(
+                    scenario_id=sid,
+                    broken_link="responsibility",
+                    expected=f"valid RESP ID from {sorted(lookups.resp_ids)}",
+                    actual=spec.target_controller,
+                )
+            )
 
-    if spec.target_control_action not in lookups.all_ca_ids:
-        errors.append(
-            TraceabilityError(
-                scenario_id=sid,
-                broken_link="control_action",
-                expected=f"valid CA ID from {sorted(lookups.all_ca_ids)}",
-                actual=spec.target_control_action,
+        if spec.target_control_action not in lookups.all_ca_ids:
+            errors.append(
+                TraceabilityError(
+                    scenario_id=sid,
+                    broken_link="control_action",
+                    expected=f"valid CA ID from {sorted(lookups.all_ca_ids)}",
+                    actual=spec.target_control_action,
+                )
             )
-        )
 
     return errors
 

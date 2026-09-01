@@ -1,0 +1,254 @@
+"""Closed evidence that an ICA finding survived scenario production."""
+
+from __future__ import annotations
+
+import json
+from collections import Counter
+from typing import Any, Literal
+
+import yaml
+from pydantic import Field, model_validator
+
+from asago_scenario_generator.models.canonical import (
+    ClosedCanonicalModel,
+    canonical_json_text,
+    compute_framed_digest,
+    unique_sorted_strings,
+)
+from asago_scenario_generator.models.hybrid_coverage import (
+    ArtifactPin,
+    Digest,
+    ObligationId,
+)
+
+
+SCENARIO_REALIZATION_SCHEMA_VERSION = "stpa-scenario-realization-v1"
+SCENARIO_REALIZATION_DIGEST_DOMAIN = (
+    "asago-scenario-generator:stpa-scenario-realization:v1"
+)
+SCENARIO_REALIZATION_RECORD_DOMAIN = (
+    "asago-scenario-generator:stpa-scenario-realization-record:v1"
+)
+SCENARIO_REALIZATION_SOURCE_PIN_SPECS: tuple[tuple[str, str], ...] = (
+    ("obligation-accounting", "stpa-obligation-accounting-v1"),
+    ("ica-enumeration", "ica-enumeration-v1"),
+    ("stpa-scenario-collection", "stpa-scenario-collection-v1"),
+)
+
+ScenarioRealizationStatus = Literal["realized", "unresolved", "not_requested"]
+
+
+class _RealizationModel(ClosedCanonicalModel):
+    """Common closed and immutable realization record configuration."""
+
+
+class ScenarioRealizationRecord(_RealizationModel):
+    """One exact obligation/ICA finding after scenario production."""
+
+    record_id: str | None = None
+    obligation_id: ObligationId
+    consideration_pair_id: str = Field(min_length=1)
+    route_id: str = Field(min_length=1)
+    slot_id: str = Field(min_length=1)
+    ica_id: str = Field(min_length=1)
+    status: ScenarioRealizationStatus
+    scenario_ids: tuple[str, ...] = ()
+    context_digests: tuple[Digest, ...] = ()
+    evidence: tuple[str, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def canonicalize_and_validate(self) -> "ScenarioRealizationRecord":
+        if len(self.scenario_ids) != len(self.context_digests):
+            raise ValueError(
+                "scenario realization IDs and context digests must stay paired"
+            )
+        pairs = tuple(sorted(zip(self.scenario_ids, self.context_digests)))
+        if len(pairs) != len(set(pairs)):
+            raise ValueError("scenario realization references must be unique")
+        object.__setattr__(self, "scenario_ids", tuple(item[0] for item in pairs))
+        object.__setattr__(self, "context_digests", tuple(item[1] for item in pairs))
+        object.__setattr__(
+            self, "evidence", unique_sorted_strings(self.evidence, "evidence")
+        )
+        if self.status == "realized":
+            if not pairs:
+                raise ValueError(
+                    "realized records require scenario IDs and context digests"
+                )
+        elif pairs:
+            raise ValueError(
+                "unresolved and not-requested records cannot claim realized scenarios"
+            )
+        expected = self.compute_record_id()
+        if self.record_id is not None and self.record_id != expected:
+            raise ValueError("scenario realization record_id does not match content")
+        object.__setattr__(self, "record_id", expected)
+        return self
+
+    def compute_record_id(self) -> str:
+        """Compute the stable record identity from the complete result."""
+        digest = compute_framed_digest(
+            SCENARIO_REALIZATION_RECORD_DOMAIN,
+            self.model_dump(mode="json", exclude={"record_id"}),
+        )
+        return f"realization:v1:{digest}"
+
+
+class ScenarioRealizationSummary(_RealizationModel):
+    """Exact independently derived counts for realization records."""
+
+    total: int = Field(ge=0, strict=True)
+    realized: int = Field(ge=0, strict=True)
+    unresolved: int = Field(ge=0, strict=True)
+    not_requested: int = Field(ge=0, strict=True)
+
+
+def derive_scenario_realization_summary(
+    records: tuple[ScenarioRealizationRecord, ...] | list[ScenarioRealizationRecord],
+) -> ScenarioRealizationSummary:
+    """Derive all counts from the exact record collection."""
+    values = tuple(records)
+    counts = Counter(item.status for item in values)
+    return ScenarioRealizationSummary(
+        total=len(values),
+        realized=counts["realized"],
+        unresolved=counts["unresolved"],
+        not_requested=counts["not_requested"],
+    )
+
+
+def validate_scenario_realization_source_pins(
+    values: tuple[ArtifactPin, ...] | list[ArtifactPin],
+) -> tuple[ArtifactPin, ...]:
+    """Require one exact pin for each authority used by realization."""
+    if any(not isinstance(item, ArtifactPin) for item in values):
+        raise TypeError("scenario realization source_pins require ArtifactPin values")
+    ordered = tuple(sorted(values, key=lambda item: item.artifact_id))
+    if len({item.artifact_id for item in ordered}) != len(ordered):
+        raise ValueError("scenario realization source_pins contain duplicate IDs")
+    expected = dict(SCENARIO_REALIZATION_SOURCE_PIN_SPECS)
+    actual = {item.artifact_id: item.schema_version for item in ordered}
+    if actual != expected:
+        raise ValueError(
+            "scenario realization source_pins must contain the exact accounting, "
+            "ICA-enumeration, and scenario-collection authorities"
+        )
+    return ordered
+
+
+class ScenarioRealizationAssessment(_RealizationModel):
+    """Content-addressed scenario realization for all ICA findings."""
+
+    schema_version: Literal[SCENARIO_REALIZATION_SCHEMA_VERSION] = (
+        SCENARIO_REALIZATION_SCHEMA_VERSION
+    )
+    semantic_digest: Digest | None = None
+    source_pins: tuple[ArtifactPin, ...] = Field(min_length=3, max_length=3)
+    records: tuple[ScenarioRealizationRecord, ...]
+    summary: ScenarioRealizationSummary
+
+    @model_validator(mode="after")
+    def canonicalize_validate_and_digest(self) -> "ScenarioRealizationAssessment":
+        object.__setattr__(
+            self,
+            "source_pins",
+            validate_scenario_realization_source_pins(self.source_pins),
+        )
+        records = tuple(
+            sorted(
+                self.records,
+                key=lambda item: (
+                    item.obligation_id,
+                    item.slot_id,
+                    item.ica_id,
+                    item.consideration_pair_id,
+                ),
+            )
+        )
+        keys = tuple(
+            (item.obligation_id, item.consideration_pair_id, item.ica_id)
+            for item in records
+        )
+        if len(keys) != len(set(keys)):
+            raise ValueError("scenario realization records contain duplicate findings")
+        object.__setattr__(self, "records", records)
+        expected_summary = derive_scenario_realization_summary(records)
+        if self.summary != expected_summary:
+            raise ValueError("scenario realization summary does not reconcile")
+        expected = self.compute_semantic_digest()
+        if self.semantic_digest is not None and self.semantic_digest != expected:
+            raise ValueError("scenario realization semantic_digest does not match")
+        object.__setattr__(self, "semantic_digest", expected)
+        return self
+
+    def compute_semantic_digest(self) -> str:
+        """Compute the version-framed assessment digest."""
+        return compute_framed_digest(
+            SCENARIO_REALIZATION_DIGEST_DOMAIN,
+            self.model_dump(mode="json", exclude={"semantic_digest"}),
+        )
+
+    def assert_integrity(self) -> None:
+        """Verify source pins, records, summary, and digest."""
+        validate_scenario_realization_source_pins(self.source_pins)
+        if self.summary != derive_scenario_realization_summary(self.records):
+            raise ValueError("scenario realization summary does not reconcile")
+        if self.semantic_digest != self.compute_semantic_digest():
+            raise ValueError("scenario realization digest mismatch")
+
+    def to_yaml(self) -> str:
+        """Serialize canonical YAML after integrity validation."""
+        self.assert_integrity()
+        return yaml.dump(
+            self.model_dump(mode="json"),
+            default_flow_style=False,
+            sort_keys=True,
+            allow_unicode=True,
+        )
+
+    def to_json(self) -> str:
+        """Serialize canonical diagnostic JSON."""
+        self.assert_integrity()
+        return canonical_json_text(self.model_dump(mode="json"))
+
+    @classmethod
+    def from_yaml(cls, value: str | bytes) -> "ScenarioRealizationAssessment":
+        """Load and integrity-check one YAML artifact."""
+        data = yaml.safe_load(value)
+        if not isinstance(data, dict):
+            raise ValueError("YAML data must be a dictionary")
+        return cls._load_checked(data)
+
+    @classmethod
+    def from_json(cls, value: str | bytes) -> "ScenarioRealizationAssessment":
+        """Load and integrity-check one JSON artifact."""
+        try:
+            data = json.loads(value)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"Invalid JSON scenario realization: {exc}") from exc
+        if not isinstance(data, dict):
+            raise ValueError("JSON data must be a dictionary")
+        return cls._load_checked(data)
+
+    @classmethod
+    def _load_checked(cls, data: dict[str, Any]) -> "ScenarioRealizationAssessment":
+        if data.get("schema_version") != SCENARIO_REALIZATION_SCHEMA_VERSION:
+            raise ValueError(
+                f"Unsupported schema version: {data.get('schema_version')!r}"
+            )
+        artifact = cls.model_validate(data)
+        artifact.assert_integrity()
+        return artifact
+
+
+__all__ = [
+    "SCENARIO_REALIZATION_DIGEST_DOMAIN",
+    "SCENARIO_REALIZATION_SCHEMA_VERSION",
+    "SCENARIO_REALIZATION_SOURCE_PIN_SPECS",
+    "ScenarioRealizationAssessment",
+    "ScenarioRealizationRecord",
+    "ScenarioRealizationStatus",
+    "ScenarioRealizationSummary",
+    "derive_scenario_realization_summary",
+    "validate_scenario_realization_source_pins",
+]

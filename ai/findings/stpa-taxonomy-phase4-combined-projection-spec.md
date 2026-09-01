@@ -1,7 +1,9 @@
 # STPA–taxonomy synthesis: Phase 4 combined-projection contract
 
 **Status:** Approved on 2026-08-31 for the deterministic Phase 4 Tasks 1–3.
-The later semantic pilot and Phase 5 generation remain separately gated.
+The first semantic pilot was attempted on 2026-08-31. Its prescriptive
+combined-generation interpretation was retired on 2026-09-01 in favor of the
+obligation-aware STPA execution contract.
 
 **Scope:** Phase 4 is the first phase that may compose an accepted taxonomy/STPA
 relation into one executable-shaped, but not yet executable, projection. It
@@ -113,8 +115,10 @@ Phase 4 MUST NOT:
 - integrate directly with `asago-artifact-generator`. Its standalone consumer
   contract remains a separate proposed workstream.
 
-Scenario generation and finalization are explicitly a later Phase 5. A valid
-Phase 4 projection is not automatically executable.
+Scenario generation from a Phase 4 projection is not part of the approved
+synthesis path. A valid projection is reviewed evidence that two existing
+structures can be joined; it is not automatically executable and is not a
+scenario template.
 
 ## 4. Approved defaults
 
@@ -139,8 +143,8 @@ These are the deliberate choices approved for Tasks 1–3:
 6. **Evidence class:** a projection records either
    `normative_bookkeeping_fixture` or `reviewed_semantic_evidence`. The input
    envelope is required to declare one class and a set cannot mix them. The
-   former is valid for deterministic contract tests only; Phase 5 MUST reject
-   it.
+   former is valid for deterministic contract tests only; any semantic
+   evidence consumer MUST reject it.
 7. **Candidate materialization:** complete mechanism projections live in a
    content-addressed `CandidateMaterializationSet`, not in the Phase 1 plan or
    old live scenario envelopes. Each entry is pinned to and checked against one
@@ -153,9 +157,9 @@ These are the deliberate choices approved for Tasks 1–3:
 10. **Qualification facts:** the input chain must retain the exact authoritative
    facts and capability snapshot pins already required by Phase 1/2. Omitted
    compatibility is not sufficient for a semantic pilot.
-11. **Lifecycle:** if a later generation adapter is approved, it should consume
-   the existing taxonomy finalization lifecycle and its target-scoped evidence,
-   not replace it with the simplified STPA manifest.
+11. **Lifecycle:** Phase 4 is not a generation lifecycle. Any later optional
+   evidence consumer must preserve the projection's target-scoped evidence and
+   must not replace it with the simplified STPA manifest.
 
 ## 5. Closed input contract
 
@@ -269,6 +273,12 @@ candidate-record digest must agree. The complete canonical mechanism
 projection, ingress, conditions, and resource bindings live here, not in an
 old live taxonomy scenario envelope. A missing entry is relation-local; a
 present but substituted entry is a fatal source error.
+
+`candidate_id` identifies the executable projection and is intentionally
+reusable across risk obligations. Materialization therefore expands one
+supplied complete candidate into one entry for every matching
+`(obligation_id, candidate_id)` pair in the pinned plan. It must not reject a
+valid plan merely because several obligations share that candidate.
 
 `phase1_candidate_record_digest` is reproducible even though the Phase 1 model
 does not persist a per-record digest. It is the framed digest in domain
@@ -790,7 +800,7 @@ closed model and verifies its semantic digest before returning success.
 The input envelope's required `evidence_class` is copied to every projection
 and to the set. All members of one set must have the same class; mixing
 `normative_bookkeeping_fixture` and `reviewed_semantic_evidence` is a fatal
-input error. A downstream Phase 5 consumer MUST reject a set labelled
+input error. Any semantic evidence consumer MUST reject a set labelled
 `normative_bookkeeping_fixture`.
 
 Each projection inherits the relation-local pins for the Phase 1 plan and
@@ -930,8 +940,8 @@ and does not depend on serializer map ordering.
 The deterministic contract may use a small synthetic fixture to prove model,
 digest, ordering, and persistence behavior. Such a fixture MUST say
 `normative_bookkeeping_fixture`; it is not semantic truth and must not be used
-to claim correspondence, coverage, or a meaningful hybrid scenario. A later
-Phase 5 consumer MUST reject that class before generation/finalization.
+to claim correspondence, coverage, or a meaningful hybrid scenario. Any
+semantic evidence consumer MUST reject that class.
 
 ### 11.1 Target-scoped semantic pilot
 
@@ -941,16 +951,21 @@ complete-corpus claim. The current `generate` path is live, IBM-only filtered,
 has no `--plan` option, and sees only 20/49 Klarna risk cards and 38/112 NHS
 risk cards. Those limitations must be recorded in the pilot result.
 
-The current audit records these pilot blockers:
+The original audit recorded these pilot blockers:
 
 - old Klarna taxonomy envelopes join the corrected plan 0/94;
 - old NHS taxonomy envelopes join the corrected plan 0/27; and
-- corrected Klarna and NHS assessments have zero accepted coverage-bearing
+- corrected Klarna and NHS assessments had zero accepted coverage-bearing
   relations.
 
-The exact STPA lineage is clean (16/16 Klarna and 18/18 NHS), but that alone
-does not create a Phase 2 relation. Superseded envelopes cannot be adapted and
-synthetic all-confirmed evidence cannot pass this gate.
+The reviewed Klarna follow-up cleared the third blocker for two explicit
+targets and produced two combined projections. Its first target-scoped live
+attempt nevertheless generated and admitted 0/2 scenarios: both results were
+quarantined by the existing taxonomy generation boundary. The old-envelope
+join failures remain historical evidence that superseded envelopes cannot be
+adapted. The exact STPA lineage is clean (16/16 Klarna and 18/18 NHS), but that
+alone does not create or admit a hybrid scenario, and synthetic all-confirmed
+evidence cannot pass this gate.
 
 ### 11.2 Required typed pilot provenance
 
@@ -1117,8 +1132,9 @@ deterministic Phase 4 tasks:
 
 The bridge endpoint table, bridge evidence authority, one-relation
 cardinality, reconciliation authority, digest domains, fatal/exclusion
-boundary, evidence classes, and Phase 5 exclusion are approved contract
-choices, not unresolved implementation choices.
+boundary, and evidence classes are approved contract choices, not unresolved
+implementation choices. Using the projection to prescribe scenario generation
+is explicitly outside the approved synthesis path.
 
 ## 16. References and authority
 

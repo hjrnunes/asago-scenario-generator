@@ -12,9 +12,7 @@ Feature: SP3 — Run orchestration
 
   Background:
     Given the SP3 run module is importable
-    And an enriched threat set fixture for Klarna is available
-    And a control structure fixture for Klarna is available
-    And a loss analysis fixture for Klarna is available
+    And a strict SP3 orchestration fixture is available
 
   # SP3-RUN-01
   Scenario: SP3-RUN-01 full run produces scenario envelopes and eval scorecard

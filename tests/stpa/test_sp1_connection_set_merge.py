@@ -126,8 +126,16 @@ def _valid_control_element_set_dict() -> dict:
     """ControlElementSet with CAs, FBs, and CPs (Call 2b output)."""
     return {
         "control_actions": [
-            {"ca_id": "CA-1-1", "description": "Execute payment"},
-            {"ca_id": "CA-2-1", "description": "Send response"},
+            {
+                "ca_id": "CA-1-1",
+                "description": "Execute payment",
+                "target": {"type": "controlled_process", "id": "CP-1"},
+            },
+            {
+                "ca_id": "CA-2-1",
+                "description": "Send response",
+                "target": {"type": "responsibility", "id": "RESP-2"},
+            },
         ],
         "feedback_channels": [
             {

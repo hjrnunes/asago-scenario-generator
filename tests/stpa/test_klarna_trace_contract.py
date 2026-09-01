@@ -92,9 +92,20 @@ def _responsibility_response(*, include_refs: bool = True) -> dict:
 def _control_element_response() -> dict:
     """Return the minimum valid Call 2b response."""
     return {
-        "control_actions": [{"ca_id": "CA-1-1", "description": "Apply control"}],
+        "control_actions": [
+            {
+                "ca_id": "CA-1-1",
+                "description": "Apply control",
+                "target": {"type": "responsibility", "id": "RESP-1"},
+            }
+        ],
         "feedback_channels": [
-            {"fb_id": "FB-1-1", "description": "Control result", "updates": "PM-1-1"}
+            {
+                "fb_id": "FB-1-1",
+                "description": "Control result",
+                "updates": "PM-1-1",
+                "source": {"type": "responsibility", "id": "RESP-1"},
+            }
         ],
         "controlled_processes": [],
     }

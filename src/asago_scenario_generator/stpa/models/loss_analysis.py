@@ -6,8 +6,9 @@ SP1 output, consumed by SP1 Stage 2, SP2 Stage 3, and SP3 Stage 7.
 from __future__ import annotations
 
 from enum import Enum
+from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 from asago_scenario_generator.stpa.models._validation import check_duplicate_ids
 
@@ -23,7 +24,7 @@ class LossProvenance(str, Enum):
 class Loss(BaseModel):
     """A system-level loss (something stakeholders want to avoid)."""
 
-    loss_id: str  # L-1, L-2, ...
+    loss_id: str = Field(validation_alias=AliasChoices("loss_id", "id"))
     description: str
     provenance: LossProvenance
     source_risk_cards: list[str] = Field(
@@ -35,7 +36,7 @@ class Loss(BaseModel):
 class Hazard(BaseModel):
     """A system-level hazard (a condition that can lead to a loss)."""
 
-    hazard_id: str  # H-1, H-2, ...
+    hazard_id: str = Field(validation_alias=AliasChoices("hazard_id", "id"))
     description: str
     related_losses: list[str]  # loss_id refs
 
@@ -43,7 +44,7 @@ class Hazard(BaseModel):
 class SecurityConstraint(BaseModel):
     """A security constraint (a condition that prevents a hazard)."""
 
-    constraint_id: str  # SC-1, SC-2, ...
+    constraint_id: str = Field(validation_alias=AliasChoices("constraint_id", "id"))
     description: str
     related_hazards: list[str]  # hazard_id refs
 
@@ -61,6 +62,30 @@ class LossAnalysisDraft(BaseModel):
     use_case_losses: list[Loss] = Field(default_factory=list)
     hazards: list[Hazard] = Field(default_factory=list)
     security_constraints: list[SecurityConstraint] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def split_generic_losses_by_explicit_provenance(cls, value: Any) -> Any:
+        """Normalize a provider ``losses`` list without guessing provenance."""
+        if not isinstance(value, dict) or "losses" not in value:
+            return value
+        data = dict(value)
+        losses = data.pop("losses")
+        if not isinstance(losses, list):
+            return data
+        if not data.get("risk_card_losses"):
+            data["risk_card_losses"] = [
+                item
+                for item in losses
+                if isinstance(item, dict) and item.get("provenance") == "risk_card"
+            ]
+        if not data.get("use_case_losses"):
+            data["use_case_losses"] = [
+                item
+                for item in losses
+                if not isinstance(item, dict) or item.get("provenance") != "risk_card"
+            ]
+        return data
 
 
 class LossAnalysis(BaseModel):

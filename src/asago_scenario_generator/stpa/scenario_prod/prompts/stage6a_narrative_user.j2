@@ -2,6 +2,14 @@
 
 {{ scenario_spec_yaml }}
 
+{% if scenario_context_yaml %}
+---
+
+## Immutable Scenario Generation Context
+
+{{ scenario_context_yaml }}
+{% endif %}
+
 ---
 
 ## ICA
@@ -24,8 +32,19 @@
 {% include "_stage6_projection_alignment.j2" %}
 ## Your Task
 
-Write the 7-step attack narrative following the dialectic structure defined in the system prompt. Track the evolution of beliefs on both the attacker and defender sides. Be specific about which structural elements are involved at each step.
+Write the 7-step causal narrative following the dialectic structure defined in
+the system prompt. Track attacker and defender beliefs only when attacker
+access is supported; otherwise track the declared structural condition. Be
+specific about which structural elements are involved at each step.
 
 The narrative must realize the projection alignment table in table order. The final scenario step must state the exact ICA type and control action from the table's required reference.
+
+Use the immutable scenario context as the only source of ICA, action, hazard,
+loss, constraint, obligation, and capability meaning. Do not introduce a new
+primary causal factor beyond the factors declared in the scenario specification.
+When reachable_capabilities is empty, explain an existing structural
+condition instead of claiming that an attacker suppresses, poisons, injects,
+or manipulates a feedback channel. A bounded_assumption must be labelled as
+such and may not become structured evidence.
 
 Return the narrative as raw prose text.

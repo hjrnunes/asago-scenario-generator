@@ -58,6 +58,7 @@ def _valid_resp_set_dict() -> dict:
             {
                 "resp_id": "RESP-1",
                 "description": "Authorization controller",
+                "security_constraint_refs": ["SC-1"],
                 "responsibility_constraints": [
                     {"rc_id": "RC-1-1", "description": "Must confirm before action"},
                     {"rc_id": "RC-1-2", "description": "Must protect data"},
@@ -75,7 +76,11 @@ def _valid_control_element_set_dict() -> dict:
     """ControlElementSet matching _valid_resp_set_dict (RESP-1)."""
     return {
         "control_actions": [
-            {"ca_id": "CA-1-1", "description": "Execute action"}
+            {
+                "ca_id": "CA-1-1",
+                "description": "Execute action",
+                "target": {"type": "responsibility", "id": "RESP-1"},
+            }
         ],
         "feedback_channels": [
             {

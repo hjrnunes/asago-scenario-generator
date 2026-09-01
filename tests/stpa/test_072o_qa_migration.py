@@ -37,7 +37,7 @@ _STATIC_CHECKS = [
     "SP3-072o-static-03: Stage 6b system prompt contains security analyst framing",
     "SP3-072o-static-03: Stage 6c system prompt contains security analyst framing",
     "SP3-072o-static-04: Stage 5 system prompt contains task framing ('dual-BDI', 'scenario specification')",
-    "SP3-072o-static-04: Stage 6a system prompt contains task framing ('7-step attack narrative',)",
+    "SP3-072o-static-04: Stage 6a system prompt contains task framing ('7-step causal narrative',)",
     "SP3-072o-static-04: Stage 6b system prompt contains task framing ('attack tree',)",
     "SP3-072o-static-04: Stage 6c system prompt contains task framing ('Gherkin behavior specification',)",
     "SP3-072o-static-05: Stage 6c user prompt template contains valid_loss_ids variable",

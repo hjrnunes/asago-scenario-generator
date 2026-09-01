@@ -19,6 +19,6 @@ Feature: SP3 Stage 5 and Stage 6 system prompt opener terminology
     Examples:
       | id           | stage    | task_framing                      |
       | SP3-072o-01  | Stage 5  | dual-BDI                          |
-      | SP3-072o-02  | Stage 6a | 7-step attack narrative           |
+      | SP3-072o-02  | Stage 6a | 7-step causal narrative           |
       | SP3-072o-03  | Stage 6b | attack tree                       |
       | SP3-072o-04  | Stage 6c | Gherkin behavior specification    |

@@ -475,13 +475,13 @@ class TestCallLogOrdering:
         client.set_response_for(
             ResponsibilitySet,
             {"responsibilities": [
-                {"resp_id": "RESP-1", "description": "C1", "process_model_parts": [{"pm_id": "PM-1-1", "description": "S"}]}
+                {"resp_id": "RESP-1", "description": "C1", "security_constraint_refs": ["SC-1"], "process_model_parts": [{"pm_id": "PM-1-1", "description": "S"}]}
             ]},
         )
         client.set_response_for(
             ControlElementSet,
             {
-                "control_actions": [{"ca_id": "CA-1-1", "description": "A"}],
+                "control_actions": [{"ca_id": "CA-1-1", "description": "A", "target": {"type": "responsibility", "id": "RESP-1"}}],
                 "feedback_channels": [{"fb_id": "FB-1-1", "description": "F", "updates": "PM-1-1", "source": {"type": "responsibility", "id": "RESP-1"}}],
                 "controlled_processes": [],
             },
@@ -531,13 +531,13 @@ class TestCallLogOrdering:
         client.set_response_for(
             ResponsibilitySet,
             {"responsibilities": [
-                {"resp_id": "RESP-1", "description": "C1", "process_model_parts": [{"pm_id": "PM-1-1", "description": "S"}]}
+                {"resp_id": "RESP-1", "description": "C1", "security_constraint_refs": ["SC-1"], "process_model_parts": [{"pm_id": "PM-1-1", "description": "S"}]}
             ]},
         )
         client.set_response_for(
             ControlElementSet,
             {
-                "control_actions": [{"ca_id": "CA-1-1", "description": "A"}],
+                "control_actions": [{"ca_id": "CA-1-1", "description": "A", "target": {"type": "responsibility", "id": "RESP-1"}}],
                 "feedback_channels": [{"fb_id": "FB-1-1", "description": "F", "updates": "PM-1-1", "source": {"type": "responsibility", "id": "RESP-1"}}],
                 "controlled_processes": [],
             },

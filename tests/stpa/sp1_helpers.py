@@ -364,7 +364,13 @@ def valid_control_element_set_dict() -> dict:
     ``valid_responsibility_set_dict``.
     """
     return {
-        "control_actions": [{"ca_id": "CA-1-1", "description": "Execute action"}],
+        "control_actions": [
+            {
+                "ca_id": "CA-1-1",
+                "description": "Execute action",
+                "target": {"type": "responsibility", "id": "RESP-1"},
+            }
+        ],
         "feedback_channels": [
             {
                 "fb_id": "FB-1-1",

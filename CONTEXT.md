@@ -1,8 +1,8 @@
-# STPA–Taxonomy Closed-Loop Domain
+# STPA–Taxonomy Synthesis Domain
 
-This context names the domain concepts used when a taxonomy obligation asks an
-STPA analysis to revisit an earlier structural decision. It describes the
-meaning of the work, not how the repository implements or stores it.
+This context names the domain concepts used when taxonomy supplies systematic
+obligations to an STPA-led analysis. It describes the meaning of the work, not
+how the repository implements or stores it.
 
 ## Language
 
@@ -10,6 +10,36 @@ meaning of the work, not how the repository implements or stores it.
 A risk-specific requirement to account for one authoritative attack pattern
 for one capability context.
 _Avoid_: catalog item, coverage claim
+
+**Neutral obligation brief**:
+The non-prescriptive form of a taxonomy obligation presented to STPA as an
+analysis question, with exact provenance but no required attack sequence.
+_Avoid_: taxonomy scenario, execution template
+
+**Obligation consideration**:
+STPA's explicit examination of one taxonomy obligation against its own losses,
+hazards, constraints, and control structure.
+_Avoid_: mechanism implementation, automatic coverage
+
+**Upstream STPA gap**:
+A missing loss, hazard, constraint, or control-structure concept that prevents
+STPA from meaningfully analysing an otherwise applicable obligation.
+_Avoid_: uncovered attack, failed scenario
+
+**Bounded structural revision**:
+The single additive opportunity to address upstream STPA gaps while preserving
+the original analysis as history.
+_Avoid_: regeneration loop, taxonomy override
+
+**Obligation accounting**:
+The provisional record of what STPA did with every taxonomy obligation,
+separate from reviewed taxonomy correspondence and scenario realization.
+_Avoid_: coverage score, reconciliation result
+
+**Synthesis run**:
+The STPA-led workflow in which Phase 1 obligations are always considered and
+accounted for before ordinary STPA scenario production completes.
+_Avoid_: hybrid scenario generator, combined-projection run
 
 **Phase 2 assessment**:
 The reviewed account of structural STPA consideration and exact taxonomy
@@ -111,3 +141,28 @@ The content-addressed record binding one generation run, its inputs, model-call
 evidence, scenario artifacts, expected targets, outcomes, and exact join
 counts.
 _Avoid_: collection of caller assertions, raw prompt log
+
+**Prompt view**:
+The small, closed, stage-specific explanation of the exact concepts and choices
+a model needs for one decision. Opaque handles are accompanied by their local
+meaning; digests, paths, scores, raw mappings, and unrelated global records are
+excluded.
+_Avoid_: serialized artifact, context dump
+
+**Prompt preflight**:
+The deterministic check of a fully rendered prompt's contract, references,
+size, model context window, reserved output, and safety margin before any
+provider request is allowed.
+_Avoid_: provider error, silent truncation
+
+**Scenario generation context**:
+The immutable, target-scoped facts shared by Stage 5 and every Stage 6 renderer:
+the selected loss, hazard, governing constraint, unsafe action, obligation
+concern, and causal evidence.
+_Avoid_: global STPA dump, unrelated constraints
+
+**Scenario realization**:
+The separate account of whether a generated scenario retained an exact ICA and
+its obligation concern. It does not alter the structural obligation accounting
+decision.
+_Avoid_: correspondence coverage, ICA disposition

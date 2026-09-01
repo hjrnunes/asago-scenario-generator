@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
+
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
+from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ControlElementSet,
     CoordinationAnalysis,
@@ -301,9 +304,10 @@ def test_normalization_handles_non_mapping_children_and_links() -> None:
     assert payload["responsibilities"][0]["resp_id"] == "controller"
 
 
-def test_stage2_uses_tolerant_decode_then_normalizes_before_validation(
+def test_stage2_rejects_unowned_ids_before_normalization(
     tmp_path,
 ) -> None:
+    """Call 2b must not repair arbitrary IDs by response-array order."""
     client = MockLLMClient()
     client.set_response_for(
         RequirementSet,
@@ -408,27 +412,10 @@ def test_stage2_uses_tolerant_decode_then_normalizes_before_validation(
         },
     )
 
-    normalized, warnings = derive_control_structure(
-        llm_client=client,
-        use_case_text="Test",
-        loss_analysis=_make_loss_analysis(),
-        run_dir=tmp_path,
-    )
-
-    assert warnings == []
-    assert [resp.resp_id for resp in normalized.responsibilities] == [
-        "RESP-1",
-        "RESP-2",
-    ]
-    assert (
-        normalized.responsibilities[0].responsibility_constraints[0].rc_id == "RC-1-1"
-    )
-    assert (
-        normalized.responsibilities[1].responsibility_constraints[0].rc_id == "RC-2-1"
-    )
-    assert normalized.responsibilities[0].control_actions[0].ca_id == "CA-1-1"
-    assert normalized.responsibilities[1].feedback_channels[0].fb_id == "FB-2-1"
-    assert normalized.responsibilities[0].control_actions[0].target is not None
-    assert normalized.responsibilities[0].control_actions[0].target.id == "CP-2"
-    assert normalized.coordination_links[0].link_id == "CL-1"
-    assert normalized.coordination_links[0].shared_pm == "PM-1-1"
+    with pytest.raises(StageError, match="ca_id|owner|responsibility"):
+        derive_control_structure(
+            llm_client=client,
+            use_case_text="Test",
+            loss_analysis=_make_loss_analysis(),
+            run_dir=tmp_path,
+        )

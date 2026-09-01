@@ -1,0 +1,98 @@
+schema_version: stpa-prompt-contract-regressions-v1
+control_element_combined_action:
+  response:
+    control_actions:
+      - action: CA-1-1 Mask sensitive identifiers in payload
+        target:
+          type: controlled_process
+          id: CP-1
+    feedback_channels: []
+    controlled_processes:
+      - id: CP-1
+        description: Inbound payload preparation
+  expected_error: control action requires separate ca_id and description fields
+
+hazard_constraint_mismatch:
+  selected_hazard:
+    hazard_id: H-2
+    description: Integrity-critical clinical data is changed incorrectly
+  selected_constraint:
+    constraint_id: SC-1
+    description: Personally identifying values must match an approved pattern
+    related_hazards:
+      - H-1
+  expected_error: selected constraint does not govern selected hazard
+
+routing_duplicate_hazard_constraint:
+  source_run: output/runs/20260901-synthesis-nhs-prompt-contract-v3
+  captured_relationship_records:
+    hazards:
+      - hazard_id: H-2
+        description: An adversary uses prompt injection on the conversational AI chatbot to bypass language filtering or safety guardrails.
+        related_losses: [L-3]
+      - hazard_id: H-10
+        description: An adversary uses prompt injection on the conversational AI chatbot to bypass language filtering or safety guardrails.
+        related_losses: [L-3]
+    constraints:
+      - constraint_id: SC-2
+        description: "Implementation of robust input sanitization and safety guardrails on the chatbot to prevent prompt injection attacks. (related hazards: H-2)"
+        related_hazard_ids: [H-10]
+      - constraint_id: SC-10
+        description: "Implementation of robust input sanitization and safety guardrails on the chatbot to prevent prompt injection attacks. (related hazards: H-2)"
+        related_hazard_ids: [H-10]
+  captured_route:
+    hazard_ids: [H-2]
+    constraint_ids: [SC-2]
+  expected_allowed_pairs:
+    - constraint_id: SC-2
+      hazard_id: H-10
+    - constraint_id: SC-10
+      hazard_id: H-10
+  expected_error_fragment: "allowed hazard/constraint pair(s): SC-2 -> H-10"
+
+safeguard_as_ica:
+  slot_id: RESP-1:CA-1-2:NOT_PROVIDED
+  control_action: Block unsafe high-volume requests
+  returned_text: Implement rate limiting and volume controls on tool calls
+  expected_error: finding describes a safeguard rather than unsafe control behavior
+
+scenario_mechanism_drift:
+  source:
+    obligation_concern: Automated mass-action abuse through batch or bulk tooling
+    ica_text: The controller does not limit unsafe high-volume requests when one input can trigger many operations
+    hazard: Uncontrolled bulk operations disrupt the service
+    constraint: Bulk operations must remain within approved volume limits
+  returned:
+    attacker_desire: Bypass PII classification and masking
+    attacker_intention: Cause sensitive data to be treated as non-sensitive
+  expected_error: scenario changed the selected concern and unsafe action
+
+empty_reachability_feedback_manipulation:
+  source_run: output/runs/20260901-synthesis-nhs-prompt-contract-v3
+  scenario_id: SCN-002
+  reachable_capabilities: []
+  captured_stage5:
+    attacker_intention: Manipulate the input channel associated with FB-1-1 to prevent the delivery of new clinical guidelines.
+    causal_factor:
+      kind: PROCESS_MODEL_FLAW
+      source_id: PM-1-1
+      evidence: The process model remains static when the feedback channel is obstructed or manipulated.
+      capability_ref: CAP-AUDIT
+      access_ref: FB-1-1
+  expected_correction:
+    evidence_status: structural_failure
+    forbidden_claim: attacker suppresses or manipulates the feedback channel
+
+missing_causal_factors:
+  response:
+    defender_vulnerabilities:
+      PM-1-1: Classification can be influenced by adversarial input
+    attacker_bdi:
+      beliefs:
+        - The classifier can be influenced
+      desires:
+        - Trigger an unsafe action
+      intentions:
+        - Manipulate PM-1-1 through FB-1-1
+    causal_factors: []
+  expected_error: a generated causal scenario requires at least one causal factor

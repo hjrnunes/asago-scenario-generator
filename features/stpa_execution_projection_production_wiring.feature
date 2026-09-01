@@ -48,14 +48,12 @@ Feature: STPA post-SP3 execution projection production wiring
       | a feedback delay for FB-1-1 and an actuator anomaly for CA-1-1   | FB-1-1,CA-1-1 |
 
   # STPA-PROD-WIRING-04
-  Scenario: STPA-PROD-WIRING-04 explicit empty factors remain present and empty
+  Scenario: STPA-PROD-WIRING-04 successful Stage 5 output requires a causal factor
     Given Stage 5 explicitly returns an empty causal-factor list
     When the production STPA run performs Stage 5 assembly
-    And the production STPA run derives the projection and writes artifacts
-    Then the ScenarioSpec has a present causal_factors field containing an empty list
-    And the projection has present causal_factors, assertions, and steps fields containing empty lists
-    And the temporal action vector has no assertions and no steps
-    And no behavior is invented from RESP-1, PM-1-1, FB-1-1, or CA-1-1 being present in the control structure
+    Then Stage 5 fails with a non-empty causal_factors validation error
+    And no Stage 6 narrative, attack-tree, or Gherkin call is made for the invalid ScenarioSpec
+    And no projection artifact is written for the invalid scenario
 
   # STPA-PROD-WIRING-05
   Scenario: STPA-PROD-WIRING-05 one validated alignment reaches every Stage 6 call

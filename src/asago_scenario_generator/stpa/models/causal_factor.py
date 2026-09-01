@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 if TYPE_CHECKING:
     from asago_scenario_generator.stpa.models.control_structure import (
@@ -35,6 +35,69 @@ class CausalFactorKind(str, Enum):
     feedback_delay = "FEEDBACK_DELAY"
     sensor_anomaly = "SENSOR_ANOMALY"
     actuator_anomaly = "ACTUATOR_ANOMALY"
+
+
+class CausalEvidenceStatus(str, Enum):
+    """Evidence basis for one Stage 5 causal factor.
+
+    ``structural_failure`` describes a condition already present in the
+    selected control loop; it does not grant an attacker an access path.
+    ``reachable_capability`` is reserved for a capability and access path
+    explicitly retained by :class:`ScenarioGenerationContext`.
+    ``bounded_assumption`` makes an uncertain connection visible without
+    promoting it to structural or capability evidence.
+    """
+
+    structural_failure = "structural_failure"
+    reachable_capability = "reachable_capability"
+    bounded_assumption = "bounded_assumption"
+
+    @classmethod
+    def _missing_(cls, value: object) -> "CausalEvidenceStatus | None":
+        """Accept concise legacy spellings while serializing canonically."""
+        aliases = {
+            "structural": cls.structural_failure,
+            "reachable": cls.reachable_capability,
+            "assumption": cls.bounded_assumption,
+        }
+        return aliases.get(value)
+
+
+# The longer name is useful to callers that treat this as a factor-specific
+# enum.  Keep both names as aliases so the public contract remains easy to
+# discover without duplicating enum values.
+CausalFactorEvidenceStatus = CausalEvidenceStatus
+
+
+def validate_causal_evidence_shape(
+    status: CausalEvidenceStatus,
+    capability_refs: Sequence[str],
+    access_refs: Sequence[str],
+    bounded_assumption: str | None,
+) -> None:
+    """Validate the evidence fields shared by drafts and compiled factors."""
+    if status is CausalEvidenceStatus.reachable_capability:
+        if not capability_refs:
+            raise ValueError(
+                "reachable_capability causal factor requires capability_refs"
+            )
+        if not access_refs:
+            raise ValueError("reachable_capability causal factor requires access_refs")
+    elif capability_refs or access_refs:
+        raise ValueError(
+            "capability_refs and access_refs require "
+            "reachable_capability evidence status"
+        )
+
+    if status is CausalEvidenceStatus.bounded_assumption:
+        if not bounded_assumption or not bounded_assumption.strip():
+            raise ValueError(
+                "bounded_assumption evidence requires bounded_assumption text"
+            )
+    elif bounded_assumption is not None:
+        raise ValueError(
+            "bounded_assumption text requires bounded_assumption evidence status"
+        )
 
 
 class TemporalPredicate(str, Enum):
@@ -145,10 +208,16 @@ class CausalFactor(BaseModel):
     from it deterministically at projection time.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     kind: CausalFactorKind
     source_id: str = Field(min_length=1)
     description: str = Field(min_length=1)
     declared_timing: str | None = None
+    evidence_status: CausalEvidenceStatus = CausalEvidenceStatus.structural_failure
+    capability_refs: tuple[str, ...] = ()
+    access_refs: tuple[str, ...] = ()
+    bounded_assumption: str | None = None
 
     @model_validator(mode="after")
     def validate_source_namespace(self) -> CausalFactor:
@@ -160,6 +229,17 @@ class CausalFactor(BaseModel):
                 f"{namespace_for(self.kind)} namespace; it is not a known "
                 f"{namespace_for(self.kind)} identifier."
             )
+        return self
+
+    @model_validator(mode="after")
+    def validate_evidence_shape(self) -> CausalFactor:
+        """Keep evidence basis and supporting references internally coherent."""
+        validate_causal_evidence_shape(
+            self.evidence_status,
+            self.capability_refs,
+            self.access_refs,
+            self.bounded_assumption,
+        )
         return self
 
 
@@ -213,6 +293,8 @@ def validate_factor_sources(
 __all__ = [
     "CausalFactor",
     "CausalFactorBehavior",
+    "CausalEvidenceStatus",
+    "CausalFactorEvidenceStatus",
     "CausalFactorKind",
     "ScenarioStepKind",
     "TemporalPredicate",
@@ -222,5 +304,6 @@ __all__ = [
     "predicate_for",
     "step_kind_for",
     "step_text_for",
+    "validate_causal_evidence_shape",
     "validate_factor_sources",
 ]

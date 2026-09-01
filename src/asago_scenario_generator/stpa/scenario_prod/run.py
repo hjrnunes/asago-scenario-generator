@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import yaml
 
@@ -26,7 +26,10 @@ from asago_scenario_generator.stpa.infra.llm import (
     effective_model_config,
     effective_temperature,
 )
-from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call_raw
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    safe_llm_call,
+    safe_llm_call_raw,
+)
 from asago_scenario_generator.stpa.infra.manifest_helpers import (
     count_calls_by_stage,
     hash_model,
@@ -45,17 +48,21 @@ from asago_scenario_generator.stpa.models.scenario_envelope import (
     ScenarioEnvelope,
 )
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
+from asago_scenario_generator.stpa.models.scenario_context import (
+    ScenarioGenerationContext,
+)
 
 from ._constants import PROMPTS_DIR
 from .assembly import assemble_envelope
 from .attack_tree import build_attack_tree_prompts, parse_attack_tree
 from .bdi_generation import (
     assemble_scenario_spec,
-    generate_bdi,
+    generate_bdi_for_context,
     is_bdi_length_retry_exhausted,
     parse_ica_slot_id,
     populate_defender_bdi,
 )
+from .context import build_scenario_generation_context
 from .coverage import compute_coverage_gaps, write_coverage_gaps
 from .eval_metrics import compute_eval_scorecard, write_eval_scorecard
 from .gherkin import build_gherkin_prompts, find_security_constraint, parse_gherkin_spec
@@ -125,6 +132,7 @@ def run_sp3(
     capability_profile: CapabilityProfile | None = None,
     max_workers: int = 1,
     temperature: float | None = None,
+    scenario_contexts: Mapping[str, ScenarioGenerationContext] | None = None,
 ) -> SP3RunResult:
     """Run the full SP3 pipeline: Stage 5 → Stage 6 → Stage 7.
 
@@ -141,6 +149,10 @@ def run_sp3(
         max_workers: Maximum parallel workers for LLM calls.
         temperature: Explicit LLM temperature override. When omitted, use the
             resolved client temperature (default 0.4).
+        scenario_contexts: Optional exact contexts keyed by ICA ID. This is the
+            inward synthesis adapter for routed obligations and proven reachable
+            capabilities; ordinary standalone runs build the same closed context
+            from their SP1/SP2 authority.
 
     Returns:
         An :class:`SP3RunResult` with artifacts and diagnostics.
@@ -167,7 +179,9 @@ def run_sp3(
             loader,
             temperature,
             stage_errors,
+            loss_analysis=loss_analysis,
             capability_profile=capability_profile,
+            scenario_contexts=scenario_contexts,
         )
         if stage5_result.scenario_spec is not None:
             scenario_specs.append(stage5_result.scenario_spec)
@@ -277,7 +291,9 @@ def _run_stage5_for_threat(
     temperature: float,
     stage_errors: list[str],
     *,
+    loss_analysis: LossAnalysis,
     capability_profile: CapabilityProfile | None = None,
+    scenario_contexts: Mapping[str, ScenarioGenerationContext] | None = None,
 ) -> _Stage5ThreatResult:
     """Run Stage 5 BDI generation for a single threat."""
     slot_parts = parse_ica_slot_id(threat.ica_slot_id)
@@ -289,14 +305,23 @@ def _run_stage5_for_threat(
         stage_errors.append(f"Stage 5: {e}")
         return _Stage5ThreatResult(None)
 
-    llm_result, error = generate_bdi(
+    try:
+        context = _scenario_context_for_threat(
+            threat,
+            control_structure,
+            loss_analysis,
+            scenario_index,
+            scenario_contexts,
+        )
+    except ValueError as e:
+        stage_errors.append(f"Stage 5 context: {e}")
+        return _Stage5ThreatResult(None)
+
+    llm_result, error = generate_bdi_for_context(
         llm_client,
-        defender_bdi,
-        threat,
-        control_structure,
+        context,
         run_dir,
         loader=loader,
-        capability_profile=capability_profile,
         temperature=temperature,
     )
 
@@ -309,7 +334,12 @@ def _run_stage5_for_threat(
 
     try:
         spec = assemble_scenario_spec(
-            defender_bdi, llm_result, threat, control_structure, scenario_index
+            defender_bdi,
+            llm_result,
+            threat,
+            control_structure,
+            scenario_index,
+            scenario_context=context,
         )
     except ValueError as e:
         # Invalid causal-factor references (or any other assembly-level
@@ -317,8 +347,40 @@ def _run_stage5_for_threat(
         # attack-tree, or Gherkin call is made and no artifact is written.
         stage_errors.append(f"Stage 5: {e}")
         return _Stage5ThreatResult(None)
+    prior_error_count = len(stage_errors)
     _validate_stage5_spec(spec, control_structure, stage_errors)
+    if len(stage_errors) != prior_error_count:
+        return _Stage5ThreatResult(None)
     return _Stage5ThreatResult(spec)
+
+
+def _scenario_context_for_threat(
+    threat,
+    control_structure: ControlStructure,
+    loss_analysis: LossAnalysis,
+    scenario_index: int,
+    supplied: Mapping[str, ScenarioGenerationContext] | None,
+) -> ScenarioGenerationContext:
+    """Use an exact supplied context or build the standalone STPA adapter view."""
+    context_key = threat.ica_id or threat.ica_slot_id
+    if supplied is not None and context_key in supplied:
+        context = supplied[context_key]
+    else:
+        context = build_scenario_generation_context(
+            threat,
+            control_structure,
+            loss_analysis,
+            scenario_id=f"SCN-{scenario_index + 1:03d}",
+        )
+    identity = context.scenario_identity
+    if (
+        identity.scenario_id != f"SCN-{scenario_index + 1:03d}"
+        or identity.ica_slot_id != threat.ica_slot_id
+        or identity.ica_id != threat.ica_id
+        or context.ica.exact_ica_text != threat.ica_text
+    ):
+        raise ValueError("supplied scenario context does not match selected threat")
+    return context
 
 
 def _validate_stage5_spec(
@@ -334,6 +396,21 @@ def _validate_stage5_spec(
         ),
         stage_errors,
     )
+    context = spec.scenario_context
+    if context is not None:
+        path = context.target_control_path
+        allowed_refs = {
+            *(item.element_id for item in path.process_model_parts),
+            *(item.element_id for item in path.feedback),
+            path.control_action.action_id,
+            *(item.action_id for item in path.related_control_actions),
+        }
+        for intention in spec.attacker_bdi.intentions:
+            if not any(reference in intention for reference in allowed_refs):
+                stage_errors.append(
+                    "Attacker BDI intention has no exact structural reference "
+                    f"from the selected scenario context: {intention!r}"
+                )
 
 
 def _run_stage6_for_spec(
@@ -370,14 +447,18 @@ def _run_stage6_for_spec(
     projection_doc = canonical_projection_data(projection)
     projection_alignment = render_projection_alignment_table(projection_doc)
 
-    prompts = _build_stage6_prompts(
-        spec,
-        control_structure,
-        loss_analysis,
-        loader,
-        projection_alignment=projection_alignment,
-        capability_profile=capability_profile,
-    )
+    try:
+        prompts = _build_stage6_prompts(
+            spec,
+            control_structure,
+            loss_analysis,
+            loader,
+            projection_alignment=projection_alignment,
+            capability_profile=capability_profile,
+        )
+    except ValueError as e:
+        stage_errors.append(f"Stage 6 context failed for {spec.scenario_id}: {e}")
+        return None, None
 
     results = _parallel_stage6_calls(
         llm_client=llm_client,
@@ -387,6 +468,7 @@ def _run_stage6_for_spec(
         max_workers=max_workers,
     )
 
+    prior_error_count = len(stage_errors)
     _collect_stage6_errors(spec.scenario_id, results, stage_errors)
 
     narrative_text, attack_tree, gherkin_spec, gherkin_raw = _parse_stage6_results(
@@ -402,6 +484,8 @@ def _run_stage6_for_spec(
         spec,
         stage_errors,
     )
+    if len(stage_errors) != prior_error_count:
+        return None, None
 
     envelope = assemble_envelope(
         scenario_id=spec.scenario_id,
@@ -569,6 +653,35 @@ def _parallel_stage6_calls(
         step: str, prompt_pair: tuple[str, str]
     ) -> tuple[str | None, str | None]:
         sys_prompt, user_prompt = prompt_pair
+        if step == "gherkin":
+            spec, _result, error = safe_llm_call(
+                llm_client=llm_client,
+                system_prompt=sys_prompt,
+                user_prompt=user_prompt,
+                response_format=GherkinSpec,
+                run_dir=run_dir,
+                stage="stage_6",
+                step=step,
+                temperature=temperature,
+                validation_retries=1,
+                validation_retry_feedback=(
+                    " Return one closed GherkinSpec object. Every list item "
+                    "must be a separate JSON string; do not emit YAML-only "
+                    "continuation syntax."
+                ),
+                result_parser=_parse_gherkin_result,
+                result_validator=_validate_gherkin_result,
+            )
+            if error is not None or spec is None:
+                return None, error or "Gherkin provider returned no result"
+            return (
+                yaml.safe_dump(
+                    spec.model_dump(mode="json"),
+                    sort_keys=False,
+                    allow_unicode=True,
+                ),
+                None,
+            )
         text, _result, error = safe_llm_call_raw(
             llm_client=llm_client,
             system_prompt=sys_prompt,
@@ -591,6 +704,30 @@ def _parallel_stage6_calls(
             return {step: f.result() for step, f in futures.items()}
     else:
         return {step: _run_call(step, pair) for step, pair in call_specs}
+
+
+def _parse_gherkin_result(result: Any) -> GherkinSpec:
+    """Accept a closed model, mapping, JSON, or legacy YAML into one draft."""
+    content = result.content
+    if isinstance(content, GherkinSpec):
+        return content
+    if isinstance(content, dict):
+        return GherkinSpec.model_validate(content)
+    if isinstance(content, str):
+        parsed = parse_gherkin_spec(content)
+        if parsed is not None:
+            return parsed
+        raise ValueError("response is not a valid GherkinSpec object")
+    raise TypeError(
+        "Gherkin response must be a GherkinSpec, mapping, JSON, or YAML object"
+    )
+
+
+def _validate_gherkin_result(value: GherkinSpec) -> None:
+    """Raise the exact structural errors so the bounded retry can correct them."""
+    validation = validate_gherkin_structure(value)
+    if not validation.passed:
+        raise ValueError("; ".join(validation.errors))
 
 
 def _run_stage7_validations(

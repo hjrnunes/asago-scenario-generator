@@ -27,7 +27,9 @@ from asago_scenario_generator.stpa.models.enriched_threat_set import (
     StructuralThreat,
 )
 from asago_scenario_generator.stpa.models.causal_factor import (
+    CausalEvidenceStatus,
     CausalFactor,
+    CausalFactorEvidenceStatus,
     CausalFactorKind,
     ScenarioStepKind,
     TemporalPredicate,
@@ -78,6 +80,21 @@ from asago_scenario_generator.stpa.models.scenario_envelope import (
     ScenarioEnvelope,
     SystemContext,
 )
+from asago_scenario_generator.stpa.models.scenario_context import (
+    ReachableCapability,
+    ScenarioCatalogContext,
+    ScenarioConstraint,
+    ScenarioCoordinationPath,
+    ScenarioControlPath,
+    ScenarioGenerationContext,
+    ScenarioHazard,
+    ScenarioICAContext,
+    ScenarioIdentity,
+    ScenarioLoss,
+    ScenarioObligationConsideration,
+    ScenarioSourcePin,
+    validate_factor_evidence,
+)
 from asago_scenario_generator.stpa.models.scenario_spec import (
     AttackerBDI,
     DefenderBDI,
@@ -119,8 +136,23 @@ __all__ = [
     "CoverageAnalysis",
     "EnrichedThreatSet",
     "StructuralThreat",
+    # scenario_context
+    "ReachableCapability",
+    "ScenarioCatalogContext",
+    "ScenarioConstraint",
+    "ScenarioCoordinationPath",
+    "ScenarioControlPath",
+    "ScenarioGenerationContext",
+    "ScenarioHazard",
+    "ScenarioICAContext",
+    "ScenarioIdentity",
+    "ScenarioLoss",
+    "ScenarioObligationConsideration",
+    "ScenarioSourcePin",
     # causal_factor
+    "CausalEvidenceStatus",
     "CausalFactor",
+    "CausalFactorEvidenceStatus",
     "CausalFactorKind",
     "ScenarioStepKind",
     "TemporalPredicate",
@@ -128,6 +160,7 @@ __all__ = [
     "predicate_for",
     "step_kind_for",
     "step_text_for",
+    "validate_factor_evidence",
     "validate_factor_sources",
     # execution_envelope / temporal_constraints
     "AbsenceConstraint",

@@ -32,7 +32,9 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
 from asago_scenario_generator.stpa.models.scenario_envelope import ScenarioEnvelope
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     BDIGenerationResult,
+    CausalFactorDeclaration,
 )
+from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
 from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
 
 from tests.stpa.sp1_helpers import MockLLMClient, read_calls_jsonl
@@ -134,6 +136,13 @@ def _setup_mock_client(num_threats: int = 2) -> MockLLMClient:
         bdi_responses.append(
             BDIGenerationResult(
                 defender_vulnerabilities={"PM-1-1": f"vulnerability {i + 1}"},
+                causal_factors=[
+                    CausalFactorDeclaration(
+                        kind=CausalFactorKind.process_model_flaw,
+                        source_id="PM-1-1",
+                        evidence=f"The selected state can be stale ({i + 1}).",
+                    )
+                ],
                 attacker_bdi=__import__(
                     "asago_scenario_generator.stpa.models.scenario_spec",
                     fromlist=["AttackerBDI"],
@@ -222,6 +231,40 @@ class TestFullRun:
             )
             assert len(result.scenario_envelopes) == 1
             assert run_dir.exists()
+
+    def test_public_run_persists_and_reuses_exact_scenario_context(self, tmp_path):
+        client = _setup_mock_client(1)
+        run_dir = tmp_path / "run"
+
+        result = run_sp3(
+            llm_client=client,
+            enriched_threat_set=_make_ets(num_threats=1),
+            control_structure=_make_cs(),
+            loss_analysis=_make_loss_analysis(),
+            run_dir=run_dir,
+        )
+
+        context = result.scenario_specs[0].scenario_context
+        assert context is not None
+        stage5 = [
+            call for call in client.calls if call.response_format is BDIGenerationResult
+        ]
+        stage6 = [
+            call
+            for call in client.calls
+            if call.response_format is not BDIGenerationResult
+        ]
+        assert len(stage5) == 1
+        assert len(stage6) == 3
+        assert context.context_digest in stage5[0].user_prompt
+        assert all(context.context_digest in call.user_prompt for call in stage6)
+        persisted = yaml.safe_load(
+            (run_dir / "scenarios/SCN-001.yaml").read_text(encoding="utf-8")
+        )
+        assert (
+            persisted["scenario_spec"]["scenario_context"]["context_digest"]
+            == context.context_digest
+        )
 
     def test_resolved_client_temperature_is_used_and_recorded(self):
         client = _setup_mock_client(1)
@@ -605,13 +648,12 @@ class TestErrorPaths:
 
         assert client.call_count == 2
         assert any(
-            "aborted 2 remaining threats" in error
-            and "structured-output" in error
+            "aborted 2 remaining threats" in error and "structured-output" in error
             for error in result.stage_errors
         )
 
-    def test_stage6_llm_failure_uses_fallbacks(self):
-        """Stage 6 LLM failures produce envelopes with fallback empty artifacts."""
+    def test_stage6_llm_failure_does_not_publish_contextual_scenario(self):
+        """Stage 6 failures retain diagnostics without publishing empty artifacts."""
         cs = _make_cs()
         la = _make_loss_analysis()
         ets = _make_ets(num_threats=1)
@@ -620,13 +662,20 @@ class TestErrorPaths:
         # Stage 5 BDI response
         bdi = BDIGenerationResult(
             defender_vulnerabilities={"PM-1-1": "vuln"},
+            causal_factors=[
+                CausalFactorDeclaration(
+                    kind=CausalFactorKind.process_model_flaw,
+                    source_id="PM-1-1",
+                    evidence="The selected state can be stale.",
+                )
+            ],
             attacker_bdi=__import__(
                 "asago_scenario_generator.stpa.models.scenario_spec",
                 fromlist=["AttackerBDI"],
             ).AttackerBDI(
                 beliefs=["b"],
                 desires=["d"],
-                intentions=["i"],
+                intentions=["Manipulate PM-1-1."],
             ),
         )
         client.set_response_queue([bdi])
@@ -642,10 +691,112 @@ class TestErrorPaths:
                 loss_analysis=la,
                 run_dir=Path(tmpdir),
             )
-            assert len(result.scenario_envelopes) == 1
-            env = result.scenario_envelopes[0]
-            assert env.narrative == ""
-            assert env.attack_tree == {"root": "", "branches": [], "leaves": []}
-            assert env.gherkin_raw == ""
-            assert env.gherkin_spec is not None
+            assert result.scenario_envelopes == []
             assert any("Stage 6" in e for e in result.stage_errors)
+
+    def test_stage5_validation_failure_does_not_reach_stage6(self):
+        """A structurally invalid Stage 5 result remains an unresolved scenario."""
+        cs = _make_cs()
+        la = _make_loss_analysis()
+        ets = _make_ets(num_threats=1)
+        client = MockLLMClient()
+        client.set_response_queue(
+            [
+                BDIGenerationResult(
+                    defender_vulnerabilities={"PM-1-1": "vuln"},
+                    causal_factors=[
+                        CausalFactorDeclaration(
+                            kind=CausalFactorKind.process_model_flaw,
+                            source_id="PM-1-1",
+                            evidence="The selected state can be stale.",
+                        )
+                    ],
+                    attacker_bdi=__import__(
+                        "asago_scenario_generator.stpa.models.scenario_spec",
+                        fromlist=["AttackerBDI"],
+                    ).AttackerBDI(
+                        beliefs=["b"],
+                        desires=["d"],
+                        intentions=["No structural reference is supplied."],
+                    ),
+                )
+            ]
+        )
+
+        with TemporaryDirectory() as tmpdir:
+            result = run_sp3(
+                llm_client=client,
+                enriched_threat_set=ets,
+                control_structure=cs,
+                loss_analysis=la,
+                run_dir=Path(tmpdir),
+            )
+
+        assert result.scenario_envelopes == []
+        assert client.call_count == 1
+        assert any("Attacker BDI" in error for error in result.stage_errors)
+
+    def test_malformed_gherkin_gets_one_schema_correction(self):
+        """The contextual Gherkin call repairs malformed structured output once."""
+        cs = _make_cs()
+        la = _make_loss_analysis()
+        ets = _make_ets(num_threats=1)
+        client = MockLLMClient()
+        client.set_response_queue(
+            [
+                BDIGenerationResult(
+                    defender_vulnerabilities={"PM-1-1": "vuln"},
+                    causal_factors=[
+                        CausalFactorDeclaration(
+                            kind=CausalFactorKind.process_model_flaw,
+                            source_id="PM-1-1",
+                            evidence="The selected state can be stale.",
+                        )
+                    ],
+                    attacker_bdi=__import__(
+                        "asago_scenario_generator.stpa.models.scenario_spec",
+                        fromlist=["AttackerBDI"],
+                    ).AttackerBDI(
+                        beliefs=["b"],
+                        desires=["d"],
+                        intentions=["Manipulate PM-1-1."],
+                    ),
+                ),
+                "A seven-step narrative retaining PM-1-1 and CA-1-1.",
+                '{"root":"Induce ICA NOT_PROVIDED on CA-1-1","branches":'
+                '[{"category":"controller_side","label":"PM-1-1",'
+                '"children":[]},{"category":"path_side","label":"CA-1-1",'
+                '"children":[]}],"leaves":["PM-1-1","CA-1-1"]}',
+                "given:\n  - Given PM-1-1 is active\n    And malformed",
+                __import__(
+                    "asago_scenario_generator.stpa.models.scenario_envelope",
+                    fromlist=["GherkinSpec"],
+                ).GherkinSpec(
+                    feature="Safe operation",
+                    scenario="Unsafe action",
+                    given=["Given PM-1-1 is active"],
+                    when=["When the selected state becomes stale"],
+                    then_expected=["Then the system should remain safe"],
+                    then_actual=[
+                        "But the system performs NOT_PROVIDED CA-1-1",
+                        "And loss L-1 is realized",
+                    ],
+                ),
+            ]
+        )
+
+        with TemporaryDirectory() as tmpdir:
+            result = run_sp3(
+                llm_client=client,
+                enriched_threat_set=ets,
+                control_structure=cs,
+                loss_analysis=la,
+                run_dir=Path(tmpdir),
+                max_workers=1,
+            )
+
+        assert len(result.scenario_envelopes) == 1
+        assert client.call_count == 5
+        correction = client.calls[-1].user_prompt
+        assert "Exact validation error from the prior response" in correction
+        assert '"then_actual"' in correction

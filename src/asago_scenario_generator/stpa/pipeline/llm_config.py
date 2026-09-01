@@ -38,6 +38,8 @@ def resolve_llm_client_from_profile(
         base_url=profile.get("base_url"),
         api_key=profile.get("api_key"),
         model=profile.get("model"),
+        context_window=profile.get("context_window"),
+        safety_margin=profile.get("safety_margin"),
         max_completion_tokens=profile.get("max_completion_tokens"),
         temperature=profile.get("temperature"),
         top_p=profile.get("top_p"),

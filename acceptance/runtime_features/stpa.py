@@ -14,8 +14,8 @@ export with round-trip forgery rejection.
 Also implements ``features/stpa_execution_projection_production_wiring.feature``
 (STPA-PROD-WIRING-01 through STPA-PROD-WIRING-06): Stage 5 declared
 evidence-backed causal factors validated against the control structure,
-inference-free deterministic ``project_execution``, explicit present-
-empty factors, one shared Stage 6 alignment table, and canonical
+inference-free deterministic ``project_execution``, fail-closed empty
+successful output, one shared Stage 6 alignment table, and canonical
 projection artifacts written beside the legacy scenario YAML and Gherkin
 feature.
 
@@ -2245,6 +2245,21 @@ def _h_stage5_fails_ref_validation(
     return True, ""
 
 
+def _h_stage5_fails_empty_factors(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Then: an empty successful Stage 5 response fails closed."""
+    error = getattr(world, "validation_error", None)
+    if error is None:
+        return False, "No Stage 5 validation error was recorded"
+    message = str(error)
+    if "causal_factors" not in message or "at least 1" not in message:
+        return False, f"Recorded error is not the non-empty factor error: {message}"
+    if getattr(world, "stpa_scenario_spec", None) is not None:
+        return False, "Stage 5 published a ScenarioSpec with no causal factor"
+    return True, ""
+
+
 def _h_no_stage6_calls_for_invalid(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -4084,6 +4099,10 @@ def register(api: object) -> None:
     api.register(
         r"Stage 5 fails with a causal-factor reference validation error",
         _h_stage5_fails_ref_validation,
+    )
+    api.register(
+        r"Stage 5 fails with a non-empty causal_factors validation error",
+        _h_stage5_fails_empty_factors,
     )
     api.register(
         r"no Stage 6 narrative, attack-tree, or Gherkin call is made for "

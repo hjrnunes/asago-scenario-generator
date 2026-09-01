@@ -12,6 +12,7 @@ from asago_scenario_generator.stpa.system_model.control_structure import (  # no
     RequirementSet,
     ResponsibilitySet,
     derive_control_structure,
+    parse_control_element_set_response,
 )
 from asago_scenario_generator.stpa.system_model.id_normalization import (  # noqa: E402
     ControlStructureNormalization,
@@ -43,6 +44,7 @@ __all__ = [
     "RequirementSet",
     "ResponsibilitySet",
     "ControlElementSet",
+    "parse_control_element_set_response",
     "CoordinationAnalysis",
     "ControlStructureNormalization",
     "CriticFindings",

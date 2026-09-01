@@ -75,7 +75,9 @@ class TestHasLossIdRestriction:
         assert _072o_has_loss_id_restriction("do not use H-* IDs") is True
 
     def test_rejects_plain_text(self):
-        assert _072o_has_loss_id_restriction("ordinary text without restrictions") is False
+        assert (
+            _072o_has_loss_id_restriction("ordinary text without restrictions") is False
+        )
 
     def test_rejects_empty(self):
         assert _072o_has_loss_id_restriction("") is False
@@ -255,7 +257,9 @@ class TestTemplateNotContainsVar:
             world, "the Stage 5 user prompt template source is inspected", {}
         )
         ok, _msg = _h_072o_template_not_contains_var(
-            world, 'the template does not contain the variable "nonexistent_var_xyz"', {}
+            world,
+            'the template does not contain the variable "nonexistent_var_xyz"',
+            {},
         )
         assert ok is True
 
@@ -278,21 +282,21 @@ class TestTemplateNotContainsVar:
 class TestSysNotContainsString:
     def test_passes_when_string_absent(self):
         world = World()
-        _h_072o_render_system_prompt(
-            world, "the Stage 5 system prompt is rendered", {}
-        )
+        _h_072o_render_system_prompt(world, "the Stage 5 system prompt is rendered", {})
         ok, _msg = _h_072o_sys_not_contains_string(
-            world, 'the Stage 5 system prompt does not contain the string "STPA-Sec"', {}
+            world,
+            'the Stage 5 system prompt does not contain the string "STPA-Sec"',
+            {},
         )
         assert ok is True
 
     def test_fails_when_string_present(self):
         world = World()
-        _h_072o_render_system_prompt(
-            world, "the Stage 5 system prompt is rendered", {}
-        )
+        _h_072o_render_system_prompt(world, "the Stage 5 system prompt is rendered", {})
         ok, msg = _h_072o_sys_not_contains_string(
-            world, 'the Stage 5 system prompt does not contain the string "security"', {}
+            world,
+            'the Stage 5 system prompt does not contain the string "security"',
+            {},
         )
         assert ok is False
         assert "should not contain" in msg
@@ -304,19 +308,17 @@ class TestSysNotContainsString:
 class TestSysContainsPhrase:
     def test_passes_when_phrase_present(self):
         world = World()
-        _h_072o_render_system_prompt(
-            world, "the Stage 5 system prompt is rendered", {}
-        )
+        _h_072o_render_system_prompt(world, "the Stage 5 system prompt is rendered", {})
         ok, _msg = _h_072o_sys_contains_phrase(
-            world, 'the Stage 5 system prompt contains the phrase "security analyst"', {}
+            world,
+            'the Stage 5 system prompt contains the phrase "security analyst"',
+            {},
         )
         assert ok is True
 
     def test_fails_when_phrase_absent(self):
         world = World()
-        _h_072o_render_system_prompt(
-            world, "the Stage 5 system prompt is rendered", {}
-        )
+        _h_072o_render_system_prompt(world, "the Stage 5 system prompt is rendered", {})
         ok, msg = _h_072o_sys_contains_phrase(
             world, 'the Stage 5 system prompt contains the phrase "STPA-Sec"', {}
         )
@@ -334,7 +336,9 @@ class TestSysContainsTaskFraming:
             world, "the Stage 6a system prompt is rendered", {}
         )
         ok, _msg = _h_072o_sys_contains_task_framing(
-            world, 'the Stage 6a system prompt contains the task framing phrase "7-step attack narrative"', {}
+            world,
+            'the Stage 6a system prompt contains the task framing phrase "7-step causal narrative"',
+            {},
         )
         assert ok is True
 
@@ -344,7 +348,9 @@ class TestSysContainsTaskFraming:
             world, "the Stage 6a system prompt is rendered", {}
         )
         ok, msg = _h_072o_sys_contains_task_framing(
-            world, 'the Stage 6a system prompt contains the task framing phrase "STPA-Sec"', {}
+            world,
+            'the Stage 6a system prompt contains the task framing phrase "STPA-Sec"',
+            {},
         )
         assert ok is False
         assert "does not contain" in msg
@@ -571,7 +577,9 @@ class TestGherkinNoHazardHeading:
         world = World()
         world.sp3_user_prompt = "some text with Valid Hazard IDs heading"
         ok, msg = _h_072o_gherkin_no_hazard_heading(
-            world, 'the Stage 6c user prompt does not contain the heading "Valid Hazard IDs"', {}
+            world,
+            'the Stage 6c user prompt does not contain the heading "Valid Hazard IDs"',
+            {},
         )
         assert ok is False
         assert "should not contain" in msg

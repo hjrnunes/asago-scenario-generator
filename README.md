@@ -55,6 +55,13 @@ Requests have a 300-second application default deadline. Named-profile
 The SDK's implicit retries are disabled so retry decisions remain bounded and
 visible in pipeline evidence.
 
+Every profile used for STPA synthesis must also declare `context_window` and
+`max_completion_tokens`; `safety_margin` is optional and defaults to the
+greater of 10 percent of the context window or 1,024 tokens. The fully rendered
+system and user prompts are measured before dispatch. A prompt that does not
+fit is rejected locally, and multi-obligation routing batches are split in a
+stable order instead of truncating domain context.
+
 Gemma 4 deployments used for structured generation need a compact JSON grammar
 configuration to avoid valid-prefix responses stalling on whitespace. See the
 [Gemma 4 vLLM runtime notes](docs/operations/gemma4-vllm-structured-output.md)
@@ -141,6 +148,42 @@ Useful companion commands include `projection-preflight`, `plan-obligations`,
 `qualify-catalog`, `validate-catalog-qualification`, and
 `validate-stpa-projection`. Run `asago-scenario-generator --help` for the
 complete interface.
+
+### Obligation-aware synthesis
+
+`synthesis-run` performs one provisional, obligation-aware pass while leaving
+the existing `generate` and `stpa-run` commands unchanged. It requires the
+use case, the complete reviewed risk extraction, explicit qualification facts,
+an output directory, and either a reviewed risk-to-OWASP-LLM SSSOM file or a
+typed taxonomy-input snapshot:
+
+```bash
+asago-scenario-generator synthesis-run \
+  --use-case @use-case.txt \
+  --risk-extraction risk-extraction.json \
+  --qualification-facts qualification-facts.yaml \
+  --taxonomy-inputs obligation-inputs.yaml \
+  --output-dir output/synthesis \
+  --sp1-profile <profile-name> --sp2-profile <profile-name> \
+  --sp3-profile <profile-name>
+```
+
+The run prepares one capability/fact snapshot, always executes Phase 1
+planning, runs the ordinary SP1 baseline, considers every applicable
+obligation, and permits at most one structural revision. An applied revision
+causes exactly one complete final recheck; rejected or failed revisions retain
+the baseline and upstream gaps without a second pass. Final STPA ICA evidence
+is accounted separately for applicable, capability-excluded, and
+governance-only obligations before ordinary SP3 scenario realization.
+
+The output contains atomically published
+`taxonomy-obligation-plan.yaml`, `obligation-consideration.yaml`,
+`obligation-accounting.yaml`, `scenario-realization.yaml`, and
+`synthesis-manifest.yaml`, plus a report. `scenario-realization.yaml` records
+whether each accepted ICA was actually carried into a generated scenario; it
+does not change the separate obligation/STPA accounting result.
+The report is explicitly provisional: Phase 2 verification and human review
+are not required for this run.
 
 Publish a deterministic obligation ledger from a pinned snapshot without
 contacting an LLM endpoint:

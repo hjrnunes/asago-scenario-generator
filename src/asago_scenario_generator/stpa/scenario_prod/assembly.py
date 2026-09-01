@@ -172,8 +172,14 @@ def assemble_candidate_envelope(
     Returns:
         A :class:`CandidateExecutionEnvelope`.
     """
-    responsibility = _find_responsibility(control_structure, controller_id)
-    control_action = _find_control_action(responsibility, control_action_id)
+    if controller_id.startswith("CL-"):
+        action_description = _coordination_mechanism_description(
+            control_structure, controller_id, control_action_id
+        )
+    else:
+        responsibility = _find_responsibility(control_structure, controller_id)
+        control_action = _find_control_action(responsibility, control_action_id)
+        action_description = control_action.description
     factors = list(causal_factors or [])
     validate_factor_sources(control_structure, factors)
 
@@ -190,7 +196,7 @@ def assemble_candidate_envelope(
         candidate_id=candidate_id_for(controller_id, control_action_id, uca_type),
         controller_id=controller_id,
         control_action_id=control_action_id,
-        control_action_description=control_action.description,
+        control_action_description=action_description,
         uca_type=uca_type,
         uca_ref=uca_ref_for(controller_id, control_action_id, uca_type),
         causal_factors=factors,
@@ -198,3 +204,24 @@ def assemble_candidate_envelope(
         ica_id=ica_id,
         scenario_id=scenario_id,
     )
+
+
+def _coordination_mechanism_description(
+    control_structure: ControlStructure,
+    link_id: str,
+    mechanism_id: str,
+) -> str:
+    """Resolve one exact CL/CM pair for an execution envelope."""
+    links = [
+        item for item in control_structure.coordination_links if item.link_id == link_id
+    ]
+    if len(links) != 1:
+        raise ValueError(
+            f"Control structure has no exact coordination link '{link_id}'."
+        )
+    link = links[0]
+    if link.coordination_mechanism.cm_id != mechanism_id:
+        raise ValueError(
+            f"Coordination link '{link_id}' has no coordination mechanism '{mechanism_id}'."
+        )
+    return link.coordination_mechanism.description

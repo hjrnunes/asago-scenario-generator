@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactor,
@@ -19,6 +19,9 @@ from asago_scenario_generator.stpa.models.causal_factor import (
 )
 from asago_scenario_generator.stpa.models.enriched_threat_set import CatalogMapping
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
+from asago_scenario_generator.stpa.models.scenario_context import (
+    ScenarioGenerationContext,
+)
 
 if TYPE_CHECKING:
     from asago_scenario_generator.stpa.models.control_structure import ControlStructure
@@ -87,6 +90,38 @@ class ScenarioSpec(BaseModel):
     # structural presence alone never invents a factor.  Empty is valid
     # and means "no declared factors".
     causal_factors: list[CausalFactor] = Field(default_factory=list)
+    scenario_context: ScenarioGenerationContext | None = None
+
+    @model_validator(mode="after")
+    def preserve_scenario_context_authority(self) -> "ScenarioSpec":
+        """Bind corrected scenarios to the exact immutable source context."""
+        context = self.scenario_context
+        if context is None:
+            return self
+        identity = context.scenario_identity
+        expected = (
+            identity.scenario_id,
+            identity.ica_slot_id,
+            identity.ica_id,
+            context.target_control_path.controller.element_id,
+            context.target_control_path.control_action.action_id,
+            context.ica.uca_type,
+            context.ica.loss_consequence,
+        )
+        actual = (
+            self.scenario_id,
+            self.threat_source.ica_slot_id,
+            self.threat_source.ica_id,
+            self.target_controller,
+            self.target_control_action,
+            self.ica_type,
+            self.loss_scenario,
+        )
+        if actual != expected:
+            raise ValueError("scenario fields do not match immutable scenario context")
+        if not self.causal_factors:
+            raise ValueError("successful contextual scenario requires causal_factors")
+        return self
 
     def validate_against(self, control_structure: ControlStructure) -> None:
         """Validate scenario spec references against a ControlStructure.
@@ -111,13 +146,20 @@ class ScenarioSpec(BaseModel):
             control_structure
         )
 
-        _validate_target(
-            self.target_controller,
-            self.target_control_action,
-            resp_ids,
-            all_ca_ids,
-            ca_to_resp,
-        )
+        if self.target_controller.startswith("CL-"):
+            _validate_coordination_target(
+                self.target_controller,
+                self.target_control_action,
+                control_structure,
+            )
+        else:
+            _validate_target(
+                self.target_controller,
+                self.target_control_action,
+                resp_ids,
+                all_ca_ids,
+                ca_to_resp,
+            )
         _validate_defender_bdi(self.defender_bdi, all_pm_ids, resp_ids, all_ca_ids)
         validate_factor_sources(control_structure, self.causal_factors)
 
@@ -167,6 +209,27 @@ def _validate_target(
         raise ValueError(
             f"target_control_action '{target_control_action}' does not "
             f"belong to target_controller '{target_controller}'."
+        )
+
+
+def _validate_coordination_target(
+    link_id: str,
+    mechanism_id: str,
+    control_structure: ControlStructure,
+) -> None:
+    """Validate a CL/CM target without treating it as RESP/CA."""
+    links = [
+        item for item in control_structure.coordination_links if item.link_id == link_id
+    ]
+    if len(links) != 1:
+        raise ValueError(
+            f"target_controller '{link_id}' is not an exact coordination link ID."
+        )
+    expected = links[0].coordination_mechanism.cm_id
+    if mechanism_id != expected:
+        raise ValueError(
+            f"target_control_action '{mechanism_id}' does not match coordination "
+            f"mechanism '{expected}' for '{link_id}'."
         )
 
 

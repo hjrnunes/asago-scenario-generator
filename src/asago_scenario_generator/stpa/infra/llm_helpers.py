@@ -18,12 +18,106 @@ from asago_scenario_generator.stpa.infra.call_log import (
     make_call_log_entry,
 )
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
+from asago_scenario_generator.stpa.infra.prompt_preflight import (
+    PromptAudit,
+    PromptBudget,
+    PromptBudgetExceeded,
+    PromptContractError,
+    audit_prompt_contract,
+)
 from asago_scenario_generator.stpa.infra.unvalidated_decode import (
     construct_model_unvalidated,
 )
 from asago_scenario_generator.stpa._model_data import raw_model_data
 
 _T = TypeVar("_T", bound=BaseModel)
+
+
+def _preflight_configured_prompt(
+    llm_client: LLMClient,
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    stage: str,
+    max_completion_tokens: int | None,
+) -> PromptAudit | None:
+    """Reject an oversized rendered prompt before a configured provider call."""
+    context_window = getattr(llm_client, "context_window", None)
+    if context_window is None:
+        # Lightweight deterministic test adapters predate model profiles. Real
+        # named profiles carry this value through LLMClient and are audited.
+        return None
+    completion = max_completion_tokens or getattr(
+        llm_client, "max_completion_tokens", None
+    )
+    if completion is None:
+        raise ValueError("configured model must declare max_completion_tokens")
+    audit = audit_prompt_contract(
+        stage=stage,
+        prompt_view={},
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        budget=PromptBudget(
+            context_window=context_window,
+            maximum_completion_tokens=completion,
+            safety_margin=getattr(llm_client, "safety_margin", None),
+        ),
+        raise_on_error=False,
+    )
+    return audit
+
+
+def _enforce_prompt_audit(audit: PromptAudit | None) -> None:
+    """Fail before dispatch while allowing callers to retain the audit."""
+    if audit is None or audit.ok:
+        return
+    if (
+        audit.usable_input_tokens is not None
+        and audit.input_tokens > audit.usable_input_tokens
+    ):
+        raise PromptBudgetExceeded(
+            input_tokens=audit.input_tokens,
+            usable_input_tokens=audit.usable_input_tokens,
+            context_window=audit.context_window or 0,
+            maximum_completion_tokens=audit.maximum_completion_tokens or 0,
+            safety_margin=audit.safety_margin or 0,
+        )
+    raise PromptContractError(*audit.errors)
+
+
+def _prompt_audit_fields(audit: PromptAudit | None) -> dict[str, Any]:
+    """Serialize one pre-dispatch audit into the durable provider call record."""
+    if audit is None:
+        return {}
+    detail = {
+        "rendered_prompt_digest": audit.rendered_prompt_digest,
+        "input_tokens": audit.input_tokens,
+        "input_tokens_estimated": audit.input_tokens_estimated,
+        "context_window": audit.context_window,
+        "maximum_completion_tokens": audit.maximum_completion_tokens,
+        "safety_margin": audit.safety_margin,
+        "usable_input_tokens": audit.usable_input_tokens,
+        "provider_call_allowed": audit.provider_call_allowed,
+        "errors": list(audit.errors),
+    }
+    return {
+        "rendered_prompt_digest": audit.rendered_prompt_digest,
+        "preflight_input_tokens": audit.input_tokens,
+        "prompt_preflight": detail,
+    }
+
+
+def _decode_json_text(value: str) -> Any:
+    """Decode JSON, tolerating only an exact Markdown JSON fence wrapper."""
+    stripped = value.strip()
+    lines = stripped.splitlines()
+    if (
+        len(lines) >= 3
+        and lines[0].strip().lower() in {"```json", "```"}
+        and lines[-1].strip() == "```"
+    ):
+        stripped = "\n".join(lines[1:-1])
+    return json.loads(stripped)
 
 
 class StageError(Exception):
@@ -80,7 +174,7 @@ def parse_llm_result(result: LLMResult, model_class: type[_T]) -> _T:
     if isinstance(content, dict):
         return model_class.model_validate(content)
     if isinstance(content, str):
-        return model_class.model_validate(json.loads(content))
+        return model_class.model_validate(_decode_json_text(content))
     raise TypeError(
         f"Unexpected LLM result content type: {type(content).__name__}, "
         f"expected {model_class.__name__}, dict, or str."
@@ -95,7 +189,7 @@ def _decode_llm_content(result: LLMResult) -> Any:
     if isinstance(content, dict):
         return content
     if isinstance(content, str):
-        return json.loads(content)
+        return _decode_json_text(content)
     raise TypeError(
         f"Unexpected LLM result content type: {type(content).__name__}, "
         "expected a Pydantic model, dict, or JSON string."
@@ -165,12 +259,39 @@ def _result_usage(
     return result.prompt_tokens, result.completion_tokens, result.duration_ms
 
 
+def _validation_retry_prompt(
+    *,
+    original_prompt: str,
+    feedback: str | None,
+    error: Exception,
+    response_format: type[BaseModel],
+) -> str:
+    """Build a bounded correction prompt with exact error and output schema."""
+    schema = json.dumps(
+        response_format.model_json_schema(),
+        ensure_ascii=False,
+        sort_keys=True,
+        indent=2,
+    )
+    suffix = feedback or ""
+    suffix += (
+        "\n\nExact validation error from the prior response:\n"
+        f"{type(error).__name__}: {error}\n\n"
+        "Expected response schema (return one JSON object matching it):\n"
+        f"```json\n{schema}\n```"
+    )
+    return original_prompt + suffix
+
+
 def _parse_structured_result(
     result: LLMResult,
     response_format: type[_T],
     allow_unvalidated: bool,
+    result_parser: Callable[[LLMResult], _T] | None = None,
 ) -> _T:
     """Validate a structured result, with a tolerant fallback when requested."""
+    if result_parser is not None:
+        return result_parser(result)
     try:
         return parse_llm_result(result, response_format)
     except ValidationError:
@@ -185,6 +306,8 @@ def log_llm_call(
     run_dir: Path,
     stage: str,
     step: str,
+    *,
+    prompt_audit: PromptAudit | None = None,
 ) -> None:
     """Append a call-log entry for a single LLM call.
 
@@ -209,6 +332,7 @@ def log_llm_call(
         success=_success,
         response_content=_response_content,
     )
+    entry.update(_prompt_audit_fields(prompt_audit))
     append_call_log([entry], run_dir)
 
 
@@ -224,6 +348,7 @@ def log_llm_call_failure(
     prompt_tokens: int = 0,
     completion_tokens: int = 0,
     duration_ms: int = 0,
+    prompt_audit: PromptAudit | None = None,
 ) -> None:
     """Append a call-log entry for a failed LLM call.
 
@@ -252,6 +377,7 @@ def log_llm_call_failure(
         success=_success,
         error=error,
     )
+    entry.update(_prompt_audit_fields(prompt_audit))
     append_call_log([entry], run_dir)
 
 
@@ -272,6 +398,7 @@ def safe_llm_call(
     json_decode_retries: int = 0,
     validation_retries: int = 0,
     validation_retry_feedback: str | None = None,
+    result_parser: Callable[[LLMResult], _T] | None = None,
 ) -> tuple[_T | None, LLMResult | None, str | None]:
     """Wrap complete() + parse_llm_result() in a try/except.
 
@@ -309,6 +436,10 @@ def safe_llm_call(
             to zero; stages must opt in.
         validation_retry_feedback: Optional text appended to the original user
             prompt on a validation retry.
+        result_parser: Optional stage-local parser for semantic responses. The
+            parser receives the raw ``LLMResult`` and must return a validated
+            response model. It is useful when a stage needs stricter wire
+            validation than the shared compatibility decoder provides.
 
     Returns:
         A tuple of (validated_model_or_None, llm_result_or_None, error_or_None).
@@ -321,9 +452,19 @@ def safe_llm_call(
     attempt_user_prompt = user_prompt
     while True:
         result: LLMResult | None = None
+        prompt_audit: PromptAudit | None = None
         raw_result_validation_failed = False
         result_validation_failed = False
+        result_parser_failed = False
         try:
+            prompt_audit = _preflight_configured_prompt(
+                llm_client,
+                system_prompt=system_prompt,
+                user_prompt=attempt_user_prompt,
+                stage=stage,
+                max_completion_tokens=max_completion_tokens,
+            )
+            _enforce_prompt_audit(prompt_audit)
             completion_kwargs = _build_completion_kwargs(
                 system_prompt=system_prompt,
                 user_prompt=attempt_user_prompt,
@@ -346,18 +487,30 @@ def safe_llm_call(
                 except Exception:
                     raw_result_validation_failed = True
                     raise
-            model = _parse_structured_result(
-                result,
-                response_format,
-                allow_unvalidated,
-            )
+            try:
+                model = _parse_structured_result(
+                    result,
+                    response_format,
+                    allow_unvalidated,
+                    result_parser=result_parser,
+                )
+            except Exception:
+                result_parser_failed = result_parser is not None
+                raise
             if result_validator is not None:
                 try:
                     result_validator(model)
                 except Exception:
                     result_validation_failed = True
                     raise
-            log_llm_call(result, llm_client.model, run_dir, stage, step)
+            log_llm_call(
+                result,
+                llm_client.model,
+                run_dir,
+                stage,
+                step,
+                prompt_audit=prompt_audit,
+            )
             return model, result, None
         except Exception as exc:
             error_msg = f"{type(exc).__name__}: {exc}"
@@ -373,6 +526,7 @@ def safe_llm_call(
                 prompt_tokens=_prompt_tokens,
                 completion_tokens=_completion_tokens,
                 duration_ms=_duration_ms,
+                prompt_audit=prompt_audit,
             )
             if isinstance(exc, json.JSONDecodeError) and json_retries_remaining:
                 json_retries_remaining -= 1
@@ -381,10 +535,15 @@ def safe_llm_call(
                 isinstance(exc, ValidationError)
                 or raw_result_validation_failed
                 or result_validation_failed
+                or result_parser_failed
             ) and validation_retries_remaining:
                 validation_retries_remaining -= 1
-                if validation_retry_feedback:
-                    attempt_user_prompt = user_prompt + validation_retry_feedback
+                attempt_user_prompt = _validation_retry_prompt(
+                    original_prompt=user_prompt,
+                    feedback=validation_retry_feedback,
+                    error=exc,
+                    response_format=response_format,
+                )
                 continue
             return None, result, error_msg
 
@@ -423,7 +582,16 @@ def safe_llm_call_raw(
         A tuple of (raw_text_or_None, llm_result_or_None, error_or_None).
     """
     result: LLMResult | None = None
+    prompt_audit: PromptAudit | None = None
     try:
+        prompt_audit = _preflight_configured_prompt(
+            llm_client,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            stage=stage,
+            max_completion_tokens=max_completion_tokens,
+        )
+        _enforce_prompt_audit(prompt_audit)
         completion_kwargs: dict[str, Any] = {
             "system_prompt": system_prompt,
             "user_prompt": user_prompt,
@@ -438,7 +606,14 @@ def safe_llm_call_raw(
             content = ""
         if not isinstance(content, str):
             content = str(content)
-        log_llm_call(result, llm_client.model, run_dir, stage, step)
+        log_llm_call(
+            result,
+            llm_client.model,
+            run_dir,
+            stage,
+            step,
+            prompt_audit=prompt_audit,
+        )
         return content, result, None
     except Exception as exc:
         error_msg = f"{type(exc).__name__}: {exc}"
@@ -454,5 +629,6 @@ def safe_llm_call_raw(
             prompt_tokens=_prompt_tokens,
             completion_tokens=_completion_tokens,
             duration_ms=_duration_ms,
+            prompt_audit=prompt_audit,
         )
         return None, result, error_msg

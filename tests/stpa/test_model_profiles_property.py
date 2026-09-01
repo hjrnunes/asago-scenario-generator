@@ -49,6 +49,8 @@ st_profile_name = st.from_regex(r"[a-z][a-z0-9_-]*", fullmatch=True)
 st_optional_field_values = st.fixed_dictionaries(
     {},
     optional={
+        "context_window": st.integers(min_value=1, max_value=1_000_000),
+        "safety_margin": st.integers(min_value=0, max_value=100_000),
         "max_completion_tokens": st.integers(min_value=1, max_value=100000),
         "temperature": st.floats(min_value=0.0, max_value=2.0, allow_nan=False),
         "top_p": st.floats(min_value=0.0, max_value=1.0, allow_nan=False),
@@ -101,7 +103,9 @@ class TestProfileRoundTrip:
 
         for field in OPTIONAL_FIELDS:
             if field in optionals:
-                assert result[field] == optionals[field], f"Optional field '{field}' mismatch"
+                assert result[field] == optionals[field], (
+                    f"Optional field '{field}' mismatch"
+                )
             else:
                 assert field not in result, f"Optional field '{field}' should be absent"
 
@@ -289,7 +293,9 @@ class TestCallsHtmlSummaryConservation:
         assert str(success) in html, f"Success count {success} not found in HTML"
         assert str(failure) in html, f"Failure count {failure} not found in HTML"
         assert str(prompt_tokens) in html, f"Prompt tokens {prompt_tokens} not found"
-        assert str(completion_tokens) in html, f"Completion tokens {completion_tokens} not found"
+        assert str(completion_tokens) in html, (
+            f"Completion tokens {completion_tokens} not found"
+        )
         assert str(duration) in html, f"Duration {duration} not found"
 
     @given(entries=st.lists(st_call_entry, min_size=0, max_size=20))
@@ -360,7 +366,11 @@ class TestCallsHtmlSelfContained:
 class TestCallsHtmlEntryCoverage:
     """Every entry's step name appears in the rendered HTML."""
 
-    @given(entries=st.lists(st_call_entry, min_size=1, max_size=15, unique_by=lambda e: e["step"]))
+    @given(
+        entries=st.lists(
+            st_call_entry, min_size=1, max_size=15, unique_by=lambda e: e["step"]
+        )
+    )
     @settings(
         max_examples=40,
         deadline=None,

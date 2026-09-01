@@ -500,8 +500,9 @@ def candidate_materialization_set_from_artifacts(
     rows_by_candidate = _candidate_rows_by_id(plan)
     plan_pin, source_pins = _materialization_sources(plan, snapshot)
     entries = tuple(
-        _materialize_candidate(raw, plan, rows_by_candidate, source_pins)
+        entry
         for raw in candidates
+        for entry in _materialize_candidate(raw, plan, rows_by_candidate, source_pins)
     )
 
     result = CandidateMaterializationSet(
@@ -540,15 +541,13 @@ def _validated_snapshot_for_plan(
 
 def _candidate_rows_by_id(
     plan: TaxonomyObligationPlan,
-) -> dict[str, tuple[TaxonomyObligation, CandidateRecord]]:
-    """Index each Phase 1 candidate row exactly once."""
-    rows_by_candidate: dict[str, tuple[TaxonomyObligation, CandidateRecord]] = {}
+) -> dict[str, tuple[tuple[TaxonomyObligation, CandidateRecord], ...]]:
+    """Index every obligation/candidate pair by executable candidate identity."""
+    collected: dict[str, list[tuple[TaxonomyObligation, CandidateRecord]]] = {}
     for row in plan.obligations:
         for record in row.candidate_records:
-            if record.candidate_id in rows_by_candidate:
-                raise ValueError("candidate identity appears in multiple plan rows")
-            rows_by_candidate[record.candidate_id] = (row, record)
-    return rows_by_candidate
+            collected.setdefault(record.candidate_id, []).append((row, record))
+    return {candidate_id: tuple(pairs) for candidate_id, pairs in collected.items()}
 
 
 def _materialization_sources(
@@ -595,15 +594,30 @@ def _materialization_sources(
 def _materialize_candidate(
     raw_candidate: ProjectedCandidate,
     plan: TaxonomyObligationPlan,
-    rows_by_candidate: dict[str, tuple[TaxonomyObligation, CandidateRecord]],
+    rows_by_candidate: dict[
+        str, tuple[tuple[TaxonomyObligation, CandidateRecord], ...]
+    ],
+    source_pins: Sequence[ProjectionSourcePin],
+) -> tuple[CandidateMaterialization, ...]:
+    """Validate and materialize one candidate for each exact obligation pair."""
+    candidate = _copy_revalidated(raw_candidate, ProjectedCandidate, "candidate")
+    pairs = rows_by_candidate.get(candidate.candidate_id)
+    if pairs is None:
+        raise ValueError("candidate is not present in the obligation plan")
+    return tuple(
+        _materialize_candidate_pair(candidate, row, record, plan, source_pins)
+        for row, record in pairs
+    )
+
+
+def _materialize_candidate_pair(
+    candidate: ProjectedCandidate,
+    row: TaxonomyObligation,
+    record: CandidateRecord,
+    plan: TaxonomyObligationPlan,
     source_pins: Sequence[ProjectionSourcePin],
 ) -> CandidateMaterialization:
-    """Validate and materialize one complete candidate-v2 record."""
-    candidate = _copy_revalidated(raw_candidate, ProjectedCandidate, "candidate")
-    pair = rows_by_candidate.get(candidate.candidate_id)
-    if pair is None:
-        raise ValueError("candidate is not present in the obligation plan")
-    row, record = pair
+    """Materialize one exact obligation/candidate pair."""
     _validate_candidate_against_record(candidate, row, record, plan)
     mechanism = MechanismProjection(
         obligation_id=row.obligation_id,

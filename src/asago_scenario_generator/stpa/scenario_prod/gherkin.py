@@ -21,6 +21,7 @@ from asago_scenario_generator.stpa.models.scenario_envelope import GherkinSpec
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 
 from ._constants import PROMPTS_DIR
+from .context import render_scenario_generation_context
 
 __all__ = [
     "generate_gherkin",
@@ -65,7 +66,10 @@ def generate_gherkin(
     if loader is None:
         loader = TemplateLoader(PROMPTS_DIR)
 
-    security_constraint = find_security_constraint(scenario_spec, loss_analysis)
+    try:
+        security_constraint = find_security_constraint(scenario_spec, loss_analysis)
+    except ValueError as exc:
+        return None, None, f"ScenarioContextError: {exc}"
     system_prompt, user_prompt = build_gherkin_prompts(
         scenario_spec, security_constraint, loss_analysis, loader
     )
@@ -122,24 +126,55 @@ def _parse_gherkin_yaml(text: str) -> GherkinSpec | None:
         parsed = yaml.safe_load(text)
         if not isinstance(parsed, dict):
             return None
+        _normalize_gherkin_headings(parsed)
         return GherkinSpec.model_validate(parsed)
     except Exception:  # noqa: BLE001
         return None
+
+
+def _normalize_gherkin_headings(parsed: dict[object, object]) -> None:
+    """Remove renderer-owned keywords from model-authored title fields."""
+    for field, keyword in (("feature", "Feature"), ("scenario", "Scenario")):
+        value = parsed.get(field)
+        if isinstance(value, str):
+            normalized, replacements = re.subn(
+                rf"^(?:\s*{keyword}\s*:\s*)+",
+                "",
+                value,
+                flags=re.IGNORECASE,
+            )
+            if replacements:
+                parsed[field] = normalized.strip()
 
 
 def find_security_constraint(
     scenario_spec: ScenarioSpec,
     loss_analysis: LossAnalysis,
 ) -> SecurityConstraint | None:
-    """Find the security constraint related to the scenario's ICA.
-
-    For MVP, returns the first security constraint from the loss analysis.
-    The run.py orchestrator can override this by passing a more specific
-    constraint lookup.
-    """
-    if loss_analysis.security_constraints:
-        return loss_analysis.security_constraints[0]
-    return None
+    """Resolve the one exact governing constraint from the retained context."""
+    context = scenario_spec.scenario_context
+    if context is None:
+        return None
+    if len(context.constraints) != 1:
+        raise ValueError("scenario context has ambiguous governing constraints")
+    selected = context.constraints[0]
+    hazard_ids = {item.hazard_id for item in context.hazards}
+    if not set(selected.related_hazard_ids) & hazard_ids:
+        raise ValueError("scenario constraint does not govern its selected hazard")
+    matches = [
+        item
+        for item in loss_analysis.security_constraints
+        if item.constraint_id == selected.constraint_id
+    ]
+    if len(matches) != 1:
+        raise ValueError("scenario governing constraint is missing from loss analysis")
+    resolved = matches[0]
+    if (
+        resolved.description != selected.description
+        or tuple(resolved.related_hazards) != selected.related_hazard_ids
+    ):
+        raise ValueError("scenario governing constraint changed after context capture")
+    return resolved
 
 
 def _extract_valid_loss_ids(loss_analysis: LossAnalysis) -> list[str]:
@@ -176,8 +211,11 @@ def build_gherkin_prompts(
     Returns:
         A tuple of (system_prompt, user_prompt).
     """
+    context = scenario_spec.scenario_context
     scenario_spec_yaml = yaml.dump(
-        scenario_spec.model_dump(mode="json", exclude_none=True),
+        scenario_spec.model_dump(
+            mode="json", exclude_none=True, exclude={"scenario_context"}
+        ),
         default_flow_style=False,
         sort_keys=False,
         allow_unicode=True,
@@ -189,10 +227,22 @@ def build_gherkin_prompts(
         else "No security constraint found."
     )
 
-    ica_text = f"ICA type: {scenario_spec.ica_type.value} on {scenario_spec.target_control_action}"
+    ica_text = (
+        context.ica.exact_ica_text
+        if context is not None
+        else f"ICA type: {scenario_spec.ica_type.value} on {scenario_spec.target_control_action}"
+    )
 
-    valid_loss_ids = _extract_valid_loss_ids(loss_analysis)
-    valid_hazard_ids = _extract_valid_hazard_ids(loss_analysis)
+    valid_loss_ids = (
+        [item.loss_id for item in context.losses]
+        if context is not None
+        else _extract_valid_loss_ids(loss_analysis)
+    )
+    valid_hazard_ids = (
+        [item.hazard_id for item in context.hazards]
+        if context is not None
+        else _extract_valid_hazard_ids(loss_analysis)
+    )
 
     system_prompt = loader.render_prompt(
         "stage6c_gherkin_system.j2",
@@ -201,6 +251,9 @@ def build_gherkin_prompts(
     user_prompt = loader.render_prompt(
         "stage6c_gherkin_user.j2",
         scenario_spec_yaml=scenario_spec_yaml,
+        scenario_context_yaml=(
+            render_scenario_generation_context(context) if context is not None else None
+        ),
         security_constraint=constraint_text,
         ica_type=scenario_spec.ica_type.value,
         control_action=scenario_spec.target_control_action,

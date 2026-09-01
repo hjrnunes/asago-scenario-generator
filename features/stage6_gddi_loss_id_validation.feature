@@ -5,8 +5,8 @@
 
 Feature: Stage 6 Gherkin Loss/Hazard ID validation (gddi)
   The Gherkin generation must reference only valid Loss (L-*) and Hazard (H-*)
-  IDs from the loss analysis. The Stage 6c user prompt receives the list of
-  valid L-* and H-* IDs and instructs the LLM to reference only those. A
+  IDs selected in the exact scenario context. The Stage 6c user prompt receives
+  those selected L-* and H-* IDs and excludes unrelated global IDs. A
   post-generation validator checks all L-* and H-* references in the Gherkin
   text against the loss analysis and reports any hallucinated IDs.
 
@@ -17,15 +17,11 @@ Feature: Stage 6 Gherkin Loss/Hazard ID validation (gddi)
     And a loss analysis with losses L-1, L-2, L-3 and hazards H-1, H-2
 
   # GDDI-01
-  Scenario Outline: GDDI-01 user prompt includes valid Loss IDs only
+  Scenario: GDDI-01 user prompt includes only the exact selected Loss and Hazard IDs
     When the Gherkin user prompt is built with the loss analysis
-    Then the user prompt contains the valid <id_type> ID <valid_id>
-
-    Examples:
-      | id_type | valid_id |
-      | loss    | L-1      |
-      | loss    | L-2      |
-      | loss    | L-3      |
+    Then the user prompt contains the valid loss ID L-1
+    And the user prompt contains the valid hazard ID H-1
+    And the user prompt excludes unrelated IDs L-2, L-3, and H-2
 
   # GDDI-02
   Scenario: GDDI-02 user prompt instructs LLM to reference only valid IDs
@@ -41,7 +37,7 @@ Feature: Stage 6 Gherkin Loss/Hazard ID validation (gddi)
   # GDDI-04
   Scenario: GDDI-04 build_gherkin_prompts accepts loss analysis
     When build_gherkin_prompts is called with the scenario spec and loss analysis
-    Then the user prompt contains valid Loss IDs and excludes Hazard IDs from the loss analysis
+    Then the user prompt contains exact selected Loss and Hazard IDs and excludes unrelated IDs
 
   # GDDI-05
   Scenario Outline: GDDI-05 validator catches hallucinated Loss or Hazard IDs

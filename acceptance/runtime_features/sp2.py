@@ -1697,6 +1697,24 @@ def _h_sp2_full_run(world: World, text: str, examples: dict) -> tuple[bool, str]
     # Build minimal fixtures
     cs = world.control_structure or _make_sp2_control_structure(4, 2, 2)
     la = world.loss_analysis or _make_minimal_loss_analysis()
+    # The production runner now requires every loss-analysis constraint to be
+    # assigned to a controller before it creates ICA slots.  The orchestration
+    # fixture deliberately uses a small synthetic control structure, so bind
+    # any constraints not already represented on that fixture locally rather
+    # than weakening the runner's strict precondition.
+    assigned_constraints = {
+        constraint_id
+        for responsibility in cs.responsibilities
+        for constraint_id in responsibility.security_constraint_refs
+    }
+    missing_constraints = [
+        constraint.constraint_id
+        for constraint in la.security_constraints
+        if constraint.constraint_id not in assigned_constraints
+    ]
+    if missing_constraints and cs.responsibilities:
+        cs = cs.model_copy(deep=True)
+        cs.responsibilities[0].security_constraint_refs.extend(missing_constraints)
     cp = CapabilityProfile(
         zones_active=["input", "reasoning"],
         entry_points=[

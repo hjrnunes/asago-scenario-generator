@@ -127,7 +127,11 @@ def _valid_control_element_set_dict() -> dict:
                 "description": "Execute payment transaction",
                 "target": {"type": "controlled_process", "id": "CP-1"},
             },
-            {"ca_id": "CA-2-1", "description": "Send response to user"},
+            {
+                "ca_id": "CA-2-1",
+                "description": "Send response to user",
+                "target": {"type": "responsibility", "id": "RESP-2"},
+            },
         ],
         "feedback_channels": [
             {

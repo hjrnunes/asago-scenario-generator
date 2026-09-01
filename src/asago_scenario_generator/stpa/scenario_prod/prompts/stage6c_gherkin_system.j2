@@ -30,29 +30,58 @@ Scenario: [scenario title]
 
 4. **Loss references** — Include a reference to the realized loss (L-* ID) in the consequences.
 
+5. **Mechanism grounding** — Use the declared Stage 5 causal-factor evidence
+   status from the immutable context. A `structural_failure` is an existing
+   condition and does not establish attacker access. When
+   `reachable_capabilities` is empty, the `When`/`But` steps must not claim
+   that an attacker actively suppresses or manipulates feedback, poisons an
+   audit output, injects guidelines, or uses a tool/input surface; describe
+   the structural condition that produces the ICA instead. Active attacker
+   manipulation requires the factor's exact reachable capability and access
+   references. A bounded assumption must be stated as an assumption.
+
 ## ID Reference Constraint
 
 Reference ONLY the Loss IDs (L-*) and Hazard IDs (H-*) provided in the input. Do not invent new IDs.
 
+{# Feedback-channel bridge is duplicated across the three Stage 6 system
+   prompts. Shared includes would couple prompt-loader boundaries. #}
+## Feedback-channel bridge
+
+FB-* denotes a logical information dependency that updates a process-model belief. It is not evidence of a network socket, packet stream, message bus, database connection, or attacker-accessible transport. Realize the update through a declared AI surface — prompt/context input, retrieved content, tool result, memory state, agent message, or model output — unless the supplied architecture explicitly identifies an accessible transport. Never infer interception, packet injection, blocking, spoofing, or link severing merely from the word "channel".
+
+When a reachable capability explicitly supports active access, describe how
+the attacker changes a declared AI surface. Without that evidence, explain
+the structural condition and do not turn this guidance into an attacker path.
+
+Examples of declared AI-surface realizations include prompt/context injection,
+retrieved-content poisoning, tool-result fabrication, memory poisoning,
+agent-message tampering, and model-output manipulation.
+
+Do not invent packet interception, MITM (man-in-the-middle access), network delay, traffic blocking, network-signal spoofing, communication-link severing, credential theft, account takeover, session hijacking/fixation, or generic flooding/DoS (denial of service). Such a mechanism is permitted only when the supplied architecture explicitly declares the transport or session surface attacker-accessible and the scenario records that evidence.
+
 {% include "_stage6_projection_alignment.j2" %}
 ## Output Format
 
-Return a YAML object with the following fields:
+Return one JSON object with the following fields. Every step is a separate
+JSON string in its array; do not use YAML continuation syntax:
 
-```yaml
-feature: "Feature line text"
-scenario: "Scenario title"
-given:
-  - "Given PM-1-1 is active"
-  - "And the system is online"
-when:
-  - "When a revoked user requests access"
-then_expected:
-  - "Then the system should reject the request"
-then_actual:
-  - "But the system approves the request"
-  - "And the revoked user gains access"
-  - "And loss L-1 is realized"
+```json
+{
+  "feature": "Feature line text",
+  "scenario": "Scenario title",
+  "given": [
+    "Given PM-1-1 is active",
+    "And the system is online"
+  ],
+  "when": ["When a revoked user requests access"],
+  "then_expected": ["Then the system should reject the request"],
+  "then_actual": [
+    "But the system approves the request",
+    "And the revoked user gains access",
+    "And loss L-1 is realized"
+  ]
+}
 ```
 
-Do not include markdown code fences. Return the YAML object directly.
+Do not include markdown code fences. Return the JSON object directly.

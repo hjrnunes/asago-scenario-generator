@@ -1821,6 +1821,27 @@ def test_materialization_match_requires_identity_and_mechanism_match() -> None:
     assert not _materialization_matches(stale, record, relation)
 
 
+def test_materialization_expands_a_shared_candidate_per_obligation() -> None:
+    """One executable candidate can legitimately serve several risk obligations."""
+    plan = plan_taxonomy_obligations(make_inputs(risk_ids=("risk-a", "risk-b")))
+    candidate = get_projected_candidate()
+
+    materializations = build_candidate_materialization_set(
+        plan,
+        (candidate,),
+        get_test_snapshot(),
+    )
+
+    assert len(materializations.entries) == 2
+    assert {
+        (item.obligation_id, item.risk_id, item.selected_candidate_id)
+        for item in materializations.entries
+    } == {
+        (row.obligation_id, row.risk_ref.risk_id, candidate.candidate_id)
+        for row in plan.obligations
+    }
+
+
 def test_resolved_parts_stops_when_materialization_is_missing_without_reason(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -858,6 +858,7 @@ def _sp1_valid_resp_set_dict() -> dict:
             {
                 "resp_id": "RESP-1",
                 "description": "Authorization controller",
+                "security_constraint_refs": ["SC-1"],
                 "responsibility_constraints": [
                     {"rc_id": "RC-1-1", "description": "Must confirm"}
                 ],
@@ -879,6 +880,7 @@ def _sp1_valid_resp_set_dict() -> dict:
             {
                 "resp_id": "RESP-2",
                 "description": "Data controller",
+                "security_constraint_refs": ["SC-2"],
                 "responsibility_constraints": [
                     {"rc_id": "RC-2-1", "description": "Protect data"}
                 ],
@@ -914,6 +916,7 @@ def _sp1_valid_resp_set_2a_dict() -> dict:
             {
                 "resp_id": "RESP-1",
                 "description": "Authorization controller",
+                "security_constraint_refs": ["SC-1"],
                 "responsibility_constraints": [
                     {"rc_id": "RC-1-1", "description": "Must confirm"}
                 ],
@@ -924,6 +927,7 @@ def _sp1_valid_resp_set_2a_dict() -> dict:
             {
                 "resp_id": "RESP-2",
                 "description": "Data controller",
+                "security_constraint_refs": ["SC-2"],
                 "responsibility_constraints": [
                     {"rc_id": "RC-2-1", "description": "Protect data"}
                 ],
@@ -980,7 +984,11 @@ def _sp1_valid_control_element_set_dict() -> dict:
                 "description": "Execute action",
                 "target": {"type": "controlled_process", "id": "CP-1"},
             },
-            {"ca_id": "CA-2-1", "description": "Send response"},
+            {
+                "ca_id": "CA-2-1",
+                "description": "Send response",
+                "target": {"type": "responsibility", "id": "RESP-2"},
+            },
         ],
         "feedback_channels": [
             {
@@ -2240,6 +2248,45 @@ def _make_sp3_scenario_spec(
     )
 
 
+def _make_sp3_contextual_scenario_spec(
+    *,
+    scenario_id: str = "SCN-001",
+    ica_type: UCAType = UCAType.not_provided,
+) -> ScenarioSpec:
+    """Build a successful SP3 fixture carrying its exact governing context."""
+    from asago_scenario_generator.stpa.scenario_prod.context import (
+        build_scenario_generation_context,
+    )
+
+    slot_id = f"RESP-1:CA-1-1:{ica_type.value}"
+    threat = _make_sp3_threat(slot_id=slot_id, ica_id=f"{slot_id}:1")
+    context = build_scenario_generation_context(
+        threat,
+        _make_sp3_cs(),
+        _make_sp3_loss_analysis(),
+        scenario_id=scenario_id,
+    )
+    base = _make_sp3_scenario_spec(
+        scenario_id=scenario_id,
+        ica_type=ica_type,
+        ica_id=threat.ica_id,
+    )
+    values = base.model_dump(mode="json", exclude={"scenario_context"})
+    values["threat_source"]["ica_slot_id"] = slot_id
+    values["loss_scenario"] = threat.loss_scenario
+    values["causal_factors"] = [
+        {
+            "kind": factor.kind,
+            "source_id": factor.source_id,
+            "description": factor.evidence,
+            "declared_timing": factor.timing,
+        }
+        for factor in _make_sp3_causal_factors()
+    ]
+    values["scenario_context"] = context
+    return ScenarioSpec.model_validate(values)
+
+
 def _make_sp3_envelope(
     spec: ScenarioSpec | None = None,
     attack_tree: dict | None = None,
@@ -2313,6 +2360,7 @@ def _setup_sp3_mock_client(num_threats: int = 2):
                     desires=["induce ICA"],
                     intentions=["poison PM-1-1 via FB-1-1"],
                 ),
+                causal_factors=_make_sp3_causal_factors(),
             )
         )
     stage6_responses = []
@@ -2341,12 +2389,17 @@ def _setup_sp3_mock_client(num_threats: int = 2):
             )
         )
         stage6_responses.append(
-            f"Scenario: Attack scenario {i + 1}\n"
-            f"  Given PM-1-1 is in a valid state\n"
-            f"  When the attacker sends a malicious request\n"
-            f"  Then the system should reject the request\n"
-            f"  But the system approves the request (ICA NOT_PROVIDED on CA-1-1)\n"
-            f"  And loss L-1 is realized\n"
+            {
+                "feature": "Safe orchestration",
+                "scenario": f"Attack scenario {i + 1}",
+                "given": ["Given PM-1-1 is in a valid state"],
+                "when": ["When the attacker sends a malicious request"],
+                "then_expected": ["Then the system should reject the request"],
+                "then_actual": [
+                    "But the system approves the request (ICA NOT_PROVIDED on CA-1-1)",
+                    "And loss L-1 is realized",
+                ],
+            }
         )
     client.set_response_queue(bdi_responses + stage6_responses)
     # Also set a default response for raw text calls (response_format=None)
@@ -2361,6 +2414,22 @@ def _setup_sp3_mock_client(num_threats: int = 2):
         "  And loss L-1 is realized\n",
     )
     return client
+
+
+def _make_sp3_causal_factors():
+    """Build the explicit structural cause used by successful SP3 fixtures."""
+    from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
+    from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+        CausalFactorDeclaration,
+    )
+
+    return [
+        CausalFactorDeclaration(
+            kind=CausalFactorKind.process_model_flaw,
+            source_id="PM-1-1",
+            evidence="Parsed user intent can be corrupted before CA-1-1 is selected.",
+        )
+    ]
 
 
 def _h_sp3_la_hazard_constraint(
@@ -2937,6 +3006,8 @@ __all__ = [
     "_make_sp3_envelope",
     "_make_sp3_ets",
     "_make_sp3_loss_analysis",
+    "_make_sp3_causal_factors",
+    "_make_sp3_contextual_scenario_spec",
     "_make_sp3_scenario_spec",
     "_make_sp3_threat",
     "_parallel_make_spec",

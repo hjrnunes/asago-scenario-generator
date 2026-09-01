@@ -55,11 +55,10 @@ Feature: Stage 2 Assembly and Coordination Fallback
     And the warnings list includes a warning naming step assemble_control_structure
 
   # stage2-assembly-fallback-04
-  Scenario: stage2-assembly-fallback-04 fallback ControlStructure is written to control-structure.yaml
+  Scenario: stage2-assembly-fallback-04 strict Call 2b rejection prevents publication
     Given an LLM that returns a ControlElementSet from Call 2b with an unresolvable feedback source reference
     When Stage 2 control structure derivation is run
-    Then a file control-structure.yaml exists in the run directory
-    And the file contains a valid ControlStructure model when read back
+    Then validation fails with error containing CP-404
 
   # stage2-assembly-fallback-05
   Scenario: stage2-assembly-fallback-05 invalid coordination links are dropped and logged
@@ -79,16 +78,15 @@ Feature: Stage 2 Assembly and Coordination Fallback
     Then no call log entry has step merge_connection_set
 
   # stage2-assembly-fallback-07
-  Scenario: stage2-assembly-fallback-07 assembly failure yields a partial but usable run
+  Scenario: stage2-assembly-fallback-07 strict Call 2b failure yields a recorded partial run
     Given an LLM that returns valid responses for stage_1a and stage_1b
     And an LLM that returns a ControlElementSet from Call 2b with an unresolvable feedback source reference
     When the full SP1 run is executed
     Then the pipeline does not crash
     And a run manifest is written
-    And the manifest contains a stage_warnings field
-    And the SP1RunResult control_structure is not None
-    And the heuristic result is available
-    And the SP1RunResult stage_warnings contains the assemble_control_structure repair
+    And the manifest contains a stage_errors field
+    And the stage_errors field includes the stage_2 failure description
+    And control_structure is None
 
   # stage2-assembly-fallback-08
   Scenario: stage2-assembly-fallback-08 successful assembly produces no warnings

@@ -19,6 +19,7 @@ from asago_scenario_generator.stpa.models.control_structure import ControlStruct
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 
 from ._constants import PROMPTS_DIR
+from .context import render_scenario_generation_context
 
 __all__ = ["generate_attack_tree", "build_attack_tree_prompts", "parse_attack_tree"]
 
@@ -158,8 +159,11 @@ def build_attack_tree_prompts(
     Returns:
         A tuple of (system_prompt, user_prompt).
     """
+    context = scenario_spec.scenario_context
     scenario_spec_yaml = yaml.dump(
-        scenario_spec.model_dump(mode="json", exclude_none=True),
+        scenario_spec.model_dump(
+            mode="json", exclude_none=True, exclude={"scenario_context"}
+        ),
         default_flow_style=False,
         sort_keys=False,
         allow_unicode=True,
@@ -170,6 +174,9 @@ def build_attack_tree_prompts(
         sort_keys=False,
         allow_unicode=True,
     )
+    scenario_context_yaml = (
+        render_scenario_generation_context(context) if context is not None else None
+    )
 
     system_prompt = loader.render_prompt(
         "stage6b_tree_system.j2",
@@ -178,7 +185,10 @@ def build_attack_tree_prompts(
     user_prompt = loader.render_prompt(
         "stage6b_tree_user.j2",
         scenario_spec_yaml=scenario_spec_yaml,
-        control_structure_yaml=control_structure_yaml,
+        scenario_context_yaml=scenario_context_yaml,
+        control_structure_yaml=(
+            None if context is not None else control_structure_yaml
+        ),
         ica_type=scenario_spec.ica_type.value,
         control_action=scenario_spec.target_control_action,
         projection_alignment=projection_alignment,

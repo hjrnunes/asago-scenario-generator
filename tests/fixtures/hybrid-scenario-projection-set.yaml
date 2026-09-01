@@ -1,4 +1,4 @@
-assessment_digest: 432571484f7964e508bbcee0685b37af353c48aef376345c012aae762d0e38d4
+assessment_digest: 58adfe9e716c4180caf2c95d90e280adaff59dbaa50238a62d28b75e7d6ecbae
 diagnostics: []
 evidence_class: normative_bookkeeping_fixture
 exclusions: []
@@ -116,32 +116,32 @@ projections:
       artifact_pin:
         artifact_id: correspondence-proposals
         schema_version: correspondence-proposals-v1
-        semantic_digest: 49326fe0e71a8c516d6a1bb85afb6602af4a1e84e0e54c090cf1e10f2178eec3
+        semantic_digest: 129cde044195a897a1ee32bb12bbbb69ca6a5335e78fadd3f13f8d254c5c622a
       evidence_kind: exact_id
       record_id: corrp:v1:1b0b1d97d2d70bd3a8e746914eee3ce09046102f34ec61652254500bddc3cab5
       schema_version: mechanism-evidence-attestation-v1
-      semantic_digest: d4e36a421bb1b811688adfa7a11ab71fcb1f32d77f6d26ec41928bd01b9e0689
+      semantic_digest: 3ceac9cdd17fe1098a34e9bfbb08918518c212c92c6dbf3cfd05a6614b833569
     relation_id: correlation:v1:ea7ad1b470a32d2fbd42e17e1583cb8f186aaf3379766a7cf39056886387cc23
-    review_artifact_digest: 389bf1fdfd3095bcbd5ad4deac1015448bcfb51d409862722c1661165bef8697
+    review_artifact_digest: 1c1fbc7c826a9f5b90ba288ac983811cda086b66cd7afe54376a2b62e51f4009
     review_artifact_pin:
       artifact_id: reviewed-correspondence-adjudications
       schema_version: correspondence-reviewed-adjudications-v1
-      semantic_digest: 389bf1fdfd3095bcbd5ad4deac1015448bcfb51d409862722c1661165bef8697
+      semantic_digest: 1c1fbc7c826a9f5b90ba288ac983811cda086b66cd7afe54376a2b62e51f4009
     reviewer_id: operator-1
     schema_version: confirmed-coverage-review-v1
-    semantic_digest: 5e25916e661e2e0309b1b7a64938ddd35483b62510aa015ba458a69a08b7a5f4
+    semantic_digest: 89e3d574a51ca40d1f76501172cc6cdb0c153ce786a022d4fe1e1cedad8051d0
     source_pins:
     - kind: artifact
       pin:
         artifact_id: correspondence-proposals
         schema_version: correspondence-proposals-v1
-        semantic_digest: 49326fe0e71a8c516d6a1bb85afb6602af4a1e84e0e54c090cf1e10f2178eec3
+        semantic_digest: 129cde044195a897a1ee32bb12bbbb69ca6a5335e78fadd3f13f8d254c5c622a
       role: mechanism-evidence
     - kind: artifact
       pin:
         artifact_id: reviewed-correspondence-adjudications
         schema_version: correspondence-reviewed-adjudications-v1
-        semantic_digest: 389bf1fdfd3095bcbd5ad4deac1015448bcfb51d409862722c1661165bef8697
+        semantic_digest: 1c1fbc7c826a9f5b90ba288ac983811cda086b66cd7afe54376a2b62e51f4009
       role: review
   evidence_class: normative_bookkeeping_fixture
   exec_candidate_id: EXEC:RESP-1:CA-1-1:WRONG_TIMING
@@ -412,7 +412,7 @@ projections:
     selected_candidate_id: cand:v2:c1ce1e48c8fcea147f0c57d7552d041a
     semantic_digest: ebe2af1dc785d0071e96589308eb4449993a5068fa4ba459290ca1404ad0491b
   obligation_id: ob:v1:741b678e5ed0aae16ceb83ee81db90e98fc10b78f7cb90a5e4628a67ab727727
-  projection_id: projection:v1:b246c3dfcdbaa82f1bb05e3c9f5acc54b85d83a4642dfdafbb3f65d8c65b09d4
+  projection_id: projection:v1:fad8713de68ebbc6da5574e614b68cccbb59f57db392816e12d93d3e47a3f15b
   relation_id: correlation:v1:ea7ad1b470a32d2fbd42e17e1583cb8f186aaf3379766a7cf39056886387cc23
   relation_kind: same_mechanism
   risk_id: risk-a
@@ -438,7 +438,7 @@ projections:
   - artifact_pin:
       artifact_id: correspondence-reconciliation
       schema_version: correspondence-reconciliation-v1
-      semantic_digest: eabf271fbae976f19ca74bde7a0a30eace4b55295157ead3f2705c35df2173d7
+      semantic_digest: c1fd11fa59cd228f927a23a2f41060627fd6f1fab1d4c45fced89ace785796ff
     record_id: correlation:v1:ea7ad1b470a32d2fbd42e17e1583cb8f186aaf3379766a7cf39056886387cc23
     source_kind: phase2_relation
   - artifact_pin:
@@ -479,13 +479,13 @@ projections:
     source_kind: stpa_slot
   schema_version: hybrid-scenario-projection-v1
   selected_candidate_id: cand:v2:c1ce1e48c8fcea147f0c57d7552d041a
-  semantic_digest: 8b98abe4ade5a65ddf2f429ba92d5a90249dec26f077a6f2695336d5ae183eeb
+  semantic_digest: d384a4b59da3817acb137d38d6be39173db79704925c346fb27ad3fbaa999ebe
   source_pins:
   - kind: artifact
     pin:
       artifact_id: control-structure
       schema_version: control-structure-v1
-      semantic_digest: fb68323896802a1b4819a4709c0be2f389d4b17ebc6f50a21bda83efbb6ce818
+      semantic_digest: 19bacfd87b3f1febed3abaf2c93a004a52c7bcd2eedacdbc0bf97d747a70c831
     role: artifact
   - kind: artifact
     pin:
@@ -527,19 +527,19 @@ projections:
     pin:
       artifact_id: confirmed-coverage-review:correlation:v1:ea7ad1b470a32d2fbd42e17e1583cb8f186aaf3379766a7cf39056886387cc23
       schema_version: confirmed-coverage-review-v1
-      semantic_digest: 5e25916e661e2e0309b1b7a64938ddd35483b62510aa015ba458a69a08b7a5f4
+      semantic_digest: 89e3d574a51ca40d1f76501172cc6cdb0c153ce786a022d4fe1e1cedad8051d0
     role: confirmed-review
   - kind: artifact
     pin:
       artifact_id: control-structure
       schema_version: control-structure-v1
-      semantic_digest: fb68323896802a1b4819a4709c0be2f389d4b17ebc6f50a21bda83efbb6ce818
+      semantic_digest: 19bacfd87b3f1febed3abaf2c93a004a52c7bcd2eedacdbc0bf97d747a70c831
     role: control-structure
   - kind: artifact
     pin:
       artifact_id: hybrid-correspondence-attestation
       schema_version: hybrid-correspondence-attestation-v1
-      semantic_digest: f0fd4f7d7969ff64f09c7391448ae2349dcc505cf1afe031f49067189afde362
+      semantic_digest: 217472718a8aa6f94a4c3bbfab37618f4186cfb682bbefbb71e9c8841d76dc61
     role: correspondence-attestation
   - kind: artifact
     pin:
@@ -569,13 +569,13 @@ projections:
     pin:
       artifact_id: correspondence-proposals
       schema_version: correspondence-proposals-v1
-      semantic_digest: 49326fe0e71a8c516d6a1bb85afb6602af4a1e84e0e54c090cf1e10f2178eec3
+      semantic_digest: 129cde044195a897a1ee32bb12bbbb69ca6a5335e78fadd3f13f8d254c5c622a
     role: mechanism-evidence
   - kind: artifact
     pin:
       artifact_id: mechanism-evidence-attestation:correlation:v1:ea7ad1b470a32d2fbd42e17e1583cb8f186aaf3379766a7cf39056886387cc23
       schema_version: mechanism-evidence-attestation-v1
-      semantic_digest: d4e36a421bb1b811688adfa7a11ab71fcb1f32d77f6d26ec41928bd01b9e0689
+      semantic_digest: 3ceac9cdd17fe1098a34e9bfbb08918518c212c92c6dbf3cfd05a6614b833569
     role: mechanism-evidence
   - kind: artifact
     pin:
@@ -587,13 +587,13 @@ projections:
     pin:
       artifact_id: hybrid-coverage-assessment
       schema_version: hybrid-coverage-assessment-v1
-      semantic_digest: 432571484f7964e508bbcee0685b37af353c48aef376345c012aae762d0e38d4
+      semantic_digest: 58adfe9e716c4180caf2c95d90e280adaff59dbaa50238a62d28b75e7d6ecbae
     role: phase2-assessment
   - kind: artifact
     pin:
       artifact_id: correspondence-proposals
       schema_version: correspondence-proposals-v1
-      semantic_digest: 49326fe0e71a8c516d6a1bb85afb6602af4a1e84e0e54c090cf1e10f2178eec3
+      semantic_digest: 129cde044195a897a1ee32bb12bbbb69ca6a5335e78fadd3f13f8d254c5c622a
     role: proposal-set
   - kind: artifact
     pin:
@@ -605,25 +605,25 @@ projections:
     pin:
       artifact_id: correspondence-reconciliation
       schema_version: correspondence-reconciliation-v1
-      semantic_digest: eabf271fbae976f19ca74bde7a0a30eace4b55295157ead3f2705c35df2173d7
+      semantic_digest: c1fd11fa59cd228f927a23a2f41060627fd6f1fab1d4c45fced89ace785796ff
     role: reconciliation
   - kind: artifact
     pin:
       artifact_id: system-resource-map
       schema_version: system-resource-map-v1
-      semantic_digest: 5c56bdc51585c2caa242f9ddbc986c8c5bdd6fd929ce360bd6ad8d33216d9a26
+      semantic_digest: dfcde82e845853a112355dfba593c2cc279463b1c00478f5c74f0c13dbdc61a6
     role: resource-map
   - kind: artifact
     pin:
       artifact_id: reviewed-correspondence-adjudications
       schema_version: correspondence-reviewed-adjudications-v1
-      semantic_digest: 389bf1fdfd3095bcbd5ad4deac1015448bcfb51d409862722c1661165bef8697
+      semantic_digest: 1c1fbc7c826a9f5b90ba288ac983811cda086b66cd7afe54376a2b62e51f4009
     role: review
   - kind: artifact
     pin:
       artifact_id: pinned-stpa-projection-attestation
       schema_version: pinned-stpa-projection-attestation-v1
-      semantic_digest: 0c48894f5a4698d6dc6764792822f7499af4b1ed6b1c40cdf4c421d7215b7cbe
+      semantic_digest: cd635b4e11406cf48842879c5e9a0b13840f997b19f57652da76cabae68d50dc
     role: stpa-attestation
   - kind: taxonomy
     pin:
@@ -644,13 +644,13 @@ projections:
     role: mapping
     taxonomy_id: sssom
 schema_version: hybrid-scenario-projection-set-v1
-semantic_digest: 802a802115f01402bbcec74a6c9ff94733d19f515e7e8697e5a08903c8767df0
+semantic_digest: dedcdd551641df0fdd8b8bc17adb5f10cafc52a34c87d091c9957fc5a1058b52
 source_pins:
 - kind: artifact
   pin:
     artifact_id: control-structure
     schema_version: control-structure-v1
-    semantic_digest: fb68323896802a1b4819a4709c0be2f389d4b17ebc6f50a21bda83efbb6ce818
+    semantic_digest: 19bacfd87b3f1febed3abaf2c93a004a52c7bcd2eedacdbc0bf97d747a70c831
   role: artifact
 - kind: artifact
   pin:
@@ -692,19 +692,19 @@ source_pins:
   pin:
     artifact_id: confirmed-coverage-review:correlation:v1:ea7ad1b470a32d2fbd42e17e1583cb8f186aaf3379766a7cf39056886387cc23
     schema_version: confirmed-coverage-review-v1
-    semantic_digest: 5e25916e661e2e0309b1b7a64938ddd35483b62510aa015ba458a69a08b7a5f4
+    semantic_digest: 89e3d574a51ca40d1f76501172cc6cdb0c153ce786a022d4fe1e1cedad8051d0
   role: confirmed-review
 - kind: artifact
   pin:
     artifact_id: control-structure
     schema_version: control-structure-v1
-    semantic_digest: fb68323896802a1b4819a4709c0be2f389d4b17ebc6f50a21bda83efbb6ce818
+    semantic_digest: 19bacfd87b3f1febed3abaf2c93a004a52c7bcd2eedacdbc0bf97d747a70c831
   role: control-structure
 - kind: artifact
   pin:
     artifact_id: hybrid-correspondence-attestation
     schema_version: hybrid-correspondence-attestation-v1
-    semantic_digest: f0fd4f7d7969ff64f09c7391448ae2349dcc505cf1afe031f49067189afde362
+    semantic_digest: 217472718a8aa6f94a4c3bbfab37618f4186cfb682bbefbb71e9c8841d76dc61
   role: correspondence-attestation
 - kind: artifact
   pin:
@@ -734,13 +734,13 @@ source_pins:
   pin:
     artifact_id: correspondence-proposals
     schema_version: correspondence-proposals-v1
-    semantic_digest: 49326fe0e71a8c516d6a1bb85afb6602af4a1e84e0e54c090cf1e10f2178eec3
+    semantic_digest: 129cde044195a897a1ee32bb12bbbb69ca6a5335e78fadd3f13f8d254c5c622a
   role: mechanism-evidence
 - kind: artifact
   pin:
     artifact_id: mechanism-evidence-attestation:correlation:v1:ea7ad1b470a32d2fbd42e17e1583cb8f186aaf3379766a7cf39056886387cc23
     schema_version: mechanism-evidence-attestation-v1
-    semantic_digest: d4e36a421bb1b811688adfa7a11ab71fcb1f32d77f6d26ec41928bd01b9e0689
+    semantic_digest: 3ceac9cdd17fe1098a34e9bfbb08918518c212c92c6dbf3cfd05a6614b833569
   role: mechanism-evidence
 - kind: artifact
   pin:
@@ -752,13 +752,13 @@ source_pins:
   pin:
     artifact_id: hybrid-coverage-assessment
     schema_version: hybrid-coverage-assessment-v1
-    semantic_digest: 432571484f7964e508bbcee0685b37af353c48aef376345c012aae762d0e38d4
+    semantic_digest: 58adfe9e716c4180caf2c95d90e280adaff59dbaa50238a62d28b75e7d6ecbae
   role: phase2-assessment
 - kind: artifact
   pin:
     artifact_id: correspondence-proposals
     schema_version: correspondence-proposals-v1
-    semantic_digest: 49326fe0e71a8c516d6a1bb85afb6602af4a1e84e0e54c090cf1e10f2178eec3
+    semantic_digest: 129cde044195a897a1ee32bb12bbbb69ca6a5335e78fadd3f13f8d254c5c622a
   role: proposal-set
 - kind: artifact
   pin:
@@ -770,25 +770,25 @@ source_pins:
   pin:
     artifact_id: correspondence-reconciliation
     schema_version: correspondence-reconciliation-v1
-    semantic_digest: eabf271fbae976f19ca74bde7a0a30eace4b55295157ead3f2705c35df2173d7
+    semantic_digest: c1fd11fa59cd228f927a23a2f41060627fd6f1fab1d4c45fced89ace785796ff
   role: reconciliation
 - kind: artifact
   pin:
     artifact_id: system-resource-map
     schema_version: system-resource-map-v1
-    semantic_digest: 5c56bdc51585c2caa242f9ddbc986c8c5bdd6fd929ce360bd6ad8d33216d9a26
+    semantic_digest: dfcde82e845853a112355dfba593c2cc279463b1c00478f5c74f0c13dbdc61a6
   role: resource-map
 - kind: artifact
   pin:
     artifact_id: reviewed-correspondence-adjudications
     schema_version: correspondence-reviewed-adjudications-v1
-    semantic_digest: 389bf1fdfd3095bcbd5ad4deac1015448bcfb51d409862722c1661165bef8697
+    semantic_digest: 1c1fbc7c826a9f5b90ba288ac983811cda086b66cd7afe54376a2b62e51f4009
   role: review
 - kind: artifact
   pin:
     artifact_id: pinned-stpa-projection-attestation
     schema_version: pinned-stpa-projection-attestation-v1
-    semantic_digest: 0c48894f5a4698d6dc6764792822f7499af4b1ed6b1c40cdf4c421d7215b7cbe
+    semantic_digest: cd635b4e11406cf48842879c5e9a0b13840f997b19f57652da76cabae68d50dc
   role: stpa-attestation
 - kind: taxonomy
   pin:

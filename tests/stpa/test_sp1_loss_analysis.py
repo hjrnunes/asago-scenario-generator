@@ -25,7 +25,9 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysisDraft,
     LossProvenance,
 )
-from asago_scenario_generator.stpa.system_model.loss_analysis import derive_loss_analysis
+from asago_scenario_generator.stpa.system_model.loss_analysis import (
+    derive_loss_analysis,
+)
 from asago_scenario_generator.stpa.system_model.run import run_sp1
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
@@ -57,6 +59,47 @@ def _make_capability_profile() -> CapabilityProfile:
         kc_subcodes=["KC1.1", "KC5.1", "KC6.1.1"],
         tool_inventory=[{"name": "tool1", "description": "A tool"}],
     ).to_capability_profile()
+
+
+def test_provider_generic_ids_are_canonicalized_for_hazards_and_constraints() -> None:
+    """Provider-facing drafts accept generic IDs but serialize canonical names."""
+    payload = valid_risk_draft_dict()
+    payload["hazards"][0]["id"] = payload["hazards"][0].pop("hazard_id")
+    payload["security_constraints"][0]["id"] = payload["security_constraints"][0].pop(
+        "constraint_id"
+    )
+
+    draft = LossAnalysisDraft.model_validate(payload)
+    dumped = draft.model_dump(mode="json")
+
+    assert dumped["hazards"][0]["hazard_id"] == "H-1"
+    assert dumped["security_constraints"][0]["constraint_id"] == "SC-1"
+    assert "id" not in dumped["hazards"][0]
+    assert "id" not in dumped["security_constraints"][0]
+
+
+def test_provider_generic_losses_are_split_only_by_explicit_provenance() -> None:
+    """A generic provider collection is normalized without guessing its source."""
+    payload = valid_risk_draft_dict()
+    losses = [*payload.pop("risk_card_losses"), *payload.pop("use_case_losses")]
+    losses.append(
+        {
+            "loss_id": "L-2",
+            "description": "A use-case loss.",
+            "provenance": "use_case",
+            "source_risk_cards": [],
+        }
+    )
+    for item in losses:
+        item["id"] = item.pop("loss_id")
+    payload["losses"] = losses
+
+    draft = LossAnalysisDraft.model_validate(payload)
+    dumped = draft.model_dump(mode="json")
+
+    assert [item["loss_id"] for item in dumped["risk_card_losses"]] == ["L-1"]
+    assert [item["loss_id"] for item in dumped["use_case_losses"]] == ["L-2"]
+    assert "losses" not in dumped
 
 
 def _observed_invalid_risk_draft() -> dict:
@@ -165,7 +208,9 @@ class TestStage1aLossAnalysis:
             LossAnalysisDraft,
             [bad_risk, bad_risk],
         )
-        with pytest.raises((ValidationError, ValueError, StageError), match="related_losses"):
+        with pytest.raises(
+            (ValidationError, ValueError, StageError), match="related_losses"
+        ):
             derive_loss_analysis(
                 llm_client=client,
                 use_case_text="Test use case",
@@ -182,7 +227,9 @@ class TestStage1aLossAnalysis:
             LossAnalysisDraft,
             [bad_risk, bad_risk],
         )
-        with pytest.raises((ValidationError, ValueError, StageError), match="related_hazards"):
+        with pytest.raises(
+            (ValidationError, ValueError, StageError), match="related_hazards"
+        ):
             derive_loss_analysis(
                 llm_client=client,
                 use_case_text="Test use case",
@@ -199,7 +246,9 @@ class TestStage1aLossAnalysis:
             LossAnalysisDraft,
             [bad_risk, valid_gap_draft_dict()],
         )
-        with pytest.raises((ValidationError, ValueError, StageError), match="source_risk_cards"):
+        with pytest.raises(
+            (ValidationError, ValueError, StageError), match="source_risk_cards"
+        ):
             derive_loss_analysis(
                 llm_client=client,
                 use_case_text="Test use case",
@@ -216,7 +265,9 @@ class TestStage1aLossAnalysis:
             LossAnalysisDraft,
             [valid_risk_draft_dict(), bad_gap],
         )
-        with pytest.raises((ValidationError, ValueError, StageError), match="source_risk_cards"):
+        with pytest.raises(
+            (ValidationError, ValueError, StageError), match="source_risk_cards"
+        ):
             derive_loss_analysis(
                 llm_client=client,
                 use_case_text="Test use case",
@@ -252,7 +303,10 @@ class TestStage1aLossAnalysis:
         all_losses = result.risk_card_losses + result.use_case_losses
         assert [loss.loss_id for loss in all_losses] == ["L-1", "L-2"]
         assert [h.hazard_id for h in result.hazards] == ["H-1", "H-2"]
-        assert [sc.constraint_id for sc in result.security_constraints] == ["SC-1", "SC-2"]
+        assert [sc.constraint_id for sc in result.security_constraints] == [
+            "SC-1",
+            "SC-2",
+        ]
         # Cross-references updated
         assert result.hazards[0].related_losses == ["L-1"]
         assert result.hazards[1].related_losses == ["L-2"]
@@ -542,8 +596,7 @@ class TestStage1aLossAnalysis:
         assert len(result.risk_card_losses) == 5
         assert len(result.use_case_losses) == 3
         all_loss_ids = {
-            loss.loss_id
-            for loss in result.risk_card_losses + result.use_case_losses
+            loss.loss_id for loss in result.risk_card_losses + result.use_case_losses
         }
         assert all(
             ref in all_loss_ids
@@ -685,8 +738,7 @@ class TestStage1aLossAnalysis:
         assert len(result.hazards) == 8
         assert len(result.security_constraints) == 7
         all_loss_ids = {
-            loss.loss_id
-            for loss in result.risk_card_losses + result.use_case_losses
+            loss.loss_id for loss in result.risk_card_losses + result.use_case_losses
         }
         all_hazard_ids = {hazard.hazard_id for hazard in result.hazards}
         assert all(
@@ -701,7 +753,8 @@ class TestStage1aLossAnalysis:
         )
 
         entries = [
-            json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
+            json.loads(line)
+            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
         ]
         stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
         assert [entry["success"] for entry in stage1a_entries] == [False, True, True]
@@ -726,7 +779,8 @@ class TestStage1aLossAnalysis:
 
         assert "related_hazards" in str(exc_info.value)
         entries = [
-            json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
+            json.loads(line)
+            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
         ]
         assert len(entries) == 2
         assert all(not entry["success"] for entry in entries)
@@ -758,7 +812,8 @@ class TestStage1aLossAnalysis:
         assert {hazard.hazard_id for hazard in result.hazards} == {"H-1", "H-2"}
 
         entries = [
-            json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
+            json.loads(line)
+            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
         ]
         stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
         assert len(stage1a_entries) == 3

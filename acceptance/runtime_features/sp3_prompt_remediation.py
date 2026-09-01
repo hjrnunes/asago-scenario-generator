@@ -10,6 +10,7 @@ from runtime_shared import (
     TemplateLoader,
     World,
     _make_sp3_cs,
+    _make_sp3_causal_factors,
     _make_sp3_ets,
     _make_sp3_loss_analysis,
     _make_sp3_scenario_spec,
@@ -23,16 +24,19 @@ from asago_scenario_generator.models.capability_profile import (
     EntryPoint,
     ToolInventoryEntry,
 )
+from asago_scenario_generator.stpa.models.scenario_context import (
+    ReachableCapability,
+)
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-    build_bdi_prompts,
-    populate_defender_bdi,
+    build_context_bdi_prompts,
+)
+from asago_scenario_generator.stpa.scenario_prod.context import (
+    build_scenario_generation_context,
+    render_scenario_generation_context,
 )
 from asago_scenario_generator.stpa.scenario_prod.narrative import (
     build_narrative_prompts,
     generate_narrative,
-)
-from asago_scenario_generator.stpa.threat_enum.technology_context import (
-    build_technology_context,
 )
 
 
@@ -110,8 +114,27 @@ def _prompt_for_stage(stage: str) -> str:
     return TemplateLoader(PROMPTS_DIR).render_prompt(name)
 
 
+def _reachable_capabilities() -> tuple[ReachableCapability, ...]:
+    """Build only capabilities proven reachable from the selected control path."""
+    return tuple(
+        ReachableCapability(
+            capability_id=capability_id,
+            description=description,
+            evidence="The selected input path reaches this declared capability.",
+            access_path=("RESP-1", "CA-1-1", "CP-1"),
+        )
+        for capability_id, description in (
+            ("CAP-PROMPT", "prompt injection"),
+            ("CAP-TOOL-RESULT", "tool result fabrication"),
+            ("CAP-MEMORY", "memory poisoning"),
+            ("CAP-AGENT", "agent impersonation"),
+            ("CAP-RETRIEVAL", "retrieval poisoning"),
+        )
+    )
+
+
 def _profile() -> CapabilityProfile:
-    """Build a profile with the positive mechanisms used by SP3."""
+    """Build the legacy profile used by the focused prompt-guidance fixtures."""
     return CapabilityProfile(
         zones_active=["input", "tool_execution", "memory", "inter_agent"],
         entry_points=[
@@ -123,6 +146,35 @@ def _profile() -> CapabilityProfile:
             ToolInventoryEntry(name="search", description="retrieves documents"),
         ],
     )
+
+
+def _scenario_context():
+    """Build the exact authority context used throughout one acceptance scenario."""
+    return build_scenario_generation_context(
+        _make_sp3_threat(),
+        _make_sp3_cs(),
+        _make_sp3_loss_analysis(),
+        scenario_id="SCN-001",
+        reachable_capabilities=_reachable_capabilities(),
+    )
+
+
+def _scenario_spec_with_context(context):
+    """Attach the exact context to the legacy ScenarioSpec fixture."""
+    base = _make_sp3_scenario_spec()
+    values = base.model_dump(mode="json", exclude={"scenario_context"})
+    values["loss_scenario"] = context.ica.loss_consequence
+    values["causal_factors"] = [
+        {
+            "kind": factor.kind,
+            "source_id": factor.source_id,
+            "description": factor.evidence,
+            "declared_timing": factor.timing,
+        }
+        for factor in _make_sp3_causal_factors()
+    ]
+    values["scenario_context"] = context
+    return type(base).model_validate(values)
 
 
 def _call_value(call: object, name: str) -> str:
@@ -508,60 +560,48 @@ def _h_mcp_modules(world: World, text: str, examples: dict) -> tuple[bool, str]:
 
 
 def _h_mcp_profile(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Create the capability profile used by the propagation scenarios."""
-    world.sp3_profile = _profile()
+    """Create the proven reachable capabilities used by the scenarios."""
+    world.sp3_reachable_capabilities = _reachable_capabilities()
     return True, ""
 
 
 def _h_mcp_kc(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Ensure KC6.3.3 remains active in the profile."""
-    profile = getattr(world, "sp3_profile", None)
-    if profile is None:
-        world.sp3_profile = _profile()
-    elif "KC6.3.3" not in profile.kc_subcodes:
-        world.sp3_profile = profile.model_copy(
-            update={"kc_subcodes": [*profile.kc_subcodes, "KC6.3.3"]}
-        )
+    """Check that every capability carries explicit reachability evidence."""
+    capabilities = getattr(world, "sp3_reachable_capabilities", ())
+    if not capabilities or any(not item.evidence for item in capabilities):
+        return False, "Reachable capability evidence is incomplete"
     return True, ""
 
 
 def _h_mcp_context(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Build the deterministic context once for prompt comparisons."""
-    world.sp3_context = build_technology_context(world.sp3_profile)
+    """Build the exact immutable context once for prompt comparisons."""
+    world.sp3_context = _scenario_context()
     return True, ""
 
 
 def _h_mcp_prompt(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Build the requested Stage 5 or Stage 6 narrative user prompt."""
+    """Build the requested Stage 5 or Stage 6 prompt from one exact context."""
     from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 
     loader = TemplateLoader(PROMPTS_DIR)
     stage = re.search(r"the (Stage \d+ (?:BDI|narrative)) user prompt", text)
     if not stage:
         return False, f"Could not identify prompt stage in: {text}"
+    context = world.sp3_context
     if stage.group(1) == "Stage 5 BDI":
-        threat = _make_sp3_threat()
-        _system, user = build_bdi_prompts(
-            populate_defender_bdi(_make_sp3_cs(), "RESP-1"),
-            threat,
-            _make_sp3_cs(),
-            "RESP-1",
-            loader,
-            capability_profile=world.sp3_profile,
-        )
+        _system, user = build_context_bdi_prompts(context, loader)
     else:
         _system, user = build_narrative_prompts(
-            _make_sp3_scenario_spec(),
+            _scenario_spec_with_context(context),
             loader,
-            capability_profile=world.sp3_profile,
         )
     world.sp3_user_prompt = user
     return True, ""
 
 
 def _h_mcp_complete(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Check that the complete deterministic context reaches the user prompt."""
-    context = getattr(world, "sp3_context", "")
+    """Check that the complete exact context reaches the user prompt."""
+    context = render_scenario_generation_context(world.sp3_context)
     if not context or context not in getattr(world, "sp3_user_prompt", ""):
         return False, "User prompt does not contain the complete technology context"
     return True, ""
@@ -585,7 +625,7 @@ def _h_mcp_mechanisms(world: World, text: str, examples: dict) -> tuple[bool, st
 
 def _h_mcp_mechanism(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Check one positive mechanism captured from the step wording."""
-    match = re.search(r"contains positive mechanism (.+)$", text)
+    match = re.search(r"contains? (?:positive )?mechanism (.+)$", text)
     if match is None:
         return False, f"Could not identify positive mechanism in: {text}"
     mechanism = match.group(1).strip().lower()
@@ -601,24 +641,25 @@ def _h_mcp_recording_llm(world: World, text: str, examples: dict) -> tuple[bool,
 
 
 def _h_mcp_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Run SP3 with the capability profile."""
+    """Run SP3 with the exact prebuilt context."""
     from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
 
     world.sp3_run_dir = Path(tempfile.mkdtemp())
+    context = world.sp3_context
     world.sp3_result = run_sp3(
         llm_client=world.sp3_llm_client,
         enriched_threat_set=_make_sp3_ets(),
         control_structure=_make_sp3_cs(),
         loss_analysis=_make_sp3_loss_analysis(),
         run_dir=world.sp3_run_dir,
-        capability_profile=world.sp3_profile,
+        scenario_contexts={context.ica.ica_id: context},
     )
     return True, ""
 
 
 def _h_mcp_stage5_requests(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Check every Stage 5 request for the deterministic context."""
-    context = build_technology_context(world.sp3_profile)
+    """Check every Stage 5 request for the exact context."""
+    context = render_scenario_generation_context(world.sp3_context)
     calls = [call for call in _logged_calls(world) if call.get("stage") == "stage_5"]
     if not calls or any(
         context not in call.get("user_prompt_text", "") for call in calls
@@ -628,8 +669,8 @@ def _h_mcp_stage5_requests(world: World, text: str, examples: dict) -> tuple[boo
 
 
 def _h_mcp_stage6_requests(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Check every Stage 6 narrative request for the same context."""
-    context = build_technology_context(world.sp3_profile)
+    """Check every Stage 6 narrative request for the same exact context."""
+    context = render_scenario_generation_context(world.sp3_context)
     calls = [
         call
         for call in _logged_calls(world)
@@ -816,37 +857,37 @@ def register(api: object) -> None:
         source_order=24027,
     )
     api.register_first(
-        "a capability profile with zones input, tool_execution, memory, and inter_agent",
+        "exact reachable capabilities for the selected control path",
         _h_mcp_profile,
         source_order=24028,
     )
     api.register_first(
-        "the capability profile has KC subcode KC6\\.3\\.3",
+        "each reachable capability has explicit access evidence",
         _h_mcp_kc,
         source_order=24029,
     )
     api.register_first(
-        "the deterministic technology context is built from the capability profile",
+        "the exact scenario generation context is built from selected authority",
         _h_mcp_context,
         source_order=24030,
     )
     api.register_first(
-        "the Stage (?:5 BDI|6 narrative) user prompt is built with the capability profile",
+        "the Stage (?:5 BDI|6 narrative) user prompt is built with the exact scenario context",
         _h_mcp_prompt,
         source_order=24031,
     )
     api.register_first(
-        "the user prompt contains the complete deterministic technology context",
+        "the user prompt contains the complete exact scenario context",
         _h_mcp_complete,
         source_order=24032,
     )
     api.register_first(
-        "the user prompt technology context contains each positive mechanism:",
+        "the user prompt reachable capabilities contain each mechanism:",
         _h_mcp_mechanisms,
         source_order=24033,
     )
     api.register_first(
-        "the user prompt technology context contains positive mechanism .+$",
+        "the user prompt reachable capabilities contain mechanism .+$",
         _h_mcp_mechanism,
         source_order=24033,
     )
@@ -856,17 +897,17 @@ def register(api: object) -> None:
         source_order=24034,
     )
     api.register_first(
-        "SP3 runs with the capability profile",
+        "SP3 runs with the exact scenario context",
         _h_mcp_run,
         source_order=24035,
     )
     api.register_first(
-        "every Stage 5 BDI request contains the deterministic technology context",
+        "every Stage 5 BDI request contains the exact scenario context",
         _h_mcp_stage5_requests,
         source_order=24036,
     )
     api.register_first(
-        "every Stage 6 narrative request contains the same deterministic technology context",
+        "every Stage 6 narrative request contains the same exact scenario context",
         _h_mcp_stage6_requests,
         source_order=24037,
     )

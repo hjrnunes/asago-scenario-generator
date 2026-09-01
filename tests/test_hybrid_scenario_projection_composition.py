@@ -437,7 +437,7 @@ def test_projection_id_uses_the_independent_identity_domain() -> None:
     result = build_hybrid_scenario_projection_set(inputs)
 
     assert result.projections[0].projection_id == (
-        "projection:v1:b246c3dfcdbaa82f1bb05e3c9f5acc54b85d83a4642dfdafbb3f65d8c65b09d4"
+        "projection:v1:fad8713de68ebbc6da5574e614b68cccbb59f57db392816e12d93d3e47a3f15b"
     )
 
 

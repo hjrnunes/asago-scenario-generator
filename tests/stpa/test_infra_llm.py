@@ -19,6 +19,10 @@ from asago_scenario_generator.stpa.infra.llm import (
 )
 
 
+class _OpenRouterPayload(BaseModel):
+    exact_field: str
+
+
 class TestInfraLLMClient:
     """LLM client construction and configuration."""
 
@@ -170,6 +174,33 @@ class TestInfraLLMComplete:
             "response_format"
         ] == {"type": "json_object"}
         assert not client._client.beta.chat.completions.parse.called
+
+    def test_openrouter_structured_completion_uses_json_object_compatibility(self):
+        """OpenRouter bypasses the unsupported beta parse endpoint."""
+        client = self._make_mock_client(content='{"key": "value"}')
+        client.base_url = "https://openrouter.ai/api/v1"
+
+        result = client.complete("system", "user", response_format=dict)
+
+        assert result.content == '{"key": "value"}'
+        assert client._client.chat.completions.create.call_args.kwargs[
+            "response_format"
+        ] == {"type": "json_object"}
+        assert not client._client.beta.chat.completions.parse.called
+
+    def test_openrouter_structured_prompt_carries_exact_schema(self):
+        """Portable JSON mode still gives the model the exact field contract."""
+        client = self._make_mock_client(content='{"exact_field": "value"}')
+        client.base_url = "https://openrouter.ai/api/v1"
+
+        result = client.complete("system", "user", response_format=_OpenRouterPayload)
+
+        sent_user_prompt = client._client.chat.completions.create.call_args.kwargs[
+            "messages"
+        ][1]["content"]
+        assert "Use the property names exactly as written" in sent_user_prompt
+        assert '"exact_field"' in sent_user_prompt
+        assert result.user_prompt == sent_user_prompt
 
     def test_complete_passes_effective_max_tokens(self):
         """Complete passes max_completion_tokens to the API."""

@@ -39,6 +39,7 @@ from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 from asago_scenario_generator.stpa.threat_enum.technology_context import context_for
 
 from ._constants import PROMPTS_DIR
+from .context import render_scenario_generation_context
 
 __all__ = [
     "generate_narrative",
@@ -117,16 +118,28 @@ def build_narrative_prompts(
     Returns:
         A tuple of (system_prompt, user_prompt).
     """
+    context = scenario_spec.scenario_context
     scenario_spec_yaml = yaml.dump(
-        scenario_spec.model_dump(mode="json", exclude_none=True),
+        scenario_spec.model_dump(
+            mode="json", exclude_none=True, exclude={"scenario_context"}
+        ),
         default_flow_style=False,
         sort_keys=False,
         allow_unicode=True,
     )
 
+    scenario_context_yaml = (
+        render_scenario_generation_context(context) if context is not None else None
+    )
     loss_scenario = scenario_spec.loss_scenario
-    ica_text = f"ICA type: {scenario_spec.ica_type.value} on {scenario_spec.target_control_action}"
-    technology_context = context_for(capability_profile)
+    ica_text = (
+        context.ica.exact_ica_text
+        if context is not None
+        else f"ICA type: {scenario_spec.ica_type.value} on {scenario_spec.target_control_action}"
+    )
+    technology_context = (
+        None if context is not None else context_for(capability_profile)
+    )
 
     system_prompt = loader.render_prompt(
         "stage6a_narrative_system.j2",
@@ -135,6 +148,7 @@ def build_narrative_prompts(
     user_prompt = loader.render_prompt(
         "stage6a_narrative_user.j2",
         scenario_spec_yaml=scenario_spec_yaml,
+        scenario_context_yaml=scenario_context_yaml,
         ica_text=ica_text,
         loss_scenario=loss_scenario,
         technology_context=technology_context,

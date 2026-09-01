@@ -34,6 +34,8 @@ STAGE = "stage_1a"
 STEP_RISK = "risk_derivation"
 STEP_GAP = "gap_analysis"
 STEP_MERGE = "merge"
+JSON_DECODE_RETRIES = 1
+STAGE1A_MAX_COMPLETION_TOKENS = 8192
 DEFAULT_TEMPERATURE = 0.4
 
 
@@ -204,6 +206,8 @@ def _run_stage1a_call(
         stage=STAGE,
         step=step,
         temperature=temperature,
+        max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
+        json_decode_retries=JSON_DECODE_RETRIES,
         result_validator=validate_references,
     )
     if error_msg is None:
@@ -237,6 +241,7 @@ def _run_stage1a_call(
         stage=STAGE,
         step=step,
         temperature=temperature,
+        max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
         result_validator=validate_retry_references,
     )
     if retry_error_msg is not None:

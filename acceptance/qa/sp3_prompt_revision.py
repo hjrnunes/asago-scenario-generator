@@ -233,7 +233,7 @@ def run_static_checks(runner: QARunner) -> None:
     # --- Task framing in each system prompt ---------------------------------
     task_phrases = {
         "Stage 5": ("dual-BDI", "scenario specification"),
-        "Stage 6a": ("7-step attack narrative",),
+        "Stage 6a": ("7-step causal narrative",),
         "Stage 6b": ("attack tree",),
         "Stage 6c": ("Gherkin behavior specification",),
     }

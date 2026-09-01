@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import pytest
 import yaml
 
+from asago_scenario_generator.stpa.infra.llm_helpers import StageError
+from asago_scenario_generator.stpa.system_model.loss_analysis import (
+    derive_loss_analysis,
+)
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ResponsibilitySet,
 )
@@ -13,6 +18,8 @@ from tests.stpa.sp1_helpers import (
     make_risk_cards,
     read_calls_jsonl,
     setup_sp1_mock_client,
+    valid_gap_draft_dict,
+    valid_risk_draft_dict,
     valid_responsibility_set_dict,
 )
 
@@ -157,3 +164,88 @@ def test_stage2_client_failure_is_not_retried(tmp_path):
     assert len(attempts) == 1
     assert attempts[0]["success"] is False
     assert "RuntimeError" in attempts[0]["error"]
+
+
+def test_stage1a_json_decode_retry_continues_and_logs_both_attempts(tmp_path):
+    """One malformed risk draft is retried and then accepted."""
+    from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
+
+    client = MockLLMClient()
+    client.set_response_for(
+        LossAnalysisDraft,
+        ["{malformed JSON", valid_risk_draft_dict(), valid_gap_draft_dict()],
+    )
+
+    result = derive_loss_analysis(
+        llm_client=client,
+        use_case_text="Test use case",
+        risk_cards=make_risk_cards(),
+        run_dir=tmp_path,
+    )
+
+    assert result.risk_card_losses
+    attempts = [
+        entry
+        for entry in read_calls_jsonl(tmp_path)
+        if entry["stage"] == "stage_1a" and entry["step"] == "risk_derivation"
+    ]
+    assert len(attempts) == 2
+    assert [entry["success"] for entry in attempts] == [False, True]
+    assert "JSONDecodeError" in attempts[0]["error"]
+
+
+def test_stage1a_json_decode_retry_is_bounded(tmp_path):
+    """Two malformed risk drafts stop after one retry without consuming more."""
+    from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
+
+    client = MockLLMClient()
+    client.set_response_for(
+        LossAnalysisDraft,
+        [
+            "{malformed JSON",
+            "{still malformed JSON",
+            valid_risk_draft_dict(),
+            valid_gap_draft_dict(),
+        ],
+    )
+
+    with pytest.raises(StageError, match="stage_1a/risk_derivation"):
+        derive_loss_analysis(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=make_risk_cards(),
+            run_dir=tmp_path,
+        )
+
+    attempts = [
+        entry
+        for entry in read_calls_jsonl(tmp_path)
+        if entry["stage"] == "stage_1a" and entry["step"] == "risk_derivation"
+    ]
+    assert len(attempts) == 2
+    assert [entry["success"] for entry in attempts] == [False, False]
+    assert client.call_count == 2
+
+
+def test_stage1a_calls_forward_exact_completion_cap(tmp_path):
+    """Both Stage 1a structured calls use the bounded completion budget."""
+    from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
+
+    client = MockLLMClient()
+    client.set_response_for(
+        LossAnalysisDraft,
+        [valid_risk_draft_dict(), valid_gap_draft_dict()],
+    )
+
+    derive_loss_analysis(
+        llm_client=client,
+        use_case_text="Test use case",
+        risk_cards=make_risk_cards(),
+        run_dir=tmp_path,
+    )
+
+    stage1a_calls = [
+        call for call in client.calls if call.response_format is LossAnalysisDraft
+    ]
+    assert len(stage1a_calls) == 2
+    assert [call.max_completion_tokens for call in stage1a_calls] == [8192, 8192]

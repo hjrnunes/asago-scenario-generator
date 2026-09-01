@@ -331,6 +331,7 @@ class TestRepairCalledInDeriveControlStructure:
                     {
                         "resp_id": "RESP-1",
                         "description": "Controller 1",
+                        "security_constraint_refs": [],
                         "process_model_parts": [
                             {"pm_id": "PM-1-1", "description": "State 1"},
                             {"pm_id": "PM-1-2", "description": "Orphan state"},
@@ -340,19 +341,31 @@ class TestRepairCalledInDeriveControlStructure:
             },
         )
 
-        # Call 2b: Control elements (CA and FB for PM-1-1 only — PM-1-2 is orphan)
+        # Call 2b: strict responses must explicitly cover every PM, so the
+        # repair hook is exercised as a no-op for this complete response.
         client.set_response_for(
             ControlElementSet,
             {
                 "control_actions": [
-                    {"ca_id": "CA-1-1", "description": "Action 1"}
+                    {
+                        "ca_id": "CA-1-1",
+                        "description": "Action 1",
+                        "target": {"type": "responsibility", "id": "RESP-1"},
+                    }
                 ],
                 "feedback_channels": [
                     {
                         "fb_id": "FB-1-1",
                         "description": "FB 1",
                         "updates": "PM-1-1",
-                    }
+                        "source": {"type": "responsibility", "id": "RESP-1"},
+                    },
+                    {
+                        "fb_id": "FB-1-2",
+                        "description": "FB 2",
+                        "updates": "PM-1-2",
+                        "source": {"type": "responsibility", "id": "RESP-1"},
+                    },
                 ],
                 "controlled_processes": [],
             },

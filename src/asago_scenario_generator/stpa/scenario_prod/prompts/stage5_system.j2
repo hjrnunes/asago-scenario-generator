@@ -7,13 +7,46 @@ Your task is to produce a dual-BDI (Belief-Desire-Intention) scenario specificat
 2. **Attacker BDI generation**: Generate a complete attacker BDI:
    - **Beliefs**: What the attacker knows about the defender's process model and its weaknesses. Reference specific PM-* IDs where relevant.
    - **Desires**: Which ICA the attacker wants to induce (state the desired unsafe control action).
-   - **Intentions**: How the attacker plans to manipulate the control loop. Each intention MUST reference specific structural elements: PM-* (process model parts), FB-* (feedback channels), or CA-* (control actions).
+   - **Intentions**: How the selected structural condition leads to the ICA.
+     Describe active attacker manipulation only when an exact reachable
+     capability or labelled bounded assumption supports it. Each intention
+     MUST reference specific structural elements: PM-* (process model parts),
+     FB-* (feedback channels), or CA-* (control actions).
+
+## Evidence basis and access rules
+
+The selected control path is the structural source of truth. Classify every
+causal factor with one evidence status:
+
+- `structural_failure`: an existing stale, missing, incorrect, mistimed, or
+  otherwise inadequate control-loop condition. This status does not establish
+  attacker access. Describe the condition itself; do not claim that an
+  attacker suppresses, poisons, injects, or manipulates a channel.
+- `reachable_capability`: an attacker mechanism is supported only by an exact
+  record in `reachable_capabilities` and its own `access_path`. Copy the exact
+  capability ID and access references into the factor. Never use a capability
+  merely because it exists elsewhere in the system.
+- `bounded_assumption`: the connection is uncertain. State the short,
+  bounded assumption in `bounded_assumption` and label it as an assumption,
+  never as established access or evidence.
+
+When `reachable_capabilities` is empty, no attacker-access path is established.
+Do not force an active attacker manipulation. The attacker BDI may describe
+how the existing structural condition would lead to the selected ICA, or may
+use a clearly labelled bounded assumption, but it must not present an invented
+feedback, transport, tool, audit, or input path as fact.
 
 ## Defender-Attacker Interaction Model
 
-The attacker targets the defender's process model. The defender's beliefs (PM parts) are the attack surface. The attacker manipulates a declared AI surface that provides a logical feedback update, using the supplied technology-context mechanisms to corrupt the process model and cause the defender to act on false beliefs and issue unsafe control actions.
+The attacker targets the defender's process model only through an explicitly
+supported capability or a clearly labelled bounded assumption. The defender's
+beliefs (PM parts) remain structural context, not proof of attacker access.
 
-Feedback is a logical belief update, not an assumed transport. Direct the attacker BDI toward the supplied technology-context mechanisms and the declared AI surfaces that can update the defender's process-model belief.
+Feedback is a logical belief update, not an assumed transport. Never infer
+interception, packet injection, blocking, spoofing, or link severing merely
+from the word “channel”. When a reachable capability supports active access,
+direct the attacker BDI toward the supplied technology-context mechanisms and
+the declared AI surfaces that can update the defender's process-model belief.
 
 {# Feedback-channel bridge is duplicated in stage3/stage6a system prompts.
    Shared includes would cross the threat_enum and scenario_prod TemplateLoader roots. #}
@@ -36,13 +69,42 @@ Return a JSON object with this structure:
     "beliefs": ["attacker belief 1", "attacker belief 2", ...],
     "desires": ["attacker desire 1", "attacker desire 2", ...],
     "intentions": ["attacker intention 1 referencing PM/FB/CA elements", ...]
-  }
+  },
+  "causal_factors": [
+    {
+      "kind": "PROCESS_MODEL_FLAW",
+      "source_id": "PM-1-1",
+      "evidence": "plain evidence connecting this exact source to the ICA",
+      "timing": null,
+      "evidence_status": "structural_failure",
+      "capability_refs": [],
+      "access_refs": [],
+      "bounded_assumption": null
+    }
+  ]
 }
 ```
 
 ## Constraints
 
 - Every defender belief must receive a non-empty vulnerability annotation.
-- Attacker intentions must reference at least one structural ID (PM-*, FB-*, or CA-*).
+- Attacker intentions must reference at least one structural ID (PM-*, FB-*,
+  or CA-*), but an ID alone never establishes attacker access.
+- A selected path can be a responsibility/control-action pair
+  (`RESP-*`/`CA-*`) or an exact coordination link/mechanism pair
+  (`CL-*`/`CM-*`). For `CL-*`/`CM-*`, reason about the supplied source and
+  target responsibilities and shared process-model state; never relabel the
+  link or mechanism as a responsibility or control action.
 - The attacker BDI should be realistic and grounded in the specific control structure.
 - Do NOT alter the defender BDI IDs — use the exact PM-*, RESP-*, CA-* IDs provided.
+- `causal_factors` is required and must contain at least one explicit factor.
+- `kind` must be exactly one of `PROCESS_MODEL_FLAW`, `FEEDBACK_DELAY`,
+  `SENSOR_ANOMALY`, or `ACTUATOR_ANOMALY`; its `source_id` must use the
+  matching PM-*, FB-*, FB-*, or CA-* namespace from the supplied path.
+- `evidence_status` must be `structural_failure`, `reachable_capability`, or
+  `bounded_assumption`.
+- `reachable_capability` requires exact `capability_refs` and `access_refs`
+  from the supplied `reachable_capabilities` records; `structural_failure`
+  must leave both lists empty; `bounded_assumption` requires a non-empty
+  `bounded_assumption` and must not claim those references as facts.
+- Do not return replacement ICA, action, target, hazard, loss, constraint, obligation, or capability fields.

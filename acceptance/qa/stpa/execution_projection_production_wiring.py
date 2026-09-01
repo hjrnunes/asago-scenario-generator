@@ -613,49 +613,31 @@ def _qa_03(qa: QARunner, work: Path, inputs: dict[str, Path], profiles: Path) ->
     STATE.eval_observations = None
     output_dir = work / "qa-03"
     result = _run_sp3(output_dir, inputs, profiles)
+    manifest_path = output_dir / "run-manifest.yaml"
+    manifest = _load_yaml(manifest_path) if manifest_path.is_file() else {}
+    diagnostics = _combined_output(result) + json.dumps(manifest)
     qa.check(
-        "QA-STPA-PROJ-03 run succeeds", result.returncode == 0, result.stderr[-400:]
+        "QA-STPA-PROJ-03 empty successful output fails closed",
+        "causal_factors" in diagnostics,
+        diagnostics[-800:],
     )
     scenario_path = _scenario_yaml(output_dir)
     json_path = _projection_json(output_dir)
     yaml_path = _projection_yaml(output_dir)
     feature_path = _scenario_feature(output_dir)
     qa.check(
-        "QA-STPA-PROJ-03 legacy YAML and feature remain",
-        scenario_path.is_file() and feature_path.is_file(),
+        "QA-STPA-PROJ-03 no legacy scenario is published",
+        not scenario_path.exists() and not feature_path.exists(),
     )
     qa.check(
-        "QA-STPA-PROJ-03 canonical projection files exist",
-        json_path.is_file() and yaml_path.is_file(),
-    )
-    if not (scenario_path.is_file() and json_path.is_file()):
-        return
-    scenario = _load_yaml(scenario_path)
-    spec_factors = (scenario.get("scenario_spec") or {}).get("causal_factors")
-    qa.check(
-        "QA-STPA-PROJ-03 ScenarioSpec causal_factors present empty",
-        spec_factors == [],
-        str(spec_factors),
-    )
-    doc = _load_json(json_path)
-    qa.check(
-        "QA-STPA-PROJ-03 projection vectors present empty",
-        doc.get("causal_factors") == []
-        and doc.get("assertions") == []
-        and doc.get("steps") == [],
-        json.dumps(
-            {key: doc.get(key) for key in ("causal_factors", "assertions", "steps")}
-        ),
-    )
-    qa.check(
-        "QA-STPA-PROJ-03 no invented temporal behavior",
-        doc.get("uca_constraint") in (None, {}),
-        str(doc.get("uca_constraint")),
+        "QA-STPA-PROJ-03 no canonical projection is published",
+        not json_path.exists() and not yaml_path.exists(),
     )
     stage6 = _stage6_prompts()
     qa.check(
-        "QA-STPA-PROJ-03 no Stage 6 alignment table",
-        all("Projection ID:" not in prompt for prompt in stage6),
+        "QA-STPA-PROJ-03 no Stage 6 request",
+        stage6 == [],
+        str(len(stage6)),
     )
 
 

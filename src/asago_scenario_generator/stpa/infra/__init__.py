@@ -24,6 +24,15 @@ from asago_scenario_generator.stpa.infra.parallel_llm import (
     LLMCallSpec,
     parallel_safe_llm_calls,
 )
+from asago_scenario_generator.stpa.infra.prompt_preflight import (
+    PromptAudit,
+    PromptBudget,
+    PromptBudgetExceeded,
+    PromptContractError,
+    audit_prompt_contract,
+    estimate_prompt_tokens,
+    split_prompt_batch,
+)
 from asago_scenario_generator.stpa.infra.templates import (
     TemplateLoader,
     hash_prompt_templates,
@@ -57,4 +66,12 @@ __all__ = [
     "LLMCallSpec",
     "LLMCallResult",
     "parallel_safe_llm_calls",
+    # prompt preflight
+    "PromptAudit",
+    "PromptBudget",
+    "PromptBudgetExceeded",
+    "PromptContractError",
+    "audit_prompt_contract",
+    "estimate_prompt_tokens",
+    "split_prompt_batch",
 ]

@@ -49,6 +49,8 @@ MODULES = (
     "stpa",
     "phase4_task1_hybrid_projection",
     "hybrid_scenario_projection",
+    "synthesis",
+    "synthesis_prompt_contracts",
 )
 
 

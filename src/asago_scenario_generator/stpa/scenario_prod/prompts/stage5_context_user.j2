@@ -1,0 +1,41 @@
+## Immutable Scenario Generation Context
+
+Every identity and description below is authoritative. Use it as context; do
+not replace, reinterpret, or return any ICA, action, target, hazard, loss,
+constraint, obligation, or capability identity.
+
+{{ scenario_context_yaml }}
+
+---
+
+The selected control path may be a responsibility/control-action pair
+(`RESP-*`/`CA-*`) or a coordination path (`CL-*`/`CM-*`). For a coordination
+path, treat the exact link, source responsibility, target responsibility,
+shared process-model part, and coordination mechanism as the control loop
+context. Do not relabel `CL-*` or `CM-*` as a responsibility or control action,
+and do not invent a direct transport or endpoint that is not described above.
+
+## Your Task
+
+1. Fill in `defender_vulnerabilities` — one entry per process-model ID in the selected control path, describing the evidence-backed vulnerability in the context of this exact ICA.
+
+2. Generate `attacker_bdi` grounded only in the selected control path and reachable capabilities.
+
+3. Declare one or more `causal_factors`. Each factor must contain `kind`, an
+   exact `source_id` from the selected path, a non-empty `evidence` description,
+   `evidence_status`, and optional `timing`. Use
+   `structural_failure` for an existing structural condition, and do not turn
+   that condition into attacker access. Use `reachable_capability` only with
+   exact capability and access references from this context. Use
+   `bounded_assumption` only with a short, explicit
+   `bounded_assumption` statement.
+
+When no reachable capabilities are supplied (`reachable_capabilities: []`),
+no attacker-access path is established.
+Do not claim that an attacker suppresses or manipulates a feedback channel,
+poisons an audit output, injects guidelines, or uses a tool/input surface.
+Describe an existing structural condition, or label the connection as a
+bounded assumption. If no factor can be supported, do not manufacture a
+successful response.
+
+Return only a JSON object matching the closed structure defined in the system prompt.

@@ -26,12 +26,14 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
 )
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     BDIGenerationResult,
+    CausalFactorDeclaration,
     assemble_scenario_spec,
     generate_bdi,
     generate_scenario_id,
     parse_ica_slot_id,
     populate_defender_bdi,
 )
+from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
 from tests.stpa.sp1_helpers import MockCall, MockLLMClient, read_calls_jsonl
 
 
@@ -163,6 +165,16 @@ def _make_structural_threat(
     )
 
 
+def _causal_factors() -> list[CausalFactorDeclaration]:
+    return [
+        CausalFactorDeclaration(
+            kind=CausalFactorKind.process_model_flaw,
+            source_id="PM-1-1",
+            evidence="The selected process-model state can be stale.",
+        )
+    ]
+
+
 class TestPopulateDefenderBDI:
     """Tests for deterministic defender BDI pre-population."""
 
@@ -220,6 +232,7 @@ class TestGenerateBDI:
         threat = _make_structural_threat()
         llm_result = BDIGenerationResult(
             defender_vulnerabilities={"PM-1-1": "vuln1", "PM-1-2": "vuln2"},
+            causal_factors=_causal_factors(),
             attacker_bdi=AttackerBDI(
                 beliefs=["Knows PM-1-1 is exploitable"],
                 desires=["Induce NOT_PROVIDED on CA-1-1"],
@@ -242,6 +255,7 @@ class TestGenerateBDI:
         threat = _make_structural_threat()
         llm_result = BDIGenerationResult(
             defender_vulnerabilities={"PM-1-1": "v", "PM-1-2": "v"},
+            causal_factors=_causal_factors(),
             attacker_bdi=AttackerBDI(
                 beliefs=["b"], desires=["d"], intentions=["i via PM-1-1"]
             ),
@@ -263,6 +277,7 @@ class TestGenerateBDI:
         threat = _make_structural_threat()
         llm_result = BDIGenerationResult(
             defender_vulnerabilities={"PM-1-1": "v", "PM-1-2": "v"},
+            causal_factors=_causal_factors(),
             attacker_bdi=AttackerBDI(
                 beliefs=["b1", "b2", "b3"],
                 desires=["d1", "d2"],
@@ -285,6 +300,7 @@ class TestGenerateBDI:
         threat = _make_structural_threat()
         llm_result = BDIGenerationResult(
             defender_vulnerabilities={"PM-1-1": "v", "PM-1-2": "v"},
+            causal_factors=_causal_factors(),
             attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
         )
         client = MockLLMClient()
@@ -307,6 +323,7 @@ class TestGenerateBDI:
         threat = _make_structural_threat()
         llm_result = BDIGenerationResult(
             defender_vulnerabilities={"PM-1-1": "v", "PM-1-2": "v"},
+            causal_factors=_causal_factors(),
             attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
         )
         client = MockLLMClient()
@@ -325,6 +342,7 @@ class TestGenerateBDI:
         threat = _make_structural_threat()
         llm_result = BDIGenerationResult(
             defender_vulnerabilities={"PM-1-1": "v", "PM-1-2": "v"},
+            causal_factors=_causal_factors(),
             attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
         )
         client = _SequenceBDIClient([LengthFinishReasonError("truncated"), llm_result])
@@ -378,6 +396,7 @@ class TestAssembleScenarioSpec:
         )
         llm_result = BDIGenerationResult(
             defender_vulnerabilities={"PM-1-1": "v1", "PM-1-2": "v2"},
+            causal_factors=_causal_factors(),
             attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
         )
         spec = assemble_scenario_spec(bdi, llm_result, threat, cs, scenario_index=0)
@@ -395,6 +414,7 @@ class TestAssembleScenarioSpec:
         threat = _make_structural_threat()
         llm_result = BDIGenerationResult(
             defender_vulnerabilities={"PM-1-1": "v", "PM-1-2": "v"},
+            causal_factors=_causal_factors(),
             attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
         )
         spec = assemble_scenario_spec(bdi, llm_result, threat, cs, scenario_index=0)
@@ -412,6 +432,7 @@ class TestAssembleScenarioSpec:
                 "PM-1-1": "exploitable via injection",
                 "PM-1-2": "schema bypass",
             },
+            causal_factors=_causal_factors(),
             attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
         )
         spec = assemble_scenario_spec(bdi, llm_result, threat, cs)
@@ -430,6 +451,7 @@ class TestAssembleScenarioSpec:
                 "PM-1-1": "correct1",
                 "PM-1-2": "correct2",
             },
+            causal_factors=_causal_factors(),
             attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
         )
         spec = assemble_scenario_spec(bdi, llm_result, threat, cs)

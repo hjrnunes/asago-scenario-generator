@@ -162,7 +162,9 @@ class TestParseLlmResult:
     def test_content_is_already_model_instance(self):
         """When content is already the target type, it is returned as-is."""
         model = _SampleModel(name="direct")
-        result = LLMResult(content=model, prompt_tokens=0, completion_tokens=0, duration_ms=0)
+        result = LLMResult(
+            content=model, prompt_tokens=0, completion_tokens=0, duration_ms=0
+        )
         parsed = parse_llm_result(result, _SampleModel)
         assert parsed is model
 
@@ -170,7 +172,9 @@ class TestParseLlmResult:
         """When content is a dict, it is validated into the model."""
         result = LLMResult(
             content={"name": "from_dict", "value": 42},
-            prompt_tokens=0, completion_tokens=0, duration_ms=0,
+            prompt_tokens=0,
+            completion_tokens=0,
+            duration_ms=0,
         )
         parsed = parse_llm_result(result, _SampleModel)
         assert parsed.name == "from_dict"
@@ -180,17 +184,46 @@ class TestParseLlmResult:
         """When content is a JSON string, it is parsed and validated."""
         result = LLMResult(
             content=json.dumps({"name": "from_string"}),
-            prompt_tokens=0, completion_tokens=0, duration_ms=0,
+            prompt_tokens=0,
+            completion_tokens=0,
+            duration_ms=0,
         )
         parsed = parse_llm_result(result, _SampleModel)
         assert parsed.name == "from_string"
         assert parsed.value == 0
 
+    def test_content_is_exact_fenced_json_document(self):
+        """OpenAI-compatible gateways may wrap an otherwise exact JSON body."""
+        result = LLMResult(
+            content='```json\n{"name": "from_fence"}\n```',
+            prompt_tokens=0,
+            completion_tokens=0,
+            duration_ms=0,
+        )
+
+        parsed = parse_llm_result(result, _SampleModel)
+
+        assert parsed.name == "from_fence"
+
+    def test_fenced_json_with_trailing_prose_is_rejected(self):
+        """Tolerance does not extract a JSON fragment from surrounding prose."""
+        result = LLMResult(
+            content='```json\n{"name": "unsafe"}\n```\nextra prose',
+            prompt_tokens=0,
+            completion_tokens=0,
+            duration_ms=0,
+        )
+
+        with pytest.raises(json.JSONDecodeError):
+            parse_llm_result(result, _SampleModel)
+
     def test_content_is_unexpected_type_raises(self):
         """When content is an unexpected type, TypeError is raised."""
         result = LLMResult(
             content=12345,
-            prompt_tokens=0, completion_tokens=0, duration_ms=0,
+            prompt_tokens=0,
+            completion_tokens=0,
+            duration_ms=0,
         )
         with pytest.raises(TypeError, match="Unexpected LLM result content type"):
             parse_llm_result(result, _SampleModel)

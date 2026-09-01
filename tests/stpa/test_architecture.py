@@ -60,6 +60,7 @@ _MODEL_LAYERS: dict[str, int] = {
     "enriched_threat_set": 1,
     "temporal_constraints": 2,
     "ica_enumeration": 2,
+    "scenario_context": 2,
     "scenario_spec": 3,
     "scenario_envelope": 4,
 }
@@ -201,6 +202,7 @@ class TestNoImportCycles:
             "asago_scenario_generator.stpa.models.control_structure",
             "asago_scenario_generator.stpa.models.ica_enumeration",
             "asago_scenario_generator.stpa.models.enriched_threat_set",
+            "asago_scenario_generator.stpa.models.scenario_context",
             "asago_scenario_generator.stpa.models.scenario_spec",
             "asago_scenario_generator.stpa.models.scenario_envelope",
         ],
@@ -909,6 +911,7 @@ SCENARIO_PROD_DIR = STPA_ROOT / "scenario_prod"
 _SCENARIO_PROD_LAYERS: dict[str, int] = {
     "_constants": 0,
     "enrichment": 0,
+    "context": 0,
     "assembly": 1,
     "bdi_generation": 1,
     "narrative": 1,
@@ -1001,6 +1004,7 @@ class TestScenarioProdNoImportCycles:
             "asago_scenario_generator.stpa.scenario_prod",
             "asago_scenario_generator.stpa.scenario_prod._constants",
             "asago_scenario_generator.stpa.scenario_prod.enrichment",
+            "asago_scenario_generator.stpa.scenario_prod.context",
             "asago_scenario_generator.stpa.scenario_prod.assembly",
             "asago_scenario_generator.stpa.scenario_prod.bdi_generation",
             "asago_scenario_generator.stpa.scenario_prod.narrative",
@@ -1311,9 +1315,9 @@ _BRIDGE_ANCHOR = (
     "FB-* denotes a logical information dependency that updates a process-model belief"
 )
 _BRIDGE_TEMPLATES = (
-    THREAT_ENUM_DIR / "prompts" / "stage3_system.j2",
-    SCENARIO_PROD_DIR / "prompts" / "stage5_system.j2",
     SCENARIO_PROD_DIR / "prompts" / "stage6a_narrative_system.j2",
+    SCENARIO_PROD_DIR / "prompts" / "stage6b_tree_system.j2",
+    SCENARIO_PROD_DIR / "prompts" / "stage6c_gherkin_system.j2",
 )
 
 
@@ -1326,21 +1330,19 @@ def _bridge_body(path: Path) -> str:
 
 
 class TestFeedbackBridgeDuplication:
-    """The FB-bridge rule is duplicated across SP3 system prompts on purpose.
+    """The FB-bridge rule is duplicated across Stage 6 prompts on purpose.
 
-    ``TemplateLoader`` is bound to one prompts directory.  Stage 3 lives
-    under ``threat_enum/prompts`` and Stages 5/6a live under
-    ``scenario_prod/prompts``.  A shared Jinja include would either
-    couple those package loaders or invent a third prompt root.  Keep
-    the templates self-contained and lock the shared prose so it cannot
-    drift independently.
+    ``TemplateLoader`` is bound to one prompts directory.  Keep the
+    templates self-contained and lock the shared prose so it cannot drift
+    independently between the three Stage 6 calls.
     """
 
     def test_bridge_prose_is_identical(self):
-        """All three system prompts share the same FB-bridge body."""
+        """All three Stage 6 system prompts share the same FB-bridge body."""
         bodies = [_bridge_body(path) for path in _BRIDGE_TEMPLATES]
         assert all(_BRIDGE_ANCHOR in body for body in bodies)
         assert len(set(bodies)) == 1
+        assert "declared AI surface" in bodies[0]
 
     def test_no_cross_package_prompt_includes(self):
         """SP3 templates must not include files from another package."""

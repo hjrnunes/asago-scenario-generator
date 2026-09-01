@@ -165,18 +165,42 @@ def _valid_responsibility_set_dict() -> dict:
     }
 
 
+def _fallback_responsibility_set_dict() -> dict:
+    """Call 2a fixture with a typed-but-unresolvable PM feedback source.
+
+    Call 2b remains a strict, schema-complete response. The invalid reference
+    is retained in Call 2a so these tests exercise the in-memory assembly
+    fallback seam without asking Call 2b parsing to accept invalid provider
+    data.
+    """
+    response = _valid_responsibility_set_dict()
+    response["responsibilities"][0]["process_model_parts"][0][
+        "feedback_source"
+    ] = {"type": "controlled_process", "id": "CP-99"}
+    return response
+
+
 def _valid_control_element_set_dict() -> dict:
     """ControlElementSet matching the responsibilities (valid cross-refs)."""
     return {
         "control_actions": [
-            {"ca_id": "CA-1-1", "description": "Execute payment"},
-            {"ca_id": "CA-2-1", "description": "Send response"},
+            {
+                "ca_id": "CA-1-1",
+                "description": "Execute payment",
+                "target": {"type": "responsibility", "id": "RESP-1"},
+            },
+            {
+                "ca_id": "CA-2-1",
+                "description": "Send response",
+                "target": {"type": "responsibility", "id": "RESP-2"},
+            },
         ],
         "feedback_channels": [
             {
                 "fb_id": "FB-1-1",
                 "description": "Transaction result",
                 "updates": "PM-1-1",
+                "source": {"type": "responsibility", "id": "RESP-1"},
             },
             {
                 "fb_id": "FB-2-1",
@@ -198,7 +222,11 @@ def _valid_control_element_set_dict_with_cp() -> dict:
                 "description": "Execute payment",
                 "target": {"type": "controlled_process", "id": "CP-1"},
             },
-            {"ca_id": "CA-2-1", "description": "Send response"},
+            {
+                "ca_id": "CA-2-1",
+                "description": "Send response",
+                "target": {"type": "responsibility", "id": "RESP-2"},
+            },
         ],
         "feedback_channels": [
             {
@@ -271,12 +299,19 @@ def _setup_stage2_client(
     configurable Call 2b ControlElementSet and Call 3 CoordinationAnalysis."""
     client = MockLLMClient()
     client.set_response_for(RequirementSet, _valid_requirement_set_dict())
+    responsibilities = resp_set_dict
+    if responsibilities is None:
+        responsibilities = (
+            _fallback_responsibility_set_dict()
+            if control_element_set_dict is None
+            else _valid_responsibility_set_dict()
+        )
     client.set_response_for(
-        ResponsibilitySet, resp_set_dict or _valid_responsibility_set_dict()
+        ResponsibilitySet, responsibilities
     )
     client.set_response_for(
         ControlElementSet,
-        control_element_set_dict or _namespace_confusion_control_element_set(),
+        control_element_set_dict or _valid_control_element_set_dict(),
     )
     client.set_response_for(
         CoordinationAnalysis,
@@ -301,12 +336,19 @@ def _setup_full_run_client(
     )
     client.set_response_for(Stage1Profile, valid_stage1_profile_dict())
     client.set_response_for(RequirementSet, _valid_requirement_set_dict())
+    responsibilities = resp_set_dict
+    if responsibilities is None:
+        responsibilities = (
+            _fallback_responsibility_set_dict()
+            if control_element_set_dict is None
+            else _valid_responsibility_set_dict()
+        )
     client.set_response_for(
-        ResponsibilitySet, resp_set_dict or _valid_responsibility_set_dict()
+        ResponsibilitySet, responsibilities
     )
     client.set_response_for(
         ControlElementSet,
-        control_element_set_dict or _namespace_confusion_control_element_set(),
+        control_element_set_dict or _valid_control_element_set_dict(),
     )
     client.set_response_for(
         CoordinationAnalysis,
@@ -394,6 +436,7 @@ class TestMergeFallback04PreservesControlledProcesses:
 
     def test_merge_fallback_04_preserves_controlled_processes(self, tmp_path):
         client = _setup_stage2_client(
+            resp_set_dict=_fallback_responsibility_set_dict(),
             control_element_set_dict=_valid_control_element_set_dict_with_cp(),
         )
         cs, _ = derive_control_structure(

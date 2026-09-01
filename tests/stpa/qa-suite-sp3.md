@@ -156,7 +156,7 @@ from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from pathlib import Path
 loader = TemplateLoader(Path('src/asago_scenario_generator/stpa/scenario_prod/prompts'))
 prompt = loader.render_prompt('stage6a_narrative_system.j2')
-steps = ['process model starts correct', 'manipulates', 'diverges', 'false beliefs', 'ICA', 'hazard', 'loss']
+steps = ['process model starts correct', 'causal transition occurs', 'diverges', 'resulting belief', 'ICA', 'hazard', 'loss']
 for step in steps:
     assert step.lower() in prompt.lower(), f'Missing step keyword: {step}'
 print('7-step structure verified in system prompt')

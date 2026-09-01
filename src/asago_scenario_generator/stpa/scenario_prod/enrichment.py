@@ -86,9 +86,21 @@ def compute_system_context(
     Returns:
         A populated :class:`SystemContext`.
     """
-    resp = _find_responsibility(control_structure, spec.target_controller)
-    resp_desc = resp.description if resp else ""
-    ca_desc = _find_control_action_description(resp, spec.target_control_action)
+    if spec.target_controller.startswith("CL-"):
+        link = _find_coordination_link(control_structure, spec.target_controller)
+        if (
+            link is None
+            or link.coordination_mechanism.cm_id != spec.target_control_action
+        ):
+            resp_desc = ""
+            ca_desc = ""
+        else:
+            resp_desc = link.description
+            ca_desc = link.coordination_mechanism.description
+    else:
+        resp = _find_responsibility(control_structure, spec.target_controller)
+        resp_desc = resp.description if resp else ""
+        ca_desc = _find_control_action_description(resp, spec.target_control_action)
 
     tool_names = _extract_tool_names(capability_profile)
 
@@ -200,6 +212,14 @@ def _find_control_action_description(
         if ca.ca_id == ca_id:
             return ca.description
     return ""
+
+
+def _find_coordination_link(control_structure: ControlStructure, link_id: str):
+    """Find one coordination link by its exact structural identifier."""
+    matches = [
+        item for item in control_structure.coordination_links if item.link_id == link_id
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _extract_tool_names(capability_profile: CapabilityProfile) -> list[str]:

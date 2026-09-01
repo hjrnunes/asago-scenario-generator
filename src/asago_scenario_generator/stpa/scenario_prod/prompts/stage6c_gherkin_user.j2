@@ -2,6 +2,14 @@
 
 {{ scenario_spec_yaml }}
 
+{% if scenario_context_yaml %}
+---
+
+## Immutable Scenario Generation Context
+
+{{ scenario_context_yaml }}
+{% endif %}
+
 ---
 
 ## Security Constraint
@@ -29,5 +37,13 @@ Produce a Gherkin behavior specification using the should/but structure defined 
 4. Include a loss reference in the consequences using only the following valid Loss IDs: {{ valid_loss_ids }}.
    Use only L-* loss IDs. Do not use H-* hazard IDs.
 5. Reference no structural ID (PM-*, FB-*, CA-*, RESP-*) outside the projection alignment table or the control structure.
+6. Use only the exact governing constraint and hazard in the immutable scenario context. Do not introduce a new causal factor or substitute a different concern.
+7. Use the causal-factor evidence status from the immutable context. With
+   `reachable_capabilities: []`, no attacker-access path is established: do
+   not claim that an attacker suppresses or manipulates feedback, poisons an
+   audit output, injects guidelines, or uses a tool/input surface. Describe
+   the existing structural condition that produces the ICA. Active
+   manipulation requires the exact capability and access references from the
+   context; label every bounded assumption explicitly.
 
-Return a YAML object with fields: feature, scenario, given (list), when (list), then_expected (list), then_actual (list).
+Return one JSON object with fields: feature, scenario, given (list), when (list), then_expected (list), then_actual (list).

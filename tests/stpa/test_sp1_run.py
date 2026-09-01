@@ -6,7 +6,6 @@ Covers SP1-RUN-01 through SP1-RUN-14 from the Gherkin feature file.
 from __future__ import annotations
 
 import json
-import warnings
 
 
 from asago_scenario_generator.models.capability_profile import (
@@ -340,10 +339,10 @@ class TestRunOrchestration:
         assert "stage_1a" in manifest["stage_summary"]
         assert "stage_2" in manifest["stage_summary"]
 
-    def test_observed_gemma_references_normalize_before_typed_serialization(
+    def test_observed_gemma_references_are_rejected_before_typed_serialization(
         self, tmp_path
     ):
-        """Tolerated raw references never serialize as an invalid typed graph."""
+        """Malformed semantic references fail the strict Call 2b boundary."""
         client = _setup_mock_client()
         from asago_scenario_generator.stpa.system_model.control_structure import (
             ControlElementSet,
@@ -354,35 +353,25 @@ class TestRunOrchestration:
             _observed_gemma_control_element_set_dict(),
         )
 
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            result = run_sp1(
-                llm_client=client,
-                use_case_text="Test use case",
-                risk_cards=make_risk_cards(),
-                run_dir=tmp_path,
-            )
-
-        serializer_warnings = [
-            warning
-            for warning in caught
-            if "Pydantic serializer warnings" in str(warning.message)
-        ]
-        assert serializer_warnings == []
-        assert result.control_structure is not None
-        ControlStructure.model_validate(
-            result.control_structure.model_dump(mode="python")
+        result = run_sp1(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=make_risk_cards(),
+            run_dir=tmp_path,
         )
-        responsibility = result.control_structure.responsibilities[0]
-        assert responsibility.control_actions[0].target is not None
-        assert responsibility.control_actions[0].target.id == "CP-1"
-        assert responsibility.feedback_channels[0].source is not None
-        assert responsibility.feedback_channels[0].source.id == "RESP-1"
 
-    def test_observed_invalid_feedback_update_is_contained_by_fallback(
+        assert result.control_structure is None
+        assert result.stage_warnings == []
+        assert any(
+            "call_2b_control_elements" in error
+            and "target requires type and id" in error
+            for error in result.stage_errors
+        )
+
+    def test_observed_invalid_feedback_update_is_rejected_without_fallback(
         self, tmp_path
     ):
-        """An unresolvable object-shaped update cannot crash fallback repair."""
+        """An object-shaped update fails strict Call 2b parsing."""
         from asago_scenario_generator.stpa.system_model.control_structure import (
             ControlElementSet,
         )
@@ -400,16 +389,12 @@ class TestRunOrchestration:
             run_dir=tmp_path,
         )
 
-        assert result.control_structure is not None
-        assert result.stage_errors == []
+        assert result.control_structure is None
+        assert result.stage_warnings == []
         assert any(
-            "Stripped invalid feedback channel FB-1-1" in warning
-            for warning in result.stage_warnings
-        )
-        assert all(
-            isinstance(channel.updates, str)
-            for responsibility in result.control_structure.responsibilities
-            for channel in responsibility.feedback_channels
+            "call_2b_control_elements" in error
+            and "requires a non-empty updates" in error
+            for error in result.stage_errors
         )
 
     def test_run_manifest_records_profile_name(self, tmp_path):

@@ -210,6 +210,51 @@ direction keeps taxonomy planning, STPA generation, persistence, and hybrid
 reporting replaceable and prevents either workflow from importing the other
 workflow's implementation.
 
+## Obligation-aware synthesis composition
+
+`pipeline.synthesis.run_synthesis` is the composition root for a provisional
+obligation-aware run. `SynthesisInputs` carries the use case, complete
+reviewed risks, typed qualification facts, one capability profile/snapshot,
+and either a closed `TaxonomyObligationInputs` graph or its production
+builder. Phase 1 planning always executes; a prebuilt plan is accepted only
+as a resume checkpoint after the fresh plan and input pins validate.
+
+The fixed order is capability preparation and snapshot pinning, Phase 1
+planning, ordinary SP1 baseline, neutral-brief consideration, at most one
+additive revision, one complete recheck only when that revision is `applied`,
+final obligation-aware ICA filling, ordinary SP3 realization, and provisional
+accounting. The shared provider adapter is constructed lazily after planning
+and baseline preparation. An SP3 failure is recorded without discarding final
+ICA or accounting evidence.
+
+Provider prompts use closed, stage-specific views rather than serializing
+durable artifacts into prose. Opaque IDs are accompanied by the exact local
+meaning needed for the requested decision, while digests, paths, mapping
+records, scores, and unrelated global context stay outside the prompt. A pure
+preflight audits the final rendered prompt and its exact reference universe,
+then checks it against the selected model profile's context window, reserved
+completion, and safety margin. Oversized routing batches split canonically;
+one oversized item becomes a typed local failure and is never silently
+truncated. `calls.jsonl` and the synthesis manifest retain the prompt audit and
+provider-reported usage.
+
+Scenario generation receives one immutable `ScenarioGenerationContext` per
+ICA. It contains only the selected loss, hazard, governing constraint, unsafe
+action, obligation concern, and causal evidence. Stage 5 must retain the
+selected concern and establish at least one causal factor. All Stage 6
+renderers consume that same context, so an unrelated global constraint cannot
+leak into a scenario.
+
+The root atomically publishes `taxonomy-obligation-plan.yaml`,
+`obligation-consideration.yaml`, `obligation-accounting.yaml`,
+`scenario-realization.yaml`, and `synthesis-manifest.yaml`. Accounting joins
+exact obligation/slot, ICA,
+`EXEC:*`, hazard, and constraint evidence but makes no Phase 2 correspondence
+or coverage claim. Scenario realization separately records whether that exact
+ICA/obligation concern survived into an admitted scenario. Reporting keeps
+structural findings separate from scenario realization and labels the run provisional. Existing `generate` and
+`stpa-run` do not import or require synthesis artifacts.
+
 Correspondence is split into reviewable `correspondence-proposals-v1` and
 `correspondence-reconciliation-v1` artifacts. A proposal names exact obligation,
 the selected projectable taxonomy candidate, ICA slot, ICA, canonical `EXEC:*`
@@ -400,6 +445,9 @@ The input graph keeps each source in its native identity scheme. Phase 1
 taxonomy pins remain release/digest pins; ordinary artifacts use
 artifact/schema/digest pins. Candidate materializations bind a complete
 existing `ProjectionSnapshot` to the exact Phase 1 candidate-record digest.
+Because one executable candidate can support several risk obligations, the
+adapter emits one materialization per exact `(obligation_id, candidate_id)`
+pair rather than treating `candidate_id` as globally unique in the plan.
 The STPA attestation deep-copies and pins loss analysis, control structure,
 ICA enumeration, and execution envelopes before they enter the neutral model.
 Its source control structure must assign every loss-analysis security

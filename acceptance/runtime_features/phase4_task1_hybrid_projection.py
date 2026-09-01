@@ -107,6 +107,11 @@ def _fixture() -> tuple[Any, Any, Any]:
     candidate = get_projected_candidate()
     snapshot = get_test_snapshot()
     control_structure = make_control_structure()
+    # The Phase 4 STPA adapter requires security-constraint ownership to be
+    # explicit on the authoritative controller.  Keep this acceptance
+    # fixture aligned with the public unit-test fixture rather than allowing
+    # the background step's expected-error handling to leave ``inputs`` empty.
+    control_structure.responsibilities[0].security_constraint_refs = ["SC-1"]
     resource_map = make_map(
         ResourceLink(
             link_id="srm:v1:assessment-link",

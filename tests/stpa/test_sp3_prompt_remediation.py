@@ -34,21 +34,27 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     BDIGenerationResult,
+    CausalFactorDeclaration,
     generate_bdi,
     populate_defender_bdi,
 )
-from asago_scenario_generator.stpa.scenario_prod.narrative import build_narrative_prompts
+from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
+from asago_scenario_generator.stpa.scenario_prod.narrative import (
+    build_narrative_prompts,
+)
 from tests.stpa.sp1_helpers import MockLLMClient
 
 
-PROMPTS_DIR = Path(__file__).parents[2] / "src/asago_scenario_generator/stpa/scenario_prod/prompts"
+PROMPTS_DIR = (
+    Path(__file__).parents[2]
+    / "src/asago_scenario_generator/stpa/scenario_prod/prompts"
+)
 STAGE3_PROMPTS_DIR = (
     Path(__file__).parents[2] / "src/asago_scenario_generator/stpa/threat_enum/prompts"
 )
 
 BRIDGE = (
-    "FB-* denotes a logical information dependency that updates a "
-    "process-model belief"
+    "FB-* denotes a logical information dependency that updates a process-model belief"
 )
 SURFACES = (
     "prompt/context input",
@@ -179,6 +185,13 @@ def _bdi_client() -> MockLLMClient:
         BDIGenerationResult,
         BDIGenerationResult(
             defender_vulnerabilities={"PM-1-1": "retrieval poisoning"},
+            causal_factors=[
+                CausalFactorDeclaration(
+                    kind=CausalFactorKind.feedback_delay,
+                    source_id="FB-1-1",
+                    evidence="The selected feedback can arrive too late.",
+                )
+            ],
             attacker_bdi=AttackerBDI(
                 beliefs=["The retrieved state is exploitable"],
                 desires=["Induce NOT_PROVIDED"],
@@ -211,9 +224,7 @@ def test_stage5_prompt_defines_feedback_bridge_and_negative_rule():
 
 
 def test_stage6_narrative_prompt_uses_ai_surface_realizations():
-    prompt = TemplateLoader(PROMPTS_DIR).render_prompt(
-        "stage6a_narrative_system.j2"
-    )
+    prompt = TemplateLoader(PROMPTS_DIR).render_prompt("stage6a_narrative_system.j2")
 
     assert BRIDGE in prompt
     assert "changes a declared AI surface" in prompt

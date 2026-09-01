@@ -39,7 +39,10 @@ from asago_scenario_generator.stpa.scenario_prod.attack_tree import (
     generate_attack_tree,
     parse_attack_tree,
 )
-from asago_scenario_generator.stpa.scenario_prod.gherkin import generate_gherkin
+from asago_scenario_generator.stpa.scenario_prod.gherkin import (
+    generate_gherkin,
+    parse_gherkin_spec,
+)
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
 from asago_scenario_generator.stpa.scenario_prod.run import _write_scenario_artifacts
 
@@ -53,17 +56,26 @@ def _make_cs() -> ControlStructure:
             Responsibility(
                 resp_id="RESP-1",
                 description="R1",
-                process_model_parts=[ProcessModelPart(pm_id="PM-1-1", description="State")],
+                process_model_parts=[
+                    ProcessModelPart(pm_id="PM-1-1", description="State")
+                ],
                 control_actions=[
                     ControlAction(
-                        ca_id="CA-1-1", description="Action",
-                        target=ElementRef(type=ReferenceType.controlled_process, id="CP-1"),
+                        ca_id="CA-1-1",
+                        description="Action",
+                        target=ElementRef(
+                            type=ReferenceType.controlled_process, id="CP-1"
+                        ),
                     ),
                 ],
                 feedback_channels=[
                     FeedbackChannel(
-                        fb_id="FB-1-1", description="Feedback", updates="PM-1-1",
-                        source=ElementRef(type=ReferenceType.controlled_process, id="CP-1"),
+                        fb_id="FB-1-1",
+                        description="Feedback",
+                        updates="PM-1-1",
+                        source=ElementRef(
+                            type=ReferenceType.controlled_process, id="CP-1"
+                        ),
                     ),
                 ],
             ),
@@ -84,7 +96,11 @@ def _make_scenario_spec() -> ScenarioSpec:
         target_control_action="CA-1-1",
         ica_type=UCAType.not_provided,
         defender_bdi=DefenderBDI(
-            beliefs=[DefenderBelief(pm_id="PM-1-1", content="State", vulnerability="exploitable")],
+            beliefs=[
+                DefenderBelief(
+                    pm_id="PM-1-1", content="State", vulnerability="exploitable"
+                )
+            ],
             desires=[DefenderDesire(resp_id="RESP-1", content="R1")],
             intentions=[DefenderIntention(ca_id="CA-1-1", content="Action")],
         ),
@@ -100,7 +116,12 @@ def _make_scenario_spec() -> ScenarioSpec:
 def _make_loss_analysis() -> LossAnalysis:
     return LossAnalysis(
         risk_card_losses=[
-            Loss(loss_id="L-1", description="Loss", provenance=LossProvenance.risk_card, source_risk_cards=["r1"]),
+            Loss(
+                loss_id="L-1",
+                description="Loss",
+                provenance=LossProvenance.risk_card,
+                source_risk_cards=["r1"],
+            ),
         ],
         use_case_losses=[],
         hazards=[Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"])],
@@ -143,7 +164,9 @@ class TestNarrative:
     def test_narrative_is_non_empty_string(self):
         spec = _make_scenario_spec()
         client = MockLLMClient()
-        client.set_response_for(None, "Step 1: The defender's process model starts correct...")
+        client.set_response_for(
+            None, "Step 1: The defender's process model starts correct..."
+        )
 
         with TemporaryDirectory() as tmpdir:
             result, _ = generate_narrative(client, spec, Path(tmpdir))
@@ -180,7 +203,11 @@ class TestAttackTree:
     def test_one_llm_call(self):
         spec = _make_scenario_spec()
         cs = _make_cs()
-        tree = {"root": "Induce ICA", "branches": [{"category": "controller_side", "label": "l", "children": []}], "leaves": []}
+        tree = {
+            "root": "Induce ICA",
+            "branches": [{"category": "controller_side", "label": "l", "children": []}],
+            "leaves": [],
+        }
         client = MockLLMClient()
         client.set_response_for(None, json.dumps(tree))
 
@@ -207,7 +234,11 @@ class TestAttackTree:
     def test_result_is_dict_with_keys(self):
         spec = _make_scenario_spec()
         cs = _make_cs()
-        tree = {"root": "Induce ICA NOT_PROVIDED on CA-1-1", "branches": [{"category": "controller_side", "label": "l", "children": []}], "leaves": ["leaf1"]}
+        tree = {
+            "root": "Induce ICA NOT_PROVIDED on CA-1-1",
+            "branches": [{"category": "controller_side", "label": "l", "children": []}],
+            "leaves": ["leaf1"],
+        }
         client = MockLLMClient()
         client.set_response_for(None, json.dumps(tree))
 
@@ -222,7 +253,9 @@ class TestAttackTree:
         spec = _make_scenario_spec()
         cs = _make_cs()
         client = MockLLMClient()
-        client.set_response_for(None, json.dumps({"root": "r", "branches": [], "leaves": []}))
+        client.set_response_for(
+            None, json.dumps({"root": "r", "branches": [], "leaves": []})
+        )
 
         with TemporaryDirectory() as tmpdir:
             generate_attack_tree(client, spec, cs, Path(tmpdir))
@@ -235,7 +268,9 @@ class TestAttackTree:
         spec = _make_scenario_spec()
         cs = _make_cs()
         client = MockLLMClient()
-        client.set_response_for(None, json.dumps({"root": "r", "branches": [], "leaves": []}))
+        client.set_response_for(
+            None, json.dumps({"root": "r", "branches": [], "leaves": []})
+        )
 
         with TemporaryDirectory() as tmpdir:
             generate_attack_tree(client, spec, cs, Path(tmpdir))
@@ -248,7 +283,9 @@ class TestAttackTree:
         spec = _make_scenario_spec()
         cs = _make_cs()
         client = MockLLMClient()
-        client.set_response_for(None, json.dumps({"root": "r", "branches": [], "leaves": []}))
+        client.set_response_for(
+            None, json.dumps({"root": "r", "branches": [], "leaves": []})
+        )
 
         with TemporaryDirectory() as tmpdir:
             generate_attack_tree(client, spec, cs, Path(tmpdir))
@@ -259,7 +296,9 @@ class TestAttackTree:
         spec = _make_scenario_spec()
         cs = _make_cs()
         client = MockLLMClient()
-        client.set_response_for(None, json.dumps({"root": "r", "branches": [], "leaves": []}))
+        client.set_response_for(
+            None, json.dumps({"root": "r", "branches": [], "leaves": []})
+        )
 
         with TemporaryDirectory() as tmpdir:
             generate_attack_tree(client, spec, cs, Path(tmpdir))
@@ -450,7 +489,7 @@ class TestGherkin:
             assert "should" in sys_prompt.lower()
             assert "but" in sys_prompt.lower()
 
-    def test_user_prompt_contains_security_constraint(self):
+    def test_legacy_spec_does_not_receive_global_constraint_fallback(self):
         spec = _make_scenario_spec()
         la = _make_loss_analysis()
         client = MockLLMClient()
@@ -459,8 +498,8 @@ class TestGherkin:
         with TemporaryDirectory() as tmpdir:
             generate_gherkin(client, spec, la, Path(tmpdir))
             user_prompt = client.calls[0].user_prompt
-            assert "SC-1" in user_prompt
-            assert "validate" in user_prompt.lower()
+            assert "No security constraint found." in user_prompt
+            assert "SC-1" not in user_prompt
 
     def test_user_prompt_contains_ica_type(self):
         spec = _make_scenario_spec()
@@ -481,7 +520,11 @@ class TestAssembly:
     def test_assemble_envelope(self):
         spec = _make_scenario_spec()
         narrative = "A narrative text."
-        attack_tree = {"root": "r", "branches": [{"category": "controller_side", "label": "l", "children": []}], "leaves": []}
+        attack_tree = {
+            "root": "r",
+            "branches": [{"category": "controller_side", "label": "l", "children": []}],
+            "leaves": [],
+        }
         gherkin_spec = GherkinSpec(
             feature="Test",
             scenario="Test",
@@ -493,7 +536,12 @@ class TestAssembly:
         gherkin_raw = "feature: Test\nscenario: Test\n"
 
         envelope = assemble_envelope(
-            "SCN-001", spec, narrative, attack_tree, gherkin_spec, gherkin_raw,
+            "SCN-001",
+            spec,
+            narrative,
+            attack_tree,
+            gherkin_spec,
+            gherkin_raw,
         )
         assert envelope.scenario_id == "SCN-001"
         assert envelope.scenario_spec.scenario_id == "SCN-001"
@@ -504,6 +552,29 @@ class TestAssembly:
         assert envelope.target_responsibility == "RESP-1"
         assert envelope.ica_type == UCAType.not_provided
         assert envelope.provenance == "structural"
+
+
+def test_parse_gherkin_spec_removes_repeated_heading_keywords():
+    parsed = parse_gherkin_spec(
+        """
+feature: "Feature: Safe payment orchestration"
+scenario: "Scenario: Tool-chain exfiltration"
+given:
+  - Given the payment agent has an approved request
+when:
+  - When an attacker poisons a tool response
+then_expected:
+  - Then the agent should reject the poisoned response
+then_actual:
+  - But the agent exposes payment data
+"""
+    )
+
+    assert parsed is not None
+    assert parsed.feature == "Safe payment orchestration"
+    assert parsed.scenario == "Tool-chain exfiltration"
+    assert parsed.to_feature_text().count("Feature:") == 1
+    assert parsed.to_feature_text().count("Scenario:") == 1
 
 
 class TestScenarioArtifactWriting:

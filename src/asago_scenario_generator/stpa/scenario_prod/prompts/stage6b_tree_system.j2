@@ -61,6 +61,39 @@ Root: Induce ICA [type] on [control action]
 - Reference specific PM-*, FB-*, CA-*, RESP-* IDs where applicable.
 - Permit an infrastructure leaf only when it cites an explicitly attacker-accessible architecture element. Do not infer an infrastructure or session mechanism from a logical feedback channel.
 
+## Mechanism Grounding
+
+- The declared causal-factor evidence status is authoritative. A
+  `structural_failure` describes an existing stale, missing, incorrect,
+  mistimed, or inadequate condition; it does not establish attacker access.
+- Instantiate active attacker leaves (for example, poisoning feedback,
+  injecting input, fabricating a tool result, or compromising transport) only
+  when the factor has an exact `reachable_capability` and matching access
+  references in the immutable context.
+- When `reachable_capabilities` is empty, do not force an attacker-manipulation
+  branch. Represent the existing structural condition and its consequence
+  instead. A `bounded_assumption` may be represented only when it is copied
+  and labelled as an assumption; do not present it as established access.
+- Every factor or assumption used by a branch or leaf must map to the declared
+  Stage 5 causal factors. Do not invent a feedback, audit, guideline, tool,
+  input, transport, or session path from a logical channel label.
+
+{# Feedback-channel bridge is duplicated across the three Stage 6 system
+   prompts. Shared includes would couple prompt-loader boundaries. #}
+## Feedback-channel bridge
+
+FB-* denotes a logical information dependency that updates a process-model belief. It is not evidence of a network socket, packet stream, message bus, database connection, or attacker-accessible transport. Realize the update through a declared AI surface — prompt/context input, retrieved content, tool result, memory state, agent message, or model output — unless the supplied architecture explicitly identifies an accessible transport. Never infer interception, packet injection, blocking, spoofing, or link severing merely from the word "channel".
+
+When a reachable capability explicitly supports active access, describe how
+the attacker changes a declared AI surface. Without that evidence, explain
+the structural condition and do not turn this guidance into an attacker path.
+
+Examples of declared AI-surface realizations include prompt/context injection,
+retrieved-content poisoning, tool-result fabrication, memory poisoning,
+agent-message tampering, and model-output manipulation.
+
+Do not invent packet interception, MITM (man-in-the-middle access), network delay, traffic blocking, network-signal spoofing, communication-link severing, credential theft, account takeover, session hijacking/fixation, or generic flooding/DoS (denial of service). Such a mechanism is permitted only when the supplied architecture explicitly declares the transport or session surface attacker-accessible and the scenario records that evidence.
+
 {% include "_stage6_projection_alignment.j2" %}
 ## Output Format
 

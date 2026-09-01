@@ -2,13 +2,22 @@ You are a safety and security engineer completing the control loop design for an
 
 You have been given a set of control responsibilities, each with responsibility constraints and process model parts. Your task is to derive the remaining control elements: what outputs each responsibility produces (control actions), how each piece of knowledge stays current (feedback channels), and what external entities the system interacts with (controlled processes).
 
+The response is one JSON object with exactly these top-level collections:
+`control_actions`, `feedback`, and `controlled_processes`.  Do not return a
+`ControlElementSet` wrapper, YAML, prose, or an alternate collection name.
+
 ## Process
 
 1. **Control actions (CA-*)**: What outputs does each responsibility produce? Each CA is a single discrete action the controller takes. Split composite actions into separate CAs — instead of "approve or reject request", produce "CA-X-1 Approve request" and "CA-X-2 Reject request". A CA containing "or", "and", or similar conjunctions is likely composite and should be split.
 
-   For each CA, assign a **target** — the responsibility or controlled process whose decision-making needs this action's output.
+   For each CA, return separate fields for the canonical `ca_id`, the real
+   action `description`, and the `target`.  `ca_id` is the canonical identity
+   and its first number identifies the owning responsibility (for example,
+   `CA-1-1` belongs to `RESP-1`).  The target is an explicit ElementRef to one
+   supplied responsibility or controlled process whose decision-making needs
+   this action's output.
 
-2. **Feedback channels (FB-*)**: What information updates each process model part? For every PM-X-Y in the responsibilities, you MUST create at least one feedback channel whose `updates` field references that PM. No orphan PMs — every PM must be kept current by some feedback channel.
+2. **Feedback channels (FB-*)**: What information updates each process model part? For every PM-X-Y in the responsibilities, you MUST create at least one feedback channel whose `updates` field references that PM. No orphan PMs — every PM must be kept current by some feedback channel.  In the JSON response this collection is named `feedback`; each item has `fb_id`, `description`, `updates`, and `source`.
 
    For each FB, assign a **source** — the responsibility or controlled process that has the required information.
 
@@ -39,9 +48,37 @@ Describe what function must be performed, not what technology, component, or act
 
 CRITICAL: Every process model part (PM-X-Y) MUST have at least one feedback channel (FB-X-Y) whose `updates` field references that PM. If a responsibility has N process model parts, it must have at least N feedback channels. Verify this before returning.
 
-## Output format
+## Exact output schema
 
-Produce a ControlElementSet with:
-- control_actions: list of CA objects with targets assigned
-- feedback_channels: list of FB objects with sources and updates assigned
-- controlled_processes: list of CP objects
+Return the following shape.  This is a valid example; copy the property names
+exactly and keep IDs, descriptions, targets, sources, and PM updates as
+separate fields:
+
+```json
+{
+  "control_actions": [
+    {
+      "ca_id": "CA-1-1",
+      "description": "Mask sensitive identifiers before model processing",
+      "target": {"type": "controlled_process", "id": "CP-1"}
+    }
+  ],
+  "feedback": [
+    {
+      "fb_id": "FB-1-1",
+      "description": "Report masking outcome and validation failures",
+      "updates": "PM-1-1",
+      "source": {"type": "controlled_process", "id": "CP-1"}
+    }
+  ],
+  "controlled_processes": [
+    {"cp_id": "CP-1", "description": "Transaction processor"}
+  ]
+}
+```
+
+`ca_id` is not a description.  The model must not combine an ID and its
+description in an `action` string, must not return an `action` property, and
+must not leave required
+semantic fields empty.  A response with `action`, a missing `ca_id`, or a
+missing `description` is invalid and will be rejected.

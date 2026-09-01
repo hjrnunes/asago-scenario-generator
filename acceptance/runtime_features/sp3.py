@@ -27,6 +27,8 @@ from runtime_shared import (
     _VALID_GHERKIN_YAML,
     _h_sp3_modules_exist,
     _make_sp3_cs,
+    _make_sp3_causal_factors,
+    _make_sp3_contextual_scenario_spec,
     _make_sp3_envelope,
     _make_sp3_ets,
     _make_sp3_loss_analysis,
@@ -229,7 +231,7 @@ def _h_sp3_ica(world: World, text: str, examples: dict) -> tuple[bool, str]:
 
 def _h_sp3_scenario_spec(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a ScenarioSpec with defender BDI and attacker BDI for scenario SCN-001."""
-    world.scenario_spec = _make_sp3_scenario_spec()
+    world.scenario_spec = _make_sp3_contextual_scenario_spec()
     return True, ""
 
 
@@ -267,7 +269,7 @@ def _h_sp3_scenario_spec_ica_type(
     if m:
         ica_type_str = m.group(1)
         try:
-            kwargs["ica_type"] = UCAType(ica_type_str.lower())
+            kwargs["ica_type"] = UCAType(ica_type_str.upper())
         except ValueError:
             kwargs["ica_type"] = UCAType.not_provided
     m = re.search(r"target_control_action (\S+)", text)
@@ -276,7 +278,14 @@ def _h_sp3_scenario_spec_ica_type(
     m = re.search(r"target_controller (\S+)", text)
     if m:
         kwargs["target_controller"] = m.group(1)
-    world.scenario_spec = _make_sp3_scenario_spec(**kwargs)
+    target_controller = kwargs.get("target_controller", "RESP-1")
+    target_action = kwargs.get("target_control_action", "CA-1-1")
+    if target_controller == "RESP-1" and target_action == "CA-1-1":
+        world.scenario_spec = _make_sp3_contextual_scenario_spec(
+            ica_type=kwargs.get("ica_type", UCAType.not_provided)
+        )
+    else:
+        world.scenario_spec = _make_sp3_scenario_spec(**kwargs)
     return True, ""
 
 
@@ -317,6 +326,7 @@ def _h_sp3_llm_bdi_valid(world: World, text: str, examples: dict) -> tuple[bool,
             attacker_bdi=AttackerBDI(
                 beliefs=["b"], desires=["d"], intentions=["i via PM-1-1"]
             ),
+            causal_factors=_make_sp3_causal_factors(),
         )
     elif "3 beliefs" in text:
         result = BDIGenerationResult(
@@ -326,6 +336,7 @@ def _h_sp3_llm_bdi_valid(world: World, text: str, examples: dict) -> tuple[bool,
                 desires=["d1", "d2"],
                 intentions=["i1", "i2", "i3"],
             ),
+            causal_factors=_make_sp3_causal_factors(),
         )
     elif "PM-1-1" in text:
         result = BDIGenerationResult(
@@ -335,11 +346,13 @@ def _h_sp3_llm_bdi_valid(world: World, text: str, examples: dict) -> tuple[bool,
                 desires=["d"],
                 intentions=["i via PM-1-1"],
             ),
+            causal_factors=_make_sp3_causal_factors(),
         )
     else:
         result = BDIGenerationResult(
             defender_vulnerabilities={"PM-1-1": "v", "PM-1-2": "v"},
             attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
+            causal_factors=_make_sp3_causal_factors(),
         )
     client.set_response_for(BDIGenerationResult, result)
     world.sp3_llm_client = client
@@ -1138,7 +1151,7 @@ def _h_sp3_narrative_call(world: World, text: str, examples: dict) -> tuple[bool
     from asago_scenario_generator.stpa.scenario_prod.narrative import generate_narrative
 
     if world.scenario_spec is None:
-        world.scenario_spec = _make_sp3_scenario_spec()
+        world.scenario_spec = _make_sp3_contextual_scenario_spec()
     if not hasattr(world, "sp3_llm_client") or world.sp3_llm_client is None:
         world.sp3_llm_client = _setup_sp3_mock_client(1)
     # Clear queue and set specific response for standalone narrative call
@@ -1161,7 +1174,7 @@ def _h_sp3_tree_call(world: World, text: str, examples: dict) -> tuple[bool, str
     import json
 
     if world.scenario_spec is None:
-        world.scenario_spec = _make_sp3_scenario_spec()
+        world.scenario_spec = _make_sp3_contextual_scenario_spec()
     if world.control_structure is None:
         world.control_structure = _make_sp3_cs()
     if not hasattr(world, "sp3_llm_client") or world.sp3_llm_client is None:
@@ -1205,7 +1218,7 @@ def _h_sp3_gherkin_call(world: World, text: str, examples: dict) -> tuple[bool, 
     from asago_scenario_generator.stpa.scenario_prod.gherkin import generate_gherkin
 
     if world.scenario_spec is None:
-        world.scenario_spec = _make_sp3_scenario_spec()
+        world.scenario_spec = _make_sp3_contextual_scenario_spec()
     if world.loss_analysis is None:
         world.loss_analysis = _make_sp3_loss_analysis()
     if not hasattr(world, "sp3_llm_client") or world.sp3_llm_client is None:
@@ -1225,8 +1238,10 @@ def _h_sp3_gherkin_call(world: World, text: str, examples: dict) -> tuple[bool, 
             "Scenario: Test\n  Given PM-1-1 is valid\n  When x\n  Then should reject\n  But approves (ICA NOT_PROVIDED on CA-1-1)\n",
         )
     run_dir = getattr(world, "sp3_run_dir", None) or Path(tempfile.mkdtemp())
-    world.sp3_gherkin, world.sp3_gherkin_raw, _ = generate_gherkin(
-        world.sp3_llm_client, world.scenario_spec, world.loss_analysis, run_dir
+    world.sp3_gherkin, world.sp3_gherkin_raw, world.sp3_gherkin_error = (
+        generate_gherkin(
+            world.sp3_llm_client, world.scenario_spec, world.loss_analysis, run_dir
+        )
     )
     return True, ""
 
@@ -2849,6 +2864,24 @@ def _h_sp3_la_klarna(world: World, text: str, examples: dict) -> tuple[bool, str
     return True, ""
 
 
+def _h_sp3_strict_orchestration_fixture(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Provide a small, internally coherent fixture for strict SP3 runs.
+
+    The historical Klarna fixtures predate the closed Stage 5/6 context
+    contract and contain references that are intentionally rejected by the
+    current pipeline.  This acceptance path uses the compact fixture shared
+    by the strict prompt-contract scenarios so the orchestration assertions
+    exercise a complete successful run.
+    """
+    del text, examples
+    world.enriched_threat_set = _make_sp3_ets()
+    world.control_structure = _make_sp3_cs()
+    world.loss_analysis = _make_sp3_loss_analysis()
+    return True, ""
+
+
 def _h_sp3_llm_valid_all(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: an LLM that returns valid BDI generation, narrative, attack tree, and Gherkin results."""
     if world.enriched_threat_set is not None:
@@ -4170,11 +4203,25 @@ def _h_stage6_user_prompt_contains_valid_id(
     prompt = getattr(world, "sp3_user_prompt", None)
     if prompt is None:
         return False, "No user prompt available"
-    valid_id = examples.get("valid_id", "")
+    match = re.search(r"ID ([LH]-\d+)$", text)
+    valid_id = examples.get("valid_id", "") or (match.group(1) if match else "")
     if not valid_id:
         return False, "Missing valid_id in examples"
     if valid_id not in prompt:
         return False, f"User prompt does not contain '{valid_id}'"
+    return True, ""
+
+
+def _h_stage6_user_prompt_excludes_unrelated_ids(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Handle: unrelated global loss/hazard IDs stay outside the exact context."""
+    prompt = getattr(world, "sp3_user_prompt", None)
+    if prompt is None:
+        return False, "No user prompt available"
+    unrelated = [item for item in ("L-2", "L-3", "H-2") if item in prompt]
+    if unrelated:
+        return False, f"User prompt contains unrelated IDs: {unrelated}"
     return True, ""
 
 
@@ -4228,14 +4275,15 @@ def _h_stage6_build_gherkin_prompts_called(
 def _h_stage6_user_prompt_contains_valid_ids(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle: the user prompt contains valid Loss IDs and excludes Hazard IDs from the loss analysis."""
+    """Handle: the prompt contains exact selected IDs and excludes unrelated IDs."""
     prompt = getattr(world, "sp3_user_prompt", None)
     if prompt is None:
         return False, "No user prompt available"
-    if "L-1" not in prompt:
-        return False, "User prompt missing L-1"
-    if "H-1" in prompt:
-        return False, "User prompt should not contain H-1"
+    if "L-1" not in prompt or "H-1" not in prompt:
+        return False, "User prompt is missing selected L-1 or H-1"
+    unrelated = [item for item in ("L-2", "L-3", "H-2") if item in prompt]
+    if unrelated:
+        return False, f"User prompt contains unrelated IDs: {unrelated}"
     return True, ""
 
 
@@ -5214,12 +5262,16 @@ def _h_sp3_robustness_stage6_responses(
 def _sp3_robustness_valid_bdi() -> object:
     """Build the valid structured BDI response used by retry scenarios."""
     return BDIGenerationResult(
-        defender_vulnerabilities={"PM-1-1": "vulnerability"},
+        defender_vulnerabilities={
+            "PM-1-1": "vulnerability",
+            "PM-1-2": "the outcome state is not refreshed",
+        },
         attacker_bdi=AttackerBDI(
             beliefs=["attacker belief"],
             desires=["induce ICA"],
             intentions=["poison PM-1-1 via FB-1-1"],
         ),
+        causal_factors=_make_sp3_causal_factors(),
     )
 
 
@@ -5336,7 +5388,10 @@ def _h_sp3_robustness_run(world: World, text: str, examples: dict) -> tuple[bool
     client = _Stage5SequenceClient(
         getattr(world, "sp3_stage5_outcomes", [_sp3_robustness_valid_bdi()])
     )
-    client._response_queue = base_client._response_queue
+    # The sequence client supplies Stage 5 outcomes itself.  Remove the
+    # setup helper's queued Stage 5 response so Stage 6 consumes exactly its
+    # narrative, tree, and structured Gherkin fixtures in order.
+    client._response_queue = base_client._response_queue[1:]
     client._response_map = base_client._response_map
     world.sp3_llm_client = client
     world.sp3_run_dir = Path(tempfile.mkdtemp(prefix="sp3_retry_"))
@@ -6446,6 +6501,11 @@ def register(api: object) -> None:
         source_order=19257,
     )
     api.register(
+        "a strict SP3 orchestration fixture is available",
+        _h_sp3_strict_orchestration_fixture,
+        source_order=192571,
+    )
+    api.register(
         "an LLM that returns valid BDI generation.*",
         _h_sp3_llm_valid_all,
         source_order=19258,
@@ -6802,6 +6862,11 @@ def register(api: object) -> None:
         source_order=20159,
     )
     api.register_first(
+        "a loss analysis with losses L-1 and L-2 and hazards H-1 and H-2",
+        _h_stage6_loss_analysis_with_specific_ids,
+        source_order=20161,
+    )
+    api.register_first(
         "a loss analysis with losses L-1, L-2, L-3 and hazards H-1, H-2",
         _h_stage6_loss_analysis_with_specific_ids,
         source_order=20162,
@@ -6814,6 +6879,11 @@ def register(api: object) -> None:
     api.register_first(
         "the user prompt contains the valid .* ID .*",
         _h_stage6_user_prompt_contains_valid_id,
+        source_order=20164,
+    )
+    api.register_first(
+        "the user prompt excludes unrelated IDs L-2, L-3, and H-2",
+        _h_stage6_user_prompt_excludes_unrelated_ids,
         source_order=20164,
     )
     api.register_first(
@@ -6832,7 +6902,7 @@ def register(api: object) -> None:
         source_order=20167,
     )
     api.register_first(
-        "the user prompt contains valid Loss IDs and excludes Hazard IDs from the loss analysis",
+        "the user prompt contains exact selected Loss and Hazard IDs and excludes unrelated IDs",
         _h_stage6_user_prompt_contains_valid_ids,
         source_order=20168,
     )

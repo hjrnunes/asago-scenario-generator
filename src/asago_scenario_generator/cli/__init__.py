@@ -16,6 +16,7 @@ from asago_scenario_generator.cli import (
     qualification,
     reporting,
     resource_map,
+    synthesis,
     stpa_commands,
 )
 
@@ -31,5 +32,6 @@ __all__ = (
     "qualification",
     "reporting",
     "resource_map",
+    "synthesis",
     "stpa_commands",
 )

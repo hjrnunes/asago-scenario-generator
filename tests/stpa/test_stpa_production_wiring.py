@@ -58,17 +58,27 @@ def _threat() -> StructuralThreat:
 
 
 def _attacker_bdi() -> AttackerBDI:
-    return AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"])
+    return AttackerBDI(
+        beliefs=["b"],
+        desires=["d"],
+        intentions=["i concerning CA-1-1"],
+    )
 
 
 def _llm_result(
     declarations: list[CausalFactorDeclaration] | None = None,
 ) -> BDIGenerationResult:
-    return BDIGenerationResult(
-        defender_vulnerabilities={"PM-1-1": "v"},
-        attacker_bdi=_attacker_bdi(),
-        causal_factors=declarations or [],
-    )
+    values = {
+        "defender_vulnerabilities": {"PM-1-1": "v"},
+        "attacker_bdi": _attacker_bdi(),
+        "causal_factors": declarations or [],
+    }
+    if declarations:
+        return BDIGenerationResult(**values)
+    # Compatibility-only fixture for pre-correction ScenarioSpec artifacts.
+    # Corrected provider responses go through normal validation and cannot be
+    # empty; this bypass exists solely to retain legacy projection coverage.
+    return BDIGenerationResult.model_construct(**values)
 
 
 def _declare(
@@ -601,7 +611,12 @@ class TestRunSp3ProductionWiring:
                                 "category": "controller_side",
                                 "label": "Corrupt PM-1-1",
                                 "children": [],
-                            }
+                            },
+                            {
+                                "category": "path_side",
+                                "label": "Actuator/executor failure",
+                                "children": [],
+                            },
                         ],
                         "leaves": ["Poison PM-1-1"],
                     }

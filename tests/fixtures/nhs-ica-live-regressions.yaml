@@ -1,0 +1,20 @@
+schema_version: nhs-ica-live-regressions-v1
+source_run: output/runs/20260901-synthesis-nhs-prompt-contract-v3
+targets:
+  RESP-2:
+    request_digest: 8374639cb715878aaa596ee72be56e8ceae0f3d4da79ceb8bfdef937b708deb5
+    preflight_input_tokens: 10786
+    usable_input_tokens: 21299
+    expected_error_fragment: "prompt-view reference 'H-2' is not in the authoritative slice"
+    expected_provider_calls: 0
+  RESP-7:
+    request_digest: cfb8468140735b106f3ec5be7472935c1664467ab51f65d3553e3e48b67023ce
+    preflight_input_tokens: 13445
+    usable_input_tokens: 21299
+    expected_error_fragment: "prompt-view reference 'H-9' is not in the authoritative slice"
+    expected_provider_calls: 0
+  RESP-6:
+    expected_error_fragment: "consideration references unknown ICA IDs"
+    legacy_ica_id: RESP-6:CA-6-1:NOT_PROVIDED
+    canonical_ica_id: RESP-6:CA-6-1:NOT_PROVIDED:1
+    normative_field: consideration_results

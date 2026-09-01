@@ -1,13 +1,52 @@
-# Phase 4 live semantic pilot runbook
+# Phase 4 live semantic pilot record and retired runbook
 
-**Status: required future qualification deliverable — not run.**
+**Status: historical target-scoped qualification attempt completed; the
+combined-projection generation direction is retired.**
 
 This document describes the controlled work needed before a live semantic
 pilot can be started. Phase 4's readiness gate is offline and deterministic;
 it does not create a provider, call a model, contact a network, regenerate
 taxonomy scenarios, or write a run artifact. Completing this checklist is a
 future qualification activity, not a prerequisite for ordinary `generate` or
-`stpa-run` development.
+`stpa-run` development. Following the 2026-09-01 product correction, this
+runbook is retained as evidence of the rejected prescriptive approach. The
+current implementation direction is
+[obligation-aware STPA](stpa-taxonomy-obligation-aware-stpa-spec.md).
+
+## Qualification attempt: Klarna
+
+The first target-scoped attempt ran on 2026-08-31 UTC against the two
+operator-confirmed Klarna relations in projection set
+`7f32dac755fad94620f1fe6436cdafc1a9f9d307885522c47511b7a003a84793`.
+It did not run the complete taxonomy corpus and did not change ordinary
+`generate` or `stpa-run` behavior. Its evidence is retained under
+`output/runs/20260831-phase4-klarna-pilot/klarna-targeted-hybrid-generation/`.
+
+The outcome was **0 generated, 0 admitted, and 2 quarantined**:
+
+- the AP-T3-02 privilege-escalation target failed the existing taxonomy
+  attack-tree consistency checks after their bounded retries; and
+- the AP-T2-01 parameter-pollution target failed the existing attack-tree
+  schema because the generated root label exceeded its 120-character limit.
+
+No scenario artifact was published for either target. The first adapter
+revision also failed to count retry calls independently from final stage call
+records, so that target's exact provider-call count is not qualified evidence.
+This alone prevents a ready result even if its generated content had passed.
+
+The attempt tested the wrong product interpretation. It treated each combined
+projection as a scenario recipe and required one generated artifact to realize
+both the exact taxonomy chain and the STPA outcome. The two reviewed combined
+projections remain valid evidence, but they should not be sent to generation as
+mandatory templates.
+
+There is therefore no planned retry of this target-scoped combined-generation
+path. The next live qualification should exercise `synthesis-run`: every
+applicable taxonomy obligation is presented to STPA as a question, STPA derives
+its own ICA and causal scenario, and a separate accounting artifact records
+what happened. Phase 2 may later verify the claimed correspondence. Phase 4
+projections may be used to explain selected accepted relations, but they do not
+control scenario production.
 
 ## 1. Prepare the corrected inputs
 
@@ -53,12 +92,13 @@ and resource bindings. It must also find an accepted, coverage-bearing
 relation with a matching taxonomy row, realization row, exact STPA
 slot/ICA/`EXEC:*` identity, and independent confirmed mechanism evidence.
 
-The current audit is not ready. Preserve these blockers verbatim until the
-underlying evidence changes:
+The historical combined-projection pilot remains not ready. Preserve these
+blockers as evidence about that approach rather than as prerequisites for
+obligation-aware synthesis:
 
 - `old Klarna taxonomy envelopes: 0/94 corrected-plan joins`
 - `old NHS taxonomy envelopes: 0/27 corrected-plan joins`
-- `corrected assessments: zero accepted coverage-bearing relations for both`
+- `reviewed Klarna targets: 2 accepted relations, 0/2 generated and admitted`
 
 ## 3. Record model-call evidence
 

@@ -1,0 +1,571 @@
+"""Contract tests for provisional obligation accounting."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
+from asago_scenario_generator.models.hybrid_coverage import ArtifactPin
+from asago_scenario_generator.models.correspondence import (
+    CorrespondenceEvidence,
+    SourceArtifactPins,
+)
+from asago_scenario_generator.models.obligation_accounting import (
+    ObligationAccounting,
+    ObligationAccountingRow,
+)
+from asago_scenario_generator.models.obligation_consideration import (
+    ObligationIcaConsideration,
+    ObligationPhase2Evidence,
+    ProposedStructuralNonApplicabilityEvidence,
+    ObligationRoute,
+)
+from asago_scenario_generator.models.obligation_plan import (
+    TaxonomyObligation,
+    TaxonomyObligationPlan,
+    derive_obligation_summary,
+)
+from asago_scenario_generator.pipeline.obligation_consideration import (
+    build_consideration_artifact,
+    build_neutral_obligation_briefs,
+    build_obligation_accounting,
+)
+from asago_scenario_generator.pipeline.obligation_phase2_evidence import (
+    build_phase2_evidence_from_accounting,
+)
+from asago_scenario_generator.pipeline.obligation_consideration_persistence import (
+    ACCOUNTING_FILENAME,
+    read_obligation_accounting,
+    write_obligation_accounting,
+)
+from tests.helpers.obligation_factory import make_plan
+from tests.helpers.projection_factory import get_test_raw_pattern
+
+
+def _fixture():
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    plan = make_plan()
+    briefs = build_neutral_obligation_briefs(plan, (pattern,))
+    route = ObligationRoute(
+        obligation_id=briefs[0].obligation_id,
+        disposition="targeted",
+        slot_ids=("RESP-1:CA-1-1:NOT_PROVIDED",),
+        hazard_ids=("H-1",),
+        constraint_ids=("SC-1",),
+        rationale="The validation path is structurally relevant.",
+        evidence=("RESP-1", "H-1", "SC-1"),
+    )
+    consideration = build_consideration_artifact(
+        plan=plan,
+        briefs=briefs,
+        initial_routes=(route,),
+        final_routes=(route,),
+    )
+    pair = ObligationIcaConsideration(
+        route_id=route.route_id,
+        obligation_id=route.obligation_id,
+        slot_id=route.slot_ids[0],
+        disposition="finding",
+        ica_ids=(f"{route.slot_ids[0]}:1",),
+        exec_candidate_ids=("EXEC:RESP-1:CA-1-1:NOT_PROVIDED",),
+        hazard_ids=("H-1",),
+        constraint_ids=("SC-1",),
+        evidence=("call:ica:1",),
+    )
+    return plan, consideration, pair
+
+
+def _plan_with_non_stpa_rows():
+    """Build one exact Phase 1 plan containing all accounting scopes."""
+    plan = make_plan()
+    source_row = plan.obligations[0]
+    excluded_payload = source_row.model_dump(mode="json")
+    excluded_payload.update(
+        obligation_id="ob:v1:" + "c" * 64,
+        scope_disposition="capability_excluded",
+        qualification_disposition="not_attempted",
+        candidate_records=[],
+        evidence=[
+            {
+                "kind": "scope",
+                "detail": "required capability was explicitly excluded",
+            }
+        ],
+    )
+    excluded = TaxonomyObligation.model_validate(excluded_payload)
+    governance = TaxonomyObligation.model_validate(
+        {
+            "obligation_id": "ob:v1:" + "b" * 64,
+            "risk_ref": {
+                "risk_id": "governance-risk",
+                "risk_name": "Governance risk",
+            },
+            "taxonomy_chain": [],
+            "attack_pattern_id": None,
+            "attack_pattern_semantic_digest": None,
+            "scope_disposition": "governance_only",
+            "qualification_disposition": "not_attempted",
+            "candidate_records": [],
+            "correspondence_disposition": "not_assessed",
+            "evidence": [
+                {
+                    "kind": "governance",
+                    "detail": "reviewed governance-only obligation",
+                }
+            ],
+        }
+    )
+    rows = (source_row, excluded, governance)
+    unchecked = TaxonomyObligationPlan.model_validate(
+        {
+            "schema_version": plan.schema_version,
+            "semantic_digest": "0" * 64,
+            "capability_snapshot_digest": plan.capability_snapshot_digest,
+            "catalog_pins": plan.catalog_pins,
+            "mapping_pins": plan.mapping_pins,
+            "qualification_facts_digest": plan.qualification_facts_digest,
+            "obligations": rows,
+            "summary": derive_obligation_summary(rows),
+        }
+    )
+    return TaxonomyObligationPlan.model_validate(
+        {
+            **unchecked.model_dump(mode="json"),
+            "semantic_digest": unchecked.compute_semantic_digest(),
+        }
+    )
+
+
+def _pin(artifact_id: str, schema_version: str = "fixture-v1") -> ArtifactPin:
+    return ArtifactPin(
+        artifact_id=artifact_id,
+        schema_version=schema_version,
+        semantic_digest="1" * 64,
+    )
+
+
+def _accounting_pins(plan: TaxonomyObligationPlan) -> tuple[ArtifactPin, ...]:
+    """Return the four stable authorities required by accounting."""
+    return (
+        ArtifactPin(
+            artifact_id="taxonomy-obligation-plan",
+            schema_version="taxonomy-obligation-plan-v1",
+            semantic_digest=plan.semantic_digest,
+        ),
+        ArtifactPin(
+            artifact_id="stpa-loss-analysis",
+            schema_version="stpa-loss-analysis-v1",
+            semantic_digest="2" * 64,
+        ),
+        ArtifactPin(
+            artifact_id="stpa-control-structure",
+            schema_version="stpa-control-structure-v1",
+            semantic_digest="3" * 64,
+        ),
+        ArtifactPin(
+            artifact_id="ica-enumeration",
+            schema_version="ica-enumeration-v1",
+            semantic_digest="4" * 64,
+        ),
+    )
+
+
+def _phase2_pins(plan) -> SourceArtifactPins:
+    return SourceArtifactPins(
+        resource_map_semantic_digest="1" * 64,
+        capability_snapshot_digest=plan.capability_snapshot_digest,
+        obligation_plan_semantic_digest=plan.semantic_digest,
+        control_structure_digest="2" * 64,
+        ica_enumeration_digest="3" * 64,
+        loss_analysis_digest="4" * 64,
+        taxonomy_version=plan.schema_version,
+        stpa_version="stpa-foundation-v1",
+    )
+
+
+def test_accounting_derives_addressed_row_and_separate_summary() -> None:
+    plan, consideration, pair = _fixture()
+    accounting = build_obligation_accounting(
+        plan=plan,
+        consideration=consideration,
+        ica_considerations=(pair,),
+        source_pins=_accounting_pins(plan),
+    )
+
+    assert isinstance(accounting, ObligationAccounting)
+    assert len(accounting.rows) == len(plan.obligations)
+    assert accounting.rows[0].disposition == "addressed"
+    assert accounting.rows[0].ica_ids == pair.ica_ids
+    assert accounting.summary.total == 1
+    assert accounting.summary.addressed == 1
+
+
+def test_finding_and_unresolved_slot_remains_unresolved() -> None:
+    """One finding cannot hide uncertainty on another routed slot."""
+    plan, original, finding = _fixture()
+    second_slot = "RESP-1:CA-1-1:PROVIDED_TOO_LATE"
+    route_payload = original.final_routes[0].model_dump(mode="json")
+    route_payload["route_id"] = None
+    route_payload["slot_ids"] = (*original.final_routes[0].slot_ids, second_slot)
+    route = ObligationRoute.model_validate(route_payload)
+    consideration = build_consideration_artifact(
+        plan=plan,
+        briefs=original.briefs,
+        initial_routes=(route,),
+        final_routes=(route,),
+    )
+    unresolved = ObligationIcaConsideration(
+        route_id=route.route_id,
+        obligation_id=route.obligation_id,
+        slot_id=second_slot,
+        disposition="unresolved",
+        rationale="The available evidence cannot distinguish the unsafe timing.",
+        evidence=("call:ica:2",),
+    )
+    rebound_finding = finding.model_copy(update={"route_id": route.route_id})
+
+    accounting = build_obligation_accounting(
+        plan=plan,
+        consideration=consideration,
+        ica_considerations=(rebound_finding, unresolved),
+        source_pins=_accounting_pins(plan),
+    )
+
+    assert accounting.rows[0].disposition == "unresolved"
+    assert accounting.rows[0].ica_ids == ()
+    assert accounting.summary.unresolved == 1
+    assert {
+        (pin.artifact_id, pin.schema_version) for pin in accounting.source_pins
+    } == {
+        ("taxonomy-obligation-plan", "taxonomy-obligation-plan-v1"),
+        ("stpa-loss-analysis", "stpa-loss-analysis-v1"),
+        ("stpa-control-structure", "stpa-control-structure-v1"),
+        ("ica-enumeration", "ica-enumeration-v1"),
+    }
+    assert accounting.semantic_digest == accounting.compute_semantic_digest()
+
+
+def test_accounting_requires_all_four_authority_pins_exactly_once() -> None:
+    plan, consideration, pair = _fixture()
+
+    with pytest.raises(ValueError, match="exactly one.*ica-enumeration"):
+        build_obligation_accounting(
+            plan=plan,
+            consideration=consideration,
+            ica_considerations=(pair,),
+            source_pins=_accounting_pins(plan)[:-1],
+        )
+
+    with pytest.raises(ValueError, match="unknown"):
+        build_obligation_accounting(
+            plan=plan,
+            consideration=consideration,
+            ica_considerations=(pair,),
+            source_pins=(*_accounting_pins(plan), _pin("unrelated-authority")),
+        )
+
+
+def test_accounting_model_requires_all_four_authority_pins() -> None:
+    plan, consideration, pair = _fixture()
+    accounting = build_obligation_accounting(
+        plan=plan,
+        consideration=consideration,
+        ica_considerations=(pair,),
+        source_pins=_accounting_pins(plan),
+    )
+    payload = accounting.model_dump(mode="python")
+    payload["source_pins"] = _accounting_pins(plan)[:-1]
+
+    with pytest.raises(ValueError, match="exactly one.*ica-enumeration"):
+        ObligationAccounting.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("artifact_id", "schema_version"),
+    (
+        ("taxonomy-obligation-plan", "taxonomy-obligation-plan-v2"),
+        ("stpa-loss-analysis", "loss-analysis-v1"),
+        ("stpa-control-structure", "control-structure-v1"),
+        ("ica-enumeration", "ica-enumeration-v2"),
+    ),
+)
+def test_accounting_requires_stable_authority_schema_labels(
+    artifact_id: str, schema_version: str
+) -> None:
+    plan, consideration, pair = _fixture()
+    pins = list(_accounting_pins(plan))
+    index = next(
+        index for index, pin in enumerate(pins) if pin.artifact_id == artifact_id
+    )
+    pins[index] = ArtifactPin(
+        artifact_id=artifact_id,
+        schema_version=schema_version,
+        semantic_digest=pins[index].semantic_digest,
+    )
+
+    with pytest.raises(ValueError, match="schema"):
+        build_obligation_accounting(
+            plan=plan,
+            consideration=consideration,
+            ica_considerations=(pair,),
+            source_pins=tuple(pins),
+        )
+
+
+def test_accounting_never_accepts_coverage_as_a_provisional_disposition() -> None:
+    with pytest.raises(ValueError):
+        ObligationAccountingRow(
+            obligation_id="ob:v1:" + "a" * 64,
+            disposition="covered",  # type: ignore[arg-type]
+            evidence=("invalid",),
+        )
+
+
+@pytest.mark.parametrize(
+    "field",
+    ("slot_ids", "ica_ids", "exec_candidate_ids", "hazard_ids", "constraint_ids"),
+)
+def test_addressed_rows_require_every_exact_structural_identity(field: str) -> None:
+    values = {
+        "obligation_id": "ob:v1:" + "a" * 64,
+        "disposition": "addressed",
+        "slot_ids": ("RESP-1:CA-1-1:NOT_PROVIDED",),
+        "ica_ids": ("ica-1",),
+        "exec_candidate_ids": ("EXEC:RESP-1:CA-1-1:NOT_PROVIDED",),
+        "hazard_ids": ("H-1",),
+        "constraint_ids": ("SC-1",),
+        "route_refs": ("route:v1:" + "c" * 64,),
+        "evidence": ("route evidence",),
+    }
+    values[field] = ()
+    with pytest.raises(ValueError, match="exact"):
+        ObligationAccountingRow(**values)
+
+
+def test_accounting_retains_capability_excluded_and_governance_rows_exactly_once() -> (
+    None
+):
+    plan = _plan_with_non_stpa_rows()
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    briefs = build_neutral_obligation_briefs(plan, (pattern,))
+    route = ObligationRoute(
+        obligation_id=briefs[0].obligation_id,
+        disposition="targeted",
+        slot_ids=("RESP-1:CA-1-1:NOT_PROVIDED",),
+        hazard_ids=("H-1",),
+        constraint_ids=("SC-1",),
+        evidence=("route evidence",),
+    )
+    consideration = build_consideration_artifact(
+        plan=plan,
+        briefs=briefs,
+        initial_routes=(route,),
+        final_routes=(route,),
+    )
+    pair = ObligationIcaConsideration(
+        route_id=route.route_id,
+        obligation_id=route.obligation_id,
+        slot_id=route.slot_ids[0],
+        disposition="finding",
+        ica_ids=("ica-1",),
+        exec_candidate_ids=("EXEC:RESP-1:CA-1-1:NOT_PROVIDED",),
+        hazard_ids=("H-1",),
+        constraint_ids=("SC-1",),
+        evidence=("ica evidence",),
+    )
+
+    accounting = build_obligation_accounting(
+        plan=plan,
+        consideration=consideration,
+        ica_considerations=(pair,),
+        source_pins=_accounting_pins(plan),
+    )
+
+    assert {row.obligation_id for row in accounting.rows} == {
+        row.obligation_id for row in plan.obligations
+    }
+    dispositions = {row.obligation_id: row.disposition for row in accounting.rows}
+    by_scope = {row.scope_disposition: row for row in plan.obligations}
+    assert dispositions[by_scope["applicable"].obligation_id] == "addressed"
+    assert dispositions[by_scope["capability_excluded"].obligation_id] == (
+        "capability_excluded"
+    )
+    assert dispositions[by_scope["governance_only"].obligation_id] == "governance_only"
+    assert accounting.summary.model_dump(mode="python") == {
+        "total": 3,
+        "addressed": 1,
+        "proposed_not_applicable": 0,
+        "unresolved": 0,
+        "upstream_gap": 0,
+        "capability_excluded": 1,
+        "governance_only": 1,
+    }
+
+
+def test_missing_exact_ica_pair_remains_unresolved() -> None:
+    plan, consideration, _pair = _fixture()
+    accounting = build_obligation_accounting(
+        plan=plan,
+        consideration=consideration,
+        source_pins=_accounting_pins(plan),
+    )
+
+    row = accounting.rows[0]
+    assert row.disposition == "unresolved"
+    assert {diagnostic.code for diagnostic in row.diagnostics} == {
+        "missing_ica_consideration"
+    }
+
+
+def test_structural_non_applicability_requires_complete_slot_evidence() -> None:
+    plan, consideration, _pair = _fixture()
+    briefs = consideration.briefs
+    route = ObligationRoute(
+        obligation_id=briefs[0].obligation_id,
+        disposition="proposed_not_applicable",
+        slot_ids=("RESP-1:CA-1-1:NOT_PROVIDED",),
+        rationale="No control path can carry this action in the reviewed structure.",
+        evidence=("inventory:complete",),
+    )
+    consideration = build_consideration_artifact(
+        plan=plan,
+        briefs=briefs,
+        initial_routes=(route,),
+        final_routes=(route,),
+    )
+    pair = ObligationIcaConsideration(
+        route_id=route.route_id,
+        obligation_id=route.obligation_id,
+        slot_id=route.slot_ids[0],
+        disposition="proposed_not_applicable",
+        structural_inventory_complete=True,
+        rationale="The complete structure has no applicable control action.",
+        evidence=("inventory:complete",),
+    )
+    accounting = build_obligation_accounting(
+        plan=plan,
+        consideration=consideration,
+        ica_considerations=(pair,),
+        source_pins=_accounting_pins(plan),
+    )
+
+    assert accounting.rows[0].disposition == "proposed_not_applicable"
+    assert accounting.summary.proposed_not_applicable == 1
+
+
+def test_phase2_adapter_emits_exact_nonaccepted_proposal_evidence() -> None:
+    plan, consideration, pair = _fixture()
+    accounting = build_obligation_accounting(
+        plan=plan,
+        consideration=consideration,
+        ica_considerations=(pair,),
+        source_pins=_accounting_pins(plan),
+    )
+
+    evidence = build_phase2_evidence_from_accounting(
+        plan,
+        accounting,
+        source_pins=_phase2_pins(plan),
+        consideration=consideration,
+        ica_considerations=(pair,),
+    )
+
+    assert isinstance(evidence, ObligationPhase2Evidence)
+    assert len(evidence.proposal_evidence) == 1
+    proposal = evidence.proposal_evidence[0]
+    assert isinstance(proposal, CorrespondenceEvidence)
+    assert proposal.obligation_id == pair.obligation_id
+    assert proposal.ica_slot_id == pair.slot_id
+    assert proposal.ica_id == pair.ica_ids[0]
+    assert proposal.exec_candidate_id == pair.exec_candidate_ids[0]
+    assert proposal.selected_candidate_id is not None
+    assert not hasattr(proposal, "status")
+    assert not hasattr(evidence, "accepted_relations")
+    assert not hasattr(evidence, "confirmed")
+
+
+def test_phase2_adapter_keeps_proposed_non_applicability_reviewable_only() -> None:
+    plan, original_consideration, _pair = _fixture()
+    original_briefs = original_consideration.briefs
+    route = ObligationRoute(
+        obligation_id=original_briefs[0].obligation_id,
+        disposition="proposed_not_applicable",
+        slot_ids=("RESP-1:CA-1-1:NOT_PROVIDED",),
+        rationale="The complete reviewed structure has no applicable control path.",
+        evidence=("inventory:complete",),
+    )
+    consideration = build_consideration_artifact(
+        plan=plan,
+        briefs=original_briefs,
+        initial_routes=(route,),
+        final_routes=(route,),
+    )
+    pair = ObligationIcaConsideration(
+        route_id=route.route_id,
+        obligation_id=route.obligation_id,
+        slot_id=route.slot_ids[0],
+        disposition="proposed_not_applicable",
+        structural_inventory_complete=True,
+        rationale="No structural slot can carry the control action.",
+        evidence=("inventory:complete",),
+    )
+    accounting = build_obligation_accounting(
+        plan=plan,
+        consideration=consideration,
+        ica_considerations=(pair,),
+        source_pins=_accounting_pins(plan),
+    )
+
+    evidence = build_phase2_evidence_from_accounting(
+        plan,
+        accounting,
+        source_pins=_phase2_pins(plan),
+        consideration=consideration,
+        ica_considerations=(pair,),
+    )
+
+    assert evidence.proposal_evidence == ()
+    assert len(evidence.structural_evidence) == 1
+    structural = evidence.structural_evidence[0]
+    assert isinstance(structural, ProposedStructuralNonApplicabilityEvidence)
+    assert structural.inventory_status == "complete"
+    assert structural.decision_id == structural.evidence_id
+    assert not hasattr(structural, "adjudicated_by")
+    assert not hasattr(evidence, "accepted_relations")
+
+
+def test_phase2_adapter_rejects_substituted_plan_source_pin() -> None:
+    plan, consideration, pair = _fixture()
+    accounting = build_obligation_accounting(
+        plan=plan,
+        consideration=consideration,
+        ica_considerations=(pair,),
+        source_pins=_accounting_pins(plan),
+    )
+    pins = _phase2_pins(plan).model_copy(
+        update={"obligation_plan_semantic_digest": "f" * 64}
+    )
+
+    with pytest.raises(ValueError, match="different Phase 1 plan"):
+        build_phase2_evidence_from_accounting(
+            plan,
+            accounting,
+            source_pins=pins,
+            consideration=consideration,
+            ica_considerations=(pair,),
+        )
+
+
+def test_accounting_round_trips_atomically(tmp_path: Path) -> None:
+    plan, consideration, pair = _fixture()
+    accounting = build_obligation_accounting(
+        plan=plan,
+        consideration=consideration,
+        ica_considerations=(pair,),
+        source_pins=_accounting_pins(plan),
+    )
+    path = write_obligation_accounting(tmp_path, accounting)
+    assert path.name == ACCOUNTING_FILENAME
+    assert read_obligation_accounting(path) == accounting

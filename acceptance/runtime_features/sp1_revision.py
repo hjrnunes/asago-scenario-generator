@@ -5565,7 +5565,21 @@ def _h_b3_derive_runs(world: World, text: str, examples: dict) -> tuple[bool, st
             {"pm_id": "PM-1-2", "description": "Orphan state"}
         )
     client.set_response_for(_B3ResponsibilitySet, resp_dict)
-    client.set_response_for(ControlElementSet, valid_control_element_set_dict())
+    # Call 2b is now a strict semantic boundary: every PM returned by Call 2a
+    # must have an explicit feedback update.  Keep the integration check
+    # focused on repair hook placement while making its provider fixture
+    # schema-complete; orphan repair itself remains covered by the in-memory
+    # seam scenarios above.
+    control_elements = valid_control_element_set_dict()
+    control_elements["feedback_channels"].append(
+        {
+            "fb_id": "FB-1-2",
+            "description": "Orphan state observation",
+            "updates": "PM-1-2",
+            "source": {"type": "responsibility", "id": "RESP-1"},
+        }
+    )
+    client.set_response_for(ControlElementSet, control_elements)
     client.set_response_for(
         CoordinationAnalysis, valid_empty_coordination_analysis_dict()
     )

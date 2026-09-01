@@ -198,6 +198,74 @@ def load_risk_extraction(path: str | Path) -> list[RiskCard]:
     ]
 
 
+def _reviewed_evidence_from_raw(raw: dict[str, Any]) -> EvidenceSpan:
+    """Project one reviewed evidence span as the Phase 1 input builder does.
+
+    Policy-mapper's ``cross_encoder_score`` is a ranking score, not the
+    reviewed evidence relevance field consumed by the closed obligation
+    contract.  In particular, preserving a missing/``null`` ``relevance``
+    value is part of the Phase 1 input identity.
+    """
+    return EvidenceSpan(
+        text=raw.get("text", ""),
+        source=raw.get("document") or raw.get("source"),
+        relevance=raw.get("relevance"),
+    )
+
+
+def _reviewed_mitigation_from_raw(raw: dict[str, Any]) -> MitigationRef:
+    """Project one reviewed mitigation using the Phase 1 field precedence."""
+    return MitigationRef(
+        mitigation_id=raw.get("mitigation_id") or raw.get("action_id"),
+        description=(
+            raw.get("description")
+            or raw.get("action_description")
+            or raw.get("action_name")
+            or ""
+        ),
+        source=raw.get("source"),
+    )
+
+
+def _reviewed_risk_card_from_raw(raw: dict[str, Any]) -> RiskCard:
+    """Project a raw reviewed record without applying the IBM taxonomy filter."""
+    return RiskCard(
+        risk_id=raw["risk_id"],
+        risk_name=raw.get("risk_name", ""),
+        risk_description=raw.get("risk_description", ""),
+        taxonomy=raw.get("taxonomy", ""),
+        confidence=raw.get("confidence", 0.0),
+        grounding_confidence=raw.get("grounding_confidence", "low"),
+        evidence=[
+            _reviewed_evidence_from_raw(item) for item in raw.get("evidence", [])
+        ],
+        scores=raw.get("scores"),
+        mitigations=[
+            _reviewed_mitigation_from_raw(item) for item in raw.get("mitigations", [])
+        ],
+        threat=raw.get("threat"),
+        threat_source=raw.get("threat_source"),
+        vulnerability=raw.get("vulnerability"),
+        consequence=raw.get("consequence"),
+        impact=raw.get("impact"),
+    )
+
+
+def load_reviewed_risk_extraction(path: str | Path) -> list[RiskCard]:
+    """Load every reviewed risk record with the closed Phase 1 projection.
+
+    Unlike :func:`load_risk_extraction`, this synthesis-only loader does not
+    filter by taxonomy.  The obligation planner receives the complete
+    reviewed risk set so its identity can be checked against a supplied typed
+    snapshot.  The existing filtered loader remains unchanged for ``generate``
+    and ``stpa-run`` compatibility.
+    """
+    with open(path) as f:
+        data = json.load(f)
+    risks_raw = _risk_extraction_records(data)
+    return [_reviewed_risk_card_from_raw(r) for r in risks_raw]
+
+
 _DEFAULT_ATTACK_PATTERNS_DIR = DATA_ROOT / "taxonomies" / "attack-patterns"
 
 _DEFAULT_ATTACK_PATTERNS_PATH = _DEFAULT_ATTACK_PATTERNS_DIR / "attack-patterns.yaml"
