@@ -1,6 +1,7 @@
 # STPA synthesis semantic-quality improvement
 
-**Status:** Proposed for approval.
+**Status:** Approved, functionally implemented, and live-qualified. Source
+mutation hardening remains deliberately deferred.
 
 **Builds on:**
 [stpa-obligation-aware-prompt-contract-correction-spec.md](stpa-obligation-aware-prompt-contract-correction-spec.md)
@@ -11,6 +12,9 @@
 - `output/runs/20260901-synthesis-nhs-quality-v14`
 - `output/runs/20260901-synthesis-klarna-prompt-contract-v1`
 - `output/runs/20260901-synthesis-nhs-prompt-contract-v13`
+- `output/runs/20260901-synthesis-klarna-semantic-quality-v2`
+- `output/runs/20260901-synthesis-nhs-semantic-quality-v1`
+- `output/runs/20260902-nhs-mechanism-verifier-integrated-v2`
 
 ## 1. Decision
 
@@ -357,6 +361,7 @@ closed set:
 ```text
 addressed
 risk_pattern_mismatch
+mechanism_path_unsubstantiated
 no_structural_route
 not_applicable_proven
 not_applicable_evidence_incomplete

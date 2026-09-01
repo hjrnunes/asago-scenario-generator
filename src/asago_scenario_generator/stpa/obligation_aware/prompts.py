@@ -9,7 +9,9 @@ in the caller's typed records.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
+import json
+from pathlib import Path
 import re
 from typing import Any
 
@@ -26,6 +28,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ReferenceType,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     PromptReference,
@@ -37,6 +40,7 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     ProviderFeedbackChannel,
     ProviderHazard,
     ProviderKnownConcern,
+    ProviderMappingStrength,
     ProviderObligationQuestion,
     ProviderProcessModelPart,
     ProviderResponsibility,
@@ -53,18 +57,8 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
 from asago_scenario_generator.stpa.threat_enum.slot_creation import SlotPlaceholder
 
 
-_UCA_TYPE_DEFINITIONS = """Four ICA (unsafe control action) types:
-
-- NOT_PROVIDED: the required control action is absent when it is needed.
-- INCORRECT: the action is provided, but its value, content, destination, or effect is unsafe.
-- WRONG_TIMING: the action is provided too early, too late, or in an unsafe order.
-- WRONG_DURATION: a continuous action stops too soon, continues too long, or is applied for an unsafe duration.
-
-Timing and duration are distinct. A one-shot action cannot receive a
-WRONG_DURATION finding without explicit continuing behavior. An ICA describes
-unsafe controller behavior; a safeguard, recommendation, policy, or
-requirement such as "implement MFA" or "add rate limiting" is not an ICA.
-"""
+PROMPT_TEMPLATES_DIR = Path(__file__).with_name("prompt_templates")
+_TEMPLATE_LOADER = TemplateLoader(PROMPT_TEMPLATES_DIR)
 
 _PROHIBITED_PROMPT_KEYS = (
     "semantic_digest",
@@ -80,6 +74,40 @@ _PROHIBITED_PROMPT_KEYS = (
     "raw_mapping",
 )
 _ABSOLUTE_PATH = re.compile(r"(?:^|[\s\"'])/(?:Users|private|tmp|var|home)/")
+
+_MAPPING_STRENGTH_MEANINGS = {
+    "direct_curated_pair": (
+        "The reviewed risk was linked directly to this attack pattern. This is "
+        "discovery evidence, not proof that the mechanism exists in this system."
+    ),
+    "exact_then_category_expansion": (
+        "The risk first matched an equivalent taxonomy concept, then expanded "
+        "through a broader category to this pattern. Judge this pair explicitly."
+    ),
+    "broad_category_expansion": (
+        "The risk reached this pattern through a broader taxonomy category. Shared "
+        "category membership does not establish risk alignment."
+    ),
+    "related_category_expansion": (
+        "The risk reached this pattern through a related taxonomy concept and a "
+        "broader category. Treat the pairing as a discovery hypothesis only."
+    ),
+}
+
+
+def obligation_prompt_template_hashes() -> dict[str, str]:
+    """Hash every top-level prompt and included partial in the search root."""
+    return _TEMPLATE_LOADER.hash_prompt_templates()
+
+
+def obligation_prompt_implementation_hash(
+    template_hashes: Mapping[str, str] | None = None,
+) -> str:
+    """Content-address the complete obligation-aware prompt implementation."""
+    return compute_framed_digest(
+        "asago-scenario-generator:obligation-aware-prompt-implementation:v1",
+        dict(sorted((template_hashes or obligation_prompt_template_hashes()).items())),
+    )
 
 
 def audit_prompt_contract(
@@ -282,6 +310,7 @@ def project_obligation_question(
             )
         )
     risk = brief.risk_ref
+    mapping_strength = mapping_strength_for_brief(brief)
     return ProviderObligationQuestion(
         obligation_handle=brief.obligation_id,
         known_concern=ProviderKnownConcern(
@@ -304,6 +333,10 @@ def project_obligation_question(
             relevant_facts=relevant_facts,
             missing_or_conflicting_facts=missing_facts,
         ),
+        mapping_strength=ProviderMappingStrength(
+            label=mapping_strength,
+            meaning=_MAPPING_STRENGTH_MEANINGS[mapping_strength],
+        ),
         known_system_resources=tuple(
             sorted(resources, key=lambda item: item.resource_id)
         ),
@@ -315,6 +348,47 @@ def project_obligation_question(
             "and do not prescribe an attack sequence or coverage."
         ),
     )
+
+
+def mapping_strength_for_brief(brief: NeutralObligationBrief) -> str:
+    """Reduce exact typed mapping paths to one conservative plain label."""
+    path_relations = [
+        _mapping_relations(evidence.detail)
+        for evidence in brief.applicability_evidence
+        if evidence.kind == "mapping"
+    ]
+    if not path_relations:
+        raise ValueError("obligation question requires mapping-path evidence")
+    labels = tuple(_mapping_path_strength(path) for path in path_relations)
+    priority = {
+        "direct_curated_pair": 0,
+        "exact_then_category_expansion": 1,
+        "broad_category_expansion": 2,
+        "related_category_expansion": 3,
+    }
+    return min(labels, key=priority.__getitem__)
+
+
+def _mapping_relations(detail: str) -> tuple[str, ...]:
+    """Parse exact mapping evidence without exposing it to the provider."""
+    try:
+        payload = json.loads(detail)
+        path = payload["path"]
+        return tuple(str(edge["relation"]).lower() for edge in path)
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("mapping evidence is not a typed mapping path") from exc
+
+
+def _mapping_path_strength(relations: tuple[str, ...]) -> str:
+    """Classify one canonical path without exposing its raw payload."""
+    if len(relations) <= 1:
+        return "direct_curated_pair"
+    first = relations[0]
+    if "exact" in first:
+        return "exact_then_category_expansion"
+    if "related" in first:
+        return "related_category_expansion"
+    return "broad_category_expansion"
 
 
 def _reference_map(control_structure: ControlStructure) -> dict[str, PromptReference]:
@@ -647,13 +721,17 @@ def _project_loss_context(
     constraints = {
         item.constraint_id: item for item in loss_analysis.security_constraints
     }
-    loss_views = [
-        PromptReference(id=loss_id, description=losses[loss_id].description)
+    selected_loss_ids = {
+        loss_id
         for hazard_id in selected_hazards
         for loss_id in (
             hazards[hazard_id].related_losses if hazard_id in hazards else ()
         )
         if loss_id in losses
+    }
+    loss_views = [
+        PromptReference(id=loss_id, description=losses[loss_id].description)
+        for loss_id in sorted(selected_loss_ids)
     ]
     hazard_views = [
         ProviderHazard(
@@ -1093,54 +1171,34 @@ def build_structural_routing_prompts(
         control_structure=control_structure,
         slots=slots,
     )
-    system = f"""You are performing structural STPA analysis for taxonomy concerns.
-Treat each concern as a hypothesis, not a mandatory mechanism, ordered attack sequence,
-coverage claim, or execution instruction. Return exactly one route in the JSON `routes`
-array for each supplied obligation ({len(context.obligation_questions)} total):
-targeted, proposed_not_applicable, upstream_gap, or unresolved.
-
-{context.instructions}
-
-The obligation_handle is opaque: copy unchanged. Every selectable ID in the index is
-paired with a description. Each namespace field must use only its matching supplied IDs.
-A targeted
-route requires an owner responsibility (or coordination path), its owned action, the
-action's controlled process (or shared coordination process), matching slots, selected
-hazards, and constraints that explicitly govern those hazards. Each selected hazard must
-retain a related loss. `targeted` does not mean that an identifier merely matched; explain
-the system-specific relationship. You may reject the taxonomy hypothesis.
-
-Hazard/constraint pairing is closed over the ID-only ledger in the user prompt. Use only
-the listed `constraint_id -> hazard_id` pairs. Never infer a pair from a description,
-including a duplicated or parenthetical hazard ID; the typed relationship controls.
-
-For a responsibility slot, use the slot's exact RESP owner in `controller_ids` and
-`responsibility_ids`, its exact CA in `control_action_ids`, and that action's exact CP in
-`controlled_process_ids`. For a coordination slot such as
-`CL-1:CM-1:NOT_PROVIDED`, resolve the exact CL record: use its source responsibility as
-the `controller_ids` value, include both its source and target responsibilities in
-`responsibility_ids`, use the exact CM in `control_action_ids`, the exact CL in
-`coordination_link_ids`, and the link's shared PM in `process_model_part_ids`. Never put
-a CL in `responsibility_ids` or replace a CM with a source responsibility's CA.
-
-The route object uses these exact fields: `obligation_id`, `disposition`, `slot_ids`,
-`controller_ids`, `responsibility_ids`, `control_action_ids`, `controlled_process_ids`,
-`coordination_link_ids`, `hazard_ids`, `constraint_ids`, `missing_concepts`, `rationale`,
-and non-empty `evidence`. Valid example: {{"routes":[{{"obligation_id":"<obligation_handle>","disposition":"unresolved","evidence":["evidence is insufficient"]}}]}}.
-
-Do not return route_id or gap_id. The local adapter derives durable route and gap IDs.
-Slot IDs use the exact forms `RESP-*:CA-*:UCA_TYPE` or `CL-*:CM-*:UCA_TYPE`.
-"""
-    user = "Compact obligation questions:\n" + _yaml(
-        [item.model_dump(mode="json") for item in context.obligation_questions]
+    system = _TEMPLATE_LOADER.render_prompt(
+        "structural_routing_system.j2",
+        obligation_count=len(context.obligation_questions),
+        instructions=context.instructions,
     )
-    user += "\n" + _hazard_constraint_pair_ledger(loss_analysis) + "\n"
-    user += (
-        "\nCompact STPA target index: relationships use IDs; the ID glossary "
-        "explains each ID exactly once.\n"
-        + _yaml(_compact_routing_target_payload(context.target_index))
+    user = _TEMPLATE_LOADER.render_prompt(
+        "structural_routing_user.j2",
+        obligation_questions_yaml=_yaml(
+            [item.model_dump(mode="json") for item in context.obligation_questions]
+        ),
+        hazard_constraint_pair_ledger=_hazard_constraint_pair_ledger(loss_analysis),
+        target_index_yaml=_yaml(_compact_routing_target_payload(context.target_index)),
     )
-    user += "\nReturn typed route dispositions with exact references and evidence.\n"
+    return system, user
+
+
+def build_mechanism_verification_prompts(
+    verification_items: Sequence[Mapping[str, Any]],
+) -> tuple[str, str]:
+    """Render the compact post-routing mechanism/path comparison."""
+    items = tuple(dict(item) for item in verification_items)
+    if not items:
+        raise ValueError("mechanism verification requires at least one item")
+    system = _TEMPLATE_LOADER.render_prompt("mechanism_verification_system.j2")
+    user = _TEMPLATE_LOADER.render_prompt(
+        "mechanism_verification_user.j2",
+        verification_items_yaml=_yaml(items),
+    )
     return system, user
 
 
@@ -1156,27 +1214,15 @@ def build_structural_revision_prompts(
         loss_analysis=loss_analysis,
         control_structure=control_structure,
     )
-    system = f"""You may address typed upstream STPA gaps in one bounded additive round.
-Use request-local handles for all new concepts and preserve every baseline record. For each
-opaque gap_handle, copied unchanged, choose exactly one of:
-- propose_addition: provide a closed addition using existing IDs or declared local handles;
-- dismiss_unsupported: explain why the supplied evidence does not justify the gap;
-- unresolved: state what evidence is still missing.
-
-{context.instructions}
-No final STPA ID is supplied or invented by the model. The deterministic compiler allocates
-final IDs only after validating the complete delta. Do not prescribe an attack sequence,
-execution recipe, or taxonomy coverage. Return one JSON object matching the typed draft
-schema. The top-level fields are `draft` and `gap_decisions`; each decision contains
-`gap_handle`, `disposition`, and `rationale`. Valid example: {{"draft":{{}},"gap_decisions":[]}}.
-"""
-    user = "Compact revision gaps:\n" + _yaml(
-        [item.model_dump(mode="json") for item in context.gaps]
+    system = _TEMPLATE_LOADER.render_prompt(
+        "structural_revision_system.j2",
+        instructions=context.instructions,
     )
-    user += "\nCompact baseline STPA index:\n" + _yaml(
-        context.target_index.model_dump(mode="json")
+    user = _TEMPLATE_LOADER.render_prompt(
+        "structural_revision_user.j2",
+        gaps_yaml=_yaml([item.model_dump(mode="json") for item in context.gaps]),
+        target_index_yaml=_yaml(context.target_index.model_dump(mode="json")),
     )
-    user += "\nReturn one typed gap decision for every gap_handle and one complete request-local draft.\n"
     return system, user
 
 
@@ -1209,100 +1255,17 @@ def build_synthesis_slot_prompts(
         for route in routes
         for slot_id in sorted(set(route.slot_ids).intersection(slot_ids))
     ]
-    system = f"""Fill every supplied STPA ICA slot for exactly this target. Analyze every
-slot, including slots with no routed obligation, exactly once. Return one structured slot
-draft per supplied slot. Use each slot_id as an opaque handle and copy it unchanged.
-
-{_UCA_TYPE_DEFINITIONS}
-
-The ordinary STPA method requires a hazardous context, a loss consequence, exact hazard and
-governing-constraint references, and process-model or feedback references where relevant.
-For each finding return one non-empty `deviation` string describing how the supplied control
-action is unsafe for that slot's stated UCA type. Do not return a deviation category or any
-alternative deviation fields. The deterministic compiler owns the slot's exact UCA type and
-supplies the authoritative controller and control-action prose; do not rewrite those
-identities. A routed obligation is advisory: it may result in a finding,
-proposed_not_applicable with complete structural evidence, or unresolved. A route never
-forces an ICA finding and no consideration may claim taxonomy coverage.
-
-For N/A use `is_na=true`, a non-empty `na_rationale` citing a complete structural
-property, and no findings. For an unsafe-control result use `is_na=false`,
-`na_rationale=null`, and at least one structured item in `findings`. Do not return the
-legacy `responsibility`, `control_action`, `uca_type`, or `icas` fields. Do not return
-final ICA IDs, EXEC identities, or replacement controller/action text. Each finding
-must select exactly one supplied governing constraint that governs its selected hazard;
-do not return several constraints and leave the Gherkin should-clause ambiguous.
-
-For every item under `Required routed consideration pairs`, put exactly one result in
-the matching slot's `consideration_results` array:
-
-- Use `finding` only when one or more findings in that same slot directly express the
-  routed concern through the route's supplied hazard and governing constraint. Put the
-  matching zero-based positions from the slot's `findings` array in `finding_indexes`.
-- Use `proposed_not_applicable` only when that slot is N/A and its complete structural
-  property proves the routed mechanism cannot occur. Leave `finding_indexes` empty.
-- Use `unresolved` only when the supplied evidence is missing or contradictory. State
-  what evidence is missing or contradictory; do not use `unresolved` merely because a
-  route is advisory or does not force a finding. Leave `finding_indexes` empty.
-
-Do not attach an obligation to an unrelated finding merely because both appear in the
-same target. Copy each `obligation_handle` unchanged; route handles are input evidence
-and are resolved locally, so they are not output fields.
-
-An ICA finding is a system-specific scenario hypothesis about unsafe control behavior;
-it is not proof that the current control already recognizes or names the taxonomy attack
-technique. The routed taxonomy mechanism is not established evidence. The `deviation` and
-`hazardous_context` must describe the unsafe control or system condition in mechanism-neutral
-terms. Do not copy a mechanism such as prompt injection, poisoned persistent memory, spoofing,
-or tool abuse from the obligation question unless the compact target STPA index independently
-supplies that exact mechanism or access path. Put the relationship between the obligation and
-the unsafe-control finding in the consideration `rationale`; do not put an unsupported attack
-story into the ICA itself. Bad: `when an adversary uses poisoned persistent memory`. Good:
-`the current authorization is not revalidated after stored context changes the requested
-action`.
-
-Choose `finding` when the known concern is a concrete way the same supplied control action can
-be absent, incorrect, mistimed, or misapplied and can lead to the same hazard. A `finding`
-records that system-specific unsafe-control relationship; it does not establish that the
-taxonomy mechanism occurred. Compare the concern and finding by subject, operation, affected object, and effect.
-Shared words such as `value`, `input`, `parameter`, or `threshold` are not mechanism evidence:
-a detector's score threshold is not tool-call parameter pollution, for example. A memory
-concern requires a supplied storage-and-reuse path; an endpoint-exfiltration concern requires
-a supplied outbound-call path. When the required operation or path is absent, choose
-`unresolved` and name it. For example, an input-manipulation concern can select a finding in which the
-system fails to block a malicious input even if the present control description does not
-name that precise manipulation technique. Choose `unresolved` instead when the concern
-requires another control path (for example, a tool-execution concern routed only to an
-input filter), an unsupplied access path, or another missing system fact. State that exact
-missing path or fact in the rationale.
-
-The structured slot-draft fields are `slot_id`, `is_na`, `na_rationale`, `findings`, and
-`consideration_results`; each finding contains the plain string `deviation`, `hazardous_context`,
-`loss_consequence`, `related_hazard_ids`, `related_constraint_ids`, `process_model_refs`,
-and `feedback_refs`. A finding consideration contains `obligation_handle`,
-`disposition`, `finding_indexes`, and `rationale`. Valid example:
-{{"filled_slots":[{{"slot_id":"<slot_id>","is_na":false,"na_rationale":null,
-"findings":[{{"deviation":"the required action is absent",
-"hazardous_context":"the supplied hazardous context","loss_consequence":"the supplied
-loss consequence occurs","related_hazard_ids":["<hazard_id>"],
-"related_constraint_ids":["<constraint_id>"],"process_model_refs":[],
-"feedback_refs":[]}}],"consideration_results":[{{"obligation_handle":
-"<obligation_handle>","disposition":"finding","finding_indexes":[0],
-"rationale":"finding 0 directly expresses the routed concern"}}]}}]}}.
-Return one JSON object matching the structured slot-draft schema.
-"""
-    user = (
-        f"Target handle: {target_id} (copy unchanged)\n"
-        "Compact target STPA index:\n" + _yaml(target_index.model_dump(mode="json"))
+    system = _TEMPLATE_LOADER.render_prompt("synthesis_ica_system.j2")
+    user = _TEMPLATE_LOADER.render_prompt(
+        "synthesis_ica_user.j2",
+        target_id=target_id,
+        target_index_yaml=_yaml(target_index.model_dump(mode="json")),
+        obligation_questions_yaml=_yaml(
+            [item.model_dump(mode="json") for item in questions]
+        ),
+        routed_routes_yaml=_yaml([item.model_dump(mode="json") for item in routes]),
+        required_pairs_yaml=_yaml(required_pairs),
     )
-    user += "\nObligation considerations for this target (hypotheses only):\n" + _yaml(
-        [item.model_dump(mode="json") for item in questions]
-    )
-    user += "\nRouted route evidence (opaque handles; copy unchanged):\n" + _yaml(
-        [item.model_dump(mode="json") for item in routes]
-    )
-    user += "\nRequired routed consideration pairs:\n" + _yaml(required_pairs)
-    user += "\nReturn the structured slot-draft schema described above.\n"
     return system, user
 
 
@@ -1315,6 +1278,7 @@ __all__ = [
     "build_slot_filling_prompts",
     "build_structural_revision_prompts",
     "build_structural_routing_prompts",
+    "build_mechanism_verification_prompts",
     "build_synthesis_slot_prompts",
     "authoritative_hazard_constraint_pairs",
     "project_control_structure_context",
@@ -1322,4 +1286,7 @@ __all__ = [
     "project_obligation_question",
     "project_obligation_routing_context",
     "project_revision_context",
+    "obligation_prompt_implementation_hash",
+    "obligation_prompt_template_hashes",
+    "mapping_strength_for_brief",
 ]

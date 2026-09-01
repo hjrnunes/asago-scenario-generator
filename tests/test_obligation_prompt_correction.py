@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 import pytest
@@ -12,12 +13,22 @@ from asago_scenario_generator.models.obligation_consideration import (
     MissingStructuralConcept,
     ObligationRoute,
 )
+from asago_scenario_generator.models.obligation_plan import EvidenceRecord
+from asago_scenario_generator.models.correspondence import (
+    compute_ica_enumeration_digest,
+)
 from asago_scenario_generator.stpa.models.loss_analysis import (
     Hazard,
     Loss,
     LossAnalysis,
     LossProvenance,
     SecurityConstraint,
+)
+from asago_scenario_generator.stpa.models.ica_enumeration import (
+    ICA,
+    ICAEnumeration,
+    ICASlot,
+    UCAType,
 )
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     IcaFindingDraft,
@@ -31,9 +42,13 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
     build_structural_revision_prompts,
     build_structural_routing_prompts,
     build_synthesis_slot_prompts,
+    obligation_prompt_implementation_hash,
+    mapping_strength_for_brief,
     project_control_structure_context,
     project_obligation_question,
 )
+from asago_scenario_generator.stpa.obligation_aware import prompts as prompt_module
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.obligation_aware.routing import (
     build_neutral_briefs,
     route_obligations,
@@ -105,6 +120,8 @@ def test_provider_question_is_compact_and_explains_opaque_handle() -> None:
     assert brief.attack_pattern_semantic_digest not in payload
     assert "catalog_pins" not in payload
     assert "mapping_pins" not in payload
+    assert question.mapping_strength.label == "direct_curated_pair"
+    assert "discovery evidence" in question.mapping_strength.meaning
     assert "mitigations" not in payload
     assert "scores" not in payload
 
@@ -118,6 +135,98 @@ def test_provider_question_is_compact_and_explains_opaque_handle() -> None:
     assert brief.plan_digest not in user
     assert brief.attack_pattern_semantic_digest not in user
     assert "mapping_pins" not in user
+
+
+@pytest.mark.parametrize(
+    ("first_relation", "expected"),
+    [
+        ("skos:exactMatch", "exact_then_category_expansion"),
+        ("skos:broadMatch", "broad_category_expansion"),
+        ("skos:relatedMatch", "related_category_expansion"),
+    ],
+)
+def test_mapping_strength_is_projected_without_raw_mapping_json(
+    first_relation: str, expected: str
+) -> None:
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    plan = make_plan(
+        mappings=[
+            {
+                "source_id": "risk-a",
+                "target_id": "CATEGORY-1",
+                "relation": first_relation,
+            },
+            {
+                "source_id": "CATEGORY-1",
+                "target_id": pattern.id,
+                "relation": "attacks_via",
+            },
+        ]
+    )
+    question = project_obligation_question(build_neutral_briefs(plan, (pattern,))[0])
+
+    assert question.mapping_strength.label == expected
+    assert '"path"' not in question.model_dump_json()
+
+
+def test_mapping_strength_rejects_missing_or_malformed_exact_evidence() -> None:
+    """The plain label can only be compiled from an exact typed path."""
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    brief = build_neutral_briefs(make_plan(), (pattern,))[0]
+    with pytest.raises(ValueError, match="requires mapping-path evidence"):
+        mapping_strength_for_brief(
+            brief.model_copy(update={"applicability_evidence": ()})
+        )
+    malformed = EvidenceRecord(kind="mapping", detail="{}")
+    with pytest.raises(ValueError, match="not a typed mapping path"):
+        mapping_strength_for_brief(
+            brief.model_copy(update={"applicability_evidence": (malformed,)})
+        )
+
+
+def test_obligation_aware_provider_instructions_live_in_jinja_templates() -> None:
+    """Prompt projectors stay in Python while provider prose lives in Jinja."""
+    template_dir = Path(prompt_module.__file__).with_name("prompt_templates")
+    expected = {
+        "structural_routing_system.j2",
+        "structural_routing_user.j2",
+        "structural_revision_system.j2",
+        "structural_revision_user.j2",
+        "synthesis_ica_system.j2",
+        "synthesis_ica_user.j2",
+        "mechanism_verification_system.j2",
+        "mechanism_verification_user.j2",
+        "_uca_method.j2",
+    }
+    hashes = TemplateLoader(template_dir).hash_prompt_templates()
+    assert expected <= set(hashes)
+    assert all(len(hashes[name]) == 64 for name in expected)
+    changed = {**hashes, "_uca_method.j2": "0" * 64}
+    assert obligation_prompt_implementation_hash(changed) != (
+        obligation_prompt_implementation_hash(hashes)
+    )
+
+    source = inspect.getsource(prompt_module)
+    assert "You are performing structural STPA analysis" not in source
+    assert "Fill every supplied STPA ICA slot" not in source
+
+
+def test_target_prompt_view_deduplicates_losses_by_exact_identity() -> None:
+    """Repeated upstream loss rows produce one provider-facing loss record."""
+    loss_analysis = _loss_analysis()
+    duplicate = loss_analysis.risk_card_losses[0]
+    loss_analysis = loss_analysis.model_copy(
+        update={"risk_card_losses": (duplicate, duplicate)}
+    )
+
+    context = project_control_structure_context(
+        _control_structure(),
+        slots=create_slots(_control_structure())[:4],
+        target_id="RESP-1",
+        loss_analysis=loss_analysis,
+    )
+
+    assert [item.id for item in context.losses] == ["L-1"]
 
 
 def test_routing_prompt_explains_each_structural_id_once() -> None:
@@ -139,6 +248,110 @@ def test_routing_prompt_explains_each_structural_id_once() -> None:
     assert "owner_id: RESP-1" in user
     assert "control_action_id: CA-1-1" in user
     assert "target_process_id: CP-1" in user
+
+
+def test_routing_prompt_rejects_adjacent_control_as_mechanism_evidence() -> None:
+    """A nearby safeguard cannot stand in for the distinctive attack mechanism."""
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    brief = build_neutral_briefs(make_plan(), (pattern,))[0]
+
+    system, _user = build_structural_routing_prompts(
+        briefs=(brief,),
+        loss_analysis=_loss_analysis(),
+        control_structure=_control_structure(),
+        slots=create_slots(_control_structure()),
+    )
+
+    assert "adjacent safeguard is not evidence" in system
+    assert (
+        "unauthenticated access or authentication rejection is not poisoned" in system
+    )
+    assert "ingress resource proves only that content can arrive" in system
+    assert "neither establishes semantic separation" in system
+    assert "the disposition must be `unresolved`" in system
+    assert "capability flags, or integration IDs cannot substitute" in system
+
+
+def test_focused_verifier_retains_path_without_granting_mechanism_credit(
+    tmp_path,
+) -> None:
+    """An adjacent-control verdict keeps the STPA route but removes its credit."""
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    brief = build_neutral_briefs(make_plan(), (pattern,))[0]
+    slot = create_slots(_control_structure())[0]
+    route = ObligationRoute(
+        obligation_id=brief.obligation_id,
+        disposition="targeted",
+        semantic_assessment={
+            "mechanism_assessment": "plausible_in_system",
+            "risk_alignment": "supported",
+            "mapping_strength": "direct_curated_pair",
+            "mechanism_rationale": "A generic input surface is present.",
+            "risk_alignment_rationale": "The risk is conceptually related.",
+        },
+        slot_ids=(slot.slot_id,),
+        hazard_ids=("H-1",),
+        constraint_ids=("SC-1",),
+        evidence=("provider-route",),
+    )
+
+    class Client:
+        model = "focused-verifier-test"
+        calls = 0
+        prompts: list[str] = []
+
+        def complete(self, **kwargs):
+            self.calls += 1
+            self.prompts.append(kwargs["user_prompt"])
+            content = (
+                {"routes": [route.model_dump(mode="json", exclude={"route_id"})]}
+                if self.calls == 1
+                else {
+                    "verdicts": [
+                        {
+                            "obligation_id": brief.obligation_id,
+                            "relationship": "adjacent_control",
+                            "rationale": (
+                                "Input validation does not govern poisoned source "
+                                "output being interpreted as a goal."
+                            ),
+                        }
+                    ]
+                }
+            )
+            return LLMResult(
+                content=content,
+                prompt_tokens=1,
+                completion_tokens=1,
+                duration_ms=1,
+                system_prompt=kwargs["system_prompt"],
+                user_prompt=kwargs["user_prompt"],
+            )
+
+    client = Client()
+    controls = _controls().model_copy(update={"max_batch_size": 1})
+    result = route_obligations(
+        ObligationAwareLLMAdapter(client, run_dir=tmp_path, controls=controls),
+        briefs=(brief,),
+        loss_analysis=_loss_analysis(),
+        control_structure=_control_structure(),
+        slots=(slot,),
+        controls=controls,
+    )
+
+    retained = result.routes[0]
+    assert client.calls == 2
+    assert retained.disposition == "targeted"
+    assert retained.slot_ids == (slot.slot_id,)
+    assert retained.semantic_assessment is not None
+    assert retained.semantic_assessment.mechanism_assessment == "insufficient_evidence"
+    assert retained.semantic_assessment.risk_alignment == "supported"
+    assert retained.diagnostics[-1].code == "mechanism_path_unsubstantiated"
+    verifier_prompt = client.prompts[1]
+    assert "selected_structural_path:" in verifier_prompt
+    assert "reviewed_risk:" not in verifier_prompt
+    assert "mapping_strength:" not in verifier_prompt
+    assert "applicability:" not in verifier_prompt
 
 
 def test_prompt_audit_does_not_treat_ordinary_prose_as_internal_field() -> None:
@@ -390,6 +603,83 @@ def test_structured_ica_draft_compiles_authoritative_owner_and_action() -> None:
     assert "unreviewed operation" in ica.ica_text
     assert ica.related_hazards == ["H-1"]
     assert ica.related_constraints == ["SC-1"]
+    assert ica.quality_warnings == []
+
+
+def test_verbose_semantically_valid_ica_is_retained_with_quality_warning() -> None:
+    """Presentation defects stay visible without deleting a valid finding."""
+    structure = _control_structure()
+    slot = create_slots(structure)[0]
+    verbose_clause = (
+        "the request contains an unreviewed operation and the request contains "
+        "another unreviewed operation, such as an operation that remains pending "
+        "while several unrelated checks continue and additional explanatory detail "
+        "is supplied to the analyst"
+    )
+    draft = SlotIcaDraft(
+        slot_id=slot.slot_id,
+        is_na=False,
+        findings=(
+            IcaFindingDraft(
+                deviation=IcaDeviationDraft(
+                    not_provided_context=verbose_clause,
+                ),
+                hazardous_context="the unreviewed operation reaches the process",
+                loss_consequence="the protected operation is harmed",
+                related_hazard_ids=("H-1",),
+                related_constraint_ids=("SC-1",),
+            ),
+        ),
+    )
+
+    filled = compile_ica_slot_draft(
+        draft,
+        slot=slot,
+        loss_analysis=_loss_analysis(),
+        control_structure=structure,
+    )
+
+    assert len(filled.icas) == 1
+    assert verbose_clause in filled.icas[0].ica_text
+    assert "ica_prose_quality_warning" in filled.icas[0].quality_warnings
+    assert "ica_deviation_over_32_words" in filled.icas[0].quality_warnings
+    assert "ica_deviation_contains_example" in filled.icas[0].quality_warnings
+
+
+def test_ica_style_warning_does_not_repin_structural_authority() -> None:
+    """Presentation diagnostics stay outside the ICA authority digest."""
+    slot = ICASlot(
+        slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
+        responsibility="RESP-1",
+        control_action="CA-1-1",
+        uca_type=UCAType.not_provided,
+        is_na=False,
+        icas=[
+            ICA(
+                ica_id="RESP-1:CA-1-1:NOT_PROVIDED:1",
+                ica_text="Validation is not provided.",
+                hazardous_context="An unreviewed request reaches the process.",
+                loss_scenario="The protected operation is harmed.",
+                related_hazards=["H-1"],
+                related_constraints=["SC-1"],
+            )
+        ],
+    )
+    baseline = ICAEnumeration(slots=[slot])
+    warned_ica = slot.icas[0].model_copy(
+        update={"quality_warnings": ["ica_prose_quality_warning"]}
+    )
+    warned = baseline.model_copy(
+        update={
+            "slots": [
+                slot.model_copy(update={"icas": [warned_ica]}),
+            ]
+        }
+    )
+
+    assert compute_ica_enumeration_digest(warned) == compute_ica_enumeration_digest(
+        baseline
+    )
 
 
 def test_structured_ica_draft_rejects_safeguard_and_wrong_uca_type() -> None:

@@ -27,6 +27,7 @@ from asago_scenario_generator.models.hybrid_coverage import (
     Digest,
     ObligationId,
 )
+from asago_scenario_generator.models.obligation_funnel import ObligationStopReason
 from asago_scenario_generator.models.obligation_consideration import (
     ConsiderationDiagnostic,
 )
@@ -115,6 +116,9 @@ class ObligationAccountingRow(_AccountingModel):
 
     obligation_id: ObligationId
     disposition: AccountingDisposition
+    stop_reason: ObligationStopReason | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     slot_ids: tuple[str, ...] = ()
     ica_ids: tuple[str, ...] = ()
     exec_candidate_ids: tuple[str, ...] = ()

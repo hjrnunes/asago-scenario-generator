@@ -30,32 +30,45 @@ def _default_entries() -> list[dict]:
     """The 4 entries from the Background table."""
     return [
         {
-            "stage": "stage_1a", "step": "call_1a_losses",
+            "stage": "stage_1a",
+            "step": "call_1a_losses",
             "model": "gemma-4-26b-a4b-it",
-            "prompt_tokens": 4500, "completion_tokens": 1200,
-            "duration_ms": 8500, "timestamp": "2026-08-08T12:00:00Z",
+            "prompt_tokens": 4500,
+            "completion_tokens": 1200,
+            "duration_ms": 8500,
+            "timestamp": "2026-08-08T12:00:00Z",
             "success": True,
         },
         {
-            "stage": "stage_1b", "step": "call_1b_profile",
+            "stage": "stage_1b",
+            "step": "call_1b_profile",
             "model": "gemma-4-26b-a4b-it",
-            "prompt_tokens": 3200, "completion_tokens": 800,
-            "duration_ms": 4200, "timestamp": "2026-08-08T12:01:00Z",
+            "prompt_tokens": 3200,
+            "completion_tokens": 800,
+            "duration_ms": 4200,
+            "timestamp": "2026-08-08T12:01:00Z",
             "success": True,
         },
         {
-            "stage": "stage_2", "step": "call_2a_responsibilities",
+            "stage": "stage_2",
+            "step": "call_2a_responsibilities",
             "model": "gemma-4-26b-a4b-it",
-            "prompt_tokens": 5100, "completion_tokens": 1500,
-            "duration_ms": 9800, "timestamp": "2026-08-08T12:02:00Z",
+            "prompt_tokens": 5100,
+            "completion_tokens": 1500,
+            "duration_ms": 9800,
+            "timestamp": "2026-08-08T12:02:00Z",
             "success": True,
         },
         {
-            "stage": "stage_2", "step": "call_2_requirements",
+            "stage": "stage_2",
+            "step": "call_2_requirements",
             "model": "gemma-4-26b-a4b-it",
-            "prompt_tokens": 4800, "completion_tokens": 1300,
-            "duration_ms": 7600, "timestamp": "2026-08-08T12:03:00Z",
-            "success": False, "error": "timeout exceeded",
+            "prompt_tokens": 4800,
+            "completion_tokens": 1300,
+            "duration_ms": 7600,
+            "timestamp": "2026-08-08T12:03:00Z",
+            "success": False,
+            "error": "timeout exceeded",
         },
     ]
 
@@ -105,22 +118,35 @@ class TestRenderCallsHtml:
         # The failed row should have a failure class or indicator
         assert "call_2_requirements" in html
         # Check for a failure-related CSS class or style near the failed row
-        assert "failed" in html.lower() or "error-row" in html.lower() or "failure" in html.lower()
+        assert (
+            "failed" in html.lower()
+            or "error-row" in html.lower()
+            or "failure" in html.lower()
+        )
 
     def test_ch05_error_messages_displayed_for_failed_calls(self, tmp_path):
         """CH-05: error messages are displayed for failed calls."""
         html, _ = _render(tmp_path)
         assert "timeout exceeded" in html
 
-    @pytest.mark.parametrize("column", [
-        "model", "prompt_tokens", "completion_tokens", "duration_ms", "timestamp",
-    ])
+    @pytest.mark.parametrize(
+        "column",
+        [
+            "model",
+            "prompt_tokens",
+            "completion_tokens",
+            "duration_ms",
+            "timestamp",
+        ],
+    )
     def test_ch06_detail_table_includes_expected_columns(self, tmp_path, column):
         """CH-06: detail table includes expected columns."""
         html, _ = _render(tmp_path)
         assert column in html
 
-    def test_ch07_empty_calls_jsonl_produces_valid_html_with_zero_totals(self, tmp_path):
+    def test_ch07_empty_calls_jsonl_produces_valid_html_with_zero_totals(
+        self, tmp_path
+    ):
         """CH-07: rendering an empty calls.jsonl produces valid HTML with zero totals."""
         calls_path = _write_calls_jsonl(tmp_path / "empty.jsonl", [])
         output_path = tmp_path / "empty.html"
@@ -133,16 +159,24 @@ class TestRenderCallsHtml:
         """CH-08: rendering only successful calls shows zero failures."""
         entries = [
             {
-                "stage": "stage_1a", "step": "call_1a",
-                "model": "model-a", "prompt_tokens": 1000,
-                "completion_tokens": 500, "duration_ms": 3000,
-                "timestamp": "2026-08-08T12:00:00Z", "success": True,
+                "stage": "stage_1a",
+                "step": "call_1a",
+                "model": "model-a",
+                "prompt_tokens": 1000,
+                "completion_tokens": 500,
+                "duration_ms": 3000,
+                "timestamp": "2026-08-08T12:00:00Z",
+                "success": True,
             },
             {
-                "stage": "stage_2", "step": "call_2",
-                "model": "model-a", "prompt_tokens": 2000,
-                "completion_tokens": 800, "duration_ms": 5000,
-                "timestamp": "2026-08-08T12:01:00Z", "success": True,
+                "stage": "stage_2",
+                "step": "call_2",
+                "model": "model-a",
+                "prompt_tokens": 2000,
+                "completion_tokens": 800,
+                "duration_ms": 5000,
+                "timestamp": "2026-08-08T12:01:00Z",
+                "success": True,
             },
         ]
         html, _ = _render(tmp_path, entries)
@@ -153,12 +187,21 @@ class TestRenderCallsHtml:
 
     def test_ch09_cli_invocation_renders_html(self, tmp_path):
         """CH-09: CLI invocation renders calls.jsonl to HTML."""
-        calls_path = _write_calls_jsonl(tmp_path / "cli_calls.jsonl", _default_entries())
+        calls_path = _write_calls_jsonl(
+            tmp_path / "cli_calls.jsonl", _default_entries()
+        )
         output_path = tmp_path / "cli_output.html"
         result = subprocess.run(
-            [sys.executable, "-m", "asago_scenario_generator.stpa.infra.calls_html",
-             str(calls_path), str(output_path)],
-            capture_output=True, text=True, cwd=str(Path.cwd()),
+            [
+                sys.executable,
+                "-m",
+                "asago_scenario_generator.stpa.infra.calls_html",
+                str(calls_path),
+                str(output_path),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(Path.cwd()),
         )
         assert result.returncode == 0, f"CLI failed: {result.stderr}"
         assert output_path.exists()
@@ -186,15 +229,26 @@ class TestRenderCallsHtml:
     def test_summary_counts_success_failure_and_totals(self):
         """Summary arithmetic preserves counts and token/duration totals."""
         entries = [
-            {"success": True, "prompt_tokens": 2, "completion_tokens": 3,
-             "duration_ms": 5},
-            {"success": False, "prompt_tokens": 7, "completion_tokens": 11,
-             "duration_ms": 13},
+            {
+                "success": True,
+                "prompt_tokens": 2,
+                "completion_tokens": 3,
+                "duration_ms": 5,
+            },
+            {
+                "success": False,
+                "prompt_tokens": 7,
+                "completion_tokens": 11,
+                "duration_ms": 13,
+            },
         ]
         assert _compute_summary(entries) == {
             "total_calls": 2,
             "success_count": 1,
             "failure_count": 1,
+            "provider_response_count": 0,
+            "semantic_validation_count": 0,
+            "published_count": 0,
             "total_prompt_tokens": 9,
             "total_completion_tokens": 14,
             "total_duration_ms": 18,
@@ -206,10 +260,41 @@ class TestRenderCallsHtml:
             "total_calls": 1,
             "success_count": 1,
             "failure_count": 0,
+            "provider_response_count": 0,
+            "semantic_validation_count": 0,
+            "published_count": 0,
             "total_prompt_tokens": 0,
             "total_completion_tokens": 0,
             "total_duration_ms": 0,
         }
+
+    def test_lifecycle_status_distinguishes_received_rejected_and_published(self):
+        """The report does not call every returned provider response a success."""
+        entries = [
+            {
+                "success": False,
+                "provider_response_received": True,
+                "draft_parsed": False,
+                "semantic_validation_passed": False,
+                "published": False,
+                "terminal_error_codes": ["provider_contract_failure"],
+            },
+            {
+                "success": True,
+                "provider_response_received": True,
+                "draft_parsed": True,
+                "semantic_validation_passed": True,
+                "published": True,
+            },
+        ]
+
+        summary = _compute_summary(entries)
+        assert summary["provider_response_count"] == 2
+        assert summary["semantic_validation_count"] == 1
+        assert summary["published_count"] == 1
+        html = _build_detail_html(entries)
+        assert "RESPONSE REJECTED" in html
+        assert "PUBLISHED" in html
 
     def test_success_entry_uses_status_cell_and_default_values(self):
         """Successful rows render the status column as OK."""

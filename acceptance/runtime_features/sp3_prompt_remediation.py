@@ -52,12 +52,9 @@ _SURFACES = (
     "model output",
 )
 _LEAVES = (
-    "Inject instructions through prompt/context input [FB-*]",
-    "Poison retrieved content [FB-*]",
-    "Fabricate a tool result [FB-*]",
-    "Poison memory state [FB-*]",
-    "Tamper with an agent message [FB-*]",
-    "Manipulate model output [FB-*]",
+    "Process-model state is stale or inaccurate [PM-*]",
+    "Feedback is missing, late, stale, or inaccurate [FB-*]",
+    "Evidence-backed active change (only with exact capability/access evidence)",
 )
 _OLD_LEAVES = (
     "Delay/block feedback [FB-*]",
@@ -415,22 +412,22 @@ def _h_aat_available(world: World, text: str, examples: dict) -> tuple[bool, str
 
 
 def _h_aat_leaves(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Check all AI-surface leaves from the hard template."""
+    """Check all evidence-gated causal leaves from the hard template."""
     prompt = getattr(world, "sp3_prompt", "")
     for leaf in _table_values(world, "leaf", _LEAVES):
         if leaf not in prompt:
-            return False, f"Missing AI-surface leaf {leaf!r}"
+            return False, f"Missing evidence-gated causal leaf {leaf!r}"
     return True, ""
 
 
 def _h_aat_leaf(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Check one AI-surface leaf captured from the step wording."""
-    match = re.search(r"AI-surface leaf (.+)$", text)
+    """Check one evidence-gated causal leaf captured from the step wording."""
+    match = re.search(r"evidence-gated causal leaf (.+)$", text)
     if match is None:
-        return False, f"Could not identify AI-surface leaf in: {text}"
+        return False, f"Could not identify evidence-gated causal leaf in: {text}"
     leaf = match.group(1).strip()
     if leaf not in getattr(world, "sp3_prompt", ""):
-        return False, f"Missing AI-surface leaf {leaf!r}"
+        return False, f"Missing evidence-gated causal leaf {leaf!r}"
     return True, ""
 
 
@@ -802,12 +799,12 @@ def register(api: object) -> None:
         source_order=24018,
     )
     api.register_first(
-        "the hard template contains each AI-surface leaf:",
+        "the hard template contains each evidence-gated causal leaf:",
         _h_aat_leaves,
         source_order=24019,
     )
     api.register_first(
-        "the hard template contains AI-surface leaf .+$",
+        "the hard template contains evidence-gated causal leaf .+$",
         _h_aat_leaf,
         source_order=24019,
     )

@@ -227,7 +227,7 @@ accounting. The shared provider adapter is constructed lazily after planning
 and baseline preparation. An SP3 failure is recorded without discarding final
 ICA or accounting evidence.
 
-Provider prompts use closed, stage-specific views rather than serializing
+Provider prompts use closed, stage-specific views rendered by Jinja rather than serializing
 durable artifacts into prose. Opaque IDs are accompanied by the exact local
 meaning needed for the requested decision, while digests, paths, mapping
 records, scores, and unrelated global context stay outside the prompt. A pure
@@ -235,8 +235,23 @@ preflight audits the final rendered prompt and its exact reference universe,
 then checks it against the selected model profile's context window, reserved
 completion, and safety margin. Oversized routing batches split canonically;
 one oversized item becomes a typed local failure and is never silently
-truncated. `calls.jsonl` and the synthesis manifest retain the prompt audit and
-provider-reported usage.
+truncated. `calls.jsonl` and the synthesis manifest retain the prompt audit,
+provider-reported usage, and the hashes of every obligation-aware top-level
+template and included partial.
+
+Each structural route carries independent typed mechanism-plausibility and
+reviewed-risk-alignment decisions plus a plain mapping-strength label derived
+from the exact mapping path. The raw mapping path never enters the prompt. A
+plausible mechanism with `risk_alignment: mismatch` remains eligible for
+ordinary STPA analysis, but accounting records `risk_pattern_mismatch` and
+does not credit the obligation. Provider routes that would otherwise receive
+credit pass through a compact mechanism/path verifier that sees only the
+distinctive mechanism and exact selected structural descriptions. An adjacent
+control or incomplete mechanism path remains a usable STPA route but records
+`mechanism_path_unsubstantiated` and receives no obligation credit. ICA prose
+length and repetition are
+presentation diagnostics only: semantically valid findings remain available
+with `ica_prose_quality_warning`.
 
 Scenario generation receives one immutable `ScenarioGenerationContext` per
 ICA. It contains only the selected loss, hazard, governing constraint, unsafe
@@ -276,8 +291,16 @@ exact obligation/slot, ICA,
 `EXEC:*`, hazard, and constraint evidence but makes no Phase 2 correspondence
 or coverage claim. Scenario realization separately records whether that exact
 ICA/obligation concern survived into an admitted scenario. Reporting keeps
-structural findings separate from scenario realization and labels the run provisional. Existing `generate` and
-`stpa-run` do not import or require synthesis artifacts.
+structural findings separate from scenario realization and labels the run
+provisional. Accounting and realization expose one closed terminal stop reason
+per applicable obligation. The manifest/report replace the provisional
+`addressed` marker with the later realized, generation-failed, or not-requested
+outcome where scenario evidence exists, and show both the full applicable
+denominator and survivor denominators. Provider call evidence separately
+records response receipt, typed parsing, semantic validation, compilation,
+publication, and terminal error codes; compatibility `success` is not the sole
+stage-quality signal. Existing `generate` and `stpa-run` do not import or
+require synthesis artifacts.
 
 Correspondence is split into reviewable `correspondence-proposals-v1` and
 `correspondence-reconciliation-v1` artifacts. A proposal names exact obligation,

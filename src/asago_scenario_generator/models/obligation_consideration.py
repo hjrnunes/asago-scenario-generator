@@ -72,6 +72,16 @@ OBLIGATION_ACCOUNTING_SCHEMA_VERSION = "stpa-obligation-accounting-v1"
 ObligationRouteDisposition = Literal[
     "targeted", "proposed_not_applicable", "upstream_gap", "unresolved"
 ]
+MechanismAssessment = Literal[
+    "plausible_in_system", "absent_from_system", "insufficient_evidence"
+]
+RiskAlignment = Literal["supported", "mismatch", "insufficient_evidence"]
+MappingStrength = Literal[
+    "direct_curated_pair",
+    "exact_then_category_expansion",
+    "broad_category_expansion",
+    "related_category_expansion",
+]
 StructuralConceptKind = Literal[
     "loss",
     "hazard",
@@ -301,12 +311,25 @@ class NeutralObligationBrief(_ConsiderationModel):
             raise ValueError("neutral obligation brief digest mismatch")
 
 
+class ObligationSemanticAssessment(_ConsiderationModel):
+    """Two independent judgements about a risk/pattern pair."""
+
+    mechanism_assessment: MechanismAssessment
+    risk_alignment: RiskAlignment
+    mapping_strength: MappingStrength
+    mechanism_rationale: str = Field(min_length=1)
+    risk_alignment_rationale: str = Field(min_length=1)
+
+
 class ObligationRoute(_ConsiderationModel):
     """STPA's provisional structural placement for one obligation."""
 
     route_id: str | None = None
     obligation_id: ObligationId
     disposition: ObligationRouteDisposition
+    semantic_assessment: ObligationSemanticAssessment | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     slot_ids: tuple[str, ...] = ()
     controller_ids: tuple[str, ...] = ()
     control_action_ids: tuple[str, ...] = ()
@@ -354,7 +377,12 @@ class ObligationRoute(_ConsiderationModel):
         if len({item.gap_id for item in concepts}) != len(concepts):
             raise ValueError("missing structural concepts must be unique")
         object.__setattr__(self, "missing_concepts", concepts)
-        route_payload = self.model_dump(mode="json", exclude={"route_id"})
+        excluded = {"route_id"}
+        if self.semantic_assessment is None:
+            # Preserve the established route identity for compatibility
+            # adapters that use the pre-assessment contract.
+            excluded.add("semantic_assessment")
+        route_payload = self.model_dump(mode="json", exclude=excluded)
         expected = f"route:v1:{compute_framed_digest(OBLIGATION_ROUTE_ID_DOMAIN, route_payload)}"
         if self.route_id is not None and self.route_id != expected:
             raise ValueError("route_id does not match route content")
@@ -881,6 +909,8 @@ __all__ = [
     "IcaConsideration",
     "IcaConsiderationDisposition",
     "MissingStructuralConcept",
+    "MechanismAssessment",
+    "MappingStrength",
     "NeutralObligationBrief",
     "OBLIGATION_ACCOUNTING_ARTIFACT_ID",
     "OBLIGATION_ACCOUNTING_SCHEMA_VERSION",
@@ -892,6 +922,7 @@ __all__ = [
     "ObligationIcaConsideration",
     "ObligationRoute",
     "ObligationRouteDisposition",
+    "ObligationSemanticAssessment",
     "PHASE2_EVIDENCE_DIGEST_DOMAIN",
     "PHASE2_STRUCTURAL_EVIDENCE_DIGEST_DOMAIN",
     "Phase2Evidence",
@@ -900,6 +931,7 @@ __all__ = [
     "StructuralNonApplicabilityEvidence",
     "RevisionAddition",
     "RevisionDelta",
+    "RiskAlignment",
     "StructuralConceptKind",
     "StructuralRevisionDelta",
 ]

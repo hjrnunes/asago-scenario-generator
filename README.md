@@ -186,7 +186,7 @@ The report is explicitly provisional: Phase 2 verification and human review
 are not required for this run.
 
 At model boundaries, code retains control of structural identity. The ICA
-provider returns one deviation sentence and code applies the supplied slot's
+provider returns one short deviation clause and code applies the supplied slot's
 exact unsafe-control category. Scenario reasoning selects explained local
 causal handles; code maps those handles to valid process-model, feedback, or
 control-action sources. It also returns exactly one vulnerability for each
@@ -204,6 +204,26 @@ mechanism occurred. ICA and scenario text may use that mechanism only when the
 STPA structure or exact capability/access evidence independently supports it.
 Attack-tree templates use neutral stale, missing, late, or inaccurate-state
 causes so they do not seed poisoning or tool-fabrication claims.
+
+The obligation-aware routing, revision, and ICA prompt bodies are Jinja
+templates over closed prompt views. Their call evidence records hashes for the
+top-level templates and included partials. Routing answers two separate typed
+questions: whether the attack mechanism is plausible in the supplied system,
+and whether that mechanism actually realizes the reviewed risk. A plausible
+mechanism with a risk mismatch may still yield a useful ordinary STPA
+scenario, but it cannot mark that risk obligation as addressed. A separate
+compact verifier compares only the distinctive mechanism with the selected
+structural path. If it finds an adjacent control or insufficient evidence, the
+STPA route and scenario remain available while accounting records
+`mechanism_path_unsubstantiated` and withholds obligation credit.
+
+Long but semantically valid ICA clauses remain publishable and carry an
+`ica_prose_quality_warning`; style never becomes a reason to delete a valid
+scenario. Accounting and scenario realization record a closed stop reason for
+every applicable obligation. The synthesis manifest and report reconcile those
+reasons against the full applicable-obligation denominator, while
+`calls.jsonl` distinguishes a returned provider response from parsing,
+semantic validation, compilation, and publication.
 
 Publish a deterministic obligation ledger from a pinned snapshot without
 contacting an LLM endpoint:

@@ -62,19 +62,31 @@ def _read_calls(path: Path) -> list[dict[str, Any]]:
 def _compute_summary(entries: list[dict[str, Any]]) -> dict[str, Any]:
     """Compute summary statistics from a list of call entries."""
     total = len(entries)
-    success = sum(1 for e in entries if e.get("success", True))
+    success = _count_true(entries, "success", default=True)
     failure = total - success
-    prompt_tokens = sum(e.get("prompt_tokens", 0) for e in entries)
-    completion_tokens = sum(e.get("completion_tokens", 0) for e in entries)
-    total_duration = sum(e.get("duration_ms", 0) for e in entries)
     return {
         "total_calls": total,
         "success_count": success,
         "failure_count": failure,
-        "total_prompt_tokens": prompt_tokens,
-        "total_completion_tokens": completion_tokens,
-        "total_duration_ms": total_duration,
+        "provider_response_count": _count_true(entries, "provider_response_received"),
+        "semantic_validation_count": _count_true(entries, "semantic_validation_passed"),
+        "published_count": _count_true(entries, "published"),
+        "total_prompt_tokens": _sum_metric(entries, "prompt_tokens"),
+        "total_completion_tokens": _sum_metric(entries, "completion_tokens"),
+        "total_duration_ms": _sum_metric(entries, "duration_ms"),
     }
+
+
+def _count_true(
+    entries: list[dict[str, Any]], key: str, *, default: bool = False
+) -> int:
+    """Count entries whose named lifecycle flag is true."""
+    return sum(1 for entry in entries if entry.get(key, default) is True)
+
+
+def _sum_metric(entries: list[dict[str, Any]], key: str) -> int:
+    """Sum an integer call metric, treating omitted legacy values as zero."""
+    return sum(entry.get(key, 0) for entry in entries)
 
 
 def _html_escape(text: str) -> str:
@@ -93,6 +105,9 @@ def _build_summary_html(summary: dict[str, Any]) -> str:
         ("Total calls", summary["total_calls"]),
         ("Successful", summary["success_count"]),
         ("Failed", summary["failure_count"]),
+        ("Provider responses received", summary["provider_response_count"]),
+        ("Responses passing semantic validation", summary["semantic_validation_count"]),
+        ("Results published", summary["published_count"]),
         ("Total prompt tokens", summary["total_prompt_tokens"]),
         ("Total completion tokens", summary["total_completion_tokens"]),
         ("Total duration (ms)", summary["total_duration_ms"]),
@@ -117,10 +132,44 @@ _DETAIL_HEADERS = (
 
 def _build_status_cell(success: bool, entry: dict[str, Any]) -> str:
     """Build the HTML for the status column of a detail row."""
+    lifecycle = _lifecycle_status(entry)
+    if lifecycle is not None:
+        error_codes = ", ".join(entry.get("terminal_error_codes", ()))
+        error_detail = entry.get("error", "") or error_codes
+        detail = (
+            f'<br><span class="error-msg">{_html_escape(error_detail)}</span>'
+            if error_detail
+            else ""
+        )
+        return f"<td>{lifecycle}{detail}</td>"
     if success:
         return "<td>OK</td>"
     error = entry.get("error", "")
     return f'<td>FAILED<br><span class="error-msg">{_html_escape(error)}</span></td>'
+
+
+def _lifecycle_status(entry: dict[str, Any]) -> str | None:
+    """Return the most precise lifecycle label available for a call entry."""
+    lifecycle_fields = (
+        "provider_response_received",
+        "draft_parsed",
+        "semantic_validation_passed",
+        "compiled",
+        "published",
+    )
+    if not any(field in entry for field in lifecycle_fields):
+        return None
+    states = (
+        ("published", "PUBLISHED"),
+        ("compiled", "COMPILED — NOT PUBLISHED"),
+        ("semantic_validation_passed", "VALIDATED — NOT COMPILED"),
+        ("draft_parsed", "PARSED — SEMANTICALLY REJECTED"),
+        ("provider_response_received", "RESPONSE REJECTED"),
+    )
+    for field, label in states:
+        if entry.get(field) is True:
+            return label
+    return "PROVIDER CALL FAILED"
 
 
 def _build_entry_cells(entry: dict[str, Any]) -> list[str]:

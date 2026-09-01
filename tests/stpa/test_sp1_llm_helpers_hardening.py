@@ -453,6 +453,12 @@ class TestSafeCallKwargsAndFailureUsage:
         assert entry["prompt_tokens"] == 17
         assert entry["completion_tokens"] == 4
         assert entry["duration_ms"] == 230
+        assert entry["provider_response_received"] is True
+        assert entry["draft_parsed"] is False
+        assert entry["semantic_validation_passed"] is False
+        assert entry["compiled"] is False
+        assert entry["published"] is False
+        assert entry["terminal_error_codes"] == ["provider_contract_failure"]
 
     def test_unexpected_type_error_is_not_treated_as_compat(
         self, tmp_path: Path

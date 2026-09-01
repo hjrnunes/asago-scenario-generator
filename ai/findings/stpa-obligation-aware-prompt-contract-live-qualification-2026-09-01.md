@@ -55,6 +55,77 @@ budget. The remaining calls ran on OpenShift.
 
 ## Results
 
+### Semantic-quality implementation comparison
+
+The completed semantic-quality implementation was exercised in two fresh runs:
+
+- Klarna: `output/runs/20260901-synthesis-klarna-semantic-quality-v2`
+- NHS: `output/runs/20260901-synthesis-nhs-semantic-quality-v1`
+
+SP1 used `gemma4-openrouter`; the baseline STPA, obligation-aware routing, ICA,
+and scenario calls used `gemma4-oc`. An initial all-cluster Klarna attempt was
+stopped before obligation processing because the baseline Stage 2 response was
+truncated and then returned the wrong shape. This was a baseline provider
+failure, not a failure of the obligation prompts.
+
+| Terminal result | Klarna | NHS |
+|---|---:|---:|
+| Obligations retained | 92 | 152 |
+| Governance-only | 40 | 100 |
+| Scenario realized | 1 | 2 |
+| Risk/pattern mismatch | 45 | 38 |
+| No structural route | 3 | 10 |
+| Inapplicability evidence incomplete | 2 | 2 |
+| ICA consideration unresolved | 1 | 0 |
+| Applicable-obligation total reconciles | 52/52 | 52/52 |
+| Ordinary STPA scenarios published | 35 | 33 |
+
+This is the intended separation. All applicable obligations ran, but only
+exactly supported obligation/ICA pairs received obligation credit. The many
+ordinary STPA scenarios were not suppressed merely because a taxonomy pair was
+weak.
+
+The motivating NHS mass-action/data-acquisition pair now terminates as
+`risk_pattern_mismatch`: the route correctly says that legal restrictions on
+acquiring data are not realized by an automated mass-action mechanism. It does
+not receive obligation credit.
+
+Inspection also found one weaker NHS credit in which authentication rejection
+was treated as evidence for poisoned tool output. Stronger routing prose alone
+did not reliably correct Gemma: bounded replays replaced the same mechanism
+first with external-content ingress and then with generic user-input
+sanitization.
+
+The final implementation therefore uses a compact second decision. It removes
+capability flags, taxonomy mappings, and the proposed route rationale, then
+asks whether the exact selected structural descriptions govern the distinctive
+mechanism, an adjacent control, or neither. The integrated live result is:
+
+- artifacts: `output/runs/20260902-nhs-mechanism-verifier-integrated-v2`;
+- routing still selected `RESP-2:CA-2-1:NOT_PROVIDED`, preserving the ordinary
+  input-sanitization STPA finding;
+- the verifier classified that path as `adjacent_control` because input
+  sanitization does not govern poisoned source output being interpreted as an
+  operational goal;
+- the route's mechanism assessment became `insufficient_evidence`; and
+- accounting uses `mechanism_path_unsubstantiated`, so the route receives no
+  obligation credit while remaining eligible for ordinary scenario work.
+
+This bounded OpenShift run completes the post-guidance live sample. The whole
+NHS/Klarna pipelines do not need to be repeated for this correction.
+
+The final verifier input contained only the distinctive attack mechanism and
+the exact selected structural path. It contained no reviewed-risk prose,
+capability flags, taxonomy mapping strength, applicability facts, or proposed
+route rationale. This prevents contextual similarity from being reused as
+mechanism evidence in the second decision.
+
+Provider lifecycle evidence is now distinct: response receipt, typed parsing,
+semantic validation, compilation, and publication are recorded separately.
+The NHS obligation calls completed cleanly. Klarna retained local provider and
+contract failures while continuing valid sibling work, so its totals still
+reconcile rather than hiding failed calls.
+
 ### Current mechanism-boundary Klarna rerun
 
 The current live artifacts are under

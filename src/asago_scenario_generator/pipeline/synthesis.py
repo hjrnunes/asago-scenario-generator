@@ -1688,6 +1688,15 @@ def _build_manifest(
         "provider_evidence": _manifest_provider_evidence(provider_stages or {}, inputs),
         "prompt_call_evidence": _manifest_prompt_call_evidence(inputs.output_dir),
         "obligation_disposition_counts": counts,
+        "obligation_stop_reason_counts": _obligation_stop_reason_counts(
+            accounting, realization
+        ),
+        "obligation_resolution_funnel": _obligation_resolution_funnel(
+            plan=plan,
+            accounting=accounting,
+            realization=realization,
+            scenario_count=len(scenarios),
+        ),
         "scenario_counts": {
             "generated": len(scenarios),
             # Count only SP3-owned failures; revision/accounting diagnostics
@@ -3003,6 +3012,104 @@ def _count_accounting_rows(rows: list[dict[str, Any]]) -> dict[str, int]:
         result[value] += 1
     result["total"] = len(rows)
     return result
+
+
+def _obligation_stop_reason_counts(accounting: Any, realization: Any) -> dict[str, int]:
+    """Count exactly one terminal reason for each applicable accounting row."""
+    realization_reasons = _realization_reasons_by_obligation(realization)
+    reasons = (
+        _accounting_terminal_reason(row, realization_reasons)
+        for row in tuple(_first_attr(accounting, "rows") or ())
+    )
+    counts: dict[str, int] = {}
+    for reason in reasons:
+        if reason is not None:
+            counts[reason] = counts.get(reason, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _realization_reasons_by_obligation(realization: Any) -> dict[str, set[str]]:
+    """Index exact realization outcomes by obligation identity."""
+    realization_reasons: dict[str, set[str]] = {}
+    for record in tuple(_first_attr(realization, "records") or ()):
+        item = _realization_reason(record)
+        if item is not None:
+            obligation_id, reason = item
+            realization_reasons.setdefault(obligation_id, set()).add(reason)
+    return realization_reasons
+
+
+def _realization_reason(record: Any) -> tuple[str, str] | None:
+    """Return one complete obligation/reason pair or no index entry."""
+    obligation_id = str(_first_attr(record, "obligation_id") or "")
+    reason = _first_attr(record, "stop_reason")
+    if not obligation_id or reason is None:
+        return None
+    return obligation_id, str(reason)
+
+
+def _accounting_terminal_reason(
+    row: Any, realization_reasons: Mapping[str, set[str]]
+) -> str | None:
+    """Prefer later scenario evidence over the earlier addressed marker."""
+    obligation_id = str(_first_attr(row, "obligation_id") or "")
+    reasons = realization_reasons.get(obligation_id, set())
+    for reason in (
+        "scenario_realized",
+        "scenario_generation_failure",
+        "scenario_not_requested",
+    ):
+        if reason in reasons:
+            return reason
+    value = _first_attr(row, "stop_reason")
+    return str(value) if value is not None else None
+
+
+def _obligation_resolution_funnel(
+    *, plan: Any, accounting: Any, realization: Any, scenario_count: int
+) -> dict[str, Any]:
+    """Expose full and survivor denominators with exact reconciliation."""
+    rows = tuple(_first_attr(accounting, "rows") or ())
+    reasons = _obligation_stop_reason_counts(accounting, realization)
+    applicable = _count_rows_with_value(rows, "stop_reason")
+    realized_obligations = _realized_obligation_count(realization)
+    return {
+        "all_plan_rows": len(_plan_rows(plan)),
+        "governance_only": _count_rows_with_value(
+            rows, "disposition", "governance_only"
+        ),
+        "capability_excluded": _count_rows_with_value(
+            rows, "disposition", "capability_excluded"
+        ),
+        "applicable_and_considered": applicable,
+        "terminal_reasons": reasons,
+        "terminal_reason_total": sum(reasons.values()),
+        "reconciles": sum(reasons.values()) == applicable,
+        "realized_obligation_denominator": realized_obligations,
+        "admitted_scenario_denominator": scenario_count,
+    }
+
+
+def _count_rows_with_value(
+    rows: tuple[Any, ...], field: str, expected: str | None = None
+) -> int:
+    """Count present fields or fields equal to one exact value."""
+    values = (_first_attr(row, field) for row in rows)
+    if expected is None:
+        return sum(value is not None for value in values)
+    return sum(value == expected for value in values)
+
+
+def _realized_obligation_count(realization: Any) -> int:
+    """Count distinct obligations with at least one admitted scenario."""
+    records = tuple(_first_attr(realization, "records") or ())
+    return len(
+        {
+            str(_first_attr(record, "obligation_id"))
+            for record in records
+            if _first_attr(record, "stop_reason") == "scenario_realized"
+        }
+    )
 
 
 def _fallback_accounting_summary(

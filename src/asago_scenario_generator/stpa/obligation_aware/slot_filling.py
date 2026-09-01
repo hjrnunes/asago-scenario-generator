@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+import re
 from typing import Any, Literal
 
 from asago_scenario_generator.models.canonical import compute_framed_digest
@@ -541,7 +542,51 @@ def _compile_finding(
         loss_scenario=finding.loss_consequence.strip(),
         related_hazards=list(finding.related_hazard_ids),
         related_constraints=list(finding.related_constraint_ids),
+        quality_warnings=_deviation_quality_warnings(
+            finding.deviation.text, action_description
+        ),
     )
+
+
+def _deviation_quality_warnings(deviation: str, action_description: str) -> list[str]:
+    """Return non-blocking diagnostics for human-facing ICA prose."""
+    text = deviation.strip()
+    details = _deviation_style_codes(text, action_description)
+    return ["ica_prose_quality_warning", *details] if details else []
+
+
+def _deviation_style_codes(text: str, action_description: str) -> list[str]:
+    """Evaluate each independent presentation-only rule."""
+    checks = (
+        (len(text.split()) > 32, "ica_deviation_over_32_words"),
+        (len(text) > 220, "ica_deviation_over_220_characters"),
+        (_contains_example(text), "ica_deviation_contains_example"),
+        (
+            _shares_substantial_phrase(text, action_description),
+            "ica_deviation_repeats_action",
+        ),
+    )
+    return [code for matched, code in checks if matched]
+
+
+def _contains_example(text: str) -> bool:
+    """Recognize common example-introducing phrases."""
+    lowered = text.casefold()
+    return any(marker in lowered for marker in ("such as", "e.g.", "for example"))
+
+
+def _shares_substantial_phrase(left: str, right: str) -> bool:
+    """Detect repeated four-word phrases after conservative normalization."""
+
+    def phrases(value: str) -> set[tuple[str, ...]]:
+        words = tuple(
+            item
+            for item in re.sub(r"[^a-z0-9]+", " ", value.casefold()).split()
+            if item
+        )
+        return {words[index : index + 4] for index in range(max(0, len(words) - 3))}
+
+    return bool(phrases(left).intersection(phrases(right)))
 
 
 def _validate_finding_semantics(

@@ -29,7 +29,7 @@ import json
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 _call_log_lock = threading.Lock()
 
@@ -55,6 +55,13 @@ def make_call_log_entry(
     scenario_id: str | None = None,
     timestamp: str | None = None,
     response_content: str | None = None,
+    provider_response_received: bool | None = None,
+    draft_parsed: bool | None = None,
+    semantic_validation_passed: bool | None = None,
+    compiled: bool | None = None,
+    published: bool = False,
+    terminal_error_codes: tuple[str, ...] = (),
+    prompt_template_hashes: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Build a call-log entry dict following the STPA format (Section 6).
 
@@ -93,6 +100,21 @@ def make_call_log_entry(
         "duration_ms": duration_ms,
         "timestamp": _timestamp,
         "success": success,
+        "provider_response_received": (
+            success
+            if provider_response_received is None
+            else provider_response_received
+        ),
+        "draft_parsed": success if draft_parsed is None else draft_parsed,
+        "semantic_validation_passed": (
+            success
+            if semantic_validation_passed is None
+            else semantic_validation_passed
+        ),
+        "compiled": success if compiled is None else compiled,
+        "published": published,
+        "terminal_error_codes": list(terminal_error_codes),
+        "prompt_template_hashes": dict(sorted((prompt_template_hashes or {}).items())),
     }
     if response_content is not None:
         entry["response_content"] = response_content
@@ -117,3 +139,50 @@ def append_call_log(entries: list[dict], run_dir: Path) -> None:
         )
         with calls_path.open("a", encoding="utf-8") as fh:
             fh.write(payload)
+
+
+def mark_call_published(run_dir: Path, stage: str, step: str) -> None:
+    """Mark the latest matching validated call as compiled and published."""
+    calls_path = Path(run_dir) / "calls.jsonl"
+    with _call_log_lock:
+        entries = _load_call_entries(calls_path)
+        match = _latest_validated_call(entries, stage=stage, step=step)
+        match["compiled"] = True
+        match["published"] = True
+        _replace_call_entries(calls_path, entries)
+
+
+def _load_call_entries(calls_path: Path) -> list[dict[str, Any]]:
+    """Load an existing call log for a lifecycle transition."""
+    if not calls_path.exists():
+        raise ValueError("cannot publish lifecycle for a missing call log")
+    return [
+        json.loads(line)
+        for line in calls_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def _latest_validated_call(
+    entries: list[dict[str, Any]], *, stage: str, step: str
+) -> dict[str, Any]:
+    """Resolve the latest exact call and require semantic validation."""
+    matches = (
+        entry
+        for entry in reversed(entries)
+        if entry.get("stage") == stage and entry.get("step") == step
+    )
+    match = next(matches, None)
+    if match is None or not match.get("semantic_validation_passed", False):
+        raise ValueError("cannot publish a call without semantic validation")
+    return match
+
+
+def _replace_call_entries(calls_path: Path, entries: list[dict[str, Any]]) -> None:
+    """Atomically replace a call log after a lifecycle transition."""
+    temporary = calls_path.with_suffix(".jsonl.tmp")
+    temporary.write_text(
+        "".join(f"{json.dumps(entry, ensure_ascii=False)}\n" for entry in entries),
+        encoding="utf-8",
+    )
+    temporary.replace(calls_path)

@@ -1,0 +1,75 @@
+Fill every supplied STPA ICA slot for exactly this target. Analyze every
+slot, including slots with no routed obligation, exactly once. Return one structured slot
+draft per supplied slot. Use each slot_id as an opaque handle and copy it unchanged.
+
+{% include "_uca_method.j2" %}
+
+The ordinary STPA method requires a hazardous context, a loss consequence, exact hazard and
+governing-constraint references, and process-model or feedback references where relevant.
+For each finding return one non-empty `deviation` clause describing only the condition that
+makes the supplied control action unsafe for that slot's stated UCA type. The deterministic
+compiler owns the slot's exact UCA type and supplies the authoritative controller,
+control-action prose, and unsafe-action sentence frame; do not repeat or rewrite them.
+
+Keep the deviation to one condition, normally no more than 32 words or 220 characters. Do not
+put examples, alternatives, mitigations, hazards, losses, constraints, IDs, or taxonomy attack
+stories in it. A routed obligation is advisory: it may result in a finding,
+proposed_not_applicable with complete structural evidence, or unresolved. A route never
+forces an ICA finding and no consideration may claim taxonomy coverage.
+Do not put an unsupported attack story into the ICA itself.
+
+For N/A use `is_na=true`, a non-empty `na_rationale` citing a complete structural
+property, and no findings. For an unsafe-control result use `is_na=false`,
+`na_rationale=null`, and at least one structured item in `findings`. Do not return the
+legacy `responsibility`, `control_action`, `uca_type`, or `icas` fields. Do not return
+final ICA IDs, EXEC identities, or replacement controller/action text. Each finding
+must select exactly one supplied governing constraint that governs its selected hazard.
+
+For every item under `Required routed consideration pairs`, put exactly one result in
+the matching slot's `consideration_results` array:
+
+- Use `finding` only when one or more findings in that same slot directly express the
+  routed concern through the route's supplied hazard and governing constraint. Put the
+  matching zero-based positions from the slot's `findings` array in `finding_indexes`.
+- Use `proposed_not_applicable` only when that slot is N/A and its complete structural
+  property proves the routed mechanism cannot occur. Leave `finding_indexes` empty.
+- Use `unresolved` only when the supplied evidence is missing or contradictory. State
+  what evidence is missing or contradictory; do not use `unresolved` merely because a
+  route is advisory or does not force a finding. Leave `finding_indexes` empty.
+
+Do not attach an obligation to an unrelated finding merely because both appear in the
+same target. Copy each `obligation_handle` unchanged; route handles are input evidence
+and are resolved locally, so they are not output fields.
+
+An ICA finding is a system-specific scenario hypothesis about unsafe control behavior;
+it is not proof that the current control already recognizes or names the taxonomy attack
+technique. The routed taxonomy mechanism is not established evidence. The `deviation` and
+`hazardous_context` must describe the unsafe control or system condition in mechanism-neutral
+terms. Put the relationship between the obligation and the unsafe-control finding in the
+consideration `rationale`; keep unsupported attack stories out of the ICA itself.
+Bad: `when an adversary uses poisoned persistent memory`.
+Good: `the current authorization is not revalidated after stored context is restored`.
+
+Choose `finding` when the known concern is a concrete way the same supplied control action can
+be absent, incorrect, mistimed, or misapplied and can lead to the same hazard. Compare the
+concern and finding by subject, operation, affected object, and effect. Shared words such as
+`value`, `input`, `parameter`, or `threshold` are not mechanism evidence. A memory concern
+requires a supplied storage-and-reuse path; endpoint exfiltration requires a supplied
+outbound-call path. When the required operation or path is absent, choose `unresolved` and
+name it. Choose `unresolved` when the concern requires another control path, an unsupplied
+access path, or another missing system fact.
+a detector's score threshold is not tool-call parameter pollution.
+
+The structured slot-draft fields are `slot_id`, `is_na`, `na_rationale`, `findings`, and
+`consideration_results`; each finding contains the plain string `deviation`, `hazardous_context`,
+`loss_consequence`, `related_hazard_ids`, `related_constraint_ids`, `process_model_refs`,
+and `feedback_refs`. A finding consideration contains `obligation_handle`,
+`disposition`, `finding_indexes`, and `rationale`. Valid example:
+{"filled_slots":[{"slot_id":"<slot_id>","is_na":false,"na_rationale":null,
+"findings":[{"deviation":"authorization is not established before the request is accepted",
+"hazardous_context":"the supplied hazardous context","loss_consequence":"the supplied loss consequence occurs",
+"related_hazard_ids":["<hazard_id>"],"related_constraint_ids":["<constraint_id>"],
+"process_model_refs":[],"feedback_refs":[]}],"consideration_results":[{"obligation_handle":
+"<obligation_handle>","disposition":"finding","finding_indexes":[0],
+"rationale":"finding 0 directly expresses the routed concern"}]}]}.
+Return one JSON object matching the structured slot-draft schema.

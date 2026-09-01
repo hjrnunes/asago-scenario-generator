@@ -136,6 +136,20 @@ changing acceptance behavior, or running the quality sequence.
   establish the taxonomy attack mechanism. Keep ICA text and attack-tree
   templates mechanism-neutral unless exact structural or capability/access
   evidence independently supports the mechanism.
+  Maintain routing, bounded-revision, and ICA provider prose as strict Jinja
+  templates over closed prompt views, and hash included partials with the
+  top-level templates. Ask separately whether a taxonomy mechanism is
+  plausible in the supplied system and whether it realizes the reviewed risk.
+  A plausible mismatched mechanism may retain an ordinary STPA finding but
+  must record `risk_pattern_mismatch` and cannot address the obligation. Check
+  otherwise-creditable routes with a compact mechanism/path verifier that
+  receives no capability, mapping, or proposed-rationale context. An adjacent
+  control or unsubstantiated mechanism path keeps the ordinary STPA result but
+  records `mechanism_path_unsubstantiated` and cannot address the obligation. ICA
+  style warnings are non-blocking. Reconcile one closed terminal stop reason
+  per applicable obligation across accounting and scenario realization, and
+  distinguish provider response receipt from parsing, semantic validation,
+  compilation, and publication in call evidence.
 - Keep Phase 4 Task 1 at the typed, offline
   `resolve_hybrid_projection_units` boundary. Accept one closed
   `HybridProjectionInputs` graph assembled only through exact artifact

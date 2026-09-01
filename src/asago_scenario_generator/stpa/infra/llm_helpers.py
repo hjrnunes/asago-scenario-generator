@@ -7,7 +7,7 @@ that would otherwise be copy-pasted in every stage module.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -308,6 +308,7 @@ def log_llm_call(
     step: str,
     *,
     prompt_audit: PromptAudit | None = None,
+    prompt_template_hashes: Mapping[str, str] | None = None,
 ) -> None:
     """Append a call-log entry for a single LLM call.
 
@@ -331,6 +332,12 @@ def log_llm_call(
         duration_ms=result.duration_ms,
         success=_success,
         response_content=_response_content,
+        provider_response_received=True,
+        draft_parsed=True,
+        semantic_validation_passed=True,
+        compiled=False,
+        published=False,
+        prompt_template_hashes=prompt_template_hashes,
     )
     entry.update(_prompt_audit_fields(prompt_audit))
     append_call_log([entry], run_dir)
@@ -349,6 +356,12 @@ def log_llm_call_failure(
     completion_tokens: int = 0,
     duration_ms: int = 0,
     prompt_audit: PromptAudit | None = None,
+    provider_response_received: bool = False,
+    draft_parsed: bool = False,
+    semantic_validation_passed: bool = False,
+    compiled: bool = False,
+    terminal_error_codes: tuple[str, ...] = ("provider_call_failure",),
+    prompt_template_hashes: Mapping[str, str] | None = None,
 ) -> None:
     """Append a call-log entry for a failed LLM call.
 
@@ -376,6 +389,12 @@ def log_llm_call_failure(
         duration_ms=duration_ms,
         success=_success,
         error=error,
+        provider_response_received=provider_response_received,
+        draft_parsed=draft_parsed,
+        semantic_validation_passed=semantic_validation_passed,
+        compiled=compiled,
+        terminal_error_codes=terminal_error_codes,
+        prompt_template_hashes=prompt_template_hashes,
     )
     entry.update(_prompt_audit_fields(prompt_audit))
     append_call_log([entry], run_dir)
@@ -399,6 +418,7 @@ def safe_llm_call(
     validation_retries: int = 0,
     validation_retry_feedback: str | None = None,
     result_parser: Callable[[LLMResult], _T] | None = None,
+    prompt_template_hashes: Mapping[str, str] | None = None,
 ) -> tuple[_T | None, LLMResult | None, str | None]:
     """Wrap complete() + parse_llm_result() in a try/except.
 
@@ -456,6 +476,8 @@ def safe_llm_call(
         raw_result_validation_failed = False
         result_validation_failed = False
         result_parser_failed = False
+        draft_parsed = False
+        semantic_validation_passed = False
         try:
             prompt_audit = _preflight_configured_prompt(
                 llm_client,
@@ -494,6 +516,7 @@ def safe_llm_call(
                     allow_unvalidated,
                     result_parser=result_parser,
                 )
+                draft_parsed = True
             except Exception:
                 result_parser_failed = result_parser is not None
                 raise
@@ -503,6 +526,7 @@ def safe_llm_call(
                 except Exception:
                     result_validation_failed = True
                     raise
+            semantic_validation_passed = True
             log_llm_call(
                 result,
                 llm_client.model,
@@ -510,6 +534,7 @@ def safe_llm_call(
                 stage,
                 step,
                 prompt_audit=prompt_audit,
+                prompt_template_hashes=prompt_template_hashes,
             )
             return model, result, None
         except Exception as exc:
@@ -527,6 +552,12 @@ def safe_llm_call(
                 completion_tokens=_completion_tokens,
                 duration_ms=_duration_ms,
                 prompt_audit=prompt_audit,
+                provider_response_received=result is not None,
+                draft_parsed=draft_parsed,
+                semantic_validation_passed=semantic_validation_passed,
+                compiled=semantic_validation_passed,
+                terminal_error_codes=(_terminal_error_code(exc),),
+                prompt_template_hashes=prompt_template_hashes,
             )
             if isinstance(exc, json.JSONDecodeError) and json_retries_remaining:
                 json_retries_remaining -= 1
@@ -546,6 +577,17 @@ def safe_llm_call(
                 )
                 continue
             return None, result, error_msg
+
+
+def _terminal_error_code(error: BaseException) -> str:
+    """Map provider-stage failures to stable lifecycle diagnostics."""
+    if isinstance(error, PromptBudgetExceeded):
+        return "prompt_budget_exceeded"
+    if isinstance(error, (ValidationError, json.JSONDecodeError)):
+        return "provider_contract_failure"
+    if isinstance(error, PromptContractError):
+        return "provider_contract_failure"
+    return "provider_call_failure"
 
 
 def safe_llm_call_raw(

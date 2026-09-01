@@ -25,6 +25,7 @@ from asago_scenario_generator.models.obligation_consideration import (
     ConsiderationDiagnostic,
     IcaConsideration,
     MissingStructuralConcept,
+    MappingStrength,
     NeutralObligationBrief,
     ObligationIcaConsideration,
     ObligationRoute,
@@ -439,6 +440,13 @@ class ProviderSystemResource(_Model):
     relevance: str = Field(min_length=1)
 
 
+class ProviderMappingStrength(_Model):
+    """Plain-language provenance for how a risk/pattern pair was discovered."""
+
+    label: MappingStrength
+    meaning: str = Field(min_length=1)
+
+
 class ProviderObligationQuestion(_Model):
     """Compact provider-facing projection of a durable neutral brief."""
 
@@ -446,6 +454,7 @@ class ProviderObligationQuestion(_Model):
     known_concern: ProviderKnownConcern
     reviewed_risk: ProviderReviewedRisk
     applicability: ProviderApplicability
+    mapping_strength: ProviderMappingStrength
     known_system_resources: tuple[ProviderSystemResource, ...] = ()
     analyst_instruction: str = Field(min_length=1)
 
@@ -867,6 +876,7 @@ __all__ = [
     "ProviderFeedbackChannel",
     "ProviderHazard",
     "ProviderKnownConcern",
+    "ProviderMappingStrength",
     "ProviderObligationQuestion",
     "ProviderProcessModelPart",
     "ProviderResponsibility",

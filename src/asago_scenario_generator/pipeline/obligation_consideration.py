@@ -306,6 +306,7 @@ def _account_route_row(
     route: ObligationRoute,
     *,
     disposition: str,
+    stop_reason: str,
     evidence: tuple[str, ...],
     diagnostics: list[ConsiderationDiagnostic],
     **fields: Any,
@@ -314,6 +315,7 @@ def _account_route_row(
     return ObligationAccountingRow(
         obligation_id=row.obligation_id,
         disposition=disposition,
+        stop_reason=stop_reason,
         slot_ids=route.slot_ids,
         route_refs=(route.route_id,),
         evidence=evidence,
@@ -345,6 +347,7 @@ def _account_proposed_not_applicable(
             row,
             route,
             disposition="unresolved",
+            stop_reason="not_applicable_evidence_incomplete",
             evidence=evidence,
             diagnostics=diagnostics,
         )
@@ -352,6 +355,7 @@ def _account_proposed_not_applicable(
         row,
         route,
         disposition="proposed_not_applicable",
+        stop_reason="not_applicable_proven",
         evidence=evidence,
         diagnostics=diagnostics,
     )
@@ -376,6 +380,7 @@ def _account_unresolved_ica(
         row,
         route,
         disposition="unresolved",
+        stop_reason="ica_consideration_unresolved",
         evidence=evidence or ("route:targeted",),
         diagnostics=diagnostics,
     )
@@ -400,6 +405,7 @@ def _account_missing_ica(
         row,
         route,
         disposition="unresolved",
+        stop_reason="ica_consideration_unresolved",
         evidence=evidence or ("route:targeted",),
         diagnostics=diagnostics,
     )
@@ -417,6 +423,7 @@ def _account_findings(
         row,
         route,
         disposition="addressed",
+        stop_reason="addressed",
         evidence=evidence,
         diagnostics=diagnostics,
         ica_ids=tuple(ica_id for item in findings for ica_id in item.ica_ids),
@@ -434,6 +441,58 @@ def _account_findings(
     )
 
 
+def _semantic_credit_stop(
+    row: Any,
+    route: ObligationRoute,
+    evidence: tuple[str, ...],
+    diagnostics: list[ConsiderationDiagnostic],
+) -> ObligationAccountingRow | None:
+    """Withhold obligation credit while preserving the ordinary STPA route."""
+    assessment = route.semantic_assessment
+    stop = _semantic_stop_detail(route.disposition, assessment)
+    if stop is None:
+        return None
+    code, detail = stop
+    diagnostics.append(
+        ConsiderationDiagnostic(
+            code=code,
+            detail=detail,
+            obligation_ids=(row.obligation_id,),
+            refs=(route.route_id,),
+        )
+    )
+    return _account_route_row(
+        row,
+        route,
+        disposition="unresolved",
+        stop_reason=code,
+        evidence=evidence or (f"route:{code.replace('_', '-')}",),
+        diagnostics=diagnostics,
+    )
+
+
+def _semantic_stop_detail(disposition: str, assessment: Any) -> tuple[str, str] | None:
+    """Classify the two semantic reasons that withhold obligation credit."""
+    if assessment is None:
+        return None
+    if (
+        disposition == "targeted"
+        and assessment.mechanism_assessment != "plausible_in_system"
+    ):
+        return (
+            "mechanism_path_unsubstantiated",
+            "the ordinary STPA finding is retained, but the selected path does "
+            "not establish the taxonomy mechanism",
+        )
+    if assessment.risk_alignment == "mismatch":
+        return (
+            "risk_pattern_mismatch",
+            "the routed mechanism may support an ordinary STPA finding but does "
+            "not realize the reviewed risk",
+        )
+    return None
+
+
 def _account_applicable(
     row: Any,
     route: ObligationRoute,
@@ -442,11 +501,15 @@ def _account_applicable(
     """Derive one accounting row for an applicable obligation."""
     evidence = _account_evidence(route, pairs)
     diagnostics: list[ConsiderationDiagnostic] = [*route.diagnostics]
+    semantic_stop = _semantic_credit_stop(row, route, evidence, diagnostics)
+    if semantic_stop is not None:
+        return semantic_stop
     if route.disposition in {"upstream_gap", "unresolved"}:
         return _account_route_row(
             row,
             route,
             disposition=route.disposition,
+            stop_reason=_route_stop_reason(route),
             evidence=evidence,
             diagnostics=diagnostics,
         )
@@ -508,6 +571,7 @@ def _accounting_row_for(
         return ObligationAccountingRow(
             obligation_id=obligation.obligation_id,
             disposition="unresolved",
+            stop_reason="no_structural_route",
             evidence=("consideration:missing-final-route",),
             diagnostics=(
                 ConsiderationDiagnostic(
@@ -522,6 +586,16 @@ def _accounting_row_for(
         route,
         _pair_results_for(pairs, obligation.obligation_id),
     )
+
+
+def _route_stop_reason(route: ObligationRoute) -> str:
+    """Explain why a routed obligation stopped before ICA resolution."""
+    codes = {item.code for item in route.diagnostics}
+    if "prompt_budget_exceeded" in codes:
+        return "prompt_budget_exceeded"
+    if "routing_validation_failed" in codes:
+        return "provider_contract_failure"
+    return "no_structural_route"
 
 
 def _accounting_rows(

@@ -424,6 +424,9 @@ def _canonical_ica_enumeration_payload(ica_enumeration: Any) -> dict[str, Any]:
         icas = []
         for ica in slot["icas"]:
             ica = dict(ica)
+            # Human-facing style diagnostics are deliberately non-semantic.
+            # They must not repin Phase 2 authority or hybrid projections.
+            ica.pop("quality_warnings", None)
             ica["related_hazards"] = sorted(ica["related_hazards"])
             ica["related_constraints"] = sorted(ica["related_constraints"])
             icas.append(ica)

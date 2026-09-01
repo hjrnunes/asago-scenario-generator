@@ -3,17 +3,27 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import tempfile
 from typing import Any
 
 import yaml
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from runtime_bootstrap import PROJECT_ROOT
 from runtime_shared import World
 
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
-from asago_scenario_generator.models.obligation_consideration import ObligationRoute
+from asago_scenario_generator.models.hybrid_coverage import ArtifactPin
+from asago_scenario_generator.models.obligation_consideration import (
+    ObligationIcaConsideration,
+    ObligationRoute,
+    ObligationSemanticAssessment,
+)
+from asago_scenario_generator.pipeline.obligation_consideration import (
+    build_consideration_artifact,
+    build_obligation_accounting,
+)
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
     ControlStructure,
@@ -63,6 +73,8 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     generate_bdi_for_context,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.infra.llm import LLMResult
+from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
@@ -263,6 +275,270 @@ def _h_copy_only(world: World, text: str, examples: dict) -> tuple[bool, str]:
         else "missing copy-only guidance"
     )
     return actual == expected, f"expected {expected!r}, got {actual!r}"
+
+
+def _h_inspect_obligation_templates(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text, examples
+    from asago_scenario_generator.stpa.obligation_aware import prompts
+
+    template_dir = Path(prompts.__file__).with_name("prompt_templates")
+    loader = TemplateLoader(template_dir)
+    names = {
+        "structural_routing_system.j2",
+        "structural_routing_user.j2",
+        "structural_revision_system.j2",
+        "structural_revision_user.j2",
+        "synthesis_ica_system.j2",
+        "synthesis_ica_user.j2",
+    }
+    state = _state(world)
+    state["template_names"] = names
+    state["template_hashes"] = loader.hash_prompt_templates()
+    try:
+        loader.render_prompt("structural_routing_user.j2")
+    except Exception as exc:
+        state["strict_template_error"] = type(exc).__name__
+    return True, ""
+
+
+def _h_all_prompts_jinja(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del text, examples
+    state = _state(world)
+    missing = state["template_names"] - set(state["template_hashes"])
+    return not missing, f"missing Jinja prompt templates: {sorted(missing)}"
+
+
+def _h_strict_template(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del text
+    expected = examples.get("failure", "StrictUndefined")
+    actual = _state(world).get("strict_template_error", "no failure")
+    # Jinja names the concrete exception UndefinedError; the configured policy
+    # is StrictUndefined and the behavior is what acceptance verifies.
+    normalized = "StrictUndefined" if actual == "UndefinedError" else actual
+    return normalized == expected, f"expected {expected!r}, got {normalized!r}"
+
+
+def _h_inspect_routing_guidance(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text, examples
+    from asago_scenario_generator.stpa.obligation_aware import prompts
+
+    loader = TemplateLoader(Path(prompts.__file__).with_name("prompt_templates"))
+    _state(world)["routing_guidance"] = loader.render_prompt(
+        "structural_routing_system.j2",
+        obligation_count=1,
+        instructions="Return one decision.",
+    )
+    return True, ""
+
+
+def _h_distinguish_authentication(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text
+    mechanism = examples.get("mechanism", "poisoned tool output").strip()
+    guidance = _state(world)["routing_guidance"].lower()
+    expected = f"authentication rejection is not {mechanism}".lower()
+    return expected in guidance, f"routing guidance does not contain {expected!r}"
+
+
+def _h_no_adjacent_substitution(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text, examples
+    guidance = _state(world)["routing_guidance"]
+    required = (
+        "adjacent safeguard is not evidence",
+        "ingress resource proves only that content can arrive",
+        "neither establishes semantic separation",
+        "the disposition must be `unresolved`",
+    )
+    missing = [phrase for phrase in required if phrase not in guidance]
+    return not missing, f"routing guidance misses mechanism boundary: {missing}"
+
+
+def _h_risk_mismatch(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del text, examples
+    plan = make_plan()
+    brief = _brief()
+    route = ObligationRoute(
+        obligation_id=brief.obligation_id,
+        disposition="targeted",
+        semantic_assessment=ObligationSemanticAssessment(
+            mechanism_assessment="plausible_in_system",
+            risk_alignment="mismatch",
+            mapping_strength="broad_category_expansion",
+            mechanism_rationale="The batch mechanism exists in the supplied structure.",
+            risk_alignment_rationale=(
+                "Mass action does not realize restrictions on acquiring data."
+            ),
+        ),
+        slot_ids=("RESP-1:CA-1-1:NOT_PROVIDED",),
+        hazard_ids=("H-1",),
+        constraint_ids=("SC-1",),
+        evidence=("acceptance:batch-path",),
+    )
+    _record_semantic_accounting(world, plan, brief, route)
+    return True, ""
+
+
+def _record_semantic_accounting(
+    world: World, plan: Any, brief: Any, route: ObligationRoute
+) -> None:
+    """Retain one ordinary finding and its non-credit accounting outcome."""
+    pair = ObligationIcaConsideration(
+        route_id=route.route_id,
+        obligation_id=brief.obligation_id,
+        slot_id=route.slot_ids[0],
+        disposition="finding",
+        ica_ids=(f"{route.slot_ids[0]}:1",),
+        exec_candidate_ids=("EXEC:RESP-1:CA-1-1:NOT_PROVIDED",),
+        hazard_ids=("H-1",),
+        constraint_ids=("SC-1",),
+        evidence=("acceptance:ordinary-stpa-finding",),
+    )
+    consideration = build_consideration_artifact(
+        plan=plan,
+        briefs=(brief,),
+        initial_routes=(route,),
+        final_routes=(route,),
+    )
+    accounting = build_obligation_accounting(
+        plan=plan,
+        consideration=consideration,
+        ica_considerations=(pair,),
+        source_pins=tuple(
+            ArtifactPin(
+                artifact_id=artifact_id,
+                schema_version=schema_version,
+                semantic_digest=digest,
+            )
+            for artifact_id, schema_version, digest in (
+                (
+                    "taxonomy-obligation-plan",
+                    "taxonomy-obligation-plan-v1",
+                    plan.semantic_digest,
+                ),
+                ("stpa-loss-analysis", "stpa-loss-analysis-v1", "2" * 64),
+                ("stpa-control-structure", "stpa-control-structure-v1", "3" * 64),
+                ("ica-enumeration", "ica-enumeration-v1", "4" * 64),
+            )
+        ),
+    )
+    state = _state(world)
+    state["semantic_pair"] = pair
+    state["semantic_accounting"] = accounting
+
+
+def _h_adjacent_path(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del text, examples
+    plan = make_plan()
+    brief = _brief()
+    route = ObligationRoute(
+        obligation_id=brief.obligation_id,
+        disposition="targeted",
+        semantic_assessment=ObligationSemanticAssessment(
+            mechanism_assessment="insufficient_evidence",
+            risk_alignment="supported",
+            mapping_strength="direct_curated_pair",
+            mechanism_rationale=(
+                "The selected input control does not establish poisoned output "
+                "being interpreted as a goal."
+            ),
+            risk_alignment_rationale=(
+                "The distinctive mechanism would conceptually realize the risk."
+            ),
+        ),
+        slot_ids=("RESP-1:CA-1-1:NOT_PROVIDED",),
+        hazard_ids=("H-1",),
+        constraint_ids=("SC-1",),
+        evidence=("acceptance:adjacent-control",),
+    )
+    _record_semantic_accounting(world, plan, brief, route)
+    return True, ""
+
+
+def _h_ordinary_finding_retained(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text, examples
+    pair = _state(world)["semantic_pair"]
+    return pair.disposition == "finding" and bool(pair.ica_ids), "finding was removed"
+
+
+def _h_stop_reason(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del text
+    expected = examples.get("stop_reason", "risk_pattern_mismatch")
+    actual = _state(world)["semantic_accounting"].rows[0].stop_reason
+    return actual == expected, f"expected {expected!r}, got {actual!r}"
+
+
+def _h_addressed_count(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del text
+    expected = int(examples.get("addressed", "0"))
+    actual = _state(world)["semantic_accounting"].summary.addressed
+    return actual == expected, f"expected {expected}, got {actual}"
+
+
+def _h_provider_parse_failure(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text, examples
+
+    class Expected(BaseModel):
+        required: str
+
+    class Provider:
+        model = "acceptance-provider"
+
+        def complete(self, **kwargs):
+            return LLMResult(
+                content={"wrong": "shape"},
+                prompt_tokens=1,
+                completion_tokens=1,
+                duration_ms=1,
+                system_prompt=kwargs["system_prompt"],
+                user_prompt=kwargs["user_prompt"],
+            )
+
+    run_dir = Path(tempfile.mkdtemp(prefix="call-lifecycle-acceptance-"))
+    safe_llm_call(
+        llm_client=Provider(),
+        system_prompt="Return JSON.",
+        user_prompt="Return the required field.",
+        response_format=Expected,
+        run_dir=run_dir,
+        stage="acceptance",
+        step="typed-parse",
+    )
+    _state(world)["lifecycle"] = json.loads(
+        (run_dir / "calls.jsonl").read_text(encoding="utf-8").splitlines()[0]
+    )
+    return True, ""
+
+
+def _h_lifecycle_bool(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del examples
+    field = (
+        "provider_response_received"
+        if "response received" in text
+        else "semantic_validation_passed"
+    )
+    expected = "true" in text
+    actual = _state(world)["lifecycle"][field]
+    return actual is expected, f"expected {field}={expected}, got {actual}"
+
+
+def _h_terminal_provider_error(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text
+    expected = examples.get("error_code", "provider_contract_failure")
+    actual = _state(world)["lifecycle"]["terminal_error_codes"]
+    return actual == [expected], f"expected {[expected]!r}, got {actual!r}"
 
 
 def _h_split_batch(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -1134,6 +1410,49 @@ def register(api: Any) -> None:
         _h_described,
     )
     api.register(r'the obligation handle instruction is ".*"', _h_copy_only)
+    api.register(
+        r"the obligation-aware prompt templates are inspected",
+        _h_inspect_obligation_templates,
+    )
+    api.register(
+        r"all obligation prompt pairs render through Jinja", _h_all_prompts_jinja
+    )
+    api.register(
+        r'missing template input fails before provider dispatch with ".*"',
+        _h_strict_template,
+    )
+    api.register(
+        r"the structural routing guidance is inspected",
+        _h_inspect_routing_guidance,
+    )
+    api.register(
+        r'the prompt distinguishes authentication failure from ".*"',
+        _h_distinguish_authentication,
+    )
+    api.register(
+        r"a nearby safeguard cannot substitute for mechanism evidence",
+        _h_no_adjacent_substitution,
+    )
+    api.register(
+        r"a selected STPA path is classified as an adjacent control",
+        _h_adjacent_path,
+    )
+    api.register(
+        r"a plausible taxonomy mechanism is assessed as mismatching its reviewed risk",
+        _h_risk_mismatch,
+    )
+    api.register(
+        r"the ordinary STPA finding remains available", _h_ordinary_finding_retained
+    )
+    api.register(r'the obligation stop reason is ".*"', _h_stop_reason)
+    api.register(r"the obligation addressed count is .*", _h_addressed_count)
+    api.register(
+        r"a provider returns a response that fails typed parsing",
+        _h_provider_parse_failure,
+    )
+    api.register(r"provider response received is (?:true|false)", _h_lifecycle_bool)
+    api.register(r"semantic validation passed is (?:true|false)", _h_lifecycle_bool)
+    api.register(r'the terminal provider error is ".*"', _h_terminal_provider_error)
     api.register(
         r"a canonical routing batch exceeds the configured prompt budget",
         _h_split_batch,

@@ -1,0 +1,73 @@
+You are performing structural STPA analysis for taxonomy concerns.
+Treat each concern as a hypothesis, not a mandatory mechanism, ordered attack sequence,
+coverage claim, or execution instruction. Return exactly one route in the JSON `routes`
+array for each supplied obligation ({{ obligation_count }} total):
+targeted, proposed_not_applicable, upstream_gap, or unresolved.
+
+{{ instructions }}
+
+The obligation_handle is opaque: copy unchanged. Every selectable ID in the index is
+paired with a description. Each namespace field must use only its matching supplied IDs.
+A targeted route requires an owner responsibility (or coordination path), its owned action,
+the action's controlled process (or shared coordination process), matching slots, selected
+hazards, and constraints that explicitly govern those hazards. Each selected hazard must
+retain a related loss. `targeted` does not mean that an identifier merely matched; explain
+the system-specific relationship. You may reject the taxonomy hypothesis.
+
+For each obligation, make two independent decisions before choosing its structural route:
+
+1. `mechanism_assessment`: whether the known attack mechanism is
+   `plausible_in_system`, `absent_from_system`, or has `insufficient_evidence` in the
+   supplied structure.
+2. `risk_alignment`: whether that mechanism would realize the reviewed risk's subject,
+   operation, affected object, and consequence: `supported`, `mismatch`, or
+   `insufficient_evidence`.
+
+Supply a short rationale for each decision and copy the supplied `mapping_strength` label.
+Category expansion discovers possibilities; it is not proof of alignment or mismatch.
+Shared words such as input, tool, parameter, value, or threshold are not alignment evidence.
+A generic enabling capability, integration resource, or adjacent safeguard is not evidence
+that the distinctive attack mechanism exists on the selected structural path. A capability
+flag or ingress resource proves only that content can arrive; it never proves what the system
+does with that content. The selected path must govern, permit, or prevent the mechanism
+itself—not merely a nearby concern with a similar consequence.
+For example, unauthenticated access or authentication rejection is not poisoned tool output
+or goal redirection. Authentication establishes who supplied data and schema validation
+establishes its shape; neither establishes semantic separation between data and instructions.
+External content ingestion alone is also not poisoned output. Before selecting `targeted`
+for goal redirection, identify an exact supplied process-model, feedback, or control-action
+description that governs untrusted output being interpreted as an instruction or goal. If no
+such description exists, the disposition must be `unresolved`, even when the mechanism seems
+generally plausible and the reviewed risk is conceptually aligned. Use
+`insufficient_evidence` for the missing mechanism path. Similar wording, hazards,
+consequences, capability flags, or integration IDs cannot substitute for that path.
+A plausible mechanism with a mismatched risk may still be targeted for ordinary STPA analysis,
+but it must retain `risk_alignment=mismatch` so it cannot credit the obligation.
+
+Hazard/constraint pairing is closed over the ID-only ledger in the user prompt. Use only
+the listed `constraint_id -> hazard_id` pairs. Never infer a pair from a description,
+including a duplicated or parenthetical hazard ID; the typed relationship controls.
+
+For a responsibility slot, use the slot's exact RESP owner in `controller_ids` and
+`responsibility_ids`, its exact CA in `control_action_ids`, and that action's exact CP in
+`controlled_process_ids`. For a coordination slot such as
+`CL-1:CM-1:NOT_PROVIDED`, resolve the exact CL record: use its source responsibility as
+the `controller_ids` value, include both its source and target responsibilities in
+`responsibility_ids`, use the exact CM in `control_action_ids`, the exact CL in
+`coordination_link_ids`, and the link's shared PM in `process_model_part_ids`. Never put
+a CL in `responsibility_ids` or replace a CM with a source responsibility's CA.
+
+The route object uses these exact fields: `obligation_id`, `disposition`,
+`semantic_assessment`, `slot_ids`,
+`controller_ids`, `responsibility_ids`, `control_action_ids`, `controlled_process_ids`,
+`coordination_link_ids`, `hazard_ids`, `constraint_ids`, `missing_concepts`, `rationale`,
+and non-empty `evidence`. Valid example:
+{"routes":[{"obligation_id":"<obligation_handle>","disposition":"unresolved",
+"semantic_assessment":{"mechanism_assessment":"insufficient_evidence",
+"risk_alignment":"insufficient_evidence","mapping_strength":"direct_curated_pair",
+"mechanism_rationale":"the required system path is not supplied",
+"risk_alignment_rationale":"the mechanism-to-risk relationship is not established"},
+"evidence":["evidence is insufficient"]}]}.
+
+Do not return route_id or gap_id. The local adapter derives durable route and gap IDs.
+Slot IDs use the exact forms `RESP-*:CA-*:UCA_TYPE` or `CL-*:CM-*:UCA_TYPE`.

@@ -5,6 +5,9 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from asago_scenario_generator.models.canonical import compute_framed_digest
+from asago_scenario_generator.models.correspondence import (
+    compute_ica_enumeration_digest,
+)
 from asago_scenario_generator.models.hybrid_coverage import ArtifactPin
 from asago_scenario_generator.models.obligation_accounting import (
     ObligationAccounting,
@@ -24,7 +27,6 @@ from asago_scenario_generator.stpa.models.ica_enumeration import (
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 
 
-_ICA_ENUMERATION_DIGEST_DOMAIN = "asago-scenario-generator:ica-enumeration:v1"
 _SCENARIO_COLLECTION_DIGEST_DOMAIN = (
     "asago-scenario-generator:stpa-scenario-collection:v1"
 )
@@ -202,6 +204,7 @@ def _realization_record(
             slot_id=pair.slot_id,
             ica_id=ica_id,
             status="not_requested",
+            stop_reason="scenario_not_requested",
             evidence=("scenario-production:not-requested",),
         )
     matches = tuple(
@@ -217,6 +220,7 @@ def _realization_record(
             slot_id=pair.slot_id,
             ica_id=ica_id,
             status="unresolved",
+            stop_reason="scenario_generation_failure",
             evidence=("scenario-production:no-exact-contextual-realization",),
         )
     return ScenarioRealizationRecord(
@@ -226,6 +230,7 @@ def _realization_record(
         slot_id=pair.slot_id,
         ica_id=ica_id,
         status="realized",
+        stop_reason="scenario_realized",
         scenario_ids=tuple(item.scenario_id for item in matches),
         context_digests=tuple(item.scenario_context.context_digest for item in matches),
         evidence=tuple(
@@ -265,10 +270,7 @@ def _source_pins(
         ArtifactPin(
             artifact_id="ica-enumeration",
             schema_version="ica-enumeration-v1",
-            semantic_digest=compute_framed_digest(
-                _ICA_ENUMERATION_DIGEST_DOMAIN,
-                enumeration.model_dump(mode="json"),
-            ),
+            semantic_digest=compute_ica_enumeration_digest(enumeration),
         ),
         ArtifactPin(
             artifact_id="stpa-scenario-collection",

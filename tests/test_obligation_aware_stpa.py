@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import pytest
 
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
@@ -9,6 +10,7 @@ from asago_scenario_generator.models.hybrid_coverage import ArtifactPin
 from asago_scenario_generator.models.obligation_consideration import (
     MissingStructuralConcept,
     ObligationIcaConsideration,
+    ObligationSemanticAssessment,
 )
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
@@ -323,6 +325,13 @@ def test_applied_revision_rechecks_every_brief_once_and_preserves_baseline() -> 
                         ObligationRoute(
                             obligation_id=brief.obligation_id,
                             disposition="targeted",
+                            semantic_assessment=ObligationSemanticAssessment(
+                                mechanism_assessment="plausible_in_system",
+                                risk_alignment="supported",
+                                mapping_strength="direct_curated_pair",
+                                mechanism_rationale="The supplied control path permits it.",
+                                risk_alignment_rationale="The mechanism realizes the reviewed risk.",
+                            ),
                             slot_ids=("RESP-1:CA-1-1:NOT_PROVIDED",),
                             hazard_ids=("H-1",),
                             constraint_ids=("SC-1",),
@@ -698,17 +707,34 @@ def test_provider_routing_retry_has_one_owner(tmp_path) -> None:
                 # This is schema-valid provider output but fails the router's
                 # exact one-route-per-obligation validation.
                 content = {"routes": []}
-            else:
+            elif self.calls == 2:
                 content = {
                     "routes": [
                         ObligationRoute(
                             obligation_id=brief.obligation_id,
                             disposition="targeted",
+                            semantic_assessment=ObligationSemanticAssessment(
+                                mechanism_assessment="plausible_in_system",
+                                risk_alignment="supported",
+                                mapping_strength="direct_curated_pair",
+                                mechanism_rationale="The supplied control path permits it.",
+                                risk_alignment_rationale="The mechanism realizes the reviewed risk.",
+                            ),
                             slot_ids=("RESP-1:CA-1-1:NOT_PROVIDED",),
                             hazard_ids=("H-1",),
                             constraint_ids=("SC-1",),
                             evidence=("provider-route",),
                         ).model_dump(mode="json", exclude={"route_id"})
+                    ]
+                }
+            else:
+                content = {
+                    "verdicts": [
+                        {
+                            "obligation_id": brief.obligation_id,
+                            "relationship": "mechanism_specific",
+                            "rationale": "The selected path governs the mechanism.",
+                        }
                     ]
                 }
             return LLMResult(
@@ -735,21 +761,29 @@ def test_provider_routing_retry_has_one_owner(tmp_path) -> None:
         controls=_controls(),
     )
 
-    assert client.calls == 2
+    assert client.calls == 3
     assert len(result.call_evidence) == 1
     assert result.call_evidence[0].attempt_count == 2
     assert "Validation correction" in prompts[1]
-    assert compatibility_modes == [False, False]
-    assert completion_caps == [8192, 8192]
+    assert compatibility_modes == [False, False, False]
+    assert completion_caps == [8192, 8192, 1024]
     schema = response_formats[0].model_json_schema()
     assert "routes" in schema["required"]
     assert schema["properties"]["routes"]["minItems"] == 1
     assert schema["properties"]["routes"]["maxItems"] == 1
     route_schema = schema["$defs"]["_RoutingProviderRoute"]
     assert "route_id" not in route_schema["properties"]
+    assert "semantic_assessment" in route_schema["required"]
     gap_schema = schema["$defs"]["_RoutingProviderMissingConcept"]
     assert "gap_id" not in gap_schema["properties"]
     assert result.routes[0].route_id.startswith("route:v1:")
+    calls = [
+        json.loads(line)
+        for line in (tmp_path / "calls.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert "_uca_method.j2" in calls[-1]["prompt_template_hashes"]
+    assert calls[-1]["compiled"] is True
+    assert calls[-1]["published"] is True
 
 
 def test_routing_retry_includes_exact_local_validation_error() -> None:
@@ -1209,6 +1243,93 @@ def test_provider_arbitrary_ica_id_survives_fill_and_accounting(tmp_path) -> Non
     )
     assert accounting.summary.addressed == 1
     assert accounting.rows[0].ica_ids == (canonical_ica_id,)
+
+    mismatched_route = route.model_copy(
+        update={
+            "route_id": None,
+            "semantic_assessment": ObligationSemanticAssessment(
+                mechanism_assessment="plausible_in_system",
+                risk_alignment="mismatch",
+                mapping_strength="broad_category_expansion",
+                mechanism_rationale="The batch-control mechanism exists.",
+                risk_alignment_rationale=(
+                    "Mass action does not realize restrictions on acquiring data."
+                ),
+            ),
+        }
+    )
+    mismatched_route = ObligationRoute.model_validate(
+        mismatched_route.model_dump(mode="python", exclude={"route_id"})
+    )
+    mismatched_pair = ObligationIcaConsideration.model_validate(
+        {
+            **filled.considerations[0].model_dump(mode="python"),
+            "pair_id": None,
+            "route_id": mismatched_route.route_id,
+        }
+    )
+    mismatched_consideration = build_consideration_artifact(
+        plan=plan,
+        briefs=briefs,
+        initial_routes=(mismatched_route,),
+        final_routes=(mismatched_route,),
+    )
+    mismatch_accounting = build_obligation_accounting(
+        plan=plan,
+        consideration=mismatched_consideration,
+        ica_considerations=(mismatched_pair,),
+        source_pins=accounting.source_pins,
+    )
+    assert filled_target.icas  # the ordinary STPA finding is retained
+    assert mismatch_accounting.summary.addressed == 0
+    assert mismatch_accounting.summary.unresolved == 1
+    assert mismatch_accounting.rows[0].ica_ids == ()
+    assert mismatch_accounting.rows[0].diagnostics[0].code == "risk_pattern_mismatch"
+
+    unsubstantiated_route = route.model_copy(
+        update={
+            "route_id": None,
+            "semantic_assessment": ObligationSemanticAssessment(
+                mechanism_assessment="insufficient_evidence",
+                risk_alignment="supported",
+                mapping_strength="direct_curated_pair",
+                mechanism_rationale=(
+                    "The selected path governs an adjacent control, not the mechanism."
+                ),
+                risk_alignment_rationale=(
+                    "The mechanism would conceptually realize the reviewed risk."
+                ),
+            ),
+        }
+    )
+    unsubstantiated_route = ObligationRoute.model_validate(
+        unsubstantiated_route.model_dump(mode="python", exclude={"route_id"})
+    )
+    unsubstantiated_pair = ObligationIcaConsideration.model_validate(
+        {
+            **filled.considerations[0].model_dump(mode="python"),
+            "pair_id": None,
+            "route_id": unsubstantiated_route.route_id,
+        }
+    )
+    unsubstantiated_consideration = build_consideration_artifact(
+        plan=plan,
+        briefs=briefs,
+        initial_routes=(unsubstantiated_route,),
+        final_routes=(unsubstantiated_route,),
+    )
+    unsubstantiated_accounting = build_obligation_accounting(
+        plan=plan,
+        consideration=unsubstantiated_consideration,
+        ica_considerations=(unsubstantiated_pair,),
+        source_pins=accounting.source_pins,
+    )
+    assert unsubstantiated_accounting.summary.addressed == 0
+    assert unsubstantiated_accounting.summary.unresolved == 1
+    assert unsubstantiated_accounting.rows[0].stop_reason == (
+        "mechanism_path_unsubstantiated"
+    )
+    assert unsubstantiated_accounting.rows[0].ica_ids == ()
 
 
 def test_provider_slot_payload_schema_matches_request_cardinality(tmp_path) -> None:

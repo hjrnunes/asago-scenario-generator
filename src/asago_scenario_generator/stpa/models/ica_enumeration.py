@@ -43,6 +43,13 @@ class ICA(BaseModel):
         default_factory=list,
         description="Constraint ID or RC ID references.",
     )
+    quality_warnings: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Non-blocking human-facing prose diagnostics. These warnings do not "
+            "change the ICA's structural validity."
+        ),
+    )
 
 
 def ica_id_for(slot_id: str, index: int) -> str:

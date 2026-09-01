@@ -29,6 +29,54 @@ Feature: Meaning survives obligation-aware STPA model calls
       | handle_instruction           |
       | copy unchanged opaque handle |
 
+  Scenario Outline: Obligation prompts are maintained as strict Jinja templates
+    When the obligation-aware prompt templates are inspected
+    Then all obligation prompt pairs render through Jinja
+    And missing template input fails before provider dispatch with "<failure>"
+
+    Examples:
+      | failure          |
+      | StrictUndefined  |
+
+  Scenario Outline: Risk alignment is separate from mechanism plausibility
+    When a plausible taxonomy mechanism is assessed as mismatching its reviewed risk
+    Then the ordinary STPA finding remains available
+    And the obligation stop reason is "<stop_reason>"
+    And the obligation addressed count is <addressed>
+
+    Examples:
+      | stop_reason          | addressed |
+      | risk_pattern_mismatch | 0         |
+
+  Scenario Outline: An adjacent safeguard cannot prove the attack mechanism
+    When the structural routing guidance is inspected
+    Then the prompt distinguishes authentication failure from "<mechanism>"
+    And a nearby safeguard cannot substitute for mechanism evidence
+
+    Examples:
+      | mechanism           |
+      | poisoned tool output |
+
+  Scenario Outline: Focused mechanism verification preserves ordinary STPA findings
+    When a selected STPA path is classified as an adjacent control
+    Then the ordinary STPA finding remains available
+    And the obligation stop reason is "<stop_reason>"
+    And the obligation addressed count is <addressed>
+
+    Examples:
+      | stop_reason                    | addressed |
+      | mechanism_path_unsubstantiated | 0         |
+
+  Scenario Outline: Provider transport success is not stage success
+    When a provider returns a response that fails typed parsing
+    Then provider response received is true
+    And semantic validation passed is false
+    And the terminal provider error is "<error_code>"
+
+    Examples:
+      | error_code                |
+      | provider_contract_failure |
+
   Scenario Outline: Oversized routing batches are split before dispatch
     When a canonical routing batch exceeds the configured prompt budget
     Then the routing batch ordering is "<ordering>"

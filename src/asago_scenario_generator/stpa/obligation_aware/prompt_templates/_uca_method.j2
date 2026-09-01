@@ -1,0 +1,11 @@
+Four ICA (unsafe control action) types:
+
+- NOT_PROVIDED: the required control action is absent when it is needed.
+- INCORRECT: the action is provided, but its value, content, destination, or effect is unsafe.
+- WRONG_TIMING: the action is provided too early, too late, or in an unsafe order.
+- WRONG_DURATION: a continuous action stops too soon, continues too long, or is applied for an unsafe duration.
+
+Timing and duration are distinct. A one-shot action cannot receive a
+WRONG_DURATION finding without explicit continuing behavior. An ICA describes
+unsafe controller behavior; a safeguard, recommendation, policy, or
+requirement such as "implement MFA" or "add rate limiting" is not an ICA.

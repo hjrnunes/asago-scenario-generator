@@ -47,6 +47,7 @@ def render_synthesis_report(
         _row("Revision", revision or "not_required"),
     ]
     accounting_table = [_row(key, value) for key, value in sorted(summary.items())]
+    stop_reason_counts = _stop_reason_counts(accounting_rows, realization_records)
     body = "\n".join(
         [
             "<h1>Obligation-aware synthesis</h1>",
@@ -60,8 +61,13 @@ def render_synthesis_report(
             "<table><thead><tr><th>Disposition</th><th>Count</th></tr></thead><tbody>",
             *accounting_table,
             "</tbody></table>",
+            "<h2>Where analysis stopped</h2>",
+            "<p>Each applicable obligation has a plain terminal explanation. Scenario outcomes replace the earlier addressed marker when scenario production was requested.</p>",
+            "<table><thead><tr><th>Stop reason</th><th>Count</th></tr></thead><tbody>",
+            *(_row(key, value) for key, value in sorted(stop_reason_counts.items())),
+            "</tbody></table>",
             "<h2>Obligations</h2>",
-            "<table><thead><tr><th>Obligation</th><th>Outcome</th><th>Route / gaps</th><th>STPA findings</th></tr></thead><tbody>",
+            "<table><thead><tr><th>Obligation</th><th>Outcome</th><th>Stop reason</th><th>Route / gaps</th><th>STPA findings</th></tr></thead><tbody>",
             *(
                 _obligation_row(
                     row,
@@ -141,6 +147,7 @@ def _obligation_row(row: Any, route: Any = None, accounting: Any = None) -> str:
     scope = _value(row, "scope_disposition") or ""
     qualification = _value(row, "qualification_disposition") or ""
     disposition = _value(accounting, "disposition") or scope or "unresolved"
+    stop_reason = _value(accounting, "stop_reason") or "not applicable to this row"
     route_disposition = _value(route, "disposition") or ""
     gap_items = _items(route, "missing_concepts", "gaps")
     gap_text = ", ".join(
@@ -169,10 +176,61 @@ def _obligation_row(row: Any, route: Any = None, accounting: Any = None) -> str:
         "<tr>"
         f"<td><code>{escape(str(identifier))}</code></td>"
         f"<td>{escape(outcome)}</td>"
+        f"<td>{escape(str(stop_reason))}</td>"
         f"<td>{escape(route_text)}</td>"
         f"<td>{findings}</td>"
         "</tr>"
     )
+
+
+def _stop_reason_counts(
+    accounting_rows: tuple[Any, ...], realization_records: tuple[Any, ...]
+) -> dict[str, int]:
+    """Reconcile accounting stops with later per-finding scenario outcomes."""
+    realization_by_obligation = _report_realization_reasons(realization_records)
+    counts: dict[str, int] = {}
+    for row in accounting_rows:
+        reason = _report_terminal_reason(row, realization_by_obligation)
+        if reason is not None:
+            counts[str(reason)] = counts.get(str(reason), 0) + 1
+    return counts
+
+
+def _report_realization_reasons(
+    realization_records: tuple[Any, ...],
+) -> dict[str, set[str]]:
+    """Index report-facing realization reasons by obligation."""
+    result: dict[str, set[str]] = {}
+    for item in realization_records:
+        reason = _value(item, "stop_reason")
+        if reason is not None:
+            result.setdefault(str(_value(item, "obligation_id")), set()).add(
+                str(reason)
+            )
+    return result
+
+
+def _report_terminal_reason(
+    row: Any, realization_by_obligation: Mapping[str, set[str]]
+) -> Any:
+    """Prefer a later scenario result over the accounting result."""
+    obligation_id = str(_value(row, "obligation_id"))
+    realization_reasons = realization_by_obligation.get(obligation_id, set())
+    return _terminal_realization_reason(realization_reasons) or _value(
+        row, "stop_reason"
+    )
+
+
+def _terminal_realization_reason(reasons: set[str]) -> str | None:
+    """Collapse multiple findings to one obligation-level terminal outcome."""
+    for reason in (
+        "scenario_realized",
+        "scenario_generation_failure",
+        "scenario_not_requested",
+    ):
+        if reason in reasons:
+            return reason
+    return None
 
 
 def _revision_html(value: Any) -> str:
@@ -227,12 +285,15 @@ def _realization_html(records: tuple[Any, ...]) -> str:
             f"<td><code>{escape(str(_value(item, 'obligation_id') or ''))}</code></td>"
             f"<td><code>{escape(str(_value(item, 'ica_id') or ''))}</code></td>"
             f"<td>{escape(str(_value(item, 'status') or 'unresolved'))}</td>"
+            f"<td>{escape(str(_value(item, 'stop_reason') or '—'))}</td>"
             f"<td>{escape(', '.join(map(str, _value(item, 'scenario_ids') or ())) or '—')}</td>"
             "</tr>"
         )
     return (
         "<table><thead><tr><th>Obligation</th><th>ICA</th><th>Realization</th>"
-        "<th>Scenarios</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
+        "<th>Stop reason</th><th>Scenarios</th></tr></thead><tbody>"
+        + "".join(rows)
+        + "</tbody></table>"
     )
 
 

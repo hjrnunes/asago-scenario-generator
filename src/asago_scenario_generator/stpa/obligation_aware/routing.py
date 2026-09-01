@@ -14,6 +14,7 @@ from asago_scenario_generator.models.obligation_consideration import (
     ConsiderationDiagnostic,
     NeutralObligationBrief,
     ObligationRoute,
+    ObligationSemanticAssessment,
 )
 from asago_scenario_generator.models.obligation_plan import (
     TaxonomyObligation,
@@ -35,6 +36,7 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     authoritative_hazard_constraint_pairs,
     build_structural_routing_prompts,
+    mapping_strength_for_brief,
 )
 from asago_scenario_generator.stpa.threat_enum.slot_creation import (
     SlotPlaceholder,
@@ -347,6 +349,73 @@ def _validate_route(
         loss_analysis=loss_analysis,
         control_structure=control_structure,
         slots=slots,
+    )
+
+
+def _validate_semantic_assessment(
+    route: ObligationRoute, brief: NeutralObligationBrief
+) -> None:
+    """Bind provider pair judgements to exact mapping evidence and route meaning."""
+    assessment = route.semantic_assessment
+    if assessment is None:
+        # Compatibility adapters may still provide the pre-assessment route
+        # contract. The named provider schema requires this field.
+        return
+    expected_strength = mapping_strength_for_brief(brief)
+    if assessment.mapping_strength != expected_strength:
+        raise ValueError("route mapping_strength does not match the obligation path")
+    _validate_mechanism_route_meaning(route)
+
+
+def _validate_mechanism_route_meaning(route: ObligationRoute) -> None:
+    """Require pair judgements that agree with the selected route outcome."""
+    assessment = route.semantic_assessment
+    if assessment is None:
+        return
+    _validate_disposition_mechanism(route.disposition, assessment)
+    _validate_supported_alignment(assessment)
+
+
+def _validate_disposition_mechanism(
+    disposition: str, assessment: ObligationSemanticAssessment
+) -> None:
+    """Bind targeted and non-applicable outcomes to mechanism evidence."""
+    validator = {
+        "targeted": _reject_absent_targeted_mechanism,
+        "proposed_not_applicable": _require_absent_nonapplicable_mechanism,
+    }.get(disposition)
+    if validator is not None:
+        validator(assessment)
+
+
+def _reject_absent_targeted_mechanism(
+    assessment: ObligationSemanticAssessment,
+) -> None:
+    """Reject a target when the mechanism was proven absent."""
+    if assessment.mechanism_assessment == "absent_from_system":
+        raise ValueError("targeted routes cannot use an absent system mechanism")
+
+
+def _require_absent_nonapplicable_mechanism(
+    assessment: ObligationSemanticAssessment,
+) -> None:
+    """Require absence evidence for a proposed non-applicable outcome."""
+    if assessment.mechanism_assessment != "absent_from_system":
+        raise ValueError("proposed non-applicability requires an absent mechanism")
+
+
+def _validate_supported_alignment(assessment: ObligationSemanticAssessment) -> None:
+    """A supported conceptual relationship cannot use an absent mechanism."""
+    if not _supported_alignment_is_plausible(assessment):
+        raise ValueError("supported risk alignment cannot use an absent mechanism")
+
+
+def _supported_alignment_is_plausible(
+    assessment: ObligationSemanticAssessment,
+) -> bool:
+    """Allow missing path evidence while rejecting a mechanism proven absent."""
+    return assessment.risk_alignment != "supported" or (
+        assessment.mechanism_assessment != "absent_from_system"
     )
 
 
@@ -664,6 +733,61 @@ def _coerce_response(
     raise TypeError("structural adapter returned an unsupported response")
 
 
+def _route_structure_payload(route: ObligationRoute) -> dict[str, Any]:
+    """Return fields a semantic verifier is never allowed to change."""
+    return route.model_dump(
+        mode="json",
+        exclude={"route_id", "semantic_assessment", "diagnostics"},
+    )
+
+
+def _apply_mechanism_verification(
+    adapter: StructuralAnalysisAdapter,
+    request: StructuralRoutingRequest,
+    response: StructuralRoutingResponse,
+) -> StructuralRoutingResponse:
+    """Apply an optional provider verifier without granting structural authority."""
+    method = getattr(adapter, "verify_mechanisms", None)
+    if not callable(method):
+        return response
+    verified = tuple(method(request, response.routes))
+    _validate_verified_route_authority(response.routes, verified)
+    payload = response.model_dump(mode="python", exclude={"response_digest"})
+    payload["routes"] = verified
+    return StructuralRoutingResponse.model_validate(payload)
+
+
+def _validate_verified_route_authority(
+    original_routes: tuple[ObligationRoute, ...],
+    verified: tuple[ObligationRoute, ...],
+) -> None:
+    """Prevent a semantic verifier from changing structural route authority."""
+    original_by_id = {item.obligation_id: item for item in original_routes}
+    _require_verified_identity_set(original_by_id, verified)
+    for route in verified:
+        _require_same_route_authority(original_by_id[route.obligation_id], route)
+
+
+def _require_verified_identity_set(
+    original_by_id: dict[str, ObligationRoute],
+    verified: tuple[ObligationRoute, ...],
+) -> None:
+    """Require the verifier to return each original route exactly once."""
+    verified_ids = [item.obligation_id for item in verified]
+    if set(verified_ids) != set(original_by_id) or len(verified_ids) != len(
+        original_by_id
+    ):
+        raise ValueError("mechanism verifier changed the route identity set")
+
+
+def _require_same_route_authority(
+    original: ObligationRoute, verified: ObligationRoute
+) -> None:
+    """Reject any verifier change outside assessment and diagnostics."""
+    if _route_structure_payload(verified) != _route_structure_payload(original):
+        raise ValueError("mechanism verifier changed structural route authority")
+
+
 def _call_evidence(
     response: StructuralRoutingResponse,
     request: StructuralRoutingRequest,
@@ -811,6 +935,24 @@ def _route_batch(
                     "routing response must account for every batch obligation exactly once"
                 )
             for route in candidate.routes:
+                brief = next(
+                    item for item in batch if item.obligation_id == route.obligation_id
+                )
+                _validate_semantic_assessment(route, brief)
+                _validate_route(
+                    route,
+                    route.obligation_id,
+                    references,
+                    loss_analysis=loss_analysis,
+                    control_structure=control_structure,
+                    slots=slots,
+                )
+            candidate = _apply_mechanism_verification(adapter, request, candidate)
+            for route in candidate.routes:
+                brief = next(
+                    item for item in batch if item.obligation_id == route.obligation_id
+                )
+                _validate_semantic_assessment(route, brief)
                 _validate_route(
                     route,
                     route.obligation_id,

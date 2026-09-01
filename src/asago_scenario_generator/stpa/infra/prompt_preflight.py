@@ -390,7 +390,7 @@ def _view_contract_errors(
     errors: list[str] = []
     for field_path, value in _view_items(prompt_view):
         lower_path = field_path.lower()
-        if any(marker in lower_path for marker in markers):
+        if any(_field_path_has_marker(lower_path, marker) for marker in markers):
             errors.append(f"prohibited prompt-view field leaked: {field_path}")
             if isinstance(value, str) and value and value in combined_prompt:
                 errors.append(f"prohibited prompt-view value leaked: {field_path}")
@@ -407,6 +407,18 @@ def _view_contract_errors(
     if _RELATIVE_PATH_RE.search(combined_prompt):
         errors.append("workspace-relative source path appears in rendered prompt")
     return errors
+
+
+def _field_path_has_marker(field_path: str, marker: str) -> bool:
+    """Match field-name markers without treating words such as mapping as pins."""
+    segments = tuple(item for item in re.split(r"[.\[\]]+", field_path) if item)
+    return any(_segment_has_marker(segment, marker) for segment in segments)
+
+
+def _segment_has_marker(segment: str, marker: str) -> bool:
+    """Match one snake-case field segment against a prohibited marker."""
+    words = tuple(item for item in segment.split("_") if item)
+    return marker in words or f"{marker}s" in words
 
 
 def _reference_contract_errors(

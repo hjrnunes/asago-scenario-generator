@@ -237,25 +237,23 @@ def test_stage6_narrative_prompt_uses_ai_surface_realizations():
     assert "poisons a feedback channel" not in prompt
 
 
-def test_stage6_tree_prompt_uses_ai_surface_leaves():
+def test_stage6_tree_prompt_uses_evidence_gated_causal_leaves():
     prompt = TemplateLoader(PROMPTS_DIR).render_prompt("stage6b_tree_system.j2")
 
     leaves = (
+        "Process-model state is stale or inaccurate [PM-*]",
+        "Feedback is missing, late, stale, or inaccurate [FB-*]",
+        "Evidence-backed active change (only with exact capability/access evidence)",
+    )
+    ungrounded_leaves = (
         "Inject instructions through prompt/context input [FB-*]",
         "Poison retrieved content [FB-*]",
         "Fabricate a tool result [FB-*]",
         "Poison memory state [FB-*]",
-        "Tamper with an agent message [FB-*]",
-        "Manipulate model output [FB-*]",
-    )
-    old_leaves = (
-        "Delay/block feedback [FB-*]",
-        "Forge feedback [FB-*]",
-        "Action intercepted/modified in transit",
     )
 
     assert all(leaf in prompt for leaf in leaves)
-    assert all(leaf not in prompt for leaf in old_leaves)
+    assert all(leaf not in prompt for leaf in ungrounded_leaves)
     assert (
         "infrastructure leaf only when it cites an explicitly "
         "attacker-accessible architecture element"

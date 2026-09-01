@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import json
 
-from asago_scenario_generator.stpa.infra.call_log import append_call_log, make_call_log_entry
+import pytest
+
+from asago_scenario_generator.stpa.infra.call_log import (
+    append_call_log,
+    make_call_log_entry,
+    mark_call_published,
+)
 
 
 class TestInfraCallLog:
@@ -27,6 +33,12 @@ class TestInfraCallLog:
         assert parsed["step"] == "call_1"
         assert parsed["slot_id"] == "RESP-1:CA-1-1:NOT_PROVIDED"
         assert parsed["scenario_id"] is None
+        assert parsed["provider_response_received"] is True
+        assert parsed["draft_parsed"] is True
+        assert parsed["semantic_validation_passed"] is True
+        assert parsed["compiled"] is True
+        assert parsed["published"] is False
+        assert parsed["terminal_error_codes"] == []
 
     def test_call_log_02_entry_with_scenario_id(self, tmp_path):
         """InfraCallLog-02: entry with scenario_id set."""
@@ -38,9 +50,7 @@ class TestInfraCallLog:
             scenario_id="SCN-001",
         )
         append_call_log([entry], tmp_path)
-        parsed = json.loads(
-            (tmp_path / "calls.jsonl").read_text().strip()
-        )
+        parsed = json.loads((tmp_path / "calls.jsonl").read_text().strip())
         assert parsed["scenario_id"] == "SCN-001"
 
     def test_call_log_03_multiple_entries_appended_sequentially(self, tmp_path):
@@ -115,3 +125,44 @@ class TestInfraCallLog:
         assert entry["completion_tokens"] == 50
         assert entry["duration_ms"] == 5000
         assert entry["success"] is False
+
+    def test_publish_marks_only_latest_exact_validated_call(self, tmp_path):
+        """Publication follows exact stage/step identity and latest-call order."""
+        entries = [
+            make_call_log_entry(stage="stage", step="call", model="m"),
+            make_call_log_entry(stage="other", step="call", model="m"),
+            make_call_log_entry(stage="stage", step="call", model="m"),
+        ]
+        append_call_log(entries, tmp_path)
+
+        mark_call_published(tmp_path, "stage", "call")
+
+        persisted = [
+            json.loads(line)
+            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
+        ]
+        assert persisted[0]["published"] is False
+        assert persisted[1]["published"] is False
+        assert persisted[2]["published"] is True
+
+    def test_publish_rejects_missing_or_unvalidated_call(self, tmp_path):
+        """A transport response cannot be relabelled as published evidence."""
+        with pytest.raises(ValueError, match="missing call log"):
+            mark_call_published(tmp_path, "stage", "call")
+        append_call_log(
+            [
+                make_call_log_entry(
+                    stage="stage",
+                    step="call",
+                    model="m",
+                    success=False,
+                    provider_response_received=True,
+                    semantic_validation_passed=False,
+                )
+            ],
+            tmp_path,
+        )
+        with pytest.raises(ValueError, match="without semantic validation"):
+            mark_call_published(tmp_path, "stage", "call")
+        with pytest.raises(ValueError, match="without semantic validation"):
+            mark_call_published(tmp_path, "missing-stage", "call")

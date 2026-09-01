@@ -20,6 +20,7 @@ from asago_scenario_generator.models.hybrid_coverage import (
     Digest,
     ObligationId,
 )
+from asago_scenario_generator.models.obligation_funnel import ObligationStopReason
 
 
 SCENARIO_REALIZATION_SCHEMA_VERSION = "stpa-scenario-realization-v1"
@@ -52,6 +53,7 @@ class ScenarioRealizationRecord(_RealizationModel):
     slot_id: str = Field(min_length=1)
     ica_id: str = Field(min_length=1)
     status: ScenarioRealizationStatus
+    stop_reason: ObligationStopReason
     scenario_ids: tuple[str, ...] = ()
     context_digests: tuple[Digest, ...] = ()
     evidence: tuple[str, ...] = Field(min_length=1)
@@ -75,10 +77,22 @@ class ScenarioRealizationRecord(_RealizationModel):
                 raise ValueError(
                     "realized records require scenario IDs and context digests"
                 )
+            if self.stop_reason != "scenario_realized":
+                raise ValueError("realized records require scenario_realized")
         elif pairs:
             raise ValueError(
                 "unresolved and not-requested records cannot claim realized scenarios"
             )
+        elif (
+            self.status == "unresolved"
+            and self.stop_reason != "scenario_generation_failure"
+        ):
+            raise ValueError("unresolved records require scenario_generation_failure")
+        elif (
+            self.status == "not_requested"
+            and self.stop_reason != "scenario_not_requested"
+        ):
+            raise ValueError("not-requested records require scenario_not_requested")
         expected = self.compute_record_id()
         if self.record_id is not None and self.record_id != expected:
             raise ValueError("scenario realization record_id does not match content")

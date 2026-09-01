@@ -802,6 +802,18 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
     assert result.consideration.schema_version == "stpa-obligation-consideration-v1"
     assert result.accounting.schema_version == "stpa-obligation-accounting-v1"
     assert result.accounting.rows[0].disposition == "addressed"
+    assert result.accounting.rows[0].stop_reason == "addressed"
+    assert result.manifest["obligation_resolution_funnel"] == {
+        "all_plan_rows": 1,
+        "governance_only": 0,
+        "capability_excluded": 0,
+        "applicable_and_considered": 1,
+        "terminal_reasons": {"scenario_generation_failure": 1},
+        "terminal_reason_total": 1,
+        "reconciles": True,
+        "realized_obligation_denominator": 0,
+        "admitted_scenario_denominator": 0,
+    }
     assert result.ica_considerations
     assert result.ica_enumeration is not None
     assert (tmp_path / "obligation-consideration.yaml").exists()
