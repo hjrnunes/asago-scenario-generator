@@ -21,6 +21,7 @@
 ---
 
 {% include "_stage6_projection_alignment.j2" %}
+{% include "_obligation_evidence_boundary.j2" %}
 ## Your Task
 
 Produce an attack tree using the STPA two-level causal taxonomy defined in the system prompt.
@@ -36,8 +37,10 @@ Produce an attack tree using the STPA two-level causal taxonomy defined in the s
    `reachable_capabilities: []`, no attacker-access path is established: do
    not claim that an attacker suppresses or manipulates feedback, poisons an
    audit output, injects guidelines, or uses a tool/input surface. Describe
-   the existing structural condition and its consequence. Include an active
-   manipulation leaf only for an exact reachable capability and its own access
-   references; label every bounded assumption explicitly.
+   the existing structural condition, how the adversary takes advantage of
+   it, and its consequence. Taking advantage of the condition does not itself
+   assert access. Include a new manipulation interface only for an exact
+   reachable capability and its own access references; label every bounded
+   assumption explicitly.
 
 Return the attack tree as a YAML-serializable dictionary matching the structure defined in the system prompt.

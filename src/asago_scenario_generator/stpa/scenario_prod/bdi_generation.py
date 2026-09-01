@@ -7,12 +7,26 @@ and deterministic assembly of the ScenarioSpec.
 
 from __future__ import annotations
 
-import yaml
+from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from typing import Literal
+
+import yaml
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    conlist,
+    create_model,
+    model_validator,
+)
 
 from asago_scenario_generator.stpa.infra.llm import LLMClient
-from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    parse_llm_result,
+    safe_llm_call,
+)
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.stpa.models.causal_factor import (
@@ -30,6 +44,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
 from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.scenario_context import (
+    DescribedElement,
     ScenarioGenerationContext,
     validate_factor_evidence,
 )
@@ -115,6 +130,76 @@ class BDIGenerationResult(BaseModel):
     defender_vulnerabilities: dict[str, str] = Field(default_factory=dict)
     attacker_bdi: AttackerBDI
     causal_factors: list[CausalFactorDeclaration] = Field(min_length=1)
+
+
+class _ContextCausalFactorDraft(BaseModel):
+    """Provider-only factor whose structural identity is a local handle."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_handle: str
+    evidence: str = Field(min_length=1)
+    timing: str | None = None
+    evidence_status: CausalEvidenceStatus = CausalEvidenceStatus.structural_failure
+    capability_refs: tuple[str, ...] = ()
+    access_refs: tuple[str, ...] = ()
+    bounded_assumption: str | None = None
+
+
+class _ContextDefenderVulnerabilityDraft(BaseModel):
+    """Provider prose attached to a compiler-owned defender-belief handle."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    belief_handle: str
+    vulnerability: str = Field(min_length=1)
+
+
+class _ContextAttackerIntentionDraft(BaseModel):
+    """Provider prose with compiler-owned structural references."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    description: str = Field(min_length=1)
+    source_handles: tuple[str, ...] = Field(min_length=1)
+
+
+class _ContextAttackerBDIDraft(BaseModel):
+    """Provider-only attacker BDI using local causal-source handles."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    beliefs: list[str]
+    desires: list[str]
+    intentions: list[_ContextAttackerIntentionDraft]
+
+
+class _ContextBDIProviderPayload(BDIGenerationResult):
+    """Base response body for one exact scenario-context request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    defender_vulnerabilities: list[_ContextDefenderVulnerabilityDraft]
+    attacker_bdi: _ContextAttackerBDIDraft
+    causal_factors: list[_ContextCausalFactorDraft]
+
+    @model_validator(mode="after")
+    def validate_unique_belief_handles(self) -> "_ContextBDIProviderPayload":
+        """Require one vulnerability record for each distinct selected belief."""
+        handles = [item.belief_handle for item in self.defender_vulnerabilities]
+        if len(handles) != len(set(handles)):
+            raise ValueError("defender vulnerability handles must be unique")
+        return self
+
+
+@dataclass(frozen=True)
+class _CausalSourceChoice:
+    """One request-local handle bound to an exact structural factor source."""
+
+    handle: str
+    kind: CausalFactorKind
+    source_id: str
+    description: str
 
 
 def generate_scenario_id(index: int = 0) -> str:
@@ -349,16 +434,45 @@ def generate_bdi_for_context(
     """Execute corrected Stage 5 with only the immutable scenario context."""
     if loader is None:
         loader = TemplateLoader(PROMPTS_DIR)
+    choices = _causal_source_choices(scenario_context)
+    if not choices:
+        return (
+            None,
+            "No valid causal-factor sources exist in the selected control path.",
+        )
     system_prompt, user_prompt = build_context_bdi_prompts(scenario_context, loader)
-    return _call_bdi_with_bounded_length_retry(
+    belief_choices = _defender_belief_choices(scenario_context)
+    response_format = _context_bdi_provider_payload_type(
+        len(choices), len(belief_choices)
+    )
+    draft, error = _call_bdi_with_bounded_length_retry(
         llm_client,
         system_prompt,
         user_prompt,
         run_dir,
+        response_format=response_format,
         stage=stage,
         step=step,
         temperature=temperature,
     )
+    return _finish_context_bdi(draft, error, choices, belief_choices)
+
+
+def _finish_context_bdi(
+    draft: BaseModel | None,
+    error: str | None,
+    choices: tuple[_CausalSourceChoice, ...],
+    belief_choices: tuple[tuple[str, DescribedElement], ...],
+) -> tuple[BDIGenerationResult | None, str | None]:
+    """Compile one parsed provider draft or preserve its closed failure."""
+    if error is not None or draft is None:
+        return None, error
+    if type(draft) is BDIGenerationResult:
+        return draft, None
+    try:
+        return _materialize_context_bdi(draft, choices, belief_choices), None
+    except (KeyError, TypeError, ValueError) as exc:
+        return None, f"{type(exc).__name__}: {exc}"
 
 
 def _call_bdi_with_bounded_length_retry(
@@ -367,20 +481,22 @@ def _call_bdi_with_bounded_length_retry(
     user_prompt: str,
     run_dir: Path,
     *,
+    response_format: type[BaseModel],
     stage: str,
     step: str,
     temperature: float,
-) -> tuple[BDIGenerationResult | None, str | None]:
+) -> tuple[BaseModel | None, str | None]:
     """Call the closed Stage 5 contract with its one length-only retry."""
     result, _llm_result, error = safe_llm_call(
         llm_client=llm_client,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        response_format=BDIGenerationResult,
+        response_format=response_format,
         run_dir=run_dir,
         stage=stage,
         step=step,
         temperature=temperature,
+        result_parser=lambda value: _parse_context_bdi_result(value, response_format),
     )
     if not _is_length_finish_reason_error(error):
         return (None, error) if error is not None else (result, None)
@@ -388,16 +504,24 @@ def _call_bdi_with_bounded_length_retry(
         llm_client=llm_client,
         system_prompt=system_prompt,
         user_prompt=user_prompt + _LENGTH_RETRY_PROMPT,
-        response_format=BDIGenerationResult,
+        response_format=response_format,
         run_dir=run_dir,
         stage=stage,
         step=step,
         temperature=temperature,
         max_completion_tokens=_LENGTH_RETRY_MAX_COMPLETION_TOKENS,
+        result_parser=lambda value: _parse_context_bdi_result(value, response_format),
     )
     if retry_error is None:
         return retry_result, None
     return None, f"{_LENGTH_RETRY_EXHAUSTED_PREFIX} {retry_error}"
+
+
+def _parse_context_bdi_result(result, response_format: type[BaseModel]) -> BaseModel:
+    """Retain already-typed compatibility responses; parse provider drafts strictly."""
+    if type(result.content) is BDIGenerationResult:
+        return result.content
+    return parse_llm_result(result, response_format)
 
 
 def _is_length_finish_reason_error(error: str | None) -> bool:
@@ -473,12 +597,234 @@ def build_context_bdi_prompts(
 ) -> tuple[str, str]:
     """Render Stage 5 from only the immutable context and output contract."""
     scenario_context_yaml = render_scenario_generation_context(scenario_context)
+    source_choices = _causal_source_choices(scenario_context)
+    if not source_choices:
+        raise ValueError("selected scenario context has no valid causal-factor sources")
+    source_choices_yaml = yaml.dump(
+        [
+            {
+                "source_handle": choice.handle,
+                "kind": choice.kind.value,
+                "source_id": choice.source_id,
+                "description": choice.description,
+            }
+            for choice in source_choices
+        ],
+        default_flow_style=False,
+        sort_keys=False,
+        allow_unicode=True,
+    )
+    belief_choices_yaml = yaml.dump(
+        [
+            {
+                "belief_handle": handle,
+                "description": belief.description,
+            }
+            for handle, belief in _defender_belief_choices(scenario_context)
+        ],
+        default_flow_style=False,
+        sort_keys=False,
+        allow_unicode=True,
+    )
     return (
-        loader.render_prompt("stage5_system.j2"),
+        loader.render_prompt("stage5_context_system.j2"),
         loader.render_prompt(
             "stage5_context_user.j2",
             scenario_context_yaml=scenario_context_yaml,
+            causal_source_choices_yaml=source_choices_yaml,
+            defender_belief_choices_yaml=belief_choices_yaml,
         ),
+    )
+
+
+def _defender_belief_choices(
+    context: ScenarioGenerationContext,
+) -> tuple[tuple[str, DescribedElement], ...]:
+    """Bind every selected process-model belief to a request-local handle."""
+    return tuple(
+        (f"belief_{index}", belief)
+        for index, belief in enumerate(
+            context.target_control_path.process_model_parts, start=1
+        )
+    )
+
+
+def _causal_source_choices(
+    context: ScenarioGenerationContext,
+) -> tuple[_CausalSourceChoice, ...]:
+    """Project the selected path into request-local executable source choices."""
+    path = context.target_control_path
+    candidates: list[tuple[CausalFactorKind, str, str]] = []
+    candidates.extend(
+        (CausalFactorKind.process_model_flaw, item.element_id, item.description)
+        for item in path.process_model_parts
+    )
+    for item in path.feedback:
+        candidates.extend(
+            (
+                (CausalFactorKind.feedback_delay, item.element_id, item.description),
+                (CausalFactorKind.sensor_anomaly, item.element_id, item.description),
+            )
+        )
+    actions = (path.control_action, *path.related_control_actions)
+    candidates.extend(
+        (CausalFactorKind.actuator_anomaly, item.action_id, item.description)
+        for item in actions
+        if item.action_id.startswith("CA-")
+    )
+    unique = tuple(dict.fromkeys(candidates))
+    return tuple(
+        _CausalSourceChoice(
+            handle=f"cause_{index}",
+            kind=kind,
+            source_id=source_id,
+            description=description,
+        )
+        for index, (kind, source_id, description) in enumerate(unique, start=1)
+    )
+
+
+@lru_cache(maxsize=32)
+def _context_bdi_provider_payload_type(
+    choice_count: int,
+    belief_count: int,
+) -> type[BaseModel]:
+    """Build a strict response schema over one request's local source handles."""
+    _require_positive_schema_count(choice_count, "choice_count")
+    _require_positive_schema_count(belief_count, "belief_count")
+    handles = tuple(f"cause_{index}" for index in range(1, choice_count + 1))
+    handle_type = Literal.__getitem__(handles)
+    factor_type = create_model(
+        f"_ContextCausalFactorDraft{choice_count}",
+        __base__=_ContextCausalFactorDraft,
+        source_handle=(handle_type, ...),
+    )
+    source_handle_list = conlist(handle_type, min_length=1)
+    intention_type = create_model(
+        f"_ContextAttackerIntentionDraft{choice_count}",
+        __base__=_ContextAttackerIntentionDraft,
+        source_handles=(source_handle_list, ...),
+    )
+    attacker_type = create_model(
+        f"_ContextAttackerBDIDraft{choice_count}",
+        __base__=_ContextAttackerBDIDraft,
+        intentions=(list[intention_type], ...),
+    )
+    factor_list = conlist(factor_type, min_length=1)
+    belief_handles = tuple(f"belief_{index}" for index in range(1, belief_count + 1))
+    belief_handle_type = Literal.__getitem__(belief_handles)
+    vulnerability_type = create_model(
+        f"_ContextDefenderVulnerabilityDraft{belief_count}",
+        __base__=_ContextDefenderVulnerabilityDraft,
+        belief_handle=(belief_handle_type, ...),
+    )
+    vulnerability_list = conlist(
+        vulnerability_type,
+        min_length=belief_count,
+        max_length=belief_count,
+    )
+    return create_model(
+        f"_ContextBDIProviderPayload{choice_count}x{belief_count}",
+        __base__=_ContextBDIProviderPayload,
+        defender_vulnerabilities=(vulnerability_list, ...),
+        attacker_bdi=(attacker_type, ...),
+        causal_factors=(factor_list, ...),
+    )
+
+
+def _require_positive_schema_count(value: int, name: str) -> None:
+    """Reject booleans and non-positive dynamic-schema counts."""
+    if type(value) is not int or value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+
+
+def _materialize_context_bdi(
+    draft: BaseModel,
+    choices: tuple[_CausalSourceChoice, ...],
+    belief_choices: tuple[tuple[str, DescribedElement], ...],
+) -> BDIGenerationResult:
+    """Resolve provider-local handles to exact context-owned structural IDs."""
+    choices_by_handle = {choice.handle: choice for choice in choices}
+    attacker_draft = draft.attacker_bdi
+    _validate_intention_factor_handles(attacker_draft, draft.causal_factors)
+    attacker_bdi = AttackerBDI(
+        beliefs=list(attacker_draft.beliefs),
+        desires=list(attacker_draft.desires),
+        intentions=[
+            _materialize_intention(item, choices_by_handle)
+            for item in attacker_draft.intentions
+        ],
+    )
+    factors = [
+        _materialize_causal_factor(item, choices_by_handle)
+        for item in draft.causal_factors
+    ]
+    belief_ids = {handle: belief.element_id for handle, belief in belief_choices}
+    return BDIGenerationResult(
+        defender_vulnerabilities={
+            belief_ids[item.belief_handle]: item.vulnerability.strip()
+            for item in draft.defender_vulnerabilities
+        },
+        attacker_bdi=attacker_bdi,
+        causal_factors=factors,
+    )
+
+
+def _validate_intention_factor_handles(
+    attacker_draft: BaseModel,
+    factor_drafts: list[BaseModel],
+) -> None:
+    """Require every intention source to have an explicit causal declaration."""
+    declared = {item.source_handle for item in factor_drafts}
+    missing = sorted(
+        {
+            handle
+            for intention in attacker_draft.intentions
+            for handle in intention.source_handles
+            if handle not in declared
+        }
+    )
+    if missing:
+        raise ValueError(
+            "intention source handles must have declared causal factors: "
+            + ", ".join(missing)
+        )
+
+
+def _materialize_intention(
+    draft: BaseModel,
+    choices: dict[str, _CausalSourceChoice],
+) -> str:
+    """Attach exact structural identities to one model-authored intention."""
+    source_ids = tuple(
+        dict.fromkeys(choices[handle].source_id for handle in draft.source_handles)
+    )
+    return f"{draft.description.strip()} [structural sources: {', '.join(source_ids)}]"
+
+
+def _materialize_causal_factor(
+    draft: BaseModel,
+    choices: dict[str, _CausalSourceChoice],
+) -> CausalFactorDeclaration:
+    """Compile one local causal-source handle into the closed domain record."""
+    choice = choices[draft.source_handle]
+    evidence_status = draft.evidence_status
+    if (
+        draft.bounded_assumption is not None
+        and evidence_status is CausalEvidenceStatus.structural_failure
+        and not draft.capability_refs
+        and not draft.access_refs
+    ):
+        evidence_status = CausalEvidenceStatus.bounded_assumption
+    return CausalFactorDeclaration(
+        kind=choice.kind,
+        source_id=choice.source_id,
+        evidence=draft.evidence,
+        timing=draft.timing,
+        evidence_status=evidence_status,
+        capability_refs=draft.capability_refs,
+        access_refs=draft.access_refs,
+        bounded_assumption=draft.bounded_assumption,
     )
 
 

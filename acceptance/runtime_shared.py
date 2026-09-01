@@ -2358,7 +2358,7 @@ def _setup_sp3_mock_client(num_threats: int = 2):
                 attacker_bdi=AttackerBDI(
                     beliefs=[f"attacker belief {i + 1}"],
                     desires=["induce ICA"],
-                    intentions=["poison PM-1-1 via FB-1-1"],
+                    intentions=["PM-1-1 remains stale before CA-1-1"],
                 ),
                 causal_factors=_make_sp3_causal_factors(),
             )
@@ -2375,7 +2375,7 @@ def _setup_sp3_mock_client(num_threats: int = 2):
                     "branches": [
                         {
                             "category": "controller_side",
-                            "label": "Corrupt PM-1-1 via FB-1-1",
+                            "label": "PM-1-1 remains stale after FB-1-1 delay",
                             "children": [],
                         },
                         {
@@ -2384,7 +2384,10 @@ def _setup_sp3_mock_client(num_threats: int = 2):
                             "children": [],
                         },
                     ],
-                    "leaves": ["Poison PM-1-1 via FB-1-1", "Tool fails"],
+                    "leaves": [
+                        "PM-1-1 remains stale after FB-1-1 delay",
+                        "Tool fails",
+                    ],
                 }
             )
         )
@@ -2393,7 +2396,7 @@ def _setup_sp3_mock_client(num_threats: int = 2):
                 "feature": "Safe orchestration",
                 "scenario": f"Attack scenario {i + 1}",
                 "given": ["Given PM-1-1 is in a valid state"],
-                "when": ["When the attacker sends a malicious request"],
+                "when": ["When PM-1-1 remains stale before CA-1-1"],
                 "then_expected": ["Then the system should reject the request"],
                 "then_actual": [
                     "But the system approves the request (ICA NOT_PROVIDED on CA-1-1)",
@@ -2408,7 +2411,7 @@ def _setup_sp3_mock_client(num_threats: int = 2):
         None,
         "Scenario: Attack scenario\n"
         "  Given PM-1-1 is in a valid state\n"
-        "  When the attacker sends a malicious request\n"
+        "  When PM-1-1 remains stale before CA-1-1\n"
         "  Then the system should reject the request\n"
         "  But the system approves the request (ICA NOT_PROVIDED on CA-1-1)\n"
         "  And loss L-1 is realized\n",
@@ -2427,7 +2430,7 @@ def _make_sp3_causal_factors():
         CausalFactorDeclaration(
             kind=CausalFactorKind.process_model_flaw,
             source_id="PM-1-1",
-            evidence="Parsed user intent can be corrupted before CA-1-1 is selected.",
+            evidence="Parsed user intent remains stale before CA-1-1 is selected.",
         )
     ]
 

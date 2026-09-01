@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field, conlist, create_model
+from pydantic import Field, conlist, create_model, field_validator, model_validator
 
 from asago_scenario_generator.models.hybrid_coverage import (
     ObligationId,
@@ -47,6 +47,9 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     DraftProcessModelPart,
     DraftResponsibility,
     DraftSecurityConstraint,
+    IcaDeviationDraft,
+    IcaFindingDraft,
+    ObligationIcaDraft,
     ObligationRoute,
     RevisionDraft,
     RevisionGapDecision,
@@ -72,6 +75,7 @@ from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     _draft_considerations,
     compile_slot_provider_entry,
 )
+from asago_scenario_generator.stpa.threat_enum.slot_creation import SlotPlaceholder
 
 _SYNTHESIS_MAX_COMPLETION_TOKENS = 8192
 _SYNTHESIS_SLOT_MAX_COMPLETION_TOKENS = 8192
@@ -91,30 +95,60 @@ _PROMPT_PROHIBITED_FIELDS = (
 def _reference_pairs(value: Any) -> tuple[tuple[str, str], ...]:
     """Collect explained ``id``/``description`` pairs from a prompt view."""
     pairs: dict[str, str] = {}
-
-    def visit(item: Any) -> None:
-        if hasattr(item, "model_dump"):
-            visit(item.model_dump(mode="python"))
-            return
-        if isinstance(item, dict):
-            identifier = item.get("id")
-            description = item.get("description")
-            if (
-                isinstance(identifier, str)
-                and isinstance(description, str)
-                and identifier
-                and description.strip()
-            ):
-                pairs.setdefault(identifier, description)
-            for child in item.values():
-                visit(child)
-            return
-        if isinstance(item, (list, tuple, set, frozenset)):
-            for child in item:
-                visit(child)
-
-    visit(value)
+    _visit_reference_pairs(value, pairs)
     return tuple(sorted(pairs.items()))
+
+
+def _visit_reference_pairs(item: Any, pairs: dict[str, str]) -> None:
+    """Walk one closed prompt view and retain its explained identities."""
+    if hasattr(item, "model_dump"):
+        _visit_reference_pairs(item.model_dump(mode="python"), pairs)
+        return
+    if isinstance(item, dict):
+        _record_reference_pair(item, pairs)
+        children = item.values()
+    elif isinstance(item, (list, tuple, set, frozenset)):
+        children = item
+    else:
+        return
+    for child in children:
+        _visit_reference_pairs(child, pairs)
+
+
+def _record_reference_pair(item: dict, pairs: dict[str, str]) -> None:
+    """Retain one non-empty ID/description pair when present."""
+    identifier = item.get("id")
+    description = item.get("description")
+    if (
+        isinstance(identifier, str)
+        and isinstance(description, str)
+        and identifier
+        and description.strip()
+    ):
+        pairs.setdefault(identifier, description)
+
+
+def _routing_prompt_handles(view: Any) -> tuple[str, ...]:
+    """Return opaque obligation handles from one routing prompt view."""
+    return tuple(item.obligation_handle for item in view.obligation_questions)
+
+
+def _slot_prompt_handles(
+    target_id: str,
+    questions: tuple[Any, ...],
+    routes: tuple[Any, ...],
+) -> tuple[str, ...]:
+    """Return every opaque handle copied by one ICA target prompt."""
+    return (
+        target_id,
+        *(item.obligation_handle for item in questions),
+        *(item.route_handle for item in routes),
+    )
+
+
+def _with_correction_feedback(prompt: str, feedback: str | None) -> str:
+    """Append one bounded routing correction when supplied."""
+    return prompt if not feedback else f"{prompt}\nValidation correction:\n{feedback}\n"
 
 
 def _prompt_budget(
@@ -352,7 +386,64 @@ class _SlotProviderPayload(_Model):
     safely.
     """
 
-    filled_slots: tuple[SlotIcaDraft, ...] = Field(min_length=1)
+    filled_slots: tuple["_SlotProviderDraft", ...] = Field(min_length=1)
+
+
+class _SlotProviderFindingDraft(_Model):
+    """Model-authored ICA semantics without a model-selected UCA category."""
+
+    deviation: str = Field(min_length=1)
+    hazardous_context: str = Field(min_length=1)
+    loss_consequence: str = Field(min_length=1)
+    related_hazard_ids: tuple[str, ...] = Field(min_length=1)
+    related_constraint_ids: tuple[str, ...] = Field(min_length=1, max_length=1)
+    process_model_refs: tuple[str, ...] = ()
+    feedback_refs: tuple[str, ...] = ()
+
+    @field_validator("deviation", mode="before")
+    @classmethod
+    def accept_historical_typed_deviation(cls, value: Any) -> Any:
+        """Keep deterministic typed fixtures compatible outside the schema."""
+        if isinstance(value, IcaDeviationDraft):
+            return value.text
+        if isinstance(value, dict):
+            return IcaDeviationDraft.model_validate(value).text
+        return value
+
+
+class _SlotProviderDraft(_Model):
+    """One request-local slot whose exact UCA type comes from the request."""
+
+    slot_id: str = Field(min_length=1)
+    is_na: bool
+    na_rationale: str | None = None
+    findings: tuple[_SlotProviderFindingDraft, ...] = ()
+    consideration_results: tuple[ObligationIcaDraft, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_na_and_findings(self) -> "_SlotProviderDraft":
+        if self.is_na:
+            _validate_na_slot_draft(self)
+        else:
+            _validate_finding_slot_draft(self)
+        return self
+
+
+def _validate_na_slot_draft(value: _SlotProviderDraft) -> None:
+    """Require the closed N/A shape."""
+    if value.findings:
+        raise ValueError("N/A ICA draft cannot contain findings")
+    if not value.na_rationale or not value.na_rationale.strip():
+        raise ValueError("N/A ICA draft requires a non-empty na_rationale")
+
+
+def _validate_finding_slot_draft(value: _SlotProviderDraft) -> None:
+    """Require at least one finding for a non-N/A slot."""
+    if not value.findings:
+        raise ValueError("non-N/A ICA draft requires at least one finding")
+
+
+_SlotProviderPayload.model_rebuild()
 
 
 @lru_cache(maxsize=16)
@@ -361,16 +452,30 @@ def _slot_provider_payload_type(
     required_pair_count: int,
 ) -> type[_Model]:
     """Build a provider payload constrained to one request's exact counts."""
-    if type(slot_count) is not int or slot_count <= 0:
-        raise ValueError("slot_count must be a positive integer")
-    if type(required_pair_count) is not int or required_pair_count < 0:
-        raise ValueError("required_pair_count must be a non-negative integer")
-    filled_slots = conlist(SlotIcaDraft, min_length=slot_count, max_length=slot_count)
+    _require_positive_count(slot_count, "slot_count")
+    _require_non_negative_count(required_pair_count, "required_pair_count")
+    filled_slots = conlist(
+        _SlotProviderDraft,
+        min_length=slot_count,
+        max_length=slot_count,
+    )
     return create_model(
         f"_SlotProviderPayload{slot_count}Pairs{required_pair_count}",
         __base__=_SlotProviderPayload,
         filled_slots=(filled_slots, ...),
     )
+
+
+def _require_positive_count(value: int, name: str) -> None:
+    """Reject booleans and non-positive dynamic-schema counts."""
+    if type(value) is not int or value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+
+
+def _require_non_negative_count(value: int, name: str) -> None:
+    """Reject booleans and negative dynamic-schema counts."""
+    if type(value) is not int or value < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
 
 
 def _required_pair_keys(
@@ -393,40 +498,77 @@ def _validate_slot_provider_payload(
     request: SynthesisSlotRequest,
 ) -> None:
     """Require exact identities and compile-safe slot/pair semantics."""
-    actual_slot_ids = {slot.slot_id for slot in payload.filled_slots}
-    if actual_slot_ids != expected_slot_ids:
-        missing = sorted(expected_slot_ids - actual_slot_ids)
-        unexpected = sorted(actual_slot_ids - expected_slot_ids)
-        raise ValueError(
-            "slot response must contain exactly the supplied slot IDs"
-            f" (missing={missing}, unexpected={unexpected})"
-        )
-    actual_pair_keys: set[tuple[str, str, str]] = set()
-    # Strict structured slot drafts carry obligation decisions beside their
-    # findings. Resolve those request-local handles to the exact route key
-    # supplied to this target; the provider never supplies a derived route ID
-    # in that nested shape.
+    actual_slot_ids = frozenset(slot.slot_id for slot in payload.filled_slots)
+    _require_exact_id_set(
+        actual_slot_ids,
+        expected_slot_ids,
+        "slot response must contain exactly the supplied slot IDs",
+    )
+    actual_pair_keys = _provider_pair_keys(payload, expected_pair_keys)
+    _require_exact_id_set(
+        actual_pair_keys,
+        expected_pair_keys,
+        "slot response must contain exactly the required routed pair keys",
+    )
+    _compile_slot_payload(payload, request)
+
+
+def _provider_pair_keys(
+    payload: _Model,
+    expected_pair_keys: frozenset[tuple[str, str, str]],
+) -> frozenset[tuple[str, str, str]]:
+    """Resolve provider-local obligation handles to supplied route identities."""
     route_by_pair = {
         (obligation_id, slot_id): route_id
         for route_id, obligation_id, slot_id in expected_pair_keys
     }
+    actual: set[tuple[str, str, str]] = set()
     for entry in payload.filled_slots:
-        if not isinstance(entry, SlotIcaDraft):
-            continue
         for result in entry.consideration_results:
             route_id = route_by_pair.get((result.obligation_handle, entry.slot_id))
             if route_id is not None:
-                actual_pair_keys.add(
-                    (route_id, result.obligation_handle, entry.slot_id)
-                )
-    if actual_pair_keys != expected_pair_keys:
-        missing = sorted(expected_pair_keys - actual_pair_keys)
-        unexpected = sorted(actual_pair_keys - expected_pair_keys)
-        raise ValueError(
-            "slot response must contain exactly the required routed pair keys"
-            f" (missing={missing}, unexpected={unexpected})"
+                actual.add((route_id, result.obligation_handle, entry.slot_id))
+    return frozenset(actual)
+
+
+def _require_exact_id_set(actual: frozenset, expected: frozenset, message: str) -> None:
+    """Raise one stable diagnostic for a closed identity-set mismatch."""
+    if actual != expected:
+        missing = sorted(expected - actual)
+        unexpected = sorted(actual - expected)
+        raise ValueError(f"{message} (missing={missing}, unexpected={unexpected})")
+
+
+def _materialize_slot_draft(
+    value: _SlotProviderDraft,
+    expected: SlotPlaceholder,
+) -> SlotIcaDraft:
+    """Bind provider prose to the authoritative UCA type of one exact slot."""
+    field_name = {
+        "NOT_PROVIDED": "not_provided_context",
+        "INCORRECT": "incorrect_value_or_effect",
+        "WRONG_TIMING": "timing_deviation",
+        "WRONG_DURATION": "duration_deviation",
+    }[expected.uca_type.value]
+    findings = tuple(
+        IcaFindingDraft(
+            deviation=IcaDeviationDraft.model_validate({field_name: finding.deviation}),
+            hazardous_context=finding.hazardous_context,
+            loss_consequence=finding.loss_consequence,
+            related_hazard_ids=finding.related_hazard_ids,
+            related_constraint_ids=finding.related_constraint_ids,
+            process_model_refs=finding.process_model_refs,
+            feedback_refs=finding.feedback_refs,
         )
-    _compile_slot_payload(payload, request)
+        for finding in value.findings
+    )
+    return SlotIcaDraft(
+        slot_id=value.slot_id,
+        is_na=value.is_na,
+        na_rationale=value.na_rationale,
+        findings=findings,
+        consideration_results=value.consideration_results,
+    )
 
 
 def _compile_slot_payload(
@@ -435,6 +577,7 @@ def _compile_slot_payload(
 ) -> tuple[dict[str, ICASlot], tuple[ObligationIcaConsideration, ...]]:
     """Compile one validated provider payload at the retry boundary."""
     slots: dict[str, ICASlot] = {}
+    drafts: list[SlotIcaDraft] = []
     for value in payload.filled_slots:
         expected = next(
             (item for item in request.slots if item.slot_id == value.slot_id),
@@ -442,15 +585,17 @@ def _compile_slot_payload(
         )
         if expected is None:
             raise ValueError(f"slot response references unknown slot {value.slot_id}")
+        draft = _materialize_slot_draft(value, expected)
+        drafts.append(draft)
         slots[value.slot_id] = compile_slot_provider_entry(
-            value,
+            draft,
             slot=expected,
             loss_analysis=request.loss_analysis,
             control_structure=request.control_structure,
         )
     structured_response = SynthesisSlotResponse(
         request_digest=request.semantic_digest,
-        filled_slots=tuple(payload.filled_slots),
+        filled_slots=tuple(drafts),
     )
     considerations = _draft_considerations(
         structured_response,
@@ -498,16 +643,13 @@ class ObligationAwareLLMAdapter:
             control_structure=request.control_structure,
             slots=request.slots,
         )
-        if correction_feedback:
-            user_prompt += f"\nValidation correction:\n{correction_feedback}\n"
+        user_prompt = _with_correction_feedback(user_prompt, correction_feedback)
         _preflight(
             view=routing_view,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             stage="obligation-routing",
-            handles=tuple(
-                item.obligation_handle for item in routing_view.obligation_questions
-            ),
+            handles=_routing_prompt_handles(routing_view),
             stage_max_completion_tokens=_SYNTHESIS_MAX_COMPLETION_TOKENS,
             client=self.llm_client,
             controls=request.controls,
@@ -658,10 +800,8 @@ class ObligationAwareLLMAdapter:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             stage="obligation-ica",
-            handles=(
-                request.target_id,
-                *(item.obligation_handle for item in target_questions),
-                *(item.route_handle for item in target_routes),
+            handles=_slot_prompt_handles(
+                request.target_id, target_questions, target_routes
             ),
             stage_max_completion_tokens=_SYNTHESIS_SLOT_MAX_COMPLETION_TOKENS,
             client=self.llm_client,
@@ -708,8 +848,8 @@ class ObligationAwareLLMAdapter:
                 "route/obligation/slot pair exactly once. For each slot, set "
                 "is_na=false only with a non-empty findings array and no "
                 "na_rationale; set is_na=true only with an empty findings array "
-                "and a non-empty na_rationale. Use exactly the deviation field "
-                "named for that slot's UCA type, and correct the exact semantic "
+                "and a non-empty na_rationale. Return one plain deviation string "
+                "for each finding, and correct the exact semantic "
                 "validation error reported above."
             ),
         )

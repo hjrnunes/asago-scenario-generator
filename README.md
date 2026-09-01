@@ -185,6 +185,26 @@ does not change the separate obligation/STPA accounting result.
 The report is explicitly provisional: Phase 2 verification and human review
 are not required for this run.
 
+At model boundaries, code retains control of structural identity. The ICA
+provider returns one deviation sentence and code applies the supplied slot's
+exact unsafe-control category. Scenario reasoning selects explained local
+causal handles; code maps those handles to valid process-model, feedback, or
+control-action sources. It also returns exactly one vulnerability for each
+supplied local defender-belief handle, which code maps back to the selected
+process-model identity. The model cannot omit a selected defender belief,
+publish a coordination/controller ID as a causal source, or invent its own
+factor kind. A scenario may describe an adversary taking advantage of an
+existing STPA failure even when no separate attacker capability was
+enumerated. Exact capability and access-path claims remain structured
+evidence: if supplied, they must resolve to the immutable context. Free-text
+verb matching is not a publication gate. An obligation finding means STPA
+found a related unsafe-control path; the taxonomy pattern name, concern, and
+rationale remain analysis provenance rather than proof that its attack
+mechanism occurred. ICA and scenario text may use that mechanism only when the
+STPA structure or exact capability/access evidence independently supports it.
+Attack-tree templates use neutral stale, missing, late, or inaccurate-state
+causes so they do not seed poisoning or tool-fabrication claims.
+
 Publish a deterministic obligation ledger from a pinned snapshot without
 contacting an LLM endpoint:
 

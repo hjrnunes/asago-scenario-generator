@@ -117,6 +117,25 @@ changing acceptance behavior, or running the quality sequence.
   inventing an aggregate status. Add no Phase 3 CLI or report, infer no targets
   from the lineage audit, and leave ordinary generation workflows unaware of
   Phase 3.
+- Keep obligation-aware synthesis advisory: every applicable obligation is
+  considered, but it never forces an ICA or scenario. At provider boundaries,
+  deterministic code owns structural categories and identities. ICA providers
+  return one plain deviation sentence for each supplied slot; the compiler
+  applies that slot's exact UCA category. Stage 5 providers select only
+  explained request-local causal handles, which the compiler binds to fixed
+  PM/FB/CA sources and kinds, and return exactly one vulnerability for every
+  compiler-owned local defender-belief handle. Coordination, controller,
+  controlled-process, and local-handle identities must never be published as
+  causal sources, and every intention handle must have an explicit
+  causal-factor declaration. Validate capability and access-path claims from
+  exact typed causal evidence. Do not treat ordinary adversarial wording, such
+  as taking advantage of a timing gap, as proof of a new access path or use a
+  free-text verb blacklist as a scenario-publication gate. Treat obligation
+  pattern names, concerns, and rationales as analysis provenance, not causal
+  evidence: a finding links the concern to an unsafe-control path but does not
+  establish the taxonomy attack mechanism. Keep ICA text and attack-tree
+  templates mechanism-neutral unless exact structural or capability/access
+  evidence independently supports the mechanism.
 - Keep Phase 4 Task 1 at the typed, offline
   `resolve_hybrid_projection_units` boundary. Accept one closed
   `HybridProjectionInputs` graph assembled only through exact artifact

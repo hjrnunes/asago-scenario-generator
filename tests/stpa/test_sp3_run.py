@@ -149,7 +149,7 @@ def _setup_mock_client(num_threats: int = 2) -> MockLLMClient:
                 ).AttackerBDI(
                     beliefs=[f"attacker belief {i + 1}"],
                     desires=["induce ICA"],
-                    intentions=["poison PM-1-1 via FB-1-1"],
+                    intentions=["Exploit stale PM-1-1 state before CA-1-1."],
                 ),
             )
         )
@@ -162,7 +162,7 @@ def _setup_mock_client(num_threats: int = 2) -> MockLLMClient:
         # Narrative (raw text)
         stage6_responses.append(
             "Step 1: The defender process model starts correct.\n"
-            "Step 2: The attacker manipulates FB-1-1.\n"
+            "Step 2: The adversary exploits the stale PM-1-1 window.\n"
             "Step 3: The process model PM-1-1 diverges.\n"
             "Step 4: The defender acts on false beliefs.\n"
             "Step 5: The ICA occurs.\n"
@@ -186,7 +186,7 @@ def _setup_mock_client(num_threats: int = 2) -> MockLLMClient:
                             "children": [],
                         },
                     ],
-                    "leaves": ["Poison PM-1-1 via FB-1-1", "Tool fails"],
+                    "leaves": ["Replay stale FB-1-1 state", "Tool fails"],
                 }
             )
         )
@@ -197,7 +197,7 @@ def _setup_mock_client(num_threats: int = 2) -> MockLLMClient:
             "given:\n"
             "  - Given PM-1-1 is in a valid state\n"
             "when:\n"
-            "  - When the attacker sends a malicious request\n"
+            "  - When PM-1-1 remains stale during the request\n"
             "then_expected:\n"
             "  - Then the system should reject the request\n"
             "then_actual:\n"
@@ -247,12 +247,16 @@ class TestFullRun:
         context = result.scenario_specs[0].scenario_context
         assert context is not None
         stage5 = [
-            call for call in client.calls if call.response_format is BDIGenerationResult
+            call
+            for call in client.calls
+            if call.response_format is not None
+            and issubclass(call.response_format, BDIGenerationResult)
         ]
         stage6 = [
             call
             for call in client.calls
-            if call.response_format is not BDIGenerationResult
+            if call.response_format is None
+            or not issubclass(call.response_format, BDIGenerationResult)
         ]
         assert len(stage5) == 1
         assert len(stage6) == 3
@@ -675,7 +679,7 @@ class TestErrorPaths:
             ).AttackerBDI(
                 beliefs=["b"],
                 desires=["d"],
-                intentions=["Manipulate PM-1-1."],
+                intentions=["Rely on stale PM-1-1 state."],
             ),
         )
         client.set_response_queue([bdi])
@@ -759,7 +763,7 @@ class TestErrorPaths:
                     ).AttackerBDI(
                         beliefs=["b"],
                         desires=["d"],
-                        intentions=["Manipulate PM-1-1."],
+                        intentions=["Rely on stale PM-1-1 state."],
                     ),
                 ),
                 "A seven-step narrative retaining PM-1-1 and CA-1-1.",

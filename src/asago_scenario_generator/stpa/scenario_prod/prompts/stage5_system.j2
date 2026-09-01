@@ -31,10 +31,12 @@ causal factor with one evidence status:
   never as established access or evidence.
 
 When `reachable_capabilities` is empty, no attacker-access path is established.
-Do not force an active attacker manipulation. The attacker BDI may describe
-how the existing structural condition would lead to the selected ICA, or may
-use a clearly labelled bounded assumption, but it must not present an invented
-feedback, transport, tool, audit, or input path as fact.
+That does not make the adversarial scenario invalid. The attacker BDI may
+describe how an adversary takes advantage of the existing structural
+condition—for example, by relying on a stale decision state or timing an
+ordinary interaction to a known gap—without claiming a new privileged access
+path. It may also use a clearly labelled bounded assumption. It must not
+present an invented feedback, transport, tool, audit, or input path as fact.
 
 ## Defender-Attacker Interaction Model
 

@@ -27,6 +27,7 @@
 ---
 
 {% include "_stage6_projection_alignment.j2" %}
+{% include "_obligation_evidence_boundary.j2" %}
 ## Your Task
 
 Produce a Gherkin behavior specification using the should/but structure defined in the system prompt.
@@ -42,8 +43,9 @@ Produce a Gherkin behavior specification using the should/but structure defined 
    `reachable_capabilities: []`, no attacker-access path is established: do
    not claim that an attacker suppresses or manipulates feedback, poisons an
    audit output, injects guidelines, or uses a tool/input surface. Describe
-   the existing structural condition that produces the ICA. Active
-   manipulation requires the exact capability and access references from the
-   context; label every bounded assumption explicitly.
+   the existing structural condition and how the adversary takes advantage of
+   it. Taking advantage of that condition does not itself assert access.
+   Active manipulation requires the exact capability and access references
+   from the context; label every bounded assumption explicitly.
 
 Return one JSON object with fields: feature, scenario, given (list), when (list), then_expected (list), then_actual (list).

@@ -115,20 +115,21 @@ class MockLLMClient:
         self.calls.append(call)
 
         # Raise exception if configured for this response_format
-        if response_format in self._exception_response_types:
-            raise self._exception_response_types[response_format]
+        exception = self._compatible_value(
+            response_format, self._exception_response_types
+        )
+        if exception is not None:
+            raise exception
 
         # Determine which response to return
         if self._response_queue:
             content = self._response_queue.pop(0)
-        elif (
-            response_format is not None
-            and response_format in self._invalid_response_types
-        ):
+        elif self._compatible_type(response_format, self._invalid_response_types):
             # Return a non-JSON string that will fail parsing/validation
             content = "THIS_IS_NOT_VALID_JSON{{{"
-        elif response_format is not None and response_format in self._response_map:
-            mapped = self._response_map[response_format]
+        elif (
+            mapped := self._compatible_value(response_format, self._response_map)
+        ) is not None:
             if isinstance(mapped, list):
                 if mapped:
                     content = mapped.pop(0)
@@ -149,6 +150,26 @@ class MockLLMClient:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
         )
+
+    @staticmethod
+    def _compatible_type(model_class: type | None, configured: set[type]) -> bool:
+        """Match exact or provider-specialized subclasses in deterministic tests."""
+        return bool(
+            model_class
+            and any(issubclass(model_class, candidate) for candidate in configured)
+        )
+
+    @staticmethod
+    def _compatible_value(model_class: type | None, configured: dict[type, Any]) -> Any:
+        """Return the exact or nearest configured base response value."""
+        if model_class in configured:
+            return configured[model_class]
+        if model_class is None:
+            return None
+        for candidate, value in configured.items():
+            if isinstance(candidate, type) and issubclass(model_class, candidate):
+                return value
+        return None
 
     @property
     def call_count(self) -> int:

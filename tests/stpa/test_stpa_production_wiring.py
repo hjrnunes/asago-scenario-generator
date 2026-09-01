@@ -140,7 +140,7 @@ class TestStage5EvidenceBackedSelection:
                 _declare(
                     CausalFactorKind.process_model_flaw,
                     "PM-1-1",
-                    evidence="model diverges after injection",
+                    evidence="model remains stale before action selection",
                 ),
                 _declare(
                     CausalFactorKind.feedback_delay,
@@ -152,7 +152,7 @@ class TestStage5EvidenceBackedSelection:
         first, second = spec.causal_factors
         assert first.kind == CausalFactorKind.process_model_flaw
         assert first.source_id == "PM-1-1"
-        assert first.description == "model diverges after injection"
+        assert first.description == "model remains stale before action selection"
         assert second.kind == CausalFactorKind.feedback_delay
         assert second.source_id == "FB-1-1"
         assert second.description == "state updates lag"
@@ -596,7 +596,7 @@ class TestRunSp3ProductionWiring:
                 ),
                 (
                     "Step 1: The defender process model starts correct.\n"
-                    "Step 2: The attacker manipulates FB-1-1.\n"
+                    "Step 2: Feedback FB-1-1 arrives late.\n"
                     "Step 3: The process model PM-1-1 diverges.\n"
                     "Step 4: The defender acts on false beliefs.\n"
                     "Step 5: The ICA occurs.\n"
@@ -618,7 +618,7 @@ class TestRunSp3ProductionWiring:
                                 "children": [],
                             },
                         ],
-                        "leaves": ["Poison PM-1-1"],
+                        "leaves": ["PM-1-1 remains stale"],
                     }
                 ),
                 (
@@ -627,7 +627,7 @@ class TestRunSp3ProductionWiring:
                     "given:\n"
                     "  - Given PM-1-1 is in a valid state\n"
                     "when:\n"
-                    "  - When the attacker sends a malicious request\n"
+                    "  - When PM-1-1 remains stale before CA-1-1\n"
                     "then_expected:\n"
                     "  - Then the system should reject the request\n"
                     "then_actual:\n"

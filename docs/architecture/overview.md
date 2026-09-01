@@ -241,9 +241,33 @@ provider-reported usage.
 Scenario generation receives one immutable `ScenarioGenerationContext` per
 ICA. It contains only the selected loss, hazard, governing constraint, unsafe
 action, obligation concern, and causal evidence. Stage 5 must retain the
-selected concern and establish at least one causal factor. All Stage 6
-renderers consume that same context, so an unrelated global constraint cannot
-leak into a scenario.
+selected concern and establish at least one causal factor. The model selects
+only request-local causal handles; the deterministic adapter binds each handle
+to its fixed factor kind and exact PM/FB/CA source. Coordination and controller
+IDs remain explained context but cannot be published as causal-factor sources,
+and every attacker intention must cite a handle with a declared factor.
+Defender vulnerabilities use a second closed local-handle list with exact
+cardinality, so the provider cannot omit a selected process-model belief or
+replace its identity. All Stage 6 renderers consume that same context, so an
+unrelated global constraint cannot leak into a scenario. An adversary may take
+advantage of a declared structural failure without that prose being mistaken
+for a new access path. Capability and access-path assertions are validated
+through the typed causal evidence fields against the immutable context;
+free-text verb matching is not a publication gate. Obligation pattern names,
+concerns, and rationales are analysis provenance: `finding` means that STPA
+found a related unsafe-control path, not that the taxonomy mechanism happened.
+The ICA keeps the unsafe control condition mechanism-neutral unless the compact
+STPA structure independently supplies that mechanism, and later scenario
+renderers may use a mechanism only from exact causal or capability/access
+evidence. The attack-tree hard template therefore starts from stale, missing,
+late, or inaccurate state rather than pre-seeding poisoning, injection, or
+fabricated-tool-result leaves.
+
+Obligation-aware ICA filling follows the same ownership rule. The provider
+returns one plain deviation sentence for a supplied slot; it does not choose a
+deviation field or UCA category. The deterministic compiler applies the exact
+`NOT_PROVIDED`, `INCORRECT`, `WRONG_TIMING`, or `WRONG_DURATION` category from
+the authoritative slot before validating and publishing the ICA.
 
 The root atomically publishes `taxonomy-obligation-plan.yaml`,
 `obligation-consideration.yaml`, `obligation-accounting.yaml`,

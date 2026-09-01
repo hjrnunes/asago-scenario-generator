@@ -1,0 +1,76 @@
+You are analysing why one exact unsafe control action can occur in an agentic
+AI system.
+
+The immutable scenario context owns every system identity. You author the
+causal explanation and attacker/defender reasoning; deterministic code maps
+request-local source handles to the exact structural IDs.
+
+## Evidence rules
+
+- `structural_failure` describes an existing stale, missing, incorrect,
+  mistimed, or otherwise inadequate control-loop condition. It does not prove
+  attacker access. Leave capability and access references empty.
+- `reachable_capability` is allowed only when the immutable context contains
+  the exact capability and access path. Copy those references exactly.
+- `bounded_assumption` states an uncertain connection. Supply a short
+  `bounded_assumption`; do not present it as established access.
+- With no reachable capability, do not invent manipulation, interception,
+  injection, poisoning, credential theft, flooding, or another access path.
+  The adversary may still take advantage of a declared stale state, omission,
+  wrong decision, or timing gap; that is not itself a claim of new access.
+
+## Taxonomy obligation boundary
+
+An obligation consideration explains why STPA examined this ICA. It is
+analysis provenance, not causal evidence. A `finding` means STPA found a
+related unsafe-control path; it does not prove that the taxonomy attack
+mechanism occurred. In particular, a poisoned-persistent-memory obligation
+does not establish that persistent memory was poisoned. Do not copy a prompt
+injection, memory poisoning, spoofing, tool-abuse, or other mechanism from an
+obligation's name, `concise_concern`, or `rationale` into the causal factors or
+attacker BDI. Such a mechanism is allowed only when it is independently
+supported by an exact reachable capability/access path or is declared as a
+bounded assumption. Otherwise describe the mechanism-neutral structural
+failure that makes the selected control action unsafe.
+
+## Closed output
+
+Return one JSON object with:
+
+```json
+{
+  "defender_vulnerabilities": [
+    {
+      "belief_handle": "belief_1",
+      "vulnerability": "concise vulnerability grounded in the selected ICA"
+    }
+  ],
+  "attacker_bdi": {
+    "beliefs": ["what follows from the supplied context"],
+    "desires": ["the supplied unsafe action the attacker wants to induce"],
+    "intentions": [
+      {
+        "description": "how the selected condition leads toward the ICA",
+        "source_handles": ["cause_1"]
+      }
+    ]
+  },
+  "causal_factors": [
+    {
+      "source_handle": "cause_1",
+      "evidence": "plain evidence connecting this condition to the ICA",
+      "timing": null,
+      "evidence_status": "structural_failure",
+      "capability_refs": [],
+      "access_refs": [],
+      "bounded_assumption": null
+    }
+  ]
+}
+```
+
+Every defender vulnerability must select one supplied belief handle. Every
+causal factor and attacker intention must select at least one supplied source
+handle. Never return PM-*, FB-*, CA-*, RESP-*, CL-*, CM-*, or CP-* identities
+in an identity field. Do not return a replacement ICA, action, target, hazard,
+loss, constraint, obligation, capability, source ID, or factor kind.

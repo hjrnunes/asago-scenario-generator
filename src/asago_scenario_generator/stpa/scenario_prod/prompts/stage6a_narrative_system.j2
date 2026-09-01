@@ -41,7 +41,9 @@ The narrative MUST follow these 7 steps in order:
   actually supported; otherwise track the defender's structural condition
   without inventing an attacker-access path.
 - Be specific about which structural elements (PM-*, FB-*, CA-*) are involved at each step.
-- No reachable capability means no attacker manipulation claim. Any
+- No reachable capability means no invented interface or privilege. The
+  narrative may still explain how an adversary takes advantage of the
+  declared stale state, omission, wrong decision, or timing gap. Any
   bounded_assumption must be labelled in the prose.
 - The narrative should be prose, not bullet points.
 - Each step should be a distinct paragraph or section.
@@ -61,6 +63,8 @@ retrieved-content poisoning, tool-result fabrication, memory poisoning,
 agent-message tampering, and model-output manipulation.
 
 Do not invent packet interception, MITM (man-in-the-middle access), network delay, traffic blocking, network-signal spoofing, communication-link severing, credential theft, account takeover, session hijacking/fixation, or generic flooding/DoS (denial of service). Such a mechanism is permitted only when the supplied architecture explicitly declares the transport or session surface attacker-accessible and the scenario records that evidence.
+
+{% include "_obligation_evidence_boundary.j2" %}
 
 {% include "_stage6_projection_alignment.j2" %}
 ## Output Format

@@ -1217,25 +1217,21 @@ draft per supplied slot. Use each slot_id as an opaque handle and copy it unchan
 
 The ordinary STPA method requires a hazardous context, a loss consequence, exact hazard and
 governing-constraint references, and process-model or feedback references where relevant.
-For each finding return exactly one type-specific deviation field:
-`not_provided_context` for NOT_PROVIDED, `incorrect_value_or_effect` for INCORRECT,
-`timing_deviation` for WRONG_TIMING, or `duration_deviation` for WRONG_DURATION. The
-deterministic compiler supplies the authoritative controller and control-action prose; do
-not rewrite those identities. A routed obligation is advisory: it may result in a finding,
+For each finding return one non-empty `deviation` string describing how the supplied control
+action is unsafe for that slot's stated UCA type. Do not return a deviation category or any
+alternative deviation fields. The deterministic compiler owns the slot's exact UCA type and
+supplies the authoritative controller and control-action prose; do not rewrite those
+identities. A routed obligation is advisory: it may result in a finding,
 proposed_not_applicable with complete structural evidence, or unresolved. A route never
 forces an ICA finding and no consideration may claim taxonomy coverage.
-
-The `deviation` object must have exactly one property and must omit the other three:
-NOT_PROVIDED -> `{{"not_provided_context":"..."}}`; INCORRECT ->
-`{{"incorrect_value_or_effect":"..."}}`; WRONG_TIMING ->
-`{{"timing_deviation":"..."}}`; WRONG_DURATION ->
-`{{"duration_deviation":"..."}}`. Do not return the unused properties as null or empty.
 
 For N/A use `is_na=true`, a non-empty `na_rationale` citing a complete structural
 property, and no findings. For an unsafe-control result use `is_na=false`,
 `na_rationale=null`, and at least one structured item in `findings`. Do not return the
 legacy `responsibility`, `control_action`, `uca_type`, or `icas` fields. Do not return
-final ICA IDs, EXEC identities, or replacement controller/action text.
+final ICA IDs, EXEC identities, or replacement controller/action text. Each finding
+must select exactly one supplied governing constraint that governs its selected hazard;
+do not return several constraints and leave the Gherkin should-clause ambiguous.
 
 For every item under `Required routed consideration pairs`, put exactly one result in
 the matching slot's `consideration_results` array:
@@ -1255,9 +1251,25 @@ and are resolved locally, so they are not output fields.
 
 An ICA finding is a system-specific scenario hypothesis about unsafe control behavior;
 it is not proof that the current control already recognizes or names the taxonomy attack
-technique. Choose `finding` when the known concern is a concrete way the same supplied
-control action can be absent, incorrect, mistimed, or misapplied and can lead to the same
-hazard. For example, an input-manipulation concern can select a finding in which the
+technique. The routed taxonomy mechanism is not established evidence. The `deviation` and
+`hazardous_context` must describe the unsafe control or system condition in mechanism-neutral
+terms. Do not copy a mechanism such as prompt injection, poisoned persistent memory, spoofing,
+or tool abuse from the obligation question unless the compact target STPA index independently
+supplies that exact mechanism or access path. Put the relationship between the obligation and
+the unsafe-control finding in the consideration `rationale`; do not put an unsupported attack
+story into the ICA itself. Bad: `when an adversary uses poisoned persistent memory`. Good:
+`the current authorization is not revalidated after stored context changes the requested
+action`.
+
+Choose `finding` when the known concern is a concrete way the same supplied control action can
+be absent, incorrect, mistimed, or misapplied and can lead to the same hazard. A `finding`
+records that system-specific unsafe-control relationship; it does not establish that the
+taxonomy mechanism occurred. Compare the concern and finding by subject, operation, affected object, and effect.
+Shared words such as `value`, `input`, `parameter`, or `threshold` are not mechanism evidence:
+a detector's score threshold is not tool-call parameter pollution, for example. A memory
+concern requires a supplied storage-and-reuse path; an endpoint-exfiltration concern requires
+a supplied outbound-call path. When the required operation or path is absent, choose
+`unresolved` and name it. For example, an input-manipulation concern can select a finding in which the
 system fails to block a malicious input even if the present control description does not
 name that precise manipulation technique. Choose `unresolved` instead when the concern
 requires another control path (for example, a tool-execution concern routed only to an
@@ -1265,12 +1277,12 @@ input filter), an unsupplied access path, or another missing system fact. State 
 missing path or fact in the rationale.
 
 The structured slot-draft fields are `slot_id`, `is_na`, `na_rationale`, `findings`, and
-`consideration_results`; each finding contains `deviation`, `hazardous_context`,
+`consideration_results`; each finding contains the plain string `deviation`, `hazardous_context`,
 `loss_consequence`, `related_hazard_ids`, `related_constraint_ids`, `process_model_refs`,
 and `feedback_refs`. A finding consideration contains `obligation_handle`,
 `disposition`, `finding_indexes`, and `rationale`. Valid example:
 {{"filled_slots":[{{"slot_id":"<slot_id>","is_na":false,"na_rationale":null,
-"findings":[{{"deviation":{{"not_provided_context":"the required action is absent"}},
+"findings":[{{"deviation":"the required action is absent",
 "hazardous_context":"the supplied hazardous context","loss_consequence":"the supplied
 loss consequence occurs","related_hazard_ids":["<hazard_id>"],
 "related_constraint_ids":["<constraint_id>"],"process_model_refs":[],

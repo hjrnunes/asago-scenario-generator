@@ -15,6 +15,9 @@ import yaml
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
 from asago_scenario_generator.stpa.models.scenario_spec import AttackerBDI
+from asago_scenario_generator.stpa.models.scenario_context import (
+    ScenarioObligationConsideration,
+)
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     BDIGenerationResult,
@@ -179,3 +182,67 @@ def test_empty_reachability_prompt_allows_structural_condition_without_attack() 
     assert "no reachable capabilities" in combined
     assert "do not claim" in combined or "do not describe" in combined
     assert "existing structural condition" in combined
+
+
+def test_obligation_mechanism_is_provenance_not_causal_evidence() -> None:
+    """A taxonomy finding selects the ICA but cannot establish its attack story."""
+    threat = _threat()
+    context = build_scenario_generation_context(
+        threat,
+        _control_structure(),
+        _loss_analysis(),
+        scenario_id="SCN-001",
+        obligation_considerations=(
+            ScenarioObligationConsideration(
+                obligation_id="ob:v1:" + "a" * 64,
+                attack_pattern_id="AP-T2-04",
+                attack_pattern_name="Poisoned persistent memory",
+                concise_concern=(
+                    "An adversary poisons persistent memory so later decisions use "
+                    "attacker-controlled state."
+                ),
+                disposition="finding",
+                rationale=(
+                    "The selected ICA is a system-specific unsafe-control path "
+                    "related to the concern."
+                ),
+                finding_ica_id=threat.ica_id,
+            ),
+        ),
+    )
+    loader = TemplateLoader(PROMPTS_DIR)
+    stage5_system, stage5_user = build_context_bdi_prompts(context, loader)
+    spec = _contextual_spec().model_copy(update={"scenario_context": context})
+    constraint = find_security_constraint(spec, _loss_analysis())
+    stage6_prompts = (
+        *build_narrative_prompts(spec, loader),
+        *build_attack_tree_prompts(spec, _control_structure(), loader),
+        *build_gherkin_prompts(spec, constraint, _loss_analysis(), loader),
+    )
+
+    assert "analysis provenance, not causal evidence" in " ".join(stage5_user.split())
+    assert "finding` means STPA found a related unsafe-control path" in " ".join(
+        stage5_user.split()
+    )
+    assert "does not establish that persistent memory was poisoned" in " ".join(
+        stage5_system.split()
+    )
+    for prompt in stage6_prompts:
+        assert "not causal evidence" in " ".join(prompt.split())
+
+
+def test_attack_tree_template_does_not_seed_unsupported_active_mechanisms() -> None:
+    """The hard template must not invite active attacks for structural failures."""
+    system_prompt, _user_prompt = build_attack_tree_prompts(
+        _contextual_spec().model_copy(
+            update={"scenario_context": _empty_reachability_context()}
+        ),
+        _control_structure(),
+        TemplateLoader(PROMPTS_DIR),
+    )
+
+    assert "Poison PM via feedback channel" not in system_prompt
+    assert "Attack feedback channel" not in system_prompt
+    assert "Fabricate a tool result [FB-*]" not in system_prompt
+    assert "Poison PM-1-1 via FB-1-1" not in system_prompt
+    assert "Process-model state diverges through FB-*" in system_prompt

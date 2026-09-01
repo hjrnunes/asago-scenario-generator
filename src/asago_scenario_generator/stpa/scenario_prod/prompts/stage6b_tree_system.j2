@@ -14,24 +14,16 @@ The root node MUST use the exact ICA type enum value from the scenario seed. For
 Root: Induce ICA [type] on [control action]
 │
 ├── controller_side (WHY THE UCA OCCURS — controller-side causes)
-│   ├── Corrupt process model
-│   │   ├── Poison PM via feedback channel [FB-*]
-│   │   ├── Exploit PM staleness window
-│   │   ├── Inject false beliefs via entry point
-│   │   ├── Escalate/forge authority in PM
-│   │   └── Impersonate authorized controller
+│   ├── Process-model divergence
+│   │   ├── Process-model state is stale or inaccurate [PM-*]
+│   │   ├── Process-model state diverges through FB-*
+│   │   └── Evidence-backed active change (only with exact capability/access evidence)
 │   ├── Inadequate control algorithm
 │   │   ├── Algorithm has design flaw (missing edge case)
-│   │   ├── Algorithm was correct but modified (prompt injection)
 │   │   └── Algorithm conflict (contradictory instructions/policies)
-│   ├── Attack feedback channel
-│   │   ├── Inject instructions through prompt/context input [FB-*]
-│   │   ├── Poison retrieved content [FB-*]
-│   │   ├── Fabricate a tool result [FB-*]
-│   │   ├── Poison memory state [FB-*]
-│   │   ├── Tamper with an agent message [FB-*]
-│   │   ├── Manipulate model output [FB-*]
-│   │   └── Replay stale feedback [FB-*]
+│   ├── Feedback-path condition
+│   │   ├── Feedback is missing, late, stale, or inaccurate [FB-*]
+│   │   └── Evidence-backed active change (only with exact capability/access evidence)
 │   └── Unsafe control input
 │       ├── From higher-level controller (conflicting directives)
 │       └── From peer controller (coordination desynchronization)
@@ -39,18 +31,19 @@ Root: Induce ICA [type] on [control action]
 ├── path_side (WHY CORRECT ACTION IS IMPROPERLY/NOT EXECUTED — path-side causes)
 │   ├── Actuator/executor failure
 │   │   ├── Tool execution fails silently
-│   │   ├── Tool executes with modified parameters
-│   │   └── Tool produces crafted output (tool result fabrication)
-│   ├── Control path compromise
-│   │   └── Infrastructure transport/session mechanism (only with explicit attacker-accessible architecture evidence)
+│   │   ├── Tool executes with incorrect parameters
+│   │   └── Tool produces an invalid result
+│   ├── Control-path condition
+│   │   ├── Existing transport/session state impairs the action
+│   │   └── Evidence-backed compromise (only with explicit attacker-accessible architecture evidence)
 │   └── Controlled process behavior
 │       ├── External system rejects/ignores correct action
 │       ├── External system responds in unexpected state
 │       └── Environment changed since action was decided
 │
-└── coordination_gap (Exploit coordination gap — cross-controller)
-    ├── Desynchronize shared PM between [RESP-X] and [RESP-Y]
-    └── Cause conflicting control actions
+└── coordination_gap (Cross-controller coordination gap)
+    ├── Shared PM differs between [RESP-X] and [RESP-Y]
+    └── Controllers issue conflicting control actions
 ```
 
 ## Pruning Instructions
@@ -71,9 +64,12 @@ Root: Induce ICA [type] on [control action]
   when the factor has an exact `reachable_capability` and matching access
   references in the immutable context.
 - When `reachable_capabilities` is empty, do not force an attacker-manipulation
-  branch. Represent the existing structural condition and its consequence
-  instead. A `bounded_assumption` may be represented only when it is copied
-  and labelled as an assumption; do not present it as established access.
+  branch. Build the causal tree around the adversary taking advantage of the
+  existing structural condition and its consequence. Taking advantage of a
+  stale state, omitted action, wrong decision, or timing gap is allowed and is
+  not by itself a claim of a new access path. A `bounded_assumption` may be
+  represented only when it is copied and labelled as an assumption; do not
+  present it as established access.
 - Every factor or assumption used by a branch or leaf must map to the declared
   Stage 5 causal factors. Do not invent a feedback, audit, guideline, tool,
   input, transport, or session path from a logical channel label.
@@ -94,6 +90,8 @@ agent-message tampering, and model-output manipulation.
 
 Do not invent packet interception, MITM (man-in-the-middle access), network delay, traffic blocking, network-signal spoofing, communication-link severing, credential theft, account takeover, session hijacking/fixation, or generic flooding/DoS (denial of service). Such a mechanism is permitted only when the supplied architecture explicitly declares the transport or session surface attacker-accessible and the scenario records that evidence.
 
+{% include "_obligation_evidence_boundary.j2" %}
+
 {% include "_stage6_projection_alignment.j2" %}
 ## Output Format
 
@@ -106,10 +104,10 @@ branches:
   - category: "controller_side"
     label: "WHY THE UCA OCCURS"
     children:
-      - label: "Corrupt process model"
+      - label: "Process-model divergence"
         children:
-          - label: "Poison PM-1-1 via FB-1-1"
-            details: "Attacker injects false intent data through the feedback channel"
+          - label: "Process-model state diverges through FB-1-1"
+            details: "FB-1-1 supplies stale state, leaving PM-1-1 inaccurate"
   - category: "path_side"
     label: "WHY CORRECT ACTION IS NOT EXECUTED"
     children:
@@ -118,6 +116,6 @@ branches:
           - label: "Tool execution fails silently"
             details: "The selected tool does not execute the intended action"
 leaves:
-  - "Poison PM-1-1 via FB-1-1"
+  - "Process-model state diverges through FB-1-1"
   - "Tool execution fails silently"
 ```

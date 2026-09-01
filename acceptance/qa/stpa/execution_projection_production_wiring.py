@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -214,6 +215,14 @@ def _is_structured(request: dict[str, Any]) -> bool:
     return request.get("response_format") is not None
 
 
+def _is_context_bdi_request(request: dict[str, Any], system_prompt: str) -> bool:
+    """Identify the closed Stage 5 schema without confusing structured Gherkin."""
+    schema_text = json.dumps(request.get("response_format", {}), sort_keys=True)
+    return "request-local source handles" in system_prompt or (
+        '"belief_handle"' in schema_text and '"source_handle"' in schema_text
+    )
+
+
 def _call_type(system_prompt: str) -> str:
     lowered = system_prompt.lower()
     if "attack tree" in lowered:
@@ -223,7 +232,56 @@ def _call_type(system_prompt: str) -> str:
     return "narrative"
 
 
-def _bdi_response() -> dict[str, Any]:
+def _bdi_response(system_prompt: str, user_prompt: str) -> dict[str, Any]:
+    belief_handles = tuple(
+        dict.fromkeys(re.findall(r"belief_handle: (belief_\d+)", user_prompt))
+    )
+    choices = {
+        (kind, source_id): handle
+        for handle, kind, source_id in re.findall(
+            r"source_handle: (cause_\d+)\n\s+kind: ([A-Z_]+)\n\s+source_id: ([A-Z0-9:-]+)",
+            user_prompt,
+        )
+    }
+    factors = [
+        {
+            "source_handle": choices.get(
+                (str(factor["kind"]), str(factor["source_id"])), "cause_999"
+            ),
+            "evidence": factor["evidence"],
+            "timing": factor.get("timing"),
+            "evidence_status": "structural_failure",
+            "capability_refs": [],
+            "access_refs": [],
+            "bounded_assumption": None,
+        }
+        for factor in STATE.causal_factors
+    ]
+    return {
+        "defender_vulnerabilities": [
+            {
+                "belief_handle": handle,
+                "vulnerability": "The selected process-model state can be stale.",
+            }
+            for handle in belief_handles
+        ],
+        "attacker_bdi": {
+            "beliefs": ["The selected process-model state can be stale."],
+            "desires": ["Induce the selected unsafe control action."],
+            "intentions": [
+                {
+                    "description": "Rely on the selected structural condition.",
+                    "source_handles": [factor["source_handle"]],
+                }
+                for factor in factors
+            ],
+        },
+        "causal_factors": factors,
+    }
+
+
+def _historical_bdi_response() -> dict[str, Any]:
+    """Retain the legacy response only for historical direct-interface QA."""
     payload: dict[str, Any] = {
         "defender_vulnerabilities": {
             "PM-1-1": "Parsed intent can be poisoned through FB-1-1.",
@@ -246,8 +304,8 @@ def _narrative_response() -> str:
     return (
         "Step 1: The defender's process model starts correct. "
         "The controller maintains an accurate view of PM-1-1.\n\n"
-        "Step 2: The attacker manipulates a control loop element. "
-        "The attacker injects crafted data through FB-1-1.\n\n"
+        "Step 2: The causal transition occurs. "
+        "Feedback on FB-1-1 is delayed.\n\n"
         "Step 3: The process model diverges from reality. "
         "The corrupted feedback causes PM-1-1 to hold stale information.\n\n"
         "Step 4: The defender acts on false beliefs. "
@@ -274,8 +332,8 @@ def _attack_tree_response() -> str:
                             "label": "Corrupt process model",
                             "children": [
                                 {
-                                    "label": "Poison PM-1-1 via FB-1-1",
-                                    "details": "Attacker injects false data.",
+                                    "label": "PM-1-1 remains stale after FB-1-1 delay",
+                                    "details": "The feedback update arrives late.",
                                 }
                             ],
                         }
@@ -298,7 +356,7 @@ def _attack_tree_response() -> str:
                 },
             ],
             "leaves": [
-                "Poison PM-1-1 via FB-1-1",
+                "PM-1-1 remains stale after FB-1-1 delay",
                 "Tool execution for CA-1-1 fails silently",
             ],
         }
@@ -313,7 +371,7 @@ def _gherkin_response() -> str:
             "given": [
                 "Given the process model state PM-1-1 holds the correct system state"
             ],
-            "when": ["When an attacker injects crafted input into the feedback path"],
+            "when": ["When the FB-1-1 feedback update arrives late"],
             "then_expected": [
                 "Then the system should validate all inputs against the security constraint before executing CA-1-1"
             ],
@@ -340,17 +398,18 @@ class Handler(BaseHTTPRequestHandler):
         size = int(self.headers.get("Content-Length", "0"))
         request = json.loads(self.rfile.read(size) or b"{}")
         STATE.requests.append(request)
-        system_prompt, _user_prompt = _messages(request)
-        if _is_structured(request):
-            content = json.dumps(_bdi_response())
+        system_prompt, user_prompt = _messages(request)
+        call_type = _call_type(system_prompt)
+        if _is_context_bdi_request(request, system_prompt):
+            content = json.dumps(_bdi_response(system_prompt, user_prompt))
+        elif call_type == "gherkin":
+            content = _gherkin_response()
+        elif _is_structured(request):
+            content = json.dumps(_historical_bdi_response())
+        elif call_type == "attack_tree":
+            content = _attack_tree_response()
         else:
-            call_type = _call_type(system_prompt)
-            if call_type == "attack_tree":
-                content = _attack_tree_response()
-            elif call_type == "gherkin":
-                content = _gherkin_response()
-            else:
-                content = _narrative_response()
+            content = _narrative_response()
         body = json.dumps(
             {
                 "id": "chatcmpl-stpa-proj-qa",
@@ -481,9 +540,9 @@ def _call_log(run_dir: Path) -> list[dict[str, Any]]:
 def _stage6_prompts() -> list[str]:
     prompts: list[str] = []
     for request in STATE.requests:
-        if _is_structured(request):
-            continue
         system_prompt, user_prompt = _messages(request)
+        if _is_context_bdi_request(request, system_prompt):
+            continue
         prompts.extend([system_prompt, user_prompt])
     return prompts
 
@@ -587,19 +646,17 @@ def _qa_02(qa: QARunner, work: Path, inputs: dict[str, Path], profiles: Path) ->
     manifest_path = output_dir / "run-manifest.yaml"
     manifest = _load_yaml(manifest_path) if manifest_path.is_file() else {}
     diagnostics = combined + json.dumps(manifest)
-    rejected = (
-        result.returncode != 0
-        or "Causal factor" in diagnostics
-        or any(
-            "Causal factor" in str(error) for error in manifest.get("stage_errors", [])
-        )
-    )
+    rejected = result.returncode != 0 or bool(manifest.get("stage_errors"))
     qa.check(
-        "QA-STPA-PROJ-02 reports causal-factor reference error",
-        rejected and "PM-99-1" in diagnostics,
+        "QA-STPA-PROJ-02 rejects an unknown local causal handle",
+        rejected and "cause_999" in diagnostics,
         diagnostics[-800:],
     )
-    stage6 = [request for request in STATE.requests if not _is_structured(request)]
+    stage6 = [
+        request
+        for request in STATE.requests
+        if not _is_context_bdi_request(request, _messages(request)[0])
+    ]
     qa.check("QA-STPA-PROJ-02 no Stage 6 request", stage6 == [], str(len(stage6)))
     qa.check(
         "QA-STPA-PROJ-02 no projection artifact",

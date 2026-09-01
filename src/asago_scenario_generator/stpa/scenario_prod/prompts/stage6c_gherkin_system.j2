@@ -36,7 +36,8 @@ Scenario: [scenario title]
    `reachable_capabilities` is empty, the `When`/`But` steps must not claim
    that an attacker actively suppresses or manipulates feedback, poisons an
    audit output, injects guidelines, or uses a tool/input surface; describe
-   the structural condition that produces the ICA instead. Active attacker
+   the structural condition and how the adversary takes advantage of it.
+   Taking advantage of that condition does not itself assert access. Active attacker
    manipulation requires the factor's exact reachable capability and access
    references. A bounded assumption must be stated as an assumption.
 
@@ -59,6 +60,8 @@ retrieved-content poisoning, tool-result fabrication, memory poisoning,
 agent-message tampering, and model-output manipulation.
 
 Do not invent packet interception, MITM (man-in-the-middle access), network delay, traffic blocking, network-signal spoofing, communication-link severing, credential theft, account takeover, session hijacking/fixation, or generic flooding/DoS (denial of service). Such a mechanism is permitted only when the supplied architecture explicitly declares the transport or session surface attacker-accessible and the scenario records that evidence.
+
+{% include "_obligation_evidence_boundary.j2" %}
 
 {% include "_stage6_projection_alignment.j2" %}
 ## Output Format

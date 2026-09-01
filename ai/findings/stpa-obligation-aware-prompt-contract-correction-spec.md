@@ -632,15 +632,11 @@ slot_handle
 is_na
 na_rationale
 findings[]
-  deviation
-    not_provided_context          only for NOT_PROVIDED
-    incorrect_value_or_effect     only for INCORRECT
-    timing_deviation              only for WRONG_TIMING
-    duration_deviation            only for WRONG_DURATION
+  deviation                      one plain non-empty sentence
   hazardous_context
   loss_consequence
   related_hazard_ids[]
-  related_constraint_ids[]
+  related_constraint_ids[]       exactly one supplied governing constraint
   process_model_refs[]
   feedback_refs[]
 consideration_results[]
@@ -652,7 +648,9 @@ consideration_results[]
 
 The model does not rewrite the selected controller or control action. The
 deterministic compiler combines the slot's authoritative controller/action
-description with the one type-specific deviation, context, and consequence.
+description with the plain deviation, context, and consequence. The compiler
+places that sentence into the one domain deviation field owned by the slot's
+authoritative UCA category; the provider never selects the category.
 It then allocates ICA IDs and constructs the final `ica_text`. This makes the
 unsafe behavior a consequence of the selected slot rather than free-form
 advice authored by the model. The obligation links remain separate accounting
@@ -665,10 +663,11 @@ policy, or requirement is not an ICA. Statements such as “implement MFA,”
 “ensure validation,” or “add rate limiting” must be rejected or corrected when
 they do not describe what the controller does unsafely.
 
-Exactly one deviation field is permitted and it must correspond to the slot
-type. Validation uses that typed deviation, the authoritative action, context,
-and consequence. A list of suspicious verbs may provide a diagnostic but
-cannot be the sole decision rule.
+Exactly one deviation sentence is required. The compiler maps it to the one
+typed deviation field corresponding to the slot type. Validation uses that
+compiled deviation, the authoritative action, context, and consequence. A
+list of suspicious verbs may provide a diagnostic but cannot be the sole
+decision rule.
 
 A valid finding must:
 
@@ -676,7 +675,7 @@ A valid finding must:
 - express behavior consistent with the slot type;
 - state the circumstances that make it hazardous;
 - state a consequence connected to at least one supplied hazard;
-- use only constraints that govern those hazards;
+- select exactly one supplied constraint that governs those hazards;
 - retain exact structural references; and
 - avoid claiming that a taxonomy obligation is covered.
 
@@ -767,17 +766,32 @@ When the ICA has obligation considerations, they are presented as reasons this
 ICA was selected. They are not instructions to reproduce a taxonomy attack
 chain. A scenario with no obligation remains a normal STPA scenario.
 
+The obligation's pattern name, concise concern, and consideration rationale
+are analysis provenance, not causal evidence. A `finding` means that STPA
+found a related unsafe-control path. It does not establish that the taxonomy
+mechanism occurred. The ICA deviation and hazardous context must describe the
+unsafe control or system condition without copying mechanism-specific wording,
+unless the compact STPA target evidence independently supplies that exact
+mechanism or access path. The consideration rationale records why the concern
+and ICA are related.
+
 ### 12.2 Required causal factors
 
 The Stage 5 output schema must explicitly require `causal_factors`. Each factor
 contains:
 
-- kind;
+- one request-local causal-source handle whose kind and exact source are fixed
+  by the compiler;
 - plain description;
-- exact source references to process-model, feedback, control-action,
-  responsibility, coordination, or controlled-process context;
 - evidence status; and
 - any bounded assumption required to connect it to the ICA.
+
+Only process-model, feedback, and control-action findings are selectable
+causal sources. Responsibility, coordination, and controlled-process IDs stay
+described context and cannot be published as causes. Defender vulnerabilities
+likewise use one request-local belief handle per selected process-model part;
+the closed schema requires every handle exactly once and the compiler restores
+the authoritative `PM-*` identities.
 
 A generated causal scenario requires at least one validated factor. An empty
 default is not a successful scenario. If the model cannot establish a causal
@@ -835,9 +849,21 @@ must not introduce a new primary cause, action, hazard, loss, constraint,
 target, or obligation mechanism. Any extra illustrative detail is explicitly
 labelled as an assumption and cannot become structured evidence.
 
+Capability and access-path claims are validated from typed causal evidence
+against the immutable context. An adversary taking advantage of an existing
+structural failure is not itself a claim of a new access path. Free-text verb
+matching must therefore never decide whether a scenario is published. Prompt
+guidance may flag a newly invented interface for correction, but admission is
+based on the structured causal factor, its exact source, evidence status, and
+any explicit capability/access references.
+
 The attack tree's branches and leaves must map to declared causal-factor IDs or
 to labelled assumptions. The root must express the exact selected unsafe
-outcome.
+outcome. Its hard template must use mechanism-neutral structural labels for
+stale, missing, late, inaccurate, or otherwise inadequate control-loop state.
+It must not seed poisoning, injection, interception, spoofing, tool-result
+fabrication, or another active mechanism as a default example; those labels
+are allowed only when exact evidence supports them.
 
 ### 13.3 Exact constraint resolution
 
@@ -1005,29 +1031,35 @@ Committed acceptance behavior must demonstrate at least the following.
     and governing constraints.
 24. A routed obligation may be proposed N/A or unresolved; it is not forced to
     become a finding.
+25. A finding records the concern-to-ICA relationship without treating the
+    taxonomy mechanism as established causal evidence.
+26. ICA deviation and hazardous-context prose remain mechanism-neutral unless
+    the compact STPA target independently supplies the mechanism.
 
 ### 17.5 Scenario continuity
 
-25. Stage 5 receives the exact ICA statement and described loss, hazard, and
+27. Stage 5 receives the exact ICA statement and described loss, hazard, and
     constraints.
-26. Stage 5 receives only capabilities reachable through the selected path.
-27. A generated scenario contains at least one typed causal factor.
-28. A response that changes the unsafe action, hazard, or obligation concern
+28. Stage 5 receives only capabilities reachable through the selected path.
+29. A generated scenario contains at least one typed causal factor.
+30. A response that changes the unsafe action, hazard, or obligation concern
     is rejected.
-29. Narrative, attack tree, and Gherkin use the same context digest.
-30. Stage 6 cannot invent a new structured causal factor.
-31. Gherkin selects the exact related constraint and has no global fallback.
-32. Missing constraint evidence produces unresolved output rather than the
+31. Narrative, attack tree, and Gherkin use the same context digest.
+32. Stage 6 cannot invent a new structured causal factor.
+33. The attack-tree hard template does not pre-seed unsupported active
+    mechanisms.
+34. Gherkin selects the exact related constraint and has no global fallback.
+35. Missing constraint evidence produces unresolved output rather than the
     wrong Gherkin.
-33. Concrete Gherkin steps identify state, control action, observable result,
+36. Concrete Gherkin steps identify state, control action, observable result,
     hazard, and constraint.
 
 ### 17.6 Accounting
 
-34. An ICA finding may remain `addressed` when scenario generation fails.
-35. That same failure is separately `scenario_realization=unresolved`.
-36. Scenario realization requires exact context and consideration continuity.
-37. Neither accounting result creates Phase 2 coverage.
+37. An ICA finding may remain `addressed` when scenario generation fails.
+38. That same failure is separately `scenario_realization=unresolved`.
+39. Scenario realization requires exact context and consideration continuity.
+40. Neither accounting result creates Phase 2 coverage.
 
 ## 18. Captured regression fixtures
 

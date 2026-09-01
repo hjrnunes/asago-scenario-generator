@@ -275,9 +275,9 @@ class TestAttackTree:
         with TemporaryDirectory() as tmpdir:
             generate_attack_tree(client, spec, cs, Path(tmpdir))
             sys_prompt = client.calls[0].system_prompt
-            assert "Corrupt process model" in sys_prompt
+            assert "Process-model divergence" in sys_prompt
             assert "Actuator/executor failure" in sys_prompt
-            assert "Desynchronize shared PM" in sys_prompt
+            assert "Shared PM differs" in sys_prompt
 
     def test_system_prompt_contains_pruning_instructions(self):
         spec = _make_scenario_spec()

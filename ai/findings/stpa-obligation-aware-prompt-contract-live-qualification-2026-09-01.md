@@ -1,8 +1,12 @@
 # STPA obligation-aware prompt-contract live qualification
 
 **Date:** 2026-09-01  
-**Status:** Functionally proven on Klarna and NHS; not yet production-ready on
-the current model profile.
+**Status:** The contract is functionally proven and a fresh OpenShift run
+publishes 42 scenarios while realizing all five accepted obligation findings.
+The withdrawn word-based gate would have reduced an earlier Klarna run to zero;
+it is not a publication gate. The current qualification keeps the obligation
+effective while preventing its taxonomy mechanism from becoming causal fact
+without independent evidence.
 
 ## What was qualified
 
@@ -50,6 +54,109 @@ budget. The remaining calls ran on OpenShift.
 - workers: `4`
 
 ## Results
+
+### Current mechanism-boundary Klarna rerun
+
+The current live artifacts are under
+`output/runs/20260901-synthesis-klarna-quality-v6`. All stages used
+`gemma4-oc`, temperature `0.2`, routing batches of two, and four workers.
+
+| Result | Current Klarna rerun |
+|---|---:|
+| Obligations retained | 92 |
+| Governance-only | 40 |
+| Addressed by an STPA finding | 5 |
+| Unresolved by STPA | 47 |
+| Addressed findings realized by an exact scenario | 5/5 |
+| Scenario artifacts published | 42 |
+| Validation errors | 0 |
+| Scenario cases failed locally | 6 |
+
+The five realization rows map to four scenarios because `SCN-035` carries two
+exact obligation/ICA pairs. In every obligation-backed scenario, the Stage 5
+cause is now a typed `structural_failure` with no fabricated capability or
+access reference. The strongest examples are `SCN-025`, where a missing
+threshold block permits a high-value transaction, and `SCN-035`, where stale
+validation status causes required external-data sanitization to be omitted.
+
+`SCN-024` still names prompt injection in its hazardous context, but that text
+comes from the independently generated STPA hazard `H-3`, not from the
+AP-T2-01 obligation. Its causal factor remains the mechanism-neutral failure
+to evaluate a transaction against its threshold. This is an important
+remaining distinction: exact STPA hazard meaning is preserved, while the
+obligation itself is not treated as proof of access.
+
+The same run exposed a separate renderer defect: the attack-tree hard template
+contained examples such as “Poison PM” and “Fabricate a tool result,” which the
+model copied for structural failures. The template now uses neutral
+process-model divergence and feedback-path conditions. A targeted live
+OpenShift rerender of the worst saved case (`SCN-030`) produced only stale,
+late, inaccurate, and anomalous state leaves; it introduced no poisoning,
+replay, injection, or tool-result fabrication.
+
+The scenario count is materially higher than the previous run (42 versus 22).
+That reflects model variability in how many ordinary STPA slots it marks
+unsafe, not an obligation multiplier. The separate denominators and exact
+realization ledger remain the reliable measures; raw scenario count is not a
+quality score.
+
+### Strict post-correction Klarna rerun
+
+The final prompt/schema rerun is under
+`output/runs/20260901-synthesis-klarna-quality-v4`. All stages used
+`gemma4-oc`, temperature `0.2`, routing batches of two, and four workers.
+
+This run proves that the corrected provider boundaries work:
+
+- all selected defender beliefs received a non-empty vulnerability;
+- the provider returned only local causal handles and the compiler restored
+  valid `PM-*`, `FB-*`, and `CA-*` identities;
+- each ICA finding selected exactly one governing constraint; and
+- the run contained no empty-vulnerability, causal-namespace, or ambiguous
+  constraint failure.
+
+It also exposes a blocking quality result:
+
+| Result | Strict Klarna rerun |
+|---|---:|
+| Obligations retained | 92 |
+| Governance-only | 40 |
+| Addressed by an STPA finding | 4 |
+| Unresolved by STPA | 48 |
+| Addressed findings realized by an exact scenario | 0/4 |
+| Scenario artifacts initially published | 10 |
+| Missing exact controlled-process targets | 6 |
+| Word-based access diagnostics (withdrawn) | 45 false-positive-prone diagnostics |
+
+The initial conclusion that all ten artifacts should be rejected was wrong.
+The diagnostic conflated adversarial intent with technical access: for
+example, “exploit a timing gap” can mean taking advantage of an existing STPA
+failure and does not assert a new tool, channel, or privilege. Making that word
+list a publication gate would reduce the same run to zero scenarios.
+
+The corrected admission rule uses the typed causal evidence. Exact capability
+or access-path references must resolve to the immutable context, while prose
+may describe an adversary taking advantage of the declared structural
+condition. Replaying the ten artifacts through all remaining structural
+validators accepts 10/10. They still require the qualitative review below;
+restoring them does not claim that every narrative or ICA is good.
+
+The surviving structural material also remains uneven. Timing failures such as
+late response validation and late output sanitization are clear and useful,
+while several `WRONG_DURATION` findings invent persistence for actions that
+look one-shot. ICA text remains repetitive (roughly 234–411 characters in the
+published sample). These are the next quality issues after provider-boundary
+correctness.
+
+The final deterministic gates are green: 147 generated acceptance tests,
+39/39 external production-wiring QA checks, 15/15 full-level Gherkin
+mutations, and 284 focused prompt/scenario tests. Every function changed for
+this correction has CRAP at or below 6. The full unit run passed 10,194 tests
+with 16 skips; its only sandbox failure was the known loopback-server
+restriction, and that isolated compatibility test passed when rerun with
+loopback access. Source mutation was intentionally deferred.
+
+### Earlier functional qualification
 
 | Result | NHS | Klarna |
 |---|---:|---:|

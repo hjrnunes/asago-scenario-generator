@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import tempfile
 from typing import Any
 
 import yaml
@@ -32,25 +33,37 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossProvenance,
     SecurityConstraint,
 )
+from asago_scenario_generator.stpa.models.scenario_context import (
+    ScenarioObligationConsideration,
+)
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     AnalysisControls,
     IcaDeviationDraft,
     IcaFindingDraft,
     SlotIcaDraft,
+    SynthesisSlotRequest,
 )
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
+    build_synthesis_slot_prompts,
     project_obligation_question,
 )
 from asago_scenario_generator.stpa.obligation_aware.routing import (
     build_neutral_briefs,
     route_obligations,
 )
+from asago_scenario_generator.stpa.obligation_aware.provider import (
+    ObligationAwareLLMAdapter,
+)
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     compile_ica_slot_draft,
 )
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     BDIGenerationResult,
+    build_context_bdi_prompts,
+    generate_bdi_for_context,
 )
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
 )
@@ -424,6 +437,230 @@ def _h_four_types(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return actual == expected, f"expected {expected!r}, got {actual!r}"
 
 
+def _h_provider_plain_deviation(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Run the public slot adapter with one provider-authored deviation."""
+    del text, examples
+    from tests.stpa.sp1_helpers import MockLLMClient
+
+    structure = _structure()
+    slot = create_slots(structure)[0]
+    client = MockLLMClient()
+    client.set_response_queue(
+        [
+            {
+                "filled_slots": [
+                    {
+                        "slot_id": slot.slot_id,
+                        "is_na": False,
+                        "na_rationale": None,
+                        "findings": [
+                            {
+                                "deviation": "the approval state is absent",
+                                "hazardous_context": (
+                                    "an unapproved change reaches the clinical record"
+                                ),
+                                "loss_consequence": (
+                                    "clinical decisions use corrupted patient data"
+                                ),
+                                "related_hazard_ids": ["H-1"],
+                                "related_constraint_ids": ["SC-1"],
+                                "process_model_refs": ["PM-1-1"],
+                                "feedback_refs": [],
+                            }
+                        ],
+                        "consideration_results": [],
+                    }
+                ]
+            }
+        ]
+    )
+    controls = AnalysisControls(
+        model_profile="acceptance",
+        model_name=client.model,
+        deadline_seconds=1.0,
+        temperature=0.0,
+    )
+    request = SynthesisSlotRequest(
+        target_id=slot.responsibility or "",
+        target_kind="responsibility",
+        slots=(slot,),
+        loss_analysis=_losses(),
+        control_structure=structure,
+        controls=controls,
+    )
+    result = ObligationAwareLLMAdapter(
+        client,
+        run_dir=Path(tempfile.mkdtemp(prefix="ica-deviation-acceptance-")),
+        controls=controls,
+    ).fill(request)
+    _state(world)["compiled_ica"] = result.filled_slots[0].icas[0]
+    _state(world)["ica_provider_schema"] = client.calls[0].response_format
+    _state(world)["ica_system_prompt"] = client.calls[0].system_prompt
+    return True, ""
+
+
+def _h_compiled_ica_behavior(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text
+    ica = _state(world).get("compiled_ica")
+    expected = examples.get("behavior", "fails to provide")
+    if ica is None:
+        return False, "ICA provider result was not compiled"
+    return expected in ica.ica_text, f"expected {expected!r} in {ica.ica_text!r}"
+
+
+def _h_plain_deviation_schema(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text, examples
+    response_format = _state(world).get("ica_provider_schema")
+    if response_format is None:
+        return False, "ICA provider schema was not captured"
+    finding = response_format.model_json_schema()["$defs"]["_SlotProviderFindingDraft"][
+        "properties"
+    ]
+    deviation = finding.get("deviation", {})
+    forbidden = {
+        "not_provided_context",
+        "incorrect_value_or_effect",
+        "timing_deviation",
+        "duration_deviation",
+    }
+    if forbidden.intersection(finding):
+        return False, "model-facing schema still exposes UCA category fields"
+    return deviation.get("type") == "string", "deviation is not one plain string"
+
+
+def _h_one_governing_constraint_schema(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text, examples
+    response_format = _state(world).get("ica_provider_schema")
+    if response_format is None:
+        return False, "ICA provider schema was not captured"
+    finding = response_format.model_json_schema()["$defs"]["_SlotProviderFindingDraft"][
+        "properties"
+    ]
+    constraints = finding.get("related_constraint_ids", {})
+    exact = constraints.get("minItems") == 1 and constraints.get("maxItems") == 1
+    return exact, f"unexpected governing-constraint schema: {constraints}"
+
+
+def _h_finding_relevance_contract(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text, examples
+    prompt = _state(world).get("ica_system_prompt", "")
+    required = (
+        "subject, operation, affected object, and effect",
+        "are not mechanism evidence",
+        "a detector's score threshold is not tool-call parameter pollution",
+    )
+    missing = [item for item in required if item not in prompt]
+    return not missing, f"ICA relevance contract is missing: {missing}"
+
+
+def _h_taxonomy_mechanism_routed(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Render both prompt boundaries for a mechanism-specific obligation."""
+    del text, examples
+    structure = _structure()
+    losses = _losses()
+    slot = create_slots(structure)[0]
+    ica_system, _ica_user = build_synthesis_slot_prompts(
+        target_id=slot.responsibility or "",
+        slots=(slot,),
+        routed_briefs=(),
+        routed_routes=(),
+        loss_analysis=losses,
+        control_structure=structure,
+    )
+    threat = StructuralThreat(
+        ica_slot_id=slot.slot_id,
+        ica_id=f"{slot.slot_id}:1",
+        ica_text=(
+            "The clinical controller fails to authorize a required record change."
+        ),
+        hazardous_context="A time-critical approved record change remains unapplied.",
+        loss_scenario="Clinical decisions use stale patient data.",
+        related_hazards=["H-1"],
+        related_constraints=["SC-1"],
+    )
+    context = build_scenario_generation_context(
+        threat,
+        structure,
+        losses,
+        scenario_id="SCN-ACCEPTANCE",
+        obligation_considerations=(
+            ScenarioObligationConsideration(
+                obligation_id="ob:v1:" + "a" * 64,
+                attack_pattern_id="AP-T2-04",
+                attack_pattern_name="Poisoned persistent memory",
+                concise_concern="An adversary poisons persistent memory.",
+                disposition="finding",
+                rationale="The concern led STPA to the selected unsafe-control path.",
+                finding_ica_id=threat.ica_id,
+            ),
+        ),
+    )
+    stage5_system, stage5_user = build_context_bdi_prompts(
+        context, TemplateLoader(PROMPTS_DIR)
+    )
+    state = _state(world)
+    state["mechanism_ica_prompt"] = " ".join(ica_system.split())
+    state["mechanism_stage5_prompt"] = " ".join(
+        f"{stage5_system}\n{stage5_user}".split()
+    )
+    return True, ""
+
+
+def _h_mechanism_neutral_ica(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text, examples
+    prompt = _state(world).get("mechanism_ica_prompt", "")
+    required = (
+        "taxonomy mechanism is not established evidence",
+        "must describe the unsafe control or system condition in mechanism-neutral terms",
+        "do not put an unsupported attack story into the ica itself",
+    )
+    missing = [item for item in required if item not in prompt.lower()]
+    return not missing, f"ICA mechanism boundary is missing: {missing}"
+
+
+def _h_obligation_is_provenance(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text, examples
+    prompt = _state(world).get("mechanism_stage5_prompt", "").lower()
+    required = (
+        "analysis provenance, not causal evidence",
+        "finding` means stpa found a related unsafe-control path",
+        "does not establish that persistent memory was poisoned",
+    )
+    missing = [item for item in required if item not in prompt]
+    return not missing, f"scenario obligation boundary is missing: {missing}"
+
+
+def _h_mechanism_requires_support(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text
+    expected = examples.get("required_support", "independent evidence").strip()
+    prompt = _state(world).get("mechanism_stage5_prompt", "").lower()
+    actual = (
+        "independent evidence"
+        if "independently supported by an exact reachable capability/access path"
+        in prompt
+        else "unsupported"
+    )
+    return actual == expected, f"expected {expected!r}, got {actual!r}"
+
+
 def _h_drift(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     fixture = _state(world)["fixture"]["scenario_mechanism_drift"]
@@ -690,6 +927,190 @@ def _h_coordination_not_responsibility(
     )
 
 
+def _h_stage5_local_causal_handle(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Run the public Stage 5 seam with one provider-local causal handle."""
+    del text, examples
+    from tests.stpa.sp1_helpers import MockLLMClient
+
+    context = _state(world).get("coordination_context")
+    if context is None:
+        return False, "coordination scenario context was not built"
+    _system, prompt = build_context_bdi_prompts(context, TemplateLoader(PROMPTS_DIR))
+    if "source_handle: cause_1" not in prompt:
+        return False, "Stage 5 prompt did not expose the local source handle"
+    client = MockLLMClient()
+    client.set_response_queue(
+        [
+            {
+                "defender_vulnerabilities": [
+                    {
+                        "belief_handle": f"belief_{index}",
+                        "vulnerability": "The selected state may become stale.",
+                    }
+                    for index, _item in enumerate(
+                        context.target_control_path.process_model_parts, start=1
+                    )
+                ],
+                "attacker_bdi": {
+                    "beliefs": ["The selected state may become stale."],
+                    "desires": ["Induce the selected unsafe action."],
+                    "intentions": [
+                        {
+                            "description": "Rely on a stale shared state.",
+                            "source_handles": ["cause_1"],
+                        }
+                    ],
+                },
+                "causal_factors": [
+                    {
+                        "source_handle": "cause_1",
+                        "evidence": "The shared process model may remain stale.",
+                        "timing": None,
+                        "evidence_status": "structural_failure",
+                        "capability_refs": [],
+                        "access_refs": [],
+                        "bounded_assumption": "Assume synchronization completes late.",
+                    }
+                ],
+            }
+        ]
+    )
+    result, error = generate_bdi_for_context(
+        client,
+        context,
+        Path(tempfile.mkdtemp(prefix="stage5-handle-acceptance-")),
+    )
+    if error is not None or result is None:
+        return False, f"Stage 5 local-handle compilation failed: {error}"
+    _state(world)["compiled_stage5"] = result
+    return True, ""
+
+
+def _h_compiled_causal_source(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text
+    result = _state(world).get("compiled_stage5")
+    expected = examples.get("causal_source", "PM-1-1")
+    if result is None:
+        return False, "Stage 5 result was not compiled"
+    actual = result.causal_factors[0].source_id
+    return actual == expected, f"expected {expected!r}, got {actual!r}"
+
+
+def _h_all_defender_vulnerabilities(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text, examples
+    context = _state(world).get("coordination_context")
+    result = _state(world).get("compiled_stage5")
+    if context is None or result is None:
+        return False, "Stage 5 context and result were not compiled"
+    expected = {
+        item.element_id for item in context.target_control_path.process_model_parts
+    }
+    actual = set(result.defender_vulnerabilities)
+    complete = actual == expected and all(
+        value.strip() for value in result.defender_vulnerabilities.values()
+    )
+    return (
+        complete,
+        f"expected defender beliefs {sorted(expected)}, got {sorted(actual)}",
+    )
+
+
+def _h_no_local_or_coordination_source(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text, examples
+    result = _state(world).get("compiled_stage5")
+    if result is None:
+        return False, "Stage 5 result was not compiled"
+    serialized = result.model_dump_json()
+    forbidden = (
+        "cause_1",
+        '"source_id":"CL-',
+        '"source_id":"CM-',
+        '"source_id":"RESP-',
+    )
+    unexpected = [item for item in forbidden if item in serialized]
+    return not unexpected, f"published forbidden causal identities: {unexpected}"
+
+
+def _h_bounded_assumption_preserved(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text, examples
+    result = _state(world).get("compiled_stage5")
+    if result is None:
+        return False, "Stage 5 result was not compiled"
+    factor = result.causal_factors[0]
+    expected = "Assume synchronization completes late."
+    return (
+        factor.evidence_status == "bounded_assumption"
+        and factor.bounded_assumption == expected,
+        "explicit bounded assumption was not preserved",
+    )
+
+
+def _h_structural_adversarial_intent(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text, examples
+    from asago_scenario_generator.stpa.models.causal_factor import (
+        CausalFactor,
+        CausalFactorKind,
+    )
+    from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
+    from asago_scenario_generator.stpa.scenario_prod.validators import (
+        validate_active_access_grounding,
+    )
+
+    context = _state(world).get("coordination_context")
+    if context is None:
+        return False, "scenario context was not built"
+    spec = ScenarioSpec.model_construct(
+        scenario_context=context,
+        causal_factors=[
+            CausalFactor(
+                kind=CausalFactorKind.process_model_flaw,
+                source_id=context.target_control_path.process_model_parts[0].element_id,
+                description="The selected process-model state remains stale.",
+            )
+        ],
+    )
+    result = validate_active_access_grounding(
+        spec,
+        "The adversary exploits the stale PM-1-1 state before CA-1-1.",
+    )
+    state = _state(world)
+    state["active_access_disposition"] = (
+        "unresolved" if not result.passed else "finding"
+    )
+    state["active_access_published"] = 0 if not result.passed else 1
+    return True, ""
+
+
+def _h_active_access_disposition(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text
+    expected = examples.get("disposition", "unresolved")
+    actual = _state(world).get("active_access_disposition")
+    return actual == expected, f"expected {expected!r}, got {actual!r}"
+
+
+def _h_active_access_publication(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text
+    expected = int(examples.get("published_scenarios", "0"))
+    actual = _state(world).get("active_access_published")
+    return actual == expected, f"expected {expected}, got {actual!r}"
+
+
 def register(api: Any) -> None:
     api.set_feature(FEATURE_ID)
     api.register(r"the captured synthesis prompt regressions are available", _h_fixture)
@@ -740,6 +1161,42 @@ def register(api: Any) -> None:
         r"the safeguard is rejected as unsafe-control behavior", _h_safeguard_rejected
     )
     api.register(r'the unsafe-control type set is ".*"', _h_four_types)
+    api.register(
+        r"an ICA provider supplies one deviation for a NOT_PROVIDED slot",
+        _h_provider_plain_deviation,
+    )
+    api.register(
+        r'the compiled ICA behavior contains ".*"',
+        _h_compiled_ica_behavior,
+    )
+    api.register(
+        r"the model-facing ICA schema exposes one plain deviation string",
+        _h_plain_deviation_schema,
+    )
+    api.register(
+        r"the model-facing ICA schema permits exactly one governing constraint",
+        _h_one_governing_constraint_schema,
+    )
+    api.register(
+        r"finding relevance compares subject operation object and effect",
+        _h_finding_relevance_contract,
+    )
+    api.register(
+        r"a taxonomy mechanism is routed to a related ICA",
+        _h_taxonomy_mechanism_routed,
+    )
+    api.register(
+        r"the ICA remains a mechanism-neutral unsafe-control finding",
+        _h_mechanism_neutral_ica,
+    )
+    api.register(
+        r"the obligation is provenance rather than causal evidence",
+        _h_obligation_is_provenance,
+    )
+    api.register(
+        r'the taxonomy mechanism requires ".*" before scenario use',
+        _h_mechanism_requires_support,
+    )
     api.register(r"the captured drifting scenario response is compiled", _h_drift)
     api.register(
         r"the source ICA hazard loss and constraint remain authoritative",
@@ -784,6 +1241,39 @@ def register(api: Any) -> None:
     api.register(
         r"no coordination identity is treated as a responsibility",
         _h_coordination_not_responsibility,
+    )
+    api.register(
+        r"its Stage 5 provider response selects local causal handle cause_1",
+        _h_stage5_local_causal_handle,
+    )
+    api.register(r'the compiled causal source is ".*"', _h_compiled_causal_source)
+    api.register(
+        r"every selected defender belief has a compiled vulnerability",
+        _h_all_defender_vulnerabilities,
+    )
+    api.register(
+        r"no coordination controller or local handle is published as a causal source",
+        _h_no_local_or_coordination_source,
+    )
+    api.register(
+        r"the explicit bounded assumption is preserved",
+        _h_bounded_assumption_preserved,
+    )
+    api.register(
+        r"a scenario context with no reachable attacker capability",
+        _h_coordination_context,
+    )
+    api.register(
+        r"a generated artifact describes taking advantage of its structural failure",
+        _h_structural_adversarial_intent,
+    )
+    api.register(
+        r'active-access grounding disposition is ".*"',
+        _h_active_access_disposition,
+    )
+    api.register(
+        r"the structurally grounded scenario publication count is .*",
+        _h_active_access_publication,
     )
 
 

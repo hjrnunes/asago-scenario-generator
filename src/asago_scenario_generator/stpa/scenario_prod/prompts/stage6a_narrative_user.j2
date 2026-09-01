@@ -30,6 +30,7 @@
 {% endif %}
 
 {% include "_stage6_projection_alignment.j2" %}
+{% include "_obligation_evidence_boundary.j2" %}
 ## Your Task
 
 Write the 7-step causal narrative following the dialectic structure defined in
@@ -42,9 +43,9 @@ The narrative must realize the projection alignment table in table order. The fi
 Use the immutable scenario context as the only source of ICA, action, hazard,
 loss, constraint, obligation, and capability meaning. Do not introduce a new
 primary causal factor beyond the factors declared in the scenario specification.
-When reachable_capabilities is empty, explain an existing structural
-condition instead of claiming that an attacker suppresses, poisons, injects,
-or manipulates a feedback channel. A bounded_assumption must be labelled as
+When reachable_capabilities is empty, explain the existing structural
+condition and how an adversary can take advantage of it. Do not invent a new
+interface, channel, or privilege. A bounded_assumption must be labelled as
 such and may not become structured evidence.
 
 Return the narrative as raw prose text.

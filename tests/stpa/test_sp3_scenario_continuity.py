@@ -55,6 +55,7 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     CausalFactorDeclaration,
     assemble_scenario_spec,
     build_context_bdi_prompts,
+    generate_bdi_for_context,
     populate_defender_bdi,
 )
 from asago_scenario_generator.stpa.scenario_prod.assembly import (
@@ -70,6 +71,9 @@ from asago_scenario_generator.stpa.scenario_prod.gherkin import (
     generate_gherkin,
 )
 from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
+from asago_scenario_generator.stpa.scenario_prod.validators import (
+    validate_active_access_grounding,
+)
 from asago_scenario_generator.stpa.scenario_prod.attack_tree import (
     build_attack_tree_prompts,
 )
@@ -283,6 +287,223 @@ def test_context_supports_exact_coordination_link_path() -> None:
     assert "Synchronize payment policy state" in prompt
 
 
+def test_context_stage5_offers_only_compiler_owned_causal_source_handles() -> None:
+    """Coordination IDs stay context, while causal sources use local handles."""
+    context = build_scenario_generation_context(
+        _coordination_threat(),
+        _coordination_control_structure(),
+        _loss_analysis(),
+        scenario_id="SCN-CL-001",
+    )
+
+    _system, prompt = build_context_bdi_prompts(context, TemplateLoader(PROMPTS_DIR))
+    choices = prompt.split("## Allowed Causal-Factor Sources", 1)[1].split(
+        "## Your Task", 1
+    )[0]
+
+    assert "source_handle: cause_1" in choices
+    assert "kind: PROCESS_MODEL_FLAW" in choices
+    assert "source_id: PM-1-1" in choices
+    assert "source_id: CL-1" not in choices
+    assert "source_id: CM-1" not in choices
+    assert "source_id: RESP-1" not in choices
+    assert "source_id: CP-1" not in choices
+
+
+def test_context_stage5_compiles_local_handles_to_exact_structural_sources(
+    tmp_path,
+) -> None:
+    """Provider prose chooses local handles; deterministic code owns exact IDs."""
+    context = _context()
+    client = MockLLMClient()
+    client.set_response_queue(
+        [
+            {
+                "defender_vulnerabilities": [
+                    {
+                        "belief_handle": "belief_1",
+                        "vulnerability": "The batch count can remain stale.",
+                    }
+                ],
+                "attacker_bdi": {
+                    "beliefs": ["The controller can act on a stale batch count."],
+                    "desires": ["Induce the selected unsafe action."],
+                    "intentions": [
+                        {
+                            "description": "Keep the batch count stale.",
+                            "source_handles": ["cause_1"],
+                        }
+                    ],
+                },
+                "causal_factors": [
+                    {
+                        "source_handle": "cause_1",
+                        "evidence": "The selected process-model state stays stale.",
+                        "timing": None,
+                        "evidence_status": "structural_failure",
+                        "capability_refs": [],
+                        "access_refs": [],
+                        "bounded_assumption": None,
+                    }
+                ],
+            }
+        ]
+    )
+
+    result, error = generate_bdi_for_context(client, context, tmp_path)
+
+    assert error is None
+    assert result is not None
+    assert result.causal_factors[0].kind is CausalFactorKind.process_model_flaw
+    assert result.causal_factors[0].source_id == "PM-1-1"
+    assert result.defender_vulnerabilities == {
+        "PM-1-1": "The batch count can remain stale."
+    }
+    assert "PM-1-1" in result.attacker_bdi.intentions[0]
+    assert "cause_1" not in result.model_dump_json()
+
+
+def test_context_stage5_preserves_explicit_assumption_when_status_is_mislabeled(
+    tmp_path,
+) -> None:
+    """An explicit assumption is not discarded because its status was mislabeled."""
+    context = _context()
+    client = MockLLMClient()
+    client.set_response_queue(
+        [
+            {
+                "defender_vulnerabilities": [
+                    {
+                        "belief_handle": "belief_1",
+                        "vulnerability": "The batch count may remain stale.",
+                    }
+                ],
+                "attacker_bdi": {
+                    "beliefs": ["The controller may act on a stale batch count."],
+                    "desires": ["Induce the selected unsafe action."],
+                    "intentions": [
+                        {
+                            "description": "Rely on a delayed state update.",
+                            "source_handles": ["cause_1"],
+                        }
+                    ],
+                },
+                "causal_factors": [
+                    {
+                        "source_handle": "cause_1",
+                        "evidence": "The process model may remain stale.",
+                        "timing": None,
+                        "evidence_status": "structural_failure",
+                        "capability_refs": [],
+                        "access_refs": [],
+                        "bounded_assumption": "Assume the update arrives late.",
+                    }
+                ],
+            }
+        ]
+    )
+
+    result, error = generate_bdi_for_context(client, context, tmp_path)
+
+    assert error is None
+    assert result is not None
+    factor = result.causal_factors[0]
+    assert factor.evidence_status == "bounded_assumption"
+    assert factor.bounded_assumption == "Assume the update arrives late."
+
+
+def test_context_stage5_intentions_must_reference_a_declared_factor(tmp_path) -> None:
+    """An intention cannot cite context that was omitted from causal evidence."""
+    context = _context()
+    client = MockLLMClient()
+    client.set_response_queue(
+        [
+            {
+                "defender_vulnerabilities": [
+                    {
+                        "belief_handle": "belief_1",
+                        "vulnerability": "The batch count can remain stale.",
+                    }
+                ],
+                "attacker_bdi": {
+                    "beliefs": ["The controller can act on stale state."],
+                    "desires": ["Induce the selected unsafe action."],
+                    "intentions": [
+                        {
+                            "description": "Exploit unrelated feedback timing.",
+                            "source_handles": ["cause_2"],
+                        }
+                    ],
+                },
+                "causal_factors": [
+                    {
+                        "source_handle": "cause_1",
+                        "evidence": "The selected process-model state stays stale.",
+                        "evidence_status": "structural_failure",
+                        "capability_refs": [],
+                        "access_refs": [],
+                        "bounded_assumption": None,
+                    }
+                ],
+            }
+        ]
+    )
+
+    result, error = generate_bdi_for_context(client, context, tmp_path)
+
+    assert result is None
+    assert error is not None
+    assert "intention source handles must have declared causal factors" in error
+
+
+def test_context_stage5_requires_one_vulnerability_for_every_selected_belief(
+    tmp_path,
+) -> None:
+    """The provider cannot omit a selected defender belief from its response."""
+    context = build_scenario_generation_context(
+        _coordination_threat(),
+        _coordination_control_structure(),
+        _loss_analysis(),
+        scenario_id="SCN-CL-001",
+    )
+    client = MockLLMClient()
+    client.set_response_queue(
+        [
+            {
+                "defender_vulnerabilities": [
+                    {
+                        "belief_handle": "belief_1",
+                        "vulnerability": "The selected state may remain stale.",
+                    }
+                ],
+                "attacker_bdi": {
+                    "beliefs": ["The selected state may remain stale."],
+                    "desires": ["Induce the selected unsafe action."],
+                    "intentions": [
+                        {
+                            "description": "Rely on the stale state.",
+                            "source_handles": ["cause_1"],
+                        }
+                    ],
+                },
+                "causal_factors": [
+                    {
+                        "source_handle": "cause_1",
+                        "evidence": "The selected state remains stale.",
+                        "evidence_status": "structural_failure",
+                    }
+                ],
+            }
+        ]
+    )
+
+    result, error = generate_bdi_for_context(client, context, tmp_path)
+
+    assert result is None
+    assert error is not None
+    assert "defender_vulnerabilities" in error
+
+
 def test_context_rejects_unknown_coordination_link() -> None:
     threat = _coordination_threat().model_copy(
         update={"ica_slot_id": "CL-404:CM-1:INCORRECT"}
@@ -395,7 +616,9 @@ def test_coordination_candidate_envelope_preserves_cl_cm_identity() -> None:
     assert envelope.control_action_description == "Synchronize payment policy state"
 
 
-def test_run_sp3_realizes_coordination_slot_without_relabeled_identity(tmp_path) -> None:
+def test_run_sp3_realizes_coordination_slot_without_relabeled_identity(
+    tmp_path,
+) -> None:
     control_structure = _coordination_control_structure()
     threat = _coordination_threat()
     enriched = EnrichedThreatSet(
@@ -417,7 +640,7 @@ def test_run_sp3_realizes_coordination_slot_without_relabeled_identity(tmp_path)
                 attacker_bdi=AttackerBDI(
                     beliefs=["The coordination state can be manipulated."],
                     desires=["Induce the coordination ICA."],
-                    intentions=["Manipulate PM-1-1 before CM-1 is used."],
+                    intentions=["Rely on stale PM-1-1 before CM-1 is used."],
                 ),
                 causal_factors=[
                     CausalFactorDeclaration(
@@ -428,7 +651,7 @@ def test_run_sp3_realizes_coordination_slot_without_relabeled_identity(tmp_path)
                 ],
             ),
             "Step 1: The path begins with the shared policy state.\n"
-            "Step 2: The attacker changes PM-1-1.\n"
+            "Step 2: PM-1-1 becomes stale before synchronization.\n"
             "Step 3: The coordination mechanism carries the changed state.\n"
             "Step 4: The receiver acts on the changed state.\n"
             "Step 5: The incorrect coordination action occurs.\n"
@@ -449,7 +672,7 @@ def test_run_sp3_realizes_coordination_slot_without_relabeled_identity(tmp_path)
             "given:\n"
             "  - Given PM-1-1 is current\n"
             "when:\n"
-            "  - When the attacker changes the shared state\n"
+            "  - When PM-1-1 is stale during synchronization\n"
             "then_expected:\n"
             "  - Then the system should reject the changed state\n"
             "then_actual:\n"
@@ -662,6 +885,94 @@ def test_contextual_scenario_rejects_empty_causal_factors() -> None:
 
     with pytest.raises(ValidationError, match="requires causal_factors"):
         ScenarioSpec.model_validate(payload)
+
+
+def test_no_capability_context_rejects_asserted_active_access() -> None:
+    context = build_scenario_generation_context(
+        _threat(),
+        _control_structure(),
+        _loss_analysis(),
+        scenario_id="SCN-001",
+    )
+    spec = _contextual_spec().model_copy(update={"scenario_context": context})
+
+    result = validate_active_access_grounding(
+        spec,
+        "The attacker injects a forged update into the feedback path.",
+    )
+
+    assert not result.passed
+    assert "unsupported active access" in result.errors[0]
+
+
+@pytest.mark.parametrize(
+    "claim",
+    (
+        "Exploit the stale process-model window.",
+        "Replay stale feedback before the control action.",
+        "Induce the selected unsafe output from stale PM-1-1 state.",
+        "Elicit a response before the delayed sanitization action.",
+        "Bypass the current forbidden-pattern check because PM-1-1 is stale.",
+    ),
+)
+def test_no_capability_context_allows_adversarial_use_of_structural_failure(
+    claim: str,
+) -> None:
+    context = build_scenario_generation_context(
+        _threat(),
+        _control_structure(),
+        _loss_analysis(),
+        scenario_id="SCN-001",
+    )
+    spec = _contextual_spec().model_copy(update={"scenario_context": context})
+
+    result = validate_active_access_grounding(spec, claim)
+
+    assert result.passed
+
+
+def test_reachable_capability_context_allows_active_access_description() -> None:
+    result = validate_active_access_grounding(
+        _contextual_spec(),
+        "The attacker injects a request through the supplied payment access path.",
+    )
+
+    assert result.passed
+
+
+def test_bounded_assumption_requires_and_accepts_explicit_label() -> None:
+    context = build_scenario_generation_context(
+        _threat(),
+        _control_structure(),
+        _loss_analysis(),
+        scenario_id="SCN-001",
+    )
+    spec = _contextual_spec().model_copy(
+        update={
+            "scenario_context": context,
+            "causal_factors": [
+                CausalFactor(
+                    kind=CausalFactorKind.process_model_flaw,
+                    source_id="PM-1-1",
+                    description="The state may be stale.",
+                    evidence_status="bounded_assumption",
+                    bounded_assumption="Assume a forged update can reach the state.",
+                )
+            ],
+        }
+    )
+
+    labelled = validate_active_access_grounding(
+        spec,
+        "Assumption: an adversary injects a forged update.",
+    )
+    unlabelled = validate_active_access_grounding(
+        spec,
+        "An adversary injects a forged update.",
+    )
+
+    assert labelled.passed
+    assert not unlabelled.passed
 
 
 def test_stage5_rejects_causal_factor_from_unselected_control_path() -> None:

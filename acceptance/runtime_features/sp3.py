@@ -5269,7 +5269,7 @@ def _sp3_robustness_valid_bdi() -> object:
         attacker_bdi=AttackerBDI(
             beliefs=["attacker belief"],
             desires=["induce ICA"],
-            intentions=["poison PM-1-1 via FB-1-1"],
+            intentions=["PM-1-1 remains stale before CA-1-1"],
         ),
         causal_factors=_make_sp3_causal_factors(),
     )
@@ -5355,7 +5355,7 @@ def _h_sp3_robustness_run(world: World, text: str, examples: dict) -> tuple[bool
             max_completion_tokens: int | None = None,
             temperature: float | None = None,
         ) -> LLMResult:
-            if response_format is not BDIGenerationResult or not self.outcomes:
+            if not _is_stage5_response_format(response_format) or not self.outcomes:
                 return super().complete(
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
@@ -5419,8 +5419,15 @@ def _sp3_robustness_bdi_calls(world: World) -> list[object]:
     return [
         call
         for call in getattr(world.sp3_llm_client, "calls", [])
-        if call.response_format is BDIGenerationResult
+        if _is_stage5_response_format(call.response_format)
     ]
+
+
+def _is_stage5_response_format(response_format: type | None) -> bool:
+    """Recognize the closed Stage 5 provider schema and its compatibility base."""
+    return bool(
+        response_format is not None and issubclass(response_format, BDIGenerationResult)
+    )
 
 
 def _h_sp3_robustness_attempt_count(
@@ -5454,7 +5461,7 @@ def _h_sp3_robustness_retry_request(
     if len(calls) < 2:
         return False, "No corrective Stage 5 attempt was recorded"
     retry = calls[1]
-    if retry.response_format is not BDIGenerationResult:
+    if not _is_stage5_response_format(retry.response_format):
         return False, "Retry did not request BDIGenerationResult"
     if retry.max_completion_tokens is None or retry.max_completion_tokens > 2048:
         return False, f"Retry token ceiling was {retry.max_completion_tokens}"

@@ -47,7 +47,7 @@ from asago_scenario_generator.stpa.models.scenario_envelope import (
     GherkinSpec,
     ScenarioEnvelope,
 )
-from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
+from asago_scenario_generator.stpa.models.scenario_spec import DefenderBDI, ScenarioSpec
 from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
 )
@@ -56,6 +56,7 @@ from ._constants import PROMPTS_DIR
 from .assembly import assemble_envelope
 from .attack_tree import build_attack_tree_prompts, parse_attack_tree
 from .bdi_generation import (
+    BDIGenerationResult,
     assemble_scenario_spec,
     generate_bdi_for_context,
     is_bdi_length_retry_exhausted,
@@ -298,25 +299,58 @@ def _run_stage5_for_threat(
     """Run Stage 5 BDI generation for a single threat."""
     slot_parts = parse_ica_slot_id(threat.ica_slot_id)
     target_resp_id = slot_parts["controller"]
-
-    try:
-        defender_bdi = populate_defender_bdi(control_structure, target_resp_id)
-    except ValueError as e:
-        stage_errors.append(f"Stage 5: {e}")
+    defender_bdi = _stage5_defender_bdi(control_structure, target_resp_id, stage_errors)
+    if defender_bdi is None:
+        return _Stage5ThreatResult(None)
+    context = _stage5_context(
+        threat,
+        control_structure,
+        loss_analysis,
+        scenario_index,
+        scenario_contexts,
+        stage_errors,
+    )
+    if context is None:
         return _Stage5ThreatResult(None)
 
-    try:
-        context = _scenario_context_for_threat(
-            threat,
-            control_structure,
-            loss_analysis,
-            scenario_index,
-            scenario_contexts,
-        )
-    except ValueError as e:
-        stage_errors.append(f"Stage 5 context: {e}")
-        return _Stage5ThreatResult(None)
+    llm_result, failure = _stage5_bdi(
+        llm_client,
+        context,
+        run_dir,
+        loader,
+        temperature,
+        stage_errors,
+    )
+    if failure is not None:
+        return failure
 
+    spec = _stage5_spec(
+        defender_bdi,
+        llm_result,
+        threat,
+        control_structure,
+        scenario_index,
+        context,
+        stage_errors,
+    )
+    if spec is None:
+        return _Stage5ThreatResult(None)
+    prior_error_count = len(stage_errors)
+    _validate_stage5_spec(spec, control_structure, stage_errors)
+    if len(stage_errors) != prior_error_count:
+        return _Stage5ThreatResult(None)
+    return _Stage5ThreatResult(spec)
+
+
+def _stage5_bdi(
+    llm_client: LLMClient,
+    context: ScenarioGenerationContext,
+    run_dir: Path,
+    loader: TemplateLoader,
+    temperature: float,
+    stage_errors: list[str],
+) -> tuple[BDIGenerationResult | None, _Stage5ThreatResult | None]:
+    """Generate one closed BDI result or one typed local failure."""
     llm_result, error = generate_bdi_for_context(
         llm_client,
         context,
@@ -324,16 +358,62 @@ def _run_stage5_for_threat(
         loader=loader,
         temperature=temperature,
     )
+    if error is None and llm_result is not None:
+        return llm_result, None
+    stage_errors.append(f"Stage 5 BDI generation failed: {error}")
+    return None, _Stage5ThreatResult(
+        None,
+        abort_remaining=is_bdi_length_retry_exhausted(error),
+    )
 
-    if error is not None or llm_result is None:
-        stage_errors.append(f"Stage 5 BDI generation failed: {error}")
-        return _Stage5ThreatResult(
-            None,
-            abort_remaining=is_bdi_length_retry_exhausted(error),
-        )
 
+def _stage5_defender_bdi(
+    control_structure: ControlStructure,
+    target_resp_id: str,
+    stage_errors: list[str],
+) -> DefenderBDI | None:
+    """Build deterministic defender BDI and retain a local failure."""
     try:
-        spec = assemble_scenario_spec(
+        return populate_defender_bdi(control_structure, target_resp_id)
+    except ValueError as exc:
+        stage_errors.append(f"Stage 5: {exc}")
+        return None
+
+
+def _stage5_context(
+    threat,
+    control_structure: ControlStructure,
+    loss_analysis: LossAnalysis,
+    scenario_index: int,
+    supplied: Mapping[str, ScenarioGenerationContext] | None,
+    stage_errors: list[str],
+) -> ScenarioGenerationContext | None:
+    """Build or select one exact context and retain a local failure."""
+    try:
+        return _scenario_context_for_threat(
+            threat,
+            control_structure,
+            loss_analysis,
+            scenario_index,
+            supplied,
+        )
+    except ValueError as exc:
+        stage_errors.append(f"Stage 5 context: {exc}")
+        return None
+
+
+def _stage5_spec(
+    defender_bdi: DefenderBDI,
+    llm_result: BDIGenerationResult,
+    threat,
+    control_structure: ControlStructure,
+    scenario_index: int,
+    context: ScenarioGenerationContext,
+    stage_errors: list[str],
+) -> ScenarioSpec | None:
+    """Compile one Stage 5 draft and retain an assembly failure locally."""
+    try:
+        return assemble_scenario_spec(
             defender_bdi,
             llm_result,
             threat,
@@ -341,17 +421,9 @@ def _run_stage5_for_threat(
             scenario_index,
             scenario_context=context,
         )
-    except ValueError as e:
-        # Invalid causal-factor references (or any other assembly-level
-        # reference error) stop this scenario before Stage 6: no narrative,
-        # attack-tree, or Gherkin call is made and no artifact is written.
-        stage_errors.append(f"Stage 5: {e}")
-        return _Stage5ThreatResult(None)
-    prior_error_count = len(stage_errors)
-    _validate_stage5_spec(spec, control_structure, stage_errors)
-    if len(stage_errors) != prior_error_count:
-        return _Stage5ThreatResult(None)
-    return _Stage5ThreatResult(spec)
+    except ValueError as exc:
+        stage_errors.append(f"Stage 5: {exc}")
+        return None
 
 
 def _scenario_context_for_threat(
@@ -398,19 +470,39 @@ def _validate_stage5_spec(
     )
     context = spec.scenario_context
     if context is not None:
-        path = context.target_control_path
-        allowed_refs = {
-            *(item.element_id for item in path.process_model_parts),
-            *(item.element_id for item in path.feedback),
-            path.control_action.action_id,
-            *(item.action_id for item in path.related_control_actions),
-        }
-        for intention in spec.attacker_bdi.intentions:
-            if not any(reference in intention for reference in allowed_refs):
-                stage_errors.append(
-                    "Attacker BDI intention has no exact structural reference "
-                    f"from the selected scenario context: {intention!r}"
-                )
+        stage_errors.extend(_contextual_stage5_errors(spec))
+
+
+def _contextual_stage5_errors(spec: ScenarioSpec) -> list[str]:
+    """Validate exact intention references in one context."""
+    context = spec.scenario_context
+    if context is None:
+        return []
+    return _intention_reference_errors(spec, _allowed_intention_refs(context))
+
+
+def _allowed_intention_refs(context: ScenarioGenerationContext) -> set[str]:
+    """Return exact structural IDs that an intention may cite."""
+    path = context.target_control_path
+    return {
+        *(item.element_id for item in path.process_model_parts),
+        *(item.element_id for item in path.feedback),
+        path.control_action.action_id,
+        *(item.action_id for item in path.related_control_actions),
+    }
+
+
+def _intention_reference_errors(
+    spec: ScenarioSpec,
+    allowed_refs: set[str],
+) -> list[str]:
+    """Report intentions that cite none of the selected path identities."""
+    return [
+        "Attacker BDI intention has no exact structural reference "
+        f"from the selected scenario context: {intention!r}"
+        for intention in spec.attacker_bdi.intentions
+        if not any(reference in intention for reference in allowed_refs)
+    ]
 
 
 def _run_stage6_for_spec(
@@ -483,6 +575,7 @@ def _run_stage6_for_spec(
         loss_analysis,
         spec,
         stage_errors,
+        narrative_text=narrative_text,
     )
     if len(stage_errors) != prior_error_count:
         return None, None
@@ -582,6 +675,8 @@ def _validate_stage6_artifacts(
     loss_analysis: LossAnalysis,
     spec: ScenarioSpec,
     stage_errors: list[str],
+    *,
+    narrative_text: str = "",
 ) -> None:
     """Run stage-local validators for Stage 6 artifacts."""
     _validate_stage6_tree(attack_tree, control_structure, spec, stage_errors)

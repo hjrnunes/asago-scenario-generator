@@ -45,15 +45,15 @@ Feature: SP3 Stage 6 Call B — Attack tree
 
     Examples:
       | category           | sub_branch                     |
-      | controller_side    | Corrupt process model          |
+      | controller_side    | Process-model divergence       |
       | controller_side    | Inadequate control algorithm   |
-      | controller_side    | Attack feedback channel        |
+      | controller_side    | Feedback-path condition        |
       | controller_side    | Unsafe control input           |
       | path_side          | Actuator/executor failure      |
-      | path_side          | Control path compromise        |
+      | path_side          | Control-path condition         |
       | path_side          | Controlled process behavior    |
-      | coordination_gap   | Desynchronize shared PM        |
-      | coordination_gap   | Cause conflicting control actions |
+      | coordination_gap   | Shared PM differs              |
+      | coordination_gap   | Controllers issue conflicting control actions |
 
   # SP3-TREE-05
   Scenario: SP3-TREE-05 LLM prunes irrelevant branches

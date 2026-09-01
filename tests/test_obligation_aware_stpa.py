@@ -896,7 +896,9 @@ def test_provider_slot_payload_uses_nested_typed_considerations(tmp_path) -> Non
 
     schema = response_formats[0].model_json_schema()
     assert "considerations" not in schema["properties"]
-    assert "consideration_results" in schema["$defs"]["SlotIcaDraft"]["properties"]
+    assert (
+        "consideration_results" in schema["$defs"]["_SlotProviderDraft"]["properties"]
+    )
 
 
 def test_provider_slot_payload_materializes_canonical_exec_identity(tmp_path) -> None:
@@ -977,9 +979,108 @@ def test_provider_slot_payload_materializes_canonical_exec_identity(tmp_path) ->
     assert pair.pair_id is not None
     schema = response_formats[0].model_json_schema()
     assert schema["properties"]["filled_slots"]["items"]["$ref"].endswith(
-        "/SlotIcaDraft"
+        "/_SlotProviderDraft"
     )
     assert "considerations" not in schema["properties"]
+
+
+@pytest.mark.parametrize(
+    ("uca_type", "deviation", "expected_behavior"),
+    (
+        (UCAType.not_provided, "the request is not reviewed", "fails to provide"),
+        (
+            UCAType.incorrect,
+            "an invalid request is treated as valid",
+            "with an unsafe value/effect",
+        ),
+        (
+            UCAType.wrong_timing,
+            "authorization occurs before validation completes",
+            "at an unsafe time or order",
+        ),
+        (
+            UCAType.wrong_duration,
+            "validation remains active for too long",
+            "for an unsafe duration",
+        ),
+    ),
+)
+def test_provider_slot_payload_compiles_one_deviation_for_exact_slot_type(
+    tmp_path, uca_type: UCAType, deviation: str, expected_behavior: str
+) -> None:
+    """The model supplies prose while the compiler owns the UCA category."""
+    base_request = _provider_slot_request()
+    slot = next(
+        item for item in create_slots(_control_structure()) if item.uca_type is uca_type
+    )
+    request = SynthesisSlotRequest(
+        target_id=slot.responsibility or slot.coordination_link or "",
+        target_kind="responsibility",
+        slots=(slot,),
+        loss_analysis=base_request.loss_analysis,
+        control_structure=base_request.control_structure,
+        controls=base_request.controls,
+    )
+    response_formats: list[type] = []
+
+    class FindingProvider:
+        model = "fake-stpa"
+
+        def complete(self, **kwargs):
+            response_formats.append(kwargs["response_format"])
+            return LLMResult(
+                content={
+                    "filled_slots": [
+                        {
+                            "slot_id": slot.slot_id,
+                            "is_na": False,
+                            "na_rationale": None,
+                            "findings": [
+                                {
+                                    "deviation": deviation,
+                                    "hazardous_context": (
+                                        "the unreviewed request reaches the process"
+                                    ),
+                                    "loss_consequence": (
+                                        "the protected operation is harmed"
+                                    ),
+                                    "related_hazard_ids": ["H-1"],
+                                    "related_constraint_ids": ["SC-1"],
+                                    "process_model_refs": [],
+                                    "feedback_refs": [],
+                                }
+                            ],
+                            "consideration_results": [],
+                        }
+                    ]
+                },
+                prompt_tokens=1,
+                completion_tokens=1,
+                duration_ms=1,
+                system_prompt=kwargs["system_prompt"],
+                user_prompt=kwargs["user_prompt"],
+            )
+
+    result = ObligationAwareLLMAdapter(
+        FindingProvider(),
+        run_dir=tmp_path,
+        controls=_controls(),
+    ).fill(request)
+
+    assert expected_behavior in result.filled_slots[0].icas[0].ica_text
+    assert deviation in result.filled_slots[0].icas[0].ica_text
+    schema = response_formats[0].model_json_schema()
+    finding_schema = schema["$defs"]["_SlotProviderFindingDraft"]
+    deviation_schema = finding_schema["properties"]["deviation"]
+    assert deviation_schema["type"] == "string"
+    assert deviation_schema["minLength"] == 1
+    constraint_schema = finding_schema["properties"]["related_constraint_ids"]
+    assert constraint_schema["minItems"] == 1
+    assert constraint_schema["maxItems"] == 1
+    assert "not_provided_context" not in finding_schema["properties"]
+    assert "incorrect_value_or_effect" not in finding_schema["properties"]
+    assert "timing_deviation" not in finding_schema["properties"]
+    assert "duration_deviation" not in finding_schema["properties"]
 
 
 def test_provider_arbitrary_ica_id_survives_fill_and_accounting(tmp_path) -> None:
@@ -1161,7 +1262,9 @@ def test_provider_slot_payload_schema_matches_request_cardinality(tmp_path) -> N
     assert schema["properties"]["filled_slots"]["minItems"] == 1
     assert schema["properties"]["filled_slots"]["maxItems"] == 1
     assert "considerations" not in schema["properties"]
-    assert "consideration_results" in schema["$defs"]["SlotIcaDraft"]["properties"]
+    assert (
+        "consideration_results" in schema["$defs"]["_SlotProviderDraft"]["properties"]
+    )
 
 
 def test_provider_slot_payload_zero_pairs_requires_empty_considerations(
@@ -1200,7 +1303,9 @@ def test_provider_slot_payload_zero_pairs_requires_empty_considerations(
 
     schema = response_formats[0].model_json_schema()
     assert "considerations" not in schema["properties"]
-    assert "consideration_results" in schema["$defs"]["SlotIcaDraft"]["properties"]
+    assert (
+        "consideration_results" in schema["$defs"]["_SlotProviderDraft"]["properties"]
+    )
     assert result.considerations == ()
 
 
@@ -1305,6 +1410,7 @@ def test_slot_prompt_states_ica_and_na_output_contract() -> None:
         loss_analysis=request.loss_analysis,
         control_structure=request.control_structure,
     )
+    normalized_prompt = " ".join(system_prompt.split())
     assert "is_na=false" in system_prompt
     assert "at least one structured item in `findings`" in system_prompt
     assert "is_na=true" in system_prompt
@@ -1313,6 +1419,23 @@ def test_slot_prompt_states_ica_and_na_output_contract() -> None:
     assert "do not use `unresolved` merely because" in system_prompt
     assert "not proof that the current control already recognizes" in system_prompt
     assert "requires another control path" in system_prompt
+    assert "subject, operation, affected object, and effect" in system_prompt
+    assert (
+        "`value`, `input`, `parameter`, or `threshold` are not mechanism evidence"
+        in system_prompt
+    )
+    assert "taxonomy mechanism is not established evidence" in normalized_prompt
+    assert (
+        "`deviation` and `hazardous_context` must describe the unsafe control"
+        in normalized_prompt
+    )
+    assert (
+        "Bad: `when an adversary uses poisoned persistent memory`" in normalized_prompt
+    )
+    assert (
+        "Good: `the current authorization is not revalidated after stored context"
+        in normalized_prompt
+    )
     assert (
         "legacy `responsibility`, `control_action`, `uca_type`, or `icas`"
         in system_prompt
@@ -1357,7 +1480,7 @@ def test_provider_slot_schema_leads_with_normative_structured_draft(tmp_path) ->
 
     schema = response_formats[0].model_json_schema()
     assert schema["properties"]["filled_slots"]["items"]["$ref"].endswith(
-        "/SlotIcaDraft"
+        "/_SlotProviderDraft"
     )
     assert "considerations" not in schema["properties"]
 

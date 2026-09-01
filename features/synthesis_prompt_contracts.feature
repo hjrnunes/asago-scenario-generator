@@ -1,6 +1,6 @@
-# mutation-stamp: sha256=d10c4b1b972998675b396e980e9b614304496ef38a3627fd5eae0671b60c75b0
+# mutation-stamp: sha256=bd9550b6179eb059013a8c566b10b79dbb085573662a5a99714a6429b62b4896
 # acceptance-mutation-manifest-begin
-# {"version":1,"tested_at":"2026-09-01T16:35:07.894737Z","feature_name":"Meaning survives obligation-aware STPA model calls","feature_path":"features/synthesis_prompt_contracts.feature","background_hash":"a79b6104fef11d6d32c40057ce0473f84c2625a2311588783bf6ca5e9de16ae4","implementation_hash":"sha256:cf01bd2248ea9560075e7fcb7013d731bc9299f63039bf4f16519df7427b0436","scenarios":[{"index":0,"name":"Control action meaning and ownership cannot be silently repaired","scenario_hash":"2b7a09cdc440f6060bf6ad2cee425c495dc1fe960db67475ce95dc622e5f3ed9","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-09-01T16:35:07.894737Z"},{"index":1,"name":"Routing prompts contain only explained decision context","scenario_hash":"c7522922f0c9f4132929750b8d83fb745a9b0901d4d98d7d6d6ed33a255f9913","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-09-01T16:35:07.894737Z"},{"index":2,"name":"Oversized routing batches are split before dispatch","scenario_hash":"b4b27e9df814cc154b0c3fd12e9824202bc06d96f7388f918c793069d5283417","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-09-01T16:35:07.894737Z"},{"index":3,"name":"One oversized routing item never reaches the provider","scenario_hash":"7aa1cb422220558310efb35a8a6d009ef620c333753a0190d673f07151eabdd7","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-09-01T16:35:07.894737Z"},{"index":4,"name":"A route must use a constraint that governs its hazard","scenario_hash":"e829957a695e2a769ac8cbe84983595480fee1db4b14b6d50a4379ad46189a50","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-09-01T16:35:07.894737Z"},{"index":5,"name":"Obligation-aware ICA remains unsafe-control analysis","scenario_hash":"f867091150463f10a5207f3a74c0410b1a51f7d964e253167ede63a2acf640bf","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-09-01T16:35:07.894737Z"},{"index":6,"name":"A causal scenario cannot discard its accepted meaning","scenario_hash":"5fcd39608394139d1594dcfd2b910525027fd196587c1c9078663cb5dc9d68c3","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-09-01T16:35:07.894737Z"},{"index":7,"name":"A causal scenario requires declared causal evidence","scenario_hash":"4a7274a81580baa9aae446654242fe2afeb90de4c2f965236232c892db91579b","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-09-01T16:35:07.894737Z"},{"index":8,"name":"Gherkin cannot choose an unrelated global constraint","scenario_hash":"e5b91c981233dbf44d1aec9029ba4126848b9e247db78890aa9b22ffcb9d60ff","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-09-01T16:35:07.894737Z"},{"index":9,"name":"Provider Gherkin headings are rendered exactly once","scenario_hash":"287f1e95eb7ad867250322cd8c063a156e8d05d3571a7cd72c86a7ec2fbff02d","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-09-01T16:35:07.894737Z"},{"index":10,"name":"Coordination ICAs retain their exact structural path","scenario_hash":"2170390ff87b542f9182ef01354699ec2a4c459d4f3b39d8fc8aead93038c63b","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-09-01T16:35:07.894737Z"}]}
+# {"version":1,"tested_at":"2026-09-01T18:09:31.140603Z","feature_name":"Meaning survives obligation-aware STPA model calls","feature_path":"features/synthesis_prompt_contracts.feature","background_hash":"a79b6104fef11d6d32c40057ce0473f84c2625a2311588783bf6ca5e9de16ae4","implementation_hash":"sha256:cf01bd2248ea9560075e7fcb7013d731bc9299f63039bf4f16519df7427b0436","scenarios":[{"index":0,"name":"Control action meaning and ownership cannot be silently repaired","scenario_hash":"2b7a09cdc440f6060bf6ad2cee425c495dc1fe960db67475ce95dc622e5f3ed9","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-09-01T18:09:31.140603Z"},{"index":1,"name":"Routing prompts contain only explained decision context","scenario_hash":"c7522922f0c9f4132929750b8d83fb745a9b0901d4d98d7d6d6ed33a255f9913","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-09-01T18:09:31.140603Z"},{"index":2,"name":"Oversized routing batches are split before dispatch","scenario_hash":"b4b27e9df814cc154b0c3fd12e9824202bc06d96f7388f918c793069d5283417","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-09-01T18:09:31.140603Z"},{"index":3,"name":"One oversized routing item never reaches the provider","scenario_hash":"7aa1cb422220558310efb35a8a6d009ef620c333753a0190d673f07151eabdd7","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-09-01T18:09:31.140603Z"},{"index":4,"name":"A route must use a constraint that governs its hazard","scenario_hash":"e829957a695e2a769ac8cbe84983595480fee1db4b14b6d50a4379ad46189a50","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-09-01T18:09:31.140603Z"},{"index":5,"name":"Obligation-aware ICA remains unsafe-control analysis","scenario_hash":"f867091150463f10a5207f3a74c0410b1a51f7d964e253167ede63a2acf640bf","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-09-01T18:09:31.140603Z"},{"index":6,"name":"The compiler owns the ICA deviation category","scenario_hash":"bf3b1d04153fe803bf8ed85c67d5117bd8d9acc40dc54bcf57343b355daa108d","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-09-01T18:09:31.140603Z"},{"index":7,"name":"A causal scenario cannot discard its accepted meaning","scenario_hash":"5fcd39608394139d1594dcfd2b910525027fd196587c1c9078663cb5dc9d68c3","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-09-01T18:09:31.140603Z"},{"index":8,"name":"A causal scenario requires declared causal evidence","scenario_hash":"4a7274a81580baa9aae446654242fe2afeb90de4c2f965236232c892db91579b","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-09-01T18:09:31.140603Z"},{"index":9,"name":"Gherkin cannot choose an unrelated global constraint","scenario_hash":"e5b91c981233dbf44d1aec9029ba4126848b9e247db78890aa9b22ffcb9d60ff","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-09-01T18:09:31.140603Z"},{"index":10,"name":"Provider Gherkin headings are rendered exactly once","scenario_hash":"287f1e95eb7ad867250322cd8c063a156e8d05d3571a7cd72c86a7ec2fbff02d","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-09-01T18:09:31.140603Z"},{"index":11,"name":"Coordination ICAs retain their exact structural path","scenario_hash":"2170390ff87b542f9182ef01354699ec2a4c459d4f3b39d8fc8aead93038c63b","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-09-01T18:09:31.140603Z"},{"index":12,"name":"Stage 5 compiles local causal handles into exact structural sources","scenario_hash":"b895501514d455d7f7afb865858aa2ccfa9e282882be6fc4ff842f35f419c32f","mutation_count":1,"result":{"Total":1,"Killed":1,"Survived":0,"Errors":0},"tested_at":"2026-09-01T18:09:31.140603Z"},{"index":13,"name":"Unsupported active access cannot become a scenario","scenario_hash":"b30e5bb411c440319ee2d7fa7f4ada668ef6dcf43cdaada652a4a1cf65503d9a","mutation_count":2,"result":{"Total":2,"Killed":2,"Survived":0,"Errors":0},"tested_at":"2026-09-01T18:09:31.140603Z"}]}
 # acceptance-mutation-manifest-end
 
 Feature: Meaning survives obligation-aware STPA model calls
@@ -64,6 +64,27 @@ Feature: Meaning survives obligation-aware STPA model calls
       | uca_types                                                |
       | NOT_PROVIDED, INCORRECT, WRONG_TIMING, WRONG_DURATION   |
 
+  Scenario Outline: The compiler owns the ICA deviation category
+    When an ICA provider supplies one deviation for a NOT_PROVIDED slot
+    Then the compiled ICA behavior contains "<behavior>"
+    And the model-facing ICA schema exposes one plain deviation string
+    And the model-facing ICA schema permits exactly one governing constraint
+    And finding relevance compares subject operation object and effect
+
+    Examples:
+      | behavior         |
+      | fails to provide |
+
+  Scenario Outline: A taxonomy finding does not establish its attack mechanism
+    When a taxonomy mechanism is routed to a related ICA
+    Then the ICA remains a mechanism-neutral unsafe-control finding
+    And the obligation is provenance rather than causal evidence
+    And the taxonomy mechanism requires "<required_support>" before scenario use
+
+    Examples:
+      | required_support      |
+      | independent evidence  |
+
   Scenario Outline: A causal scenario cannot discard its accepted meaning
     When the captured drifting scenario response is compiled
     Then the source ICA hazard loss and constraint remain authoritative
@@ -109,3 +130,25 @@ Feature: Meaning survives obligation-aware STPA model calls
     Examples:
       | coordination_path               |
       | CL-1, CM-1, RESP-1, RESP-2      |
+
+  Scenario Outline: Stage 5 compiles local causal handles into exact structural sources
+    When a coordination ICA is projected for scenario generation
+    And its Stage 5 provider response selects local causal handle cause_1
+    Then the compiled causal source is "<causal_source>"
+    And every selected defender belief has a compiled vulnerability
+    And no coordination controller or local handle is published as a causal source
+    And the explicit bounded assumption is preserved
+
+    Examples:
+      | causal_source |
+      | PM-1-1        |
+
+  Scenario Outline: Adversarial intent does not erase a grounded STPA scenario
+    Given a scenario context with no reachable attacker capability
+    When a generated artifact describes taking advantage of its structural failure
+    Then active-access grounding disposition is "<disposition>"
+    And the structurally grounded scenario publication count is <published_scenarios>
+
+    Examples:
+      | disposition | published_scenarios |
+      | finding      | 1                   |
