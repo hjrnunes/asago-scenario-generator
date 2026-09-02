@@ -42,6 +42,7 @@ class EffectiveModelConfig:
     timeout: float | None
     top_p: float | None
     top_k: int | None
+    enable_thinking: bool | None
     use_guided_decoding: bool
     extra_headers: Mapping[str, str] | None
     profile_name: str | None
@@ -59,6 +60,7 @@ class EffectiveModelConfig:
             "extra_headers": dict(self.extra_headers or {}),
             "top_p": self.top_p,
             "top_k": self.top_k,
+            "enable_thinking": self.enable_thinking,
             "use_guided_decoding": self.use_guided_decoding,
             "timeout": self.timeout,
         }
@@ -73,6 +75,7 @@ class EffectiveModelConfig:
             "timeout",
             "top_p",
             "top_k",
+            "enable_thinking",
             "use_guided_decoding",
             "headers",
         )
@@ -88,6 +91,7 @@ class EffectiveModelConfig:
             "timeout": self.timeout,
             "top_p": self.top_p,
             "top_k": self.top_k,
+            "enable_thinking": self.enable_thinking,
             "use_guided_decoding": self.use_guided_decoding,
             "header_names": sorted((self.extra_headers or {}).keys()),
             "sources": {
@@ -199,6 +203,7 @@ def _resolution_specs(
     top_k: int | None,
     use_guided_decoding: bool | None,
     extra_headers: Mapping[str, str] | None,
+    enable_thinking: bool | None = None,
 ) -> dict[str, tuple[Any, str, Any]]:
     """The per-field (explicit, env-var, default) resolution table."""
     return {
@@ -222,6 +227,11 @@ def _resolution_specs(
         ),
         "top_p": (top_p, "ASAGO_SCENARIO_GENERATOR_TOP_P", None),
         "top_k": (top_k, "ASAGO_SCENARIO_GENERATOR_TOP_K", None),
+        "enable_thinking": (
+            enable_thinking,
+            "ASAGO_SCENARIO_GENERATOR_ENABLE_THINKING",
+            None,
+        ),
         "use_guided_decoding": (
             use_guided_decoding,
             "ASAGO_SCENARIO_GENERATOR_USE_GUIDED_DECODING",
@@ -276,6 +286,11 @@ def _config_from_values(
         timeout=_optional_float(values["timeout"], "timeout"),
         top_p=_optional_float_value(values["top_p"]),
         top_k=_optional_int(values["top_k"], "top_k"),
+        enable_thinking=(
+            None
+            if values.get("enable_thinking") is None
+            else _bool(values["enable_thinking"], "enable_thinking")
+        ),
         use_guided_decoding=_bool(values["use_guided_decoding"], "use_guided_decoding"),
         extra_headers=_headers(values["headers"]),
         profile_name=model_profile,
@@ -296,6 +311,7 @@ def resolve_effective_model_config(
     timeout: float | None = None,
     top_p: float | None = None,
     top_k: int | None = None,
+    enable_thinking: bool | None = None,
     use_guided_decoding: bool | None = None,
     extra_headers: Mapping[str, str] | None = None,
     environ: Mapping[str, str] | None = None,
@@ -315,6 +331,7 @@ def resolve_effective_model_config(
         top_k,
         use_guided_decoding,
         extra_headers,
+        enable_thinking,
     )
     values, sources = _resolve_values(specs, profile, environment)
     return _config_from_values(values, sources, model_profile, profile_path)

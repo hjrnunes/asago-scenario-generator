@@ -44,6 +44,7 @@ def resolve_llm_client_from_profile(
         temperature=profile.get("temperature"),
         top_p=profile.get("top_p"),
         top_k=profile.get("top_k"),
+        enable_thinking=profile.get("enable_thinking"),
         extra_headers=profile.get("headers"),
         use_guided_decoding=profile.get("use_guided_decoding"),
         timeout=profile.get("timeout"),

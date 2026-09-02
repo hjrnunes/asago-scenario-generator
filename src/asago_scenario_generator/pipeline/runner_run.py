@@ -478,6 +478,7 @@ def _effective_pipeline_options(
         "timeout": effective_model.timeout,
         "top_p": effective_model.top_p,
         "top_k": effective_model.top_k,
+        "enable_thinking": effective_model.enable_thinking,
         "use_guided_decoding": effective_model.use_guided_decoding,
         "header_names": _sorted_header_names(effective_model),
         "presentation_fallback": presentation_fallback,

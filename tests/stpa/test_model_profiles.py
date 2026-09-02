@@ -84,6 +84,20 @@ class TestLoadProfile:
         assert result["top_p"] == 0.9
         assert result["top_k"] == 40
 
+    def test_load_profile_preserves_explicit_thinking_switch(self, tmp_path):
+        profiles = _write_profile(
+            tmp_path / "qwen.yaml",
+            "qwen",
+            base_url="https://local.example.com/v1",
+            model="qwen",
+            **{_KEY: "unused"},
+            enable_thinking=False,
+        )
+
+        result = load_profile(profiles, "qwen")
+
+        assert result["enable_thinking"] is False
+
     def test_mp03_load_profile_with_custom_headers(self, tmp_path):
         """MP-03: loading a profile with custom headers."""
         profiles = _write_profile(

@@ -18,10 +18,11 @@ from asago_scenario_generator.stpa.infra.llm import (
     LLMClient,
     _apply_legacy_json_fallback,
     _guided_json_enabled,
-    _guided_json_extra_body,
+    _json_schema_response_format,
     _resolve_api_key,
     _resolve_base_url,
     _resolve_model,
+    _thinking_extra_body,
     _top_k_extra_body,
 )
 
@@ -148,10 +149,12 @@ class TestApplyLegacyJsonFallback:
         _apply_legacy_json_fallback(extra, False, _Schema, False)
         assert extra == {}
 
-    def test_no_set_when_use_guided_true(self) -> None:
+    def test_json_schema_when_use_guided_true(self) -> None:
         extra: dict = {}
         _apply_legacy_json_fallback(extra, True, _Schema, True)
-        assert extra == {}
+        assert extra == {
+            "response_format": _json_schema_response_format(_Schema)
+        }
 
     def test_no_set_when_all_false(self) -> None:
         extra: dict = {}
@@ -170,22 +173,22 @@ class TestTopKExtraBody:
         assert _top_k_extra_body(5) == {"top_k": 5}
 
 
-# -- _guided_json_extra_body ---------------------------------------------
+# -- supported vLLM request-body controls --------------------------------
 
 
-class TestGuidedJsonExtraBody:
-    def test_returns_schema_when_enabled(self) -> None:
-        result = _guided_json_extra_body(True, _Schema)
-        assert result == {"guided_json": _Schema.model_json_schema()}
+class TestVllmRequestControls:
+    def test_returns_supported_schema_shape(self) -> None:
+        result = _json_schema_response_format(_Schema)
+        assert result["type"] == "json_schema"
+        assert result["json_schema"]["schema"] == _Schema.model_json_schema()
 
-    def test_empty_when_no_response_format(self) -> None:
-        assert _guided_json_extra_body(True, None) == {}
+    def test_disables_thinking_under_chat_template_kwargs(self) -> None:
+        assert _thinking_extra_body(False) == {
+            "chat_template_kwargs": {"enable_thinking": False}
+        }
 
-    def test_empty_when_disabled(self) -> None:
-        assert _guided_json_extra_body(False, _Schema) == {}
-
-    def test_empty_when_both_false(self) -> None:
-        assert _guided_json_extra_body(False, None) == {}
+    def test_omits_thinking_for_compatible_profiles(self) -> None:
+        assert _thinking_extra_body(None) == {}
 
 
 # -- LLMClient._build_extra_kwargs ---------------------------------------
@@ -222,10 +225,10 @@ class TestBuildExtraKwargs:
         kwargs = client._build_extra_kwargs(None, 0.5)
         assert kwargs["extra_body"] == {"top_k": 10}
 
-    def test_extra_body_includes_guided_json(self) -> None:
+    def test_guided_schema_is_not_put_in_extra_body(self) -> None:
         client = _make_client()
         kwargs = client._build_extra_kwargs(None, 0.5, _Schema, use_guided_json=True)
-        assert kwargs["extra_body"] == {"guided_json": _Schema.model_json_schema()}
+        assert "extra_body" not in kwargs
 
     def test_no_extra_body_when_empty(self) -> None:
         client = _make_client()

@@ -135,6 +135,7 @@ class TestResolutionSpecs:
             "timeout",
             "top_p",
             "top_k",
+            "enable_thinking",
             "use_guided_decoding",
             "headers",
         }

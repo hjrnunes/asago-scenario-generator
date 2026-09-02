@@ -12,8 +12,9 @@ from asago_scenario_generator.stpa.infra.llm import (
     LLMResult,
     _apply_legacy_json_fallback,
     _guided_json_enabled,
-    _guided_json_extra_body,
+    _json_schema_response_format,
     _prompt_messages,
+    _thinking_extra_body,
     _token_usage,
     _top_k_extra_body,
 )
@@ -175,6 +176,37 @@ class TestInfraLLMComplete:
         ] == {"type": "json_object"}
         assert not client._client.beta.chat.completions.parse.called
 
+    def test_qwen_controls_use_supported_request_body(self):
+        """Thinking and strict output use the vLLM-supported request fields."""
+        client = self._make_mock_client(content='{"exact_field": "value"}')
+        client.enable_thinking = False
+        client.use_guided_decoding = True
+
+        client.complete(
+            "system",
+            "user",
+            response_format=_OpenRouterPayload,
+            allow_unvalidated=True,
+        )
+
+        sent = client._client.chat.completions.create.call_args.kwargs
+        assert sent["extra_body"] == {
+            "chat_template_kwargs": {"enable_thinking": False}
+        }
+        assert sent["response_format"]["type"] == "json_schema"
+        assert "guided_json" not in sent["extra_body"]
+
+    def test_gemma_compatible_request_omits_thinking_control(self):
+        """Profiles without the switch keep their existing request shape."""
+        client = self._make_mock_client(content="response")
+        client.top_k = 64
+
+        client.complete("system", "user")
+
+        sent = client._client.chat.completions.create.call_args.kwargs
+        assert sent["extra_body"] == {"top_k": 64}
+        assert "chat_template_kwargs" not in sent["extra_body"]
+
     def test_openrouter_structured_completion_uses_json_object_compatibility(self):
         """OpenRouter bypasses the unsupported beta parse endpoint."""
         client = self._make_mock_client(content='{"key": "value"}')
@@ -276,11 +308,13 @@ class TestInfraLLMHelpers:
         _apply_legacy_json_fallback(kwargs, True, dict, False)
         assert kwargs["response_format"] == {"type": "json_object"}
 
-    def test_apply_legacy_json_fallback_skips_when_guided(self):
-        """_apply_legacy_json_fallback leaves kwargs alone with guided_json."""
+    def test_apply_legacy_json_fallback_uses_json_schema_when_guided(self):
+        """Guided output uses the supported top-level JSON Schema shape."""
         kwargs: dict = {}
-        _apply_legacy_json_fallback(kwargs, True, dict, True)
-        assert kwargs == {}
+        _apply_legacy_json_fallback(kwargs, True, _OpenRouterPayload, True)
+        assert kwargs["response_format"] == _json_schema_response_format(
+            _OpenRouterPayload
+        )
 
     def test_apply_legacy_json_fallback_skips_unstructured(self):
         """_apply_legacy_json_fallback does nothing without a schema."""
@@ -304,13 +338,18 @@ class TestInfraLLMHelpers:
         assert _top_k_extra_body(40) == {"top_k": 40}
         assert _top_k_extra_body(None) == {}
 
-    def test_guided_json_extra_body(self):
-        """_guided_json_extra_body embeds the schema for guided decoding."""
+    def test_json_schema_response_format(self):
+        """Strict output uses response_format rather than legacy guided_json."""
 
         class _Model(BaseModel):
             val: int
 
-        body = _guided_json_extra_body(True, _Model)
-        assert body["guided_json"] == _Model.model_json_schema()
-        assert _guided_json_extra_body(False, _Model) == {}
-        assert _guided_json_extra_body(True, None) == {}
+        body = _json_schema_response_format(_Model)
+        assert body["type"] == "json_schema"
+        assert body["json_schema"]["schema"] == _Model.model_json_schema()
+
+    def test_thinking_extra_body_is_profile_scoped(self):
+        assert _thinking_extra_body(False) == {
+            "chat_template_kwargs": {"enable_thinking": False}
+        }
+        assert _thinking_extra_body(None) == {}

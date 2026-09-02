@@ -376,6 +376,7 @@ class ModelConfig(BaseModel):
     timeout: float | None = None
     top_p: float | None = None
     top_k: int | None = None
+    enable_thinking: bool | None = None
     use_guided_decoding: bool = False
     profile_name: str | None = None
     profiles_file: str | None = None

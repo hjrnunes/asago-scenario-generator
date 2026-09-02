@@ -19,6 +19,17 @@ gemma4-local:
   top_p: 0.95
   top_k: 64
   use_guided_decoding: false
+qwen-local:
+  base_url: https://your-local-qwen-endpoint.example.com/v1
+  model: qwen3.5-27b
+  api_key: unused
+  context_window: 32768
+  max_completion_tokens: 16384
+  timeout: 300
+  temperature: 1.0
+  top_p: 1.0
+  enable_thinking: false
+  use_guided_decoding: true
 gemma4-oc-taxonomy:
   base_url: https://your-openshift-gemma-endpoint.example.com/v1
   model: gemma-4-26b-a4b-it

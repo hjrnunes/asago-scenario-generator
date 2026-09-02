@@ -592,8 +592,13 @@ asago-scenario-generator stpa-run \
 ```
 
 The STPA run manifest records effective model name, base URL, token limit,
-temperature, `top_p`, `top_k`, guided-decoding state, and request timeout. API
-keys and header values are never included.
+temperature, `top_p`, `top_k`, thinking control, guided-decoding state, and
+request timeout. API keys and header values are never included. For Qwen on
+vLLM, `enable_thinking: false` is sent inside
+`chat_template_kwargs`, while guided decoding uses the standard top-level
+`response_format: {type: json_schema, ...}` request shape. Profiles that omit
+`enable_thinking`, including the Gemma examples, retain their existing request
+body.
 
 Stage 2 retries a semantically empty requirement or responsibility response
 once with corrective feedback. Stage 3 likewise retries a schema-invalid slot

@@ -245,9 +245,14 @@ def _apply_legacy_json_fallback(
     response_format: type[BaseModel] | None,
     use_guided_json: bool,
 ) -> None:
-    """Fall back to legacy json_object mode for models without guided decoding."""
-    if allow_unvalidated and response_format is not None and not use_guided_json:
-        extra_kwargs["response_format"] = {"type": "json_object"}
+    """Select strict JSON Schema or portable JSON-object structured output."""
+    if not allow_unvalidated or response_format is None:
+        return
+    extra_kwargs["response_format"] = (
+        _json_schema_response_format(response_format)
+        if use_guided_json
+        else {"type": "json_object"}
+    )
 
 
 def _token_usage(response: Any) -> Any:
@@ -264,14 +269,25 @@ def _top_k_extra_body(top_k: int | None) -> dict[str, Any]:
     return {"top_k": top_k}
 
 
-def _guided_json_extra_body(
-    use_guided_json: bool,
-    response_format: type[BaseModel] | None,
-) -> dict[str, Any]:
-    """The extra_body entries for vLLM strict JSON schema enforcement."""
-    if use_guided_json and response_format is not None:
-        return {"guided_json": response_format.model_json_schema()}
+def _thinking_extra_body(enable_thinking: bool | None) -> dict[str, Any]:
+    """Map the profile switch to the vLLM chat-template request body."""
+    if enable_thinking is not None:
+        return {"chat_template_kwargs": {"enable_thinking": enable_thinking}}
     return {}
+
+
+def _json_schema_response_format(
+    response_format: type[BaseModel],
+) -> dict[str, Any]:
+    """Build the OpenAI-compatible strict JSON Schema request shape."""
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": response_format.__name__,
+            "strict": True,
+            "schema": response_format.model_json_schema(),
+        },
+    }
 
 
 class LLMResult(BaseModel):
@@ -304,6 +320,7 @@ class LLMClient:
         extra_headers: dict[str, str] | None = None,
         top_p: float | None = None,
         top_k: int | None = None,
+        enable_thinking: bool | None = None,
         use_guided_decoding: bool | None = None,
         timeout: float | None = None,
     ) -> None:
@@ -335,6 +352,7 @@ class LLMClient:
             maximum=1.0,
         )
         self.top_k = _resolve_optional_int(top_k, _ENV_TOP_K, minimum=1)
+        self.enable_thinking = enable_thinking
         self.use_guided_decoding = _resolve_bool(
             use_guided_decoding,
             _ENV_USE_GUIDED_DECODING,
@@ -368,8 +386,8 @@ class LLMClient:
         ``TypeError`` on non-OpenAI providers (e.g. OpenRouter). It is
         routed through ``extra_body`` instead of as a top-level kwarg.
 
-        ``guided_json`` enables vLLM's strict JSON schema enforcement via
-        guided decoding, masking invalid tokens during generation.
+        Structured-output enforcement is emitted separately as the standard
+        top-level ``response_format`` request field.
         """
         kwargs: dict[str, Any] = {"temperature": effective_temp}
         if effective_max is not None:
@@ -379,7 +397,7 @@ class LLMClient:
 
         extra_body = {
             **_top_k_extra_body(self.top_k),
-            **_guided_json_extra_body(use_guided_json, response_format),
+            **_thinking_extra_body(self.enable_thinking),
         }
         if extra_body:
             kwargs["extra_body"] = extra_body
@@ -478,6 +496,7 @@ def effective_model_config(
         "temperature": effective_temperature(client, temperature),
         "top_p": getattr(client, "top_p", None),
         "top_k": getattr(client, "top_k", None),
+        "enable_thinking": getattr(client, "enable_thinking", None),
         "use_guided_decoding": getattr(client, "use_guided_decoding", False),
         "timeout": getattr(client, "timeout", DEFAULT_REQUEST_TIMEOUT_SECONDS),
     }

@@ -374,6 +374,7 @@ def _completion_extra_kwargs(
     effective_temp: float,
     top_p: float | None,
     top_k: int | None,
+    enable_thinking: bool | None = None,
 ) -> dict[str, Any]:
     """Build the provider-facing kwargs for one completion request."""
     extra_kwargs: dict[str, Any] = {"temperature": effective_temp}
@@ -381,8 +382,13 @@ def _completion_extra_kwargs(
         extra_kwargs["max_completion_tokens"] = effective_max
     if top_p is not None:
         extra_kwargs["top_p"] = top_p
+    extra_body: dict[str, Any] = {}
     if top_k is not None:
-        extra_kwargs["extra_body"] = {"top_k": top_k}
+        extra_body["top_k"] = top_k
+    if enable_thinking is not None:
+        extra_body["chat_template_kwargs"] = {"enable_thinking": enable_thinking}
+    if extra_body:
+        extra_kwargs["extra_body"] = extra_body
     return extra_kwargs
 
 
@@ -450,6 +456,7 @@ def _request_controls(
     top_p: float | None,
     top_k: int | None,
     recovered_whitespace: bool,
+    enable_thinking: bool | None = None,
 ) -> dict[str, Any]:
     """The request_controls telemetry dict for one completion result."""
     return {
@@ -459,6 +466,7 @@ def _request_controls(
         "temperature": effective_temp,
         "top_p": top_p,
         "top_k": top_k,
+        "enable_thinking": enable_thinking,
         "structured_whitespace_recovered": recovered_whitespace,
     }
 
@@ -483,6 +491,7 @@ class LLMClient:
         extra_headers: dict[str, str] | None = None,
         top_p: float | None = None,
         top_k: int | None = None,
+        enable_thinking: bool | None = None,
         use_guided_decoding: bool = False,
         timeout: float | None = None,
     ) -> None:
@@ -493,6 +502,7 @@ class LLMClient:
         self.temperature = _resolve_temperature_arg(temperature)
         self.top_p = top_p
         self.top_k = top_k
+        self.enable_thinking = enable_thinking
         self.use_guided_decoding = use_guided_decoding
         self.timeout = (
             timeout if timeout is not None else DEFAULT_REQUEST_TIMEOUT_SECONDS
@@ -530,10 +540,11 @@ class LLMClient:
         effective_temp = _effective_temperature(temperature, self.temperature)
         top_p = getattr(self, "top_p", None)
         top_k = getattr(self, "top_k", None)
+        enable_thinking = getattr(self, "enable_thinking", None)
 
         messages = _prompt_messages(system_prompt, user_prompt)
         extra_kwargs = _completion_extra_kwargs(
-            effective_max, effective_temp, top_p, top_k
+            effective_max, effective_temp, top_p, top_k, enable_thinking
         )
 
         t0 = time.perf_counter_ns()
@@ -562,6 +573,7 @@ class LLMClient:
                 top_p,
                 top_k,
                 recovered_whitespace,
+                enable_thinking,
             ),
         )
 
