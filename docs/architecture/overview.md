@@ -223,7 +223,7 @@ The fixed order is capability preparation and snapshot pinning, Phase 1
 planning, ordinary SP1 baseline, neutral-brief consideration, at most one
 additive revision, one complete recheck only when that revision is `applied`,
 final obligation-aware ICA filling, ordinary SP3 realization, and provisional
-accounting. The shared provider adapter is constructed lazily after planning
+accounting, followed by offline Phase 2 verification. The shared provider adapter is constructed lazily after planning
 and baseline preparation. An SP3 failure is recorded without discarding final
 ICA or accounting evidence.
 
@@ -286,7 +286,19 @@ the authoritative slot before validating and publishing the ICA.
 
 The root atomically publishes `taxonomy-obligation-plan.yaml`,
 `obligation-consideration.yaml`, `obligation-accounting.yaml`,
-`scenario-realization.yaml`, and `synthesis-manifest.yaml`. Accounting joins
+`scenario-realization.yaml`, and `synthesis-manifest.yaml`. After scenario
+realization it also projects the finished artifacts through the existing Phase
+2 contracts and publishes `system-resource-map.yaml`,
+`correspondence-proposals.yaml`, `correspondence-reconciliation.yaml`, and
+`hybrid-coverage-assessment.yaml`. The automatic resource map is an exact
+zero-link baseline pinned to the synthesis capability snapshot and final
+control structure. An exact obligation/slot/ICA route becomes an unreviewed
+`mechanism_enables_ica` proposal only when provisional synthesis accounting
+credited its mechanism/path checks. Other exact route joins remain
+`related_but_not_coverage`. Neither becomes an accepted relation without
+separate explicit adjudication and the existing deterministic validation.
+Phase 2 failure is retained as a final-stage diagnostic and cannot remove or
+invalidate an admitted STPA scenario. Accounting joins
 exact obligation/slot, ICA,
 `EXEC:*`, hazard, and constraint evidence but makes no Phase 2 correspondence
 or coverage claim. Scenario realization separately records whether that exact

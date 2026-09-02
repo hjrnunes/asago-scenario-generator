@@ -1,8 +1,3 @@
-# mutation-stamp: sha256=4e937ecff17d37b930c476f67e2535f60e2a31e80c8ff8f36d39f9c71fcf5679
-# acceptance-mutation-manifest-begin
-# {"version":1,"tested_at":"2026-09-01T16:26:23.850056Z","feature_name":"Obligation-aware synthesis run","feature_path":"features/synthesis.feature","background_hash":"e590a28891bd9f46f251d41aef6f2af43850821eca84fabccab67719e320814d","implementation_hash":"sha256:77977a03754a0be10d7dac944c20d9516a1c994428118793e3a8ab8781190ea1","scenarios":[{"index":4,"name":"STPA retains each typed route outcome as analysis evidence","scenario_hash":"d4eefda6d43c9565abab12528dce639f38ac9eab5f5b88473a49411e21a0e2a6","mutation_count":4,"result":{"Total":4,"Killed":4,"Survived":0,"Errors":0},"tested_at":"2026-09-01T16:26:23.850056Z"}]}
-# acceptance-mutation-manifest-end
-
 Feature: Obligation-aware synthesis run
   A synthesis run joins the typed Phase 1 obligation ledger to ordinary STPA
   without changing the existing generate or stpa-run workflows.
@@ -15,8 +10,8 @@ Feature: Obligation-aware synthesis run
     When synthesis-run executes
     Then Phase 1 planning runs before baseline STPA
     And the synthesis recheck covers every applicable obligation exactly once
-    And the synthesis writes the five normative sidecars atomically
-    And the synthesis report identifies provisional accounting
+    And the synthesis writes the nine normative sidecars atomically
+    And the synthesis report includes non-blocking Phase 2 verification
     And applicable and non-applicable obligations are accounted separately
 
   Scenario: A rejected revision retains upstream gaps without a second pass
@@ -24,7 +19,7 @@ Feature: Obligation-aware synthesis run
     When synthesis-run executes
     Then Phase 1 planning runs before baseline STPA
     And the synthesis performs no recheck after a rejected revision
-    And the synthesis writes the five normative sidecars atomically
+    And the synthesis writes the nine normative sidecars atomically
 
   Scenario: A clean run does not perform a revision or second pass
     Given a deterministic synthesis revision is not required

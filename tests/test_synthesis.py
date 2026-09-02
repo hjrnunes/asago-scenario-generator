@@ -62,6 +62,7 @@ class _FakeAdapters:
     with_evidence: bool = False
     revision_result: object | None = None
     scenario_errors: tuple[str, ...] = ()
+    phase2_failure: bool = False
 
     def plan(self, *, taxonomy_inputs, **_) -> object:
         self.calls.append(("plan", taxonomy_inputs))
@@ -185,6 +186,16 @@ class _FakeAdapters:
             },
         )
 
+    def verify_phase2(self, **_) -> object:
+        self.calls.append(("verify_phase2", None))
+        if self.phase2_failure:
+            raise ValueError("deterministic Phase 2 failure")
+        return SimpleNamespace(
+            status="awaiting_evidence",
+            assessment=None,
+            artifact_paths={},
+        )
+
 
 def _inputs(tmp_path: Path) -> SynthesisInputs:
     return SynthesisInputs(
@@ -214,10 +225,22 @@ def test_synthesis_plans_before_baseline_and_keeps_shared_snapshot(
         "scenarios",
         "account",
         "realize",
+        "verify_phase2",
     ]
     baseline_inputs, snapshot = fake.calls[1][1]
     assert baseline_inputs is result.inputs
     assert snapshot.profile == "profile"
+
+
+def test_phase2_failure_is_last_and_does_not_erase_scenarios(tmp_path: Path) -> None:
+    fake = _FakeAdapters(calls=[], phase2_failure=True)
+
+    result = run_synthesis(_inputs(tmp_path), SynthesisAdapters.from_object(fake))
+
+    assert [name for name, _ in fake.calls][-1] == "verify_phase2"
+    assert result.scenario_envelopes == ("scenario-1",)
+    assert result.phase2_verification.status == "failed"
+    assert any("Phase 2 verification failed" in item for item in result.stage_errors)
     assert result.accounting is not None
     assert {
         "taxonomy-obligation-plan.yaml",
@@ -834,7 +857,7 @@ def test_scenario_failure_is_recorded_without_erasing_accounting(
 
     assert any("scenario generation failed" in error for error in result.stage_errors)
     names = [name for name, _ in fake.calls]
-    assert names[-1] == "realize"
+    assert names[-1] == "verify_phase2"
     assert result.accounting is not None
 
 

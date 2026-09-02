@@ -149,7 +149,13 @@ changing acceptance behavior, or running the quality sequence.
   style warnings are non-blocking. Reconcile one closed terminal stop reason
   per applicable obligation across accounting and scenario realization, and
   distinguish provider response receipt from parsing, semantic validation,
-  compilation, and publication in call evidence.
+  compilation, and publication in call evidence. Finish `synthesis-run` with
+  non-blocking offline Phase 2 verification. Start from an exact zero-link
+  resource-map baseline. Only an exact route credited by synthesis accounting
+  may become an unreviewed `mechanism_enables_ica` proposal; other route joins
+  remain `related_but_not_coverage`. Never auto-confirm correspondence.
+  Publish the four standard Phase 2 artifacts, and retain a verification
+  failure without deleting or invalidating generated scenarios.
 - Keep Phase 4 Task 1 at the typed, offline
   `resolve_hybrid_projection_units` boundary. Accept one closed
   `HybridProjectionInputs` graph assembled only through exact artifact

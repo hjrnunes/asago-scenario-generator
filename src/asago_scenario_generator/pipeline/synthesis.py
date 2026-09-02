@@ -164,6 +164,7 @@ class SynthesisAdapters:
     scenarios: Callable[..., Any] | None = None
     account: Callable[..., Any] | None = None
     realize: Callable[..., Any] | None = None
+    verify_phase2: Callable[..., Any] | None = None
     obligation_adapter: Any | None = None
     persist_plan: Callable[..., Any] | None = None
     persist_consideration: Callable[..., Any] | None = None
@@ -245,6 +246,11 @@ class SynthesisAdapters:
                 "build_scenario_realization_assessment",
                 "derive_scenario_realization",
             ),
+            "verify_phase2": (
+                "verify_phase2",
+                "run_phase2_verification",
+                "verify_hybrid_coverage",
+            ),
             "obligation_adapter": (
                 "obligation_adapter",
                 "analysis_adapter",
@@ -296,6 +302,7 @@ class SynthesisResult:
     scenario_result: Any
     accounting: Any
     realization: Any
+    phase2_verification: Any
     manifest: Any
     output_dir: Path
     report_path: Path | None = None
@@ -560,6 +567,19 @@ def run_synthesis(
         adapters=resolved,
         calls=calls,
     )
+    phase2_verification = _run_phase2_verification(
+        plan=plan,
+        accounting=accounting,
+        capability_snapshot=capability_snapshot,
+        loss_analysis=final_loss,
+        control_structure=final_control,
+        ica_enumeration=ica_enumeration,
+        scenario_result=scenario_result,
+        output_dir=output_dir,
+        adapters=resolved,
+        calls=calls,
+        stage_errors=stage_errors,
+    )
 
     consideration_path = _persist_sidecar(
         output_dir,
@@ -596,6 +616,7 @@ def run_synthesis(
         realization=realization,
         ica_enumeration=ica_enumeration,
         scenario_result=scenario_result,
+        phase2_verification=phase2_verification,
         calls=calls,
         revision=revision_result,
         stage_errors=stage_errors,
@@ -620,6 +641,7 @@ def run_synthesis(
         accounting,
         realization,
         scenario_result,
+        phase2_verification,
         resolved.report,
     )
 
@@ -632,6 +654,9 @@ def run_synthesis(
     }
     if report_path is not None:
         artifact_paths[REPORT_FILENAME] = report_path
+    artifact_paths.update(
+        dict(_first_attr(phase2_verification, "artifact_paths") or {})
+    )
 
     return SynthesisResult(
         inputs=inputs,
@@ -646,6 +671,7 @@ def run_synthesis(
         scenario_result=scenario_result,
         accounting=accounting,
         realization=realization,
+        phase2_verification=phase2_verification,
         manifest=manifest,
         output_dir=output_dir,
         report_path=report_path,
@@ -694,6 +720,7 @@ def _production_defaults() -> SynthesisAdapters:
         scenarios=_default_scenarios,
         account=_default_account,
         realize=_default_realize,
+        verify_phase2=_default_verify_phase2,
     )
 
 
@@ -1457,6 +1484,55 @@ def _fallback_realization() -> Any:
     )
 
 
+def _run_phase2_verification(
+    *,
+    plan: Any,
+    accounting: Any,
+    capability_snapshot: Any,
+    loss_analysis: Any,
+    control_structure: Any,
+    ica_enumeration: Any,
+    scenario_result: Any,
+    output_dir: Path,
+    adapters: SynthesisAdapters,
+    calls: list[str],
+    stage_errors: list[str],
+) -> Any:
+    """Run Phase 2 last and retain failures without changing scenario output."""
+    ordinary_icas = _first_attr(ica_enumeration, "ica_enumeration") or ica_enumeration
+    scenarios = tuple(
+        _first_attr(scenario_result, "scenario_envelopes", "envelopes") or ()
+    )
+    try:
+        result = _invoke(
+            adapters.verify_phase2,
+            obligation_plan=plan,
+            plan=plan,
+            capability_snapshot=capability_snapshot,
+            loss_analysis=loss_analysis,
+            control_structure=control_structure,
+            ica_enumeration=ordinary_icas,
+            ica_considerations=_ica_considerations(ica_enumeration),
+            accounting_rows=tuple(_first_attr(accounting, "rows") or ()),
+            scenario_envelopes=scenarios,
+            output_dir=output_dir,
+        )
+        calls.append("verify_phase2")
+        if result is None:
+            raise ValueError("Phase 2 verification adapter returned no result")
+        return result
+    except Exception as exc:  # noqa: BLE001 - explicitly non-blocking final stage
+        calls.append("verify_phase2")
+        message = f"Phase 2 verification failed: {type(exc).__name__}: {exc}"
+        stage_errors.append(message)
+        return SimpleNamespace(
+            status="failed",
+            error=message,
+            artifact_paths={},
+            assessment=None,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Persistence and manifest
 # ---------------------------------------------------------------------------
@@ -1583,6 +1659,7 @@ def _build_manifest(
     realization: Any,
     ica_enumeration: Any,
     scenario_result: Any,
+    phase2_verification: Any,
     calls: list[str],
     revision: Any,
     stage_errors: list[str],
@@ -1704,6 +1781,7 @@ def _build_manifest(
             "failed": len(_first_attr(scenario_result, "stage_errors") or ()),
         },
         "scenario_errors": list(_first_attr(scenario_result, "stage_errors") or ()),
+        "phase2_verification": _manifest_phase2_verification(phase2_verification),
         "revision": _manifest_revision(revision),
         "stage_errors": list(stage_errors),
         "stage_warnings": list(stage_warnings),
@@ -1737,6 +1815,27 @@ def _build_manifest(
     }
     payload["semantic_digest"] = _digest_payload(_MANIFEST_DOMAIN, payload)
     return payload
+
+
+def _manifest_phase2_verification(value: Any) -> dict[str, Any]:
+    """Retain Phase 2 status and exact output identities without claiming coverage."""
+    assessment = _first_attr(value, "assessment")
+    reconciliation = _first_attr(value, "reconciliation")
+    proposals = _first_attr(value, "proposals")
+    diagnostics = _first_attr(assessment, "diagnostics")
+    return {
+        "status": _first_attr(value, "status") or "failed",
+        "resource_map_mode": _first_attr(value, "resource_map_mode"),
+        "proposal_set_digest": _semantic_digest(proposals),
+        "reconciliation_digest": _semantic_digest(reconciliation),
+        "assessment_digest": _semantic_digest(assessment),
+        "proposed": len(tuple(_first_attr(proposals, "proposals") or ())),
+        "accepted": len(tuple(_first_attr(reconciliation, "accepted_relations") or ())),
+        "taxonomy_unresolved": _first_attr(diagnostics, "taxonomy_unresolved") or 0,
+        "error": _first_attr(value, "error"),
+        "network_calls": _first_attr(assessment, "network_calls") or 0,
+        "model_calls": _first_attr(assessment, "model_calls") or 0,
+    }
 
 
 def _manifest_prompt_call_evidence(output_dir: Path) -> list[dict[str, Any]]:
@@ -2040,6 +2139,7 @@ def _render_report(
     accounting: Any,
     realization: Any,
     scenario_result: Any,
+    phase2_verification: Any,
     renderer: Callable[..., Any] | None,
 ) -> Path | None:
     """Render the read-only synthesis report after all normative sidecars."""
@@ -2053,6 +2153,7 @@ def _render_report(
             accounting=accounting,
             realization=realization,
             scenario_result=scenario_result,
+            phase2_verification=phase2_verification,
         )
         return Path(result) if result is not None else None
     try:
@@ -2066,6 +2167,7 @@ def _render_report(
             accounting=accounting,
             realization=realization,
             scenario_result=scenario_result,
+            phase2_verification=phase2_verification,
         )
     except Exception as exc:  # noqa: BLE001 - report is read-only and non-fatal
         logger.warning("synthesis report generation failed: %s", exc)
@@ -2458,6 +2560,15 @@ def _default_realize(**kwargs: Any) -> Any:
     )
 
     return _invoke(build_scenario_realization_assessment, **kwargs)
+
+
+def _default_verify_phase2(**kwargs: Any) -> Any:
+    """Project the completed synthesis run through the offline Phase 2 seam."""
+    from asago_scenario_generator.pipeline.synthesis_phase2 import (
+        run_synthesis_phase2_verification,
+    )
+
+    return _invoke(run_synthesis_phase2_verification, **kwargs)
 
 
 def _fallback_accounting_disposition(

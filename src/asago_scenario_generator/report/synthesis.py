@@ -20,8 +20,9 @@ def render_synthesis_report(
     accounting: Any,
     realization: Any,
     scenario_result: Any,
+    phase2_verification: Any,
 ) -> Path:
-    """Render one self-contained provisional synthesis report."""
+    """Render synthesis results together with non-blocking Phase 2 verification."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     rows = _items(plan, "obligations")
@@ -52,7 +53,7 @@ def render_synthesis_report(
         [
             "<h1>Obligation-aware synthesis</h1>",
             f'<p class="run-id">Run: <code>{title}</code></p>',
-            '<p class="notice">Provisional Phase 1/STPA synthesis; Phase 2 verification is not included.</p>',
+            '<p class="notice">Scenario generation is complete. Phase 2 verification is reported separately and never removes scenarios.</p>',
             "<h2>Run summary</h2>",
             "<table><tbody>",
             *summary_rows,
@@ -85,6 +86,7 @@ def render_synthesis_report(
             *(_row(key, value) for key, value in sorted(realization_summary.items())),
             "</tbody></table>",
             _realization_html(realization_records),
+            _phase2_html(phase2_verification),
             _scenario_html(scenarios),
         ]
     )
@@ -101,6 +103,41 @@ def render_synthesis_report(
         + "</body></html>\n"
     )
     return atomic_write_text(output_dir / REPORT_FILENAME, content)
+
+
+def _phase2_html(value: Any) -> str:
+    """Explain correspondence verification without turning it into generation status."""
+    status = str(_value(value, "status") or "failed")
+    assessment = _value(value, "assessment")
+    diagnostics = _mapping(_value(assessment, "diagnostics"))
+    explanation = {
+        "verified": "At least one correspondence has explicit accepted evidence.",
+        "awaiting_review": (
+            "The run found exact obligation-to-STPA review candidates, but none "
+            "counts as taxonomy coverage until it is explicitly reviewed."
+        ),
+        "awaiting_evidence": (
+            "Phase 2 completed, but the run did not contain the independently "
+            "reviewed resource and mechanism evidence needed to confirm a "
+            "correspondence."
+        ),
+        "failed": (
+            "Phase 2 could not complete. The scenarios above remain valid outputs "
+            "of the synthesis run."
+        ),
+    }.get(status, "Phase 2 returned an unknown status.")
+    rows = "".join(
+        _row(key.replace("_", " ").title(), item)
+        for key, item in sorted(diagnostics.items())
+    )
+    error = _value(value, "error")
+    error_html = f"<p>Error: {escape(str(error))}</p>" if error else ""
+    diagnostics_html = "<table><tbody>" + rows + "</tbody></table>" if rows else ""
+    return (
+        "<h2>Phase 2: taxonomy–STPA verification</h2>"
+        f"<p>Status: <code>{escape(status)}</code></p>"
+        f"<p>{escape(explanation)}</p>" + error_html + diagnostics_html
+    )
 
 
 def render_report(*args: Any, **kwargs: Any) -> Path:

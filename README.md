@@ -151,7 +151,7 @@ complete interface.
 
 ### Obligation-aware synthesis
 
-`synthesis-run` performs one provisional, obligation-aware pass while leaving
+`synthesis-run` performs one obligation-aware pass while leaving
 the existing `generate` and `stpa-run` commands unchanged. It requires the
 use case, the complete reviewed risk extraction, explicit qualification facts,
 an output directory, and either a reviewed risk-to-OWASP-LLM SSSOM file or a
@@ -179,11 +179,21 @@ governance-only obligations before ordinary SP3 scenario realization.
 The output contains atomically published
 `taxonomy-obligation-plan.yaml`, `obligation-consideration.yaml`,
 `obligation-accounting.yaml`, `scenario-realization.yaml`, and
-`synthesis-manifest.yaml`, plus a report. `scenario-realization.yaml` records
+`synthesis-manifest.yaml`, plus a report. It then runs offline Phase 2 and
+publishes `system-resource-map.yaml`, `correspondence-proposals.yaml`,
+`correspondence-reconciliation.yaml`, and
+`hybrid-coverage-assessment.yaml`. `scenario-realization.yaml` records
 whether each accepted ICA was actually carried into a generated scenario; it
 does not change the separate obligation/STPA accounting result.
-The report is explicitly provisional: Phase 2 verification and human review
-are not required for this run.
+Phase 2 is non-blocking: failure or unresolved evidence never removes generated
+scenarios. The automatic resource map begins as an exact, zero-link baseline,
+and exact synthesis routes produce review candidates marked
+`mechanism_enables_ica` only when synthesis accounting credited the exact
+mechanism/path; non-credited structural joins remain
+`related_but_not_coverage`. No candidate is automatically accepted. Human
+review and an authoritative resource map are therefore required before the
+assessment can claim confirmed taxonomy correspondence. The normal automatic
+run reports `awaiting_evidence`; this does not prevent scenario generation.
 
 At model boundaries, code retains control of structural identity. The ICA
 provider returns one short deviation clause and code applies the supplied slot's

@@ -8,6 +8,8 @@ from typing import Any
 
 from runtime_shared import World
 
+from asago_scenario_generator.manifest import atomic_write_text
+
 from asago_scenario_generator.models.obligation_consideration import (
     MissingStructuralConcept,
     ObligationRoute,
@@ -230,6 +232,31 @@ class _FakeSynthesis:
             },
         )
 
+    def verify_phase2(self, *, output_dir: Path, **_: Any) -> Any:
+        self.calls.append("phase2")
+        names = (
+            "system-resource-map.yaml",
+            "correspondence-proposals.yaml",
+            "correspondence-reconciliation.yaml",
+            "hybrid-coverage-assessment.yaml",
+        )
+        paths = {
+            name: atomic_write_text(output_dir / name, "schema_version: acceptance\n")
+            for name in names
+        }
+        return SimpleNamespace(
+            status="awaiting_evidence",
+            assessment=SimpleNamespace(
+                diagnostics=SimpleNamespace(
+                    accepted_relations=0,
+                    taxonomy_unresolved=2,
+                ),
+                network_calls=0,
+                model_calls=0,
+            ),
+            artifact_paths=paths,
+        )
+
 
 def _state(world: World) -> dict[str, Any]:
     value = getattr(world, "synthesis_state", None)
@@ -346,6 +373,10 @@ def _h_sidecars(world: World, text: str, examples: dict) -> tuple[bool, str]:
         ACCOUNTING_FILENAME,
         SCENARIO_REALIZATION_FILENAME,
         MANIFEST_FILENAME,
+        "system-resource-map.yaml",
+        "correspondence-proposals.yaml",
+        "correspondence-reconciliation.yaml",
+        "hybrid-coverage-assessment.yaml",
     }
     actual = {path.name for path in output_dir.iterdir()}
     if not expected.issubset(actual):
@@ -358,10 +389,13 @@ def _h_sidecars(world: World, text: str, examples: dict) -> tuple[bool, str]:
 def _h_report(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     report = _state(world)["result"].report_path
-    if report is None or "Phase 2 verification is not included" not in report.read_text(
-        encoding="utf-8"
-    ):
-        return False, "provisional synthesis report notice is missing"
+    if report is None:
+        return False, "synthesis report is missing"
+    rendered = report.read_text(encoding="utf-8")
+    if "Phase 2: taxonomy–STPA verification" not in rendered:
+        return False, "Phase 2 synthesis report section is missing"
+    if "awaiting_evidence" not in rendered:
+        return False, "Phase 2 evidence status is missing"
     return True, ""
 
 
@@ -520,12 +554,15 @@ def register(api: Any) -> None:
         r"the synthesis performs no recheck after a rejected revision", _h_no_recheck
     )
     api.register(
-        r"the synthesis writes the five normative sidecars atomically", _h_sidecars
+        r"the synthesis writes the nine normative sidecars atomically", _h_sidecars
     )
     api.register(
         r"the synthesis still writes accounting and manifest sidecars", _h_sidecars
     )
-    api.register(r"the synthesis report identifies provisional accounting", _h_report)
+    api.register(
+        r"the synthesis report includes non-blocking Phase 2 verification",
+        _h_report,
+    )
     api.register(
         r"applicable and non-applicable obligations are accounted separately",
         _h_considered_and_accounted,
