@@ -112,10 +112,6 @@ Feature: Phase 4 complete hybrid scenario projection
     And Phase 3 history records 0 correspondence and 0 coverage changes
     And the offline guard records 0 network calls and 0 provider calls
 
-  Scenario: ordinary workflow compatibility remains delegated to its existing gate
-    When the existing ordinary workflow compatibility gate is inspected
-    Then the existing gate covers the "generate" and "stpa-run" commands without Phase 4 flags
-
   Scenario Outline: malformed source graphs fail before composition
     When the causal graph contains a "<failure>" failure
     Then the graph parser reports "<diagnostic>"

@@ -1,4 +1,4 @@
-"""CLI adapter for the obligation-aware ``synthesis-run`` workflow."""
+"""CLI adapter for the obligation-aware STPA product workflow."""
 
 from __future__ import annotations
 
@@ -23,8 +23,8 @@ _DEFAULT_CROSS_TAXONOMY = (
 )
 
 
-@app.command(name="synthesis-run")
-def synthesis_run_cmd(
+@app.command(name="run")
+def run_cmd(
     use_case: str = typer.Option(..., help="Use-case description or @file.txt."),
     risk_extraction: Path = typer.Option(
         ..., help="Path to policy-mapper risk-extraction.json."
@@ -68,7 +68,7 @@ def synthesis_run_cmd(
         None, help="Sampling temperature override for model adapters."
     ),
 ) -> None:
-    """Prepare shared capability evidence, then run provisional synthesis."""
+    """Run taxonomy-obligation planning, STPA scenarios, and verification."""
     _validate_file(risk_extraction, "risk-extraction file")
     _validate_file(qualification_facts, "qualification facts file")
     if sssom is not None:
@@ -113,9 +113,8 @@ def synthesis_run_cmd(
             load_capability_profile,
         )
 
-        # Unlike the existing generate/stpa-run loader, synthesis preserves
-        # every reviewed taxonomy record because the typed snapshot pins the
-        # complete risk set.
+        # The product workflow preserves every reviewed taxonomy record because
+        # the typed snapshot pins the complete risk set.
         risks = tuple(load_reviewed_risk_extraction(risk_extraction))
         facts = QualificationFactsInput.model_validate(
             _load_payload(qualification_facts, "qualification facts")
@@ -330,4 +329,4 @@ def build_taxonomy_inputs(
     )
 
 
-__all__ = ["build_taxonomy_inputs", "synthesis_run_cmd"]
+__all__ = ["build_taxonomy_inputs", "run_cmd"]

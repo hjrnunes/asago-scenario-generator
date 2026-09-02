@@ -135,9 +135,13 @@ def stpa_run_cmd(
         "Defaults to the selected profile or environment value, then 0.4.",
     ),
 ) -> None:
-    """Run the full STPA pipeline: SP1 → SP2 → SP3 → report."""
+    """Run advanced baseline STPA without taxonomy-obligation completeness."""
     from asago_scenario_generator.stpa.pipeline import run_stpa_pipeline
 
+    typer.echo(
+        "Advanced baseline STPA run: taxonomy obligations are not included. "
+        "Use 'run' for the normal product workflow."
+    )
     try:
         result = run_stpa_pipeline(
             use_case_path=use_case,

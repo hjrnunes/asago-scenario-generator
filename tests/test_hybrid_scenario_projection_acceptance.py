@@ -40,7 +40,6 @@ def test_complete_projection_feature_keeps_the_task3_contract_cases() -> None:
         "relation-local omissions remain typed and traceable",
         "every exclusion reason is a closed typed contract value",
         "Phase 3 challenge history cannot promote a new projection",
-        "ordinary workflow compatibility remains delegated to its existing gate",
         "mixed projection and exclusion identities are fully accounted",
         "the adversarial projection corpus fails closed",
         "malformed source graphs fail before composition",

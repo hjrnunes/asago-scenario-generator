@@ -11,6 +11,32 @@ A risk-specific requirement to account for one authoritative attack pattern
 for one capability context.
 _Avoid_: catalog item, coverage claim
 
+**Mapping relation**:
+A closed statement of how one taxonomy record relates to another at one edge;
+it does not by itself establish the meaning of a complete risk-to-pattern path.
+_Avoid_: mapping strength, correspondence claim
+
+**Mapping path witness**:
+The complete ordered provenance connecting one reviewed risk to one attack
+pattern, retaining every mapping relation used to discover the pair.
+_Avoid_: strongest edge, taxonomy chain label
+
+**Crosswalk disposition**:
+The evidence-bounded conclusion about one exact reviewed-risk and attack-pattern
+pair: direct support, category hypothesis, association only, reviewed mismatch,
+or unresolved.
+_Avoid_: STPA applicability, scenario coverage
+
+**Reviewed crosswalk assertion**:
+A human decision supporting, rejecting, or leaving unresolved one exact
+reviewed-risk and attack-pattern pair, bound to the reviewed source content.
+_Avoid_: model alignment verdict, category-wide override
+
+**Crosswalk resolution**:
+The complete deterministic account of every discovered reviewed-risk and
+attack-pattern pair, its full mapping provenance, and its crosswalk disposition.
+_Avoid_: obligation plan, scenario classification
+
 **Neutral obligation brief**:
 The non-prescriptive form of a taxonomy obligation presented to STPA as an
 analysis question, with exact provenance but no required attack sequence.
@@ -40,6 +66,24 @@ _Avoid_: coverage score, reconciliation result
 The STPA-led workflow in which Phase 1 obligations are always considered and
 accounted for before ordinary STPA scenario production completes.
 _Avoid_: hybrid scenario generator, combined-projection run
+
+**Product run**:
+The normal end-to-end scenario-generation workflow: taxonomy supplies
+obligations, STPA alone produces scenarios, and Phase 2 verifies the resulting
+correspondence without changing those scenarios.
+_Avoid_: taxonomy generation run, choice of peer generators
+
+**Standalone STPA analysis**:
+A diagnostic baseline STPA analysis that omits taxonomy-obligation
+completeness. It supports isolation and comparison but is not the normal
+product workflow.
+_Avoid_: equivalent product run, taxonomy-complete analysis
+
+**Scenario-generation authority**:
+The methodology permitted to create and admit scenarios. In this domain that
+authority is STPA alone; taxonomy discovers and supplies obligations but does
+not author scenarios.
+_Avoid_: peer generation approach, taxonomy-authored scenario
 
 **Phase 2 assessment**:
 The reviewed account of structural STPA consideration and exact taxonomy
@@ -166,3 +210,30 @@ The separate account of whether a generated scenario retained an exact ICA and
 its obligation concern. It does not alter the structural obligation accounting
 decision.
 _Avoid_: correspondence coverage, ICA disposition
+
+**Obligation-linked scenario**:
+A completed STPA scenario whose generation context identifies one or more
+taxonomy obligations that influenced its analysis. The link does not mean the
+scenario implements an obligation's attack mechanism.
+_Avoid_: taxonomy-generated scenario, obligation implementation
+
+**Technique candidate**:
+A real technique from a pinned taxonomy release selected for assessment against
+a completed scenario. Selection does not mean the scenario realizes it.
+_Avoid_: assigned technique, expected label
+
+**Technique origin witness**:
+The provenance explaining why a technique was assessed for a scenario, kept
+separate from the evidence that would show the scenario realizes it.
+_Avoid_: realization evidence, mapping decision
+
+**Realized technique**:
+A pinned taxonomy technique whose defined operation is demonstrated by a
+completed scenario's attacker action and causal or behavioral evidence.
+_Avoid_: related technique, obligation coverage
+
+**Scenario technique assessment**:
+The post-generation account of which pinned taxonomy techniques a completed
+scenario realizes, relates to, or does not realize, with exact evidence and
+origin provenance kept distinct.
+_Avoid_: pre-generation catalog hint, Phase 2 correspondence

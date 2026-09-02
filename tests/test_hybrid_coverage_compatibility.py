@@ -18,11 +18,6 @@ def _assert_compatibility(workflow: str) -> None:
     assert observation["no_phase2_output"], observation["detail"]
 
 
-def test_generate_is_unchanged_with_phase2_sidecars() -> None:
-    """The taxonomy/risk workflow keeps exact prompts, counts, and artifacts."""
-    _assert_compatibility("taxonomy/risk")
-
-
 def test_stpa_run_is_unchanged_with_phase2_sidecars() -> None:
-    """The STPA workflow keeps exact prompts, counts, and artifacts."""
+    """Standalone diagnostic STPA keeps exact prompts, counts, and artifacts."""
     _assert_compatibility("STPA")

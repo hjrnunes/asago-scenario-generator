@@ -4,14 +4,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import patch
-
 import pytest
 import yaml
-from typer.testing import CliRunner
 
-from asago_scenario_generator.cli import app
 from asago_scenario_generator.manifest import ModelConfig
 from asago_scenario_generator.pipeline.model_configuration import (
     ConfigSource,
@@ -80,62 +75,6 @@ def test_request_timeout_is_bounded_by_default() -> None:
 
     assert effective.timeout == 300.0
     assert effective.sources["timeout"] is ConfigSource.application_default
-
-
-@pytest.mark.parametrize(
-    ("generation_mode_args", "expected_generation_mode"),
-    [([], "exhaustive"), (["--generation-mode", "coverage"], "coverage")],
-)
-def test_generate_cli_forwards_named_model_profile(
-    tmp_path: Path,
-    generation_mode_args: list[str],
-    expected_generation_mode: str,
-) -> None:
-    risk = tmp_path / "risk.json"
-    sssom = tmp_path / "mapping.tsv"
-    profiles = tmp_path / "profiles.yaml"
-    risk.write_text("[]", encoding="utf-8")
-    sssom.write_text("", encoding="utf-8")
-    profiles.write_text("gemma: {}", encoding="utf-8")
-    result = SimpleNamespace(
-        manifest_status=SimpleNamespace(value="completed"),
-        admitted_count=1,
-        quarantined_count=0,
-        failed_count=0,
-        scenarios=[object()],
-        seeds=[object()],
-        governance_only_count=0,
-        run_dir=tmp_path / "run",
-    )
-
-    with patch(
-        "asago_scenario_generator.pipeline.runner.run_pipeline", return_value=result
-    ) as run:
-        cli_result = CliRunner().invoke(
-            app,
-            [
-                "generate",
-                "--use-case",
-                "fixture",
-                "--risk-extraction",
-                str(risk),
-                "--sssom",
-                str(sssom),
-                "--model-profile",
-                "gemma",
-                "--profiles-file",
-                str(profiles),
-                "--presentation-fallback",
-                "forbid",
-                *generation_mode_args,
-            ],
-        )
-
-    assert cli_result.exit_code == 0, cli_result.output
-    assert run.call_args.kwargs["model_profile"] == "gemma"
-    assert run.call_args.kwargs["profiles_file"] == profiles
-    assert run.call_args.kwargs["presentation_fallback"] == "forbid"
-    assert run.call_args.kwargs["generation_mode"] == expected_generation_mode
 
 
 def test_offline_provenance_accepts_an_absent_base_url() -> None:

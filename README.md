@@ -1,16 +1,9 @@
 # Asago Scenario Generator
 
 Asago Scenario Generator creates structured adversarial scenarios for AI and
-agentic systems. It supports two peer workflows:
-
-- **Taxonomy and risk driven** — maps policy risk extraction through NIST,
-  OWASP, and MITRE ATLAS data before generating scenarios, Gherkin behavior
-  specifications, evaluation evidence, and an HTML report.
-- **STPA based** — models losses, hazards, control structures, unsafe control
-  actions, and enriched threats before producing scenarios and an STPA report.
-
-Both workflows are supported product surfaces. Neither is a compatibility or
-legacy mode.
+agentic systems through one STPA-led product workflow. Taxonomy supplies
+systematic, reviewed obligations; STPA alone produces scenarios; Phase 2
+verifies the resulting correspondence without changing those scenarios.
 
 > **Status:** Pre-alpha. Interfaces and schemas may change without notice.
 
@@ -44,10 +37,10 @@ variables:
 
 For named model profiles, copy
 `config/model-profiles.example.yaml` to `config/model-profiles.yaml`. The real
-file is ignored because it may contain credentials. Both `generate` and
-`stpa-run` accept named profiles. STPA sampling values use the same precedence
-through both routes: an explicit Python/CLI argument, then the selected profile
-or environment value, then the client default. The CLI currently exposes
+file is ignored because it may contain credentials. Both `run` and the advanced
+`stpa-run` diagnostic accept named profiles. STPA sampling values use the same
+precedence: an explicit Python/CLI argument, then the selected profile or
+environment value, then the client default. The CLI exposes
 `--temperature` as the run-wide explicit sampling override. Invalid numeric or
 boolean environment values fail before the first model call.
 Requests have a 300-second application default deadline. Named-profile
@@ -67,106 +60,27 @@ configuration to avoid valid-prefix responses stalling on whitespace. See the
 [Gemma 4 vLLM runtime notes](docs/operations/gemma4-vllm-structured-output.md)
 for the required serving argument and rollout guidance.
 
-## Taxonomy and risk-driven generation
+## Product workflow
 
-```bash
-asago-scenario-generator generate \
-  --use-case @use-case.txt \
-  --risk-extraction risk-extraction.json \
-  --sssom mappings.sssom.tsv \
-  --output-dir output/my-system \
-  --model-profile gemma4-local \
-  --presentation-fallback allow
-```
-
-The pipeline profiles capabilities, determines the threat surface, qualifies
-and projects candidates, generates scenario artifacts, evaluates them, and
-writes an immutable run directory beneath the requested output collection.
-Generation is exhaustive by default: every qualified projected candidate is
-given an independent finalization target and can produce one admitted scenario.
-Use `--generation-mode coverage` for a bounded smoke run that keeps one queue
-of at most three candidates per feasible ingress and stops each queue after its
-first admission.
-
-`--max-scenarios-per-pattern N` applies after projection and deduplication. In
-exhaustive mode it retains at most `N` qualified candidates per attack pattern,
-round-robin across ingress points before taking a second candidate from one
-ingress. Omitting the option means no pattern cap.
-
-Run counts describe successive funnel stages: expanded candidates have not yet
-passed filtering; qualified candidates have passed authoritative projection;
-attempted candidates entered finalization; admitted candidates produced a
-scenario; quarantined candidates exhausted generation or failed admission.
-
-Automatic capability inference produces an `inferred_partial` Stage 1 profile.
-Authoritative projection may also require operator-reviewed architecture data,
-especially `trust_boundaries`, `external_integrations`, and explicit
-qualification facts. For a substantive run, pass that reviewed profile with
-`--profile` and, where applicable, fact readings with `--qualification-facts`.
-An inferred-only run can finish with zero scenarios when the required
-architecture evidence is unavailable.
-
-Inspect the exact requirements without contacting an LLM endpoint:
-
-```bash
-asago-scenario-generator projection-preflight \
-  --use-case @use-case.txt \
-  --risk-extraction risk-extraction.json \
-  --sssom mappings.sssom.tsv \
-  --profile capability-profile.yaml \
-  --qualification-facts qualification-facts.yaml \
-  --facts-template qualification-facts.complete.yaml
-```
-
-The command reports every required resource and fact as structured JSON. Fact
-states distinguish a missing reading (`absent`), an explicit undecided reading
-(`unknown`), a supplied fact no longer required by the selected patterns
-(`stale`), and incompatible readings for one fact (`contradictory`). A requested
-facts template contains unknown values for operator review and is never allowed
-to overwrite an existing file. If generation omits `--qualification-facts`, the
-manifest records `qualification_facts_mode: omitted_compatibility`; command
-output and the returned pipeline result also explain that unresolved conditions
-are deferred to authoritative projection.
-
-`--presentation-fallback` accepts `allow` (the default) or `forbid`. Allowing
-fallback permits only cosmetic substitutions such as a missing narrative
-title; it records a `presentation_fallback:` warning and produces
-`completed_with_warnings`. It never synthesizes actor intent, narrative beats,
-attack-tree topology, behavior interactions, or assertions.
-
-Do not use process exit alone as the live-run success criterion. Inspect the
-generated `run-manifest.yaml` and finalization inventory for admitted scenarios
-and recorded errors. The manifest's `semantic_generation` block summarizes
-whether every admitted candidate has accepted provider semantics for actor,
-narrative, tree, and behavior; its `stage_records` retain the bounded
-per-attempt evidence. The HTML report renders those stage outcomes and identifies
-presentation fallback separately.
-
-Useful companion commands include `projection-preflight`, `plan-obligations`,
-`validate-system-resource-map`, `propose-correspondence`,
-`reconcile-correspondence`, `profile`, `resume`, `eval`, `report`,
-`qualify-catalog`, `validate-catalog-qualification`, and
-`validate-stpa-projection`. Run `asago-scenario-generator --help` for the
-complete interface.
-
-### Obligation-aware synthesis
-
-`synthesis-run` performs one obligation-aware pass while leaving
-the existing `generate` and `stpa-run` commands unchanged. It requires the
-use case, the complete reviewed risk extraction, explicit qualification facts,
-an output directory, and either a reviewed risk-to-OWASP-LLM SSSOM file or a
+`run` is the sole normal scenario-generation command. It requires the use
+case, complete reviewed risk extraction, explicit qualification facts, an
+output directory, and either a reviewed risk-to-OWASP-LLM SSSOM file or a
 typed taxonomy-input snapshot:
 
 ```bash
-asago-scenario-generator synthesis-run \
+asago-scenario-generator run \
   --use-case @use-case.txt \
   --risk-extraction risk-extraction.json \
   --qualification-facts qualification-facts.yaml \
   --taxonomy-inputs obligation-inputs.yaml \
-  --output-dir output/synthesis \
+  --output-dir output/my-system \
   --sp1-profile <profile-name> --sp2-profile <profile-name> \
   --sp3-profile <profile-name>
 ```
+
+The former taxonomy-led `generate` workflow has been retired. Taxonomy still
+provides systematic risk discovery, mapping provenance, qualification, and
+obligations; it no longer authors scenarios.
 
 The run prepares one capability/fact snapshot, always executes Phase 1
 planning, runs the ordinary SP1 baseline, considers every applicable
@@ -455,8 +369,8 @@ The persistence adapter atomically writes
 rows and traces. There is intentionally no assessment CLI command: callers
 adapt completed typed artifacts at the Python seam. Assessment, proposal, and
 reconciliation are deterministic and construct neither a model client nor a
-network connection. `generate` and `stpa-run` continue to work independently
-without any Phase 2 inputs or outputs.
+network connection. Product `run` invokes this verification after scenario
+generation; standalone diagnostic `stpa-run` remains independent of it.
 
 ### Phase 3 offline challenge ledger
 
@@ -478,9 +392,9 @@ constructs no provider client. A budget-excluded target remains visible as
 `write_stpa_challenge_ledger(...)` atomically publishes the closed,
 digest-verified `stpa-obligation-challenge-ledger-v1` artifact as
 `stpa-obligation-challenge-ledger.yaml`; `read_stpa_challenge_ledger(...)`
-requires that normative filename and verifies the digest on load. The normal
-`generate` and `stpa-run` commands do not read or require this artifact. Task 1
-has no CLI and performs no STPA/model call.
+requires that normative filename and verifies the digest on load. Neither
+product `run` nor diagnostic `stpa-run` reads or requires this Phase 3
+artifact. Task 1 has no CLI and performs no STPA/model call.
 
 The second Phase 3 slice adds the only provider-capable extension point:
 `reconsider_stpa_challenge(...)`. It receives one selected ledger target, the
@@ -549,8 +463,8 @@ Task 2b provides the Python persistence seam:
 `hybrid-scenario-projection-set.yaml` filename, reloads through the closed
 model, and verifies the semantic digest, canonical bytes, and equality before
 reporting success. Persistence remains offline and has no reporting, CLI,
-model-call, or network behavior. Ordinary `generate` and `stpa-run` remain
-independent of Phase 4.
+model-call, or network behavior. Product `run` and diagnostic `stpa-run`
+remain independent of Phase 4.
 
 Task 3 proves that complete contract through deterministic Gherkin and an
 independent YAML reader. The pure
@@ -572,7 +486,11 @@ responsible controller. Phase 4 also verifies that each relation's constraint
 is recorded on its selected causal controller; it never repairs or infers that
 trace later.
 
-## STPA-based generation
+## Advanced standalone STPA
+
+`stpa-run` is retained for diagnostics, prompt qualification, and comparison.
+It does not consider taxonomy obligations and is not equivalent to the normal
+product `run`.
 
 ```bash
 asago-scenario-generator stpa-run \

@@ -1,7 +1,8 @@
 # Architecture overview
 
-Asago Scenario Generator has one shared domain and two supported generation
-workflows.
+Asago Scenario Generator has one shared domain and one supported product
+workflow. Taxonomy supplies obligations to an STPA-led analysis; STPA is the
+only scenario-generation authority.
 
 ## Shared domain
 
@@ -101,26 +102,16 @@ the persistence and finalization façades. Authoritative v3 scorecards
 consume `persistence_plan`, `persistence_journal`, and
 `finalization_gate_contracts`.
 
-The taxonomy/risk workflow uses a semantic-author/compiler seam. The model
-authors actor intent, narrative causality, attack-tree AND topology, and
-concrete behavior interactions through request-local handles. Pure compilers
-resolve those handles to projection-owned IDs, actions, zones, techniques,
-realizations, postconditions, and Gherkin syntax. Semantic draft failure is a
-candidate failure; deterministic code may replace presentation text but never
-the required semantic structure. Finalization alone owns retries, and every
-stage invocation makes exactly one provider call.
-Accepted-draft evidence for all four stages persists the request and response
-digests, request-local handle map, effective controls, validation result, and
-any declared presentation fallback. A manifest can therefore distinguish a
-fully model-authored scenario from a failed or cosmetically repaired draft.
-Its `semantic_generation` summary states whether all four stages were accepted
-and retains bounded `stage_records` evidence; the HTML report presents the same
-semantic and presentation statuses separately.
+The former taxonomy-led scenario author/compiler and finalization stack is no
+longer a product workflow. It is unreachable from the registered CLI and is
+tracked only as deletion inventory while reusable inward primitives are
+separated from it. See
+[legacy-taxonomy-generator-cleanup-inventory.md](legacy-taxonomy-generator-cleanup-inventory.md).
 
 ## Taxonomy obligation planning (observational Phase 1)
 
-The obligation planner is a shared-domain boundary between reviewed taxonomy
-inputs and the existing generation workflows. Its public seam is
+The obligation planner is the shared-domain seam between reviewed taxonomy
+inputs and the STPA product run. Its public interface is
 `plan_taxonomy_obligations(TaxonomyObligationInputs)`. The input is a typed,
 immutable value containing risk cards, one capability/fact snapshot, the
 authoritative attack-pattern catalog, pinned cross-taxonomy/SSSOM mappings,
@@ -207,13 +198,12 @@ receiving fuzzy fallbacks. The persistence adapter writes the canonical
 `system-resource-map.yaml` artifact atomically. The resource map does not
 change STPA artifacts or infer correspondence from prose. This dependency
 direction keeps taxonomy planning, STPA generation, persistence, and hybrid
-reporting replaceable and prevents either workflow from importing the other
-workflow's implementation.
+reporting replaceable without reviving a second scenario-generation workflow.
 
 ## Obligation-aware synthesis composition
 
-`pipeline.synthesis.run_synthesis` is the composition root for a provisional
-obligation-aware run. `SynthesisInputs` carries the use case, complete
+`pipeline.synthesis.run_synthesis` is the composition root for the product
+run. `SynthesisInputs` carries the use case, complete
 reviewed risks, typed qualification facts, one capability profile/snapshot,
 and either a closed `TaxonomyObligationInputs` graph or its production
 builder. Phase 1 planning always executes; a prebuilt plan is accepted only
@@ -303,15 +293,16 @@ exact obligation/slot, ICA,
 `EXEC:*`, hazard, and constraint evidence but makes no Phase 2 correspondence
 or coverage claim. Scenario realization separately records whether that exact
 ICA/obligation concern survived into an admitted scenario. Reporting keeps
-structural findings separate from scenario realization and labels the run
-provisional. Accounting and realization expose one closed terminal stop reason
+structural findings separate from scenario realization and labels provisional
+accounting separately from completed scenario generation. Accounting and
+realization expose one closed terminal stop reason
 per applicable obligation. The manifest/report replace the provisional
 `addressed` marker with the later realized, generation-failed, or not-requested
 outcome where scenario evidence exists, and show both the full applicable
 denominator and survivor denominators. Provider call evidence separately
 records response receipt, typed parsing, semantic validation, compilation,
 publication, and terminal error codes; compatibility `success` is not the sole
-stage-quality signal. Existing `generate` and `stpa-run` do not import or
+stage-quality signal. Standalone diagnostic `stpa-run` does not import or
 require synthesis artifacts.
 
 Correspondence is split into reviewable `correspondence-proposals-v1` and
@@ -446,7 +437,7 @@ publishes `stpa-obligation-challenge-ledger.yaml` and reloads it through the
 closed model. This Task 1 artifact records future work only: it performs no
 reconsideration, writes no challenge outcome, changes no Phase 2 matrix, and
 creates no correspondence, coverage credit, projection, or scenario. Neither
-`generate` nor ordinary `stpa-run` imports or requires it.
+product `run` nor standalone diagnostic `stpa-run` imports or requires it.
 
 Task 2 adds the adjacent `pipeline.challenge_analysis.reconsider_stpa_challenge`
 boundary. Its explicit boolean opt-in is evaluated before any adapter factory
@@ -488,8 +479,8 @@ selection, pending, attempt, outcome, technical-failure, and call counts. It
 does not invent an overall status. The persistence leaf atomically writes one
 `stpa-obligation-closed-loop-run.yaml` into a caller-chosen directory and
 verifies it after reload. Neither the composition model nor seam imports a
-generation runner, CLI, report, or persistence module. Ordinary `generate` and
-`stpa-run` remain unaware of all Phase 3 modules and artifacts.
+generation runner, CLI, report, or persistence module. Product `run` and
+diagnostic `stpa-run` remain unaware of all Phase 3 modules and artifacts.
 
 ## Phase 4 exact projection and composition boundary
 
@@ -555,47 +546,16 @@ authority graph and returns only exact readiness blockers and counts. Complete
 semantic evidence must be bound through the verified provenance factory;
 copying or relabelling the normative bookkeeping fixture cannot promote it.
 The evaluator neither reads files nor creates provider or network clients.
-Ordinary `generate` and `stpa-run` remain unaware of both checks.
+Product `run` and diagnostic `stpa-run` remain unaware of both checks.
 
-## Taxonomy and risk-driven workflow
+## STPA execution
 
-The `generate` workflow consumes a use-case description, policy risk
-extraction, and SSSOM mappings. It derives a capability profile and threat
-surface, expands and qualifies candidates, projects canonical chains, creates
-scenario artifacts, and runs deterministic admission and evaluation gates.
-
-Generation planning separates canonical ingress identity from durable
-finalization-target identity. The default `exhaustive` policy creates one
-one-choice target per qualified projected candidate, so an admission or
-quarantine affects only that candidate and the remaining corpus continues.
-The explicit `coverage` policy instead creates one bounded fallback queue per
-feasible ingress and stops that target after its first admission. Coverage is
-reported by canonical ingress in both modes; lifecycle transitions, persistence,
-and resume are keyed by the distinct finalization target ID.
-
-The grouped taxonomy path keeps failures local and observable. Candidate
-filter responses use compact ordinals instead of canonical IDs. An
-irreconcilable advisory filter retains all deterministic-rule-eligible
-candidates with warning evidence; it cannot admit a scenario by itself.
-Before authoritative projection, the immutable profile/fact snapshot is
-checked for required architecture resources and qualification readings;
-missing evidence stops generation with profile or qualification guidance.
-The public `projection-preflight` command runs that readiness path and emits a
-complete fact template without constructing a model client. Its fact inventory
-distinguishes absent, explicitly unknown, stale, and contradictory readings
-before the immutable snapshot is built. Omitted generation facts use an
-explicit `omitted_compatibility` mode recorded in manifest configuration and
-generation notes. The run manifest records status and admitted, quarantined,
-and failed counts; the CLI returns nonzero for degraded completion or no
-admitted scenarios.
-
-## STPA workflow
-
-The `stpa-run` workflow performs loss and hazard analysis, constructs the
-control structure, enumerates unsafe control actions and threats, and produces
-scenario, evaluation, and reporting artifacts. Its stages reuse shared
-capability and infrastructure contracts while retaining STPA-specific models
-and orchestration.
+The product `run` composes taxonomy-obligation planning with the STPA stages
+described below. The advanced `stpa-run` command executes the same baseline
+STPA stages without taxonomy-obligation completeness. Both paths construct
+losses and hazards, the control structure, unsafe control actions, causal
+factors, scenarios, evaluation, and reporting artifacts; only `run` is the
+normal product workflow.
 
 Tolerant SP1 response graphs remain raw until deterministic ID/reference
 normalization produces valid typed artifacts; invalid intermediate Pydantic
@@ -662,8 +622,8 @@ gates must remain deterministic and offline.
 
 ## Persistence boundary
 
-Generated product output is not source. Taxonomy/risk runs use immutable,
-manifest-governed run directories. STPA runs persist stage artifacts and a
-combined manifest/report in their requested output directory. Pre-rename output
-is retained only in the archived source repository and is not accepted as a
-compatibility contract.
+Generated product output is not source. Product runs persist the obligation,
+STPA, accounting, realization, Phase 2, manifest, and report artifacts in their
+requested output directory. Standalone diagnostic STPA persists its stage
+artifacts and combined manifest/report. Retired taxonomy-generator output is
+read-only historical data and is not accepted as a compatibility contract.

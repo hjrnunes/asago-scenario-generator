@@ -502,14 +502,14 @@ def _h_scenario_failure(world: World, text: str, examples: dict) -> tuple[bool, 
     fake.scenario_failure = True
     # Execute the same public run seam after toggling the deterministic SP3
     # failure.  ICA/accounting are still required to complete.
-    _h_run(world, "synthesis-run executes", {})
+    _h_run(world, "the product run executes", {})
     result = state["result"]
     if not result.stage_errors or "account" not in fake.calls:
         return False, "scenario failure erased downstream accounting"
     return True, ""
 
 
-def _h_compatibility(world: World, text: str, examples: dict) -> tuple[bool, str]:
+def _h_product_surface(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del world, text, examples
     from asago_scenario_generator.cli import app
 
@@ -523,8 +523,13 @@ def _h_compatibility(world: World, text: str, examples: dict) -> tuple[bool, str
         .replace("_", "-")
         for command in app.registered_commands
     }
-    if not {"generate", "stpa-run", "synthesis-run"}.issubset(names):
-        return False, f"CLI compatibility commands missing: {sorted(names)}"
+    required = {"run", "stpa-run"}
+    retired = {"generate", "resume", "synthesis-run", "report", "eval"}
+    if not required.issubset(names):
+        return False, f"STPA execution commands missing: {sorted(names)}"
+    present_retired = retired.intersection(names)
+    if present_retired:
+        return False, f"retired commands remain registered: {sorted(present_retired)}"
     return True, ""
 
 
@@ -544,7 +549,7 @@ def register(api: Any) -> None:
         r"a deterministic synthesis provider fails during consideration",
         _h_provider_failure,
     )
-    api.register(r"synthesis-run executes", _h_run)
+    api.register(r"the product run executes", _h_run)
     api.register(r"Phase 1 planning runs before baseline STPA", _h_stage_order)
     api.register(
         r"the synthesis recheck covers every applicable obligation exactly once",
@@ -593,7 +598,10 @@ def register(api: Any) -> None:
         _h_provider_unresolved,
     )
     api.register(r"scenario generation fails after ICA", _h_scenario_failure)
-    api.register(r"existing generation commands remain compatible", _h_compatibility)
+    api.register(
+        r"run is the normal command and retired generation commands are absent",
+        _h_product_surface,
+    )
 
 
 __all__ = ["FEATURE_ID", "register"]

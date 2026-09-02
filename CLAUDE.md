@@ -1,7 +1,8 @@
 # Asago Scenario Generator
 
-Pre-alpha adversarial-scenario generation for AI systems, with taxonomy/risk
-and STPA workflows maintained as peer product surfaces.
+Pre-alpha adversarial-scenario generation for AI systems. Taxonomy supplies
+systematic obligations to one STPA-led product workflow; STPA alone generates
+scenarios.
 
 ## Commands
 
@@ -20,9 +21,9 @@ an LLM endpoint.
 ## Architecture
 
 - `src/asago_scenario_generator/` contains shared domain models, the
-  observational taxonomy-obligation planner, the taxonomy/risk pipeline, the
-  STPA pipeline, CLI, evaluation, and reporting. The planner consumes typed
-  inputs and must not import either generation workflow's implementation.
+  observational taxonomy-obligation planner, the STPA product pipeline, CLI,
+  evaluation, and reporting. The planner consumes typed inputs and must not
+  import scenario-generation implementation.
 - `data/` contains committed schemas, taxonomies, mappings, and qualification
   inputs.
 - `features/` is the source of truth for acceptance behavior;
@@ -36,12 +37,16 @@ changing acceptance behavior, or running the quality sequence.
 ## Development
 
 - Track durable work and specification approval in GitHub Issues and PRs.
-- Preserve both generation approaches unless the issue explicitly changes
-  their shared contract.
+- Keep `run` as the sole normal scenario-generation command. Taxonomy supplies
+  obligations and STPA alone authors scenarios. `stpa-run` is an advanced
+  baseline diagnostic without obligation completeness. Do not restore the
+  retired `generate`, legacy `resume`, `synthesis-run`, `report`, or `eval`
+  commands, and add no new imports from the retained legacy generator cleanup
+  inventory.
 - Keep Phase 1 obligation planning observational: it retains every reviewed
   risk, uses the exact closed row schema and typed dispositions, computes and
-  verifies digests, publishes atomically, and leaves `generate`/`stpa-run`
-  prompts, counts, and artifacts unchanged. Persistence validation belongs to
+  verifies digests, and publishes atomically. Product `run` always consumes
+  these obligations; standalone diagnostic `stpa-run` does not. Persistence validation belongs to
   the model/adapter seam; it is not a required `validate-obligation-plan` UI.
   `mapping_pins.sssom` remains the taxonomy-context pin while
   `mapping_pins.obligation_edges` binds the supplied typed edge bundle. The
@@ -81,9 +86,9 @@ changing acceptance behavior, or running the quality sequence.
   proposer calibration separate from coverage and retain exact
   confirmed/rejected/unresolved/unreviewed counts rather than a score without
   its denominator. Publish the normative
-  YAML artifacts atomically. Neither existing generation workflow may import
-  or require Phase 2 artifacts, and Phase 2 must not construct provider clients
-  or contact endpoints.
+  YAML artifacts atomically. Product `run` executes Phase 2 last and
+  non-blockingly; standalone diagnostic `stpa-run` remains independent. Phase
+  2 must not construct provider clients or contact endpoints.
 - Keep the Phase 3 challenge ledger separate, deterministic, and offline. It
   consumes one intact Phase 2 assessment plus explicitly supplied exact
   obligation/STPA-slot pairs, an explicit non-negative budget, and the pinned
@@ -92,7 +97,7 @@ changing acceptance behavior, or running the quality sequence.
   original ICA/N/A/unresolved decisions, evidence, traces, assessment digest,
   and upstream pins. The ledger must not infer eligibility, call a provider,
   change Phase 2 matrices, create correspondence or coverage, generate a
-  scenario, or alter ordinary `generate`/`stpa-run`. Publish the closed
+  scenario, or alter product `run`/diagnostic `stpa-run`. Publish the closed
   `stpa-obligation-challenge-ledger-v1` YAML atomically through its adapter.
 - Keep Phase 3 challenge analysis behind the explicit
   `reconsider_stpa_challenge` opt-in seam. It accepts only a selected exact
@@ -105,7 +110,7 @@ changing acceptance behavior, or running the quality sequence.
   provider/protocol/identity failures separately from structural outcomes.
   Preserve the original decision and Phase 2 artifact, fix correspondence and
   coverage changes at zero, start no hybrid generation, add no Task 2 CLI or
-  run placement, and leave ordinary `stpa-run` unchanged.
+  run placement, and leave diagnostic `stpa-run` unchanged.
 - Keep Phase 3 composition at the typed internal `run_closed_loop_stpa` seam.
   It must delegate exact selection and each reconsideration to the Task 1 and
   Task 2 seams, respectively. Opt-out retains selected targets as pending and
@@ -115,8 +120,8 @@ changing acceptance behavior, or running the quality sequence.
   `stpa-obligation-closed-loop-run-v1` YAML atomically in a caller-chosen
   directory. Keep exact counts and typed outcomes separate rather than
   inventing an aggregate status. Add no Phase 3 CLI or report, infer no targets
-  from the lineage audit, and leave ordinary generation workflows unaware of
-  Phase 3.
+  from the lineage audit, and leave product `run` and diagnostic `stpa-run`
+  unaware of Phase 3.
 - Keep obligation-aware synthesis advisory: every applicable obligation is
   considered, but it never forces an ICA or scenario. At provider boundaries,
   deterministic code owns structural categories and identities. ICA providers
@@ -149,7 +154,7 @@ changing acceptance behavior, or running the quality sequence.
   style warnings are non-blocking. Reconcile one closed terminal stop reason
   per applicable obligation across accounting and scenario realization, and
   distinguish provider response receipt from parsing, semantic validation,
-  compilation, and publication in call evidence. Finish `synthesis-run` with
+  compilation, and publication in call evidence. Finish product `run` with
   non-blocking offline Phase 2 verification. Start from an exact zero-link
   resource-map baseline. Only an exact route credited by synthesis accounting
   may become an unreviewed `mechanism_enables_ica` proposal; other route joins
@@ -170,7 +175,7 @@ changing acceptance behavior, or running the quality sequence.
   constraints to be owned by its selected causal controller; never infer that
   ownership during Phase 4. Task 1 must not compose the final graph,
   persist or render an artifact, add a CLI, contact a model or network, or
-  change ordinary `generate`/`stpa-run`.
+  change product `run` or diagnostic `stpa-run`.
 - Keep Phase 4 in-memory composition at the pure
   `build_hybrid_scenario_projection_set` seam. Resolve exact units through the
   Task 1 boundary, apply only the fixed typed bridge endpoint table, validate

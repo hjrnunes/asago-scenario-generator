@@ -793,41 +793,6 @@ def _phase3_changes(world: World, text: str, _examples: dict) -> tuple[bool, str
     return actual == expected, f"expected {expected}, got {actual}"
 
 
-def _compatibility_gate(world: World, _text: str, _examples: dict) -> tuple[bool, str]:
-    """Run the existing ordinary compatibility helpers without duplicating them."""
-    from runtime_features.taxonomy_obligation_planner import (
-        _run_stpa_compatibility,
-        _run_taxonomy_compatibility,
-    )
-
-    try:
-        observations = (
-            _run_taxonomy_compatibility(),
-            _run_stpa_compatibility(),
-        )
-    except Exception as exc:  # noqa: BLE001 - preserve existing gate diagnostics
-        _state(world)["compatibility"] = False
-        _state(world)["compatibility_error"] = str(exc)
-        return True, ""
-    _state(world)["compatibility"] = all(
-        observation["exit_match"] for observation in observations
-    )
-    _state(world)["compatibility_error"] = ""
-    return True, ""
-
-
-def _compatibility_result(world: World, text: str, _examples: dict) -> tuple[bool, str]:
-    """Check compatibility remains covered by the existing gate."""
-    expected = 'the existing gate covers the "generate" and "stpa-run" commands without Phase 4 flags'
-    if text != expected:
-        return False, f"unexpected compatibility result: {text}"
-    state = _state(world)
-    return bool(state.get("compatibility")), (
-        "ordinary compatibility gate is incomplete: "
-        + str(state.get("compatibility_error", "no details"))
-    )
-
-
 def _count(world: World, text: str, _examples: dict) -> tuple[bool, str]:
     """Check projection and exclusion counts."""
     match = re.fullmatch(
@@ -1417,14 +1382,6 @@ def register(api: object) -> None:
         (
             r"^Phase 3 history records \d+ correspondence and \d+ coverage changes$",
             _phase3_changes,
-        ),
-        (
-            r"^the existing ordinary workflow compatibility gate is inspected$",
-            _compatibility_gate,
-        ),
-        (
-            r'^the existing gate covers the "generate" and "stpa-run" commands without Phase 4 flags$',
-            _compatibility_result,
         ),
         (r"^the projection set is published and reloaded atomically$", _round_trip),
         (

@@ -1,4 +1,4 @@
-"""Compatibility tests for keeping the peer generation surfaces unchanged."""
+"""Compatibility tests for the planner and standalone diagnostic STPA."""
 
 from __future__ import annotations
 
@@ -17,15 +17,12 @@ def test_obligation_planner_does_not_add_default_io_side_effects() -> None:
     assert not hasattr(io, "DEFAULT_WRITE_OBLIGATION_PLAN")
 
 
-def test_generate_and_stpa_run_help_omit_obligation_planner_flags() -> None:
-    """The peer taxonomy/risk and STPA commands retain their public surfaces."""
-    generate = runner.invoke(app, ["generate", "--help"])
+def test_stpa_run_help_omits_obligation_planner_flags() -> None:
+    """Standalone diagnostic STPA does not pretend to include obligations."""
     stpa_run = runner.invoke(app, ["stpa-run", "--help"])
 
-    assert generate.exit_code == 0
     assert stpa_run.exit_code == 0
-    assert "obligation" not in generate.stdout.lower()
-    assert "obligation" not in stpa_run.stdout.lower()
+    assert "obligation-planner" not in stpa_run.stdout.lower()
 
 
 def test_standalone_plan_has_no_provider_or_generation_counters() -> None:

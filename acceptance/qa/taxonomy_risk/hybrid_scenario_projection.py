@@ -26,9 +26,6 @@ import yaml
 ROOT = Path(__file__).resolve().parents[3]
 FIXTURE = ROOT / "tests" / "fixtures" / "hybrid-scenario-projection-set.yaml"
 FEATURE = ROOT / "features" / "hybrid_scenario_projection.feature"
-COMPATIBILITY_FEATURE = (
-    ROOT / "features" / "taxonomy_obligation_planner_compatibility.feature"
-)
 
 QA_MODULES = Path(__file__).resolve().parents[1]
 if str(QA_MODULES) not in sys.path:
@@ -486,22 +483,6 @@ def _check_feature_contract(runner: QARunner) -> None:
         "| corrupts_process_model   | process_model  | projection | 1" in feature_text
         and "| delays_feedback          | feedback       | projection | 1"
         in feature_text,
-    )
-
-    compatibility_text = COMPATIBILITY_FEATURE.read_text(encoding="utf-8")
-    compatibility_pairs = {
-        tuple(cell.strip() for cell in line.strip().strip("|").split("|")[:2])
-        for line in compatibility_text.splitlines()
-        if line.strip().startswith("|") and ("generate" in line or "stpa-run" in line)
-    }
-    runner.check(
-        "ordinary workflow compatibility rows",
-        {("taxonomy/risk", "generate"), ("STPA", "stpa-run")} <= compatibility_pairs,
-    )
-    runner.check(
-        "ordinary compatibility has no Phase 4 flags",
-        "phase4" not in compatibility_text.lower()
-        and "hybrid-scenario" not in compatibility_text.lower(),
     )
 
 

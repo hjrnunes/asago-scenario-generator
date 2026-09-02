@@ -18,14 +18,6 @@ def _print_banner(command: str, *, err: bool = False) -> None:
     )
 
 
-def _default_generate_exit_code(
-    status: str,
-    admitted: int,
-) -> int:
-    """Return the default nonzero outcome for degraded or empty runs."""
-    return 1 if status == "completed_with_errors" or admitted == 0 else 0
-
-
 def _resolve_use_case(value: str) -> str:
     """If value starts with @, read from the referenced file; otherwise return as-is."""
     if value.startswith("@"):
