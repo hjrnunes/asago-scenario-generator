@@ -170,6 +170,10 @@ def test_prepare_seam_returns_digest_bearing_projection_and_derives_binding() ->
     assert validated.projection.semantic_digest == validated.semantic_digest
     assert validated.projection.unsafe_outcome.semantic_binding_required is True
     assert validated.projection.unsafe_outcome.condition.type == "delay"
+    assert validated.projection.stimulus_requirements[0].eligible_factor_ids == (
+        "CF-1",
+    )
+    assert validated.projection.stimulus_requirements[0].intent
     assert validated.projection.steps[-1].kind.value == "UNSAFE_CONTROL_ACTION"
     assert validate_execution_projection(
         validated.projection.model_dump(mode="json")
@@ -213,6 +217,7 @@ def test_literal_incorrect_action_value_is_supported_without_runtime_requirement
     assert requirements.requires_state_observation is False
     assert requirements.requires_real_clock is False
     assert requirements.requires_persistent_state is False
+    assert requirements.requires_multi_turn is False
     assert validated.projection.unsafe_outcome.semantic_binding_required is False
     assert validate_execution_projection(
         validated.projection.model_dump(mode="json")

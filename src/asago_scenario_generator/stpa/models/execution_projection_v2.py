@@ -203,6 +203,30 @@ class ExecutionRequirements(_ClosedFrozenModel):
         return self
 
 
+class AdversarialStimulusRequirement(_ClosedFrozenModel):
+    """Platform-neutral content that must drive one causal path.
+
+    The producer owns the adversarial intent and the causal factors it must
+    express.  A consumer binds that intent to a concrete user, tool-result or
+    conversation surface; the producer does not guess a deployment surface.
+    """
+
+    stimulus_id: StrictStr = Field(pattern=r"^STIM-\d+$")
+    intent: StrictStr = Field(min_length=1)
+    desired_effect: StrictStr = Field(min_length=1)
+    eligible_factor_ids: tuple[StrictStr, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_factor_ids(self) -> "AdversarialStimulusRequirement":
+        if len(self.eligible_factor_ids) != len(set(self.eligible_factor_ids)):
+            raise ValueError("eligible_factor_ids must be unique")
+        if any(
+            not re.fullmatch(r"^CF-\d+$", item) for item in self.eligible_factor_ids
+        ):
+            raise ValueError("eligible_factor_ids must contain canonical CF-* IDs")
+        return self
+
+
 class ExecutionSourcePins(_ClosedFrozenModel):
     """Digest pins for the structural authority used to build a projection."""
 
@@ -257,6 +281,9 @@ class ExecutionProjectionV2(_ClosedFrozenModel):
     causal_factors: tuple[ExecutionCausalFactor, ...]
     steps: tuple[ExecutionStep, ...]
     unsafe_outcome: UnsafeOutcome
+    stimulus_requirements: tuple[AdversarialStimulusRequirement, ...] = Field(
+        min_length=1
+    )
     execution_requirements: ExecutionRequirements
     trace_refs: ExecutionTraceRefs
     # In-process construction may omit this so the model can derive it.  The
@@ -271,6 +298,7 @@ class ExecutionProjectionV2(_ClosedFrozenModel):
         _validate_step_sequence(self.steps, self.causal_factors, self.control_action_id)
         _validate_projection_conditions(self)
         _validate_projection_bindings(self)
+        _validate_stimulus_requirements(self)
         _set_projection_digest(self)
         return self
 
@@ -584,6 +612,18 @@ def _validate_projection_bindings(projection: ExecutionProjectionV2) -> None:
         raise ValueError(
             "semantic binding references must be unique within a projection"
         )
+
+
+def _validate_stimulus_requirements(projection: ExecutionProjectionV2) -> None:
+    factor_ids = {factor.factor_id for factor in projection.causal_factors}
+    stimulus_ids = [item.stimulus_id for item in projection.stimulus_requirements]
+    if len(stimulus_ids) != len(set(stimulus_ids)):
+        raise ValueError("stimulus requirements must have unique IDs")
+    for item in projection.stimulus_requirements:
+        if not set(item.eligible_factor_ids) <= factor_ids:
+            raise ValueError(
+                "stimulus requirement eligible_factor_ids must resolve to causal factors"
+            )
 
 
 def _set_projection_digest(projection: ExecutionProjectionV2) -> None:

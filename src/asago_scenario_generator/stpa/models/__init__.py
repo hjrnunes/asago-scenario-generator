@@ -62,6 +62,7 @@ from asago_scenario_generator.stpa.models.execution_projection import (
     StpaProjectionTraceabilityViolationCode,
 )
 from asago_scenario_generator.stpa.models.execution_projection_v2 import (
+    AdversarialStimulusRequirement,
     BUNDLE_SCHEMA_VERSION,
     BundleProjectionReference,
     BundleScenarioReference,
@@ -146,6 +147,7 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
 )
 
 __all__ = [
+    "AdversarialStimulusRequirement",
     # loss_analysis
     "Hazard",
     "Loss",

@@ -30,6 +30,7 @@ from asago_scenario_generator.stpa.models.execution_envelope import (
     parse_declared_timing,
 )
 from asago_scenario_generator.stpa.models.execution_projection_v2 import (
+    AdversarialStimulusRequirement,
     ExecutionCausalFactor,
     ExecutionProjectionV2,
     ExecutionProjectionValidationResult,
@@ -88,6 +89,7 @@ _TOP_LEVEL_FIELDS = frozenset(
         "causal_factors",
         "steps",
         "unsafe_outcome",
+        "stimulus_requirements",
         "execution_requirements",
         "trace_refs",
         "semantic_digest",
@@ -279,9 +281,34 @@ def _build_projection(
         causal_factors=factors,
         steps=steps,
         unsafe_outcome=outcome,
+        stimulus_requirements=_stimulus_requirements(spec, factors),
         execution_requirements=_execution_requirements(spec, factors, context),
         trace_refs=_trace_refs(
             spec, control_structure, context, hazard_refs, constraint_refs
+        ),
+    )
+
+
+def _stimulus_requirements(
+    spec: ScenarioSpec,
+    factors: Sequence[ExecutionCausalFactor],
+) -> tuple[AdversarialStimulusRequirement, ...]:
+    intent = "; ".join(
+        item.strip() for item in spec.attacker_bdi.intentions if item.strip()
+    )
+    desired_effect = "; ".join(
+        item.strip() for item in spec.attacker_bdi.desires if item.strip()
+    )
+    if not intent or not desired_effect:
+        raise ExecutionProjectionPreparationError(
+            "contextual execution projection requires attacker intent and desired effect"
+        )
+    return (
+        AdversarialStimulusRequirement(
+            stimulus_id="STIM-1",
+            intent=intent,
+            desired_effect=desired_effect,
+            eligible_factor_ids=tuple(factor.factor_id for factor in factors),
         ),
     )
 
@@ -481,7 +508,9 @@ def _execution_requirements(
     conditions = _projection_conditions(spec, factors)
     categories = _required_surface_categories(conditions)
     return ExecutionRequirements(
-        requires_multi_turn=True,
+        requires_multi_turn=_has_condition_type(
+            conditions, {"ordering", "delay", "duration", "window", "absence"}
+        ),
         requires_tool_execution=False,
         requires_persistent_state="persistent_data" in categories,
         requires_multi_agent=_requires_multi_agent(context),
@@ -511,8 +540,6 @@ def _required_surface_categories(
     conditions: Sequence[SemanticCondition],
 ) -> list[str]:
     categories = ["external_input"]
-    if _has_condition_type(conditions, {"delay", "absence"}):
-        categories.append("tool_result")
     if _has_condition_type(conditions, {"state_value"}):
         categories.append("persistent_data")
     return categories

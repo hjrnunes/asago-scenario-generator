@@ -37,7 +37,9 @@ Both seams require the explicit run identity and intact source pins; unknown
 semantic values are typed binding placeholders, and their presence derives
 `semantic_binding_required`. The v2 projection and v1 bundle contract kit in
 `data/contracts/stpa-execution/` is producer-owned; consumers vendor it
-byte-for-byte. Bundle publication is preflighted and atomic with the canonical
+byte-for-byte. Projections carry platform-neutral adversarial stimulus intent
+and eligible causal-factor IDs; consumers own the reviewed concrete delivery
+surface and must never pre-author the target response. Bundle publication is preflighted and atomic with the canonical
 JSON index replaced last; updates use immutable content-addressed generations
 so the live index never points at bytes being replaced. Historical v1 projection validation remains
 read-only and must not grow execution or persistence dependencies.

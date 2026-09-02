@@ -566,7 +566,11 @@ closed `stpa-execution-projection-v2` model in
 `stpa.scenario_prod.execution_projection`: it reuses the neutral typed
 semantic-condition hierarchy, preserves exact source pins from
 `ScenarioGenerationContext`, and computes canonical JSON/digests and
-requirements from typed evidence. The v2 model is prepared before Stage 6 and
+requirements from typed evidence. It also carries a neutral stimulus
+requirement containing the adversarial intent, desired effect, and eligible
+causal-factor IDs. Concrete user-message, tool-result, retrieval, and
+conversation placement remains a reviewed consumer binding rather than a
+producer guess. The v2 model is prepared before Stage 6 and
 is the only normal product persistence input; the v1 projection reader is
 retained solely for historical audit validation.
 

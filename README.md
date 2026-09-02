@@ -569,6 +569,14 @@ action-value scenarios remain executable without state observation, a
 multi-agent adapter, or a real-clock adapter unless their typed conditions
 require one.
 
+Each projection also publishes at least one platform-neutral adversarial
+stimulus requirement. It retains the attacker intent, desired unsafe effect,
+and the exact causal-factor IDs through which that content may be expressed.
+It deliberately does not choose a prompt role, tool, retrieval channel, or
+Garak probe. The artifact generator binds that intent to the reviewed
+deployment surface and compiles prompt-side history that ends before the
+target response.
+
 `publish_execution_bundle(...)` writes the closed
 `stpa-execution-bundle-v1` envelope and canonical scenario/projection pairs
 atomically. Initial entries are written before the canonical
