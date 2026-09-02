@@ -73,6 +73,18 @@ obligations, STPA alone produces scenarios, and Phase 2 verifies the resulting
 correspondence without changing those scenarios.
 _Avoid_: taxonomy generation run, choice of peer generators
 
+**Execution projection**:
+The immutable, source-pinned v2 value produced after Stage 5 and before Stage 6;
+it binds one unsafe-control scenario to typed conditions, causal evidence,
+execution requirements, canonical JSON, and a stable run identity.
+_Avoid_: provider response, mutable scenario draft, downstream interpretation
+
+**Execution bundle**:
+The atomically published v1 envelope containing canonical scenario/projection
+pairs and an index whose final replacement marks completion. It preserves the
+producer's exact identities, digests, pins, and validation attestation.
+_Avoid_: loose scenario directory, execution result, inferred runtime plan
+
 **Standalone STPA analysis**:
 A diagnostic baseline STPA analysis that omits taxonomy-obligation
 completeness. It supports isolation and comparison but is not the normal

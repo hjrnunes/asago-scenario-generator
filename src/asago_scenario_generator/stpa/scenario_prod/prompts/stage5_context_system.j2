@@ -59,18 +59,74 @@ Return one JSON object with:
     {
       "source_handle": "cause_1",
       "evidence": "plain evidence connecting this condition to the ICA",
-      "timing": null,
+      "temporal_condition": null,
       "evidence_status": "structural_failure",
       "capability_refs": [],
       "access_refs": [],
       "bounded_assumption": null
     }
-  ]
+  ],
+  "unsafe_outcome": {
+    "condition": {
+      "type": "action_value",
+      "control_action_id": "CA-1-1",
+      "property": "semantic_property",
+      "operator": "equals",
+      "expected": {
+        "binding_ref": "SEM-1",
+        "value_type": "string",
+        "description": "The selected action value for this deployment.",
+        "minimum": null,
+        "maximum": null
+      }
+    },
+    "semantic_binding_required": true,
+    "hazard_refs": [],
+    "constraint_refs": []
+  }
 }
 ```
 
 Every defender vulnerability must select one supplied belief handle. Every
 causal factor and attacker intention must select at least one supplied source
 handle. Never return PM-*, FB-*, CA-*, RESP-*, CL-*, CM-*, or CP-* identities
-in an identity field. Do not return a replacement ICA, action, target, hazard,
-loss, constraint, obligation, capability, source ID, or factor kind.
+in a causal-factor or request-local handle identity field. The typed
+`unsafe_outcome.condition` is the sole exception: its exact action/state
+reference may repeat the selected target action (`CA-*` or `CM-*`) and must
+not name a replacement action. Do not return a replacement ICA, target,
+hazard, loss, constraint, obligation, capability, source ID, or factor kind.
+
+## Typed semantic values
+
+When a semantic value is unknown, preserve its type with this exact closed
+placeholder shape (do not invent a threshold or runtime field):
+
+```json
+{
+  "binding_ref": "SEM-1",
+  "value_type": "integer",
+  "description": "Maximum supported delay in this deployment.",
+  "minimum": 0,
+  "maximum": null
+}
+```
+
+`value_type` is one of `integer`, `number`, `string`, or `boolean`.
+`minimum` and `maximum` are non-negative numeric bounds for numeric values and
+must be `null` for strings and booleans. A placeholder never changes the
+condition type, reference, semantic property, or operator.
+
+Allowed condition variants are fixed by the selected UCA: `NOT_PROVIDED`
+uses `action_presence(control_action_id, expected: not_provided)`;
+`INCORRECT` uses `action_value(control_action_id, property, operator,
+expected)` or `state_value(subject_ref, property, operator, expected)`;
+`WRONG_TIMING` uses `ordering(reference_step_id, relation)`,
+`delay(reference_ref, delay_ms)`, `window(reference_ref, window_from_ms,
+window_to_ms)`, or `absence(reference_ref, until_step_id)`; and
+`WRONG_DURATION` uses `duration(reference_ref, duration_ms)`. Structural
+references must be supplied context identities. The unsafe condition may
+repeat the exact selected action only; causal factor sources remain compiler
+
+Only `delay_ms`, `duration_ms`, `window_from_ms`, and `window_to_ms` may use
+numeric placeholders. Ordering and absence conditions use only their exact
+step/reference identities.

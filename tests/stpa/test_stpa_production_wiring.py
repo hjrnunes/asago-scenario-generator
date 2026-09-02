@@ -27,9 +27,11 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     BDIGenerationResult,
     CausalFactorDeclaration,
+    UnsafeOutcomeDeclaration,
     assemble_scenario_spec,
     populate_defender_bdi,
 )
+from asago_scenario_generator.stpa.models.semantic_conditions import OrderingCondition
 from asago_scenario_generator.stpa.scenario_prod.projection import (
     canonical_projection_data,
     export_projection_json,
@@ -65,6 +67,16 @@ def _attacker_bdi() -> AttackerBDI:
     )
 
 
+def _unsafe_outcome() -> UnsafeOutcomeDeclaration:
+    """Return the typed wrong-timing outcome used by corrected Stage 5 mocks."""
+    return UnsafeOutcomeDeclaration(
+        condition=OrderingCondition(reference_step_id="S-1", relation="after"),
+        semantic_binding_required=False,
+        hazard_refs=("H-1",),
+        constraint_refs=("SC-1",),
+    )
+
+
 def _llm_result(
     declarations: list[CausalFactorDeclaration] | None = None,
 ) -> BDIGenerationResult:
@@ -92,12 +104,13 @@ def _declare(
         source_id=source_id,
         evidence=evidence or f"evidence:{source_id}",
         timing=timing,
+        temporal_condition=None,
     )
 
 
 def _alignment_section(prompt: str) -> str:
     """Extract the rendered projection alignment table from a prompt."""
-    start = prompt.index("Projection ID:")
+    start = prompt.index("projection_schema:")
     end = prompt.index("Realize the projection rows", start)
     return prompt[start:end].rstrip()
 
@@ -593,6 +606,7 @@ class TestRunSp3ProductionWiring:
                     defender_vulnerabilities={"PM-1-1": "v"},
                     attacker_bdi=_attacker_bdi(),
                     causal_factors=declarations,
+                    unsafe_outcome=_unsafe_outcome(),
                 ),
                 (
                     "Step 1: The defender process model starts correct.\n"
@@ -674,7 +688,9 @@ class TestRunSp3ProductionWiring:
         assert canonical_json["ica_id"] == ICA_ID
         assert canonical_json["scenario_id"] == "SCN-001"
         assert canonical_json["candidate_id"] == CANDIDATE_ID
-        assert [f["source_id"] for f in canonical_json["causal_factors"]] == [
+        assert [
+            f["structural_source_id"] for f in canonical_json["causal_factors"]
+        ] == [
             "PM-1-1",
             "FB-1-1",
         ]

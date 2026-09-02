@@ -43,6 +43,11 @@ do not return or reinterpret its `kind` or `source_id`.
 
 ## Your Task
 
+The selected unsafe control action is `{{ target_action_id }}` with UCA type
+`{{ selected_uca_type }}`. If the unsafe condition uses `action_presence` or
+`action_value`, its `control_action_id` must be exactly
+`{{ target_action_id }}`. Do not substitute another action.
+
 1. Fill in `defender_vulnerabilities` — exactly one entry per supplied
    `belief_handle`, describing the evidence-backed vulnerability in the
    context of this exact ICA.
@@ -51,13 +56,45 @@ do not return or reinterpret its `kind` or `source_id`.
 
 3. Declare one or more `causal_factors`. Each factor must contain one exact
    `source_handle` from the allowed list, a non-empty `evidence` description,
-   `evidence_status`, and optional `timing`. Use
+   an explicit typed `temporal_condition` field (use `null` when no separately
+   supported temporal constraint exists), and `evidence_status`. Use
    `structural_failure` for an existing structural condition, and do not turn
    that condition into attacker access. Use `reachable_capability` only with
    exact capability and access references from this context. Use
    `bounded_assumption` only with a short, explicit `bounded_assumption`
    statement. Every attacker intention must likewise name at least one exact
    `source_handle`; deterministic code will attach the structural identity.
+
+4. Return a non-null `unsafe_outcome` condition compatible with the selected
+   UCA type. Keep its semantic family, subject/action, property, and operator
+   grounded in the context. If its value is unknown, use a typed
+   placeholder object with exactly `binding_ref`, `value_type`,
+   `description`, `minimum`, and `maximum`; never invent a threshold, runtime
+   field, tool name, endpoint, or detector. The binding flag is derived from
+   placeholder presence by deterministic validation.
+
+The placeholder object is:
+
+```json
+{
+  "binding_ref": "SEM-1",
+  "value_type": "integer",
+  "description": "Maximum supported delay in this deployment.",
+  "minimum": 0,
+  "maximum": null
+}
+```
+
+Use `integer`, `number`, `string`, or `boolean` for `value_type`; numeric
+bounds are non-negative and strings/booleans use `null` bounds. The allowed
+condition variants are selected by the requested UCA: NOT_PROVIDED is
+`action_presence`; INCORRECT is `action_value` or `state_value`; WRONG_TIMING
+is `ordering`, `delay`, `window`, or `absence`; WRONG_DURATION is `duration`.
+The typed unsafe condition may repeat the exact target action reference from
+the context (`CA-*` or `CM-*`), but causal-factor source identities remain
+the supplied request-local handles and must never be replaced with structural
+IDs. Only delay/duration/window numeric fields may contain numeric
+placeholders; ordering and absence use exact step/reference identities.
 
 When no reachable capabilities are supplied (`reachable_capabilities: []`),
 no attacker-access path is established. Do not claim attacker access.

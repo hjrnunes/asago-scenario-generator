@@ -77,15 +77,57 @@ Return a JSON object with this structure:
       "kind": "PROCESS_MODEL_FLAW",
       "source_id": "PM-1-1",
       "evidence": "plain evidence connecting this exact source to the ICA",
-      "timing": null,
+      "temporal_condition": null,
       "evidence_status": "structural_failure",
       "capability_refs": [],
       "access_refs": [],
       "bounded_assumption": null
     }
-  ]
+  ],
+  "unsafe_outcome": {
+    "condition": {
+      "type": "action_value",
+      "control_action_id": "CA-1-1",
+      "property": "semantic_property",
+      "operator": "equals",
+      "expected": {
+        "binding_ref": "SEM-1",
+        "value_type": "string",
+        "description": "The selected action value for this deployment.",
+        "minimum": null,
+        "maximum": null
+      }
+    },
+    "semantic_binding_required": true,
+    "hazard_refs": [],
+    "constraint_refs": []
+  }
 }
 ```
+
+## Typed semantic condition values
+
+Unknown semantic values must use this closed placeholder object:
+
+```json
+{
+  "binding_ref": "SEM-1",
+  "value_type": "integer",
+  "description": "Maximum supported delay in this deployment.",
+  "minimum": 0,
+  "maximum": null
+}
+```
+
+`value_type` is `integer`, `number`, `string`, or `boolean`; numeric bounds
+are non-negative and strings/booleans use `null` bounds. Allowed variants are
+NOT_PROVIDED=`action_presence`, INCORRECT=`action_value` or `state_value`,
+WRONG_TIMING=`ordering`/`delay`/`window`/`absence`, and
+WRONG_DURATION=`duration`. The typed unsafe condition may repeat the exact
+selected CA/CM action reference; this exception does not authorize
+structural IDs in causal-factor source fields or request-local handle fields.
+Only delay/duration/window numeric fields may contain numeric placeholders;
+ordering and absence use exact step/reference identities.
 
 ## Constraints
 
@@ -110,3 +152,12 @@ Return a JSON object with this structure:
   must leave both lists empty; `bounded_assumption` requires a non-empty
   `bounded_assumption` and must not claim those references as facts.
 - Do not return replacement ICA, action, target, hazard, loss, constraint, obligation, or capability fields.
+- `causal_factors` is required and non-empty. Every factor must include an
+  explicit typed `temporal_condition` field; use `null` when no separately
+  supported temporal constraint exists. Never use free-form timing prose in a
+  corrected response.
+- `unsafe_outcome` is required and non-null. Its condition must be compatible
+  with the selected UCA type. Unknown scalar values must be typed semantic
+  binding placeholders; do not invent numeric values, runtime field paths,
+  tools, endpoints, prompts, clocks, or detectors. The binding flag is derived
+  from placeholder presence and is not caller-controlled.

@@ -548,14 +548,37 @@ can also be regenerated independently:
 asago-scenario-generator stpa-report --output-dir output/my-system-stpa
 ```
 
-Canonical Stage 6 projection artifacts (`stpa-execution-projection-v1`) can be
+Canonical Stage 6 projection artifacts (`stpa-execution-projection-v2`) can be
 checked through the public validation command without reconstructing project
-objects:
+objects. The historical v1 reader remains available for audit-only validation;
+it is not a product-run input or publication path:
 
 ```bash
 asago-scenario-generator validate-stpa-projection \
   output/my-system-stpa/scenarios/canonical/SCN-001.projection.json
 ```
+
+Product `run` prepares each execution projection through the typed
+`prepare_execution_projection(...)` seam. It requires one intact,
+source-pinned `ScenarioGenerationContext` and one explicit non-empty
+`ExecutionRunIdentity`; Stage 5 and Stage 6 cannot bypass this validation.
+Unknown semantic values are represented as typed binding placeholders, so
+`semantic_binding_required` is derived from the validated projection rather
+than accepted as caller-controlled metadata. Literal single-controller
+action-value scenarios remain executable without state observation, a
+multi-agent adapter, or a real-clock adapter unless their typed conditions
+require one.
+
+`publish_execution_bundle(...)` writes the closed
+`stpa-execution-bundle-v1` envelope and canonical scenario/projection pairs
+atomically. Initial entries are written before the canonical
+`execution-bundle.json` index; updates stage entries under a deterministic,
+content-addressed generation and leave the currently indexed bytes untouched
+until that index is replaced last. YAML mirrors are written before the index,
+making the JSON index the completion marker. The producer-owned schemas,
+fixtures, expected violations, canonical digests, and lock are under
+[`data/contracts/stpa-execution`](data/contracts/stpa-execution/); the consumer
+must vendor those files byte-for-byte before compiling the bundle.
 
 ## Development
 

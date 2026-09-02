@@ -10,13 +10,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 
 import yaml
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictBool,
     conlist,
     create_model,
     model_validator,
@@ -35,6 +36,10 @@ from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactorKind,
     validate_causal_evidence_shape,
     validate_factor_sources,
+)
+from asago_scenario_generator.stpa.models.semantic_conditions import (
+    SemanticCondition,
+    contains_binding_placeholder,
 )
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
@@ -66,6 +71,7 @@ __all__ = [
     "BDIGenerationResult",
     "CausalEvidenceStatus",
     "CausalFactorDeclaration",
+    "UnsafeOutcomeDeclaration",
     "populate_defender_bdi",
     "generate_bdi",
     "generate_bdi_for_context",
@@ -105,6 +111,11 @@ class CausalFactorDeclaration(BaseModel):
     source_id: str = Field(min_length=1)
     evidence: str = Field(min_length=1)
     timing: str | None = None
+    # V2 provider contract.  ``timing`` remains a compatibility field for
+    # historical direct callers; corrected context requests require this
+    # field (including explicit ``null``) through their dynamic response
+    # model.
+    temporal_condition: SemanticCondition | None = None
     evidence_status: CausalEvidenceStatus = CausalEvidenceStatus.structural_failure
     capability_refs: tuple[str, ...] = ()
     access_refs: tuple[str, ...] = ()
@@ -122,6 +133,35 @@ class CausalFactorDeclaration(BaseModel):
         return self
 
 
+class UnsafeOutcomeDeclaration(BaseModel):
+    """Stage 5's semantic unsafe-outcome condition.
+
+    The condition family, subject and operator are provider-authored.  Any
+    value absent from source evidence is represented by a typed placeholder;
+    the binding flag is derived and cannot be used to hide a placeholder.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    condition: SemanticCondition
+    semantic_binding_required: StrictBool | None = None
+    hazard_refs: tuple[str, ...] = ()
+    constraint_refs: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def derive_binding_state(self) -> "UnsafeOutcomeDeclaration":
+        expected = contains_binding_placeholder(self.condition)
+        if (
+            self.semantic_binding_required is not None
+            and self.semantic_binding_required is not expected
+        ):
+            raise ValueError(
+                "semantic_binding_required must match typed placeholder presence"
+            )
+        object.__setattr__(self, "semantic_binding_required", expected)
+        return self
+
+
 class BDIGenerationResult(BaseModel):
     """LLM response model for the combined BDI generation call."""
 
@@ -130,6 +170,9 @@ class BDIGenerationResult(BaseModel):
     defender_vulnerabilities: dict[str, str] = Field(default_factory=dict)
     attacker_bdi: AttackerBDI
     causal_factors: list[CausalFactorDeclaration] = Field(min_length=1)
+    # Optional only for historical direct callers.  Corrected context
+    # requests use a strict dynamic subtype where this field is required.
+    unsafe_outcome: UnsafeOutcomeDeclaration | None = None
 
 
 class _ContextCausalFactorDraft(BaseModel):
@@ -139,7 +182,7 @@ class _ContextCausalFactorDraft(BaseModel):
 
     source_handle: str
     evidence: str = Field(min_length=1)
-    timing: str | None = None
+    temporal_condition: SemanticCondition | None = None
     evidence_status: CausalEvidenceStatus = CausalEvidenceStatus.structural_failure
     capability_refs: tuple[str, ...] = ()
     access_refs: tuple[str, ...] = ()
@@ -182,6 +225,7 @@ class _ContextBDIProviderPayload(BDIGenerationResult):
     defender_vulnerabilities: list[_ContextDefenderVulnerabilityDraft]
     attacker_bdi: _ContextAttackerBDIDraft
     causal_factors: list[_ContextCausalFactorDraft]
+    unsafe_outcome: UnsafeOutcomeDeclaration
 
     @model_validator(mode="after")
     def validate_unique_belief_handles(self) -> "_ContextBDIProviderPayload":
@@ -293,6 +337,19 @@ def _populate_coordination_bdi(
     link_id: str,
 ) -> DefenderBDI:
     """Derive one defender BDI from both exact endpoints of a CL path."""
+    responsibilities = _coordination_responsibilities(control_structure, link_id)
+    return DefenderBDI(
+        beliefs=_coordination_beliefs(responsibilities),
+        desires=_coordination_desires(responsibilities),
+        intentions=_coordination_intentions(responsibilities),
+    )
+
+
+def _coordination_responsibilities(
+    control_structure: ControlStructure,
+    link_id: str,
+) -> tuple[Responsibility, Responsibility]:
+    """Resolve the two exact responsibility endpoints of one CL link."""
     links = [
         item for item in control_structure.coordination_links if item.link_id == link_id
     ]
@@ -301,31 +358,44 @@ def _populate_coordination_bdi(
             f"Coordination link '{link_id}' not found in control structure."
         )
     link: CoordinationLink = links[0]
-    source = _find_responsibility(control_structure, link.source)
-    target = _find_responsibility(control_structure, link.target)
-    responsibilities = (source, target)
+    return (
+        _find_responsibility(control_structure, link.source),
+        _find_responsibility(control_structure, link.target),
+    )
 
-    beliefs = [
-        DefenderBelief(
-            pm_id=part.pm_id,
-            content=part.description,
-            vulnerability="",
-        )
+
+def _coordination_beliefs(
+    responsibilities: tuple[Responsibility, Responsibility],
+) -> list[DefenderBelief]:
+    """Build belief records for both coordination endpoints."""
+    return [
+        DefenderBelief(pm_id=part.pm_id, content=part.description, vulnerability="")
         for responsibility in responsibilities
         for part in responsibility.process_model_parts
     ]
-    desires = [
+
+
+def _coordination_desires(
+    responsibilities: tuple[Responsibility, Responsibility],
+) -> list[DefenderDesire]:
+    """Build desire records for both coordination endpoints."""
+    return [
         DefenderDesire(
             resp_id=responsibility.resp_id, content=responsibility.description
         )
         for responsibility in responsibilities
     ]
-    intentions = [
+
+
+def _coordination_intentions(
+    responsibilities: tuple[Responsibility, Responsibility],
+) -> list[DefenderIntention]:
+    """Build intention records for every action on both endpoints."""
+    return [
         DefenderIntention(ca_id=action.ca_id, content=action.description)
         for responsibility in responsibilities
         for action in responsibility.control_actions
     ]
-    return DefenderBDI(beliefs=beliefs, desires=desires, intentions=intentions)
 
 
 def _find_responsibility(
@@ -454,6 +524,10 @@ def generate_bdi_for_context(
         stage=stage,
         step=step,
         temperature=temperature,
+        result_validator=lambda value: _validate_context_provider_payload(
+            value,
+            scenario_context,
+        ),
     )
     return _finish_context_bdi(draft, error, choices, belief_choices)
 
@@ -485,6 +559,7 @@ def _call_bdi_with_bounded_length_retry(
     stage: str,
     step: str,
     temperature: float,
+    result_validator: Callable[[BaseModel], None] | None = None,
 ) -> tuple[BaseModel | None, str | None]:
     """Call the closed Stage 5 contract with its one length-only retry."""
     result, _llm_result, error = safe_llm_call(
@@ -496,6 +571,14 @@ def _call_bdi_with_bounded_length_retry(
         stage=stage,
         step=step,
         temperature=temperature,
+        validation_retries=1,
+        validation_retry_feedback=(
+            " Return only a closed JSON object with every required field. "
+            "Include causal_factors, explicit temporal_condition (including "
+            "null), and unsafe_outcome with its typed condition and derived "
+            "semantic_binding_required flag."
+        ),
+        result_validator=result_validator,
         result_parser=lambda value: _parse_context_bdi_result(value, response_format),
     )
     if not _is_length_finish_reason_error(error):
@@ -510,6 +593,14 @@ def _call_bdi_with_bounded_length_retry(
         step=step,
         temperature=temperature,
         max_completion_tokens=_LENGTH_RETRY_MAX_COMPLETION_TOKENS,
+        validation_retries=1,
+        validation_retry_feedback=(
+            " Return only a closed JSON object with every required field. "
+            "Include causal_factors, explicit temporal_condition (including "
+            "null), and unsafe_outcome with its typed condition and derived "
+            "semantic_binding_required flag."
+        ),
+        result_validator=result_validator,
         result_parser=lambda value: _parse_context_bdi_result(value, response_format),
     )
     if retry_error is None:
@@ -522,6 +613,21 @@ def _parse_context_bdi_result(result, response_format: type[BaseModel]) -> BaseM
     if type(result.content) is BDIGenerationResult:
         return result.content
     return parse_llm_result(result, response_format)
+
+
+def _validate_context_provider_payload(
+    value: BaseModel,
+    context: ScenarioGenerationContext,
+) -> None:
+    """Validate request-local unsafe semantics before Stage 5 succeeds."""
+    unsafe_outcome = getattr(value, "unsafe_outcome", None)
+    if not isinstance(unsafe_outcome, UnsafeOutcomeDeclaration):
+        raise ValueError("unsafe_outcome is required in corrected Stage 5 output")
+    _validate_unsafe_outcome_for_target(
+        unsafe_outcome,
+        context.ica.uca_type,
+        context.target_control_path.control_action.action_id,
+    )
 
 
 def _is_length_finish_reason_error(error: str | None) -> bool:
@@ -633,6 +739,8 @@ def build_context_bdi_prompts(
             scenario_context_yaml=scenario_context_yaml,
             causal_source_choices_yaml=source_choices_yaml,
             defender_belief_choices_yaml=belief_choices_yaml,
+            target_action_id=scenario_context.target_control_path.control_action.action_id,
+            selected_uca_type=scenario_context.ica.uca_type.value,
         ),
     )
 
@@ -698,6 +806,10 @@ def _context_bdi_provider_payload_type(
         f"_ContextCausalFactorDraft{choice_count}",
         __base__=_ContextCausalFactorDraft,
         source_handle=(handle_type, ...),
+        # Presence is part of the provider contract: ``null`` means that no
+        # separately supported temporal constraint exists.  A missing field
+        # is malformed and must receive the bounded structured retry.
+        temporal_condition=(SemanticCondition | None, ...),
     )
     source_handle_list = conlist(handle_type, min_length=1)
     intention_type = create_model(
@@ -723,12 +835,20 @@ def _context_bdi_provider_payload_type(
         min_length=belief_count,
         max_length=belief_count,
     )
+    unsafe_outcome_type = create_model(
+        f"_UnsafeOutcomeDeclaration{choice_count}",
+        __base__=UnsafeOutcomeDeclaration,
+        # Corrected provider responses carry the flag explicitly, while the
+        # inherited validator derives and checks its value from placeholders.
+        semantic_binding_required=(StrictBool, ...),
+    )
     return create_model(
         f"_ContextBDIProviderPayload{choice_count}x{belief_count}",
         __base__=_ContextBDIProviderPayload,
         defender_vulnerabilities=(vulnerability_list, ...),
         attacker_bdi=(attacker_type, ...),
         causal_factors=(factor_list, ...),
+        unsafe_outcome=(unsafe_outcome_type, ...),
     )
 
 
@@ -767,6 +887,7 @@ def _materialize_context_bdi(
         },
         attacker_bdi=attacker_bdi,
         causal_factors=factors,
+        unsafe_outcome=draft.unsafe_outcome,
     )
 
 
@@ -820,7 +941,7 @@ def _materialize_causal_factor(
         kind=choice.kind,
         source_id=choice.source_id,
         evidence=draft.evidence,
-        timing=draft.timing,
+        temporal_condition=draft.temporal_condition,
         evidence_status=evidence_status,
         capability_refs=draft.capability_refs,
         access_refs=draft.access_refs,
@@ -861,34 +982,14 @@ def assemble_scenario_spec(
         A :class:`ScenarioSpec`.
     """
     slot_parts = parse_ica_slot_id(threat.ica_slot_id)
-    if scenario_context is not None:
-        _validate_context_matches_threat(scenario_context, threat, scenario_index)
-
-    # Merge vulnerability annotations — use original deterministic pm_ids
-    for belief in defender_bdi.beliefs:
-        belief.vulnerability = llm_result.defender_vulnerabilities.get(belief.pm_id, "")
-
-    # Select exactly the declared, evidence-backed causal factors.
-    # References must resolve against the control structure; invalid
-    # references stop Stage 5 with a causal-factor reference validation
-    # error before any Stage 6 call can run.
-    causal_factors = [
-        CausalFactor(
-            kind=declaration.kind,
-            source_id=declaration.source_id,
-            description=declaration.evidence,
-            declared_timing=declaration.timing,
-            evidence_status=declaration.evidence_status,
-            capability_refs=declaration.capability_refs,
-            access_refs=declaration.access_refs,
-            bounded_assumption=declaration.bounded_assumption,
-        )
-        for declaration in llm_result.causal_factors
-    ]
-    validate_factor_sources(control_structure, causal_factors)
-    if scenario_context is not None:
-        validate_factor_evidence(scenario_context, causal_factors)
-        _validate_context_factor_sources(scenario_context, causal_factors)
+    _validate_optional_assembly_context(scenario_context, threat, scenario_index)
+    _merge_defender_vulnerabilities(defender_bdi, llm_result)
+    causal_factors = _materialize_causal_factors(llm_result)
+    _validate_assembled_factors(causal_factors, control_structure, scenario_context)
+    unsafe_condition = _validated_unsafe_condition(
+        llm_result, UCAType(slot_parts["ica_type"]), slot_parts["control_action"]
+    )
+    hazard_refs, constraint_refs = _unsafe_outcome_refs(llm_result, threat)
 
     return ScenarioSpec(
         scenario_id=generate_scenario_id(scenario_index),
@@ -905,6 +1006,9 @@ def assemble_scenario_spec(
         catalog_context=threat.catalog_mappings,
         loss_scenario=threat.loss_scenario,
         causal_factors=causal_factors,
+        unsafe_outcome_condition=unsafe_condition,
+        unsafe_outcome_hazard_refs=hazard_refs,
+        unsafe_outcome_constraint_refs=constraint_refs,
         scenario_context=scenario_context,
     )
 
@@ -915,16 +1019,143 @@ def _validate_context_matches_threat(
     scenario_index: int,
 ) -> None:
     """Reject an attempt to assemble provider output under different authority."""
-    identity = context.scenario_identity
-    if (
-        identity.scenario_id != generate_scenario_id(scenario_index)
-        or identity.ica_slot_id != threat.ica_slot_id
-        or identity.ica_id != threat.ica_id
-        or context.ica.exact_ica_text != threat.ica_text
-        or context.ica.hazardous_context != threat.hazardous_context
-        or context.ica.loss_consequence != threat.loss_scenario
-    ):
+    if _context_threat_identity(context) != _threat_identity(threat, scenario_index):
         raise ValueError("scenario context does not match selected structural threat")
+
+
+def _context_threat_identity(
+    context: ScenarioGenerationContext,
+) -> tuple[str, str | None, str, str, str, str]:
+    """Return the context identity fields used for threat pinning."""
+    identity = context.scenario_identity
+    return (
+        identity.scenario_id,
+        identity.ica_id,
+        identity.ica_slot_id,
+        context.ica.exact_ica_text,
+        context.ica.hazardous_context,
+        context.ica.loss_consequence,
+    )
+
+
+def _threat_identity(
+    threat: StructuralThreat,
+    scenario_index: int,
+) -> tuple[str, str | None, str, str, str, str]:
+    """Return the threat identity in the context comparison order."""
+    return (
+        generate_scenario_id(scenario_index),
+        threat.ica_id,
+        threat.ica_slot_id,
+        threat.ica_text,
+        threat.hazardous_context,
+        threat.loss_scenario,
+    )
+
+
+def _validate_optional_assembly_context(
+    context: ScenarioGenerationContext | None,
+    threat: StructuralThreat,
+    scenario_index: int,
+) -> None:
+    """Validate a supplied scenario context before compiling provider output."""
+    if context is not None:
+        _validate_context_matches_threat(context, threat, scenario_index)
+
+
+def _merge_defender_vulnerabilities(
+    defender_bdi: DefenderBDI,
+    llm_result: BDIGenerationResult,
+) -> None:
+    """Attach provider vulnerability prose to deterministic belief IDs."""
+    for belief in defender_bdi.beliefs:
+        belief.vulnerability = llm_result.defender_vulnerabilities.get(belief.pm_id, "")
+
+
+def _materialize_causal_factors(
+    llm_result: BDIGenerationResult,
+) -> list[CausalFactor]:
+    """Compile the declared Stage 5 factor records without inference."""
+    return [
+        CausalFactor(
+            kind=declaration.kind,
+            source_id=declaration.source_id,
+            description=declaration.evidence,
+            declared_timing=declaration.timing,
+            evidence_status=declaration.evidence_status,
+            capability_refs=declaration.capability_refs,
+            access_refs=declaration.access_refs,
+            bounded_assumption=declaration.bounded_assumption,
+            temporal_condition=declaration.temporal_condition,
+        )
+        for declaration in llm_result.causal_factors
+    ]
+
+
+def _validate_assembled_factors(
+    causal_factors: list[CausalFactor],
+    control_structure: ControlStructure,
+    context: ScenarioGenerationContext | None,
+) -> None:
+    """Validate factor references against structure and optional context."""
+    validate_factor_sources(control_structure, causal_factors)
+    if context is None:
+        return
+    validate_factor_evidence(context, causal_factors)
+    _validate_context_factor_sources(context, causal_factors)
+
+
+def _validated_unsafe_condition(
+    llm_result: BDIGenerationResult,
+    uca_type: UCAType,
+    control_action_id: str,
+) -> SemanticCondition | None:
+    """Validate and return the provider's typed unsafe condition when present."""
+    outcome = llm_result.unsafe_outcome
+    if outcome is None:
+        return None
+    _validate_unsafe_outcome_for_target(outcome, uca_type, control_action_id)
+    return outcome.condition
+
+
+def _unsafe_outcome_refs(
+    llm_result: BDIGenerationResult,
+    threat: StructuralThreat,
+) -> tuple[list[str], list[str]]:
+    """Use validated provider refs or the threat's authoritative fallback refs."""
+    outcome = llm_result.unsafe_outcome
+    if outcome is None:
+        return list(threat.related_hazards), list(threat.related_constraints)
+    return list(outcome.hazard_refs), list(outcome.constraint_refs)
+
+
+def _validate_unsafe_outcome_for_target(
+    unsafe_outcome: UnsafeOutcomeDeclaration,
+    uca_type: UCAType,
+    control_action_id: str,
+) -> None:
+    """Keep provider-authored unsafe semantics inside the requested ICA."""
+    accepted = {
+        UCAType.not_provided: {"action_presence"},
+        UCAType.incorrect: {"action_value", "state_value"},
+        UCAType.wrong_timing: {"ordering", "delay", "window", "absence"},
+        UCAType.wrong_duration: {"duration"},
+    }
+    condition = unsafe_outcome.condition
+    if condition.type not in accepted[uca_type]:
+        raise ValueError(
+            f"unsafe outcome condition '{condition.type}' is incompatible with "
+            f"the selected UCA '{uca_type.value}'"
+        )
+    # A typed action condition is the one place the provider may repeat the
+    # target action identity.  It remains semantic condition data, never a
+    # causal-source selection; deterministic code requires exact equality.
+    condition_action = getattr(condition, "control_action_id", None)
+    if condition_action is not None and condition_action != control_action_id:
+        raise ValueError(
+            "unsafe outcome condition control_action_id must equal the selected "
+            "target action"
+        )
 
 
 def _validate_context_factor_sources(

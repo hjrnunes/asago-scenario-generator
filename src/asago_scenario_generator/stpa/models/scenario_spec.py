@@ -22,6 +22,7 @@ from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
 )
+from asago_scenario_generator.stpa.models.semantic_conditions import SemanticCondition
 
 if TYPE_CHECKING:
     from asago_scenario_generator.stpa.models.control_structure import ControlStructure
@@ -90,6 +91,12 @@ class ScenarioSpec(BaseModel):
     # structural presence alone never invents a factor.  Empty is valid
     # and means "no declared factors".
     causal_factors: list[CausalFactor] = Field(default_factory=list)
+    # Corrected Stage 5 output owns the semantic condition that makes the
+    # selected UCA unsafe.  ``None`` remains accepted only for historical v1
+    # ScenarioSpec values; contextual v2 preparation rejects it before Stage 6.
+    unsafe_outcome_condition: SemanticCondition | None = None
+    unsafe_outcome_hazard_refs: list[str] = Field(default_factory=list)
+    unsafe_outcome_constraint_refs: list[str] = Field(default_factory=list)
     scenario_context: ScenarioGenerationContext | None = None
 
     @model_validator(mode="after")

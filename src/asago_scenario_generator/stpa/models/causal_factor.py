@@ -22,6 +22,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from asago_scenario_generator.stpa.models.semantic_conditions import SemanticCondition
+
 if TYPE_CHECKING:
     from asago_scenario_generator.stpa.models.control_structure import (
         ControlStructure,
@@ -218,6 +220,10 @@ class CausalFactor(BaseModel):
     capability_refs: tuple[str, ...] = ()
     access_refs: tuple[str, ...] = ()
     bounded_assumption: str | None = None
+    # Corrected Stage 5 responses carry the same neutral typed semantic
+    # condition leaf used by the v2 projection.  ``None`` explicitly means
+    # that no separately supported temporal constraint was evidenced.
+    temporal_condition: SemanticCondition | None = None
 
     @model_validator(mode="after")
     def validate_source_namespace(self) -> CausalFactor:

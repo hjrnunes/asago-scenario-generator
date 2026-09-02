@@ -561,11 +561,28 @@ violations aligned with the taxonomy `projection_validation` contract.
 Stage 6 narrative, attack-tree, and Gherkin prompts render the same
 validator-derived projection alignment table (`stpa.scenario_prod.prompt_alignment`),
 keyed by semantic structural IDs, when the optional `projection_alignment`
-argument is supplied to their builders. The same canonical document is
-exported as standalone JSON/YAML (`stpa-execution-projection-v1`) with stable
-identifiers and typed provenance, and re-validated on load without project
-objects. The public CLI command `validate-stpa-projection` applies that
-standalone check to a JSON or YAML export and prints typed violations.
+argument is supplied to their builders. The current product seam is the
+closed `stpa-execution-projection-v2` model in
+`stpa.scenario_prod.execution_projection`: it reuses the neutral typed
+semantic-condition hierarchy, preserves exact source pins from
+`ScenarioGenerationContext`, and computes canonical JSON/digests and
+requirements from typed evidence. The v2 model is prepared before Stage 6 and
+is the only normal product persistence input; the v1 projection reader is
+retained solely for historical audit validation.
+
+The companion `stpa.scenario_prod.execution_bundle` seam publishes
+`stpa-execution-bundle-v1` scenario/projection pairs and its canonical index.
+Publication preflights every pair and path, writes verified YAML mirrors first,
+and replaces `execution-bundle.json` last. On an update, entries are staged
+under a deterministic content-addressed generation, so the live index always
+continues to reference untouched complete bytes until the final index swap.
+Verification checks exact canonical bytes, hashes, digests, run identity, and
+the full scenario/projection/index tuple, not merely an envelope scenario ID.
+The producer contract kit under
+`data/contracts/stpa-execution/` is authoritative and is intended to be
+vendored byte-identically by consumers. The public CLI commands
+`validate-stpa-projection` and `validate-stpa-execution-bundle` perform the
+standalone checks without reconstructing project/provider objects.
 
 ## Acceptance boundary
 

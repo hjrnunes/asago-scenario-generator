@@ -42,6 +42,9 @@ from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.enriched_threat_set import EnrichedThreatSet
+from asago_scenario_generator.stpa.models.execution_projection_v2 import (
+    ExecutionRunIdentity,
+)
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.models.scenario_envelope import (
     GherkinSpec,
@@ -65,6 +68,12 @@ from .bdi_generation import (
 )
 from .context import build_scenario_generation_context
 from .coverage import compute_coverage_gaps, write_coverage_gaps
+from .execution_bundle import ExecutionBundlePublication, publish_execution_bundle
+from .execution_projection import (
+    ExecutionProjectionPreparationError,
+    ValidatedExecutionProjection,
+    prepare_execution_projection,
+)
 from .eval_metrics import compute_eval_scorecard, write_eval_scorecard
 from .gherkin import build_gherkin_prompts, find_security_constraint, parse_gherkin_spec
 from .narrative import build_narrative_prompts
@@ -159,24 +168,103 @@ def run_sp3(
         An :class:`SP3RunResult` with artifacts and diagnostics.
     """
     run_dir.mkdir(parents=True, exist_ok=True)
+    run_started = datetime.now(timezone.utc)
+    run_identity = ExecutionRunIdentity(
+        run_id=f"synthesis-{run_started.strftime('%Y%m%dT%H%M%S.%fZ')}"
+    )
     scenarios_dir = run_dir / "scenarios"
     scenarios_dir.mkdir(parents=True, exist_ok=True)
     loader = TemplateLoader(PROMPTS_DIR)
     temperature = effective_temperature(llm_client, temperature)
 
     stage_errors: list[str] = []
-    validation_errors: list[str] = []
-    scenario_specs: list[ScenarioSpec] = []
-    scenario_envelopes: list[ScenarioEnvelope] = []
+    scenario_specs = _collect_stage5_specs(
+        llm_client,
+        enriched_threat_set,
+        control_structure,
+        loss_analysis,
+        run_dir,
+        loader,
+        temperature,
+        stage_errors,
+        capability_profile=capability_profile,
+        scenario_contexts=scenario_contexts,
+    )
+    scenario_envelopes, validated_projections = _collect_stage6_artifacts(
+        llm_client,
+        scenario_specs,
+        control_structure,
+        loss_analysis,
+        run_dir,
+        scenarios_dir,
+        loader,
+        temperature,
+        max_workers,
+        stage_errors,
+        capability_profile=capability_profile,
+        run_identity=run_identity,
+    )
+    _publish_validated_projections(
+        run_dir, run_identity, validated_projections, stage_errors
+    )
+    all_validation_errors, coverage_gaps, eval_scorecard = _stage7_outputs(
+        scenario_envelopes,
+        scenario_specs,
+        enriched_threat_set,
+        control_structure,
+        loss_analysis,
+    )
 
-    # --- Stage 5: BDI generation (1 LLM call per scenario) ---
-    for idx, threat in enumerate(enriched_threat_set.structural_threats):
-        stage5_result = _run_stage5_for_threat(
+    write_eval_scorecard(eval_scorecard, run_dir)
+    write_coverage_gaps(coverage_gaps, run_dir)
+    _write_manifest(
+        run_dir=run_dir,
+        llm_client=llm_client,
+        enriched_threat_set=enriched_threat_set,
+        control_structure=control_structure,
+        loss_analysis=loss_analysis,
+        scenario_envelopes=scenario_envelopes,
+        validation_errors=all_validation_errors,
+        max_workers=max_workers,
+        temperature=temperature,
+        stage_errors=stage_errors,
+        run_identity=run_identity,
+        run_started=run_started,
+    )
+
+    return SP3RunResult(
+        scenario_specs=scenario_specs,
+        scenario_envelopes=scenario_envelopes,
+        eval_scorecard=eval_scorecard,
+        coverage_gaps=coverage_gaps,
+        stage_errors=stage_errors,
+        validation_errors=all_validation_errors,
+    )
+
+
+def _collect_stage5_specs(
+    llm_client: LLMClient,
+    enriched_threat_set: EnrichedThreatSet,
+    control_structure: ControlStructure,
+    loss_analysis: LossAnalysis,
+    run_dir: Path,
+    loader: TemplateLoader,
+    temperature: float,
+    stage_errors: list[str],
+    *,
+    capability_profile: CapabilityProfile | None,
+    scenario_contexts: Mapping[str, ScenarioGenerationContext] | None,
+) -> list[ScenarioSpec]:
+    """Generate and retain the valid Stage 5 specs in threat order."""
+    specs: list[ScenarioSpec] = []
+    threats = enriched_threat_set.structural_threats
+    for index, threat in enumerate(threats):
+        result = _run_stage5_for_threat(
             llm_client,
             threat,
             control_structure,
             run_dir,
-            idx,
+            index,
             loader,
             temperature,
             stage_errors,
@@ -184,20 +272,46 @@ def run_sp3(
             capability_profile=capability_profile,
             scenario_contexts=scenario_contexts,
         )
-        if stage5_result.scenario_spec is not None:
-            scenario_specs.append(stage5_result.scenario_spec)
-        if stage5_result.abort_remaining:
-            remaining = len(enriched_threat_set.structural_threats) - idx - 1
-            if remaining:
-                stage_errors.append(
-                    "Stage 5 aborted "
-                    f"{remaining} remaining threats after repeated structured-output "
-                    "length failures. Verify the serving runtime's structured-output "
-                    "configuration before retrying the run."
-                )
+        if result.scenario_spec is not None:
+            specs.append(result.scenario_spec)
+        if result.abort_remaining:
+            _record_stage5_abort(stage_errors, len(threats) - index - 1)
             break
+    return specs
 
-    # --- Stage 6: Concretization (3 LLM calls per scenario, parallelizable) ---
+
+def _record_stage5_abort(stage_errors: list[str], remaining: int) -> None:
+    """Record a bounded Stage 5 circuit-breaker diagnostic when needed."""
+    if remaining:
+        stage_errors.append(
+            "Stage 5 aborted "
+            f"{remaining} remaining threats after repeated structured-output "
+            "length failures. Verify the serving runtime's structured-output "
+            "configuration before retrying the run."
+        )
+
+
+def _collect_stage6_artifacts(
+    llm_client: LLMClient,
+    scenario_specs: list[ScenarioSpec],
+    control_structure: ControlStructure,
+    loss_analysis: LossAnalysis,
+    run_dir: Path,
+    scenarios_dir: Path,
+    loader: TemplateLoader,
+    temperature: float,
+    max_workers: int,
+    stage_errors: list[str],
+    *,
+    capability_profile: CapabilityProfile | None,
+    run_identity: ExecutionRunIdentity,
+) -> tuple[
+    list[ScenarioEnvelope],
+    list[tuple[ScenarioEnvelope, ValidatedExecutionProjection]],
+]:
+    """Concretize specs and write each accepted scenario companion set."""
+    envelopes: list[ScenarioEnvelope] = []
+    validated: list[tuple[ScenarioEnvelope, ValidatedExecutionProjection]] = []
     for spec in scenario_specs:
         envelope, projection_doc = _run_stage6_for_spec(
             llm_client,
@@ -210,12 +324,62 @@ def run_sp3(
             max_workers,
             stage_errors,
             capability_profile=capability_profile,
+            run_identity=run_identity,
         )
-        if envelope is not None:
-            scenario_envelopes.append(envelope)
-            _write_scenario_artifacts(envelope, scenarios_dir, projection_doc)
+        if envelope is None:
+            continue
+        envelopes.append(envelope)
+        if isinstance(projection_doc, ValidatedExecutionProjection):
+            validated.append((envelope, projection_doc))
+        _write_scenario_artifacts(envelope, scenarios_dir, projection_doc)
+    return envelopes, validated
 
-    # --- Stage 7: Validation + eval metrics + coverage gaps ---
+
+def _publish_validated_projections(
+    run_dir: Path,
+    run_identity: ExecutionRunIdentity,
+    validated_projections: list[tuple[ScenarioEnvelope, ValidatedExecutionProjection]],
+    stage_errors: list[str],
+) -> None:
+    """Publish the v2 bundle after all accepted pairs have passed preflight."""
+    if not validated_projections:
+        return
+    try:
+        publish_execution_bundle(
+            run_dir,
+            run_identity,
+            tuple(
+                _bundle_publication(envelope, projection)
+                for envelope, projection in validated_projections
+            ),
+        )
+    except (OSError, ValueError) as exc:
+        stage_errors.append(f"Execution bundle publication failed: {exc}")
+
+
+def _bundle_publication(
+    envelope: ScenarioEnvelope,
+    projection: ValidatedExecutionProjection,
+) -> ExecutionBundlePublication:
+    """Create the stable bundle paths for one validated scenario pair."""
+    scenario_id = envelope.scenario_id
+    return ExecutionBundlePublication(
+        scenario_envelope=envelope,
+        validated_projection=projection,
+        scenario_path=f"scenarios/{scenario_id}.scenario.json",
+        projection_path=f"scenarios/canonical/{scenario_id}.projection.json",
+    )
+
+
+def _stage7_outputs(
+    scenario_envelopes: list[ScenarioEnvelope],
+    scenario_specs: list[ScenarioSpec],
+    enriched_threat_set: EnrichedThreatSet,
+    control_structure: ControlStructure,
+    loss_analysis: LossAnalysis,
+) -> tuple[list[str], dict, dict]:
+    """Validate accepted scenarios and derive coverage/evaluation outputs."""
+    validation_errors: list[str] = []
     _run_stage7_validations(
         scenario_envelopes,
         scenario_specs,
@@ -223,13 +387,11 @@ def run_sp3(
         loss_analysis,
         validation_errors,
     )
-
     trace_errors = validate_traceability(
         scenario_envelopes, enriched_threat_set, control_structure, loss_analysis
     )
     trace_error_msgs = _format_traceability_errors(trace_errors)
     all_validation_errors = validation_errors + trace_error_msgs
-
     coverage_gaps = compute_coverage_gaps(
         enriched_threat_set,
         control_structure,
@@ -237,7 +399,6 @@ def run_sp3(
         loss_analysis,
         precomputed_trace_errors=trace_errors,
     )
-
     eval_scorecard = compute_eval_scorecard(
         scenario_envelopes,
         enriched_threat_set,
@@ -248,33 +409,7 @@ def run_sp3(
         coverage_gaps=coverage_gaps,
         precomputed_trace_errors=trace_errors,
     )
-
-    # --- Write output artifacts ---
-    write_eval_scorecard(eval_scorecard, run_dir)
-    write_coverage_gaps(coverage_gaps, run_dir)
-
-    # --- Write run manifest ---
-    _write_manifest(
-        run_dir=run_dir,
-        llm_client=llm_client,
-        enriched_threat_set=enriched_threat_set,
-        control_structure=control_structure,
-        loss_analysis=loss_analysis,
-        scenario_envelopes=scenario_envelopes,
-        validation_errors=all_validation_errors,
-        max_workers=max_workers,
-        temperature=temperature,
-        stage_errors=stage_errors,
-    )
-
-    return SP3RunResult(
-        scenario_specs=scenario_specs,
-        scenario_envelopes=scenario_envelopes,
-        eval_scorecard=eval_scorecard,
-        coverage_gaps=coverage_gaps,
-        stage_errors=stage_errors,
-        validation_errors=all_validation_errors,
-    )
+    return all_validation_errors, coverage_gaps, eval_scorecard
 
 
 def _format_traceability_errors(errors: list[TraceabilityError]) -> list[str]:
@@ -434,25 +569,50 @@ def _scenario_context_for_threat(
     supplied: Mapping[str, ScenarioGenerationContext] | None,
 ) -> ScenarioGenerationContext:
     """Use an exact supplied context or build the standalone STPA adapter view."""
-    context_key = threat.ica_id or threat.ica_slot_id
-    if supplied is not None and context_key in supplied:
-        context = supplied[context_key]
-    else:
-        context = build_scenario_generation_context(
-            threat,
-            control_structure,
-            loss_analysis,
-            scenario_id=f"SCN-{scenario_index + 1:03d}",
-        )
-    identity = context.scenario_identity
-    if (
-        identity.scenario_id != f"SCN-{scenario_index + 1:03d}"
-        or identity.ica_slot_id != threat.ica_slot_id
-        or identity.ica_id != threat.ica_id
-        or context.ica.exact_ica_text != threat.ica_text
-    ):
+    context = _select_scenario_context(
+        threat,
+        control_structure,
+        loss_analysis,
+        scenario_index,
+        supplied,
+    )
+    if not _scenario_context_matches_threat(context, threat, scenario_index):
         raise ValueError("supplied scenario context does not match selected threat")
     return context
+
+
+def _select_scenario_context(
+    threat,
+    control_structure: ControlStructure,
+    loss_analysis: LossAnalysis,
+    scenario_index: int,
+    supplied: Mapping[str, ScenarioGenerationContext] | None,
+) -> ScenarioGenerationContext:
+    """Select a supplied context or build the exact standalone adapter view."""
+    context_key = threat.ica_id or threat.ica_slot_id
+    if supplied is not None and context_key in supplied:
+        return supplied[context_key]
+    return build_scenario_generation_context(
+        threat,
+        control_structure,
+        loss_analysis,
+        scenario_id=f"SCN-{scenario_index + 1:03d}",
+    )
+
+
+def _scenario_context_matches_threat(
+    context: ScenarioGenerationContext,
+    threat,
+    scenario_index: int,
+) -> bool:
+    """Check the context identity and exact ICA prose against one threat."""
+    identity = context.scenario_identity
+    return (
+        identity.scenario_id == f"SCN-{scenario_index + 1:03d}"
+        and identity.ica_slot_id == threat.ica_slot_id
+        and identity.ica_id == threat.ica_id
+        and context.ica.exact_ica_text == threat.ica_text
+    )
 
 
 def _validate_stage5_spec(
@@ -517,27 +677,50 @@ def _run_stage6_for_spec(
     stage_errors: list[str],
     *,
     capability_profile: CapabilityProfile | None = None,
-) -> tuple[ScenarioEnvelope | None, dict | None]:
+    run_identity: ExecutionRunIdentity | None = None,
+) -> tuple[ScenarioEnvelope | None, ValidatedExecutionProjection | dict | None]:
     """Run Stage 6 concretization for a single scenario spec.
 
     The projection is derived once (deterministically, from the Stage 5
     declared factors) and its validator-derived alignment table is passed
     to every Stage 6 prompt, so the narrative, attack-tree, and Gherkin
-    calls all receive the same projection.  The canonical projection
-    document is returned with the envelope for artifact writing.
+    calls all receive the same projection.  Corrected contextual specs return
+    an immutable v2 projection; historical specs retain their v1 diagnostic
+    document for read/validation compatibility.
 
     Returns:
-        A (envelope, projection_doc) pair; ``None`` envelope means the
-        scenario was rejected (recorded in *stage_errors*) and no
+        A ``(envelope, projection)`` pair; ``None`` envelope means the
+        scenario was rejected before any Stage 6 provider call and no
         artifact is written.
     """
-    try:
-        projection = project_execution(spec, control_structure)
-    except ValueError as e:
-        stage_errors.append(f"Stage 6 projection failed for {spec.scenario_id}: {e}")
-        return None, None
-    projection_doc = canonical_projection_data(projection)
-    projection_alignment = render_projection_alignment_table(projection_doc)
+    projection_doc: ValidatedExecutionProjection | dict | None
+    if run_identity is not None:
+        try:
+            projection_doc = prepare_execution_projection(
+                spec,
+                control_structure,
+                run_identity,
+            )
+        except ExecutionProjectionPreparationError as exc:
+            stage_errors.append(
+                f"Stage 6 projection failed for {spec.scenario_id}: {exc}"
+            )
+            return None, None
+        projection_alignment = projection_doc.alignment_view
+    else:
+        # Only an explicitly direct diagnostic caller (which omits the run
+        # identity) may exercise the historical v1 projection path.  Product
+        # ``run_sp3`` always supplies an identity and therefore fails closed
+        # when Stage 5 omitted the required unsafe outcome.
+        try:
+            legacy_projection = project_execution(spec, control_structure)
+        except ValueError as e:
+            stage_errors.append(
+                f"Stage 6 projection failed for {spec.scenario_id}: {e}"
+            )
+            return None, None
+        projection_doc = canonical_projection_data(legacy_projection)
+        projection_alignment = render_projection_alignment_table(projection_doc)
 
     try:
         prompts = _build_stage6_prompts(
@@ -917,16 +1100,16 @@ def _envelope_gherkin_text(envelope: ScenarioEnvelope) -> str:
 def _write_scenario_artifacts(
     envelope: ScenarioEnvelope,
     scenarios_dir: Path,
-    projection_doc: dict | None = None,
+    projection_doc: dict | ValidatedExecutionProjection | None = None,
 ) -> None:
     """Write scenario YAML, .feature, and canonical projection artifacts.
 
-    The canonical projection document (``stpa-execution-projection-v1``)
-    is exported as standalone JSON and YAML under
-    ``scenarios/canonical/`` beside the legacy scenario YAML and Gherkin
-    feature, so legacy ``*.yaml`` readers keep seeing only envelope
-    documents.  When no projection is supplied only the legacy artifacts
-    are written (backward compatible default).
+    The canonical projection document is exported as standalone JSON and YAML
+    under ``scenarios/canonical/`` beside the legacy scenario YAML and Gherkin
+    feature, so legacy ``*.yaml`` readers keep seeing only envelope documents.
+    V2 bytes come from the immutable validated value; a v1 dictionary uses the
+    historical exporter. When no projection is supplied only legacy artifacts
+    are written.
     """
     write_yaml(envelope, scenarios_dir / f"{envelope.scenario_id}.yaml")
     feature_text = _envelope_gherkin_text(envelope)
@@ -934,13 +1117,33 @@ def _write_scenario_artifacts(
         feature_text, encoding="utf-8"
     )
     if projection_doc is not None:
+        # Once a bundle index exists, its canonical JSON paths are immutable
+        # members of the currently published generation.  Updates are staged
+        # by ``publish_execution_bundle`` under a new content-addressed
+        # generation and swap the index last; do not overwrite the old
+        # projection bytes while Stage 6 is still collecting companions.
+        if (
+            isinstance(projection_doc, ValidatedExecutionProjection)
+            and (scenarios_dir.parent / "execution-bundle.json").is_file()
+        ):
+            return
         canonical_dir = scenarios_dir / "canonical"
         canonical_dir.mkdir(parents=True, exist_ok=True)
+        if isinstance(projection_doc, ValidatedExecutionProjection):
+            json_text = projection_doc.canonical_json_bytes.decode("utf-8")
+            yaml_text = yaml.safe_dump(
+                projection_doc.projection.model_dump(mode="json"),
+                sort_keys=True,
+                allow_unicode=True,
+            )
+        else:
+            json_text = export_projection_json(projection_doc)
+            yaml_text = export_projection_yaml(projection_doc)
         (canonical_dir / f"{envelope.scenario_id}.projection.json").write_text(
-            export_projection_json(projection_doc), encoding="utf-8"
+            json_text, encoding="utf-8"
         )
         (canonical_dir / f"{envelope.scenario_id}.projection.yaml").write_text(
-            export_projection_yaml(projection_doc), encoding="utf-8"
+            yaml_text, encoding="utf-8"
         )
 
 
@@ -955,6 +1158,8 @@ def _write_manifest(
     max_workers: int,
     temperature: float,
     stage_errors: list[str],
+    run_identity: ExecutionRunIdentity,
+    run_started: datetime,
 ) -> None:
     """Write the run manifest YAML."""
     input_hashes = {
@@ -966,9 +1171,9 @@ def _write_manifest(
     stage_summary = count_calls_by_stage(run_dir)
 
     manifest = {
-        "run_id": f"sp3-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
+        "run_id": run_identity.run_id,
         "run_dir": str(run_dir),
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": run_started.isoformat(),
         "model_config": effective_model_config(
             llm_client,
             temperature=temperature,

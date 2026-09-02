@@ -38,11 +38,41 @@ def validate_stpa_projection(
     """
     _validate_file(artifact, "projection file")
     try:
-        from asago_scenario_generator.stpa.scenario_prod.projection import (
-            validate_exported_projection,
+        payload = _load_projection_payload(artifact)
+        if payload.get("schema_version") == "stpa-execution-projection-v2":
+            from asago_scenario_generator.stpa.scenario_prod.execution_projection import (
+                validate_execution_projection,
+            )
+
+            result = validate_execution_projection(payload)
+        else:
+            from asago_scenario_generator.stpa.scenario_prod.projection import (
+                validate_exported_projection,
+            )
+
+            result = validate_exported_projection(payload)
+    except Exception as exc:  # noqa: BLE001 - CLI validation boundary
+        _abort(exc)
+    typer.echo(json.dumps(result.model_dump(mode="json"), indent=2))
+    if not result.valid:
+        raise typer.Exit(code=1)
+
+
+@app.command(name="validate-stpa-execution-bundle")
+def validate_stpa_execution_bundle(
+    bundle: Path = typer.Argument(
+        ...,
+        help="Run directory containing execution-bundle.json.",
+    ),
+) -> None:
+    """Verify one published v2 execution bundle and every referenced byte."""
+    _validate_file(bundle, "execution bundle directory")
+    try:
+        from asago_scenario_generator.stpa.scenario_prod.execution_bundle import (
+            verify_execution_bundle,
         )
 
-        result = validate_exported_projection(_load_projection_payload(artifact))
+        result = verify_execution_bundle(bundle)
     except Exception as exc:  # noqa: BLE001 - CLI validation boundary
         _abort(exc)
     typer.echo(json.dumps(result.model_dump(mode="json"), indent=2))

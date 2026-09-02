@@ -1243,13 +1243,25 @@ def _h_stage5_local_causal_handle(
                     {
                         "source_handle": "cause_1",
                         "evidence": "The shared process model may remain stale.",
-                        "timing": None,
+                        "temporal_condition": None,
                         "evidence_status": "structural_failure",
                         "capability_refs": [],
                         "access_refs": [],
                         "bounded_assumption": "Assume synchronization completes late.",
                     }
                 ],
+                "unsafe_outcome": {
+                    "condition": {
+                        "type": "action_value",
+                        "control_action_id": "CM-1",
+                        "property": "policy_state",
+                        "operator": "equals",
+                        "expected": "approved",
+                    },
+                    "semantic_binding_required": False,
+                    "hazard_refs": ["H-1"],
+                    "constraint_refs": ["SC-1"],
+                },
             }
         ]
     )

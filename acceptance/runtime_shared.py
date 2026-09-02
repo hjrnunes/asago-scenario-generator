@@ -2343,6 +2343,10 @@ def _setup_sp3_mock_client(num_threats: int = 2):
     from tests.stpa.sp1_helpers import MockLLMClient
     from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
         BDIGenerationResult,
+        UnsafeOutcomeDeclaration,
+    )
+    from asago_scenario_generator.stpa.models.semantic_conditions import (
+        ActionPresenceCondition,
     )
     import json
 
@@ -2361,6 +2365,12 @@ def _setup_sp3_mock_client(num_threats: int = 2):
                     intentions=["PM-1-1 remains stale before CA-1-1"],
                 ),
                 causal_factors=_make_sp3_causal_factors(),
+                unsafe_outcome=UnsafeOutcomeDeclaration(
+                    condition=ActionPresenceCondition(
+                        control_action_id="CA-1-1",
+                        expected="not_provided",
+                    )
+                ),
             )
         )
     stage6_responses = []

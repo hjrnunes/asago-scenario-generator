@@ -49,10 +49,14 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
     ScenarioSpec,
     ThreatSource,
 )
+from asago_scenario_generator.stpa.models.semantic_conditions import (
+    ActionValueCondition,
+)
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     BDIGenerationResult,
     CausalFactorDeclaration,
+    UnsafeOutcomeDeclaration,
     assemble_scenario_spec,
     build_context_bdi_prompts,
     generate_bdi_for_context,
@@ -339,13 +343,23 @@ def test_context_stage5_compiles_local_handles_to_exact_structural_sources(
                     {
                         "source_handle": "cause_1",
                         "evidence": "The selected process-model state stays stale.",
-                        "timing": None,
+                        "temporal_condition": None,
                         "evidence_status": "structural_failure",
                         "capability_refs": [],
                         "access_refs": [],
                         "bounded_assumption": None,
                     }
                 ],
+                "unsafe_outcome": {
+                    "condition": {
+                        "type": "action_value",
+                        "control_action_id": "CA-1-1",
+                        "property": "authorization_state",
+                        "operator": "equals",
+                        "expected": "approved",
+                    },
+                    "semantic_binding_required": False,
+                },
             }
         ]
     )
@@ -392,13 +406,23 @@ def test_context_stage5_preserves_explicit_assumption_when_status_is_mislabeled(
                     {
                         "source_handle": "cause_1",
                         "evidence": "The process model may remain stale.",
-                        "timing": None,
+                        "temporal_condition": None,
                         "evidence_status": "structural_failure",
                         "capability_refs": [],
                         "access_refs": [],
                         "bounded_assumption": "Assume the update arrives late.",
                     }
                 ],
+                "unsafe_outcome": {
+                    "condition": {
+                        "type": "action_value",
+                        "control_action_id": "CA-1-1",
+                        "property": "authorization_state",
+                        "operator": "equals",
+                        "expected": "approved",
+                    },
+                    "semantic_binding_required": False,
+                },
             }
         ]
     )
@@ -439,12 +463,23 @@ def test_context_stage5_intentions_must_reference_a_declared_factor(tmp_path) ->
                     {
                         "source_handle": "cause_1",
                         "evidence": "The selected process-model state stays stale.",
+                        "temporal_condition": None,
                         "evidence_status": "structural_failure",
                         "capability_refs": [],
                         "access_refs": [],
                         "bounded_assumption": None,
                     }
                 ],
+                "unsafe_outcome": {
+                    "condition": {
+                        "type": "action_value",
+                        "control_action_id": "CA-1-1",
+                        "property": "authorization_state",
+                        "operator": "equals",
+                        "expected": "approved",
+                    },
+                    "semantic_binding_required": False,
+                },
             }
         ]
     )
@@ -467,35 +502,43 @@ def test_context_stage5_requires_one_vulnerability_for_every_selected_belief(
         scenario_id="SCN-CL-001",
     )
     client = MockLLMClient()
-    client.set_response_queue(
-        [
+    invalid_response = {
+        "defender_vulnerabilities": [
             {
-                "defender_vulnerabilities": [
-                    {
-                        "belief_handle": "belief_1",
-                        "vulnerability": "The selected state may remain stale.",
-                    }
-                ],
-                "attacker_bdi": {
-                    "beliefs": ["The selected state may remain stale."],
-                    "desires": ["Induce the selected unsafe action."],
-                    "intentions": [
-                        {
-                            "description": "Rely on the stale state.",
-                            "source_handles": ["cause_1"],
-                        }
-                    ],
-                },
-                "causal_factors": [
-                    {
-                        "source_handle": "cause_1",
-                        "evidence": "The selected state remains stale.",
-                        "evidence_status": "structural_failure",
-                    }
-                ],
+                "belief_handle": "belief_1",
+                "vulnerability": "The selected state may remain stale.",
             }
-        ]
-    )
+        ],
+        "attacker_bdi": {
+            "beliefs": ["The selected state may remain stale."],
+            "desires": ["Induce the selected unsafe action."],
+            "intentions": [
+                {
+                    "description": "Rely on the stale state.",
+                    "source_handles": ["cause_1"],
+                }
+            ],
+        },
+        "causal_factors": [
+            {
+                "source_handle": "cause_1",
+                "evidence": "The selected state remains stale.",
+                "temporal_condition": None,
+                "evidence_status": "structural_failure",
+            }
+        ],
+        "unsafe_outcome": {
+            "condition": {
+                "type": "action_value",
+                "control_action_id": "CM-1",
+                "property": "authorization_state",
+                "operator": "equals",
+                "expected": "approved",
+            },
+            "semantic_binding_required": False,
+        },
+    }
+    client.set_response_queue([invalid_response, invalid_response])
 
     result, error = generate_bdi_for_context(client, context, tmp_path)
 
@@ -649,6 +692,15 @@ def test_run_sp3_realizes_coordination_slot_without_relabeled_identity(
                         evidence="The shared policy state can be stale when synchronized.",
                     )
                 ],
+                unsafe_outcome=UnsafeOutcomeDeclaration(
+                    condition=ActionValueCondition(
+                        control_action_id="CM-1",
+                        property="authorization_state",
+                        operator="equals",
+                        expected="approved",
+                    ),
+                    semantic_binding_required=False,
+                ),
             ),
             "Step 1: The path begins with the shared policy state.\n"
             "Step 2: PM-1-1 becomes stale before synchronization.\n"

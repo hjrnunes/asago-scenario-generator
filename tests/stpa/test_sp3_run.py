@@ -33,6 +33,13 @@ from asago_scenario_generator.stpa.models.scenario_envelope import ScenarioEnvel
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     BDIGenerationResult,
     CausalFactorDeclaration,
+    UnsafeOutcomeDeclaration,
+)
+from asago_scenario_generator.stpa.scenario_prod.execution_bundle import (
+    verify_execution_bundle,
+)
+from asago_scenario_generator.stpa.models.semantic_conditions import (
+    ActionPresenceCondition,
 )
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
 from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
@@ -143,6 +150,12 @@ def _setup_mock_client(num_threats: int = 2) -> MockLLMClient:
                         evidence=f"The selected state can be stale ({i + 1}).",
                     )
                 ],
+                unsafe_outcome=UnsafeOutcomeDeclaration(
+                    condition=ActionPresenceCondition(control_action_id="CA-1-1"),
+                    semantic_binding_required=False,
+                    hazard_refs=["H-1"],
+                    constraint_refs=["SC-1"],
+                ),
                 attacker_bdi=__import__(
                     "asago_scenario_generator.stpa.models.scenario_spec",
                     fromlist=["AttackerBDI"],
@@ -269,6 +282,13 @@ class TestFullRun:
             persisted["scenario_spec"]["scenario_context"]["context_digest"]
             == context.context_digest
         )
+        bundle = verify_execution_bundle(run_dir)
+        assert bundle.valid is True
+        assert bundle.index is not None
+        manifest = yaml.safe_load(
+            (run_dir / "run-manifest.yaml").read_text(encoding="utf-8")
+        )
+        assert manifest["run_id"] == bundle.index.run_id
 
     def test_resolved_client_temperature_is_used_and_recorded(self):
         client = _setup_mock_client(1)
@@ -673,6 +693,12 @@ class TestErrorPaths:
                     evidence="The selected state can be stale.",
                 )
             ],
+            unsafe_outcome=UnsafeOutcomeDeclaration(
+                condition=ActionPresenceCondition(control_action_id="CA-1-1"),
+                semantic_binding_required=False,
+                hazard_refs=["H-1"],
+                constraint_refs=["SC-1"],
+            ),
             attacker_bdi=__import__(
                 "asago_scenario_generator.stpa.models.scenario_spec",
                 fromlist=["AttackerBDI"],
@@ -715,6 +741,12 @@ class TestErrorPaths:
                             evidence="The selected state can be stale.",
                         )
                     ],
+                    unsafe_outcome=UnsafeOutcomeDeclaration(
+                        condition=ActionPresenceCondition(control_action_id="CA-1-1"),
+                        semantic_binding_required=False,
+                        hazard_refs=["H-1"],
+                        constraint_refs=["SC-1"],
+                    ),
                     attacker_bdi=__import__(
                         "asago_scenario_generator.stpa.models.scenario_spec",
                         fromlist=["AttackerBDI"],
@@ -757,6 +789,12 @@ class TestErrorPaths:
                             evidence="The selected state can be stale.",
                         )
                     ],
+                    unsafe_outcome=UnsafeOutcomeDeclaration(
+                        condition=ActionPresenceCondition(control_action_id="CA-1-1"),
+                        semantic_binding_required=False,
+                        hazard_refs=["H-1"],
+                        constraint_refs=["SC-1"],
+                    ),
                     attacker_bdi=__import__(
                         "asago_scenario_generator.stpa.models.scenario_spec",
                         fromlist=["AttackerBDI"],

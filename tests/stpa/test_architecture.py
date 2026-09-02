@@ -54,6 +54,7 @@ _FORBIDDEN_INFRA_PREFIXES = (
 # A module may only import from same-or-lower layers.
 _MODEL_LAYERS: dict[str, int] = {
     "_validation": 0,
+    "semantic_conditions": 0,
     "causal_factor": 1,
     "loss_analysis": 1,
     "control_structure": 1,
@@ -62,6 +63,7 @@ _MODEL_LAYERS: dict[str, int] = {
     "ica_enumeration": 2,
     "scenario_context": 2,
     "scenario_spec": 3,
+    "execution_projection_v2": 3,
     "scenario_envelope": 4,
 }
 
@@ -203,8 +205,10 @@ class TestNoImportCycles:
             "asago_scenario_generator.stpa.models.ica_enumeration",
             "asago_scenario_generator.stpa.models.enriched_threat_set",
             "asago_scenario_generator.stpa.models.scenario_context",
+            "asago_scenario_generator.stpa.models.semantic_conditions",
             "asago_scenario_generator.stpa.models.scenario_spec",
             "asago_scenario_generator.stpa.models.scenario_envelope",
+            "asago_scenario_generator.stpa.models.execution_projection_v2",
         ],
     )
     def test_module_imports_cleanly(self, module_name):
@@ -922,7 +926,9 @@ _SCENARIO_PROD_LAYERS: dict[str, int] = {
     # only on stpa.models (execution_envelope/execution_projection), never
     # on scenario_prod siblings or IO, so they sit at the stage-module layer.
     "projection": 1,
+    "execution_projection": 1,
     "prompt_alignment": 1,
+    "execution_bundle": 2,
     "eval_metrics": 2,
     "coverage": 2,
     "run": 3,
@@ -1012,7 +1018,9 @@ class TestScenarioProdNoImportCycles:
             "asago_scenario_generator.stpa.scenario_prod.gherkin",
             "asago_scenario_generator.stpa.scenario_prod.validators",
             "asago_scenario_generator.stpa.scenario_prod.projection",
+            "asago_scenario_generator.stpa.scenario_prod.execution_projection",
             "asago_scenario_generator.stpa.scenario_prod.prompt_alignment",
+            "asago_scenario_generator.stpa.scenario_prod.execution_bundle",
             "asago_scenario_generator.stpa.scenario_prod.eval_metrics",
             "asago_scenario_generator.stpa.scenario_prod.coverage",
             "asago_scenario_generator.stpa.scenario_prod.run",

@@ -30,6 +30,18 @@ an LLM endpoint.
   `acceptance/` contains the portable generator, runtime, and handlers.
 - `config/` contains sanitized examples and portable project configuration.
 
+The Stage 6 execution interface is deliberately closed and typed. Normal
+product execution crosses `prepare_execution_projection(...)` before any
+Stage 6 call and publishes only through `publish_execution_bundle(...)`.
+Both seams require the explicit run identity and intact source pins; unknown
+semantic values are typed binding placeholders, and their presence derives
+`semantic_binding_required`. The v2 projection and v1 bundle contract kit in
+`data/contracts/stpa-execution/` is producer-owned; consumers vendor it
+byte-for-byte. Bundle publication is preflighted and atomic with the canonical
+JSON index replaced last; updates use immutable content-addressed generations
+so the live index never points at bytes being replaced. Historical v1 projection validation remains
+read-only and must not grow execution or persistence dependencies.
+
 Read `docs/architecture/overview.md` before changing cross-pipeline contracts.
 Read `docs/development/swarmforge.md` when planning or executing feature work,
 changing acceptance behavior, or running the quality sequence.

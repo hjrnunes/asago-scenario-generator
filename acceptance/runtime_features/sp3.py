@@ -5261,6 +5261,13 @@ def _h_sp3_robustness_stage6_responses(
 
 def _sp3_robustness_valid_bdi() -> object:
     """Build the valid structured BDI response used by retry scenarios."""
+    from asago_scenario_generator.stpa.models.semantic_conditions import (
+        ActionPresenceCondition,
+    )
+    from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+        UnsafeOutcomeDeclaration,
+    )
+
     return BDIGenerationResult(
         defender_vulnerabilities={
             "PM-1-1": "vulnerability",
@@ -5272,6 +5279,12 @@ def _sp3_robustness_valid_bdi() -> object:
             intentions=["PM-1-1 remains stale before CA-1-1"],
         ),
         causal_factors=_make_sp3_causal_factors(),
+        unsafe_outcome=UnsafeOutcomeDeclaration(
+            condition=ActionPresenceCondition(
+                control_action_id="CA-1-1",
+                expected="not_provided",
+            )
+        ),
     )
 
 

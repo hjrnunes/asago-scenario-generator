@@ -42,6 +42,7 @@ MODULES = (
     "stpa_challenge_analysis",
     "closed_loop_stpa",
     "stpa",
+    "stpa_execution_bundle",
     "phase4_task1_hybrid_projection",
     "hybrid_scenario_projection",
     "synthesis",
