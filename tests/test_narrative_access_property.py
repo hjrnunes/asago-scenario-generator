@@ -15,7 +15,7 @@ from asago_scenario_generator.models.scenario import (
     NarrativeLayer,
     NarrativeStep,
 )
-from asago_scenario_generator.pipeline.generate.narrative_access import (
+from asago_scenario_generator.pipeline.narrative_access import (
     MAX_NARRATIVE_STEPS,
     NARRATIVE_CONNECTOR_STEPS,
     validate_narrative_access_realization,
@@ -37,7 +37,9 @@ def _step(number: int, *projected: str) -> NarrativeStep:
     )
 
 
-def _narrative(*steps: NarrativeStep, realization: NarrativeAccessRealization | None = None) -> NarrativeLayer:
+def _narrative(
+    *steps: NarrativeStep, realization: NarrativeAccessRealization | None = None
+) -> NarrativeLayer:
     return NarrativeLayer(
         title="Test",
         summary="A test scenario.",
@@ -76,8 +78,15 @@ def test_step_bounds_accept_covered_narratives_within_cap(
         for index in range(step_count)
     ]
     for leftover in selected[step_count:]:
-        steps[-1] = _step(steps[-1].step_number, *steps[-1].projected_step_ids, leftover)
-    codes = {code for code, _detail in validate_narrative_step_bounds(_narrative(*steps), selected)}
+        steps[-1] = _step(
+            steps[-1].step_number, *steps[-1].projected_step_ids, leftover
+        )
+    codes = {
+        code
+        for code, _detail in validate_narrative_step_bounds(
+            _narrative(*steps), selected
+        )
+    }
     assert "narrative_step_coverage" not in codes
     assert "narrative_step_bound" not in codes
 
@@ -103,8 +112,16 @@ def test_step_bounds_report_overlong_narratives(selected_count: int) -> None:
     """More than selected + 2 steps, or more than 16, is always a bound error."""
     selected = [f"step.{index}" for index in range(selected_count)]
     maximum = min(MAX_NARRATIVE_STEPS, selected_count + NARRATIVE_CONNECTOR_STEPS)
-    steps = [_step(index + 1, selected[index] if index < selected_count else f"x.{index}") for index in range(maximum + 1)]
-    codes = {code for code, _detail in validate_narrative_step_bounds(_narrative(*steps), selected)}
+    steps = [
+        _step(index + 1, selected[index] if index < selected_count else f"x.{index}")
+        for index in range(maximum + 1)
+    ]
+    codes = {
+        code
+        for code, _detail in validate_narrative_step_bounds(
+            _narrative(*steps), selected
+        )
+    }
     assert "narrative_step_bound" in codes
 
 
@@ -122,7 +139,12 @@ def test_matching_direct_realization_is_empty(entry: str) -> None:
         initial_entry_point_id=ep_id,
         responsible_step_number=1,
     )
-    assert validate_narrative_access_realization(_narrative(realization=realization), _actor(access)) == []
+    assert (
+        validate_narrative_access_realization(
+            _narrative(realization=realization), _actor(access)
+        )
+        == []
+    )
 
 
 @settings(max_examples=_MAX_EXAMPLES, deadline=None)

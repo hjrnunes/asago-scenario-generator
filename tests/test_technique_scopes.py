@@ -11,7 +11,6 @@ from asago_scenario_generator.pipeline.technique_scopes import (
     resolved_technique_scope_evidence,
 )
 from asago_scenario_generator.pipeline.validation import validate_scenario_semantics
-from asago_scenario_generator.report.template import _build_atlas_techniques_block
 from tests.test_semantic_validation import _make_envelope, _make_profile
 
 
@@ -106,15 +105,6 @@ def test_legacy_envelope_derives_named_scopes_without_intersection_rule() -> Non
     assert "narrative_technique_orphan" not in rules
 
 
-def test_report_labels_both_technique_scopes() -> None:
-    raw = _explicit_scope_envelope().model_dump(mode="json")
-
-    rendered = _build_atlas_techniques_block(raw)
-
-    assert "Scenario classifications" in rendered
-    assert "AML.T0051.001" in rendered
-    assert "Projected-step mappings" in rendered
-    assert "AML.T0065" in rendered
 
 
 class TestNarrativeReferenceTextHelpers:

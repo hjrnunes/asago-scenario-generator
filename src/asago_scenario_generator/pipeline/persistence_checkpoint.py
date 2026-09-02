@@ -2,24 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from asago_scenario_generator.manifest import ManifestIntegrityError
-from .persistence_common import canonical_json_bytes
-from .persistence_files import _exclusive_create
 from .persistence_plan import CoveragePlanV2, PlanningCheckpointV1
-
-
-def write_planning_checkpoint(run_dir: Path, checkpoint: PlanningCheckpointV1) -> Path:
-    checkpoint = PlanningCheckpointV1.model_validate(
-        checkpoint.model_dump(mode="python")
-    )
-    _exclusive_create(
-        run_dir,
-        "planning-checkpoint.json",
-        canonical_json_bytes(checkpoint.model_dump(mode="json", exclude_none=True)),
-    )
-    return run_dir / "planning-checkpoint.json"
 
 
 def read_planning_checkpoint_bytes(content: bytes) -> PlanningCheckpointV1:

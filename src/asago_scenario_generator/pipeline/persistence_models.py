@@ -12,7 +12,7 @@ from asago_scenario_generator.pipeline.finalization_contracts import (
     GeneratedStage,
     LifecycleState,
 )
-from asago_scenario_generator.pipeline.finalization_gates import (
+from asago_scenario_generator.pipeline.finalization_gate_contracts import (
     DIAGNOSTIC_BACKED_EVIDENCE_IDS,
     AdmissionEvidenceId,
 )

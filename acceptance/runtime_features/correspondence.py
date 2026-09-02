@@ -49,9 +49,6 @@ from asago_scenario_generator.pipeline.projection_contracts import (
 from asago_scenario_generator.pipeline.system_resource_map import (
     validate_system_resource_map,
 )
-from acceptance.qa.taxonomy_risk.correspondence_support import (
-    run_workflow_compatibility,
-)
 
 FEATURE_ID = "correspondence"
 OBLIGATION_ID = "ob:v1:" + "1" * 64
@@ -77,7 +74,6 @@ def _state(world: World) -> dict[str, Any]:
             "result": None,
             "serialized": None,
             "error": None,
-            "compatibility": None,
             "gap_reason": None,
             "structural_ids": (),
             "resource_link_evidence": (),
@@ -1281,69 +1277,6 @@ def _register(api: Any) -> None:
             f"expected dangling diagnostic {expected!r}, got {sorted(codes)}",
         )
 
-    def compatibility_fixture(
-        world: World, text: str, examples: dict
-    ) -> tuple[bool, str]:
-        del examples
-        match = re.search(r'for "([^"]+)"', text)
-        workflow = match.group(1) if match else ""
-        if workflow not in {"taxonomy/risk", "STPA"}:
-            return False, f"unsupported workflow fixture {workflow!r}"
-        state = _state(world)
-        state["compatibility_workflow"] = workflow
-        return True, ""
-
-    def compatibility_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
-        del examples
-        match = re.search(
-            r'^correspondence "([^"]+)" runs before and after Phase 2 sidecars$',
-            text,
-        )
-        command = match.group(1) if match else ""
-        expected = {"taxonomy/risk": "generate", "STPA": "stpa-run"}.get(
-            _state(world).get("compatibility_workflow")
-        )
-        if command != expected:
-            return False, f"{command!r} is not the expected command {expected!r}"
-        try:
-            observation = run_workflow_compatibility(
-                _state(world)["compatibility_workflow"]
-            )
-        except Exception as exc:  # pragma: no cover - acceptance diagnostic boundary
-            return False, f"compatibility subprocesses failed: {exc}"
-        _state(world)["compatibility"] = observation
-        return observation["exit_match"], observation["detail"]
-
-    def compatibility_assert(
-        world: World, text: str, examples: dict
-    ) -> tuple[bool, str]:
-        del examples
-        match = re.search(r'^the correspondence "([^"]+)" (.+)$', text)
-        if match is None:
-            return False, f"cannot parse compatibility assertion: {text}"
-        kind = match.group(2)
-        observation = _state(world).get("compatibility") or {}
-        key = {
-            "exit status is unchanged": "exit_match",
-            "scenario artifacts are identical after normalization of known volatile fields": "artifacts_match",
-            "generation counts are identical": "counts_match",
-            "prompt contracts are identical": "prompts_match",
-        }.get(kind)
-        if key is None:
-            return False, f"unknown compatibility assertion: {kind}"
-        return bool(
-            observation.get(key)
-        ), f"compatibility {key} failed: {observation.get('detail')}"
-
-    def no_phase2_output(world: World, text: str, examples: dict) -> tuple[bool, str]:
-        del text, examples
-        observation = _state(world).get("compatibility") or {}
-        return (
-            bool(observation.get("sidecars_present"))
-            and bool(observation.get("no_phase2_output")),
-            f"Phase 2 output leaked into workflow artifacts: {observation.get('detail')}",
-        )
-
     registrations = (
         (r"^a valid typed correspondence authority is available$", ok),
         (r"^correspondence operations make no provider calls$", assert_no_calls),
@@ -1526,34 +1459,6 @@ def _register(api: Any) -> None:
         (
             r"^calibration retains \d+ unresolved and \d+ unreviewed proposal$",
             assert_calibration_open_counts,
-        ),
-        (
-            r'^a deterministic correspondence compatibility fixture includes valid Phase 2 sidecars for "([^"]+)"$',
-            compatibility_fixture,
-        ),
-        (
-            r'^correspondence "([^"]+)" runs before and after Phase 2 sidecars$',
-            compatibility_run,
-        ),
-        (
-            r'^the correspondence "([^"]+)" exit status is unchanged$',
-            compatibility_assert,
-        ),
-        (
-            r'^the correspondence "([^"]+)" scenario artifacts are identical after normalization of known volatile fields$',
-            compatibility_assert,
-        ),
-        (
-            r'^the correspondence "([^"]+)" generation counts are identical$',
-            compatibility_assert,
-        ),
-        (
-            r'^the correspondence "([^"]+)" prompt contracts are identical$',
-            compatibility_assert,
-        ),
-        (
-            r"^no correspondence Phase 2 artifact is written into either workflow output$",
-            no_phase2_output,
         ),
     )
     for pattern, handler in registrations:

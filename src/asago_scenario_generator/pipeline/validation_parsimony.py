@@ -135,9 +135,7 @@ def _repair_tree_model(root_dict: dict[str, Any]) -> dict[str, Any]:
 
 def _scenario_leaf_budget(scenario: ScenarioEnvelope) -> int:
     """The parsimony leaf budget for one scenario's tree."""
-    from asago_scenario_generator.pipeline.generate.constants import (
-        compute_leaf_budget,
-    )
+    from asago_scenario_generator.pipeline.leaf_budget import compute_leaf_budget
 
     tree = scenario.attack_tree
     technique_ids = _collect_technique_ids(tree.root)

@@ -1,7 +1,7 @@
 """Property tests pinning the typed access-provenance policy (cmps.6).
 
-The deterministic actor-access policy
-(``pipeline/generate/actor_access.py``) owns two contracts worth pinning
+The deterministic actor-access policy (``pipeline/actor_access.py``) owns two
+contracts worth pinning
 under broad input ranges:
 
 - **Structural validation rules**: for every combination of actor type,
@@ -24,22 +24,23 @@ from __future__ import annotations
 from hypothesis import given, settings, strategies as st
 
 from asago_scenario_generator.models.scenario import (
+    ACTOR_TYPES,
     ActorAccessProvenance,
     ActorProfile,
 )
-from asago_scenario_generator.pipeline.generate.actor_access import (
+from asago_scenario_generator.pipeline.actor_access import (
     build_actor_access_provenance,
-    validate_actor_access_provenance,
     Call0Response,
-)
-from asago_scenario_generator.pipeline.generate.constants import (
-    _INSIDER_ACTOR_TYPES,
-    ALL_ACTOR_TYPES,
+    validate_actor_access_provenance,
 )
 
+_INSIDER_ACTOR_TYPES = {"malicious-insider", "negligent-insider"}
+
 _MAX_EXAMPLES = 60
-_IDS = st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789-_", min_size=1, max_size=24)
-_ACTOR_TYPES = tuple(sorted(ALL_ACTOR_TYPES))
+_IDS = st.text(
+    alphabet="abcdefghijklmnopqrstuvwxyz0123456789-_", min_size=1, max_size=24
+)
+_ACTOR_TYPES = tuple(sorted(ACTOR_TYPES))
 _ACCESS_CLASSES = ("public", "authenticated", "privileged", "supply_chain")
 _OPTIONAL_TEXT = st.one_of(st.none(), _IDS)
 
@@ -177,9 +178,7 @@ def test_validate_actor_access_provenance_flags_missing_provenance(
 @st.composite
 def builder_inputs(
     draw,
-) -> tuple[
-    str, str | None, Call0Response, list[dict[str, str | None]]
-]:
+) -> tuple[str, str | None, Call0Response, list[dict[str, str | None]]]:
     """Canonical EP identity, controllability, evidence, and projection paths."""
     entry_point_id = draw(_IDS)
     controllability = draw(
@@ -216,9 +215,7 @@ def builder_inputs(
 @settings(max_examples=_MAX_EXAMPLES, deadline=None)
 @given(inputs=builder_inputs())
 def test_build_actor_access_provenance_delegates_canonical_identity(
-    inputs: tuple[
-        str, str | None, Call0Response, list[dict[str, str | None]]
-    ],
+    inputs: tuple[str, str | None, Call0Response, list[dict[str, str | None]]],
 ) -> None:
     """Ingress mode is canonical; source identity follows the projection."""
     entry_point_id, controllability, response, paths = inputs
@@ -287,8 +284,5 @@ def test_build_actor_access_provenance_delegates_canonical_identity(
         assert access.influence_source_id is None
         assert access.influence_mechanism == response.influence_mechanism
         assert access.trust_boundary_id == response.trust_boundary_id
-        assert (
-            access.material_insider_advantage
-            == response.material_insider_advantage
-        )
+        assert access.material_insider_advantage == response.material_insider_advantage
         assert build(projection_context) == access

@@ -1,3 +1,0 @@
-{%- if 'inter_agent' not in (zones_active | default([])) %} Do not reference inter-agent communication — the system has no inter_agent zone.{% endif %}
-{%- if 'tool_execution' not in (zones_active | default([])) %} Do not reference tool execution — the system has no tool_execution zone.{% endif %}
-{%- if 'memory' not in (zones_active | default([])) %} Do not reference persistent memory or state — the system has no memory zone.{% endif %}

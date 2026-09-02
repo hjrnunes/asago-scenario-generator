@@ -1,6 +1,6 @@
 """JSONL call logging for the STPA pipeline — clean copy.
 
-Simplified from ``asago_scenario_generator.pipeline.io.write_pipeline_call_log``.
+The STPA pipeline owns this append-only call-log boundary.
 Appends JSONL entries with stage/step/slot_id/scenario_id metadata.
 No manifest coupling.
 

@@ -121,8 +121,7 @@ class TestAttackPatternConsumersDependInward:
         DATA_DIR / "taxonomy_pins.py",
         SRC_DIR / "catalog_qualification.py",
         PIPELINE_DIR / "preflight.py",
-        PIPELINE_DIR / "runner.py",
-        PIPELINE_DIR / "runner_run.py",
+        PIPELINE_DIR / "behavior_compiler.py",
         PIPELINE_DIR / "projection.py",
         PIPELINE_DIR / "projection_allocation.py",
         PIPELINE_DIR / "projection_allocator.py",
@@ -136,7 +135,6 @@ class TestAttackPatternConsumersDependInward:
         PIPELINE_DIR / "projection_semantics.py",
         PIPELINE_DIR / "projection_snapshot.py",
         PIPELINE_DIR / "projection_validation.py",
-        PIPELINE_DIR / "generate" / "behavior_compiler.py",
     )
 
     @pytest.mark.parametrize(

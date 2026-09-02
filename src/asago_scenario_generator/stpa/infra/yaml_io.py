@@ -4,7 +4,7 @@
 ``read_yaml(path, model_class)`` loads a YAML file and validates it
 against a Pydantic model class.
 
-Follows the pattern in ``asago_scenario_generator.pipeline.io`` but decoupled.
+This is the STPA pipeline's isolated YAML persistence boundary.
 """
 
 from __future__ import annotations

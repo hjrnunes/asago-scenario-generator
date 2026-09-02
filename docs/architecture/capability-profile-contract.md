@@ -37,7 +37,8 @@ computed fields and the input stripper, so the two cannot diverge.
 - Serialized capability profiles (`capability-profile.yaml`,
   `model_dump(mode="json")`) **include** the computed booleans, matching
   the documented profile shape in `data-flow-diagrams.md`.
-- Consumers (report rendering, threat gating) may read them directly.
+- Consumers (STPA reporting, threat gating, and obligation qualification) may
+  read them directly.
 - Loading the project's own output is a silent round trip: the included
   booleans are stripped without warning and recomputed from
   `kc_subcodes`, yielding identical values.

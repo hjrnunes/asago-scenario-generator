@@ -217,7 +217,7 @@ def _v3_scorecard_counts(
 ) -> tuple[Any, Any]:
     """Return strict v1 scorecard counts, validating identity and
     qualification."""
-    from asago_scenario_generator.eval.scorecard import ScorecardV1
+    from asago_scenario_generator.models.scorecard import ScorecardV1
 
     try:
         scorecard = ScorecardV1.model_validate(sc_data)

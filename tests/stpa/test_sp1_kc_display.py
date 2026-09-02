@@ -150,7 +150,9 @@ class TestPipelineIoInjection:
 
     def test_kcdisp_07_pipeline_io_injects_display(self, tmp_path):
         """KCDisp-07: pipeline io.py write_capability_profile injects kc_subcodes_display."""
-        from asago_scenario_generator.pipeline.io import write_capability_profile
+        from asago_scenario_generator.pipeline.capability_profile_persistence import (
+            write_capability_profile,
+        )
 
         profile = _make_profile(["KC1.1", "KCX-PRIV", "KC5.1"])
         path = write_capability_profile(profile, tmp_path)
@@ -166,7 +168,9 @@ class TestSharedHelper:
         """KCDisp-08: verify both paths use the shared injection function."""
         import inspect
 
-        from asago_scenario_generator.pipeline.io import write_capability_profile
+        from asago_scenario_generator.pipeline.capability_profile_persistence import (
+            write_capability_profile,
+        )
 
         io_src = inspect.getsource(write_capability_profile)
 

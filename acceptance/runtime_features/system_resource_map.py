@@ -32,9 +32,6 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ProcessModelPart,
     Responsibility,
 )
-from acceptance.qa.taxonomy_risk.correspondence_support import (
-    run_workflow_compatibility,
-)
 
 FEATURE_ID = "system_resource_map"
 
@@ -93,8 +90,6 @@ def _state(world: World) -> dict[str, Any]:
             "serialized": None,
             "persisted": None,
             "error": None,
-            "compatibility_workflow": None,
-            "compatibility": None,
         }
         world.system_resource_map_state = state
     return state
@@ -415,70 +410,6 @@ def _persisted_filename(world: World, text: str, examples: dict) -> tuple[bool, 
     )
 
 
-def _compatibility_fixture(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Record the workflow whose real before/after fixture will be executed."""
-    del examples
-    match = re.search(r'for "([^"]+)"', text)
-    workflow = match.group(1) if match else ""
-    if workflow not in {"taxonomy/risk", "STPA"}:
-        return False, f"unsupported workflow fixture {workflow!r}"
-    _state(world)["compatibility_workflow"] = workflow
-    return True, ""
-
-
-def _compatibility_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Run the real public command before and after sidecar inputs are present."""
-    del examples
-    match = re.search(
-        r'^resource-map "([^"]+)" runs before and after Phase 2 sidecars$',
-        text,
-    )
-    command = match.group(1) if match else ""
-    state = _state(world)
-    expected = {"taxonomy/risk": "generate", "STPA": "stpa-run"}.get(
-        state.get("compatibility_workflow")
-    )
-    if command != expected:
-        return False, f"{command!r} is not the expected command {expected!r}"
-    try:
-        observation = run_workflow_compatibility(state["compatibility_workflow"])
-    except Exception as exc:  # pragma: no cover - acceptance diagnostic boundary
-        return False, f"compatibility subprocesses failed: {exc}"
-    state["compatibility"] = observation
-    return observation["exit_match"], observation["detail"]
-
-
-def _compatibility_assert(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Assert one exact compatibility dimension from the subprocess result."""
-    del examples
-    match = re.search(r'^the resource-map "([^"]+)" (.+)$', text)
-    if match is None:
-        return False, f"cannot parse compatibility assertion: {text}"
-    key = {
-        "exit status is unchanged": "exit_match",
-        "scenario artifacts are identical after normalization of known volatile fields": "artifacts_match",
-        "generation counts are identical": "counts_match",
-        "prompt contracts are identical": "prompts_match",
-    }.get(match.group(2))
-    observation = _state(world).get("compatibility") or {}
-    if key is None:
-        return False, f"unknown compatibility assertion: {match.group(2)}"
-    return bool(
-        observation.get(key)
-    ), f"compatibility {key} failed: {observation.get('detail')}"
-
-
-def _no_phase2_output(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Ensure Phase 2 sidecars do not leak into default workflow output."""
-    del text, examples
-    observation = _state(world).get("compatibility") or {}
-    return (
-        bool(observation.get("sidecars_present"))
-        and bool(observation.get("no_phase2_output")),
-        f"Phase 2 output leaked into workflow artifacts: {observation.get('detail')}",
-    )
-
-
 def register(api) -> None:
     """Register handlers in the isolated acceptance registry."""
     registrations = (
@@ -512,34 +443,6 @@ def register(api) -> None:
         (r"^the round-trip map is identical$", _round_trip_equal),
         (r"^the map is atomically persisted$", _persist),
         (r'^the published filename is "([^"]+)"$', _persisted_filename),
-        (
-            r'^a deterministic resource-map compatibility fixture includes valid Phase 2 sidecars for "([^"]+)"$',
-            _compatibility_fixture,
-        ),
-        (
-            r'^resource-map "([^"]+)" runs before and after Phase 2 sidecars$',
-            _compatibility_run,
-        ),
-        (
-            r'^the resource-map "([^"]+)" exit status is unchanged$',
-            _compatibility_assert,
-        ),
-        (
-            r'^the resource-map "([^"]+)" scenario artifacts are identical after normalization of known volatile fields$',
-            _compatibility_assert,
-        ),
-        (
-            r'^the resource-map "([^"]+)" generation counts are identical$',
-            _compatibility_assert,
-        ),
-        (
-            r'^the resource-map "([^"]+)" prompt contracts are identical$',
-            _compatibility_assert,
-        ),
-        (
-            r"^no resource-map Phase 2 artifact is written into either workflow output$",
-            _no_phase2_output,
-        ),
     )
     for pattern, handler in registrations:
         api.register(pattern, handler)

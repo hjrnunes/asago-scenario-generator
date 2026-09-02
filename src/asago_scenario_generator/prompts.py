@@ -20,7 +20,7 @@ def render_prompt(template_name: str, **kwargs: object) -> str:
     """Render a Jinja2 prompt template with the given variables.
 
     Args:
-        template_name: Filename of the template (e.g. ``"call0_system.j2"``).
+        template_name: Filename of the template (e.g. ``"filter_system.j2"``).
         **kwargs: Template variables.
 
     Returns:

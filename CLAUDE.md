@@ -22,7 +22,7 @@ an LLM endpoint.
 
 - `src/asago_scenario_generator/` contains shared domain models, the
   observational taxonomy-obligation planner, the STPA product pipeline, CLI,
-  evaluation, and reporting. The planner consumes typed inputs and must not
+  offline verification, and STPA reporting. The planner consumes typed inputs and must not
   import scenario-generation implementation.
 - `data/` contains committed schemas, taxonomies, mappings, and qualification
   inputs.
@@ -41,8 +41,8 @@ changing acceptance behavior, or running the quality sequence.
   obligations and STPA alone authors scenarios. `stpa-run` is an advanced
   baseline diagnostic without obligation completeness. Do not restore the
   retired `generate`, legacy `resume`, `synthesis-run`, `report`, or `eval`
-  commands, and add no new imports from the retained legacy generator cleanup
-  inventory.
+  commands. The retained historical audit seam is read-only and must not grow
+  new execution, persistence-writing, or provider dependencies.
 - Keep Phase 1 obligation planning observational: it retains every reviewed
   risk, uses the exact closed row schema and typed dispositions, computes and
   verifies digests, and publishes atomically. Product `run` always consumes

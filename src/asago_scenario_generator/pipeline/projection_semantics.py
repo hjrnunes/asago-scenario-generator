@@ -946,7 +946,7 @@ def _gherkin_correspondence_check(
     # Zone annotations (display metadata) are stripped before comparison.
     import re as _re
 
-    from asago_scenario_generator.pipeline.generate.behavior_compiler import (
+    from asago_scenario_generator.pipeline.behavior_compiler import (
         render_gherkin_from_behavior_spec,
     )
 

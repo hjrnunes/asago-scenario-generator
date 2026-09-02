@@ -30,7 +30,9 @@ from asago_scenario_generator.pipeline.finalization_contracts import (
     GeneratedStage,
     LifecycleState,
 )
-from asago_scenario_generator.pipeline.finalization_gates import AdmissionEvidenceId
+from asago_scenario_generator.pipeline.finalization_gate_contracts import (
+    AdmissionEvidenceId,
+)
 from asago_scenario_generator.pipeline.projection_contracts import canonical_json_bytes
 from asago_scenario_generator.pipeline.persistence_artifacts import ArtifactReceipt
 from asago_scenario_generator.pipeline.persistence_checkpoint import (

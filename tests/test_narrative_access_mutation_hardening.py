@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from asago_scenario_generator.pipeline.generate.narrative_access import (
+from asago_scenario_generator.pipeline.narrative_access import (
     _direct_source_violation,
     _source_identity,
 )

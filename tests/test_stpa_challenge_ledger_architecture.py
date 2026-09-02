@@ -12,7 +12,6 @@ PIPELINE = ROOT / "src/asago_scenario_generator/pipeline/challenge_ledger.py"
 PERSISTENCE = (
     ROOT / "src/asago_scenario_generator/pipeline/challenge_ledger_persistence.py"
 )
-TAXONOMY_RUNNER = ROOT / "src/asago_scenario_generator/pipeline/runner.py"
 STPA_RUNNER = ROOT / "src/asago_scenario_generator/stpa/pipeline/runner.py"
 
 
@@ -42,11 +41,10 @@ def test_challenge_domain_and_planning_are_offline_and_io_free() -> None:
     assert "asago_scenario_generator.manifest" in _imports(PERSISTENCE)
 
 
-def test_existing_generation_runners_do_not_depend_on_phase3() -> None:
-    """Task 1 cannot become a hidden requirement of either workflow."""
-    for runner in (TAXONOMY_RUNNER, STPA_RUNNER):
-        imports = _imports(runner)
-        assert all("challenge_ledger" not in name for name in imports)
+def test_stpa_runner_does_not_depend_on_phase3() -> None:
+    """Task 1 cannot become a hidden requirement of the standalone runner."""
+    imports = _imports(STPA_RUNNER)
+    assert all("challenge_ledger" not in name for name in imports)
 
 
 def test_model_does_not_import_implementation_or_stpa_runner_modules() -> None:

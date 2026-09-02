@@ -159,12 +159,12 @@ class TestSetupLogging:
     def test_child_logger_propagation(self, tmp_path: Path) -> None:
         """Messages from child loggers propagate to the asago_scenario_generator handlers."""
         setup_logging(output_dir=tmp_path)
-        child = logging.getLogger("asago_scenario_generator.pipeline.runner")
+        child = logging.getLogger("asago_scenario_generator.pipeline.synthesis")
         child.info("child message")
 
         content = (tmp_path / "pipeline.log").read_text(encoding="utf-8")
         assert "child message" in content
-        assert "asago_scenario_generator.pipeline.runner" in content
+        assert "asago_scenario_generator.pipeline.synthesis" in content
 
     def test_logger_level_set_to_debug(self, tmp_path: Path) -> None:
         """The asago_scenario_generator logger itself is set to DEBUG to let handlers filter."""

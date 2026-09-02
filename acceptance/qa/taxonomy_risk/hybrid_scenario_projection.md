@@ -18,9 +18,8 @@ source-pin inheritance, and independent review/mechanism evidence. It also
 ensures the fixture is labelled `normative_bookkeeping_fixture`, contains no
 score/readiness/execution claim, and is not presented as semantic pilot truth.
 The independent source checks also verify the complete closed exclusion
-vocabulary, the valid process-model and feedback bridge examples, the distinct
-ICA/shared-EXEC acceptance case, and the unchanged ordinary `generate` and
-`stpa-run` compatibility rows.
+vocabulary, the valid process-model and feedback bridge examples, and the
+distinct ICA/shared-EXEC acceptance case.
 
 The fixture is intentionally deterministic bookkeeping evidence. Passing this
 QA does not establish real taxonomy/STPA correspondence or authorize a live

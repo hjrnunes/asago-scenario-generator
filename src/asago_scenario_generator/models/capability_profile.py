@@ -198,8 +198,7 @@ def inject_kc_subcodes_display(data: dict) -> dict:
     ``kc_subcodes_display`` field mapping each KC sub-code to its
     human-readable description, using :func:`build_kc_subcodes_display`.
 
-    Both the STPA pipeline (``stpa.system_model.profile``) and the
-    existing pipeline (``pipeline.io``) call this shared function so
+    STPA and preparation persistence adapters call this shared function so
     that the injection logic is defined in exactly one place.
     """
     kc_subcodes = data.get("kc_subcodes")

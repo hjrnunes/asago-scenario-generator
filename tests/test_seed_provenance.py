@@ -201,7 +201,6 @@ class TestSeedProvenanceFields:
         seed = next(s for s in seeds if s.seed_id == "AP-T7-01")
         assert "AML.T0053" not in seed.atlas_provenance_ids
         assert set(seed.atlas_provenance_ids) == {"AML.T0054", "AML.T0015"}
-
     def test_no_provenance_when_sssom_missing(self):
         """When SSSOM provenance is not available, provenance fields default empty."""
         entry = _make_entry(
@@ -294,75 +293,3 @@ class TestSeedProvenanceFields:
         # atlas_provenance_ids filtered: AML.T0053 excluded (not in merged set)
         assert "AML.T0053" not in seed.atlas_provenance_ids
         assert set(seed.atlas_provenance_ids) == {"AML.T0054", "AML.T0015"}
-
-
-class TestReportProvenanceBlock:
-    """Verify _build_provenance_block reads from scenario seed metadata."""
-
-    def test_provenance_block_renders_from_seed_metadata(self):
-        """Provenance block should render OWASP origin, LAAF, and ATLAS from
-        the scenario's scenario_seed_metadata dict."""
-        from asago_scenario_generator.report.provenance import (
-            _build_provenance_block,
-        )
-
-        scenario = {
-            "scenario_seed_metadata": {
-                "seed_id": "AP-T7-01",
-                "owasp_origin": "T7-S1",
-                "laaf_technique_ids": ["S1", "M3"],
-                "atlas_provenance_ids": ["AML.T0054", "AML.T0015"],
-            }
-        }
-        html = _build_provenance_block(scenario)
-        assert "T7-S1" in html
-        assert "S1" in html
-        assert "M3" in html
-        assert "AML.T0054" in html
-        assert "AML.T0015" in html
-        assert "SSSOM Provenance" in html
-
-    def test_provenance_block_empty_for_non_ap_seed(self):
-        """Non-AP seeds should produce empty provenance block."""
-        from asago_scenario_generator.report.provenance import (
-            _build_provenance_block,
-        )
-
-        scenario = {
-            "scenario_seed_metadata": {
-                "seed_id": "T2-S1",
-                "owasp_origin": None,
-                "laaf_technique_ids": [],
-                "atlas_provenance_ids": [],
-            }
-        }
-        html = _build_provenance_block(scenario)
-        assert html == ""
-
-    def test_provenance_block_empty_without_metadata(self):
-        """Scenario without seed metadata should produce empty provenance block."""
-        from asago_scenario_generator.report.provenance import (
-            _build_provenance_block,
-        )
-
-        html = _build_provenance_block({})
-        assert html == ""
-
-    def test_provenance_block_excludes_gated_technique(self):
-        """When atlas_provenance_ids omits a zone-3-gated technique,
-        the rendered block should not contain it."""
-        from asago_scenario_generator.report.provenance import (
-            _build_provenance_block,
-        )
-
-        scenario = {
-            "scenario_seed_metadata": {
-                "seed_id": "AP-T7-01",
-                "owasp_origin": "T7-S1",
-                "laaf_technique_ids": ["S1"],
-                "atlas_provenance_ids": ["AML.T0054"],  # AML.T0053 excluded
-            }
-        }
-        html = _build_provenance_block(scenario)
-        assert "AML.T0054" in html
-        assert "AML.T0053" not in html

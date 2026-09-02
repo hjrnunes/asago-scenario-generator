@@ -13,11 +13,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from asago_scenario_generator.data.loaders import load_attack_patterns, load_yaml_strict
 from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
-from asago_scenario_generator.eval.scorecard import (
+from asago_scenario_generator.models.scorecard import (
     ScorecardV1,
     scorecard_qualification_gates,
 )
-from asago_scenario_generator.eval.versioned_metrics import evaluate_v3_scorecard
+from asago_scenario_generator.pipeline.qualification_metrics import (
+    evaluate_v3_scorecard,
+)
 from asago_scenario_generator.manifest import (
     ArtifactEntry,
     ArtifactRole,

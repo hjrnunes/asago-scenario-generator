@@ -38,9 +38,9 @@ class ManifestInventoryResolver:
     entry (path, hash, role, duplicates, orphans, singletons, pairing),
     and provides typed access to artifacts by role.
 
-    This is the **single shared resolver** used by both eval and report
-    readers.  It never globs the filesystem — it consumes only manifest
-    inventory entries.
+    This is the **single shared resolver** used by qualification and product
+    artifact readers.  It never globs the filesystem — it consumes only
+    manifest inventory entries.
     """
 
     def __init__(
@@ -849,7 +849,7 @@ def _load_v3_scorecard(
     resolver: ManifestInventoryResolver, entry: ArtifactEntry
 ) -> Any:
     """Parse a persisted v3 scorecard against the strict v1 schema."""
-    from asago_scenario_generator.eval.scorecard import ScorecardV1
+    from asago_scenario_generator.models.scorecard import ScorecardV1
 
     try:
         return ScorecardV1.model_validate(resolver.read_yaml(entry))

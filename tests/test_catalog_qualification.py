@@ -66,7 +66,9 @@ from asago_scenario_generator.catalog_qualification import (
 )
 from asago_scenario_generator.data.loaders import load_attack_patterns
 from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
-from asago_scenario_generator.eval.versioned_metrics import evaluate_v3_scorecard
+from asago_scenario_generator.pipeline.qualification_metrics import (
+    evaluate_v3_scorecard,
+)
 from asago_scenario_generator.manifest import ArtifactRole, ManifestIntegrityError
 from asago_scenario_generator.models.attack_pattern import EvaluatedFactEvidence
 from asago_scenario_generator.pipeline.projection import (
@@ -289,7 +291,7 @@ def test_qualification_yaml_rejects_duplicate_facts_key(tmp_path: Path) -> None:
 def test_campaign_rejects_internally_valid_forged_scorecard(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from tests.test_versioned_scorecard import _Resolver
+    from tests.helpers.qualification import _Resolver
 
     matrix = tmp_path / "matrix.yaml"
     matrix.write_bytes(MATRIX.read_bytes())
@@ -348,207 +350,6 @@ def test_campaign_rejects_internally_valid_forged_scorecard(
 
     with pytest.raises(ValueError, match="canonical resolver evaluation"):
         aggregate_campaign(matrix, campaign_path)
-
-
-def test_completed_v3_campaign_with_nonempty_facts_qualifies_one_pattern(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from unittest.mock import patch
-
-    from asago_scenario_generator.eval.scorecard import (
-        MetricResult,
-        QUALIFICATION_GATE_PATHS,
-        QUALIFICATION_RATIO_GATE_IDS,
-        REQUIRED_QUALIFICATION_GATE_IDS,
-        ScorecardV1,
-        aggregate_qualification,
-        ratio_metric,
-        zero_gate,
-    )
-    from asago_scenario_generator.manifest import RunStatus, load_manifest
-    from asago_scenario_generator.models.attack_pattern import AttackPattern
-    from asago_scenario_generator.models.capability_profile import InventoryCompleteness
-    from asago_scenario_generator.pipeline.projection import capture_capability_snapshot
-    from asago_scenario_generator.pipeline.runner import run_pipeline
-    from tests.helpers.projection_factory import (
-        _pattern,
-        _TaxonomyResolver,
-        get_projected_candidate,
-        get_test_profile,
-        get_test_snapshot,
-    )
-    from tests.test_projection_runner_integration import _arrange
-
-    projected = get_projected_candidate()
-    stack, patches, _, args = _arrange(
-        tmp_path,
-        entry_point_id=projected.canonical_ingress.entry_point_id,
-        projected_candidates=[projected],
-    )
-    profile = get_test_profile()
-    profile.entry_point_completeness = InventoryCompleteness.operator_confirmed_complete
-    profile.entry_point_evidence = ["operator-review:campaign-fixture"]
-    profile.tool_inventory_completeness = (
-        InventoryCompleteness.operator_confirmed_complete
-    )
-    profile.tool_inventory_evidence = ["operator-review:campaign-fixture"]
-    patches["infer_capability_profile"].return_value = (
-        profile,
-        patches["infer_capability_profile"].return_value[1],
-    )
-    patches["capture_capability_snapshot"].return_value = capture_capability_snapshot(
-        profile, get_test_snapshot().facts
-    )
-    facts_path = tmp_path / "qualification-facts.yaml"
-    facts_path.write_text(
-        yaml.safe_dump(
-            {
-                "schema_version": "1",
-                "facts": [
-                    item.model_dump(mode="json") for item in get_test_snapshot().facts
-                ],
-            },
-            sort_keys=False,
-        )
-    )
-
-    def qualifying_evaluation(*, resolver, threats_path=None):
-        raw = evaluate_v3_scorecard(resolver).model_dump(mode="json")
-        for gate_id, (section, metric_id) in QUALIFICATION_GATE_PATHS.items():
-            metric = (
-                ratio_metric(1, 1, evidence=["campaign fixture qualifying evidence"])
-                if gate_id in QUALIFICATION_RATIO_GATE_IDS
-                else zero_gate(0, evidence=["campaign fixture qualifying evidence"])
-            )
-            raw[section]["metrics"][metric_id] = metric.model_dump(mode="json")
-        gates = {
-            gate_id: MetricResult.model_validate(raw[section]["metrics"][metric_id])
-            for gate_id, (section, metric_id) in QUALIFICATION_GATE_PATHS.items()
-        }
-        raw["qualification"] = aggregate_qualification(
-            gates, required_gate_ids=REQUIRED_QUALIFICATION_GATE_IDS
-        ).model_dump(mode="json")
-        return ScorecardV1.model_validate(raw).model_dump(mode="json")
-
-    stack.enter_context(
-        patch(
-            "asago_scenario_generator.eval.runner.run_evaluation",
-            side_effect=qualifying_evaluation,
-        )
-    )
-    with stack:
-        result = run_pipeline(**args, qualification_facts_path=facts_path)
-
-    assert load_manifest(result.run_dir).status is RunStatus.COMPLETED
-    run_manifest = result.run_dir / "run-manifest.yaml"
-    manifest_sha = hashlib.sha256(run_manifest.read_bytes()).hexdigest()
-    profile_ids = (
-        "direct-conversational",
-        "influenceable-retrieval",
-        "multi-agent-delegation",
-        "state-changing-tools",
-        "training-tool-supply-chain",
-        "writable-persistent-state",
-    )
-    pattern_ids = (
-        projected.pattern_id,
-        "AP-X-02",
-        "AP-X-03",
-        "AP-X-04",
-        "AP-X-05",
-        "AP-X-06",
-    )
-    reviewed_profiles = tuple(
-        ReviewedProfile(
-            profile_id=profile_id,
-            rationale="resolver-valid campaign fixture",
-            profile=profile,
-            facts=get_test_snapshot().facts,
-            applicable_pattern_ids=(pattern_id,),
-        )
-        for profile_id, pattern_id in zip(profile_ids, pattern_ids, strict=True)
-    )
-    matrix = ReviewedProfileMatrixV1(
-        catalog_sha256=projected.projection.catalog_pin,
-        catalog_denominator=len(pattern_ids),
-        profiles=reviewed_profiles,
-    )
-    matrix_path = tmp_path / "matrix.yaml"
-    matrix_path.write_text(
-        yaml.safe_dump(matrix.model_dump(mode="json"), sort_keys=False)
-    )
-    matrix_sha = hashlib.sha256(matrix_path.read_bytes()).hexdigest()
-    preflight = QualificationReportV1(
-        kind="preflight",
-        catalog_sha256=matrix.catalog_sha256,
-        catalog_denominator=matrix.catalog_denominator,
-        matrix_sha256=matrix_sha,
-        preflight=tuple(
-            ProfilePreflight(
-                profile_id=item.profile_id,
-                reviewed_pattern_ids=item.applicable_pattern_ids,
-                projected_pattern_ids=item.applicable_pattern_ids,
-                missing_pattern_ids=(),
-                issues=(),
-            )
-            for item in reviewed_profiles
-        ),
-        missing_pattern_ids=(),
-    )
-    campaign = CampaignManifestV1(
-        catalog_sha256=matrix.catalog_sha256,
-        catalog_denominator=matrix.catalog_denominator,
-        matrix_sha256=matrix_sha,
-        qualification_runs=(
-            QualificationRunRef(
-                profile_id=profile_ids[0],
-                run_manifest_path=f"runs/{result.run_id}/run-manifest.yaml",
-                manifest_sha256=manifest_sha,
-            ),
-        ),
-    )
-    campaign_path = tmp_path / "campaign.yaml"
-    campaign_path.write_text(
-        yaml.safe_dump(campaign.model_dump(mode="json"), sort_keys=False)
-    )
-    record = _pattern()
-    records = [
-        record,
-        *({**record, "id": pattern_id} for pattern_id in pattern_ids[1:]),
-    ]
-    taxonomy = _TaxonomyResolver(
-        AttackPattern.model_validate(record).canonical_chain.taxonomy_context
-    )
-    monkeypatch.setattr(
-        "asago_scenario_generator.catalog_qualification.load_attack_patterns",
-        lambda: {record["id"]: record for record in records},
-    )
-    monkeypatch.setattr(
-        "asago_scenario_generator.catalog_qualification.load_taxonomy_resolver",
-        lambda: taxonomy,
-    )
-    monkeypatch.setattr(
-        "asago_scenario_generator.catalog_qualification.compute_authoritative_catalog_pin",
-        lambda *_args: matrix.catalog_sha256,
-    )
-    monkeypatch.setattr(
-        "asago_scenario_generator.catalog_qualification._preflight_matrix",
-        lambda *_args, **_kwargs: preflight,
-    )
-    monkeypatch.setattr(
-        "asago_scenario_generator.catalog_qualification.evaluate_v3_scorecard",
-        lambda resolver: ScorecardV1.model_validate(
-            resolver.read_yaml(resolver.entry_by_role(ArtifactRole.EVAL_SCORECARD))
-        ),
-    )
-    report = aggregate_campaign(matrix_path, campaign_path)
-    assert report.kind == "campaign"
-    assert (
-        report.campaign_manifest_sha256
-        == hashlib.sha256(campaign_path.read_bytes()).hexdigest()
-    )
-    assert report.qualified_pattern_ids == (projected.pattern_id,)
-    assert get_test_snapshot().facts
 
 
 def test_checked_in_schemas_have_exact_parity_and_validate_matrix() -> None:
@@ -1276,7 +1077,7 @@ class TestAggregateCampaignHelpers:
             _validate_scorecard_equivalence,
             _validate_scorecard_gates,
         )
-        from tests.test_versioned_scorecard import _Resolver
+        from tests.helpers.qualification import _Resolver
 
         canonical = evaluate_v3_scorecard(_Resolver())  # type: ignore[arg-type]
         text = yaml.safe_dump(canonical.model_dump(mode="json"), sort_keys=False)

@@ -286,7 +286,9 @@ def _h_serialize_pipeline_io(
 
     if world.sp1_profile is None:
         return False, "No CapabilityProfile to serialize"
-    from asago_scenario_generator.pipeline.io import write_capability_profile
+    from asago_scenario_generator.pipeline.capability_profile_persistence import (
+        write_capability_profile,
+    )
 
     tmpdir = Path(tempfile.mkdtemp())
     world.yaml_path = write_capability_profile(world.sp1_profile, tmpdir)
@@ -439,7 +441,9 @@ def _h_both_paths_use_same_helper(
 ) -> tuple[bool, str]:
     """Handle: both paths use the same helper function to build kc_subcodes_display."""
     import inspect
-    from asago_scenario_generator.pipeline.io import write_capability_profile
+    from asago_scenario_generator.pipeline.capability_profile_persistence import (
+        write_capability_profile,
+    )
 
     src = inspect.getsource(write_capability_profile)
     if "inject_kc_subcodes_display" not in src:

@@ -13,7 +13,6 @@ LEDGER = ROOT / "src/asago_scenario_generator/pipeline/challenge_ledger.py"
 LEDGER_PERSISTENCE = (
     ROOT / "src/asago_scenario_generator/pipeline/challenge_ledger_persistence.py"
 )
-TAXONOMY_RUNNER = ROOT / "src/asago_scenario_generator/pipeline/runner.py"
 STPA_RUNNER = ROOT / "src/asago_scenario_generator/stpa/pipeline/runner.py"
 
 
@@ -43,12 +42,11 @@ def test_offline_ledger_does_not_depend_on_provider_capable_analysis() -> None:
         assert all("challenge_analysis" not in name for name in _imports(path))
 
 
-def test_existing_generation_runners_do_not_import_phase3_analysis() -> None:
-    """Ordinary generate and stpa-run retain their existing dependency graph."""
-    for runner in (TAXONOMY_RUNNER, STPA_RUNNER):
-        imports = _imports(runner)
-        assert all("challenge_analysis" not in name for name in imports)
-        assert all("challenge_ledger" not in name for name in imports)
+def test_stpa_runner_does_not_import_phase3_analysis() -> None:
+    """The standalone STPA runner retains its existing dependency graph."""
+    imports = _imports(STPA_RUNNER)
+    assert all("challenge_analysis" not in name for name in imports)
+    assert all("challenge_ledger" not in name for name in imports)
 
 
 def test_analysis_never_imports_stpa_runner_or_provider_infrastructure() -> None:

@@ -1,11 +1,8 @@
 """Threat-surface output contracts for taxonomy threat-surface derivation.
 
-These Pydantic shapes are the persisted and resumed artifact of Stage 2:
-``pipeline.io.write_threat_surface`` serialises them to
-``threat-surface.yaml`` and ``pipeline.runner`` reconstructs them from
-disk with ``ThreatSurface.model_validate``.  Consumers of the shape
-therefore import it from the model layer, never from the derivation
-algorithm in ``pipeline.threats``.
+These Pydantic shapes are shared inputs to deterministic taxonomy preparation
+and obligation planning. Consumers import the shape from the model layer,
+never from the derivation algorithm in ``pipeline.threats``.
 """
 
 from __future__ import annotations

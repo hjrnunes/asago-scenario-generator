@@ -1,7 +1,7 @@
 """Property tests pinning the deterministic behavior-compiler contracts.
 
 The deterministic BehaviorSpec compiler
-(``pipeline/generate/behavior_compiler.py``) owns three contracts worth
+(``pipeline/behavior_compiler.py``) owns three contracts worth
 pinning under broad input ranges:
 
 - **Leaf filters**: only leaves with non-empty projected step IDs fully
@@ -34,7 +34,7 @@ from asago_scenario_generator.models.scenario import (
     BehaviorAssertion,
     BehaviorScenario,
 )
-from asago_scenario_generator.pipeline.generate.behavior_compiler import (
+from asago_scenario_generator.pipeline.behavior_compiler import (
     _action_from_leaf,
     _assertions_from_block,
     _leaf_action_text,

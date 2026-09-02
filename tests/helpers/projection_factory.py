@@ -293,7 +293,9 @@ def get_second_projected_candidate() -> Any:
     remediation tests can exercise multiple entry points with exact
     ingress matching.
     """
-    from asago_scenario_generator.models.attack_pattern import EntryPointResourceReference
+    from asago_scenario_generator.models.attack_pattern import (
+        EntryPointResourceReference,
+    )
 
     base = get_projected_candidate()
     second_ep_id = "ep:v1:22222222222222222222222200000002"
@@ -476,7 +478,7 @@ def make_behavior_spec(
             )
 
     # Deterministically render Gherkin from the structured behavior.
-    from asago_scenario_generator.pipeline.generate.behavior_compiler import (
+    from asago_scenario_generator.pipeline.behavior_compiler import (
         render_gherkin_from_behavior_spec,
     )
 

@@ -92,7 +92,6 @@ class TestCandidateAdaptersDependInward:
             "coverage_planning.py",
             "coverage_planning_flow.py",
             "coverage_planning_universe.py",
-            "io.py",
         ),
     )
     def test_adapter_does_not_import_candidates_facade(self, module_name: str) -> None:
@@ -111,7 +110,6 @@ class TestCandidateAdaptersDependInward:
             "candidate_filter.py",
             "candidate_rules.py",
             "coverage_planning.py",
-            "io.py",
         ),
     )
     def test_adapter_imports_models_leaf(self, module_name: str) -> None:
@@ -130,21 +128,17 @@ class TestCandidateCappingDependsInward:
         assert _MODELS_MODULE in imports
 
 
-class TestRunnerAndPreflightDependInward:
-    """Orchestration consumes candidate leaves, not the public façade."""
+class TestPreflightDependsInward:
+    """The surviving preflight consumes candidate leaves, not the façade."""
 
     @pytest.mark.parametrize(
         "module_name",
-        (
-            "preflight.py",
-            "runner.py",
-            "runner_run.py",
-        ),
+        ("preflight.py",),
     )
     def test_orchestrator_does_not_import_candidates_facade(
         self, module_name: str
     ) -> None:
-        """Preflight and runner reach identity through inward leaves."""
+        """Preflight reaches identity through inward leaves."""
         imports = _imported_modules(PIPELINE_DIR / module_name)
         assert _FACADE_MODULE not in imports, (
             f"{module_name} must not import the public candidates façade"

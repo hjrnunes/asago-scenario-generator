@@ -6,15 +6,11 @@ only scenario-generation authority.
 
 ## Shared domain
 
-Pydantic models define capability profiles, taxonomy evidence, projected
-attack chains, attack trees, behavior specifications, scenario envelopes, and
-run manifests. Shared LLM adapters, deterministic validators, evaluation, and
-reporting sit around those contracts. Named model-profile loading lives in
-`model_profiles` so generation configuration and STPA infrastructure both
-depend inward on that leaf. The historical `stpa.infra.model_profiles`
-import path remains a façade. Taxonomy prompt-message construction lives in
-`llm.messages`. STPA keeps a structurally distinct local helper so the
-clean-copy boundary stays intact.
+Pydantic models define capability profiles, reviewed taxonomy evidence,
+projected attack-pattern candidates, STPA analysis artifacts, obligation
+accounting, correspondence, and scenario realization. Named model-profile
+loading lives in `model_profiles`; STPA provider construction remains behind
+the STPA infrastructure boundary.
 
 The capability profile's computed boolean fields (`has_persistent_memory`,
 `multi_agent`, `hitl`) follow the contract in
@@ -22,43 +18,27 @@ The capability profile's computed boolean fields (`has_persistent_memory`,
 derived from `kc_subcodes`, included in serialized output, and legacy input
 values warn only when they conflict with the derived result.
 
-Generation lifecycle contracts (retry directives, causal provider controls,
-stage call evidence, and typed attempt failures) live in
-`pipeline.generation_contracts`. Stage adapters, lifecycle policy, and
-persistence consume that boundary without importing one another's
-implementation modules.
-
 Authoritative projection contracts (candidate-v2 identity, digest helpers,
 capability-fact snapshots, and slot-matching policy) live in
 `pipeline.projection_contracts`. Resource matching, qualification, allocation,
-and the public `pipeline.projection` façade depend inward on that leaf. The
-envelope model and generate-stage orchestration import the same contract
-leaf rather than the projection façade, so persistence validation and
-stage adapters do not pull implementation modules. Projection drift,
-realization, and semantic checks stay off that façade as well.
-
-Finalization lifecycle types, retry budgets, and choice-queue policy live in
-`pipeline.finalization_contracts`. Admission, gate contracts, snapshots,
-parsimony, prebehavior checks, and persistence adapters depend inward on that
-leaf instead of the `pipeline.finalization` controller.
-Durable encoding uses `projection_contracts.canonical_json_bytes`; inventory
-validation depends on persistence record modules rather than the persistence
-façade.
+and the public `pipeline.projection` façade depend inward on that leaf.
+Deterministic projection preflight and catalog qualification reuse the same
+contracts without constructing a provider client.
 
 Candidate identity, filter wire models, and origin canonicalization live in
-`pipeline.candidate_models`. Expansion, rules, capping, coverage planning,
-pipeline IO, preflight, and runner orchestration consume that leaf rather
-than the `pipeline.candidates` façade. Coverage-universe construction and
+`pipeline.candidate_models`. Expansion, rules, coverage planning, and
+preflight consume that leaf rather than the `pipeline.candidates` façade.
+Coverage-universe construction and
 min-cost assignment live in `pipeline.coverage_planning_universe` and
 `pipeline.coverage_planning_flow`; those leaves stay off the candidates and
 projection façades. Queue construction and plan persistence remain in
-`pipeline.coverage_planning`.
+`pipeline.coverage_planning` solely for read-only catalog qualification.
 
 Authoritative attack-pattern models are split by responsibility
 (`attack_pattern_contracts`, `attack_pattern_chain`,
 `attack_pattern_projection`, `attack_pattern_digests`,
 `attack_pattern_validation`) behind the historical
-`models.attack_pattern` façade. Projection, preflight, runner, catalog
+`models.attack_pattern` façade. Projection, preflight, catalog
 qualification, taxonomy pins, and the behavior compiler consume those
 leaves rather than the façade. Catalog-lineage source-catalog pinning lives
 in `data.catalog_lineage_snapshot` so normal lineage validation does not
@@ -73,40 +53,18 @@ Attack-complexity models and admission routing live in
 check live in `pipeline.complexity` and depend inward on those models
 plus `pipeline.projection_contracts`, not the projection façade.
 
-Scenario validation is split by responsibility (`validation_common`,
-structure, phantom, insider, provenance, parsimony, goal, and semantic
-leaves) behind the historical `pipeline.validation` façade. Those leaves
-do not import the façade or IO-near modules. Narrative access-realization
-and step-bound checks live in `pipeline.generate.narrative_access`;
-narrative semantic draft contracts and compilation live in
-`pipeline.generate.narrative_semantics`; actor draft compilation lives in
-`pipeline.generate.actor_semantics`. Tests and acceptance import access
-bounds, draft contracts, and zone-sequence derivation from those leaves
-rather than the IO-near `generate.narrative` façade. Attack-tree transport, zone
-enforcement, name resolution, and diversity helpers live in
-`pipeline.generate.tree_transport`, `tree_validation`, `zones`, `names`,
-and `diversity`; those leaves stay off the IO-near `generate.tree`
-façade. Path enumeration, tool-execution grounding, and transport
-normalization are imported from those leaves by tests and acceptance
-rather than re-exported through `generate.tree`. Scenario versus
-projected-step ATLAS identity lives in
-`pipeline.technique_scopes`. Projection-envelope sidecars are
-built by `pipeline.projection_block`. Validation, pre-behavior gates,
-stage orchestration, and assembly consume those leaves instead of the
-IO-near `generate.narrative`, `generate.actor`, and `generate.assembly`
-façades.
+The few neutral validation helpers still used by projection and catalog
+qualification live directly under `pipeline` (`actor_access`,
+`narrative_access`, `behavior_compiler`, and `leaf_budget`). They do not form a
+scenario-authoring workflow and are not provider-capable.
 
-Deterministic evaluation metrics (`consistency`, `diversity`, `gherkin`,
-`grounding`, `plausibility`, `scorecard`, `versioned_metrics`) stay off
-the persistence and finalization façades. Authoritative v3 scorecards
-consume `persistence_plan`, `persistence_journal`, and
-`finalization_gate_contracts`.
-
-The former taxonomy-led scenario author/compiler and finalization stack is no
-longer a product workflow. It is unreachable from the registered CLI and is
-tracked only as deletion inventory while reusable inward primitives are
-separated from it. See
-[legacy-taxonomy-generator-cleanup-inventory.md](legacy-taxonomy-generator-cleanup-inventory.md).
+The former taxonomy-led runner, generation stages, finalization controllers,
+scenario-authoring prompts, reports, evaluation adapters, and their acceptance
+surface have been deleted. A narrow read-only manifest-v3 audit seam remains
+for catalog qualification and historical artifact inspection; it cannot write,
+resume, or extend an old run. See
+[legacy-taxonomy-generator-cleanup-inventory.md](legacy-taxonomy-generator-cleanup-inventory.md)
+for the exact boundary.
 
 ## Taxonomy obligation planning (observational Phase 1)
 

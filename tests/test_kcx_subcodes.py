@@ -30,7 +30,6 @@ from asago_scenario_generator.models.capability_profile import (
     ToolInventoryEntry,
     VALID_KC_SUBCODES,
 )
-from asago_scenario_generator.pipeline.generate import build_kc_definitions_block
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +72,9 @@ def _make_profile(
         kc_subcodes = ["KC1.1", "KC6.1.1"]
     kw = {}
     if any(c.startswith("KC5.") or c.startswith("KC6.") for c in kc_subcodes):
-        kw["tool_inventory"] = [ToolInventoryEntry(name="test_tool", description="A test tool")]
+        kw["tool_inventory"] = [
+            ToolInventoryEntry(name="test_tool", description="A test tool")
+        ]
     return CapabilityProfile(
         zones_active=["input", "reasoning"],
         entry_points=["user input (zone 1)"],
@@ -122,15 +123,11 @@ class TestKCXValidation:
     """KCX-prefixed codes pass the kc_subcodes validator."""
 
     def test_kcx_priv_accepted(self):
-        p = CapabilityProfile(
-            **_base_profile_data(kc_subcodes=["KC1.1", "KCX-PRIV"])
-        )
+        p = CapabilityProfile(**_base_profile_data(kc_subcodes=["KC1.1", "KCX-PRIV"]))
         assert "KCX-PRIV" in p.kc_subcodes
 
     def test_kcx_xauth_accepted(self):
-        p = CapabilityProfile(
-            **_base_profile_data(kc_subcodes=["KC1.1", "KCX-XAUTH"])
-        )
+        p = CapabilityProfile(**_base_profile_data(kc_subcodes=["KC1.1", "KCX-XAUTH"]))
         assert "KCX-XAUTH" in p.kc_subcodes
 
     def test_both_kcx_codes_accepted(self):
@@ -147,17 +144,13 @@ class TestKCXValidation:
 
     def test_arbitrary_kcx_prefix_accepted(self):
         """Any KCX- prefixed code passes validation (future extensibility)."""
-        p = CapabilityProfile(
-            **_base_profile_data(kc_subcodes=["KC1.1", "KCX-FUTURE"])
-        )
+        p = CapabilityProfile(**_base_profile_data(kc_subcodes=["KC1.1", "KCX-FUTURE"]))
         assert "KCX-FUTURE" in p.kc_subcodes
 
     def test_invalid_non_kcx_code_still_rejected(self):
         """Non-KCX, non-standard codes are still rejected."""
         with pytest.raises(ValidationError, match="Invalid KC sub-code"):
-            CapabilityProfile(
-                **_base_profile_data(kc_subcodes=["KC1.1", "KC99.1"])
-            )
+            CapabilityProfile(**_base_profile_data(kc_subcodes=["KC1.1", "KC99.1"]))
 
     def test_kcx_codes_sorted_with_standard(self):
         """KCX codes sort correctly alongside standard KC codes."""
@@ -180,9 +173,7 @@ class TestKCXStage1Validation:
     """KCX codes pass Stage1Profile validation and promotion."""
 
     def test_stage1_accepts_kcx_codes(self):
-        s = Stage1Profile(
-            **_base_stage1_data(kc_subcodes=["KC1.1", "KCX-PRIV"])
-        )
+        s = Stage1Profile(**_base_stage1_data(kc_subcodes=["KC1.1", "KCX-PRIV"]))
         assert "KCX-PRIV" in s.kc_subcodes
 
     def test_stage1_to_capability_profile_preserves_kcx(self):
@@ -195,9 +186,7 @@ class TestKCXStage1Validation:
 
     def test_stage1_rejects_invalid_non_kcx(self):
         with pytest.raises(ValidationError, match="Invalid KC sub-code"):
-            Stage1Profile(
-                **_base_stage1_data(kc_subcodes=["KC1.1", "INVALID"])
-            )
+            Stage1Profile(**_base_stage1_data(kc_subcodes=["KC1.1", "INVALID"]))
 
 
 # ---------------------------------------------------------------------------
@@ -358,62 +347,3 @@ class TestKCSubcodeNames:
             assert isinstance(name, str) and len(name) > 0, (
                 f"{code} has empty or non-string name"
             )
-
-
-# ---------------------------------------------------------------------------
-# build_kc_definitions_block
-# ---------------------------------------------------------------------------
-
-
-class TestBuildKcDefinitionsBlock:
-    """Tests for the KC/KCX definition block builder."""
-
-    def test_empty_list_returns_empty_string(self):
-        assert build_kc_definitions_block([]) == ""
-
-    def test_single_kc_code(self):
-        result = build_kc_definitions_block(["KC1.1"])
-        assert "KC1.1" in result
-        assert "Large Language Model" in result
-
-    def test_single_kcx_code(self):
-        result = build_kc_definitions_block(["KCX-PMEM"])
-        assert "KCX-PMEM" in result
-        assert "persistent memory" in result.lower()
-
-    def test_mixed_kc_and_kcx(self):
-        result = build_kc_definitions_block(["KC1.1", "KC3.2", "KCX-PMEM"])
-        assert "KC1.1" in result
-        assert "KC3.2" in result
-        assert "KCX-PMEM" in result
-        # Each line should start with "- "
-        for line in result.strip().split("\n"):
-            assert line.startswith("- ")
-
-    def test_unknown_code_included_raw(self):
-        """Unknown codes (e.g. future KCX) appear without a definition."""
-        result = build_kc_definitions_block(["KC1.1", "KCX-FUTURE"])
-        assert "- KCX-FUTURE" in result
-        # KC1.1 should still have its definition
-        assert "Large Language Model" in result
-
-    def test_all_standard_codes_produce_definitions(self):
-        """Every standard KC sub-code should produce a line with a definition."""
-        codes = sorted(VALID_KC_SUBCODES)
-        result = build_kc_definitions_block(codes)
-        for code in codes:
-            assert code in result
-
-    def test_all_kcx_codes_produce_definitions(self):
-        """Every KCX sub-code should produce a line with a definition."""
-        codes = sorted(KCX_SUBCODES.keys())
-        result = build_kc_definitions_block(codes)
-        for code in codes:
-            assert code in result
-
-    def test_output_format_is_dash_prefixed_lines(self):
-        result = build_kc_definitions_block(["KC1.1", "KC6.4"])
-        lines = result.strip().split("\n")
-        assert len(lines) == 2
-        for line in lines:
-            assert line.startswith("- KC")

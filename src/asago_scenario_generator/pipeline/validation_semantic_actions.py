@@ -334,10 +334,10 @@ def _check_semantic_actor_access_policy(
     violations: list[SemanticViolation],
 ) -> None:
     """Run shared actor access-policy and narrative realization validation."""
-    from asago_scenario_generator.pipeline.generate.actor_access import (
+    from asago_scenario_generator.pipeline.actor_access import (
         validate_actor_access_provenance as _vap,
     )
-    from asago_scenario_generator.pipeline.generate.narrative_access import (
+    from asago_scenario_generator.pipeline.narrative_access import (
         validate_narrative_access_realization as _vnr,
     )
 

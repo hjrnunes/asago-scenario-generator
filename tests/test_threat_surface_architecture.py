@@ -4,8 +4,7 @@ These tests enforce structural invariants that are easy to regress:
 
 1. **Contract home**: ``ThreatSurface``/``ThreatSurfaceEntry`` and
    ``ThreatScope``/``ThreatScopeEntry``/``OutOfScopeEntry`` live in the
-   model layer.  IO-near modules (``pipeline.io``) and shape consumers
-   (``pipeline.seeds``, ``pipeline.coverage``) must import the shape
+   model layer.  Shape consumers such as ``pipeline.seeds`` import the shape
    from ``models``, never from the derivation algorithm
    ``pipeline.threats``.
 
@@ -21,8 +20,6 @@ These tests enforce structural invariants that are easy to regress:
 4. **No import cycles**: The threat-surface dependency chain imports
    cleanly.
 
-5. **Acceptance clean-copy parity**: The taxonomy threat-surface
-   runtime feature must not import from the STPA pipeline.
 """
 
 from __future__ import annotations
@@ -53,9 +50,8 @@ _FORBIDDEN_IO_NEAR_PREFIXES = (
 )
 
 # Modules that may not import ``pipeline.threats`` solely for the
-# threat-surface shape.  ``pipeline.runner`` imports both the shape and the
-# derivation algorithm, so it is excluded from the blanket check.
-_SHAPE_CONSUMERS = ("io.py", "seeds.py", "coverage.py")
+# threat-surface shape.
+_SHAPE_CONSUMERS = ("seeds.py",)
 
 
 def _extract_imports(file_path: Path) -> list[str]:
@@ -233,36 +229,3 @@ class TestThreatSurfaceNoImportCycles:
     def test_module_imports_cleanly(self, module_name):
         mod = importlib.import_module(module_name)
         assert mod is not None
-
-
-class TestThreatSurfaceAcceptanceBoundary:
-    """Acceptance runtime handlers stay on the public derivation surface."""
-
-    def test_runtime_feature_does_not_import_stpa(self):
-        """taxonomy_threat_surface.py must not import the STPA pipeline."""
-        path = (
-            Path(__file__).resolve().parent.parent
-            / "acceptance"
-            / "runtime_features"
-            / "taxonomy_threat_surface.py"
-        )
-        imports = _extract_imports(path)
-        forbidden = [
-            imp
-            for imp in imports
-            if imp.startswith("asago_scenario_generator.stpa")
-        ]
-        assert not forbidden, (
-            "acceptance runtime imports STPA modules: " + ", ".join(forbidden)
-        )
-
-    def test_runtime_feature_imports_shapes_from_models(self):
-        """If the runtime imports the surface shape, it comes from models."""
-        source = (
-            Path(__file__).resolve().parent.parent
-            / "acceptance"
-            / "runtime_features"
-            / "taxonomy_threat_surface.py"
-        ).read_text(encoding="utf-8")
-        assert "pipeline.threats import (\n        ThreatSurface" not in source
-        assert "pipeline.threats import ThreatSurface" not in source

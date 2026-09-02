@@ -16,7 +16,7 @@ Hypothesis-driven invariants over generated fixture inputs for
   when the profile lacks any mapping-declared KC6 sub-code.
 - **Determinism**: identical inputs produce identical surfaces.
 - **Persistence round trip**: the serialised surface survives the
-  YAML dump/validate cycle used by ``pipeline.io`` and ``pipeline.runner``.
+  YAML dump/validate cycle used by deterministic artifact readers.
 - **Gating monotonicity**: adding KC sub-codes never drops an attack
   pattern whose kc_requires gate previously passed.
 

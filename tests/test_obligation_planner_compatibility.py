@@ -10,13 +10,6 @@ from tests.helpers.obligation_factory import make_plan
 runner = CliRunner()
 
 
-def test_obligation_planner_does_not_add_default_io_side_effects() -> None:
-    """Importing the planner does not change existing pipeline output defaults."""
-    from asago_scenario_generator.pipeline import io
-
-    assert not hasattr(io, "DEFAULT_WRITE_OBLIGATION_PLAN")
-
-
 def test_stpa_run_help_omits_obligation_planner_flags() -> None:
     """Standalone diagnostic STPA does not pretend to include obligations."""
     stpa_run = runner.invoke(app, ["stpa-run", "--help"])

@@ -2651,26 +2651,6 @@ def _h_stage6_validation_fails_with_id(
     return True, ""
 
 
-def _h_report_gauge_colored_literal(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: the eval scorecard gauge for "..." is colored green/yellow/red."""
-    match = re.search(r'gauge for "([^"]+)" is colored (\w+)', text)
-    if not match:
-        return False, f"Could not parse gauge color step: {text}"
-    metric = match.group(1)
-    color = match.group(2)
-    if not hasattr(world, "report_html_content") or world.report_html_content is None:
-        return False, "No report HTML generated"
-    html_content = world.report_html_content
-    if metric not in html_content:
-        return False, f"Metric '{metric}' not found in report HTML"
-    expected_class = f"eval-gauge-fill {color}"
-    if expected_class not in html_content:
-        return False, f"Expected gauge fill class '{expected_class}' not found"
-    return True, ""
-
-
 def _h_cmidup_passes_validation(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -2964,7 +2944,6 @@ __all__ = [
     "_h_pqf_prompts_dir_available",
     "_h_pqf_rendered_text_contains",
     "_h_pqf_template_loader_created",
-    "_h_report_gauge_colored_literal",
     "_h_sp1_critic_run_full",
     "_h_sp1_cs_two_resps_available",
     "_h_sp1_file_exists",

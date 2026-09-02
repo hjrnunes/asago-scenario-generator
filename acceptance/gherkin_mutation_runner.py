@@ -18,8 +18,7 @@ the scratch tree. The generated test resolves ``_PROJECT_ROOT`` from its own
 file is ever touched, which makes parallel workers race-free. A crashed job
 also cannot leave a mutated IR behind in the real snapshot.
 
-``FEATURE_STEM`` must name the feature under test (for example
-``taxonomy_report_sections_rendering``), matching the generated test
+``FEATURE_STEM`` must name the feature under test, matching the generated test
 ``build/acceptance/generated/<stem>_acceptance_test.py``.
 
 Outcome mapping: pytest exit 0 -> test_success (mutant survived), exit 1 ->
