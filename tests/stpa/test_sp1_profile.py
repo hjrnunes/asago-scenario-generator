@@ -25,7 +25,11 @@ from tests.stpa.sp1_helpers import MockLLMClient
 def _valid_stage1_profile_dict() -> dict:
     return {
         "entry_points": [
-            {"name": "User chat messages", "direction": "input", "controllability": "direct"},
+            {
+                "name": "User chat messages",
+                "direction": "input",
+                "controllability": "direct",
+            },
         ],
         "confidence": "medium",
         "kc_subcodes": ["KC1.1", "KC4.3", "KC6.1.1", "KC6.3.2"],
@@ -69,12 +73,51 @@ class TestStage1bProfile:
         # has_persistent_memory derived from kc_subcodes (KC4.3)
         assert result.has_persistent_memory is True
 
+    def test_cp_02a_exact_duplicate_tool_operations_are_normalized(self, tmp_path):
+        """Redundant operation labels from structured output do not abort Stage 1b."""
+        response = _valid_stage1_profile_dict()
+        response["tool_inventory"] = [
+            {
+                "name": "payment_api",
+                "description": "Execute payments",
+                "supported_operations": ["execute_code", "execute_code"],
+            },
+            {
+                "name": "ledger_api",
+                "description": "Read and update the ledger",
+                "supported_operations": [
+                    "transmit_data",
+                    "retrieve_data",
+                    "transmit_data",
+                ],
+            },
+        ]
+        client = MockLLMClient()
+        client.set_response_for(Stage1Profile, response)
+
+        result = derive_capability_profile(
+            llm_client=client,
+            use_case_text="Test use case",
+            run_dir=tmp_path,
+        )
+
+        assert result.tool_inventory is not None
+        assert result.tool_inventory[0].supported_operations == ("execute_code",)
+        assert result.tool_inventory[1].supported_operations == (
+            "retrieve_data",
+            "transmit_data",
+        )
+
     def test_cp_03_profile_flag_skips_llm_call(self, tmp_path):
         """Profile flag skips the LLM call."""
         # Write a pre-built profile
         profile = Stage1Profile(
             entry_points=[
-                {"name": "User chat", "direction": "input", "controllability": "direct"},
+                {
+                    "name": "User chat",
+                    "direction": "input",
+                    "controllability": "direct",
+                },
             ],
             confidence="medium",
             kc_subcodes=["KC1.1", "KC4.3", "KC6.1.1"],
@@ -124,7 +167,9 @@ class TestStage1bProfile:
         bad["kc_subcodes"] = ["KC1.1", "KC9.9"]
         client = MockLLMClient()
         client.set_response_for(Stage1Profile, bad)
-        with pytest.raises((ValidationError, ValueError, StageError), match="(?i)Invalid KC sub-code"):
+        with pytest.raises(
+            (ValidationError, ValueError, StageError), match="(?i)Invalid KC sub-code"
+        ):
             derive_capability_profile(
                 llm_client=client,
                 use_case_text="Test use case",
@@ -172,7 +217,9 @@ class TestStage1bProfile:
 
     def test_cp_12_stage1_profile_no_bool_fields(self):
         """Stage1Profile model does not declare boolean capability fields."""
-        from asago_scenario_generator.models.capability_profile import Stage1Profile as S1P
+        from asago_scenario_generator.models.capability_profile import (
+            Stage1Profile as S1P,
+        )
 
         field_names = set(S1P.model_fields.keys())
         assert "has_persistent_memory" not in field_names

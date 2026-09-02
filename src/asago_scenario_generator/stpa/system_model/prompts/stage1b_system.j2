@@ -77,6 +77,11 @@ A component can appear in both tool_inventory and entry_points — if a tool als
 
 List every tool and API the system can invoke. Be thorough — every tool must be explicitly mentioned or directly implied by the use-case description. Do not invent tools based on what a system like this might have.
 
+For each tool, provide its name, a one-line description, and
+`supported_operations`. Use only `retrieve_data`, `transmit_data`, and
+`execute_code`; include each applicable operation at most once. Use `null` when
+the description does not establish which operations the tool supports.
+
 ## Rules
 
 - **Grounding**: every KC code, entry point, and tool must be traceable to a specific capability described in the use-case text. Do not infer capabilities speculatively.

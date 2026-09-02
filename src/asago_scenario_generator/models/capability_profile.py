@@ -1373,6 +1373,35 @@ class Stage1Profile(BaseModel):
         ),
     )
 
+    @field_validator("tool_inventory", mode="before")
+    @classmethod
+    def normalize_redundant_tool_operations(cls, value: object) -> object:
+        """Collapse exact operation repeats at the Stage 1 provider boundary.
+
+        Structured-output schemas cannot express the domain model's tuple
+        uniqueness validator.  An exact repeated enum value carries no new
+        evidence, so normalize only that redundancy before the strict nested
+        ``ToolInventoryEntry`` validation runs.  Invalid operation values and
+        every other malformed field still reach the normal validators.
+        """
+        if not isinstance(value, list):
+            return value
+        normalized: list[object] = []
+        for item in value:
+            if not isinstance(item, dict):
+                normalized.append(item)
+                continue
+            operations = item.get("supported_operations")
+            if not isinstance(operations, (list, tuple)):
+                normalized.append(item)
+                continue
+            deduplicated = []
+            for operation in operations:
+                if operation not in deduplicated:
+                    deduplicated.append(operation)
+            normalized.append({**item, "supported_operations": deduplicated})
+        return normalized
+
     @field_validator("kc_subcodes")
     @classmethod
     def validate_kc_subcodes(cls, v: list[str]) -> list[str]:
