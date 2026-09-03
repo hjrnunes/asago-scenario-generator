@@ -51,6 +51,7 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
 )
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     ActionValueCondition,
+    SemanticBindingPlaceholder,
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionActionKind,
@@ -65,7 +66,10 @@ from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     BDIGenerationResult,
     CausalFactorDeclaration,
+    ExecutableRouteSelection,
     UnsafeOutcomeDeclaration,
+    _validate_delivery_factor_fidelity,
+    _validate_model_output_outcome,
     assemble_scenario_spec,
     build_context_bdi_prompts,
     generate_bdi_for_context,
@@ -210,6 +214,105 @@ def _context():
             ),
         ),
     )
+
+
+@pytest.mark.parametrize(
+    ("delivery_class", "factor_handle"),
+    (
+        ("direct_prompt", "cause_1"),
+        ("conversation_context", "cause_1"),
+        ("conversation_context", "cause_2"),
+        ("indirect_content", "cause_1"),
+        ("indirect_content", "cause_3"),
+    ),
+)
+def test_stage5_accepts_delivery_routes_that_can_exercise_selected_factor(
+    delivery_class: str,
+    factor_handle: str,
+) -> None:
+    route = ExecutableRouteSelection(
+        delivery_class=delivery_class,
+        selected_factor_handle=factor_handle,
+        action_kind="model_output",
+        resource_role_handles=(
+            ("role_stimulus_carrier",) if delivery_class == "indirect_content" else ()
+        ),
+        carrier_attacker_influence=(
+            "indirect" if delivery_class == "indirect_content" else "none"
+        ),
+        reason="The delivery reaches the selected factor.",
+    )
+
+    _validate_delivery_factor_fidelity(route, _context())
+
+
+@pytest.mark.parametrize(
+    ("delivery_class", "factor_handle"),
+    (
+        ("direct_prompt", "cause_2"),
+        ("direct_prompt", "cause_3"),
+        ("direct_prompt", "cause_4"),
+        ("conversation_context", "cause_3"),
+        ("conversation_context", "cause_4"),
+        ("indirect_content", "cause_2"),
+        ("indirect_content", "cause_4"),
+    ),
+)
+def test_stage5_rejects_delivery_routes_that_cannot_exercise_selected_factor(
+    delivery_class: str,
+    factor_handle: str,
+) -> None:
+    route = ExecutableRouteSelection(
+        delivery_class=delivery_class,
+        selected_factor_handle=factor_handle,
+        action_kind="model_output",
+        resource_role_handles=(
+            ("role_stimulus_carrier",) if delivery_class == "indirect_content" else ()
+        ),
+        carrier_attacker_influence=(
+            "indirect" if delivery_class == "indirect_content" else "none"
+        ),
+        reason="The delivery does not reach the selected factor.",
+    )
+
+    with pytest.raises(ValueError, match="cannot exercise selected factor kind"):
+        _validate_delivery_factor_fidelity(route, _context())
+
+
+def test_stage5_requires_literal_semantic_proposition_for_model_output() -> None:
+    route = ExecutableRouteSelection(
+        delivery_class="direct_prompt",
+        selected_factor_handle="cause_1",
+        action_kind="model_output",
+        reason="The user prompt exercises the process-model flaw.",
+    )
+    outcome = UnsafeOutcomeDeclaration(
+        condition=ActionValueCondition(
+            control_action_id="CA-1-1",
+            property="reveals_restricted_information",
+            operator="equals",
+            expected=SemanticBindingPlaceholder(
+                binding_ref="SEM-outcome-value",
+                value_type="string",
+                description="The selected action value for this deployment.",
+            ),
+        )
+    )
+
+    with pytest.raises(ValueError, match="literal semantic proposition"):
+        _validate_model_output_outcome(route, outcome)
+
+    literal = outcome.model_copy(
+        update={
+            "condition": ActionValueCondition(
+                control_action_id="CA-1-1",
+                property="reveals_restricted_information",
+                operator="equals",
+                expected=True,
+            )
+        }
+    )
+    _validate_model_output_outcome(route, literal)
 
 
 def _coordination_control_structure() -> ControlStructure:

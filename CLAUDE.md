@@ -155,7 +155,12 @@ changing acceptance behavior, or running the quality sequence.
   Stage 5 also selects exactly one explained delivery route; deterministic
   assembly materializes its contract and classification. A missing route is a
   provider failure, while explicit `analytical_only` remains outside
-  compilation. Render Stage 5 from an actionable prompt view: include plain
+  compilation. Require the delivery class to fit the selected causal category:
+  direct prompt to a process-model flaw, conversation context to a
+  process-model flaw or feedback delay, and indirect content to a process-model
+  flaw or sensor anomaly. Model-output value conditions are literal semantic
+  propositions for a downstream response judge, not unknown whole-response
+  string placeholders. Render Stage 5 from an actionable prompt view: include plain
   semantic facts and only references that a named response field copies;
   retain digests, source pins, catalog labels, and bookkeeping identities in
   deterministic code. Derive `semantic_binding_required` from typed

@@ -525,6 +525,15 @@ handles; deterministic assembly resolves them to the fixed STPA identities and
 resource-requirement templates. It does not ask the model to label a result
 concrete or executable.
 
+Delivery/factor fidelity is a closed structural check. Direct prompt accepts a
+selected process-model flaw; conversation context accepts a process-model flaw
+or feedback delay; and indirect content accepts a process-model flaw or sensor
+anomaly. A different pairing receives the existing bounded Stage 5 correction
+attempt and is not published as an executable route. Model-output value
+conditions are semantic propositions with literal expected values rather than
+unknown complete-response strings; the consumer may evaluate them with a
+semantic response judge.
+
 The historical `generate_bdi` entry point is a compatibility-only adapter for
 direct callers. It accepts BDI content but rejects compiler-owned execution
 routes and contracts; normal Stage 5 must use `generate_bdi_for_context`, which

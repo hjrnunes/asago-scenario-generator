@@ -40,6 +40,8 @@ from asago_scenario_generator.stpa.models.causal_factor import (
     validate_factor_sources,
 )
 from asago_scenario_generator.stpa.models.semantic_conditions import (
+    ActionValueCondition,
+    SemanticBindingPlaceholder,
     SemanticCondition,
     StateValueCondition,
     contains_binding_placeholder,
@@ -1161,10 +1163,71 @@ def _validate_execution_route(
         _validate_analytical_route_gaps(route, declared_handles)
         return
     _validate_selected_factor_handle(route, declared_handles)
+    _validate_delivery_factor_fidelity(route, context)
+    _validate_model_output_outcome(route, unsafe_outcome)
     role_handles = set(route.resource_role_handles)
     _validate_route_role_names(role_handles)
     _validate_route_state_role(role_handles, unsafe_outcome)
     _validate_route_required_roles(route, role_handles, context, unsafe_outcome)
+
+
+_DELIVERY_FACTOR_KINDS = {
+    ExecutionDeliveryClass.direct_prompt: frozenset(
+        {CausalFactorKind.process_model_flaw}
+    ),
+    ExecutionDeliveryClass.conversation_context: frozenset(
+        {
+            CausalFactorKind.process_model_flaw,
+            CausalFactorKind.feedback_delay,
+        }
+    ),
+    ExecutionDeliveryClass.indirect_content: frozenset(
+        {
+            CausalFactorKind.process_model_flaw,
+            CausalFactorKind.sensor_anomaly,
+        }
+    ),
+}
+
+
+def _validate_delivery_factor_fidelity(
+    route: ExecutableRouteSelection,
+    context: ScenarioGenerationContext,
+) -> None:
+    """Require the chosen stimulus route to exercise its selected factor."""
+    kinds = {choice.handle: choice.kind for choice in _causal_source_choices(context)}
+    selected_kind = kinds.get(route.selected_factor_handle)
+    if selected_kind in _DELIVERY_FACTOR_KINDS[route.delivery_class]:
+        return
+    allowed = ", ".join(
+        item.value
+        for item in sorted(
+            _DELIVERY_FACTOR_KINDS[route.delivery_class], key=lambda item: item.value
+        )
+    )
+    actual = selected_kind.value if selected_kind is not None else "unknown"
+    raise ValueError(
+        f"{route.delivery_class.value} cannot exercise selected factor kind "
+        f"{actual}; choose one of [{allowed}] or an analytical route"
+    )
+
+
+def _validate_model_output_outcome(
+    route: ExecutableRouteSelection,
+    unsafe_outcome: _ContextUnsafeOutcomeDraft | UnsafeOutcomeDeclaration,
+) -> None:
+    """Keep model-output judgments semantic instead of deployment-string bound."""
+    condition = unsafe_outcome.condition
+    if (
+        route.action_kind is ExecutionActionKind.model_output
+        and isinstance(condition, ActionValueCondition)
+        and isinstance(condition.expected, SemanticBindingPlaceholder)
+    ):
+        raise ValueError(
+            "model_output action_value must use a literal semantic proposition; "
+            "use a specific property such as reveals_restricted_information with "
+            "expected true instead of a deployment value placeholder"
+        )
 
 
 def _declared_causal_handles(factor_drafts: Sequence[BaseModel]) -> set[str]:

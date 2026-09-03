@@ -115,7 +115,12 @@ Stage 5 fixes one execution route for each scenario: a direct prompt, content
 carried indirectly into the model, or a conversation context. It also fixes
 the causal factor, action kind, logical domain resources, and observable unsafe
 outcome. The model may choose among the explained route choices, but
-deterministic code resolves the choices and owns the scenario's meaning.
+deterministic code resolves the choices and owns the scenario's meaning. The
+selected factor must also fit the route: direct prompts exercise a
+process-model flaw, conversation history may exercise a process-model flaw or
+feedback delay, and indirect content may exercise a process-model flaw or
+sensor anomaly. This prevents a direct prompt from being used as a default for
+an unrelated internal timing or actuator failure.
 
 The producer then classifies the result. `concrete` means no domain resource is
 needed or every required resource is already resolved. `parameterized` means
@@ -134,12 +139,14 @@ integration.
 No profile is a valid mode and produces target-agnostic or parameterized
 scenarios as appropriate.
 
-The artifact generator receives the published scenario and an explicitly
-selected profile later. It creates one bound execution case by matching the
-producer's logical requirements to exact resources, then handles runtime
-readiness and platform compilation. It may not change the delivery route,
-causal factor, operation, action, or oracle. An analytical-only case stops
-before compilation; a parameterized case remains pending until it is bound.
+The artifact generator receives the published scenario and, when the contract
+needs environment resources, an explicitly selected profile. It creates one
+bound execution case by matching the producer's logical requirements to exact
+resources, then handles runtime readiness and platform compilation.
+Target-agnostic model conversations need no profile. The consumer may not
+change the delivery route, causal factor, operation, action, or oracle. An
+analytical-only case stops before compilation; a parameterized case remains
+pending until it is bound.
 
 At model boundaries, code retains control of structural identity. The ICA
 provider returns one short deviation clause and code applies the supplied slot's
@@ -154,7 +161,11 @@ serialized context artifact: integrity hashes, source pins, catalog labels,
 and bookkeeping identities stay in deterministic code, while every remaining
 reference is defined and tied to an output field. Placeholder presence, and
 therefore `semantic_binding_required`, is also derived after the provider
-response rather than requested from the model. A scenario may describe an
+response rather than requested from the model. For model-output `action_value`
+cases, Stage 5 supplies an observable semantic proposition such as
+`reveals_restricted_information equals true`; it does not defer an unknown
+whole response as a string placeholder. Deployment-specific tool values and
+timing thresholds remain typed placeholders. A scenario may describe an
 adversary taking advantage of an
 existing STPA failure even when no separate attacker capability was
 enumerated. Exact capability and access-path claims remain structured

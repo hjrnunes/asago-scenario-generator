@@ -14,11 +14,14 @@ from runtime_shared import (
 )
 
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
+    build_context_bdi_prompts,
     generate_bdi_for_context,
 )
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
 )
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from tests.stpa.sp1_helpers import MockLLMClient
 
 
@@ -133,6 +136,65 @@ def _h_analytical(world: World, text: str, examples: dict) -> tuple[bool, str]:
     return True, ""
 
 
+def _h_direct_feedback(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Prepare a structurally valid factor with an incompatible delivery."""
+    match = re.search(r'feedback factor "([^"]+)"$', text)
+    if match is None:
+        return False, f"Could not parse feedback factor: {text}"
+    handle = match.group(1)
+    payload = _route_payload(
+        {
+            "disposition": "executable_route",
+            "delivery_class": "direct_prompt",
+            "selected_factor_handle": handle,
+            "action_kind": "model_output",
+            "resource_role_handles": [],
+            "carrier_attacker_influence": "none",
+            "reason": "The provider incorrectly treats feedback as direct input.",
+        }
+    )
+    payload["causal_factors"][0]["source_handle"] = handle
+    payload["attacker_bdi"]["intentions"][0]["source_handles"] = [handle]
+    world.route_payload = payload
+    return True, ""
+
+
+def _h_render_prompt(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Render the exact contextual prompt used at the provider boundary."""
+    del text, examples
+    loader = TemplateLoader(PROMPTS_DIR)
+    world.route_prompts = build_context_bdi_prompts(world.route_context, loader)
+    return True, ""
+
+
+def _h_semantic_proposition(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text, examples
+    rendered = "\n".join(world.route_prompts)
+    required = (
+        "semantic proposition",
+        "reveals_restricted_information equals true",
+        "Do not use a string placeholder",
+        "the whole response",
+    )
+    missing = [item for item in required if item not in rendered]
+    return (not missing, f"prompt is missing: {missing}")
+
+
+def _h_route_table(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del text, examples
+    rendered = "\n".join(world.route_prompts)
+    required = (
+        "direct_prompt",
+        "PROCESS_MODEL_FLAW",
+        "FEEDBACK_DELAY",
+        "SENSOR_ANOMALY",
+    )
+    missing = [item for item in required if item not in rendered]
+    return (not missing, f"prompt is missing route guidance: {missing}")
+
+
 def _h_materialize(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Run corrected Stage 5 against the request-local fixture."""
     client = MockLLMClient()
@@ -141,7 +203,7 @@ def _h_materialize(world: World, text: str, examples: dict) -> tuple[bool, str]:
         payload.pop("execution_route")
         client.set_response_queue([payload, payload])
     else:
-        client.set_response_queue([world.route_payload])
+        client.set_response_queue([world.route_payload, world.route_payload])
     world.route_result, world.route_error = generate_bdi_for_context(
         client,
         world.route_context,
@@ -203,6 +265,16 @@ def _h_failure(world: World, text: str, examples: dict) -> tuple[bool, str]:
     )
 
 
+def _h_fidelity_failure(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del text, examples
+    error = getattr(world, "route_error", "") or ""
+    return (
+        getattr(world, "route_result", None) is None
+        and "cannot exercise selected factor kind" in error,
+        f"expected delivery/factor failure, got {error!r}",
+    )
+
+
 def register(api: object) -> None:
     """Register route-selection acceptance steps."""
     api.register(r"^a corrected Stage 5 route context is available$", _h_context)
@@ -212,6 +284,10 @@ def register(api: object) -> None:
     )
     api.register(
         r"^the provider selects an explicit analytical-only route$", _h_analytical
+    )
+    api.register(
+        r'^the provider selects direct prompt for feedback factor "[^"]+"$',
+        _h_direct_feedback,
     )
     api.register(r"^corrected Stage 5 materializes the route$", _h_materialize)
     api.register(
@@ -226,6 +302,19 @@ def register(api: object) -> None:
     api.register(r"^the provider response omits execution_route$", _h_missing_route)
     api.register(
         r"^the materialization fails with an execution route error$", _h_failure
+    )
+    api.register(
+        r"^materialization says the delivery cannot exercise the selected factor$",
+        _h_fidelity_failure,
+    )
+    api.register(r"^the corrected Stage 5 route prompt is rendered$", _h_render_prompt)
+    api.register(
+        r"^it requires a literal semantic proposition for model output$",
+        _h_semantic_proposition,
+    )
+    api.register(
+        r"^it explains the delivery and causal-factor compatibility table$",
+        _h_route_table,
     )
 
 
