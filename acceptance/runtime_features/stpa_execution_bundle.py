@@ -28,6 +28,13 @@ from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralT
 from asago_scenario_generator.stpa.models.execution_projection_v2 import (
     ExecutionRunIdentity,
 )
+from asago_scenario_generator.stpa.models.execution_classification import (
+    ExecutionActionKind,
+    ExecutionDeliveryClass,
+    RequestedEnvironmentBasis,
+    SemanticExecutionContract,
+    SemanticExecutionDelivery,
+)
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.loss_analysis import (
     Hazard,
@@ -200,6 +207,15 @@ def _spec(*, placeholder: bool, with_outcome: bool = True) -> ScenarioSpec:
         unsafe_outcome_hazard_refs=["H-1"],
         unsafe_outcome_constraint_refs=["SC-1"],
         scenario_context=context,
+        execution_contract=SemanticExecutionContract(
+            requested_environment_basis=RequestedEnvironmentBasis.target_agnostic,
+            delivery=SemanticExecutionDelivery(
+                delivery_class=ExecutionDeliveryClass.direct_prompt,
+                factor_id="CF-1",
+                source_role="direct_user_input",
+            ),
+            action_kind=ExecutionActionKind.model_output,
+        ),
     )
 
 

@@ -2341,37 +2341,59 @@ def _make_sp3_envelope(
 def _setup_sp3_mock_client(num_threats: int = 2):
     """Set up a mock LLM client with valid SP3 responses."""
     from tests.stpa.sp1_helpers import MockLLMClient
-    from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-        BDIGenerationResult,
-        UnsafeOutcomeDeclaration,
-    )
-    from asago_scenario_generator.stpa.models.semantic_conditions import (
-        ActionPresenceCondition,
-    )
     import json
 
     client = MockLLMClient()
     bdi_responses = []
     for i in range(num_threats):
         bdi_responses.append(
-            BDIGenerationResult(
-                defender_vulnerabilities={
-                    "PM-1-1": f"vulnerability {i + 1}",
-                    "PM-1-2": f"vuln {i + 1}",
+            {
+                "defender_vulnerabilities": [
+                    {
+                        "belief_handle": "belief_1",
+                        "vulnerability": f"vulnerability {i + 1}",
+                    },
+                    {
+                        "belief_handle": "belief_2",
+                        "vulnerability": f"vuln {i + 1}",
+                    },
+                ],
+                "attacker_bdi": {
+                    "beliefs": [f"attacker belief {i + 1}"],
+                    "desires": ["induce ICA"],
+                    "intentions": [
+                        {
+                            "description": "PM-1-1 remains stale before CA-1-1",
+                            "source_handles": ["cause_1"],
+                        }
+                    ],
                 },
-                attacker_bdi=AttackerBDI(
-                    beliefs=[f"attacker belief {i + 1}"],
-                    desires=["induce ICA"],
-                    intentions=["PM-1-1 remains stale before CA-1-1"],
-                ),
-                causal_factors=_make_sp3_causal_factors(),
-                unsafe_outcome=UnsafeOutcomeDeclaration(
-                    condition=ActionPresenceCondition(
-                        control_action_id="CA-1-1",
-                        expected="not_provided",
-                    )
-                ),
-            )
+                "causal_factors": [
+                    {
+                        "source_handle": "cause_1",
+                        "evidence": "The selected structural state can remain stale.",
+                        "temporal_condition": None,
+                    }
+                ],
+                "unsafe_outcome": {
+                    "condition": {
+                        "type": "action_presence",
+                        "control_action_id": "CA-1-1",
+                        "expected": "not_provided",
+                    },
+                    "hazard_refs": [],
+                    "constraint_refs": [],
+                },
+                "execution_route": {
+                    "disposition": "executable_route",
+                    "delivery_class": "direct_prompt",
+                    "selected_factor_handle": "cause_1",
+                    "action_kind": "model_output",
+                    "resource_role_handles": [],
+                    "carrier_attacker_influence": "none",
+                    "reason": "The selected structural factor supports the direct route.",
+                },
+            }
         )
     stage6_responses = []
     for i in range(num_threats):

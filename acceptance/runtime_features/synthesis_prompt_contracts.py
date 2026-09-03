@@ -1258,9 +1258,17 @@ def _h_stage5_local_causal_handle(
                         "operator": "equals",
                         "expected": "approved",
                     },
-                    "semantic_binding_required": False,
                     "hazard_refs": ["H-1"],
                     "constraint_refs": ["SC-1"],
+                },
+                "execution_route": {
+                    "disposition": "executable_route",
+                    "delivery_class": "direct_prompt",
+                    "selected_factor_handle": "cause_1",
+                    "action_kind": "model_output",
+                    "resource_role_handles": [],
+                    "carrier_attacker_influence": "none",
+                    "reason": "The selected shared state explains the direct route.",
                 },
             }
         ]

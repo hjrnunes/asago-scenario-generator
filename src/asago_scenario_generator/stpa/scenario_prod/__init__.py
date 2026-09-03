@@ -10,6 +10,7 @@ from .execution_bundle import (
     ExecutionBundlePublication,
     ExecutionBundlePublicationError,
     publish_execution_bundle,
+    publish_execution_target_profile,
     read_execution_bundle,
     verify_execution_bundle,
 )
@@ -20,6 +21,7 @@ from .execution_projection import (
     prepare_execution_projection,
     validate_execution_projection,
 )
+from .execution_classification import classify_scenario_execution
 
 __all__ = [
     "ExecutionBundlePublication",
@@ -29,7 +31,9 @@ __all__ = [
     "parse_execution_projection",
     "prepare_execution_projection",
     "publish_execution_bundle",
+    "publish_execution_target_profile",
     "read_execution_bundle",
     "validate_execution_projection",
     "verify_execution_bundle",
+    "classify_scenario_execution",
 ]

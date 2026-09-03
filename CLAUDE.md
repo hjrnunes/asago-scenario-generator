@@ -37,9 +37,17 @@ Both seams require the explicit run identity and intact source pins; unknown
 semantic values are typed binding placeholders, and their presence derives
 `semantic_binding_required`. The v2 projection and v1 bundle contract kit in
 `data/contracts/stpa-execution/` is producer-owned; consumers vendor it
-byte-for-byte. Projections carry platform-neutral adversarial stimulus intent
-and eligible causal-factor IDs; consumers own the reviewed concrete delivery
-surface and must never pre-author the target response. Bundle publication is preflighted and atomic with the canonical
+byte-for-byte. Stage 5 fixes one delivery route, selected causal factor, action,
+logical domain-resource requirements, and observable unsafe outcome. The
+producer deterministically classifies binding completeness as `concrete`,
+`parameterized`, or `analytical_only`, independently of
+`target_agnostic`, `target_profile`, `simulation_profile`, or `none` basis.
+The artifact generator later binds parameterized requirements to an explicitly
+supplied target or simulation profile; it may add runtime details but cannot
+change the route's meaning. `run` accepts optional
+`--execution-target-profile` and `--requested-environment-basis` inputs.
+Profiles contain semantic resource facts only: no URLs, credentials, or
+secrets. Bundle publication is preflighted and atomic with the canonical
 JSON index replaced last; updates use immutable content-addressed generations
 so the live index never points at bytes being replaced. Historical v1 projection validation remains
 read-only and must not grow execution or persistence dependencies.
@@ -144,6 +152,14 @@ changing acceptance behavior, or running the quality sequence.
   explained request-local causal handles, which the compiler binds to fixed
   PM/FB/CA sources and kinds, and return exactly one vulnerability for every
   compiler-owned local defender-belief handle. Coordination, controller,
+  Stage 5 also selects exactly one explained delivery route; deterministic
+  assembly materializes its contract and classification. A missing route is a
+  provider failure, while explicit `analytical_only` remains outside
+  compilation. Render Stage 5 from an actionable prompt view: include plain
+  semantic facts and only references that a named response field copies;
+  retain digests, source pins, catalog labels, and bookkeeping identities in
+  deterministic code. Derive `semantic_binding_required` from typed
+  placeholder presence after the provider response.
   controlled-process, and local-handle identities must never be published as
   causal sources, and every intention handle must have an explicit
   causal-factor declaration. Validate capability and access-path claims from

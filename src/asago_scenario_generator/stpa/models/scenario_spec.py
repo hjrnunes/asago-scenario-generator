@@ -23,6 +23,9 @@ from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
 )
 from asago_scenario_generator.stpa.models.semantic_conditions import SemanticCondition
+from asago_scenario_generator.stpa.models.execution_classification import (
+    SemanticExecutionContract,
+)
 
 if TYPE_CHECKING:
     from asago_scenario_generator.stpa.models.control_structure import ControlStructure
@@ -98,6 +101,10 @@ class ScenarioSpec(BaseModel):
     unsafe_outcome_hazard_refs: list[str] = Field(default_factory=list)
     unsafe_outcome_constraint_refs: list[str] = Field(default_factory=list)
     scenario_context: ScenarioGenerationContext | None = None
+    # Corrected Stage 5 route selected from request-local handles.  A missing
+    # value is retained for historical/non-contextual values but cannot be
+    # published through the v2 execution projection seam.
+    execution_contract: SemanticExecutionContract | None = None
 
     @model_validator(mode="after")
     def preserve_scenario_context_authority(self) -> "ScenarioSpec":

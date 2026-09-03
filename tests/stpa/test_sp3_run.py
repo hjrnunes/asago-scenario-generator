@@ -31,17 +31,18 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
 )
 from asago_scenario_generator.stpa.models.scenario_envelope import ScenarioEnvelope
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-    BDIGenerationResult,
-    CausalFactorDeclaration,
-    UnsafeOutcomeDeclaration,
+    _context_bdi_provider_payload_type,
 )
 from asago_scenario_generator.stpa.scenario_prod.execution_bundle import (
     verify_execution_bundle,
 )
-from asago_scenario_generator.stpa.models.semantic_conditions import (
-    ActionPresenceCondition,
+from asago_scenario_generator.stpa.models.execution_classification import (
+    ExecutionActionKind,
+    ExecutionDeliveryClass,
+    RequestedEnvironmentBasis,
+    SemanticExecutionContract,
+    SemanticExecutionDelivery,
 )
-from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
 from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
 
 from tests.stpa.sp1_helpers import MockLLMClient, read_calls_jsonl
@@ -133,6 +134,25 @@ def _make_ets(num_threats: int = 2) -> EnrichedThreatSet:
     )
 
 
+def _direct_execution_contract() -> SemanticExecutionContract:
+    """Return the explicit target-agnostic route used by test Stage 5 calls."""
+    return SemanticExecutionContract(
+        requested_environment_basis=RequestedEnvironmentBasis.target_agnostic,
+        delivery=SemanticExecutionDelivery(
+            delivery_class=ExecutionDeliveryClass.direct_prompt,
+            factor_id="CF-1",
+            source_role="direct_user_input",
+        ),
+        action_kind=ExecutionActionKind.model_output,
+    )
+
+
+def _is_stage5_response_format(response_format: type | None) -> bool:
+    """Identify the contextual Stage 5 contract by its required fields."""
+    fields = getattr(response_format, "model_fields", {})
+    return "execution_route" in fields and "unsafe_outcome" in fields
+
+
 def _setup_mock_client(num_threats: int = 2) -> MockLLMClient:
     """Set up a mock LLM client with valid SP3 responses."""
     client = MockLLMClient()
@@ -141,30 +161,49 @@ def _setup_mock_client(num_threats: int = 2) -> MockLLMClient:
     bdi_responses = []
     for i in range(num_threats):
         bdi_responses.append(
-            BDIGenerationResult(
-                defender_vulnerabilities={"PM-1-1": f"vulnerability {i + 1}"},
-                causal_factors=[
-                    CausalFactorDeclaration(
-                        kind=CausalFactorKind.process_model_flaw,
-                        source_id="PM-1-1",
-                        evidence=f"The selected state can be stale ({i + 1}).",
-                    )
+            {
+                "defender_vulnerabilities": [
+                    {
+                        "belief_handle": "belief_1",
+                        "vulnerability": f"vulnerability {i + 1}",
+                    }
                 ],
-                unsafe_outcome=UnsafeOutcomeDeclaration(
-                    condition=ActionPresenceCondition(control_action_id="CA-1-1"),
-                    semantic_binding_required=False,
-                    hazard_refs=["H-1"],
-                    constraint_refs=["SC-1"],
-                ),
-                attacker_bdi=__import__(
-                    "asago_scenario_generator.stpa.models.scenario_spec",
-                    fromlist=["AttackerBDI"],
-                ).AttackerBDI(
-                    beliefs=[f"attacker belief {i + 1}"],
-                    desires=["induce ICA"],
-                    intentions=["Exploit stale PM-1-1 state before CA-1-1."],
-                ),
-            )
+                "attacker_bdi": {
+                    "beliefs": [f"attacker belief {i + 1}"],
+                    "desires": ["induce ICA"],
+                    "intentions": [
+                        {
+                            "description": "Exploit stale PM-1-1 state before CA-1-1.",
+                            "source_handles": ["cause_1"],
+                        }
+                    ],
+                },
+                "causal_factors": [
+                    {
+                        "source_handle": "cause_1",
+                        "evidence": f"The selected state can be stale ({i + 1}).",
+                        "temporal_condition": None,
+                    }
+                ],
+                "unsafe_outcome": {
+                    "condition": {
+                        "type": "action_presence",
+                        "control_action_id": "CA-1-1",
+                        "expected": "not_provided",
+                    },
+                    "hazard_refs": ["H-1"],
+                    "constraint_refs": ["SC-1"],
+                },
+                "execution_route": {
+                    "disposition": "executable_route",
+                    "delivery_class": "direct_prompt",
+                    "selected_factor_handle": "cause_1",
+                    "action_kind": "model_output",
+                    "resource_role_handles": [],
+                    "carrier_attacker_influence": "none",
+                    "reason": "The selected structural factor supports the direct route.",
+                },
+            }
         )
 
     # Stage 6 responses — 3 per scenario (narrative, attack_tree, gherkin)
@@ -262,18 +301,17 @@ class TestFullRun:
         stage5 = [
             call
             for call in client.calls
-            if call.response_format is not None
-            and issubclass(call.response_format, BDIGenerationResult)
+            if _is_stage5_response_format(call.response_format)
         ]
         stage6 = [
             call
             for call in client.calls
-            if call.response_format is None
-            or not issubclass(call.response_format, BDIGenerationResult)
+            if not _is_stage5_response_format(call.response_format)
         ]
         assert len(stage5) == 1
         assert len(stage6) == 3
-        assert context.context_digest in stage5[0].user_prompt
+        assert context.context_digest not in stage5[0].user_prompt
+        assert "source_pins" not in stage5[0].user_prompt
         assert all(context.context_digest in call.user_prompt for call in stage6)
         persisted = yaml.safe_load(
             (run_dir / "scenarios/SCN-001.yaml").read_text(encoding="utf-8")
@@ -657,7 +695,7 @@ class TestErrorPaths:
         ets = _make_ets(num_threats=3)
         client = MockLLMClient()
         client.set_exception_for(
-            BDIGenerationResult,
+            _context_bdi_provider_payload_type(4, 1),
             LengthFinishReasonError("structured response reached its length limit"),
         )
 
@@ -684,30 +722,46 @@ class TestErrorPaths:
         client = MockLLMClient()
 
         # Stage 5 BDI response
-        bdi = BDIGenerationResult(
-            defender_vulnerabilities={"PM-1-1": "vuln"},
-            causal_factors=[
-                CausalFactorDeclaration(
-                    kind=CausalFactorKind.process_model_flaw,
-                    source_id="PM-1-1",
-                    evidence="The selected state can be stale.",
-                )
+        bdi = {
+            "defender_vulnerabilities": [
+                {"belief_handle": "belief_1", "vulnerability": "vuln"}
             ],
-            unsafe_outcome=UnsafeOutcomeDeclaration(
-                condition=ActionPresenceCondition(control_action_id="CA-1-1"),
-                semantic_binding_required=False,
-                hazard_refs=["H-1"],
-                constraint_refs=["SC-1"],
-            ),
-            attacker_bdi=__import__(
-                "asago_scenario_generator.stpa.models.scenario_spec",
-                fromlist=["AttackerBDI"],
-            ).AttackerBDI(
-                beliefs=["b"],
-                desires=["d"],
-                intentions=["Rely on stale PM-1-1 state."],
-            ),
-        )
+            "attacker_bdi": {
+                "beliefs": ["b"],
+                "desires": ["d"],
+                "intentions": [
+                    {
+                        "description": "Rely on stale PM-1-1 state.",
+                        "source_handles": ["cause_1"],
+                    }
+                ],
+            },
+            "causal_factors": [
+                {
+                    "source_handle": "cause_1",
+                    "evidence": "The selected state can be stale.",
+                    "temporal_condition": None,
+                }
+            ],
+            "unsafe_outcome": {
+                "condition": {
+                    "type": "action_presence",
+                    "control_action_id": "CA-1-1",
+                    "expected": "not_provided",
+                },
+                "hazard_refs": ["H-1"],
+                "constraint_refs": ["SC-1"],
+            },
+            "execution_route": {
+                "disposition": "executable_route",
+                "delivery_class": "direct_prompt",
+                "selected_factor_handle": "cause_1",
+                "action_kind": "model_output",
+                "resource_role_handles": [],
+                "carrier_attacker_influence": "none",
+                "reason": "The selected structural factor supports the direct route.",
+            },
+        }
         client.set_response_queue([bdi])
 
         # Stage 6: all three calls raise
@@ -732,30 +786,46 @@ class TestErrorPaths:
         client = MockLLMClient()
         client.set_response_queue(
             [
-                BDIGenerationResult(
-                    defender_vulnerabilities={"PM-1-1": "vuln"},
-                    causal_factors=[
-                        CausalFactorDeclaration(
-                            kind=CausalFactorKind.process_model_flaw,
-                            source_id="PM-1-1",
-                            evidence="The selected state can be stale.",
-                        )
+                {
+                    "defender_vulnerabilities": [
+                        {"belief_handle": "belief_1", "vulnerability": "vuln"}
                     ],
-                    unsafe_outcome=UnsafeOutcomeDeclaration(
-                        condition=ActionPresenceCondition(control_action_id="CA-1-1"),
-                        semantic_binding_required=False,
-                        hazard_refs=["H-1"],
-                        constraint_refs=["SC-1"],
-                    ),
-                    attacker_bdi=__import__(
-                        "asago_scenario_generator.stpa.models.scenario_spec",
-                        fromlist=["AttackerBDI"],
-                    ).AttackerBDI(
-                        beliefs=["b"],
-                        desires=["d"],
-                        intentions=["No structural reference is supplied."],
-                    ),
-                )
+                    "attacker_bdi": {
+                        "beliefs": ["b"],
+                        "desires": ["d"],
+                        "intentions": [
+                            {
+                                "description": "No structural reference is supplied.",
+                                "source_handles": ["cause_2"],
+                            }
+                        ],
+                    },
+                    "causal_factors": [
+                        {
+                            "source_handle": "cause_1",
+                            "evidence": "The selected state can be stale.",
+                            "temporal_condition": None,
+                        }
+                    ],
+                    "unsafe_outcome": {
+                        "condition": {
+                            "type": "action_presence",
+                            "control_action_id": "CA-1-1",
+                            "expected": "not_provided",
+                        },
+                        "hazard_refs": ["H-1"],
+                        "constraint_refs": ["SC-1"],
+                    },
+                    "execution_route": {
+                        "disposition": "executable_route",
+                        "delivery_class": "direct_prompt",
+                        "selected_factor_handle": "cause_1",
+                        "action_kind": "model_output",
+                        "resource_role_handles": [],
+                        "carrier_attacker_influence": "none",
+                        "reason": "The selected structural factor supports the direct route.",
+                    },
+                }
             ]
         )
 
@@ -770,7 +840,9 @@ class TestErrorPaths:
 
         assert result.scenario_envelopes == []
         assert client.call_count == 1
-        assert any("Attacker BDI" in error for error in result.stage_errors)
+        assert any(
+            "Stage 5 BDI generation failed" in error for error in result.stage_errors
+        )
 
     def test_malformed_gherkin_gets_one_schema_correction(self):
         """The contextual Gherkin call repairs malformed structured output once."""
@@ -780,30 +852,46 @@ class TestErrorPaths:
         client = MockLLMClient()
         client.set_response_queue(
             [
-                BDIGenerationResult(
-                    defender_vulnerabilities={"PM-1-1": "vuln"},
-                    causal_factors=[
-                        CausalFactorDeclaration(
-                            kind=CausalFactorKind.process_model_flaw,
-                            source_id="PM-1-1",
-                            evidence="The selected state can be stale.",
-                        )
+                {
+                    "defender_vulnerabilities": [
+                        {"belief_handle": "belief_1", "vulnerability": "vuln"}
                     ],
-                    unsafe_outcome=UnsafeOutcomeDeclaration(
-                        condition=ActionPresenceCondition(control_action_id="CA-1-1"),
-                        semantic_binding_required=False,
-                        hazard_refs=["H-1"],
-                        constraint_refs=["SC-1"],
-                    ),
-                    attacker_bdi=__import__(
-                        "asago_scenario_generator.stpa.models.scenario_spec",
-                        fromlist=["AttackerBDI"],
-                    ).AttackerBDI(
-                        beliefs=["b"],
-                        desires=["d"],
-                        intentions=["Rely on stale PM-1-1 state."],
-                    ),
-                ),
+                    "attacker_bdi": {
+                        "beliefs": ["b"],
+                        "desires": ["d"],
+                        "intentions": [
+                            {
+                                "description": "Rely on stale PM-1-1 state.",
+                                "source_handles": ["cause_1"],
+                            }
+                        ],
+                    },
+                    "causal_factors": [
+                        {
+                            "source_handle": "cause_1",
+                            "evidence": "The selected state can be stale.",
+                            "temporal_condition": None,
+                        }
+                    ],
+                    "unsafe_outcome": {
+                        "condition": {
+                            "type": "action_presence",
+                            "control_action_id": "CA-1-1",
+                            "expected": "not_provided",
+                        },
+                        "hazard_refs": ["H-1"],
+                        "constraint_refs": ["SC-1"],
+                    },
+                    "execution_route": {
+                        "disposition": "executable_route",
+                        "delivery_class": "direct_prompt",
+                        "selected_factor_handle": "cause_1",
+                        "action_kind": "model_output",
+                        "resource_role_handles": [],
+                        "carrier_attacker_influence": "none",
+                        "reason": "The selected structural factor supports the direct route.",
+                    },
+                },
                 "A seven-step narrative retaining PM-1-1 and CA-1-1.",
                 '{"root":"Induce ICA NOT_PROVIDED on CA-1-1","branches":'
                 '[{"category":"controller_side","label":"PM-1-1",'

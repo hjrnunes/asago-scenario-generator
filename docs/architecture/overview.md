@@ -515,6 +515,56 @@ losses and hazards, the control structure, unsafe control actions, causal
 factors, scenarios, evaluation, and reporting artifacts; only `run` is the
 normal product workflow.
 
+### Execution classification and target profiles
+
+Stage 5 fixes one semantic execution route per scenario: `direct_prompt`,
+`indirect_content`, or `conversation_context`. The route includes the selected
+causal factor, action kind, logical domain-resource requirements, and the
+observable unsafe outcome. The model selects only explained request-local
+handles; deterministic assembly resolves them to the fixed STPA identities and
+resource-requirement templates. It does not ask the model to label a result
+concrete or executable.
+
+The historical `generate_bdi` entry point is a compatibility-only adapter for
+direct callers. It accepts BDI content but rejects compiler-owned execution
+routes and contracts; normal Stage 5 must use `generate_bdi_for_context`, which
+validates local handles and materializes the semantic execution contract.
+Its provider prompt is a purpose-built view of the immutable context, not a
+serialization of that artifact. It omits digests, source pins, scenario/ICA
+bookkeeping identities, raw causal-source IDs, and catalog labels. Exact target
+action, hazard, constraint, capability, and access references remain only when
+the response has a named field that copies them, with their meanings stated in
+the prompt. Deterministic assembly derives `semantic_binding_required` from
+typed placeholder presence; the provider cannot declare that redundant flag.
+
+The producer classifies binding completeness as `concrete`, `parameterized`, or
+`analytical_only`, independently of the environment basis
+(`target_agnostic`, `target_profile`, `simulation_profile`, or `none`). A
+target-agnostic direct or conversation case can be concrete without a profile.
+An indirect or external-action route with complete semantics but unresolved
+resources is parameterized. Missing route meaning or an observable oracle is
+analytical-only and cannot reach compilation. Only domain resources influence
+this classification; chat surfaces, clocks, observers, locators, credentials,
+and endpoint details remain runtime-readiness concerns.
+
+`run` may receive `--execution-target-profile` and an explicit
+`--requested-environment-basis`. The profile is a reviewed, content-addressed
+semantic inventory with no secrets or live connection details. A simulation
+profile is selected explicitly and supplies a complete mock contract; the
+producer never invents one from missing target information. With no profile,
+the producer retains exact logical requirements for later binding. A complete
+simulation profile produces a concrete simulated case, not a target-integrated
+claim.
+
+The artifact generator consumes the published contract and profile through its
+own resolver. It creates one bound execution case, matching each logical role
+to exact resources before runtime readiness and platform compilation. This
+consumer step may supply endpoints, credentials, locators, observers, and
+platform syntax, but it cannot change the producer's delivery route, causal
+factor, operation, action, or oracle. Analytical-only cases are excluded from
+compilation and parameterized cases remain pending until an exact binding is
+available.
+
 Tolerant SP1 response graphs remain raw until deterministic ID/reference
 normalization produces valid typed artifacts; invalid intermediate Pydantic
 objects are never serialized. Stage 1a classifies losses from either
@@ -566,11 +616,10 @@ closed `stpa-execution-projection-v2` model in
 `stpa.scenario_prod.execution_projection`: it reuses the neutral typed
 semantic-condition hierarchy, preserves exact source pins from
 `ScenarioGenerationContext`, and computes canonical JSON/digests and
-requirements from typed evidence. It also carries a neutral stimulus
-requirement containing the adversarial intent, desired effect, and eligible
-causal-factor IDs. Concrete user-message, tool-result, retrieval, and
-conversation placement remains a reviewed consumer binding rather than a
-producer guess. The v2 model is prepared before Stage 6 and
+requirements from typed evidence. It carries the Stage 5 semantic execution
+contract, a neutral stimulus requirement containing the adversarial intent,
+desired effect, and eligible causal-factor IDs, and the producer's
+classification. The v2 model is prepared before Stage 6 and
 is the only normal product persistence input; the v1 projection reader is
 retained solely for historical audit validation.
 

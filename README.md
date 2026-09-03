@@ -109,6 +109,38 @@ review and an authoritative resource map are therefore required before the
 assessment can claim confirmed taxonomy correspondence. The normal automatic
 run reports `awaiting_evidence`; this does not prevent scenario generation.
 
+### Execution meaning and target profiles
+
+Stage 5 fixes one execution route for each scenario: a direct prompt, content
+carried indirectly into the model, or a conversation context. It also fixes
+the causal factor, action kind, logical domain resources, and observable unsafe
+outcome. The model may choose among the explained route choices, but
+deterministic code resolves the choices and owns the scenario's meaning.
+
+The producer then classifies the result. `concrete` means no domain resource is
+needed or every required resource is already resolved. `parameterized` means
+the route and oracle are complete but a resource still needs to be selected.
+`analytical_only` means the execution meaning is incomplete and cannot be
+compiled honestly. These classifications are separate from the environment
+basis: `target_agnostic`, `target_profile`, `simulation_profile`, or `none`.
+
+An optional `--execution-target-profile` (also available as `--target-profile`)
+supplies a reviewed target or explicit simulation profile. Select its meaning
+with `--requested-environment-basis` (or `--basis`). A simulation profile must
+be explicit and complete; missing target information never creates a mock.
+Profiles contain semantic resource facts, not URLs, credentials, or secrets.
+That path is classified as a concrete simulated case, not as a real target
+integration.
+No profile is a valid mode and produces target-agnostic or parameterized
+scenarios as appropriate.
+
+The artifact generator receives the published scenario and an explicitly
+selected profile later. It creates one bound execution case by matching the
+producer's logical requirements to exact resources, then handles runtime
+readiness and platform compilation. It may not change the delivery route,
+causal factor, operation, action, or oracle. An analytical-only case stops
+before compilation; a parameterized case remains pending until it is bound.
+
 At model boundaries, code retains control of structural identity. The ICA
 provider returns one short deviation clause and code applies the supplied slot's
 exact unsafe-control category. Scenario reasoning selects explained local
@@ -117,7 +149,13 @@ control-action sources. It also returns exactly one vulnerability for each
 supplied local defender-belief handle, which code maps back to the selected
 process-model identity. The model cannot omit a selected defender belief,
 publish a coordination/controller ID as a causal source, or invent its own
-factor kind. A scenario may describe an adversary taking advantage of an
+factor kind. Stage 5 receives a purpose-built semantic view rather than the
+serialized context artifact: integrity hashes, source pins, catalog labels,
+and bookkeeping identities stay in deterministic code, while every remaining
+reference is defined and tied to an output field. Placeholder presence, and
+therefore `semantic_binding_required`, is also derived after the provider
+response rather than requested from the model. A scenario may describe an
+adversary taking advantage of an
 existing STPA failure even when no separate attacker capability was
 enumerated. Exact capability and access-path claims remain structured
 evidence: if supplied, they must resolve to the immutable context. Free-text
@@ -570,12 +608,11 @@ multi-agent adapter, or a real-clock adapter unless their typed conditions
 require one.
 
 Each projection also publishes at least one platform-neutral adversarial
-stimulus requirement. It retains the attacker intent, desired unsafe effect,
-and the exact causal-factor IDs through which that content may be expressed.
-It deliberately does not choose a prompt role, tool, retrieval channel, or
-Garak probe. The artifact generator binds that intent to the reviewed
-deployment surface and compiles prompt-side history that ends before the
-target response.
+stimulus requirement and the exact causal-factor IDs through which that content
+may be expressed. Stage 5 also records one semantic execution contract and its
+deterministic classification. The artifact generator later binds that fixed
+meaning to an explicitly supplied target or simulation profile, then compiles
+prompt-side history that ends before the target response.
 
 `publish_execution_bundle(...)` writes the closed
 `stpa-execution-bundle-v1` envelope and canonical scenario/projection pairs

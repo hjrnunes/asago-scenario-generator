@@ -387,24 +387,43 @@ def _h_sp3_bdi_call(world: World, text: str, examples: dict) -> tuple[bool, str]
     """Handle: the BDI generation LLM call is executed for the scenario."""
     from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
         generate_bdi,
+        generate_bdi_for_context,
         populate_defender_bdi,
+    )
+    from asago_scenario_generator.stpa.scenario_prod.context import (
+        build_scenario_generation_context,
     )
 
     if world.control_structure is None:
         world.control_structure = _make_sp3_cs()
     if world.enriched_threat_set is None:
         world.enriched_threat_set = _make_sp3_ets()
+    if world.loss_analysis is None:
+        world.loss_analysis = _make_sp3_loss_analysis()
     threat = world.enriched_threat_set.structural_threats[0]
     bdi = populate_defender_bdi(world.control_structure, "RESP-1")
-    if not hasattr(world, "sp3_llm_client") or world.sp3_llm_client is None:
+    configured_client = getattr(world, "sp3_llm_client", None)
+    if configured_client is None:
         world.sp3_llm_client = _setup_sp3_mock_client(1)
-    result, error = generate_bdi(
-        world.sp3_llm_client,
-        bdi,
-        threat,
-        world.control_structure,
-        getattr(world, "sp3_run_dir", None) or Path(tempfile.mkdtemp()),
-    )
+        context = build_scenario_generation_context(
+            threat,
+            world.control_structure,
+            world.loss_analysis,
+            scenario_id="SCN-001",
+        )
+        result, error = generate_bdi_for_context(
+            world.sp3_llm_client,
+            context,
+            getattr(world, "sp3_run_dir", None) or Path(tempfile.mkdtemp()),
+        )
+    else:
+        result, error = generate_bdi(
+            world.sp3_llm_client,
+            bdi,
+            threat,
+            world.control_structure,
+            getattr(world, "sp3_run_dir", None) or Path(tempfile.mkdtemp()),
+        )
     world.sp3_bdi_result = result
     return True, ""
 
@@ -456,28 +475,47 @@ def _h_sp3_bdi_all_threats(world: World, text: str, examples: dict) -> tuple[boo
     from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
         populate_defender_bdi,
         generate_bdi,
+        generate_bdi_for_context,
         assemble_scenario_spec,
+    )
+    from asago_scenario_generator.stpa.scenario_prod.context import (
+        build_scenario_generation_context,
     )
 
     if world.control_structure is None:
         world.control_structure = _make_sp3_cs()
     if world.enriched_threat_set is None:
         world.enriched_threat_set = _make_sp3_ets()
-    if not hasattr(world, "sp3_llm_client") or world.sp3_llm_client is None:
+    configured_client = getattr(world, "sp3_llm_client", None)
+    if configured_client is None:
         n = len(world.enriched_threat_set.structural_threats)
         world.sp3_llm_client = _setup_sp3_mock_client(n)
+        world.loss_analysis = world.loss_analysis or _make_sp3_loss_analysis()
     if getattr(world, "sp3_run_dir", None) is None:
         world.sp3_run_dir = Path(tempfile.mkdtemp())
     world.sp3_specs = []
     for idx, threat in enumerate(world.enriched_threat_set.structural_threats):
         bdi = populate_defender_bdi(world.control_structure, "RESP-1")
-        result, error = generate_bdi(
-            world.sp3_llm_client,
-            bdi,
-            threat,
-            world.control_structure,
-            world.sp3_run_dir,
-        )
+        if configured_client is None:
+            context = build_scenario_generation_context(
+                threat,
+                world.control_structure,
+                world.loss_analysis,
+                scenario_id=f"SCN-{idx + 1:03d}",
+            )
+            result, error = generate_bdi_for_context(
+                world.sp3_llm_client,
+                context,
+                world.sp3_run_dir,
+            )
+        else:
+            result, error = generate_bdi(
+                world.sp3_llm_client,
+                bdi,
+                threat,
+                world.control_structure,
+                world.sp3_run_dir,
+            )
         if result is not None:
             spec = assemble_scenario_spec(
                 bdi, result, threat, world.control_structure, scenario_index=idx
@@ -2920,15 +2958,45 @@ def _h_sp3_length_exhausting_llm(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: configure every Stage 5 attempt to reach the length boundary."""
+    from tests.stpa.sp1_helpers import MockCall, MockLLMClient
 
     class LengthFinishReasonError(Exception):
         pass
 
-    client = _setup_sp3_mock_client(3)
-    client.set_exception_for(
-        BDIGenerationResult,
-        LengthFinishReasonError("structured response reached its length limit"),
-    )
+    class _LengthClient(MockLLMClient):
+        def complete(
+            self,
+            system_prompt: str,
+            user_prompt: str,
+            response_format: type | None = None,
+            max_completion_tokens: int | None = None,
+            temperature: float | None = None,
+        ) -> object:
+            if _is_stage5_response_format(response_format):
+                self.calls.append(
+                    MockCall(
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        response_format=response_format,
+                        temperature=temperature,
+                        max_completion_tokens=max_completion_tokens,
+                    )
+                )
+                raise LengthFinishReasonError(
+                    "structured response reached its length limit"
+                )
+            return super().complete(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                response_format=response_format,
+                max_completion_tokens=max_completion_tokens,
+                temperature=temperature,
+            )
+
+    base = _setup_sp3_mock_client(3)
+    client = _LengthClient()
+    client._response_queue = base._response_queue
+    client._response_map = base._response_map
     world.sp3_llm_client = client
     return True, ""
 
@@ -2938,7 +3006,7 @@ def _h_sp3_two_stage5_attempts(
 ) -> tuple[bool, str]:
     """Handle: assert one normal and one concise Stage 5 attempt occurred."""
     client = getattr(world, "sp3_llm_client", None)
-    actual = getattr(client, "call_count", 0)
+    actual = len(_sp3_robustness_bdi_calls(client)) if client is not None else 0
     if actual != 2:
         return False, f"Expected 2 Stage 5 completion attempts, got {actual}"
     return True, ""
@@ -5261,31 +5329,50 @@ def _h_sp3_robustness_stage6_responses(
 
 def _sp3_robustness_valid_bdi() -> object:
     """Build the valid structured BDI response used by retry scenarios."""
-    from asago_scenario_generator.stpa.models.semantic_conditions import (
-        ActionPresenceCondition,
-    )
-    from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-        UnsafeOutcomeDeclaration,
-    )
-
-    return BDIGenerationResult(
-        defender_vulnerabilities={
-            "PM-1-1": "vulnerability",
-            "PM-1-2": "the outcome state is not refreshed",
+    return {
+        "defender_vulnerabilities": [
+            {"belief_handle": "belief_1", "vulnerability": "vulnerability"},
+            {
+                "belief_handle": "belief_2",
+                "vulnerability": "the outcome state is not refreshed",
+            },
+        ],
+        "attacker_bdi": {
+            "beliefs": ["attacker belief"],
+            "desires": ["induce ICA"],
+            "intentions": [
+                {
+                    "description": "PM-1-1 remains stale before CA-1-1",
+                    "source_handles": ["cause_1"],
+                }
+            ],
         },
-        attacker_bdi=AttackerBDI(
-            beliefs=["attacker belief"],
-            desires=["induce ICA"],
-            intentions=["PM-1-1 remains stale before CA-1-1"],
-        ),
-        causal_factors=_make_sp3_causal_factors(),
-        unsafe_outcome=UnsafeOutcomeDeclaration(
-            condition=ActionPresenceCondition(
-                control_action_id="CA-1-1",
-                expected="not_provided",
-            )
-        ),
-    )
+        "causal_factors": [
+            {
+                "source_handle": "cause_1",
+                "evidence": "The selected structural state can remain stale.",
+                "temporal_condition": None,
+            }
+        ],
+        "unsafe_outcome": {
+            "condition": {
+                "type": "action_presence",
+                "control_action_id": "CA-1-1",
+                "expected": "not_provided",
+            },
+            "hazard_refs": [],
+            "constraint_refs": [],
+        },
+        "execution_route": {
+            "disposition": "executable_route",
+            "delivery_class": "direct_prompt",
+            "selected_factor_handle": "cause_1",
+            "action_kind": "model_output",
+            "resource_role_handles": [],
+            "carrier_attacker_influence": "none",
+            "reason": "The selected structural factor supports the direct route.",
+        },
+    }
 
 
 def _h_sp3_robustness_first_bdi(
@@ -5429,18 +5516,22 @@ def _h_sp3_robustness_run(world: World, text: str, examples: dict) -> tuple[bool
 
 def _sp3_robustness_bdi_calls(world: World) -> list[object]:
     """Return only the Stage 5 structured completion calls."""
+    client = getattr(world, "sp3_llm_client", world)
     return [
         call
-        for call in getattr(world.sp3_llm_client, "calls", [])
+        for call in getattr(client, "calls", [])
         if _is_stage5_response_format(call.response_format)
     ]
 
 
 def _is_stage5_response_format(response_format: type | None) -> bool:
     """Recognize the closed Stage 5 provider schema and its compatibility base."""
-    return bool(
-        response_format is not None and issubclass(response_format, BDIGenerationResult)
-    )
+    if response_format is None or not isinstance(response_format, type):
+        return False
+    if issubclass(response_format, BDIGenerationResult):
+        return True
+    fields = getattr(response_format, "model_fields", {})
+    return "execution_route" in fields and "unsafe_outcome" in fields
 
 
 def _h_sp3_robustness_attempt_count(

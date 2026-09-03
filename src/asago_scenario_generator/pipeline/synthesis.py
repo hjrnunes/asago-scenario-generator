@@ -45,6 +45,10 @@ from asago_scenario_generator.pipeline.projection_contracts import (
     capture_capability_snapshot,
 )
 from asago_scenario_generator.models.canonical import compute_framed_digest
+from asago_scenario_generator.stpa.models.execution_classification import (
+    ExecutionTargetProfile,
+    RequestedEnvironmentBasis,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +90,8 @@ class SynthesisInputs:
     output_dir: Path = Path("output/synthesis")
     capability_profile: Any | None = None
     capability_snapshot: Any | None = None
+    execution_target_profile: ExecutionTargetProfile | None = None
+    requested_environment_basis: RequestedEnvironmentBasis | None = None
     taxonomy_inputs: TaxonomyObligationInputs | Any | None = None
     prebuilt_plan: Any | None = None
 
@@ -139,6 +145,18 @@ class SynthesisInputs:
                 self,
                 "qualification_facts",
                 QualificationFactsInput.model_validate(self.qualification_facts),
+            )
+        if self.execution_target_profile is not None:
+            if not isinstance(self.execution_target_profile, ExecutionTargetProfile):
+                raise TypeError(
+                    "execution_target_profile must be an ExecutionTargetProfile"
+                )
+            self.execution_target_profile.assert_integrity()
+        if self.requested_environment_basis is not None and not isinstance(
+            self.requested_environment_basis, RequestedEnvironmentBasis
+        ):
+            raise TypeError(
+                "requested_environment_basis must be a RequestedEnvironmentBasis"
             )
 
 
@@ -1282,6 +1300,8 @@ def _run_scenarios(
             control_structure=control_structure,
             capability_profile=profile,
             capability_snapshot=snapshot,
+            execution_target_profile=inputs.execution_target_profile,
+            requested_environment_basis=inputs.requested_environment_basis,
             inputs=inputs,
             output_dir=inputs.output_dir,
             max_workers=inputs.max_workers,
@@ -2427,6 +2447,8 @@ def _default_scenarios(
     inputs: SynthesisInputs,
     capability_profile: Any,
     output_dir: Path,
+    execution_target_profile: ExecutionTargetProfile | None = None,
+    requested_environment_basis: RequestedEnvironmentBasis | None = None,
     briefs: tuple[Any, ...] = (),
     ica_considerations: tuple[Any, ...] = (),
     **_: Any,
@@ -2467,6 +2489,8 @@ def _default_scenarios(
         max_workers=inputs.max_workers,
         temperature=inputs.temperature,
         scenario_contexts=scenario_contexts,
+        execution_target_profile=execution_target_profile,
+        requested_environment_basis=requested_environment_basis,
     )
 
 

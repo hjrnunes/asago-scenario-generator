@@ -27,6 +27,9 @@ from asago_scenario_generator.stpa.models.execution_projection_v2 import (
     ProjectionValidationCode,
     ProjectionValidationViolation,
 )
+from asago_scenario_generator.stpa.models.execution_classification import (
+    ExecutionTargetProfile,
+)
 from asago_scenario_generator.stpa.models.scenario_envelope import ScenarioEnvelope
 
 from .execution_projection import (
@@ -37,6 +40,7 @@ from .execution_projection import (
 
 INDEX_JSON_NAME = "execution-bundle.json"
 INDEX_YAML_NAME = "execution-bundle.yaml"
+EXECUTION_TARGET_PROFILE_NAME = "execution-target-profile.json"
 
 
 @dataclass(frozen=True)
@@ -51,6 +55,29 @@ class ExecutionBundlePublication:
 
 class ExecutionBundlePublicationError(ValueError):
     """Raised when publication preflight or atomic persistence fails."""
+
+
+def publish_execution_target_profile(
+    destination: Path,
+    profile: ExecutionTargetProfile,
+) -> Path:
+    """Publish one verified target profile through the shared atomic writer.
+
+    The profile is written as canonical JSON beside the execution bundle.  The
+    function is intentionally separate from bundle-index publication so the
+    run orchestrator can publish the profile first and refuse to publish an
+    index whose classifications point at unavailable profile bytes.
+    """
+    if not isinstance(destination, Path):
+        raise ExecutionBundlePublicationError("destination must be a pathlib.Path")
+    if not isinstance(profile, ExecutionTargetProfile):
+        raise ExecutionBundlePublicationError(
+            "profile must be an ExecutionTargetProfile"
+        )
+    profile.assert_integrity()
+    profile_path = destination.resolve() / EXECUTION_TARGET_PROFILE_NAME
+    _atomic_write(profile_path, profile.canonical_json_bytes())
+    return profile_path
 
 
 @dataclass(frozen=True)
@@ -1029,7 +1056,9 @@ __all__ = [
     "ExecutionBundlePublicationError",
     "INDEX_JSON_NAME",
     "INDEX_YAML_NAME",
+    "EXECUTION_TARGET_PROFILE_NAME",
     "publish_execution_bundle",
+    "publish_execution_target_profile",
     "read_execution_bundle",
     "verify_execution_bundle",
 ]

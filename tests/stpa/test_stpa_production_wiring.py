@@ -32,6 +32,13 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     populate_defender_bdi,
 )
 from asago_scenario_generator.stpa.models.semantic_conditions import OrderingCondition
+from asago_scenario_generator.stpa.models.execution_classification import (
+    ExecutionActionKind,
+    ExecutionDeliveryClass,
+    RequestedEnvironmentBasis,
+    SemanticExecutionContract,
+    SemanticExecutionDelivery,
+)
 from asago_scenario_generator.stpa.scenario_prod.projection import (
     canonical_projection_data,
     export_projection_json,
@@ -47,6 +54,19 @@ from tests.stpa.helpers import make_minimal_control_structure
 UCA_SLOT = "RESP-1:CA-1-1:WRONG_TIMING"
 ICA_ID = "RESP-1:CA-1-1:WRONG_TIMING:1"
 CANDIDATE_ID = "EXEC:RESP-1:CA-1-1:WRONG_TIMING"
+
+
+def _direct_execution_contract() -> SemanticExecutionContract:
+    """Return the explicit target-agnostic route used by test Stage 5 calls."""
+    return SemanticExecutionContract(
+        requested_environment_basis=RequestedEnvironmentBasis.target_agnostic,
+        delivery=SemanticExecutionDelivery(
+            delivery_class=ExecutionDeliveryClass.direct_prompt,
+            factor_id="CF-1",
+            source_role="direct_user_input",
+        ),
+        action_kind=ExecutionActionKind.model_output,
+    )
 
 
 def _threat() -> StructuralThreat:
@@ -84,6 +104,7 @@ def _llm_result(
         "defender_vulnerabilities": {"PM-1-1": "v"},
         "attacker_bdi": _attacker_bdi(),
         "causal_factors": declarations or [],
+        "execution_contract": _direct_execution_contract(),
     }
     if declarations:
         return BDIGenerationResult(**values)
@@ -602,12 +623,57 @@ class TestRunSp3ProductionWiring:
         client = MockLLMClient()
         client.set_response_queue(
             [
-                BDIGenerationResult(
-                    defender_vulnerabilities={"PM-1-1": "v"},
-                    attacker_bdi=_attacker_bdi(),
-                    causal_factors=declarations,
-                    unsafe_outcome=_unsafe_outcome(),
-                ),
+                {
+                    "defender_vulnerabilities": [
+                        {"belief_handle": "belief_1", "vulnerability": "v"}
+                    ],
+                    "attacker_bdi": {
+                        "beliefs": ["b"],
+                        "desires": ["d"],
+                        "intentions": [
+                            {
+                                "description": "Rely on the declared structural factors.",
+                                "source_handles": (
+                                    ["cause_99"]
+                                    if any(
+                                        declaration.source_id == "PM-99-1"
+                                        for declaration in declarations
+                                    )
+                                    else [
+                                        f"cause_{index}"
+                                        for index in range(1, len(declarations) + 1)
+                                    ]
+                                ),
+                            }
+                        ],
+                    },
+                    "causal_factors": [
+                        {
+                            "source_handle": f"cause_{index}",
+                            "evidence": declaration.evidence,
+                            "temporal_condition": declaration.temporal_condition,
+                            "evidence_status": declaration.evidence_status.value,
+                            "capability_refs": list(declaration.capability_refs),
+                            "access_refs": list(declaration.access_refs),
+                            "bounded_assumption": declaration.bounded_assumption,
+                        }
+                        for index, declaration in enumerate(declarations, start=1)
+                    ],
+                    "unsafe_outcome": {
+                        **_unsafe_outcome().model_dump(
+                            mode="json", exclude={"semantic_binding_required"}
+                        ),
+                    },
+                    "execution_route": {
+                        "disposition": "executable_route",
+                        "delivery_class": "direct_prompt",
+                        "selected_factor_handle": "cause_1",
+                        "action_kind": "model_output",
+                        "resource_role_handles": [],
+                        "carrier_attacker_influence": "none",
+                        "reason": "The declared structural factor supports the direct route.",
+                    },
+                },
                 (
                     "Step 1: The defender process model starts correct.\n"
                     "Step 2: Feedback FB-1-1 arrives late.\n"
@@ -746,7 +812,9 @@ class TestRunSp3ProductionWiring:
             [_declare(CausalFactorKind.process_model_flaw, "PM-99-1")],
         )
         assert result.scenario_envelopes == []
-        assert any("Causal factor" in error for error in result.stage_errors)
+        assert any(
+            "Stage 5 BDI generation failed" in error for error in result.stage_errors
+        )
         stage6_calls = [
             call for call in client.calls if "Projection Alignment" in call.user_prompt
         ]

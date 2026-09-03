@@ -45,6 +45,11 @@ from asago_scenario_generator.stpa.models.enriched_threat_set import EnrichedThr
 from asago_scenario_generator.stpa.models.execution_projection_v2 import (
     ExecutionRunIdentity,
 )
+from asago_scenario_generator.stpa.models.execution_classification import (
+    ExecutionTargetProfile,
+    ProfileBasis,
+    RequestedEnvironmentBasis,
+)
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.models.scenario_envelope import (
     GherkinSpec,
@@ -68,7 +73,12 @@ from .bdi_generation import (
 )
 from .context import build_scenario_generation_context
 from .coverage import compute_coverage_gaps, write_coverage_gaps
-from .execution_bundle import ExecutionBundlePublication, publish_execution_bundle
+from .execution_bundle import (
+    ExecutionBundlePublication,
+    ExecutionBundlePublicationError,
+    publish_execution_bundle,
+    publish_execution_target_profile,
+)
 from .execution_projection import (
     ExecutionProjectionPreparationError,
     ValidatedExecutionProjection,
@@ -132,6 +142,25 @@ class _Stage5ThreatResult:
     abort_remaining: bool = False
 
 
+def _resolve_requested_environment_basis(
+    profile: ExecutionTargetProfile | None,
+    requested: RequestedEnvironmentBasis | None,
+) -> RequestedEnvironmentBasis | None:
+    """Derive Stage 5's basis without exposing profile facts to the model."""
+    if profile is None:
+        return requested
+    profile_basis = (
+        RequestedEnvironmentBasis.simulation_profile
+        if profile.basis is ProfileBasis.simulation
+        else RequestedEnvironmentBasis.target_profile
+    )
+    if requested is not None and requested is not profile_basis:
+        raise ValueError(
+            "requested_environment_basis does not match execution target profile"
+        )
+    return profile_basis
+
+
 def run_sp3(
     *,
     llm_client: LLMClient,
@@ -143,6 +172,8 @@ def run_sp3(
     max_workers: int = 1,
     temperature: float | None = None,
     scenario_contexts: Mapping[str, ScenarioGenerationContext] | None = None,
+    execution_target_profile: ExecutionTargetProfile | None = None,
+    requested_environment_basis: RequestedEnvironmentBasis | None = None,
 ) -> SP3RunResult:
     """Run the full SP3 pipeline: Stage 5 → Stage 6 → Stage 7.
 
@@ -163,6 +194,13 @@ def run_sp3(
             inward synthesis adapter for routed obligations and proven reachable
             capabilities; ordinary standalone runs build the same closed context
             from their SP1/SP2 authority.
+        execution_target_profile: Optional typed target or simulation inventory
+            used only for deterministic producer classification. Runtime
+            bindings and endpoints remain consumer-owned.
+        requested_environment_basis: Optional explicit target or simulation
+            basis for Stage 5 route materialization. When a profile is
+            supplied, its basis is authoritative and must agree with this
+            selection.
 
     Returns:
         An :class:`SP3RunResult` with artifacts and diagnostics.
@@ -178,6 +216,9 @@ def run_sp3(
     temperature = effective_temperature(llm_client, temperature)
 
     stage_errors: list[str] = []
+    requested_basis = _resolve_requested_environment_basis(
+        execution_target_profile, requested_environment_basis
+    )
     scenario_specs = _collect_stage5_specs(
         llm_client,
         enriched_threat_set,
@@ -189,6 +230,7 @@ def run_sp3(
         stage_errors,
         capability_profile=capability_profile,
         scenario_contexts=scenario_contexts,
+        requested_environment_basis=requested_basis,
     )
     scenario_envelopes, validated_projections = _collect_stage6_artifacts(
         llm_client,
@@ -203,10 +245,15 @@ def run_sp3(
         stage_errors,
         capability_profile=capability_profile,
         run_identity=run_identity,
+        execution_target_profile=execution_target_profile,
     )
-    _publish_validated_projections(
-        run_dir, run_identity, validated_projections, stage_errors
+    profile_published = _publish_execution_target_profile(
+        run_dir, execution_target_profile, stage_errors
     )
+    if profile_published:
+        _publish_validated_projections(
+            run_dir, run_identity, validated_projections, stage_errors
+        )
     all_validation_errors, coverage_gaps, eval_scorecard = _stage7_outputs(
         scenario_envelopes,
         scenario_specs,
@@ -254,6 +301,7 @@ def _collect_stage5_specs(
     *,
     capability_profile: CapabilityProfile | None,
     scenario_contexts: Mapping[str, ScenarioGenerationContext] | None,
+    requested_environment_basis: RequestedEnvironmentBasis | None,
 ) -> list[ScenarioSpec]:
     """Generate and retain the valid Stage 5 specs in threat order."""
     specs: list[ScenarioSpec] = []
@@ -271,6 +319,7 @@ def _collect_stage5_specs(
             loss_analysis=loss_analysis,
             capability_profile=capability_profile,
             scenario_contexts=scenario_contexts,
+            requested_environment_basis=requested_environment_basis,
         )
         if result.scenario_spec is not None:
             specs.append(result.scenario_spec)
@@ -305,6 +354,7 @@ def _collect_stage6_artifacts(
     *,
     capability_profile: CapabilityProfile | None,
     run_identity: ExecutionRunIdentity,
+    execution_target_profile: ExecutionTargetProfile | None,
 ) -> tuple[
     list[ScenarioEnvelope],
     list[tuple[ScenarioEnvelope, ValidatedExecutionProjection]],
@@ -325,6 +375,7 @@ def _collect_stage6_artifacts(
             stage_errors,
             capability_profile=capability_profile,
             run_identity=run_identity,
+            execution_target_profile=execution_target_profile,
         )
         if envelope is None:
             continue
@@ -355,6 +406,22 @@ def _publish_validated_projections(
         )
     except (OSError, ValueError) as exc:
         stage_errors.append(f"Execution bundle publication failed: {exc}")
+
+
+def _publish_execution_target_profile(
+    run_dir: Path,
+    profile: ExecutionTargetProfile | None,
+    stage_errors: list[str],
+) -> bool:
+    """Persist the verified profile before publishing the bundle index."""
+    if profile is None:
+        return True
+    try:
+        publish_execution_target_profile(run_dir, profile)
+    except (ExecutionBundlePublicationError, OSError, ValueError) as exc:
+        stage_errors.append(f"Execution target profile publication failed: {exc}")
+        return False
+    return True
 
 
 def _bundle_publication(
@@ -430,6 +497,7 @@ def _run_stage5_for_threat(
     loss_analysis: LossAnalysis,
     capability_profile: CapabilityProfile | None = None,
     scenario_contexts: Mapping[str, ScenarioGenerationContext] | None = None,
+    requested_environment_basis: RequestedEnvironmentBasis | None = None,
 ) -> _Stage5ThreatResult:
     """Run Stage 5 BDI generation for a single threat."""
     slot_parts = parse_ica_slot_id(threat.ica_slot_id)
@@ -455,6 +523,7 @@ def _run_stage5_for_threat(
         loader,
         temperature,
         stage_errors,
+        requested_environment_basis=requested_environment_basis,
     )
     if failure is not None:
         return failure
@@ -467,6 +536,7 @@ def _run_stage5_for_threat(
         scenario_index,
         context,
         stage_errors,
+        requested_environment_basis=requested_environment_basis,
     )
     if spec is None:
         return _Stage5ThreatResult(None)
@@ -484,6 +554,8 @@ def _stage5_bdi(
     loader: TemplateLoader,
     temperature: float,
     stage_errors: list[str],
+    *,
+    requested_environment_basis: RequestedEnvironmentBasis | None,
 ) -> tuple[BDIGenerationResult | None, _Stage5ThreatResult | None]:
     """Generate one closed BDI result or one typed local failure."""
     llm_result, error = generate_bdi_for_context(
@@ -492,6 +564,9 @@ def _stage5_bdi(
         run_dir,
         loader=loader,
         temperature=temperature,
+        requested_environment_basis=(
+            requested_environment_basis or RequestedEnvironmentBasis.target_profile
+        ),
     )
     if error is None and llm_result is not None:
         return llm_result, None
@@ -545,6 +620,8 @@ def _stage5_spec(
     scenario_index: int,
     context: ScenarioGenerationContext,
     stage_errors: list[str],
+    *,
+    requested_environment_basis: RequestedEnvironmentBasis | None,
 ) -> ScenarioSpec | None:
     """Compile one Stage 5 draft and retain an assembly failure locally."""
     try:
@@ -555,6 +632,7 @@ def _stage5_spec(
             control_structure,
             scenario_index,
             scenario_context=context,
+            requested_environment_basis=requested_environment_basis,
         )
     except ValueError as exc:
         stage_errors.append(f"Stage 5: {exc}")
@@ -678,6 +756,7 @@ def _run_stage6_for_spec(
     *,
     capability_profile: CapabilityProfile | None = None,
     run_identity: ExecutionRunIdentity | None = None,
+    execution_target_profile: ExecutionTargetProfile | None = None,
 ) -> tuple[ScenarioEnvelope | None, ValidatedExecutionProjection | dict | None]:
     """Run Stage 6 concretization for a single scenario spec.
 
@@ -700,6 +779,7 @@ def _run_stage6_for_spec(
                 spec,
                 control_structure,
                 run_identity,
+                target_profile=execution_target_profile,
             )
         except ExecutionProjectionPreparationError as exc:
             stage_errors.append(

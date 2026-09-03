@@ -36,6 +36,14 @@ from asago_scenario_generator.stpa.models.causal_factor import (
     namespace_for,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
+from asago_scenario_generator.stpa.models.execution_classification import (
+    BindingCompleteness,
+    ExecutionClassification,
+    ExecutionContractDisposition,
+    ExecutionDeliveryClass,
+    SemanticExecutionContract,
+    SemanticExecutionDelivery,
+)
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     AbsenceCondition,
     ActionPresenceCondition,
@@ -206,24 +214,35 @@ class ExecutionRequirements(_ClosedFrozenModel):
 class AdversarialStimulusRequirement(_ClosedFrozenModel):
     """Platform-neutral content that must drive one causal path.
 
-    The producer owns the adversarial intent and the causal factors it must
-    express.  A consumer binds that intent to a concrete user, tool-result or
-    conversation surface; the producer does not guess a deployment surface.
+    The producer owns the adversarial intent, selected causal factor and exact
+    delivery route.  A consumer may bind that route to platform surfaces, but
+    cannot choose another factor or delivery class.
     """
 
     stimulus_id: StrictStr = Field(pattern=r"^STIM-\d+$")
     intent: StrictStr = Field(min_length=1)
     desired_effect: StrictStr = Field(min_length=1)
-    eligible_factor_ids: tuple[StrictStr, ...] = Field(min_length=1)
+    delivery_class: ExecutionDeliveryClass
+    factor_id: StrictStr = Field(pattern=r"^CF-\d+$")
+    source_role: StrictStr = Field(
+        min_length=1,
+        pattern=r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$",
+    )
+    carrier_requirement_id: StrictStr | None = Field(
+        default=None, pattern=r"^REQ-[A-Za-z0-9._-]+$"
+    )
 
     @model_validator(mode="after")
-    def validate_factor_ids(self) -> "AdversarialStimulusRequirement":
-        if len(self.eligible_factor_ids) != len(set(self.eligible_factor_ids)):
-            raise ValueError("eligible_factor_ids must be unique")
-        if any(
-            not re.fullmatch(r"^CF-\d+$", item) for item in self.eligible_factor_ids
-        ):
-            raise ValueError("eligible_factor_ids must contain canonical CF-* IDs")
+    def validate_delivery(self) -> "AdversarialStimulusRequirement":
+        if self.delivery_class is ExecutionDeliveryClass.indirect_content:
+            if self.carrier_requirement_id is None:
+                raise ValueError(
+                    "indirect_content stimuli require carrier_requirement_id"
+                )
+        elif self.carrier_requirement_id is not None:
+            raise ValueError(
+                "only indirect_content stimuli may name a carrier requirement"
+            )
         return self
 
 
@@ -281,10 +300,10 @@ class ExecutionProjectionV2(_ClosedFrozenModel):
     causal_factors: tuple[ExecutionCausalFactor, ...]
     steps: tuple[ExecutionStep, ...]
     unsafe_outcome: UnsafeOutcome
-    stimulus_requirements: tuple[AdversarialStimulusRequirement, ...] = Field(
-        min_length=1
-    )
+    stimulus_requirements: tuple[AdversarialStimulusRequirement, ...] = ()
     execution_requirements: ExecutionRequirements
+    execution_contract: SemanticExecutionContract
+    execution_classification: ExecutionClassification
     trace_refs: ExecutionTraceRefs
     # In-process construction may omit this so the model can derive it.  The
     # persisted standalone parser rejects omission before model validation.
@@ -299,6 +318,7 @@ class ExecutionProjectionV2(_ClosedFrozenModel):
         _validate_projection_conditions(self)
         _validate_projection_bindings(self)
         _validate_stimulus_requirements(self)
+        _validate_execution_classification(self)
         _set_projection_digest(self)
         return self
 
@@ -443,6 +463,7 @@ class ProjectionValidationCode(str, Enum):
     step_mapping_mismatch = "step_mapping_mismatch"
     uca_condition_incompatible = "uca_condition_incompatible"
     runtime_observation_forbidden = "runtime_observation_forbidden"
+    execution_classification_mismatch = "execution_classification_mismatch"
     semantic_digest_mismatch = "semantic_digest_mismatch"
     bundle_path_invalid = "bundle_path_invalid"
     content_digest_mismatch = "content_digest_mismatch"
@@ -615,15 +636,164 @@ def _validate_projection_bindings(projection: ExecutionProjectionV2) -> None:
 
 
 def _validate_stimulus_requirements(projection: ExecutionProjectionV2) -> None:
+    if (
+        projection.execution_contract.disposition
+        is ExecutionContractDisposition.analytical_only
+    ):
+        _validate_analytical_stimulus_requirements(projection)
+        return
+    _validate_executable_stimulus_requirements(projection)
+
+
+def _validate_analytical_stimulus_requirements(
+    projection: ExecutionProjectionV2,
+) -> None:
+    """Ensure analytical findings carry no executable stimulus route."""
+    if projection.stimulus_requirements:
+        raise ValueError(
+            "analytical_only projections cannot publish an execution stimulus route"
+        )
+
+
+def _validate_executable_stimulus_requirements(
+    projection: ExecutionProjectionV2,
+) -> None:
+    """Ensure one executable stimulus matches its selected delivery exactly."""
+    if len(projection.stimulus_requirements) != 1:
+        raise ValueError("executable projections require exactly one stimulus route")
     factor_ids = {factor.factor_id for factor in projection.causal_factors}
-    stimulus_ids = [item.stimulus_id for item in projection.stimulus_requirements]
-    if len(stimulus_ids) != len(set(stimulus_ids)):
-        raise ValueError("stimulus requirements must have unique IDs")
     for item in projection.stimulus_requirements:
-        if not set(item.eligible_factor_ids) <= factor_ids:
-            raise ValueError(
-                "stimulus requirement eligible_factor_ids must resolve to causal factors"
-            )
+        _validate_stimulus_factor(item, factor_ids)
+        _validate_stimulus_delivery(item, projection.execution_contract.delivery)
+
+
+def _validate_stimulus_factor(
+    item: AdversarialStimulusRequirement,
+    factor_ids: set[str],
+) -> None:
+    """Require a stimulus route to name one projected causal factor."""
+    if item.factor_id not in factor_ids:
+        raise ValueError(
+            "stimulus requirement factor_id must resolve to a causal factor"
+        )
+
+
+def _validate_stimulus_delivery(
+    item: AdversarialStimulusRequirement,
+    delivery: SemanticExecutionDelivery | None,
+) -> None:
+    """Require stimulus fields to equal the contract's selected delivery."""
+    if delivery is None:
+        raise ValueError("stimulus route requires an execution delivery")
+    if _stimulus_delivery_matches(item, delivery):
+        return
+    raise ValueError("stimulus route must match the execution contract delivery")
+
+
+def _stimulus_delivery_matches(
+    item: AdversarialStimulusRequirement,
+    delivery: SemanticExecutionDelivery,
+) -> bool:
+    """Compare every identity field in a published delivery route."""
+    return (
+        item.delivery_class is delivery.delivery_class
+        and item.factor_id == delivery.factor_id
+        and item.source_role == delivery.source_role
+        and item.carrier_requirement_id == delivery.carrier_requirement_id
+    )
+
+
+def _validate_execution_classification(projection: ExecutionProjectionV2) -> None:
+    """Keep the semantic contract and derived classification consistent."""
+    contract = projection.execution_contract
+    classification = projection.execution_classification
+    _validate_classification_delivery_factor(projection)
+    _require_classification_digest(classification)
+    if contract.disposition is ExecutionContractDisposition.analytical_only:
+        _validate_analytical_classification(classification)
+    elif not contract.resource_requirements:
+        _validate_target_agnostic_classification(classification)
+
+
+def _validate_classification_delivery_factor(
+    projection: ExecutionProjectionV2,
+) -> None:
+    """Require a selected delivery factor to be present in the projection."""
+    delivery = projection.execution_contract.delivery
+    if delivery is None:
+        return
+    factor_ids = {factor.factor_id for factor in projection.causal_factors}
+    if delivery.factor_id not in factor_ids:
+        raise ValueError("execution delivery factor_id must resolve to a causal factor")
+
+
+def _require_classification_digest(classification: ExecutionClassification) -> None:
+    """Require the classification to carry its derived content digest."""
+    if classification.classification_digest is None:
+        raise ValueError("execution classification requires classification_digest")
+
+
+def _validate_analytical_classification(
+    classification: ExecutionClassification,
+) -> None:
+    """Require an analytical contract to make no execution claim."""
+    expected = (
+        BindingCompleteness.analytical_only,
+        "none",
+        "invalid",
+        "no_execution_claim",
+    )
+    actual = (
+        classification.binding_completeness,
+        classification.environment_basis.value,
+        classification.profile_fit.value,
+        classification.claim_scope.value,
+    )
+    if actual != expected:
+        raise ValueError(
+            "analytical_only execution contracts require the analytical classification tuple"
+        )
+    _reject_classification_bindings(classification, "analytical_only")
+
+
+def _validate_target_agnostic_classification(
+    classification: ExecutionClassification,
+) -> None:
+    """Require a resource-free route to remain target agnostic."""
+    expected = (
+        BindingCompleteness.concrete,
+        "target_agnostic",
+        "not_required",
+        "model_behavior_only",
+    )
+    actual = (
+        classification.binding_completeness,
+        classification.environment_basis.value,
+        classification.profile_fit.value,
+        classification.claim_scope.value,
+    )
+    if actual != expected:
+        raise ValueError(
+            "resource-free executable contracts require the target-agnostic classification tuple"
+        )
+    _reject_classification_bindings(classification, "resource-free")
+
+
+def _reject_classification_bindings(
+    classification: ExecutionClassification,
+    label: str,
+) -> None:
+    """Reject profile or resource identities where no binding is allowed."""
+    if (
+        classification.resolved_bindings
+        or classification.unresolved_requirement_ids
+        or classification.ambiguous_matches
+        or classification.unsupported_requirement_ids
+        or classification.target_profile_digest is not None
+    ):
+        raise ValueError(
+            f"{label} classifications cannot contain bindings or profile pins"
+        )
 
 
 def _set_projection_digest(projection: ExecutionProjectionV2) -> None:

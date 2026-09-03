@@ -52,6 +52,15 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     ActionValueCondition,
 )
+from asago_scenario_generator.stpa.models.execution_classification import (
+    ExecutionActionKind,
+    ExecutionContractDisposition,
+    ExecutionDeliveryClass,
+    ExecutionResourceKind,
+    ExecutionSurface,
+    SemanticExecutionContract,
+    SemanticExecutionDelivery,
+)
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     BDIGenerationResult,
@@ -61,6 +70,7 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     build_context_bdi_prompts,
     generate_bdi_for_context,
     populate_defender_bdi,
+    _context_bdi_provider_payload_type,
 )
 from asago_scenario_generator.stpa.scenario_prod.assembly import (
     assemble_candidate_envelope,
@@ -306,12 +316,13 @@ def test_context_stage5_offers_only_compiler_owned_causal_source_handles() -> No
     )[0]
 
     assert "source_handle: cause_1" in choices
-    assert "kind: PROCESS_MODEL_FLAW" in choices
-    assert "source_id: PM-1-1" in choices
-    assert "source_id: CL-1" not in choices
-    assert "source_id: CM-1" not in choices
-    assert "source_id: RESP-1" not in choices
-    assert "source_id: CP-1" not in choices
+    assert "source_type: a process-model belief or state" in choices
+    assert "source_id:" not in choices
+    assert "PM-1-1" not in choices
+    assert "CL-1" not in choices
+    assert "CM-1" not in choices
+    assert "RESP-1" not in choices
+    assert "CP-1" not in choices
 
 
 def test_context_stage5_compiles_local_handles_to_exact_structural_sources(
@@ -358,7 +369,15 @@ def test_context_stage5_compiles_local_handles_to_exact_structural_sources(
                         "operator": "equals",
                         "expected": "approved",
                     },
-                    "semantic_binding_required": False,
+                },
+                "execution_route": {
+                    "disposition": "executable_route",
+                    "delivery_class": "direct_prompt",
+                    "selected_factor_handle": "cause_1",
+                    "action_kind": "model_output",
+                    "resource_role_handles": [],
+                    "carrier_attacker_influence": "none",
+                    "reason": "The stale state explains the direct adversarial route.",
                 },
             }
         ]
@@ -375,6 +394,475 @@ def test_context_stage5_compiles_local_handles_to_exact_structural_sources(
     }
     assert "PM-1-1" in result.attacker_bdi.intentions[0]
     assert "cause_1" not in result.model_dump_json()
+
+
+def test_context_stage5_materializes_executable_route_from_local_handles(
+    tmp_path,
+) -> None:
+    """Stage 5 route choices become a deterministic semantic contract."""
+    context = _context()
+    client = MockLLMClient()
+    client.set_response_queue(
+        [
+            {
+                "defender_vulnerabilities": [
+                    {
+                        "belief_handle": "belief_1",
+                        "vulnerability": "The batch count can remain stale.",
+                    }
+                ],
+                "attacker_bdi": {
+                    "beliefs": ["The controller can act on stale state."],
+                    "desires": ["Induce the selected unsafe action."],
+                    "intentions": [
+                        {
+                            "description": "Rely on the stale state.",
+                            "source_handles": ["cause_1"],
+                        }
+                    ],
+                },
+                "causal_factors": [
+                    {
+                        "source_handle": "cause_1",
+                        "evidence": "The selected process-model state stays stale.",
+                        "temporal_condition": None,
+                        "evidence_status": "structural_failure",
+                        "capability_refs": [],
+                        "access_refs": [],
+                        "bounded_assumption": None,
+                    }
+                ],
+                "unsafe_outcome": {
+                    "condition": {
+                        "type": "action_value",
+                        "control_action_id": "CA-1-1",
+                        "property": "authorization_state",
+                        "operator": "equals",
+                        "expected": "approved",
+                    },
+                },
+                "execution_route": {
+                    "disposition": "executable_route",
+                    "delivery_class": "direct_prompt",
+                    "selected_factor_handle": "cause_1",
+                    "action_kind": "model_output",
+                    "resource_role_handles": [],
+                    "carrier_attacker_influence": "none",
+                    "reason": "The stale state explains the direct adversarial route.",
+                },
+            }
+        ]
+    )
+
+    result, error = generate_bdi_for_context(client, context, tmp_path)
+
+    assert error is None
+    assert result is not None
+    assert result.execution_route is None
+    assert result.execution_contract is not None
+    assert (
+        result.execution_contract.disposition
+        is ExecutionContractDisposition.executable_route
+    )
+    assert result.execution_contract.delivery is not None
+    assert (
+        result.execution_contract.delivery.delivery_class
+        is ExecutionDeliveryClass.direct_prompt
+    )
+    assert result.execution_contract.delivery.factor_id == "CF-1"
+    assert result.execution_contract.action_kind is ExecutionActionKind.model_output
+    assert result.execution_contract.resource_requirements == ()
+
+
+def test_context_stage5_rejects_typed_compiler_contract(tmp_path) -> None:
+    """Contextual Stage 5 accepts only the local-handle provider payload."""
+    context = _context()
+    client = MockLLMClient()
+    client.set_response_queue(
+        [
+            BDIGenerationResult(
+                defender_vulnerabilities={"PM-1-1": "The state can be stale."},
+                attacker_bdi=AttackerBDI(
+                    beliefs=["b"],
+                    desires=["d"],
+                    intentions=["Rely on PM-1-1."],
+                ),
+                causal_factors=[
+                    CausalFactorDeclaration(
+                        kind=CausalFactorKind.process_model_flaw,
+                        source_id="PM-1-1",
+                        evidence="The selected state can be stale.",
+                    )
+                ],
+                unsafe_outcome=UnsafeOutcomeDeclaration(
+                    condition=ActionValueCondition(
+                        control_action_id="CA-1-1",
+                        property="authorization_state",
+                        operator="equals",
+                        expected="approved",
+                    ),
+                    semantic_binding_required=False,
+                ),
+                execution_contract=SemanticExecutionContract(
+                    delivery=SemanticExecutionDelivery(
+                        delivery_class=ExecutionDeliveryClass.direct_prompt,
+                        factor_id="CF-1",
+                        source_role="direct_user_input",
+                    ),
+                    action_kind=ExecutionActionKind.model_output,
+                ),
+            )
+        ]
+    )
+
+    result, error = generate_bdi_for_context(client, context, tmp_path)
+
+    assert result is None
+    assert error is not None
+    assert "Unexpected LLM result content type" in error
+
+
+def test_context_stage5_missing_execution_route_is_provider_failure(tmp_path) -> None:
+    """A corrected response without route selection is not defaulted to direct."""
+    context = _context()
+    client = MockLLMClient()
+    client.set_response_queue(
+        [
+            {
+                "defender_vulnerabilities": [
+                    {
+                        "belief_handle": "belief_1",
+                        "vulnerability": "The batch count can remain stale.",
+                    }
+                ],
+                "attacker_bdi": {
+                    "beliefs": ["The controller can act on stale state."],
+                    "desires": ["Induce the selected unsafe action."],
+                    "intentions": [
+                        {
+                            "description": "Rely on the stale state.",
+                            "source_handles": ["cause_1"],
+                        }
+                    ],
+                },
+                "causal_factors": [
+                    {
+                        "source_handle": "cause_1",
+                        "evidence": "The selected process-model state stays stale.",
+                        "temporal_condition": None,
+                    }
+                ],
+                "unsafe_outcome": {
+                    "condition": {
+                        "type": "action_value",
+                        "control_action_id": "CA-1-1",
+                        "property": "authorization_state",
+                        "operator": "equals",
+                        "expected": "approved",
+                    },
+                },
+            },
+            {
+                "defender_vulnerabilities": [
+                    {
+                        "belief_handle": "belief_1",
+                        "vulnerability": "The batch count can remain stale.",
+                    }
+                ],
+                "attacker_bdi": {
+                    "beliefs": ["The controller can act on stale state."],
+                    "desires": ["Induce the selected unsafe action."],
+                    "intentions": [
+                        {
+                            "description": "Rely on the stale state.",
+                            "source_handles": ["cause_1"],
+                        }
+                    ],
+                },
+                "causal_factors": [
+                    {
+                        "source_handle": "cause_1",
+                        "evidence": "The selected process-model state stays stale.",
+                        "temporal_condition": None,
+                    }
+                ],
+                "unsafe_outcome": {
+                    "condition": {
+                        "type": "action_value",
+                        "control_action_id": "CA-1-1",
+                        "property": "authorization_state",
+                        "operator": "equals",
+                        "expected": "approved",
+                    },
+                },
+            },
+        ]
+    )
+
+    result, error = generate_bdi_for_context(client, context, tmp_path)
+
+    assert result is None
+    assert error is not None
+    assert "execution_route" in error
+    correction_prompt = client.calls[1].user_prompt
+    assert "Exact validation error from the prior response" in correction_prompt
+    assert "Expected response schema" not in correction_prompt
+    assert "response schema already supplied" in correction_prompt
+
+
+def test_context_stage5_retains_analytical_only_route_with_typed_gap(tmp_path) -> None:
+    """An explicit analytical route is retained without inventing bindings."""
+    context = _context()
+    client = MockLLMClient()
+    client.set_response_queue(
+        [
+            {
+                "defender_vulnerabilities": [
+                    {
+                        "belief_handle": "belief_1",
+                        "vulnerability": "The batch count can remain stale.",
+                    }
+                ],
+                "attacker_bdi": {
+                    "beliefs": ["The controller can act on stale state."],
+                    "desires": ["Induce the selected unsafe action."],
+                    "intentions": [
+                        {
+                            "description": "Rely on the stale state.",
+                            "source_handles": ["cause_1"],
+                        }
+                    ],
+                },
+                "causal_factors": [
+                    {
+                        "source_handle": "cause_1",
+                        "evidence": "The selected process-model state stays stale.",
+                        "temporal_condition": None,
+                    }
+                ],
+                "unsafe_outcome": {
+                    "condition": {
+                        "type": "action_value",
+                        "control_action_id": "CA-1-1",
+                        "property": "authorization_state",
+                        "operator": "equals",
+                        "expected": "approved",
+                    },
+                },
+                "execution_route": {
+                    "disposition": "analytical_only",
+                    "gaps": [
+                        {
+                            "code": "operation_missing",
+                            "detail": "The source evidence does not establish an executable operation.",
+                            "evidence_handles": ["cause_1"],
+                        }
+                    ],
+                    "reason": "The unsafe path is meaningful for analysis but lacks an operation.",
+                },
+            }
+        ]
+    )
+
+    result, error = generate_bdi_for_context(client, context, tmp_path)
+
+    assert error is None
+    assert result is not None
+    assert result.execution_route is None
+    assert result.execution_contract is not None
+    assert (
+        result.execution_contract.disposition
+        is ExecutionContractDisposition.analytical_only
+    )
+    assert result.execution_contract.delivery is None
+    assert result.execution_contract.gaps[0].evidence_refs == ("CF-1",)
+
+
+def test_context_stage5_materializes_indirect_carrier_role(tmp_path) -> None:
+    """Indirect delivery creates one late-bound, attacker-influenced carrier."""
+    context = _context()
+    client = MockLLMClient()
+    client.set_response_queue(
+        [
+            {
+                "defender_vulnerabilities": [
+                    {
+                        "belief_handle": "belief_1",
+                        "vulnerability": "The batch count can remain stale.",
+                    }
+                ],
+                "attacker_bdi": {
+                    "beliefs": ["The controller can act on stale state."],
+                    "desires": ["Induce the selected unsafe action."],
+                    "intentions": [
+                        {
+                            "description": "Rely on the stale state.",
+                            "source_handles": ["cause_1"],
+                        }
+                    ],
+                },
+                "causal_factors": [
+                    {
+                        "source_handle": "cause_1",
+                        "evidence": "The selected process-model state stays stale.",
+                        "temporal_condition": None,
+                    }
+                ],
+                "unsafe_outcome": {
+                    "condition": {
+                        "type": "action_value",
+                        "control_action_id": "CA-1-1",
+                        "property": "authorization_state",
+                        "operator": "equals",
+                        "expected": "approved",
+                    },
+                },
+                "execution_route": {
+                    "disposition": "executable_route",
+                    "delivery_class": "indirect_content",
+                    "selected_factor_handle": "cause_1",
+                    "action_kind": "model_output",
+                    "resource_role_handles": ["role_stimulus_carrier"],
+                    "carrier_attacker_influence": "indirect",
+                    "reason": "The supplied carrier role brings the content into context.",
+                },
+            }
+        ]
+    )
+
+    result, error = generate_bdi_for_context(client, context, tmp_path)
+
+    assert error is None
+    assert result is not None
+    contract = result.execution_contract
+    assert contract is not None
+    assert contract.delivery is not None
+    assert contract.delivery.carrier_requirement_id == "REQ-carrier"
+    assert len(contract.resource_requirements) == 1
+    requirement = contract.resource_requirements[0]
+    assert requirement.acceptable_resource_kinds == (
+        ExecutionResourceKind.integration,
+        ExecutionResourceKind.tool,
+    )
+    assert requirement.owner_ref == "PM-1-1"
+    assert requirement.required_surfaces == (ExecutionSurface.tool_result,)
+
+
+def test_context_stage5_carrier_influence_is_request_local(tmp_path) -> None:
+    """A direct carrier choice is preserved rather than hard-coded indirect."""
+    context = _context()
+    client = MockLLMClient()
+    payload = {
+        "defender_vulnerabilities": [
+            {"belief_handle": "belief_1", "vulnerability": "The state is stale."}
+        ],
+        "attacker_bdi": {
+            "beliefs": ["The state is stale."],
+            "desires": ["Induce the selected action."],
+            "intentions": [
+                {"description": "Use the carrier.", "source_handles": ["cause_1"]}
+            ],
+        },
+        "causal_factors": [
+            {
+                "source_handle": "cause_1",
+                "evidence": "The selected carrier is attacker-controlled.",
+                "temporal_condition": None,
+            }
+        ],
+        "unsafe_outcome": {
+            "condition": {
+                "type": "action_value",
+                "control_action_id": "CA-1-1",
+                "property": "authorization_state",
+                "operator": "equals",
+                "expected": "approved",
+            },
+        },
+        "execution_route": {
+            "disposition": "executable_route",
+            "delivery_class": "indirect_content",
+            "selected_factor_handle": "cause_1",
+            "action_kind": "model_output",
+            "resource_role_handles": ["role_stimulus_carrier"],
+            "carrier_attacker_influence": "direct",
+            "reason": "The source evidence establishes direct influence.",
+        },
+    }
+    client.set_response_queue([payload])
+
+    result, error = generate_bdi_for_context(client, context, tmp_path)
+
+    assert error is None
+    assert result is not None
+    assert result.execution_contract is not None
+    requirement = result.execution_contract.resource_requirements[0]
+    assert requirement.required_attacker_influence == "direct"
+
+
+def test_context_stage5_state_resource_requires_explicit_role(tmp_path) -> None:
+    """A state-valued outcome alone does not create a domain resource."""
+    context = _context()
+    client = MockLLMClient()
+    payload = {
+        "defender_vulnerabilities": [
+            {"belief_handle": "belief_1", "vulnerability": "The state is stale."}
+        ],
+        "attacker_bdi": {
+            "beliefs": ["The state is stale."],
+            "desires": ["Induce the selected action."],
+            "intentions": [
+                {"description": "Use the state.", "source_handles": ["cause_1"]}
+            ],
+        },
+        "causal_factors": [
+            {
+                "source_handle": "cause_1",
+                "evidence": "The state store's identity is part of the attack.",
+                "temporal_condition": None,
+            }
+        ],
+        "unsafe_outcome": {
+            "condition": {
+                "type": "state_value",
+                "subject_ref": "PM-1-1",
+                "property": "authorization_state",
+                "operator": "equals",
+                "expected": "approved",
+            },
+        },
+        "execution_route": {
+            "disposition": "executable_route",
+            "delivery_class": "direct_prompt",
+            "selected_factor_handle": "cause_1",
+            "action_kind": "model_output",
+            "resource_role_handles": ["role_state"],
+            "carrier_attacker_influence": "none",
+            "reason": "The named state store is part of the attack meaning.",
+        },
+    }
+    client.set_response_queue([payload])
+
+    result, error = generate_bdi_for_context(client, context, tmp_path)
+
+    assert error is None
+    assert result is not None
+    assert result.execution_contract is not None
+    assert [
+        item.purpose.value for item in result.execution_contract.resource_requirements
+    ] == ["state_resource"]
+    assert result.execution_contract.resource_requirements[0].required_surfaces == (
+        ExecutionSurface.state_observation,
+    )
+
+
+def test_context_provider_schema_excludes_compiler_contract() -> None:
+    """The provider wire schema cannot emit the materialized contract."""
+    schema = _context_bdi_provider_payload_type(2, 1).model_json_schema()
+
+    assert "execution_contract" not in schema.get("properties", {})
+    assert "execution_route" in schema.get("properties", {})
+    assert "semantic_binding_required" not in json.dumps(schema)
 
 
 def test_context_stage5_preserves_explicit_assumption_when_status_is_mislabeled(
@@ -421,7 +909,15 @@ def test_context_stage5_preserves_explicit_assumption_when_status_is_mislabeled(
                         "operator": "equals",
                         "expected": "approved",
                     },
-                    "semantic_binding_required": False,
+                },
+                "execution_route": {
+                    "disposition": "executable_route",
+                    "delivery_class": "direct_prompt",
+                    "selected_factor_handle": "cause_1",
+                    "action_kind": "model_output",
+                    "resource_role_handles": [],
+                    "carrier_attacker_influence": "none",
+                    "reason": "The stale state explains the direct adversarial route.",
                 },
             }
         ]
@@ -478,7 +974,15 @@ def test_context_stage5_intentions_must_reference_a_declared_factor(tmp_path) ->
                         "operator": "equals",
                         "expected": "approved",
                     },
-                    "semantic_binding_required": False,
+                },
+                "execution_route": {
+                    "disposition": "executable_route",
+                    "delivery_class": "direct_prompt",
+                    "selected_factor_handle": "cause_1",
+                    "action_kind": "model_output",
+                    "resource_role_handles": [],
+                    "carrier_attacker_influence": "none",
+                    "reason": "The stale state explains the direct adversarial route.",
                 },
             }
         ]
@@ -535,7 +1039,6 @@ def test_context_stage5_requires_one_vulnerability_for_every_selected_belief(
                 "operator": "equals",
                 "expected": "approved",
             },
-            "semantic_binding_required": False,
         },
     }
     client.set_response_queue([invalid_response, invalid_response])
@@ -623,6 +1126,14 @@ def test_coordination_bdi_and_spec_validate_against_exact_link() -> None:
                 evidence="The shared policy state can be stale when synchronized.",
             )
         ],
+        execution_contract=SemanticExecutionContract(
+            delivery=SemanticExecutionDelivery(
+                delivery_class=ExecutionDeliveryClass.direct_prompt,
+                factor_id="CF-1",
+                source_role="direct_user_input",
+            ),
+            action_kind=ExecutionActionKind.model_output,
+        ),
     )
 
     spec = assemble_scenario_spec(
@@ -675,33 +1186,53 @@ def test_run_sp3_realizes_coordination_slot_without_relabeled_identity(
     client = MockLLMClient()
     client.set_response_queue(
         [
-            BDIGenerationResult(
-                defender_vulnerabilities={
-                    "PM-1-1": "The shared state can be stale.",
-                    "PM-2-1": "The verification state can be stale.",
-                },
-                attacker_bdi=AttackerBDI(
-                    beliefs=["The coordination state can be manipulated."],
-                    desires=["Induce the coordination ICA."],
-                    intentions=["Rely on stale PM-1-1 before CM-1 is used."],
-                ),
-                causal_factors=[
-                    CausalFactorDeclaration(
-                        kind=CausalFactorKind.process_model_flaw,
-                        source_id="PM-1-1",
-                        evidence="The shared policy state can be stale when synchronized.",
-                    )
+            {
+                "defender_vulnerabilities": [
+                    {
+                        "belief_handle": "belief_1",
+                        "vulnerability": "The shared state can be stale.",
+                    },
+                    {
+                        "belief_handle": "belief_2",
+                        "vulnerability": "The verification state can be stale.",
+                    },
                 ],
-                unsafe_outcome=UnsafeOutcomeDeclaration(
-                    condition=ActionValueCondition(
-                        control_action_id="CM-1",
-                        property="authorization_state",
-                        operator="equals",
-                        expected="approved",
-                    ),
-                    semantic_binding_required=False,
-                ),
-            ),
+                "attacker_bdi": {
+                    "beliefs": ["The coordination state can be manipulated."],
+                    "desires": ["Induce the coordination ICA."],
+                    "intentions": [
+                        {
+                            "description": "Rely on stale PM-1-1 before CM-1 is used.",
+                            "source_handles": ["cause_1"],
+                        }
+                    ],
+                },
+                "causal_factors": [
+                    {
+                        "source_handle": "cause_1",
+                        "evidence": "The shared policy state can be stale when synchronized.",
+                        "temporal_condition": None,
+                    }
+                ],
+                "unsafe_outcome": {
+                    "condition": {
+                        "type": "action_value",
+                        "control_action_id": "CM-1",
+                        "property": "authorization_state",
+                        "operator": "equals",
+                        "expected": "approved",
+                    },
+                },
+                "execution_route": {
+                    "disposition": "executable_route",
+                    "delivery_class": "direct_prompt",
+                    "selected_factor_handle": "cause_1",
+                    "action_kind": "model_output",
+                    "resource_role_handles": [],
+                    "carrier_attacker_influence": "none",
+                    "reason": "The selected structural factor supports the direct route.",
+                },
+            },
             "Step 1: The path begins with the shared policy state.\n"
             "Step 2: PM-1-1 becomes stale before synchronization.\n"
             "Step 3: The coordination mechanism carries the changed state.\n"

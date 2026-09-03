@@ -85,6 +85,36 @@ pairs and an index whose final replacement marks completion. It preserves the
 producer's exact identities, digests, pins, and validation attestation.
 _Avoid_: loose scenario directory, execution result, inferred runtime plan
 
+**Semantic execution contract**:
+The scenario-owned description of its delivery path, selected causal factor,
+logical resource needs, operations and observable unsafe outcome.
+_Avoid_: runtime binding, generated transcript, platform plan
+
+**Binding completeness**:
+Whether a semantic execution contract is concrete, parameterized by precise
+unresolved resource roles, or too incomplete for execution.
+_Avoid_: platform readiness, model confidence, simulation status
+
+**Environment basis**:
+Whether execution meaning is target-agnostic, backed by a reviewed target
+profile, backed by an explicit simulation profile, or has no execution basis.
+_Avoid_: binding completeness, deployment readiness
+
+**Execution target profile**:
+A reviewed, content-addressed description of the semantic resources and
+interfaces available in one real or deliberately simulated environment.
+_Avoid_: capability inference, credential file, runtime receipt
+
+**Bound execution case**:
+One immutable pairing of a verified scenario with one exact target or
+simulation resource mapping, created before runtime readiness and compilation.
+_Avoid_: scenario, runtime binding set, platform artifact
+
+**Analytical-only scenario**:
+An admitted safety finding whose delivery path, operation or observable oracle
+is too incomplete to compile into an honest executable test.
+_Avoid_: unsupported platform case, missing credentials, failed test
+
 **Standalone STPA analysis**:
 A diagnostic baseline STPA analysis that omits taxonomy-obligation
 completeness. It supports isolation and comparison but is not the normal
@@ -212,9 +242,10 @@ provider request is allowed.
 _Avoid_: provider error, silent truncation
 
 **Scenario generation context**:
-The immutable, target-scoped facts shared by Stage 5 and every Stage 6 renderer:
-the selected loss, hazard, governing constraint, unsafe action, obligation
-concern, and causal evidence.
+The immutable, target-scoped authority behind Stage 5 and every Stage 6
+renderer: the selected loss, hazard, governing constraint, unsafe action,
+obligation concern, and causal evidence. Stage 5 receives only its actionable
+semantic projection; Stage 6 retains the complete content-addressed artifact.
 _Avoid_: global STPA dump, unrelated constraints
 
 **Scenario realization**:

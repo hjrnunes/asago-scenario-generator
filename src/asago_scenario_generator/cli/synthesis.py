@@ -49,6 +49,24 @@ def run_cmd(
         None,
         help="Optional pre-built capability-profile.yaml; skips profile inference.",
     ),
+    execution_target_profile: Path | None = typer.Option(
+        None,
+        "--target-profile",
+        "--execution-target-profile",
+        help=(
+            "Optional verified execution target/simulation profile JSON or YAML. "
+            "The run publishes its canonical copy before the execution bundle."
+        ),
+    ),
+    requested_environment_basis: str | None = typer.Option(
+        None,
+        "--basis",
+        "--requested-environment-basis",
+        help=(
+            "Explicit execution basis: target_profile, simulation_profile, "
+            "or target_agnostic."
+        ),
+    ),
     profile: str | None = typer.Option(None, help="Default model profile name."),
     sp1_profile: str | None = typer.Option(None, help="SP1 model profile override."),
     sp2_profile: str | None = typer.Option(None, help="SP2 model profile override."),
@@ -88,6 +106,8 @@ def run_cmd(
     _validate_file(profiles_file, "model profiles file")
     if capability_profile is not None:
         _validate_file(capability_profile, "capability profile file")
+    if execution_target_profile is not None:
+        _validate_file(execution_target_profile, "execution target profile file")
     if cross_taxonomy is not None:
         _validate_file(cross_taxonomy, "cross-taxonomy file")
     if max_workers < 1:
@@ -112,6 +132,10 @@ def run_cmd(
         from asago_scenario_generator.stpa.system_model.profile import (
             load_capability_profile,
         )
+        from asago_scenario_generator.stpa.models.execution_classification import (
+            ExecutionTargetProfile,
+            RequestedEnvironmentBasis,
+        )
 
         # The product workflow preserves every reviewed taxonomy record because
         # the typed snapshot pins the complete risk set.
@@ -131,6 +155,28 @@ def run_cmd(
             if capability_profile is not None
             else None
         )
+        execution_target_profile_value = None
+        if execution_target_profile is not None:
+            target_payload = _load_payload(
+                execution_target_profile, "execution target profile"
+            )
+            if "semantic_digest" not in target_payload:
+                raise ValueError(
+                    "execution target profile must include semantic_digest"
+                )
+            execution_target_profile_value = ExecutionTargetProfile.model_validate(
+                target_payload
+            )
+            execution_target_profile_value.assert_integrity()
+        requested_basis = None
+        if requested_environment_basis is not None:
+            try:
+                requested_basis = RequestedEnvironmentBasis(requested_environment_basis)
+            except ValueError as exc:
+                raise ValueError(
+                    "requested environment basis must be target_profile, "
+                    "simulation_profile, or target_agnostic"
+                ) from exc
         if typed_inputs is not None:
             snapshot_profile = typed_inputs.capability_snapshot.profile
             if profile_value is None:
@@ -159,6 +205,8 @@ def run_cmd(
             qualification_facts=facts,
             output_dir=output_dir,
             capability_profile=profile_value,
+            execution_target_profile=execution_target_profile_value,
+            requested_environment_basis=requested_basis,
             capability_snapshot=(
                 typed_inputs.capability_snapshot if typed_inputs is not None else None
             ),

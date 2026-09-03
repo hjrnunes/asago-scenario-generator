@@ -51,6 +51,8 @@ _SCENARIO_ID_RE = re.compile(r"scenario_id:\s*(SCN-\d+)")
 _TARGET_CONTROLLER_RE = re.compile(r"target_controller:\s*(RESP-\d+)")
 _TARGET_CA_RE = re.compile(r"target_control_action:\s*(CA-\d+-\d+)")
 _ICA_TYPE_RE = re.compile(r"ica_type:\s*(\w+)")
+_BELIEF_HANDLE_RE = re.compile(r"belief_handle:\s*(belief_\d+)")
+_CAUSE_HANDLE_RE = re.compile(r"source_handle:\s*(cause_\d+)")
 
 
 def _extract_pm_ids(text: str) -> list[str]:
@@ -100,6 +102,16 @@ def _build_bdi_response(user_prompt: str) -> dict:
     resp_ids = _extract_resp_ids(user_prompt)
     ca_ids = _extract_ca_ids(user_prompt)
     fb_ids = _extract_fb_ids(user_prompt)
+    belief_handles = list(dict.fromkeys(_BELIEF_HANDLE_RE.findall(user_prompt)))
+    cause_handles = list(dict.fromkeys(_CAUSE_HANDLE_RE.findall(user_prompt))) or [
+        "cause_1"
+    ]
+    target_match = _TARGET_CA_RE.search(user_prompt)
+    target_action = (
+        target_match.group(1) if target_match else (ca_ids[0] if ca_ids else "CA-1-1")
+    )
+    ica_match = _ICA_TYPE_RE.search(user_prompt)
+    ica_type = ica_match.group(1) if ica_match else "NOT_PROVIDED"
 
     defender_vulnerabilities: dict[str, str] = {}
     for pm_id in pm_ids:
@@ -110,12 +122,12 @@ def _build_bdi_response(user_prompt: str) -> dict:
 
     # Attacker BDI — reference at least one structural ID in intentions.
     beliefs = [
-        f"The defender relies on {pm_ids[0]} for decision-making." if pm_ids
+        f"The defender relies on {pm_ids[0]} for decision-making."
+        if pm_ids
         else "The defender has a process model that can be manipulated.",
     ]
     desires = [
-        "Induce the unsafe control action by corrupting the defender's "
-        "process model."
+        "Induce the unsafe control action by corrupting the defender's process model."
     ]
     intention_refs: list[str] = []
     if fb_ids:
@@ -129,12 +141,77 @@ def _build_bdi_response(user_prompt: str) -> dict:
     if resp_ids:
         intention_refs.append(f"Target {resp_ids[0]} as the vulnerable controller")
 
+    if ica_type == "NOT_PROVIDED":
+        unsafe_condition = {
+            "type": "action_presence",
+            "control_action_id": target_action,
+            "expected": "not_provided",
+        }
+    elif ica_type == "INCORRECT":
+        unsafe_condition = {
+            "type": "action_value",
+            "control_action_id": target_action,
+            "property": "semantic_value",
+            "operator": "equals",
+            "expected": "unsafe",
+        }
+    elif ica_type == "WRONG_DURATION":
+        unsafe_condition = {
+            "type": "duration",
+            "reference_ref": target_action,
+            "duration_ms": 1,
+        }
+    else:
+        unsafe_condition = {
+            "type": "delay",
+            "reference_ref": target_action,
+            "delay_ms": 1,
+        }
+
     return {
-        "defender_vulnerabilities": defender_vulnerabilities,
+        "defender_vulnerabilities": [
+            {
+                "belief_handle": handle,
+                "vulnerability": "The selected belief may be stale.",
+            }
+            for handle in belief_handles
+        ],
         "attacker_bdi": {
             "beliefs": beliefs,
             "desires": desires,
-            "intentions": intention_refs,
+            "intentions": [
+                {
+                    "description": text,
+                    "source_handles": [cause_handles[0]],
+                }
+                for text in intention_refs
+            ],
+        },
+        "causal_factors": [
+            {
+                "source_handle": handle,
+                "evidence": "The selected structural condition can remain stale.",
+                "temporal_condition": None,
+                "evidence_status": "structural_failure",
+                "capability_refs": [],
+                "access_refs": [],
+                "bounded_assumption": None,
+            }
+            for handle in cause_handles
+        ],
+        "unsafe_outcome": {
+            "condition": unsafe_condition,
+            "hazard_refs": [],
+            "constraint_refs": [],
+        },
+        "execution_route": {
+            "disposition": "executable_route",
+            "delivery_class": "direct_prompt",
+            "selected_factor_handle": cause_handles[0],
+            "action_kind": "model_output",
+            "resource_role_handles": [],
+            "carrier_attacker_influence": "none",
+            "reason": "The selected structural factor explains the direct route.",
         },
     }
 

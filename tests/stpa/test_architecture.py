@@ -55,6 +55,7 @@ _FORBIDDEN_INFRA_PREFIXES = (
 _MODEL_LAYERS: dict[str, int] = {
     "_validation": 0,
     "semantic_conditions": 0,
+    "execution_classification": 0,
     "causal_factor": 1,
     "loss_analysis": 1,
     "control_structure": 1,
@@ -206,6 +207,7 @@ class TestNoImportCycles:
             "asago_scenario_generator.stpa.models.enriched_threat_set",
             "asago_scenario_generator.stpa.models.scenario_context",
             "asago_scenario_generator.stpa.models.semantic_conditions",
+            "asago_scenario_generator.stpa.models.execution_classification",
             "asago_scenario_generator.stpa.models.scenario_spec",
             "asago_scenario_generator.stpa.models.scenario_envelope",
             "asago_scenario_generator.stpa.models.execution_projection_v2",
@@ -927,6 +929,7 @@ _SCENARIO_PROD_LAYERS: dict[str, int] = {
     # on scenario_prod siblings or IO, so they sit at the stage-module layer.
     "projection": 1,
     "execution_projection": 1,
+    "execution_classification": 1,
     "prompt_alignment": 1,
     "execution_bundle": 2,
     "eval_metrics": 2,
@@ -1019,6 +1022,7 @@ class TestScenarioProdNoImportCycles:
             "asago_scenario_generator.stpa.scenario_prod.validators",
             "asago_scenario_generator.stpa.scenario_prod.projection",
             "asago_scenario_generator.stpa.scenario_prod.execution_projection",
+            "asago_scenario_generator.stpa.scenario_prod.execution_classification",
             "asago_scenario_generator.stpa.scenario_prod.prompt_alignment",
             "asago_scenario_generator.stpa.scenario_prod.execution_bundle",
             "asago_scenario_generator.stpa.scenario_prod.eval_metrics",

@@ -41,6 +41,8 @@ def test_run_owns_the_obligation_aware_synthesis_inputs() -> None:
         "--output-dir",
         "--taxonomy-inputs",
         "--sssom",
+        "--target-profile",
+        "--basis",
         "--resume",
     ):
         assert option in result.stdout

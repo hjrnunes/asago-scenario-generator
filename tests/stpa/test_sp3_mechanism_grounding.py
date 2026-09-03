@@ -14,6 +14,13 @@ import yaml
 
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
+from asago_scenario_generator.stpa.models.execution_classification import (
+    ExecutionActionKind,
+    ExecutionDeliveryClass,
+    RequestedEnvironmentBasis,
+    SemanticExecutionContract,
+    SemanticExecutionDelivery,
+)
 from asago_scenario_generator.stpa.models.scenario_spec import AttackerBDI
 from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioObligationConsideration,
@@ -61,6 +68,19 @@ def _empty_reachability_context():
     )
 
 
+def _direct_execution_contract() -> SemanticExecutionContract:
+    """Return the explicit target-agnostic route used by legacy test calls."""
+    return SemanticExecutionContract(
+        requested_environment_basis=RequestedEnvironmentBasis.target_agnostic,
+        delivery=SemanticExecutionDelivery(
+            delivery_class=ExecutionDeliveryClass.direct_prompt,
+            factor_id="CF-1",
+            source_role="direct_user_input",
+        ),
+        action_kind=ExecutionActionKind.model_output,
+    )
+
+
 def _stage5_result(factor: CausalFactorDeclaration) -> BDIGenerationResult:
     return BDIGenerationResult(
         defender_vulnerabilities={"PM-1-1": "The action count can be stale."},
@@ -70,6 +90,7 @@ def _stage5_result(factor: CausalFactorDeclaration) -> BDIGenerationResult:
             intentions=["Use the selected structural condition."],
         ),
         causal_factors=[factor],
+        execution_contract=_direct_execution_contract(),
     )
 
 
@@ -184,6 +205,50 @@ def test_empty_reachability_prompt_allows_structural_condition_without_attack() 
     assert "existing structural condition" in combined
 
 
+def test_stage5_prompt_separates_delivery_from_internal_causal_proof() -> None:
+    """A usable test route does not require proof of every internal transition."""
+    system_prompt, user_prompt = build_context_bdi_prompts(
+        _empty_reachability_context(), TemplateLoader(PROMPTS_DIR)
+    )
+    prompt = " ".join(f"{system_prompt}\n{user_prompt}".split()).lower()
+
+    assert "how the test stimulus enters the system" in prompt
+    assert "does not need to prove every internal causal step" in prompt
+    assert "direct_prompt" in prompt
+    assert "conversation_context" in prompt
+    assert "do not require a reachable capability" in prompt
+    assert (
+        "missing target-specific runtime details makes the route parameterized"
+        in prompt
+    )
+
+
+def test_stage5_prompt_contains_only_actionable_context_and_defines_references() -> (
+    None
+):
+    """Provider context omits integrity bookkeeping and explains copied IDs."""
+    context = _empty_reachability_context()
+    system_prompt, user_prompt = build_context_bdi_prompts(
+        context, TemplateLoader(PROMPTS_DIR)
+    )
+    prompt = f"{system_prompt}\n{user_prompt}"
+    normalized_prompt = " ".join(prompt.split())
+
+    assert context.context_digest not in prompt
+    assert context.scenario_identity.scenario_id not in prompt
+    assert context.scenario_identity.ica_id not in prompt
+    assert context.target_control_path.process_model_parts[0].element_id not in prompt
+    assert context.target_control_path.feedback[0].element_id not in prompt
+    assert "source_pins:" not in prompt
+    assert "catalog_context:" not in prompt
+    assert "Copy the listed hazard and constraint references" in normalized_prompt
+    assert "target-agnostic semantic label" in normalized_prompt
+    assert "Select only when timing, lateness, staleness" in normalized_prompt
+    assert (
+        "Select only when the observed feedback value is incorrect" in normalized_prompt
+    )
+
+
 def test_obligation_mechanism_is_provenance_not_causal_evidence() -> None:
     """A taxonomy finding selects the ICA but cannot establish its attack story."""
     threat = _threat()
@@ -221,9 +286,7 @@ def test_obligation_mechanism_is_provenance_not_causal_evidence() -> None:
     )
 
     assert "analysis provenance, not causal evidence" in " ".join(stage5_user.split())
-    assert "finding` means STPA found a related unsafe-control path" in " ".join(
-        stage5_user.split()
-    )
+    assert "finding`), found the concern inapplicable" in " ".join(stage5_user.split())
     assert "does not establish that persistent memory was poisoned" in " ".join(
         stage5_system.split()
     )

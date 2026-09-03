@@ -585,7 +585,8 @@ def _h_mcp_prompt(world: World, text: str, examples: dict) -> tuple[bool, str]:
     if not stage:
         return False, f"Could not identify prompt stage in: {text}"
     context = world.sp3_context
-    if stage.group(1) == "Stage 5 BDI":
+    world.sp3_prompt_stage = stage.group(1)
+    if world.sp3_prompt_stage == "Stage 5 BDI":
         _system, user = build_context_bdi_prompts(context, loader)
     else:
         _system, user = build_narrative_prompts(
@@ -597,10 +598,36 @@ def _h_mcp_prompt(world: World, text: str, examples: dict) -> tuple[bool, str]:
 
 
 def _h_mcp_complete(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Check that the complete exact context reaches the user prompt."""
+    """Check the exact full or purpose-built context for the selected stage."""
+    prompt = getattr(world, "sp3_user_prompt", "")
+    if getattr(world, "sp3_prompt_stage", None) == "Stage 5 BDI":
+        return _check_actionable_stage5_context(prompt, world.sp3_context)
     context = render_scenario_generation_context(world.sp3_context)
-    if not context or context not in getattr(world, "sp3_user_prompt", ""):
+    if not context or context not in prompt:
         return False, "User prompt does not contain the complete technology context"
+    return True, ""
+
+
+def _check_actionable_stage5_context(prompt: str, context: object) -> tuple[bool, str]:
+    """Require useful semantic facts while excluding integrity-only material."""
+    required = (
+        context.ica.exact_ica_text,
+        context.ica.uca_type_definition,
+        context.target_control_path.control_action.action_id,
+        context.target_control_path.control_action.description,
+        *(item.description for item in context.losses),
+        *(item.hazard_id for item in context.hazards),
+        *(item.description for item in context.hazards),
+        *(item.constraint_id for item in context.constraints),
+        *(item.description for item in context.constraints),
+        *(item.capability_id for item in context.reachable_capabilities),
+        *(item.description for item in context.reachable_capabilities),
+        *(item.evidence for item in context.reachable_capabilities),
+    )
+    if any(value not in prompt for value in required):
+        return False, "Stage 5 prompt lacks actionable scenario meaning"
+    if context.context_digest in prompt or "source_pins:" in prompt:
+        return False, "Stage 5 prompt contains integrity-only bookkeeping"
     return True, ""
 
 
@@ -655,13 +682,16 @@ def _h_mcp_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
 
 
 def _h_mcp_stage5_requests(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Check every Stage 5 request for the exact context."""
-    context = render_scenario_generation_context(world.sp3_context)
+    """Check every Stage 5 request for useful facts without bookkeeping."""
     calls = [call for call in _logged_calls(world) if call.get("stage") == "stage_5"]
-    if not calls or any(
-        context not in call.get("user_prompt_text", "") for call in calls
-    ):
+    if not calls:
         return False, "A Stage 5 request lacks the deterministic context"
+    for call in calls:
+        passed, reason = _check_actionable_stage5_context(
+            call.get("user_prompt_text", ""), world.sp3_context
+        )
+        if not passed:
+            return False, reason
     return True, ""
 
 
@@ -874,7 +904,7 @@ def register(api: object) -> None:
         source_order=24031,
     )
     api.register_first(
-        "the user prompt contains the complete exact scenario context",
+        "the user prompt contains the stage-appropriate scenario context",
         _h_mcp_complete,
         source_order=24032,
     )
@@ -899,7 +929,7 @@ def register(api: object) -> None:
         source_order=24035,
     )
     api.register_first(
-        "every Stage 5 BDI request contains the exact scenario context",
+        "every Stage 5 BDI request contains the actionable scenario context",
         _h_mcp_stage5_requests,
         source_order=24036,
     )

@@ -265,21 +265,29 @@ def _validation_retry_prompt(
     feedback: str | None,
     error: Exception,
     response_format: type[BaseModel],
+    include_schema: bool,
 ) -> str:
-    """Build a bounded correction prompt with exact error and output schema."""
-    schema = json.dumps(
-        response_format.model_json_schema(),
-        ensure_ascii=False,
-        sort_keys=True,
-        indent=2,
-    )
+    """Build a bounded correction prompt with an exact validation error."""
     suffix = feedback or ""
     suffix += (
         "\n\nExact validation error from the prior response:\n"
-        f"{type(error).__name__}: {error}\n\n"
-        "Expected response schema (return one JSON object matching it):\n"
-        f"```json\n{schema}\n```"
+        f"{type(error).__name__}: {error}"
     )
+    if include_schema:
+        schema = json.dumps(
+            response_format.model_json_schema(),
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        )
+        suffix += (
+            "\n\nExpected response schema (return one JSON object matching it):\n"
+            f"```json\n{schema}\n```"
+        )
+    else:
+        suffix += (
+            "\n\nReturn one JSON object matching the response schema already supplied."
+        )
     return original_prompt + suffix
 
 
@@ -417,6 +425,7 @@ def safe_llm_call(
     json_decode_retries: int = 0,
     validation_retries: int = 0,
     validation_retry_feedback: str | None = None,
+    validation_retry_include_schema: bool = True,
     result_parser: Callable[[LLMResult], _T] | None = None,
     prompt_template_hashes: Mapping[str, str] | None = None,
 ) -> tuple[_T | None, LLMResult | None, str | None]:
@@ -456,6 +465,9 @@ def safe_llm_call(
             to zero; stages must opt in.
         validation_retry_feedback: Optional text appended to the original user
             prompt on a validation retry.
+        validation_retry_include_schema: Whether to repeat the complete JSON
+            schema in a retry prompt. Stages using transport-level structured
+            output may disable this to keep correction prompts compact.
         result_parser: Optional stage-local parser for semantic responses. The
             parser receives the raw ``LLMResult`` and must return a validated
             response model. It is useful when a stage needs stricter wire
@@ -574,6 +586,7 @@ def safe_llm_call(
                     feedback=validation_retry_feedback,
                     error=exc,
                     response_format=response_format,
+                    include_schema=validation_retry_include_schema,
                 )
                 continue
             return None, result, error_msg

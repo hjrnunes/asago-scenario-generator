@@ -15,6 +15,7 @@ from asago_scenario_generator.stpa.models.causal_factor import (
 from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
 from asago_scenario_generator.stpa.models.execution_projection_v2 import (
     ExecutionCausalFactor,
+    ExecutionProjectionV2,
     ExecutionRunIdentity,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
@@ -47,6 +48,22 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
     SemanticBindingPlaceholder,
     SemanticBindingValueType,
 )
+from asago_scenario_generator.stpa.models.execution_classification import (
+    BindingCompleteness,
+    EnvironmentBasis,
+    ExecutionActionKind,
+    ExecutionClassification,
+    ExecutionClaimScope,
+    ExecutionDeliveryClass,
+    ExecutionProfileFit,
+    ExecutionTargetProfile,
+    InventoryCompleteness,
+    ProfileAuthority,
+    ProfileBasis,
+    RequestedEnvironmentBasis,
+    SemanticExecutionContract,
+    SemanticExecutionDelivery,
+)
 from asago_scenario_generator.stpa.scenario_prod.execution_projection import (
     prepare_execution_projection,
     validate_execution_projection,
@@ -54,6 +71,7 @@ from asago_scenario_generator.stpa.scenario_prod.execution_projection import (
 from asago_scenario_generator.stpa.scenario_prod.execution_bundle import (
     ExecutionBundlePublication,
     publish_execution_bundle,
+    publish_execution_target_profile,
     verify_execution_bundle,
 )
 from asago_scenario_generator.stpa.scenario_prod import (
@@ -157,6 +175,15 @@ def _spec(
             ),
         ),
         scenario_context=context,
+        execution_contract=SemanticExecutionContract(
+            requested_environment_basis=RequestedEnvironmentBasis.target_agnostic,
+            delivery=SemanticExecutionDelivery(
+                delivery_class=ExecutionDeliveryClass.direct_prompt,
+                factor_id="CF-1",
+                source_role="direct_user_input",
+            ),
+            action_kind=ExecutionActionKind.model_output,
+        ),
     )
 
 
@@ -170,14 +197,78 @@ def test_prepare_seam_returns_digest_bearing_projection_and_derives_binding() ->
     assert validated.projection.semantic_digest == validated.semantic_digest
     assert validated.projection.unsafe_outcome.semantic_binding_required is True
     assert validated.projection.unsafe_outcome.condition.type == "delay"
-    assert validated.projection.stimulus_requirements[0].eligible_factor_ids == (
-        "CF-1",
+    assert validated.projection.stimulus_requirements[0].factor_id == "CF-1"
+    assert (
+        validated.projection.stimulus_requirements[0].delivery_class.value
+        == "direct_prompt"
     )
     assert validated.projection.stimulus_requirements[0].intent
     assert validated.projection.steps[-1].kind.value == "UNSAFE_CONTROL_ACTION"
     assert validate_execution_projection(
         validated.projection.model_dump(mode="json")
     ).valid
+
+
+def test_projection_rejects_inconsistent_resource_free_classification() -> None:
+    validated = prepare_execution_projection(
+        _spec(),
+        _control_structure(),
+        ExecutionRunIdentity(run_id="run-classification"),
+    )
+    classification = ExecutionClassification(
+        binding_completeness=BindingCompleteness.parameterized,
+        environment_basis=EnvironmentBasis.target_agnostic,
+        profile_fit=ExecutionProfileFit.needs_binding,
+        claim_scope=ExecutionClaimScope.no_execution_claim,
+    )
+    payload = validated.projection.model_dump(mode="json", exclude={"semantic_digest"})
+    payload["execution_classification"] = classification.model_dump(mode="json")
+
+    validation = validate_execution_projection(
+        payload | {"semantic_digest": validated.semantic_digest}
+    )
+    assert validation.valid is False
+    assert validation.violations[0].code.value == "execution_classification_mismatch"
+
+    with pytest.raises(ValueError, match="resource-free executable"):
+        ExecutionProjectionV2.model_validate(payload)
+
+
+def test_projection_rejects_bindings_on_analytical_classification() -> None:
+    validated = prepare_execution_projection(
+        _spec(),
+        _control_structure(),
+        ExecutionRunIdentity(run_id="run-analytical-classification"),
+    )
+    classification = ExecutionClassification(
+        binding_completeness=BindingCompleteness.analytical_only,
+        environment_basis=EnvironmentBasis.none,
+        profile_fit=ExecutionProfileFit.invalid,
+        claim_scope=ExecutionClaimScope.no_execution_claim,
+        target_profile_digest="a" * 64,
+    )
+    payload = validated.projection.model_dump(mode="json", exclude={"semantic_digest"})
+    payload["execution_contract"] = {
+        **payload["execution_contract"],
+        "disposition": "analytical_only",
+        "requested_environment_basis": None,
+        "delivery": None,
+        "action_kind": None,
+        "resource_requirements": [],
+        "gaps": [
+            {
+                "code": "operation_missing",
+                "detail": "No operation was established.",
+                "evidence_refs": ["CF-1"],
+            }
+        ],
+    }
+    payload["execution_contract"].pop("semantic_digest")
+    payload["execution_classification"] = classification.model_dump(mode="json")
+    payload["stimulus_requirements"] = []
+
+    with pytest.raises(ValueError, match="analytical_only classifications"):
+        ExecutionProjectionV2.model_validate(payload)
 
 
 def test_standalone_parser_requires_persisted_semantic_digest() -> None:
@@ -313,6 +404,24 @@ def test_bundle_publication_is_canonical_index_last_and_tamper_evident(
     )
 
 
+def test_target_profile_publication_uses_canonical_shared_writer(tmp_path) -> None:
+    profile = ExecutionTargetProfile(
+        profile_id="target-profile-1",
+        environment_id="target-1",
+        basis=ProfileBasis.target,
+        authority=ProfileAuthority.reviewed,
+        inventory_completeness=InventoryCompleteness.reviewed_complete,
+        evidence_refs=("review:target",),
+    )
+
+    path = publish_execution_target_profile(tmp_path, profile)
+
+    assert path == tmp_path / "execution-target-profile.json"
+    assert json.loads(path.read_text(encoding="utf-8")) == profile.model_dump(
+        mode="json"
+    )
+
+
 def test_context_stage5_prompt_describes_constructible_typed_unsafe_condition() -> None:
     context = _spec().scenario_context
     assert context is not None
@@ -321,8 +430,8 @@ def test_context_stage5_prompt_describes_constructible_typed_unsafe_condition() 
         TemplateLoader(PROMPTS_DIR),
     )
 
-    assert '"semantic_binding_required": true' in system_prompt
-    assert '"binding_ref": "SEM-1"' in system_prompt
+    assert "semantic_binding_required" not in system_prompt
+    assert '"binding_ref": "SEM-outcome-value"' in system_prompt
     assert '"value_type": "integer"' in system_prompt
     assert '"minimum": 0' in system_prompt
     assert '"maximum": null' in system_prompt

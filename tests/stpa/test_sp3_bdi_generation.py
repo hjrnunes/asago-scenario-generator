@@ -24,6 +24,12 @@ from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.models.scenario_spec import (
     AttackerBDI,
 )
+from asago_scenario_generator.stpa.models.execution_classification import (
+    ExecutionActionKind,
+    ExecutionDeliveryClass,
+    SemanticExecutionContract,
+    SemanticExecutionDelivery,
+)
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     BDIGenerationResult,
     CausalFactorDeclaration,
@@ -375,6 +381,33 @@ class TestGenerateBDI:
         assert error is not None
         assert "retry exhausted" in error.lower()
         assert "LengthFinishReasonError" in error
+
+    def test_legacy_adapter_rejects_compiler_owned_execution_contract(self):
+        cs = _make_control_structure()
+        bdi = populate_defender_bdi(cs, "RESP-1")
+        threat = _make_structural_threat()
+        llm_result = BDIGenerationResult(
+            defender_vulnerabilities={"PM-1-1": "v", "PM-1-2": "v"},
+            causal_factors=_causal_factors(),
+            attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
+            execution_contract=SemanticExecutionContract(
+                delivery=SemanticExecutionDelivery(
+                    delivery_class=ExecutionDeliveryClass.direct_prompt,
+                    factor_id="CF-1",
+                    source_role="direct_user_input",
+                ),
+                action_kind=ExecutionActionKind.model_output,
+            ),
+        )
+        client = MockLLMClient()
+        client.set_response_for(BDIGenerationResult, llm_result)
+
+        with TemporaryDirectory() as tmpdir:
+            result, error = generate_bdi(client, bdi, threat, cs, Path(tmpdir))
+
+        assert result is None
+        assert error is not None
+        assert "legacy generate_bdi" in error
 
 
 class TestAssembleScenarioSpec:

@@ -44,6 +44,13 @@ from asago_scenario_generator.stpa.models.execution_projection_v2 import (
     ProjectionValidationViolation,
     UnsafeOutcome,
 )
+from asago_scenario_generator.stpa.models.execution_classification import (
+    ExecutionActionKind,
+    ExecutionResourceKind,
+    ExecutionResourcePurpose,
+    SemanticExecutionContract,
+    ExecutionTargetProfile,
+)
 from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
 )
@@ -57,6 +64,8 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
     WindowCondition,
     contains_binding_placeholder,
 )
+
+from .execution_classification import classify_scenario_execution
 
 
 _RUNTIME_KEYS = frozenset(
@@ -91,6 +100,8 @@ _TOP_LEVEL_FIELDS = frozenset(
         "unsafe_outcome",
         "stimulus_requirements",
         "execution_requirements",
+        "execution_contract",
+        "execution_classification",
         "trace_refs",
         "semantic_digest",
     }
@@ -130,6 +141,9 @@ def prepare_execution_projection(
     spec: ScenarioSpec,
     control_structure: ControlStructure,
     run_identity: ExecutionRunIdentity,
+    *,
+    execution_contract: SemanticExecutionContract | None = None,
+    target_profile: ExecutionTargetProfile | None = None,
 ) -> ValidatedExecutionProjection:
     """Validate and freeze one contextual ``ScenarioSpec`` as v2 intent.
 
@@ -137,10 +151,26 @@ def prepare_execution_projection(
     condition identities are checked against the exact control structure
     before the immutable digest-bearing value is returned.
     """
-    _validate_prepare_types(spec, control_structure, run_identity)
+    _validate_prepare_types(
+        spec,
+        control_structure,
+        run_identity,
+        execution_contract,
+        target_profile,
+    )
     context = _validate_prepare_authority(spec, control_structure)
     factors = _build_projection_factors(spec.causal_factors)
     hazard_refs, constraint_refs = _outcome_refs(spec, context)
+    contract = execution_contract or spec.execution_contract
+    if execution_contract is not None and spec.execution_contract is not None:
+        if execution_contract != spec.execution_contract:
+            raise ExecutionProjectionPreparationError(
+                "explicit execution contract does not match scenario contract"
+            )
+    if contract is None:
+        raise ExecutionProjectionPreparationError(
+            "contextual v2 projection requires an explicit Stage 5 execution contract"
+        )
     projection = _build_projection(
         spec,
         control_structure,
@@ -149,6 +179,8 @@ def prepare_execution_projection(
         factors,
         hazard_refs,
         constraint_refs,
+        contract,
+        target_profile,
     )
     return _freeze_validated_projection(projection)
 
@@ -157,6 +189,8 @@ def _validate_prepare_types(
     spec: ScenarioSpec,
     control_structure: ControlStructure,
     run_identity: ExecutionRunIdentity,
+    execution_contract: SemanticExecutionContract | None,
+    target_profile: ExecutionTargetProfile | None,
 ) -> None:
     if not isinstance(spec, ScenarioSpec):
         raise ExecutionProjectionPreparationError("spec must be a ScenarioSpec")
@@ -167,6 +201,18 @@ def _validate_prepare_types(
     if not isinstance(run_identity, ExecutionRunIdentity):
         raise ExecutionProjectionPreparationError(
             "run_identity must be an ExecutionRunIdentity"
+        )
+    if execution_contract is not None and not isinstance(
+        execution_contract, SemanticExecutionContract
+    ):
+        raise ExecutionProjectionPreparationError(
+            "execution_contract must be a SemanticExecutionContract"
+        )
+    if target_profile is not None and not isinstance(
+        target_profile, ExecutionTargetProfile
+    ):
+        raise ExecutionProjectionPreparationError(
+            "target_profile must be an ExecutionTargetProfile"
         )
 
 
@@ -263,9 +309,16 @@ def _build_projection(
     factors: tuple[ExecutionCausalFactor, ...],
     hazard_refs: tuple[str, ...],
     constraint_refs: tuple[str, ...],
+    execution_contract: SemanticExecutionContract,
+    target_profile: ExecutionTargetProfile | None,
 ) -> ExecutionProjectionV2:
     steps = _build_projection_steps(factors, spec.target_control_action)
     outcome = _build_unsafe_outcome(spec, hazard_refs, constraint_refs)
+    classification = classify_scenario_execution(
+        execution_contract,
+        outcome,
+        target_profile,
+    )
     return ExecutionProjectionV2(
         run_id=run_identity.run_id,
         scenario_id=spec.scenario_id,
@@ -281,8 +334,12 @@ def _build_projection(
         causal_factors=factors,
         steps=steps,
         unsafe_outcome=outcome,
-        stimulus_requirements=_stimulus_requirements(spec, factors),
-        execution_requirements=_execution_requirements(spec, factors, context),
+        stimulus_requirements=_stimulus_requirements(spec, factors, execution_contract),
+        execution_requirements=_execution_requirements(
+            spec, factors, context, execution_contract
+        ),
+        execution_contract=execution_contract,
+        execution_classification=classification,
         trace_refs=_trace_refs(
             spec, control_structure, context, hazard_refs, constraint_refs
         ),
@@ -292,7 +349,10 @@ def _build_projection(
 def _stimulus_requirements(
     spec: ScenarioSpec,
     factors: Sequence[ExecutionCausalFactor],
+    execution_contract: SemanticExecutionContract,
 ) -> tuple[AdversarialStimulusRequirement, ...]:
+    if execution_contract.disposition.value == "analytical_only":
+        return ()
     intent = "; ".join(
         item.strip() for item in spec.attacker_bdi.intentions if item.strip()
     )
@@ -308,7 +368,10 @@ def _stimulus_requirements(
             stimulus_id="STIM-1",
             intent=intent,
             desired_effect=desired_effect,
-            eligible_factor_ids=tuple(factor.factor_id for factor in factors),
+            delivery_class=execution_contract.delivery.delivery_class,
+            factor_id=execution_contract.delivery.factor_id,
+            source_role=execution_contract.delivery.source_role,
+            carrier_requirement_id=execution_contract.delivery.carrier_requirement_id,
         ),
     )
 
@@ -504,6 +567,7 @@ def _execution_requirements(
     spec: ScenarioSpec,
     factors: Sequence[ExecutionCausalFactor],
     context: ScenarioGenerationContext | None,
+    execution_contract: SemanticExecutionContract,
 ) -> ExecutionRequirements:
     conditions = _projection_conditions(spec, factors)
     categories = _required_surface_categories(conditions)
@@ -511,7 +575,7 @@ def _execution_requirements(
         requires_multi_turn=_has_condition_type(
             conditions, {"ordering", "delay", "duration", "window", "absence"}
         ),
-        requires_tool_execution=False,
+        requires_tool_execution=_requires_tool_execution(execution_contract),
         requires_persistent_state="persistent_data" in categories,
         requires_multi_agent=_requires_multi_agent(context),
         requires_real_clock=_has_condition_type(
@@ -520,6 +584,18 @@ def _execution_requirements(
         requires_state_observation=_has_condition_type(conditions, {"state_value"}),
         required_surface_categories=tuple(categories),
     )
+
+
+def _requires_tool_execution(contract: SemanticExecutionContract) -> bool:
+    """Derive tool execution from explicit semantic resources, never prose."""
+    return any(
+        ExecutionResourceKind.tool in requirement.acceptable_resource_kinds
+        or requirement.purpose is ExecutionResourcePurpose.target_action
+        for requirement in contract.resource_requirements
+    ) or contract.action_kind in {
+        ExecutionActionKind.tool_call,
+        ExecutionActionKind.environment_action,
+    }
 
 
 def _projection_conditions(
@@ -869,6 +945,10 @@ def _error_violation(error: Mapping[str, Any]) -> ProjectionValidationViolation:
 def _validation_code(path: str, message: str) -> ProjectionValidationCode:
     lowered = message.lower()
     rules = (
+        (
+            _is_classification_error,
+            ProjectionValidationCode.execution_classification_mismatch,
+        ),
         (_is_binding_error, ProjectionValidationCode.semantic_binding_state_mismatch),
         (_is_digest_error, ProjectionValidationCode.semantic_digest_mismatch),
         (_is_compatible_error, ProjectionValidationCode.uca_condition_incompatible),
@@ -887,6 +967,11 @@ def _validation_code(path: str, message: str) -> ProjectionValidationCode:
         if matches(path, lowered):
             return code
     return ProjectionValidationCode.condition_field_mismatch
+
+
+def _is_classification_error(path: str, message: str) -> bool:
+    """Map projection/classification cross-field failures to one stable code."""
+    return "execution_classification" in path or "classification" in message
 
 
 def _is_binding_error(path: str, message: str) -> bool:

@@ -31,6 +31,7 @@ __all__ = (
     "closed_loop_stpa",
     "stpa",
     "stpa_execution_bundle",
+    "stpa_execution_route",
     "phase4_task1_hybrid_projection",
     "hybrid_scenario_projection",
     "synthesis",
