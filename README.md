@@ -205,6 +205,21 @@ structural path. If it finds an adjacent control or insufficient evidence, the
 STPA route and scenario remain available while accounting records
 `mechanism_path_unsubstantiated` and withholds obligation credit.
 
+After final ICA filling, a separate STPA-only check compares every non-N/A ICA
+with its exact control action, UCA category, hazard, governing constraint, and
+reachable loss. An unsupported ICA receives one bounded correction by the ICA
+author and one independent recheck; it cannot reach Stage 5 unless the recheck
+supports the corrected meaning. Sibling ICAs continue, and failures remain
+explicit in obligation accounting. Risk-to-pattern mapping strength is derived
+from the pinned mapping path in code and is never accepted from model output.
+
+The unsafe outcome published for an executable scenario carries both its
+machine condition and a short human-readable semantic proposition. For model
+output, the machine condition is fixed bookkeeping over that proposition; the
+artifact generator must use the proposition itself as the response-judging
+criterion. The same scenario, projection, and execution trace retain the exact
+hazard, governing-constraint, and reachable-loss lineage.
+
 Long but semantically valid ICA clauses remain publishable and carry an
 `ica_prose_quality_warning`; style never becomes a reason to delete a valid
 scenario. Accounting and scenario realization record a closed stop reason for

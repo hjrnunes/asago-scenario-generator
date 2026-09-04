@@ -22,6 +22,9 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     SemanticExecutionDelivery,
 )
 from asago_scenario_generator.stpa.models.scenario_spec import AttackerBDI
+from asago_scenario_generator.stpa.models.semantic_conditions import (
+    ActionValueCondition,
+)
 from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioObligationConsideration,
 )
@@ -29,6 +32,7 @@ from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     BDIGenerationResult,
     CausalFactorDeclaration,
+    UnsafeOutcomeDeclaration,
     assemble_scenario_spec,
     populate_defender_bdi,
     build_context_bdi_prompts,
@@ -90,6 +94,15 @@ def _stage5_result(factor: CausalFactorDeclaration) -> BDIGenerationResult:
             intentions=["Use the selected structural condition."],
         ),
         causal_factors=[factor],
+        unsafe_outcome=UnsafeOutcomeDeclaration(
+            condition=ActionValueCondition(
+                control_action_id="CA-1-1",
+                property="semantic_proposition",
+                operator="equals",
+                expected=True,
+            ),
+            semantic_proposition="The response exhibits the selected unsafe action.",
+        ),
         execution_contract=_direct_execution_contract(),
     )
 
@@ -238,7 +251,7 @@ def test_stage5_prompt_contains_only_actionable_context_and_defines_references()
     assert context.target_control_path.feedback[0].element_id not in prompt
     assert "source_pins:" not in prompt
     assert "catalog_context:" not in prompt
-    assert "copy only the listed hazard/constraint references" in normalized_prompt
+    assert "Do not return hazard, constraint, or loss IDs" in normalized_prompt
     assert "Use the selected target action in action conditions" in normalized_prompt
     assert "Select only when timing, lateness, staleness" in normalized_prompt
     assert (

@@ -709,34 +709,34 @@ def test_provider_routing_retry_has_one_owner(tmp_path) -> None:
                 # exact one-route-per-obligation validation.
                 content = {"routes": []}
             elif self.calls == 2:
+                provider_route = ObligationRoute(
+                    obligation_id=brief.obligation_id,
+                    disposition="targeted",
+                    semantic_assessment=ObligationSemanticAssessment(
+                        mechanism_assessment="plausible_in_system",
+                        risk_alignment="supported",
+                        mapping_strength="direct_curated_pair",
+                        mechanism_rationale="The supplied control path permits it.",
+                        risk_alignment_rationale="The mechanism realizes the reviewed risk.",
+                    ),
+                    slot_ids=("RESP-1:CA-1-1:NOT_PROVIDED",),
+                    hazard_ids=("H-1",),
+                    constraint_ids=("SC-1",),
+                    rationale="The supplied control path is relevant to the concern.",
+                    evidence=("provider-route",),
+                ).model_dump(
+                    mode="json",
+                    exclude={
+                        "route_id",
+                        "missing_concepts",
+                        "model_call_refs",
+                        "trace_refs",
+                        "diagnostics",
+                    },
+                )
+                provider_route["semantic_assessment"].pop("mapping_strength", None)
                 content = {
-                    "routes": [
-                        ObligationRoute(
-                            obligation_id=brief.obligation_id,
-                            disposition="targeted",
-                            semantic_assessment=ObligationSemanticAssessment(
-                                mechanism_assessment="plausible_in_system",
-                                risk_alignment="supported",
-                                mapping_strength="direct_curated_pair",
-                                mechanism_rationale="The supplied control path permits it.",
-                                risk_alignment_rationale="The mechanism realizes the reviewed risk.",
-                            ),
-                            slot_ids=("RESP-1:CA-1-1:NOT_PROVIDED",),
-                            hazard_ids=("H-1",),
-                            constraint_ids=("SC-1",),
-                            rationale="The supplied control path is relevant to the concern.",
-                            evidence=("provider-route",),
-                        ).model_dump(
-                            mode="json",
-                            exclude={
-                                "route_id",
-                                "missing_concepts",
-                                "model_call_refs",
-                                "trace_refs",
-                                "diagnostics",
-                            },
-                        )
-                    ]
+                    "routes": [provider_route]
                 }
             else:
                 content = {

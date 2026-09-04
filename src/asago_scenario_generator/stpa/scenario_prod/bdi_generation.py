@@ -48,12 +48,12 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
     DelayCondition,
     DurationCondition,
     OrderingCondition,
-    SemanticBindingPlaceholder,
     SemanticCondition,
     SemanticValue,
     StateValueCondition,
     WindowCondition,
     contains_binding_placeholder,
+    normalize_semantic_proposition,
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
     AttackerInfluence,
@@ -205,7 +205,10 @@ class UnsafeOutcomeDeclaration(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     condition: SemanticCondition
+    semantic_proposition: StrictStr | None = None
     semantic_binding_required: StrictBool | None = None
+    # These fields remain only for non-contextual compatibility callers.  The
+    # corrected contextual wire model never exposes or accepts them.
     hazard_refs: tuple[str, ...] = ()
     constraint_refs: tuple[str, ...] = ()
 
@@ -220,6 +223,15 @@ class UnsafeOutcomeDeclaration(BaseModel):
                 "semantic_binding_required must match typed placeholder presence"
             )
         object.__setattr__(self, "semantic_binding_required", expected)
+        if self.semantic_proposition is not None:
+            object.__setattr__(
+                self,
+                "semantic_proposition",
+                normalize_semantic_proposition(
+                    self.semantic_proposition,
+                    required=True,
+                ),
+            )
         return self
 
 
@@ -229,8 +241,7 @@ class _ContextUnsafeOutcomeDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     condition: SemanticCondition
-    hazard_refs: tuple[str, ...] = ()
-    constraint_refs: tuple[str, ...] = ()
+    semantic_proposition: StrictStr | None
 
 
 class _ContextActionPresenceConditionWire(BaseModel):
@@ -1270,7 +1281,6 @@ def _validate_context_provider_payload(
     _validate_intention_factor_handles(value.attacker_bdi, value.causal_factors)
     _validate_intention_choice_handles(value.attacker_bdi, allowed_handles)
     _validate_defender_vulnerability_handles(value, context)
-    _validate_unsafe_outcome_references(unsafe_outcome, context)
     _validate_context_provider_temporal_conditions(
         value.causal_factors, choices, context
     )
@@ -1377,27 +1387,6 @@ def _validate_defender_vulnerability_handles(
         raise ValueError(
             "defender_vulnerabilities must cover each supplied belief handle "
             f"(missing: {missing}; extra: {extra})"
-        )
-
-
-def _validate_unsafe_outcome_references(
-    outcome: _ContextUnsafeOutcomeDraft,
-    context: ScenarioGenerationContext,
-) -> None:
-    """Keep copied hazard and constraint references inside the context slice."""
-    hazard_ids = {item.hazard_id for item in context.hazards}
-    constraint_ids = {item.constraint_id for item in context.constraints}
-    unknown_hazards = set(outcome.hazard_refs) - hazard_ids
-    unknown_constraints = set(outcome.constraint_refs) - constraint_ids
-    if unknown_hazards:
-        raise ValueError(
-            "unsafe_outcome hazard_refs must name supplied hazards: "
-            + ", ".join(sorted(unknown_hazards))
-        )
-    if unknown_constraints:
-        raise ValueError(
-            "unsafe_outcome constraint_refs must name supplied constraints: "
-            + ", ".join(sorted(unknown_constraints))
         )
 
 
@@ -1942,8 +1931,12 @@ def _prompt_provider_payload(
         "causal_factors": [factor_data],
         "unsafe_outcome": {
             "condition": dict(condition),
-            "hazard_refs": [],
-            "constraint_refs": [],
+            "semantic_proposition": (
+                "The selected response exhibits the unsafe semantic behavior."
+                if _context_expected_action_kind(context)
+                is ExecutionActionKind.model_output
+                else None
+            ),
         },
         "execution_route": dict(route),
     }
@@ -2013,19 +2006,25 @@ def _prompt_condition_fixture(
             "expected": "not_provided",
         }
     if kind == "action_value":
+        if _context_expected_action_kind(context) is ExecutionActionKind.model_output:
+            property_name = "semantic_proposition"
+            expected: object = True
+        else:
+            property_name = "action_argument"
+            expected = "approved"
         return {
             "type": kind,
             "control_action_id": action_id,
-            "property": "semantic_value",
+            "property": property_name,
             "operator": "equals",
-            "expected": True,
+            "expected": expected,
         }
     if kind == "state_value":
         state = context.target_control_path.process_model_parts[0].element_id
         return {
             "type": kind,
             "subject_ref": state,
-            "property": "semantic_state",
+            "property": "state_value",
             "operator": "equals",
             "expected": True,
         }
@@ -2353,17 +2352,11 @@ def _stage5_controlled_processes(context: ScenarioGenerationContext) -> list[str
 
 
 def _stage5_unsafe_results(context: ScenarioGenerationContext) -> Mapping[str, object]:
-    """Expose consequence prose and only references copied by provider output."""
+    """Expose consequence descriptions; lineage IDs remain compiler-owned."""
     return {
         "losses": [item.description for item in context.losses],
-        "hazards": [
-            {"reference": item.hazard_id, "description": item.description}
-            for item in context.hazards
-        ],
-        "constraints": [
-            {"reference": item.constraint_id, "description": item.description}
-            for item in context.constraints
-        ],
+        "hazards": [item.description for item in context.hazards],
+        "constraints": [item.description for item in context.constraints],
     }
 
 
@@ -2653,15 +2646,21 @@ def _validate_model_output_outcome(
 ) -> None:
     """Keep model-output judgments semantic instead of deployment-string bound."""
     condition = unsafe_outcome.condition
-    if (
-        route.action_kind is ExecutionActionKind.model_output
-        and getattr(condition, "type", None) == "action_value"
-        and isinstance(getattr(condition, "expected", None), SemanticBindingPlaceholder)
+    if route.action_kind is not ExecutionActionKind.model_output:
+        return
+    proposition = getattr(unsafe_outcome, "semantic_proposition", None)
+    normalize_semantic_proposition(proposition, required=True)
+    if getattr(condition, "type", None) != "action_value":
+        return
+    if not (
+        getattr(condition, "property", None) == "semantic_proposition"
+        and getattr(condition, "operator", None) == "equals"
+        and type(getattr(condition, "expected", None)) is bool
+        and getattr(condition, "expected", None) is True
     ):
         raise ValueError(
-            "model_output action_value must use a literal semantic proposition; "
-            "use a specific property such as reveals_restricted_information with "
-            "expected true instead of a deployment value placeholder"
+            "model_output action_value must use the fixed semantic proposition "
+            "condition (property=semantic_proposition, operator=equals, expected=true)"
         )
 
 
@@ -3071,6 +3070,7 @@ def _context_bdi_provider_wire_types(
     unsafe_condition_types = _context_unsafe_condition_wire_types(
         choice_count,
         uca_type=uca_type,
+        expected_action_kind=expected_action_kind,
         target_action_id=target_action_id,
         state_subject_refs=state_subject_refs,
         condition_reference_refs=condition_reference_refs,
@@ -3088,6 +3088,7 @@ def _context_bdi_provider_wire_types(
         f"_ContextUnsafeOutcomeDraft{choice_count}",
         __base__=_ContextUnsafeOutcomeDraft,
         condition=(unsafe_condition_union, ...),
+        semantic_proposition=(StrictStr | None, Field(max_length=600)),
     )
     route_type, executable_route_type, analytical_route_type = (
         _context_route_wire_types(
@@ -3298,6 +3299,7 @@ def _context_causal_factor_wire_types(
 def _context_unsafe_condition_branch_names(
     uca_type: UCAType | None,
     *,
+    expected_action_kind: ExecutionActionKind | None,
     state_subject_refs: tuple[str, ...],
     duration_eligible: bool,
     allowed_branches: tuple[str, ...],
@@ -3310,6 +3312,11 @@ def _context_unsafe_condition_branch_names(
         UCAType.wrong_duration: ("duration",),
     }
     branches = list(by_uca.get(uca_type, allowed_branches))
+    if (
+        uca_type is UCAType.incorrect
+        and expected_action_kind is ExecutionActionKind.model_output
+    ):
+        branches = ["action_value"]
     if uca_type is UCAType.incorrect and not state_subject_refs:
         branches = [item for item in branches if item != "state_value"]
     if uca_type is UCAType.wrong_duration and not duration_eligible:
@@ -3338,6 +3345,7 @@ def _context_unsafe_condition_branch_is_available(
 def _context_unsafe_condition_branch_fields(
     branch: str,
     *,
+    expected_action_kind: ExecutionActionKind | None,
     target_action_id: str | None,
     state_subject_refs: tuple[str, ...],
     condition_reference_refs: tuple[str, ...],
@@ -3352,6 +3360,13 @@ def _context_unsafe_condition_branch_fields(
             Literal.__getitem__((target_action_id,)) if target_action_id else StrictStr,
             ...,
         )
+    if (
+        branch == "action_value"
+        and expected_action_kind is ExecutionActionKind.model_output
+    ):
+        fields["property"] = (Literal["semantic_proposition"], ...)
+        fields["operator"] = (Literal["equals"], ...)
+        fields["expected"] = (Literal[True], ...)
     if branch == "state_value" and state_subject_refs:
         fields["subject_ref"] = (
             Literal.__getitem__(state_subject_refs),
@@ -3377,6 +3392,7 @@ def _context_unsafe_condition_wire_types(
     choice_count: int,
     *,
     uca_type: UCAType | None,
+    expected_action_kind: ExecutionActionKind | None = None,
     target_action_id: str | None,
     state_subject_refs: tuple[str, ...],
     condition_reference_refs: tuple[str, ...],
@@ -3396,6 +3412,7 @@ def _context_unsafe_condition_wire_types(
     }
     branches = _context_unsafe_condition_branch_names(
         uca_type,
+        expected_action_kind=expected_action_kind,
         state_subject_refs=state_subject_refs,
         duration_eligible=duration_eligible,
         allowed_branches=tuple(allowed),
@@ -3411,6 +3428,7 @@ def _context_unsafe_condition_wire_types(
         base = allowed[branch]
         fields = _context_unsafe_condition_branch_fields(
             branch,
+            expected_action_kind=expected_action_kind,
             target_action_id=target_action_id,
             state_subject_refs=state_subject_refs,
             condition_reference_refs=condition_reference_refs,
@@ -3441,7 +3459,7 @@ def _materialize_context_bdi(
     choices_by_handle = {choice.handle: choice for choice in choices}
     attacker_bdi = _materialize_context_attacker_bdi(draft, choices_by_handle)
     factors = _materialize_context_factors(draft, choices, choices_by_handle, context)
-    unsafe_outcome = _materialize_context_unsafe_outcome(draft)
+    unsafe_outcome = _materialize_context_unsafe_outcome(draft, context)
     execution_contract = _materialize_execution_contract(
         draft.execution_route,
         draft.causal_factors,
@@ -3508,12 +3526,14 @@ def _materialize_context_factors(
 
 def _materialize_context_unsafe_outcome(
     draft: BaseModel,
+    context: ScenarioGenerationContext,
 ) -> UnsafeOutcomeDeclaration:
     """Compile the provider semantic outcome and derive binding state."""
     return UnsafeOutcomeDeclaration(
         condition=_materialize_provider_condition(draft.unsafe_outcome.condition),
-        hazard_refs=draft.unsafe_outcome.hazard_refs,
-        constraint_refs=draft.unsafe_outcome.constraint_refs,
+        semantic_proposition=draft.unsafe_outcome.semantic_proposition,
+        hazard_refs=tuple(item.hazard_id for item in context.hazards),
+        constraint_refs=tuple(item.constraint_id for item in context.constraints),
     )
 
 
@@ -3680,7 +3700,14 @@ def assemble_scenario_spec(
     unsafe_condition = _validated_unsafe_condition(
         llm_result, UCAType(slot_parts["ica_type"]), slot_parts["control_action"]
     )
-    hazard_refs, constraint_refs = _unsafe_outcome_refs(llm_result, threat)
+    if scenario_context is not None:
+        # Context is the only authoritative source for selected consequence
+        # lineage.  The contextual provider wire carries descriptions only;
+        # deterministic assembly derives the exact IDs here.
+        hazard_refs = [item.hazard_id for item in scenario_context.hazards]
+        constraint_refs = [item.constraint_id for item in scenario_context.constraints]
+    else:
+        hazard_refs, constraint_refs = _unsafe_outcome_refs(llm_result, threat)
 
     return ScenarioSpec(
         scenario_id=generate_scenario_id(scenario_index),
@@ -3698,6 +3725,11 @@ def assemble_scenario_spec(
         loss_scenario=threat.loss_scenario,
         causal_factors=causal_factors,
         unsafe_outcome_condition=unsafe_condition,
+        unsafe_outcome_semantic_proposition=(
+            llm_result.unsafe_outcome.semantic_proposition
+            if llm_result.unsafe_outcome is not None
+            else None
+        ),
         unsafe_outcome_hazard_refs=hazard_refs,
         unsafe_outcome_constraint_refs=constraint_refs,
         scenario_context=scenario_context,

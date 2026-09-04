@@ -368,6 +368,18 @@ def _account_unresolved_ica(
     diagnostics: list[ConsiderationDiagnostic],
 ) -> ObligationAccountingRow:
     """Retain unresolved routed slots as unresolved accounting."""
+    stop_reason = "ica_consideration_unresolved"
+    diagnostic_codes = {item.code for item in diagnostics}
+    for code in (
+        "ica_hazard_contradictory",
+        "ica_hazard_insufficient_evidence",
+        "ica_hazard_verification_provider_failure",
+        "ica_hazard_correction_exhausted",
+        "unsafe_outcome_lineage_incomplete",
+    ):
+        if code in diagnostic_codes:
+            stop_reason = code
+            break
     diagnostics.append(
         ConsiderationDiagnostic(
             code="unresolved_ica_consideration",
@@ -380,7 +392,7 @@ def _account_unresolved_ica(
         row,
         route,
         disposition="unresolved",
-        stop_reason="ica_consideration_unresolved",
+        stop_reason=stop_reason,
         evidence=evidence or ("route:targeted",),
         diagnostics=diagnostics,
     )
@@ -501,6 +513,7 @@ def _account_applicable(
     """Derive one accounting row for an applicable obligation."""
     evidence = _account_evidence(route, pairs)
     diagnostics: list[ConsiderationDiagnostic] = [*route.diagnostics]
+    diagnostics.extend(diagnostic for pair in pairs for diagnostic in pair.diagnostics)
     semantic_stop = _semantic_credit_stop(row, route, evidence, diagnostics)
     if semantic_stop is not None:
         return semantic_stop
@@ -647,6 +660,8 @@ def build_obligation_accounting(
     consideration: ObligationConsideration,
     ica_considerations: Iterable[ObligationIcaConsideration] = (),
     source_pins: Iterable[Any] = (),
+    ica_verification: Any | None = None,
+    ica_enumeration: Any | None = None,
 ) -> ObligationAccounting:
     """Derive one provisional row per Phase 1 obligation.
 
@@ -660,6 +675,16 @@ def build_obligation_accounting(
     if any(brief.plan_digest != plan.semantic_digest for brief in consideration.briefs):
         raise ValueError("consideration briefs do not use the supplied Phase 1 plan")
     pairs = tuple(ica_considerations)
+    if ica_verification is not None:
+        from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
+            filter_ica_considerations,
+        )
+
+        pairs = filter_ica_considerations(
+            pairs,
+            ica_verification,
+            enumeration=ica_enumeration,
+        )
     routes = _validate_accounting_pairs(plan, consideration, pairs)
     rows = _accounting_rows(plan, routes, pairs)
     pins = _validated_accounting_pins(source_pins, plan)

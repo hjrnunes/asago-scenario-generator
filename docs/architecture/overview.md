@@ -550,6 +550,23 @@ conditions are semantic propositions with literal expected values rather than
 unknown complete-response strings; the consumer may evaluate them with a
 semantic response judge.
 
+Final non-N/A ICAs cross an independent STPA attribution check before Stage 5.
+Its closed prompt view contains only the authoritative action/category and the
+selected hazard, constraint, and reachable-loss meaning. Contradictory or
+insufficient attribution permits one separate ICA-author correction followed
+by one independent recheck; unchanged or still-unsupported material is retained
+as an explicit exclusion while sibling ICAs proceed. Taxonomy concepts and
+mapping evidence do not enter this verifier. Mapping strength is instead
+derived deterministically from the complete pinned relation path.
+
+Every executable unsafe outcome has a bounded semantic proposition as well as
+its machine condition. A model-output condition uses the compiler-owned
+`semantic_proposition equals true` shape; that label is bookkeeping, while the
+proposition is the exact criterion passed to a downstream semantic judge. The
+scenario specification, projection, bundle trace, and consumer must preserve
+the exact hazard, governing-constraint, and reachable-loss references without
+substitution or fallback expansion.
+
 The historical `generate_bdi` entry point is a compatibility-only adapter for
 direct callers. It accepts BDI content but rejects compiler-owned execution
 routes and contracts; normal Stage 5 must use `generate_bdi_for_context`, which

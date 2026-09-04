@@ -179,6 +179,7 @@ def _contextual_stage6_view(
                 if scenario_spec.unsafe_outcome_condition is not None
                 else None
             ),
+            "semantic_proposition": scenario_spec.unsafe_outcome_semantic_proposition,
             "hazard_refs": list(scenario_spec.unsafe_outcome_hazard_refs),
             "constraint_refs": list(scenario_spec.unsafe_outcome_constraint_refs),
         },

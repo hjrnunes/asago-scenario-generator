@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import re
 import tempfile
 from typing import Any
 
@@ -43,6 +44,11 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossProvenance,
     SecurityConstraint,
 )
+from asago_scenario_generator.stpa.models.ica_enumeration import (
+    ICA,
+    ICAEnumeration,
+    ICASlot,
+)
 from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioObligationConsideration,
 )
@@ -64,6 +70,11 @@ from asago_scenario_generator.stpa.obligation_aware.routing import (
 )
 from asago_scenario_generator.stpa.obligation_aware.provider import (
     ObligationAwareLLMAdapter,
+    _routing_provider_payload_type,
+)
+from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
+    IcaHazardVerificationCorrection,
+    verify_final_ica_batch,
 )
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     compile_ica_slot_draft,
@@ -1259,8 +1270,7 @@ def _h_stage5_local_causal_handle(
                         "operator": "equals",
                         "expected": "approved",
                     },
-                    "hazard_refs": ["H-1"],
-                    "constraint_refs": ["SC-1"],
+                    "semantic_proposition": None,
                 },
                 "execution_route": {
                     "disposition": "executable_route",
@@ -1404,6 +1414,413 @@ def _h_active_access_publication(
     expected = int(examples.get("published_scenarios", "0"))
     actual = _state(world).get("active_access_published")
     return actual == expected, f"expected {expected}, got {actual!r}"
+
+
+def _verification_enumeration(
+    *, sibling: bool = False, na: bool = False
+) -> ICAEnumeration:
+    """Build a small domain-neutral final-ICA verification fixture."""
+    slot_id = "RESP-1:CA-1-1:INCORRECT"
+    if na:
+        slot = ICASlot(
+            slot_id=slot_id,
+            responsibility="RESP-1",
+            control_action="CA-1-1",
+            uca_type="INCORRECT",
+            is_na=True,
+            icas=[],
+            na_justification="The control action is not applicable in this run.",
+        )
+        return ICAEnumeration(slots=[slot])
+    count = 2 if sibling else 1
+    icas = [
+        ICA(
+            ica_id=f"{slot_id}:{index}",
+            ica_text=(
+                "Approve a clinical record change without the required gate "
+                f"check ({index})."
+            ),
+            hazardous_context="An unapproved clinical record change is accepted.",
+            loss_scenario="Clinical decisions rely on corrupted patient data.",
+            related_hazards=["H-1"],
+            related_constraints=["SC-1"],
+        )
+        for index in range(1, count + 1)
+    ]
+    return ICAEnumeration(
+        slots=[
+            ICASlot(
+                slot_id=slot_id,
+                responsibility="RESP-1",
+                control_action="CA-1-1",
+                uca_type="INCORRECT",
+                is_na=False,
+                icas=icas,
+            )
+        ]
+    )
+
+
+def _h_verification_fixtures(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Mark the shared final-ICA verification fixtures as available."""
+    del text, examples
+    _state(world)["ica_verification_ready"] = True
+    return True, ""
+
+
+def _h_supported_final_ica(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Verify that one supported final ICA remains in the enumeration."""
+    del text, examples
+    if not _state(world).get("ica_verification_ready"):
+        return False, "final-ICA verification fixtures were not prepared"
+
+    class SupportedVerifier:
+        calls = 0
+
+        def verify_ica_hazards(self, requests, *, correction_feedback=None):
+            del correction_feedback
+            self.calls += 1
+            return [
+                {
+                    "ica_id": request.ica_id,
+                    "verdict": "supported",
+                    "rationale": "The supplied action, hazard, constraint, and loss align.",
+                }
+                for request in requests
+            ]
+
+    adapter = SupportedVerifier()
+    enumeration = _verification_enumeration()
+    filtered, batch = verify_final_ica_batch(
+        adapter,
+        enumeration,
+        loss_analysis=_losses(),
+        control_structure=_structure(),
+    )
+    record = batch.records[0]
+    state = _state(world)
+    state["ica_verifier_calls"] = adapter.calls
+    state["ica_batch"] = batch
+    state["ica_filtered"] = filtered
+    state["ica_disposition"] = record.disposition
+    state["ica_eligible"] = any(filtered_slot.icas for filtered_slot in filtered.slots)
+    return True, ""
+
+
+def _h_contradictory_recheck(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Exercise exactly one correction followed by one independent recheck."""
+    del text, examples
+    if not _state(world).get("ica_verification_ready"):
+        return False, "final-ICA verification fixtures were not prepared"
+
+    class CorrectingVerifier:
+        calls: list[bool] = []
+
+        def verify_ica_hazards(self, requests, *, correction_feedback=None):
+            self.calls.append(bool(correction_feedback))
+            verdict = "supported" if correction_feedback else "contradictory"
+            return [
+                {
+                    "ica_id": request.ica_id,
+                    "verdict": verdict,
+                    "rationale": "The supplied STPA path is coherent after one correction.",
+                }
+                for request in requests
+            ]
+
+        def correct_ica(self, request, verdict):
+            del verdict
+            return IcaHazardVerificationCorrection(
+                ica_id=request.ica_id,
+                deviation=request.deviation + " after the gate check",
+                rationale="Add the missing typed gate check.",
+            )
+
+    adapter = CorrectingVerifier()
+    _filtered, batch = verify_final_ica_batch(
+        adapter,
+        _verification_enumeration(),
+        loss_analysis=_losses(),
+        control_structure=_structure(),
+    )
+    record = batch.records[0]
+    state = _state(world)
+    state["ica_verifier_calls"] = len(adapter.calls)
+    state["ica_batch"] = batch
+    state["ica_disposition"] = record.disposition
+    state["ica_separate_attempts"] = (
+        len(record.attempts) == 2
+        and record.corrected_request is not None
+        and adapter.calls == [False, True]
+        and record.attempts[0].request_digest != record.attempts[1].request_digest
+    )
+    return True, ""
+
+
+def _h_failed_recheck_with_sibling(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Retain a provider failure while keeping a supported sibling eligible."""
+    del text, examples
+    if not _state(world).get("ica_verification_ready"):
+        return False, "final-ICA verification fixtures were not prepared"
+
+    class OneFailedRecheckVerifier:
+        calls: list[bool] = []
+
+        def verify_ica_hazards(self, requests, *, correction_feedback=None):
+            self.calls.append(bool(correction_feedback))
+            if correction_feedback:
+                request = requests[0]
+                return [
+                    {
+                        "ica_id": request.ica_id,
+                        "verdict": "supported",
+                        "rationale": "The first corrected path is supported.",
+                    }
+                ]
+            return [
+                {
+                    "ica_id": request.ica_id,
+                    "verdict": "insufficient_evidence",
+                    "rationale": "The initial path needs one correction.",
+                }
+                for request in requests
+            ]
+
+        def correct_ica(self, request, verdict):
+            del verdict
+            return IcaHazardVerificationCorrection(
+                ica_id=request.ica_id,
+                deviation=request.deviation + " with typed evidence",
+                rationale="Add the missing typed evidence.",
+            )
+
+    adapter = OneFailedRecheckVerifier()
+    filtered, batch = verify_final_ica_batch(
+        adapter,
+        _verification_enumeration(sibling=True),
+        loss_analysis=_losses(),
+        control_structure=_structure(),
+    )
+    state = _state(world)
+    failed = tuple(
+        item.ica_id for item in batch.records if item.disposition == "provider_failure"
+    )
+    retained = tuple(item.ica_id for slot in filtered.slots for item in slot.icas)
+    state["ica_verifier_calls"] = len(adapter.calls)
+    state["ica_batch"] = batch
+    state["ica_filtered"] = filtered
+    state["ica_provider_failure_ids"] = failed
+    state["ica_sibling_retained"] = any(
+        item.endswith(":1") and record.disposition == "supported"
+        for item in retained
+        for record in batch.records
+        if record.ica_id == item
+    )
+    state["ica_failure_recorded"] = bool(failed) and any(
+        diagnostic.code == "ica_hazard_verification_provider_failure"
+        and failed[0] in diagnostic.refs
+        for diagnostic in batch.diagnostics
+    )
+    return True, ""
+
+
+def _h_na_verification(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Verify that an N/A slot exits before constructing a verifier call."""
+    del text, examples
+
+    class NoCallVerifier:
+        calls = 0
+
+        def verify_ica_hazards(self, requests, *, correction_feedback=None):
+            del requests, correction_feedback
+            self.calls += 1
+            raise AssertionError("N/A ICA should not reach the verifier")
+
+    adapter = NoCallVerifier()
+    enumeration = _verification_enumeration(na=True)
+    filtered, batch = verify_final_ica_batch(
+        adapter,
+        enumeration,
+        loss_analysis=_losses(),
+        control_structure=_structure(),
+    )
+    state = _state(world)
+    state["ica_verifier_calls"] = adapter.calls
+    state["ica_na_unchanged"] = (
+        filtered.slots[0] == enumeration.slots[0] and not batch.records
+    )
+    return True, ""
+
+
+def _h_provider_derived_mapping_field(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Reject a provider payload that tries to choose mapping strength."""
+    del text, examples
+    from pydantic import ValidationError
+
+    payload_type = _routing_provider_payload_type(1)
+    properties = payload_type.model_json_schema()["$defs"][
+        "_RoutingProviderSemanticAssessment"
+    ]["properties"]
+    route = {
+        "disposition": "unresolved",
+        "obligation_id": _brief().obligation_id,
+        "semantic_assessment": {
+            "mechanism_assessment": "insufficient_evidence",
+            "risk_alignment": "insufficient_evidence",
+            "mechanism_rationale": "The mechanism is not established.",
+            "risk_alignment_rationale": "The reviewed risk is not established.",
+            "mapping_strength": "direct_curated_pair",
+        },
+        "rationale": "The provider cannot choose this durable label.",
+        "evidence": ["acceptance:provider-derived-field"],
+    }
+    try:
+        payload_type.model_validate({"routes": [route]})
+    except ValidationError:
+        rejected = True
+    else:
+        rejected = False
+    _state(world)["provider_derived_field_rejected"] = (
+        "mapping_strength" not in properties and rejected
+    )
+    return True, ""
+
+
+def _h_attribution_canary(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Run one domain-neutral public attribution canary from the test fixtures."""
+    del examples
+    from tests.test_ica_hazard_attribution_canary import (
+        test_mismatched_ica_remains_accounted_but_cannot_realize_or_propose,
+        test_supported_ica_reaches_realization_and_unreviewed_phase2_proposal,
+    )
+
+    mode = "mismatched" if "mismatched" in text else "supported"
+    try:
+        if mode == "mismatched":
+            test_mismatched_ica_remains_accounted_but_cannot_realize_or_propose(
+                Path(tempfile.mkdtemp(prefix="ica-attribution-acceptance-"))
+            )
+            values = {
+                "status": "mismatched_no_credit",
+                "realized": 0,
+                "proposals": 0,
+            }
+        else:
+            test_supported_ica_reaches_realization_and_unreviewed_phase2_proposal(
+                Path(tempfile.mkdtemp(prefix="ica-attribution-acceptance-"))
+            )
+            values = {
+                "status": "supported_unreviewed",
+                "realized": 1,
+                "phase2": "awaiting_evidence",
+            }
+    except Exception as exc:  # noqa: BLE001 - surface canary failures in acceptance
+        return False, f"ICA attribution canary failed: {type(exc).__name__}: {exc}"
+    state = _state(world)
+    state["attribution_canary"] = values
+    return True, ""
+
+
+def _h_canary_status(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del examples
+    expected = re.search(r'"([^"]+)"', text)
+    wanted = expected.group(1) if expected else ""
+    actual = _state(world).get("attribution_canary", {}).get("status")
+    return actual == wanted, f"expected {wanted!r}, got {actual!r}"
+
+
+def _h_canary_count(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del examples
+    match = re.search(r"is (\d+)$", text)
+    if match is None:
+        return False, f"could not parse canary count from {text!r}"
+    expected = int(match.group(1))
+    key = "realized" if "realization" in text else "proposals"
+    actual = _state(world).get("attribution_canary", {}).get(key)
+    return actual == expected, f"expected {key}={expected}, got {actual!r}"
+
+
+def _h_canary_phase2(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del examples
+    expected = re.search(r'"([^"]+)"', text)
+    wanted = expected.group(1) if expected else ""
+    actual = _state(world).get("attribution_canary", {}).get("phase2")
+    return actual == wanted, f"expected {wanted!r}, got {actual!r}"
+
+
+def _h_ica_count(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del examples
+    match = re.search(r"is (\d+)$", text)
+    if match is None:
+        return False, f"could not parse verifier count from {text!r}"
+    expected = int(match.group(1))
+    actual = _state(world).get("ica_verifier_calls")
+    return actual == expected, f"expected {expected}, got {actual!r}"
+
+
+def _h_ica_disposition(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del examples
+    expected = re.search(r'"([^"]+)"', text)
+    wanted = expected.group(1) if expected else ""
+    actual = _state(world).get("ica_disposition")
+    return actual == wanted, f"expected {wanted!r}, got {actual!r}"
+
+
+def _h_ica_eligible(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del text, examples
+    return bool(_state(world).get("ica_eligible")), "supported ICA was not retained"
+
+
+def _h_ica_separate_attempts(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text, examples
+    return bool(_state(world).get("ica_separate_attempts")), (
+        "correction and recheck were not separate bound attempts"
+    )
+
+
+def _h_provider_failure(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del text, examples
+    batch = _state(world).get("ica_batch")
+    actual = sum(item.disposition == "provider_failure" for item in batch.records)
+    return actual == 1, f"expected one provider failure, got {actual}"
+
+
+def _h_sibling_eligible(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del text, examples
+    return bool(_state(world).get("ica_sibling_retained")), (
+        "supported ICA sibling was not retained"
+    )
+
+
+def _h_failure_recorded(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del text, examples
+    return bool(_state(world).get("ica_failure_recorded")), (
+        "provider failure was not recorded as a distinct diagnostic"
+    )
+
+
+def _h_na_unchanged(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del text, examples
+    return bool(_state(world).get("ica_na_unchanged")), "N/A slot changed"
+
+
+def _h_derived_field_rejected(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text, examples
+    return bool(_state(world).get("provider_derived_field_rejected")), (
+        "provider-derived mapping strength was accepted"
+    )
 
 
 def register(api: Any) -> None:
@@ -1613,6 +2030,54 @@ def register(api: Any) -> None:
         r"the structurally grounded scenario publication count is .*",
         _h_active_access_publication,
     )
+    api.register(
+        r"deterministic final ICA verification fixtures are available",
+        _h_verification_fixtures,
+    )
+    api.register(r"a supported final ICA is verified", _h_supported_final_ica)
+    api.register(
+        r"a contradictory final ICA is corrected and rechecked",
+        _h_contradictory_recheck,
+    )
+    api.register(
+        r"one final ICA recheck fails while its sibling is supported",
+        _h_failed_recheck_with_sibling,
+    )
+    api.register(r"an N/A final ICA slot is verified", _h_na_verification)
+    api.register(
+        r"the routing provider attempts to return mapping strength",
+        _h_provider_derived_mapping_field,
+    )
+    api.register(r"the final ICA verifier call count is \d+", _h_ica_count)
+    api.register(r'the supported ICA disposition is ".*"', _h_ica_disposition)
+    api.register(r"the verified ICA remains eligible", _h_ica_eligible)
+    api.register(
+        r"the correction and recheck are separate attempts",
+        _h_ica_separate_attempts,
+    )
+    api.register(r'the corrected ICA disposition is ".*"', _h_ica_disposition)
+    api.register(
+        r"one final ICA has provider-failure disposition",
+        _h_provider_failure,
+    )
+    api.register(r"the supported sibling remains eligible", _h_sibling_eligible)
+    api.register(
+        r"the final ICA provider failure is recorded separately",
+        _h_failure_recorded,
+    )
+    api.register(r"the N/A slot remains unchanged", _h_na_unchanged)
+    api.register(
+        r"the provider-derived routing field is rejected",
+        _h_derived_field_rejected,
+    )
+    api.register(
+        r"the (?:supported|mismatched) ICA attribution canary is executed",
+        _h_attribution_canary,
+    )
+    api.register(r'the attribution canary status is ".*"', _h_canary_status)
+    api.register(r"the canary realization count is \d+", _h_canary_count)
+    api.register(r'the canary Phase 2 status is ".*"', _h_canary_phase2)
+    api.register(r"the canary Phase 2 proposal count is \d+", _h_canary_count)
 
 
 __all__ = ["FEATURE_ID", "register"]

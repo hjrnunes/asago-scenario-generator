@@ -55,6 +55,7 @@ def _outcome() -> UnsafeOutcome:
         condition=ActionPresenceCondition(
             control_action_id="CA-1-1", expected="not_provided"
         ),
+        semantic_proposition=None,
         semantic_binding_required=False,
     )
 

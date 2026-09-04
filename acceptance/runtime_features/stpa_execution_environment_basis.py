@@ -162,6 +162,7 @@ def _outcome() -> UnsafeOutcome:
         condition=ActionPresenceCondition(
             control_action_id="CA-1-1", expected="not_provided"
         ),
+        semantic_proposition="The model response exhibits the selected unsafe behavior.",
         semantic_binding_required=False,
     )
 
@@ -307,8 +308,11 @@ def _stage5_payload(delivery: str, action: str) -> dict[str, Any]:
                 "control_action_id": "CA-1-1",
                 "expected": "not_provided",
             },
-            "hazard_refs": [],
-            "constraint_refs": [],
+            "semantic_proposition": (
+                "The model response exhibits the selected unsafe behavior."
+                if action == "model_output"
+                else None
+            ),
         },
         "execution_route": {
             "disposition": "executable_route",

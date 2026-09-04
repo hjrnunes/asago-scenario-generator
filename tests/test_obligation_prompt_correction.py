@@ -419,21 +419,19 @@ def test_focused_verifier_retains_path_without_granting_mechanism_credit(
         def complete(self, **kwargs):
             self.calls += 1
             self.prompts.append(kwargs["user_prompt"])
+            provider_route = route.model_dump(
+                mode="json",
+                exclude={
+                    "route_id",
+                    "missing_concepts",
+                    "model_call_refs",
+                    "trace_refs",
+                    "diagnostics",
+                },
+            )
+            provider_route["semantic_assessment"].pop("mapping_strength", None)
             content = (
-                {
-                    "routes": [
-                        route.model_dump(
-                            mode="json",
-                            exclude={
-                                "route_id",
-                                "missing_concepts",
-                                "model_call_refs",
-                                "trace_refs",
-                                "diagnostics",
-                            },
-                        )
-                    ]
-                }
+                {"routes": [provider_route]}
                 if self.calls == 1
                 else {
                     "verdicts": [

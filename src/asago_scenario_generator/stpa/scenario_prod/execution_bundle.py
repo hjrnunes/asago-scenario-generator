@@ -968,6 +968,60 @@ def _envelope_projection_identity_violations(
                 "scenario envelope target_responsibility does not match projection",
             )
         )
+    context = scenario_spec.scenario_context
+    if context is not None:
+        expected_hazards = tuple(sorted(item.hazard_id for item in context.hazards))
+        expected_constraints = tuple(
+            sorted(item.constraint_id for item in context.constraints)
+        )
+        expected_losses = tuple(sorted(item.loss_id for item in context.losses))
+        lineage_pairs = (
+            (
+                "unsafe_outcome.hazard_refs",
+                tuple(projection.unsafe_outcome.hazard_refs),
+                expected_hazards,
+            ),
+            (
+                "unsafe_outcome.constraint_refs",
+                tuple(projection.unsafe_outcome.constraint_refs),
+                expected_constraints,
+            ),
+            (
+                "trace_refs.hazard_ids",
+                tuple(projection.trace_refs.hazard_ids),
+                expected_hazards,
+            ),
+            (
+                "trace_refs.constraint_ids",
+                tuple(projection.trace_refs.constraint_ids),
+                expected_constraints,
+            ),
+            (
+                "trace_refs.loss_ids",
+                tuple(projection.trace_refs.loss_ids),
+                expected_losses,
+            ),
+        )
+        for field_name, actual_value, expected_value in lineage_pairs:
+            if actual_value != expected_value:
+                violations.append(
+                    _violation(
+                        ProjectionValidationCode.pair_identity_mismatch,
+                        f"{prefix}.{field_name}",
+                        f"scenario context lineage does not match projection {field_name}",
+                    )
+                )
+        if (
+            projection.unsafe_outcome.semantic_proposition
+            != scenario_spec.unsafe_outcome_semantic_proposition
+        ):
+            violations.append(
+                _violation(
+                    ProjectionValidationCode.pair_identity_mismatch,
+                    f"{prefix}.unsafe_outcome.semantic_proposition",
+                    "scenario semantic proposition does not match projection",
+                )
+            )
     return violations
 
 

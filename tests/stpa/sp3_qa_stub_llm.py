@@ -151,9 +151,9 @@ def _build_bdi_response(user_prompt: str) -> dict:
         unsafe_condition = {
             "type": "action_value",
             "control_action_id": target_action,
-            "property": "semantic_value",
+            "property": "semantic_proposition",
             "operator": "equals",
-            "expected": "unsafe",
+            "expected": True,
         }
     elif ica_type == "WRONG_DURATION":
         unsafe_condition = {
@@ -201,8 +201,9 @@ def _build_bdi_response(user_prompt: str) -> dict:
         ],
         "unsafe_outcome": {
             "condition": unsafe_condition,
-            "hazard_refs": [],
-            "constraint_refs": [],
+            "semantic_proposition": (
+                "The response exhibits the unsafe semantic behavior."
+            ),
         },
         "execution_route": {
             "disposition": "executable_route",

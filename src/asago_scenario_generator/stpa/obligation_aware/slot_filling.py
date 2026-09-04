@@ -1234,6 +1234,27 @@ class SlotFillRunResult:
         """Expose exact obligation/slot evidence."""
         return self.result.considerations
 
+    @property
+    def ica_hazard_verification(self) -> Any | None:
+        """Expose the independent final-ICA semantic verification batch."""
+        return self.result.ica_hazard_verification
+
+    @property
+    def call_evidence(self) -> tuple[Any, ...]:
+        """Expose slot and independent-verifier call evidence together."""
+        values = list(self.result.call_evidence)
+        verification = self.result.ica_hazard_verification
+        values.extend(getattr(verification, "call_evidence", ()) or ())
+        return tuple(values)
+
+    @property
+    def diagnostics(self) -> tuple[Any, ...]:
+        """Expose slot and independent-verifier diagnostics together."""
+        values = list(self.result.diagnostics)
+        verification = self.result.ica_hazard_verification
+        values.extend(getattr(verification, "diagnostics", ()) or ())
+        return tuple(values)
+
 
 @dataclass(slots=True)
 class _SlotFillState:

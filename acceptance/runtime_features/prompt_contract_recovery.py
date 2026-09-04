@@ -208,8 +208,6 @@ def _route_fixture(world: World, text: str, examples: dict) -> tuple[bool, str]:
         "category": stimulus,
         "description": "Exercise the selected stale authorization belief through the stated input.",
     }
-    response["unsafe_outcome"]["hazard_refs"] = ["H-1"]
-    response["unsafe_outcome"]["constraint_refs"] = ["SC-1"]
     _state(world).update(route_context=context, route_provider=_Reply([response]))
     return True, ""
 

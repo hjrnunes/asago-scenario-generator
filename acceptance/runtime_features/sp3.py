@@ -5370,8 +5370,9 @@ def _sp3_robustness_valid_bdi() -> object:
                 "control_action_id": "CA-1-1",
                 "expected": "not_provided",
             },
-            "hazard_refs": [],
-            "constraint_refs": [],
+            "semantic_proposition": (
+                "The model response exhibits the selected unsafe behavior."
+            ),
         },
         "execution_route": {
             "disposition": "executable_route",

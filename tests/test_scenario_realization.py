@@ -253,6 +253,10 @@ def _scenario(*, include_obligation: bool = True) -> ScenarioSpec:
                 description="The completed-action count arrives too late.",
             )
         ],
+        unsafe_outcome_hazard_refs=[item.hazard_id for item in _context().hazards],
+        unsafe_outcome_constraint_refs=[
+            item.constraint_id for item in _context().constraints
+        ],
         scenario_context=_context(include_obligation=include_obligation),
     )
 

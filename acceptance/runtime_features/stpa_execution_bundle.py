@@ -29,9 +29,13 @@ from asago_scenario_generator.stpa.models.execution_projection_v2 import (
     ExecutionRunIdentity,
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
+    AttackerInfluence,
     ExecutionActionKind,
     ExecutionDeliveryClass,
-    RequestedEnvironmentBasis,
+    ExecutionResourceKind,
+    ExecutionResourcePurpose,
+    ExecutionResourceRequirement,
+    ExecutionSurface,
     SemanticExecutionContract,
     SemanticExecutionDelivery,
 )
@@ -161,21 +165,42 @@ def _spec(*, placeholder: bool, with_outcome: bool = True) -> ScenarioSpec:
         _loss_analysis(),
         scenario_id="SCN-001",
     )
-    condition = ActionValueCondition(
-        control_action_id="CA-1-1",
-        property="authorization_state",
-        operator="equals",
-        expected=(
-            SemanticBindingPlaceholder(
+    condition = (
+        ActionValueCondition(
+            control_action_id="CA-1-1",
+            property="authorization_state",
+            operator="equals",
+            expected=SemanticBindingPlaceholder(
                 binding_ref="SEM-1",
                 value_type="string",
                 description="The authorized state in this deployment.",
-            )
-            if placeholder
-            else "approved"
-        ),
+            ),
+        )
+        if placeholder
+        else ActionValueCondition(
+            control_action_id="CA-1-1",
+            property="semantic_proposition",
+            operator="equals",
+            expected=True,
+        )
     )
-    return ScenarioSpec(
+    target_action_requirement = ExecutionResourceRequirement(
+        requirement_id="REQ-target-action",
+        purpose=ExecutionResourcePurpose.target_action,
+        factor_id="CF-1",
+        owner_ref="CA-1-1",
+        acceptable_resource_kinds=(
+            ExecutionResourceKind.integration,
+            ExecutionResourceKind.tool,
+        ),
+        role_id="target_control_action",
+        operation="CA-1-1",
+        required_surfaces=(ExecutionSurface.tool_call,),
+        required_attacker_influence=AttackerInfluence.none,
+        late_bindable=True,
+        evidence_refs=("CF-1",),
+    )
+    spec = ScenarioSpec(
         scenario_id="SCN-001",
         threat_source=ThreatSource(
             ica_slot_id=threat.ica_slot_id,
@@ -203,20 +228,35 @@ def _spec(*, placeholder: bool, with_outcome: bool = True) -> ScenarioSpec:
                 description="The authorization state can be stale.",
             )
         ],
-        unsafe_outcome_condition=condition if with_outcome else None,
+        unsafe_outcome_condition=condition,
         unsafe_outcome_hazard_refs=["H-1"],
         unsafe_outcome_constraint_refs=["SC-1"],
+        unsafe_outcome_semantic_proposition=(
+            None
+            if placeholder
+            else "The model response exhibits the selected unsafe behavior."
+        ),
         scenario_context=context,
         execution_contract=SemanticExecutionContract(
-            requested_environment_basis=RequestedEnvironmentBasis.target_agnostic,
+            requested_environment_basis=None,
             delivery=SemanticExecutionDelivery(
                 delivery_class=ExecutionDeliveryClass.direct_prompt,
                 factor_id="CF-1",
                 source_role="direct_user_input",
             ),
-            action_kind=ExecutionActionKind.model_output,
+            action_kind=(
+                ExecutionActionKind.tool_call
+                if placeholder
+                else ExecutionActionKind.model_output
+            ),
+            resource_requirements=(target_action_requirement,) if placeholder else (),
         ),
     )
+    if not with_outcome:
+        # Keep an otherwise valid contextual fixture so preparation, rather
+        # than model construction, reports the intentionally missing field.
+        return spec.model_copy(update={"unsafe_outcome_condition": None})
+    return spec
 
 
 def _state(world: World) -> dict[str, Any]:

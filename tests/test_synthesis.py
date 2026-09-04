@@ -831,6 +831,9 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
         StructuralRoutingResponse,
         SynthesisSlotResponse,
     )
+    from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
+        IcaHazardVerificationCorrection,
+    )
     from asago_scenario_generator.stpa.models.control_structure import (
         ControlAction,
         ControlStructure,
@@ -933,6 +936,7 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
         purposes: list[str] = []
         fill_targets: list[str] = []
         stage_provider_ids: list[int] = []
+        verification_calls: list[tuple[tuple[str, ...], object]] = []
 
         def route(self, request):
             self.stage_provider_ids.append(id(self))
@@ -1051,6 +1055,32 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
                 considerations=tuple(pairs),
             )
 
+        def verify_ica_hazards(self, requests, *, correction_feedback=None):
+            self.stage_provider_ids.append(id(self))
+            requests = tuple(requests)
+            self.verification_calls.append(
+                (tuple(request.ica_id for request in requests), correction_feedback)
+            )
+            return tuple(
+                {
+                    "ica_id": request.ica_id,
+                    "verdict": (
+                        "supported"
+                        if correction_feedback
+                        else "insufficient_evidence"
+                    ),
+                    "rationale": "The typed STPA path is coherent after one correction.",
+                }
+                for request in requests
+            )
+
+        def correct_ica(self, request, verdict):
+            return IcaHazardVerificationCorrection(
+                ica_id=request.ica_id,
+                deviation=request.deviation + " after checking the timing fact",
+                rationale="Add the missing typed timing fact.",
+            )
+
     provider = FakeProvider()
     inputs = SynthesisInputs(
         use_case="A system that handles requests",
@@ -1079,6 +1109,10 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
     assert result.accounting.schema_version == "stpa-obligation-accounting-v1"
     assert result.accounting.rows[0].disposition == "addressed"
     assert result.accounting.rows[0].stop_reason == "addressed"
+    assert len(provider.verification_calls) == 2
+    assert provider.verification_calls[0][0] == provider.verification_calls[1][0]
+    assert provider.verification_calls[0][1] is None
+    assert provider.verification_calls[1][1]
     assert result.manifest["obligation_resolution_funnel"] == {
         "all_plan_rows": 1,
         "governance_only": 0,

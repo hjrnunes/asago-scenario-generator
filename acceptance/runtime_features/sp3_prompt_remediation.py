@@ -169,6 +169,10 @@ def _scenario_spec_with_context(context):
         }
         for factor in _make_sp3_causal_factors()
     ]
+    values["unsafe_outcome_hazard_refs"] = [item.hazard_id for item in context.hazards]
+    values["unsafe_outcome_constraint_refs"] = [
+        item.constraint_id for item in context.constraints
+    ]
     values["scenario_context"] = context
     return type(base).model_validate(values)
 
@@ -614,9 +618,7 @@ def _check_actionable_stage5_context(prompt: str, context: object) -> tuple[bool
         context.target_control_path.control_action.action_id,
         context.target_control_path.control_action.description,
         *(item.description for item in context.losses),
-        *(item.hazard_id for item in context.hazards),
         *(item.description for item in context.hazards),
-        *(item.constraint_id for item in context.constraints),
         *(item.description for item in context.constraints),
         *(item.capability_id for item in context.reachable_capabilities),
         *(item.description for item in context.reachable_capabilities),

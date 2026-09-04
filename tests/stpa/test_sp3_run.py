@@ -199,8 +199,9 @@ def _setup_mock_client(num_threats: int = 2) -> MockLLMClient:
                         "control_action_id": "CA-1-1",
                         "expected": "not_provided",
                     },
-                    "hazard_refs": ["H-1"],
-                    "constraint_refs": ["SC-1"],
+                    "semantic_proposition": (
+                        "The response does not provide the requested action."
+                    ),
                 },
                 "execution_route": {
                     "disposition": "executable_route",
@@ -779,8 +780,9 @@ class TestErrorPaths:
                     "control_action_id": "CA-1-1",
                     "expected": "not_provided",
                 },
-                "hazard_refs": ["H-1"],
-                "constraint_refs": ["SC-1"],
+                "semantic_proposition": (
+                    "The response does not provide the requested action."
+                ),
             },
             "execution_route": {
                 "disposition": "executable_route",
@@ -876,8 +878,9 @@ class TestErrorPaths:
                             "control_action_id": "CA-1-1",
                             "expected": "not_provided",
                         },
-                        "hazard_refs": ["H-1"],
-                        "constraint_refs": ["SC-1"],
+                        "semantic_proposition": (
+                            "The response does not provide the requested action."
+                        ),
                     },
                     "execution_route": {
                         "disposition": "executable_route",
@@ -945,8 +948,9 @@ class TestErrorPaths:
                             "control_action_id": "CA-1-1",
                             "expected": "not_provided",
                         },
-                        "hazard_refs": ["H-1"],
-                        "constraint_refs": ["SC-1"],
+                        "semantic_proposition": (
+                            "The response does not provide the requested action."
+                        ),
                     },
                     "execution_route": {
                         "disposition": "executable_route",

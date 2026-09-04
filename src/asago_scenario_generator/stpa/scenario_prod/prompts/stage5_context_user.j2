@@ -2,10 +2,11 @@
 
 The facts below are authoritative. Internal bookkeeping identities are shown
 only when an output field explicitly asks for a copyable reference. Use the
-selected target action in action conditions, the listed hazard and constraint
-references in `unsafe_outcome`, and supplied capability/access references only
-when claiming reachable capability evidence. Never invent or substitute a
-reference.
+selected target action in action conditions and the selected hazard and
+constraint descriptions when writing `semantic_proposition`; deterministic
+code derives the lineage IDs. Supplied capability/access references are
+allowed only when claiming reachable capability evidence. Never invent or
+substitute a reference.
 
 Taxonomy considerations are analysis provenance, not causal evidence. Their
 pattern names, concerns, and rationales explain why STPA considered this
@@ -83,8 +84,10 @@ another action.
    use `bounded_assumption` only with a short explicit assumption.
 
 5. Return one non-null `unsafe_outcome` using the condition family required by
-   the UCA type and copy only the listed hazard/constraint references. For a
-   model output, state a precise observable proposition and scalar type.
+   the UCA type. Do not return hazard, constraint, or loss IDs: deterministic
+   code derives exact lineage from this immutable context. For a model output,
+   provide the bounded plain `semantic_proposition` sentence and, for
+   `INCORRECT`, use the fixed semantic-proposition condition.
 
 6. Return exactly one `execution_route` with an explicit `disposition`. For an executable route, choose the
    typed stimulus's matching delivery class, one compatible selected factor,

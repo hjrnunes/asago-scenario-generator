@@ -28,6 +28,11 @@ from pydantic import (
 _STRUCTURAL_REFERENCE = re.compile(r"^(?:PM|FB|CA|CM)-\d+(?:-\d+)?$|^S-\d+$")
 _FACTOR_REFERENCE = re.compile(r"^(?:PM|FB|CA)-\d+(?:-\d+)?$")
 _ACTION_REFERENCE = re.compile(r"^(?:CA|CM)-\d+(?:-\d+)?$")
+_SEMANTIC_PROPOSITION_MAX_LENGTH = 600
+_SEMANTIC_PROPOSITION_ID = re.compile(
+    r"\b(?:PM|FB|CA|CM|CL|CP|RESP|H|L|SC|CF|SEM|REQ|OUTCOME|EXEC|SCN)-[A-Za-z0-9._-]+\b"
+)
+_SEMANTIC_PROPOSITION_URL = re.compile(r"\b(?:https?|ftp)://|\bwww\.", re.IGNORECASE)
 
 
 class ClosedSemanticModel(BaseModel):
@@ -213,6 +218,45 @@ SemanticCondition = Annotated[
     ],
     Field(discriminator="type"),
 ]
+
+
+def normalize_semantic_proposition(
+    value: str | None,
+    *,
+    required: bool = False,
+) -> str | None:
+    """Normalize and validate one bounded provider-authored proposition.
+
+    A proposition is intentionally plain semantic text.  Structural IDs,
+    runtime locators, and URLs belong to compiler bookkeeping or deployment
+    configuration and therefore cannot be copied into the downstream judge
+    instruction.
+    """
+    if value is None:
+        if required:
+            raise ValueError(
+                "semantic_proposition is required for output-text observation"
+            )
+        return None
+    if not isinstance(value, str):
+        raise ValueError("semantic_proposition must be a string or null")
+    normalized = value.strip()
+    if not normalized:
+        if required:
+            raise ValueError("semantic_proposition must be non-empty")
+        return None
+    if len(normalized) > _SEMANTIC_PROPOSITION_MAX_LENGTH:
+        raise ValueError(
+            "semantic_proposition must be at most "
+            f"{_SEMANTIC_PROPOSITION_MAX_LENGTH} characters"
+        )
+    if "\n" in normalized or "\r" in normalized:
+        raise ValueError("semantic_proposition must be one plain line")
+    if _SEMANTIC_PROPOSITION_URL.search(normalized):
+        raise ValueError("semantic_proposition must not contain a runtime URL")
+    if _SEMANTIC_PROPOSITION_ID.search(normalized):
+        raise ValueError("semantic_proposition must not contain structural identifiers")
+    return normalized
 
 
 def _validate_structural_reference(value: str, field_name: str) -> None:

@@ -197,6 +197,8 @@ class SynthesisAdapters:
     revise: Callable[..., Any] | None = None
     recheck: Callable[..., Any] | None = None
     fill_icas: Callable[..., Any] | None = None
+    verify_icas: Callable[..., Any] | None = None
+    correct_icas: Callable[..., Any] | None = None
     scenarios: Callable[..., Any] | None = None
     account: Callable[..., Any] | None = None
     realize: Callable[..., Any] | None = None
@@ -264,6 +266,18 @@ class SynthesisAdapters:
                 "fill_obligation_aware_icas",
                 "run_ica_analysis",
                 "final_ica",
+            ),
+            "verify_icas": (
+                "verify_icas",
+                "verify_ica_hazards",
+                "verify_ica_batch",
+                "verify_final_icas",
+            ),
+            "correct_icas": (
+                "correct_icas",
+                "correct_ica_hazard",
+                "correct_ica",
+                "correct_final_ica",
             ),
             "scenarios": (
                 "scenarios",
@@ -346,6 +360,7 @@ class SynthesisResult:
     ica_considerations: tuple[Any, ...] = field(default_factory=tuple)
     stage_errors: list[str] = field(default_factory=list)
     stage_warnings: list[str] = field(default_factory=list)
+    ica_hazard_verification: Any | None = None
 
     @property
     def plan(self) -> Any:
@@ -726,6 +741,7 @@ def run_synthesis(
         ica_considerations=_ica_considerations(ica_enumeration),
         stage_errors=stage_errors,
         stage_warnings=stage_warnings,
+        ica_hazard_verification=_first_attr(ica_enumeration, "ica_hazard_verification"),
     )
 
 
@@ -1295,7 +1311,167 @@ def _run_ica(
     calls.append("ica")
     if result is None:
         raise ValueError("obligation-aware ICA adapter returned no enumeration")
-    return result
+    return _run_ica_verification(
+        result,
+        adapters=adapters,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+        inputs=inputs,
+    )
+
+
+def _run_ica_verification(
+    result: Any,
+    *,
+    adapters: SynthesisAdapters,
+    loss_analysis: Any,
+    control_structure: Any,
+    inputs: SynthesisInputs,
+) -> Any:
+    """Run the independent ICA verifier before ordinary Stage 5."""
+    from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
+        filter_ica_considerations,
+        verify_final_ica_batch,
+    )
+
+    ordinary = _first_attr(result, "ica_enumeration") or result
+    verifier = adapters.verify_icas
+    if verifier is None:
+        candidate = adapters.obligation_adapter
+        if candidate is not None and callable(
+            getattr(candidate, "verify_ica_hazards", None)
+        ):
+            verifier = candidate
+    if verifier is None:
+        # Deterministic legacy fakes that do not expose the optional provider
+        # boundary retain their ordinary STPA behavior.
+        return result
+
+    if _is_batch_verifier_callable(verifier):
+        owner = getattr(verifier, "__self__", None)
+        verification_adapter = owner or SimpleNamespace(
+            verify_ica_hazards=verifier,
+            correct_ica=adapters.correct_icas,
+        )
+        filtered, batch = verify_final_ica_batch(
+            verification_adapter,
+            ordinary,
+            loss_analysis=loss_analysis,
+            control_structure=control_structure,
+            batch_id="synthesis-ica-hazard-verification",
+        )
+    elif verifier is adapters.obligation_adapter:
+        filtered, batch = verify_final_ica_batch(
+            verifier,
+            ordinary,
+            loss_analysis=loss_analysis,
+            control_structure=control_structure,
+            batch_id="synthesis-ica-hazard-verification",
+        )
+    else:
+        verification_result = _invoke(
+            verifier,
+            ica_enumeration=ordinary,
+            enumeration=ordinary,
+            loss_analysis=loss_analysis,
+            control_structure=control_structure,
+            inputs=inputs,
+            output_dir=inputs.output_dir,
+            batch_id="synthesis-ica-hazard-verification",
+        )
+        if not isinstance(verification_result, tuple) or len(verification_result) != 2:
+            raise ValueError(
+                "ICA verification adapter must return (enumeration, verification_batch)"
+            )
+        filtered, batch = verification_result
+
+    original_pairs = _ica_considerations(result)
+    if original_pairs:
+        try:
+            pairs = filter_ica_considerations(
+                original_pairs,
+                batch,
+                enumeration=_first_attr(filtered, "ica_enumeration") or filtered,
+            )
+        except (TypeError, ValueError):
+            pairs = _filter_legacy_ica_considerations(original_pairs, batch)
+    else:
+        pairs = original_pairs
+    return _attach_ica_verification(result, filtered, batch, pairs)
+
+
+def _is_batch_verifier_callable(value: Any) -> bool:
+    """Distinguish request-level provider verifiers from stage fakes."""
+    if getattr(value, "__name__", "") in {
+        "verify_ica_hazards",
+        "verify_ica_batch",
+        "verify_icas",
+    }:
+        return True
+    try:
+        parameters = inspect.signature(value).parameters
+    except (TypeError, ValueError):
+        return False
+    return "requests" in parameters or "request" in parameters
+
+
+def _filter_legacy_ica_considerations(
+    values: tuple[Any, ...], batch: Any
+) -> tuple[Any, ...]:
+    """Conservatively filter duck-typed consideration values for old fakes."""
+    excluded = {
+        record.ica_id
+        for record in getattr(batch, "records", ())
+        if getattr(record, "disposition", None) != "supported"
+    }
+    excluded.update(getattr(batch, "incomplete_ica_ids", ()) or ())
+    result: list[Any] = []
+    for value in values:
+        ids = tuple(getattr(value, "ica_ids", ()) or ())
+        if ids and not set(ids) & excluded:
+            result.append(value)
+        elif not ids or not excluded:
+            result.append(value)
+    return tuple(result)
+
+
+def _attach_ica_verification(
+    result: Any,
+    enumeration: Any,
+    batch: Any,
+    considerations: tuple[Any, ...],
+) -> Any:
+    """Attach verifier evidence while preserving each existing result wrapper."""
+    from asago_scenario_generator.stpa.obligation_aware.contracts import (
+        SynthesisSlotFillResult,
+    )
+    from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
+        SlotFillRunResult,
+    )
+
+    if isinstance(result, SlotFillRunResult):
+        updated = result.result.model_copy(
+            update={
+                "ica_enumeration": enumeration,
+                "considerations": considerations,
+                "ica_hazard_verification": batch,
+            }
+        )
+        return SlotFillRunResult(result=updated)
+    if isinstance(result, SynthesisSlotFillResult):
+        return result.model_copy(
+            update={
+                "ica_enumeration": enumeration,
+                "considerations": considerations,
+                "ica_hazard_verification": batch,
+            }
+        )
+    return SimpleNamespace(
+        ica_enumeration=enumeration,
+        considerations=considerations,
+        ica_hazard_verification=batch,
+        result=result,
+    )
 
 
 def _run_scenarios(
@@ -1440,6 +1616,9 @@ def _run_accounting(
                 routes=routes,
                 ica_enumeration=ica_enumeration,
                 ica_considerations=_ica_considerations(ica_enumeration),
+                ica_verification=_first_attr(
+                    ica_enumeration, "ica_hazard_verification"
+                ),
                 source_pins=source_pins,
                 scenario_result=scenario_result,
                 loss_analysis=loss_analysis,
@@ -2181,6 +2360,9 @@ def _manifest_provider_evidence(
             "records": records,
             "controls": controls,
         }
+        verification = _first_attr(stages[stage_name], "ica_hazard_verification")
+        if verification is not None:
+            result[stage_name]["ica_hazard_verification"] = _dump(verification)
     return result
 
 
@@ -3407,7 +3589,23 @@ def _ica_considerations(value: Any) -> tuple[Any, ...]:
         "ica_considerations",
         "slot_considerations",
     )
-    return tuple(result or ())
+    values = tuple(result or ())
+    verification = _first_attr(value, "ica_hazard_verification")
+    if verification is None or not values:
+        return values
+    try:
+        from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
+            filter_ica_considerations,
+        )
+
+        enumeration = _first_attr(value, "ica_enumeration")
+        return filter_ica_considerations(
+            values,
+            verification,
+            enumeration=enumeration,
+        )
+    except (TypeError, ValueError):
+        return _filter_legacy_ica_considerations(values, verification)
 
 
 def _fact_items(value: Any) -> tuple[Any, ...]:

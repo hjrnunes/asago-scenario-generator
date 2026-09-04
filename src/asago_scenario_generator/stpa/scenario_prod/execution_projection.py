@@ -56,14 +56,17 @@ from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
 )
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
+from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     AbsenceCondition,
+    ActionValueCondition,
     DelayCondition,
     DurationCondition,
     OrderingCondition,
     SemanticCondition,
     WindowCondition,
     contains_binding_placeholder,
+    normalize_semantic_proposition,
 )
 
 from .execution_classification import classify_scenario_execution
@@ -279,6 +282,38 @@ def _validate_contextual_spec_content(spec: ScenarioSpec) -> None:
         raise ExecutionProjectionPreparationError(
             "v2 projection requires a concrete ICA identity"
         )
+    contract = spec.execution_contract
+    if contract is None:
+        return
+    if contract.action_kind is ExecutionActionKind.model_output:
+        try:
+            normalize_semantic_proposition(
+                spec.unsafe_outcome_semantic_proposition,
+                required=True,
+            )
+        except ValueError as exc:
+            raise ExecutionProjectionPreparationError(str(exc)) from exc
+        if spec.ica_type is UCAType.incorrect:
+            condition = spec.unsafe_outcome_condition
+            if not (
+                isinstance(condition, ActionValueCondition)
+                and condition.property == "semantic_proposition"
+                and condition.operator == "equals"
+                and type(condition.expected) is bool
+                and condition.expected is True
+            ):
+                raise ExecutionProjectionPreparationError(
+                    "model_output INCORRECT scenarios require the fixed "
+                    "semantic-proposition condition"
+                )
+    elif spec.unsafe_outcome_semantic_proposition is not None:
+        try:
+            normalize_semantic_proposition(
+                spec.unsafe_outcome_semantic_proposition,
+                required=True,
+            )
+        except ValueError as exc:
+            raise ExecutionProjectionPreparationError(str(exc)) from exc
 
 
 def _build_projection_factors(
@@ -414,6 +449,7 @@ def _build_unsafe_outcome(
         control_action_id=spec.target_control_action,
         uca_type=spec.ica_type,
         condition=condition,
+        semantic_proposition=spec.unsafe_outcome_semantic_proposition,
         semantic_binding_required=contains_binding_placeholder(condition),
         hazard_refs=hazard_refs,
         constraint_refs=constraint_refs,
@@ -521,10 +557,10 @@ def _outcome_refs(
     spec: ScenarioSpec,
     context: ScenarioGenerationContext | None,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    hazards = tuple(dict.fromkeys(spec.unsafe_outcome_hazard_refs))
-    constraints = tuple(dict.fromkeys(spec.unsafe_outcome_constraint_refs))
+    hazards = tuple(spec.unsafe_outcome_hazard_refs)
+    constraints = tuple(spec.unsafe_outcome_constraint_refs)
     if context is None:
-        return hazards, constraints
+        return tuple(dict.fromkeys(hazards)), tuple(dict.fromkeys(constraints))
     return _resolve_outcome_refs_against_context(hazards, constraints, context)
 
 
@@ -533,35 +569,33 @@ def _resolve_outcome_refs_against_context(
     constraints: tuple[str, ...],
     context: ScenarioGenerationContext,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    context_hazards = {item.hazard_id for item in context.hazards}
-    context_constraints = {item.constraint_id for item in context.constraints}
-    resolved_hazards, resolved_constraints = _default_outcome_refs(
-        hazards, constraints, context
-    )
-    _require_context_refs(resolved_hazards, context_hazards, "hazard")
-    _require_context_refs(resolved_constraints, context_constraints, "constraint")
-    return resolved_hazards, resolved_constraints
-
-
-def _default_outcome_refs(
-    hazards: tuple[str, ...],
-    constraints: tuple[str, ...],
-    context: ScenarioGenerationContext,
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    return (
-        hazards or tuple(item.hazard_id for item in context.hazards),
-        constraints or tuple(item.constraint_id for item in context.constraints),
-    )
-
-
-def _require_context_refs(
-    refs: tuple[str, ...], valid_refs: set[str], label: str
-) -> None:
-    if set(refs) <= valid_refs:
-        return
-    raise ExecutionProjectionPreparationError(
-        f"unsafe outcome {label}_refs do not resolve to scenario context"
-    )
+    expected_hazards = tuple(item.hazard_id for item in context.hazards)
+    expected_constraints = tuple(item.constraint_id for item in context.constraints)
+    if not hazards:
+        raise ExecutionProjectionPreparationError(
+            "unsafe outcome hazard_refs cannot be empty for a contextual projection"
+        )
+    if not constraints:
+        raise ExecutionProjectionPreparationError(
+            "unsafe outcome constraint_refs cannot be empty for a contextual projection"
+        )
+    if len(hazards) != len(set(hazards)):
+        raise ExecutionProjectionPreparationError(
+            "unsafe outcome hazard_refs must contain unique IDs"
+        )
+    if len(constraints) != len(set(constraints)):
+        raise ExecutionProjectionPreparationError(
+            "unsafe outcome constraint_refs must contain unique IDs"
+        )
+    if hazards != expected_hazards:
+        raise ExecutionProjectionPreparationError(
+            "unsafe outcome hazard_refs must exactly equal scenario context"
+        )
+    if constraints != expected_constraints:
+        raise ExecutionProjectionPreparationError(
+            "unsafe outcome constraint_refs must exactly equal scenario context"
+        )
+    return hazards, constraints
 
 
 def _execution_requirements(

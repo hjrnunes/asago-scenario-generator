@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, StrictStr, model_validator
 
 from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactor,
@@ -22,7 +22,11 @@ from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
 )
-from asago_scenario_generator.stpa.models.semantic_conditions import SemanticCondition
+from asago_scenario_generator.stpa.models.semantic_conditions import (
+    ActionValueCondition,
+    SemanticCondition,
+    normalize_semantic_proposition,
+)
 from asago_scenario_generator.stpa.models.execution_classification import (
     SemanticExecutionContract,
 )
@@ -98,6 +102,7 @@ class ScenarioSpec(BaseModel):
     # selected UCA unsafe.  ``None`` remains accepted only for historical v1
     # ScenarioSpec values; contextual v2 preparation rejects it before Stage 6.
     unsafe_outcome_condition: SemanticCondition | None = None
+    unsafe_outcome_semantic_proposition: StrictStr | None = None
     unsafe_outcome_hazard_refs: list[str] = Field(default_factory=list)
     unsafe_outcome_constraint_refs: list[str] = Field(default_factory=list)
     scenario_context: ScenarioGenerationContext | None = None
@@ -135,6 +140,38 @@ class ScenarioSpec(BaseModel):
             raise ValueError("scenario fields do not match immutable scenario context")
         if not self.causal_factors:
             raise ValueError("successful contextual scenario requires causal_factors")
+        expected_hazards = tuple(item.hazard_id for item in context.hazards)
+        expected_constraints = tuple(item.constraint_id for item in context.constraints)
+        if tuple(self.unsafe_outcome_hazard_refs) != expected_hazards:
+            raise ValueError(
+                "scenario unsafe_outcome_hazard_refs must equal scenario context"
+            )
+        if tuple(self.unsafe_outcome_constraint_refs) != expected_constraints:
+            raise ValueError(
+                "scenario unsafe_outcome_constraint_refs must equal scenario context"
+            )
+        if self.execution_contract is not None:
+            if self.execution_contract.action_kind.value == "model_output":
+                normalize_semantic_proposition(
+                    self.unsafe_outcome_semantic_proposition,
+                    required=True,
+                )
+                if self.ica_type is UCAType.incorrect and not (
+                    isinstance(self.unsafe_outcome_condition, ActionValueCondition)
+                    and self.unsafe_outcome_condition.property == "semantic_proposition"
+                    and self.unsafe_outcome_condition.operator == "equals"
+                    and type(self.unsafe_outcome_condition.expected) is bool
+                    and self.unsafe_outcome_condition.expected is True
+                ):
+                    raise ValueError(
+                        "model_output INCORRECT scenarios require the fixed "
+                        "semantic-proposition condition"
+                    )
+            elif self.unsafe_outcome_semantic_proposition is not None:
+                normalize_semantic_proposition(
+                    self.unsafe_outcome_semantic_proposition,
+                    required=True,
+                )
         return self
 
     def validate_against(self, control_structure: ControlStructure) -> None:

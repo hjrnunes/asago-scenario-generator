@@ -196,7 +196,18 @@ changing acceptance behavior, or running the quality sequence.
   receives no capability, mapping, or proposed-rationale context. An adjacent
   control or unsubstantiated mechanism path keeps the ordinary STPA result but
   records `mechanism_path_unsubstantiated` and cannot address the obligation. ICA
-  style warnings are non-blocking. Reconcile one closed terminal stop reason
+  style warnings are non-blocking. Independently verify every final non-N/A ICA
+  against its exact control action, UCA category, selected hazard, governing
+  constraint, and reachable loss before Stage 5. One unsupported result may be
+  corrected once by the ICA author and independently rechecked once; unchanged
+  or still-unsupported material is retained as a typed exclusion while sibling
+  ICAs continue. Do not send taxonomy or mapping context to this verifier, and
+  derive mapping strength locally from the complete pinned mapping path rather
+  than accepting it from provider output. Every executable unsafe outcome must
+  carry a bounded semantic proposition and exact hazard/constraint/loss lineage;
+  for model-output outcomes, use the fixed compiler-owned
+  `semantic_proposition equals true` bookkeeping condition and give downstream
+  judges the proposition itself. Reconcile one closed terminal stop reason
   per applicable obligation across accounting and scenario realization, and
   distinguish provider response receipt from parsing, semantic validation,
   compilation, and publication in call evidence. Finish product `run` with

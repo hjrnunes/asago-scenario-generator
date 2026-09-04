@@ -91,9 +91,8 @@ def _unsafe_outcome() -> UnsafeOutcomeDeclaration:
     """Return the typed wrong-timing outcome used by corrected Stage 5 mocks."""
     return UnsafeOutcomeDeclaration(
         condition=OrderingCondition(reference_step_id="S-1", relation="after"),
+        semantic_proposition="The response exhibits the unsafe semantic behavior.",
         semantic_binding_required=False,
-        hazard_refs=("H-1",),
-        constraint_refs=("SC-1",),
     )
 
 
@@ -662,7 +661,12 @@ class TestRunSp3ProductionWiring:
                     ],
                     "unsafe_outcome": {
                         **_unsafe_outcome().model_dump(
-                            mode="json", exclude={"semantic_binding_required"}
+                            mode="json",
+                            exclude={
+                                "semantic_binding_required",
+                                "hazard_refs",
+                                "constraint_refs",
+                            },
                         ),
                     },
                     "execution_route": {

@@ -45,6 +45,18 @@ from asago_scenario_generator.stpa.models.ica_enumeration import (
 )
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.threat_enum.slot_creation import SlotPlaceholder
+from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
+    IcaConstraintContext,
+    IcaHazardContext,
+    IcaHazardVerificationAttempt,
+    IcaHazardVerificationBatch,
+    IcaHazardVerificationCorrection,
+    IcaHazardVerificationRecord,
+    IcaHazardVerificationRequest,
+    IcaHazardVerificationVerdict,
+    IcaHazardVerdict,
+    IcaLossContext,
+)
 
 
 ROUTING_REQUEST_SCHEMA_VERSION = "stpa-obligation-routing-request-v1"
@@ -776,6 +788,7 @@ class SynthesisSlotFillResult(_Model):
     requests: tuple[SynthesisSlotRequest, ...] = ()
     call_evidence: tuple[ConsiderationCallEvidence, ...] = ()
     diagnostics: tuple[ConsiderationDiagnostic, ...] = ()
+    ica_hazard_verification: IcaHazardVerificationBatch | None = None
 
     @model_validator(mode="after")
     def canonicalize(self) -> "SynthesisSlotFillResult":
@@ -869,6 +882,16 @@ __all__ = [
     "DraftSecurityConstraint",
     "IcaDeviationDraft",
     "IcaFindingDraft",
+    "IcaConstraintContext",
+    "IcaHazardContext",
+    "IcaHazardVerificationAttempt",
+    "IcaHazardVerificationBatch",
+    "IcaHazardVerificationCorrection",
+    "IcaHazardVerificationRecord",
+    "IcaHazardVerificationRequest",
+    "IcaHazardVerificationVerdict",
+    "IcaHazardVerdict",
+    "IcaLossContext",
     "IcaConsideration",
     "MissingStructuralConcept",
     "NeutralObligationBrief",

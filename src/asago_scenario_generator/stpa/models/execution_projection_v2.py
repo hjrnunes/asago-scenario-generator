@@ -38,6 +38,7 @@ from asago_scenario_generator.stpa.models.causal_factor import (
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.execution_classification import (
     BindingCompleteness,
+    ExecutionActionKind,
     ExecutionClassification,
     ExecutionContractDisposition,
     ExecutionDeliveryClass,
@@ -59,6 +60,7 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
     WindowCondition,
     collect_binding_refs,
     contains_binding_placeholder,
+    normalize_semantic_proposition,
 )
 
 
@@ -160,6 +162,7 @@ class UnsafeOutcome(_ClosedFrozenModel):
     control_action_id: StrictStr = Field(min_length=1)
     uca_type: UCAType
     condition: SemanticCondition
+    semantic_proposition: StrictStr | None
     semantic_binding_required: StrictBool
     hazard_refs: tuple[StrictStr, ...] = ()
     constraint_refs: tuple[StrictStr, ...] = ()
@@ -177,6 +180,12 @@ class UnsafeOutcome(_ClosedFrozenModel):
             raise ValueError(
                 "semantic_binding_required must exactly match placeholder presence"
             )
+        if self.semantic_proposition is not None:
+            normalize_semantic_proposition(self.semantic_proposition, required=True)
+        _validate_unique_outcome_refs(self.hazard_refs, "hazard_refs")
+        _validate_unique_outcome_refs(self.constraint_refs, "constraint_refs")
+        object.__setattr__(self, "hazard_refs", tuple(sorted(self.hazard_refs)))
+        object.__setattr__(self, "constraint_refs", tuple(sorted(self.constraint_refs)))
         return self
 
 
@@ -313,6 +322,7 @@ class ExecutionProjectionV2(_ClosedFrozenModel):
     def validate_projection(self) -> "ExecutionProjectionV2":
         _validate_projection_identity(self)
         _validate_projection_outcome(self)
+        _validate_projection_lineage(self)
         _validate_factor_sequence(self.causal_factors)
         _validate_step_sequence(self.steps, self.causal_factors, self.control_action_id)
         _validate_projection_conditions(self)
@@ -592,6 +602,54 @@ def _validate_projection_outcome(projection: ExecutionProjectionV2) -> None:
         raise ValueError("unsafe_outcome control_action_id does not match projection")
     if outcome.uca_type is not projection.uca_type:
         raise ValueError("unsafe_outcome uca_type does not match projection")
+
+
+def _validate_projection_lineage(projection: ExecutionProjectionV2) -> None:
+    """Close outcome meaning and source lineage before publication."""
+    outcome = projection.unsafe_outcome
+    contract = projection.execution_contract
+    if contract.action_kind is ExecutionActionKind.model_output:
+        normalize_semantic_proposition(outcome.semantic_proposition, required=True)
+        if projection.uca_type is UCAType.incorrect:
+            condition = outcome.condition
+            if not (
+                isinstance(condition, ActionValueCondition)
+                and condition.property == "semantic_proposition"
+                and condition.operator == "equals"
+                and type(condition.expected) is bool
+                and condition.expected is True
+            ):
+                raise ValueError(
+                    "model_output INCORRECT outcomes require the fixed "
+                    "semantic-proposition action_value condition"
+                )
+    elif outcome.semantic_proposition is not None:
+        normalize_semantic_proposition(outcome.semantic_proposition, required=True)
+
+    if contract.disposition is not ExecutionContractDisposition.executable_route:
+        return
+    trace = projection.trace_refs
+    if not outcome.hazard_refs:
+        raise ValueError("executable unsafe outcome requires at least one hazard_ref")
+    if not outcome.constraint_refs:
+        raise ValueError(
+            "executable unsafe outcome requires at least one constraint_ref"
+        )
+    if not trace.loss_ids:
+        raise ValueError("executable projection requires at least one loss trace ref")
+    if tuple(outcome.hazard_refs) != tuple(trace.hazard_ids):
+        raise ValueError(
+            "unsafe outcome hazard_refs must exactly match trace_refs.hazard_ids"
+        )
+    if tuple(outcome.constraint_refs) != tuple(trace.constraint_ids):
+        raise ValueError(
+            "unsafe outcome constraint_refs must exactly match trace_refs.constraint_ids"
+        )
+
+
+def _validate_unique_outcome_refs(values: Sequence[str], field_name: str) -> None:
+    if len(values) != len(set(values)):
+        raise ValueError(f"{field_name} must contain unique IDs")
 
 
 def _validate_projection_conditions(projection: ExecutionProjectionV2) -> None:

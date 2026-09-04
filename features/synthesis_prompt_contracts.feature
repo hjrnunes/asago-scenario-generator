@@ -200,3 +200,49 @@ Feature: Meaning survives obligation-aware STPA model calls
     Examples:
       | disposition | published_scenarios |
       | finding      | 1                   |
+
+  # STPA-ICA-VERIFICATION
+  Scenario: A supported final ICA remains eligible after independent verification
+    Given deterministic final ICA verification fixtures are available
+    When a supported final ICA is verified
+    Then the final ICA verifier call count is 1
+    And the supported ICA disposition is "supported"
+    And the verified ICA remains eligible
+
+  Scenario: A contradictory ICA gets one bounded correction and separate recheck
+    Given deterministic final ICA verification fixtures are available
+    When a contradictory final ICA is corrected and rechecked
+    Then the final ICA verifier call count is 2
+    And the correction and recheck are separate attempts
+    And the corrected ICA disposition is "supported"
+
+  Scenario: A failed recheck stays distinct while a sibling ICA survives
+    Given deterministic final ICA verification fixtures are available
+    When one final ICA recheck fails while its sibling is supported
+    Then the final ICA verifier call count is 2
+    And one final ICA has provider-failure disposition
+    And the supported sibling remains eligible
+    And the final ICA provider failure is recorded separately
+
+  Scenario: An N/A ICA does not invoke the independent verifier
+    Given deterministic final ICA verification fixtures are available
+    When an N/A final ICA slot is verified
+    Then the final ICA verifier call count is 0
+    And the N/A slot remains unchanged
+
+  Scenario: Provider routing cannot choose locally derived mapping strength
+    Given deterministic final ICA verification fixtures are available
+    When the routing provider attempts to return mapping strength
+    Then the provider-derived routing field is rejected
+
+  Scenario: A supported ICA reaches Phase 2 without automatic coverage confirmation
+    When the supported ICA attribution canary is executed
+    Then the attribution canary status is "supported_unreviewed"
+    And the canary realization count is 1
+    And the canary Phase 2 status is "awaiting_evidence"
+
+  Scenario: A mismatched ICA remains accounted but receives no realization credit
+    When the mismatched ICA attribution canary is executed
+    Then the attribution canary status is "mismatched_no_credit"
+    And the canary realization count is 0
+    And the canary Phase 2 proposal count is 0

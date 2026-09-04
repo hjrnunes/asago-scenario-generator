@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any, Literal, Sequence
+from typing import Annotated, Any, Literal, Mapping, Sequence
 
 from pydantic import Field, conlist, create_model, field_validator, model_validator
 
@@ -60,12 +60,20 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     SlotIcaDraft,
     _Model,
 )
+from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
+    IcaHazardVerificationRequest,
+    IcaHazardVerificationCorrection,
+    IcaHazardVerificationVerdict,
+)
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     audit_prompt_contract,
+    build_ica_hazard_correction_prompts,
+    build_ica_hazard_verification_prompts,
     build_mechanism_verification_prompts,
     build_structural_revision_prompts,
     build_structural_routing_prompts,
     build_synthesis_slot_prompts,
+    mapping_strength_for_brief,
     obligation_prompt_template_hashes,
     project_obligation_routing_context,
     project_ica_target_context,
@@ -289,11 +297,27 @@ class _RoutingProviderMissingConcept(_Model):
     obligation_id: ObligationId | None = None
 
 
+class _RoutingProviderSemanticAssessment(_Model):
+    """Provider-only semantic assessment.
+
+    ``mapping_strength`` is derived from the pinned mapping evidence by the
+    local adapter.  It is deliberately not part of this wire model, so a
+    provider cannot choose or copy a durable classification.
+    """
+
+    mechanism_assessment: Literal[
+        "plausible_in_system", "absent_from_system", "insufficient_evidence"
+    ]
+    risk_alignment: Literal["supported", "mismatch", "insufficient_evidence"]
+    mechanism_rationale: str = Field(min_length=1)
+    risk_alignment_rationale: str = Field(min_length=1)
+
+
 class _RoutingProviderRouteBase(_Model):
     """Fields shared by each disposition-specific routing branch."""
 
     obligation_id: ObligationId
-    semantic_assessment: ObligationSemanticAssessment
+    semantic_assessment: _RoutingProviderSemanticAssessment
     rationale: str = Field(min_length=1)
     evidence: tuple[str, ...] = Field(min_length=1)
 
@@ -375,9 +399,16 @@ def _routing_provider_payload_type(route_count: int) -> type[_Model]:
     )
 
 
-def _materialize_routing_route(value: _RoutingProviderRouteUnion) -> ObligationRoute:
+def _materialize_routing_route(
+    value: _RoutingProviderRouteUnion,
+    *,
+    mapping_strength: str,
+) -> ObligationRoute:
     """Derive authoritative route and gap IDs from provider semantics."""
     data = value.model_dump(mode="python")
+    assessment = dict(data["semantic_assessment"])
+    assessment["mapping_strength"] = mapping_strength
+    data["semantic_assessment"] = assessment
     data["missing_concepts"] = tuple(
         concept.model_dump(mode="python")
         for concept in getattr(value, "missing_concepts", ())
@@ -401,6 +432,26 @@ class _MechanismVerdictPayload(_Model):
     verdicts: tuple[_MechanismVerdict, ...] = Field(min_length=1)
 
 
+class _IcaHazardProviderVerdict(_Model):
+    """Provider-only ICA judgement; request binding is attached locally."""
+
+    ica_id: str = Field(min_length=1)
+    verdict: Literal["supported", "contradictory", "insufficient_evidence"]
+    rationale: str = Field(min_length=1, max_length=2000)
+
+
+class _IcaHazardProviderPayload(_Model):
+    """Provider payload with one semantic judgement per supplied ICA."""
+
+    verdicts: tuple[_IcaHazardProviderVerdict, ...] = Field(min_length=1)
+
+
+class _IcaHazardCorrectionPayload(_Model):
+    """Provider-only correction envelope."""
+
+    correction: IcaHazardVerificationCorrection
+
+
 @lru_cache(maxsize=16)
 def _mechanism_verdict_payload_type(verdict_count: int) -> type[_Model]:
     """Build a strict verifier payload for every selected route."""
@@ -414,6 +465,23 @@ def _mechanism_verdict_payload_type(verdict_count: int) -> type[_Model]:
     return create_model(
         f"_MechanismVerdictPayload{verdict_count}",
         __base__=_MechanismVerdictPayload,
+        verdicts=(verdicts, ...),
+    )
+
+
+@lru_cache(maxsize=16)
+def _ica_hazard_provider_payload_type(verdict_count: int) -> type[_Model]:
+    """Build a strict provider payload for an exact ICA batch cardinality."""
+    if type(verdict_count) is not int or verdict_count <= 0:
+        raise ValueError("verdict_count must be a positive integer")
+    verdicts = conlist(
+        _IcaHazardProviderVerdict,
+        min_length=verdict_count,
+        max_length=verdict_count,
+    )
+    return create_model(
+        f"_IcaHazardProviderPayload{verdict_count}",
+        __base__=_IcaHazardProviderPayload,
         verdicts=(verdicts, ...),
     )
 
@@ -1000,7 +1068,6 @@ class ObligationAwareLLMAdapter:
                         "semantic_assessment": {
                             "mechanism_assessment": "insufficient_evidence",
                             "risk_alignment": "insufficient_evidence",
-                            "mapping_strength": "direct_curated_pair",
                             "mechanism_rationale": "the required path is not supplied",
                             "risk_alignment_rationale": "alignment is not established",
                         },
@@ -1037,9 +1104,30 @@ class ObligationAwareLLMAdapter:
         )
         if error is not None or payload is None:
             raise ValueError(error or "structural routing provider returned no payload")
+        brief_by_id = {brief.obligation_id: brief for brief in request.briefs}
+        unknown_ids = sorted(
+            {
+                route.obligation_id
+                for route in payload.routes
+                if route.obligation_id not in brief_by_id
+            }
+        )
+        if unknown_ids:
+            raise ValueError(
+                "structural routing provider returned unknown obligation IDs: "
+                + ", ".join(unknown_ids)
+            )
         response = StructuralRoutingResponse(
             request_digest=request.semantic_digest,
-            routes=tuple(_materialize_routing_route(route) for route in payload.routes),
+            routes=tuple(
+                _materialize_routing_route(
+                    route,
+                    mapping_strength=mapping_strength_for_brief(
+                        brief_by_id[route.obligation_id]
+                    ),
+                )
+                for route in payload.routes
+            ),
             adapter_kind="provider",
             provider_calls=1,
             request_ref=f"memory://{request.batch_id}/request",
@@ -1067,6 +1155,127 @@ class ObligationAwareLLMAdapter:
                 request.batch_id,
             )
         return _merge_verified_routes(routes, verified)
+
+    def verify_ica_hazards(
+        self,
+        requests: Sequence[IcaHazardVerificationRequest],
+        *,
+        correction_feedback: Mapping[str, str] | None = None,
+    ) -> tuple[IcaHazardVerificationVerdict, ...]:
+        """Independently verify every supplied final ICA in one bounded call.
+
+        The request projection and prompt builder contain only STPA semantic
+        context.  A correction call is explicit and is initiated by the
+        deterministic orchestration seam; this adapter itself never retries.
+        """
+        requests = tuple(requests)
+        if not requests:
+            return ()
+        expected_ids = tuple(item.ica_id for item in requests)
+        if len(set(expected_ids)) != len(expected_ids):
+            raise ValueError(
+                "ICA hazard verification requests must have unique ICA IDs"
+            )
+        system_prompt, user_prompt = build_ica_hazard_verification_prompts(
+            requests,
+            correction_feedback=correction_feedback,
+        )
+        payload, _result, error = safe_llm_call(
+            llm_client=self.llm_client,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_format=_ica_hazard_provider_payload_type(len(requests)),
+            run_dir=self.run_dir,
+            stage=f"{self.stage_prefix}_ica_hazard_verification",
+            step="correction" if correction_feedback else "initial",
+            temperature=self.controls.temperature,
+            max_completion_tokens=_MECHANISM_VERIFICATION_MAX_COMPLETION_TOKENS,
+            validation_retries=0,
+            validation_retry_feedback=(
+                " Return one verdict for every exact supplied ica_id and no other IDs."
+            ),
+            prompt_template_hashes=obligation_prompt_template_hashes(),
+        )
+        if error is not None or payload is None:
+            raise ValueError(
+                error or "ICA hazard verification provider returned no payload"
+            )
+        actual_ids = tuple(item.ica_id for item in payload.verdicts)
+        if set(actual_ids) != set(expected_ids) or len(actual_ids) != len(expected_ids):
+            raise ValueError(
+                "ICA hazard verification must account for every supplied ICA exactly once"
+            )
+        request_by_id = {item.ica_id: item for item in requests}
+        result = tuple(
+            IcaHazardVerificationVerdict(
+                ica_id=item.ica_id,
+                request_digest=request_by_id[item.ica_id].semantic_digest,
+                verdict=item.verdict,
+                rationale=item.rationale,
+            )
+            for item in sorted(payload.verdicts, key=lambda value: value.ica_id)
+        )
+        mark_call_published(
+            self.run_dir,
+            f"{self.stage_prefix}_ica_hazard_verification",
+            "correction" if correction_feedback else "initial",
+        )
+        return result
+
+    # Short aliases are intentionally kept at the adapter edge for callers
+    # that name this stage after its batch semantics.
+    verify_ica_batch = verify_ica_hazards
+    verify_icas = verify_ica_hazards
+
+    def correct_ica_hazard(
+        self,
+        request: IcaHazardVerificationRequest,
+        verdict: IcaHazardVerificationVerdict,
+    ) -> IcaHazardVerificationCorrection:
+        """Perform one bounded request-local ICA correction."""
+        system_prompt, user_prompt = build_ica_hazard_correction_prompts(
+            request, verdict
+        )
+        payload, _result, error = safe_llm_call(
+            llm_client=self.llm_client,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_format=_IcaHazardCorrectionPayload,
+            run_dir=self.run_dir,
+            stage=f"{self.stage_prefix}_ica_hazard_correction",
+            step=request.ica_id,
+            temperature=self.controls.temperature,
+            max_completion_tokens=_MECHANISM_VERIFICATION_MAX_COMPLETION_TOKENS,
+            validation_retries=0,
+            validation_retry_feedback=(
+                " Return one correction with the exact supplied ica_id and no new IDs."
+            ),
+            prompt_template_hashes=obligation_prompt_template_hashes(),
+        )
+        if error is not None or payload is None:
+            raise ValueError(
+                error or "ICA hazard correction provider returned no payload"
+            )
+        correction_value = (
+            payload.correction
+            if isinstance(payload, _IcaHazardCorrectionPayload)
+            else getattr(payload, "correction", payload)
+        )
+        correction = (
+            correction_value
+            if isinstance(correction_value, IcaHazardVerificationCorrection)
+            else IcaHazardVerificationCorrection.model_validate(correction_value)
+        )
+        if correction.ica_id != request.ica_id:
+            raise ValueError("ICA correction provider changed the ICA identity")
+        mark_call_published(
+            self.run_dir,
+            f"{self.stage_prefix}_ica_hazard_correction",
+            request.ica_id,
+        )
+        return correction
+
+    correct_ica = correct_ica_hazard
 
     def revise(self, request: StructuralRevisionRequest) -> StructuralRevisionResponse:
         """Run the single named additive-revision provider stage."""

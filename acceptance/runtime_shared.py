@@ -2283,6 +2283,10 @@ def _make_sp3_contextual_scenario_spec(
         }
         for factor in _make_sp3_causal_factors()
     ]
+    values["unsafe_outcome_hazard_refs"] = [item.hazard_id for item in context.hazards]
+    values["unsafe_outcome_constraint_refs"] = [
+        item.constraint_id for item in context.constraints
+    ]
     values["scenario_context"] = context
     return ScenarioSpec.model_validate(values)
 
@@ -2386,8 +2390,9 @@ def _setup_sp3_mock_client(num_threats: int = 2):
                         "control_action_id": "CA-1-1",
                         "expected": "not_provided",
                     },
-                    "hazard_refs": [],
-                    "constraint_refs": [],
+                    "semantic_proposition": (
+                        "The model response exhibits the selected unsafe behavior."
+                    ),
                 },
                 "execution_route": {
                     "disposition": "executable_route",

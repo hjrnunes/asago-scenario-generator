@@ -31,6 +31,14 @@ from asago_scenario_generator.stpa.obligation_aware.provider import (
     adapter_from_synthesis_inputs,
     make_obligation_aware_adapter,
 )
+from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
+    IcaHazardVerdict,
+    apply_ica_hazard_verification_correction,
+    build_ica_hazard_verification_request,
+    build_ica_hazard_verification_requests,
+    filter_ica_considerations,
+    verify_final_ica_batch,
+)
 from asago_scenario_generator.stpa.obligation_aware.revision import (
     RevisionCompilation,
     RevisionRunResult,
@@ -258,6 +266,7 @@ __all__ = [
     "RevisionRunResult",
     "RoutingRunResult",
     "SlotFillRunResult",
+    "IcaHazardVerdict",
     "adapter_from_synthesis_inputs",
     "analyze_obligations",
     "build_neutral_brief",
@@ -272,6 +281,10 @@ __all__ = [
     "fill_obligation_aware_icas",
     "fill_synthesis_slots",
     "final_slot_universe",
+    "apply_ica_hazard_verification_correction",
+    "build_ica_hazard_verification_request",
+    "build_ica_hazard_verification_requests",
+    "filter_ica_considerations",
     "make_obligation_aware_adapter",
     "recheck",
     "recheck_obligations",
@@ -282,4 +295,5 @@ __all__ = [
     "run_recheck",
     "run_revision",
     "run_structural_consideration",
+    "verify_final_ica_batch",
 ]

@@ -57,7 +57,6 @@ def _routing_semantics() -> dict[str, str]:
     return {
         "mechanism_assessment": "insufficient_evidence",
         "risk_alignment": "insufficient_evidence",
-        "mapping_strength": "direct_curated_pair",
         "mechanism_rationale": "the required path is not supplied",
         "risk_alignment_rationale": "alignment is not established",
     }

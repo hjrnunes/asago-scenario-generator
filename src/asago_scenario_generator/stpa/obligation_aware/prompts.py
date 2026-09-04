@@ -204,7 +204,6 @@ def _routing_wire_examples() -> tuple[str, str]:
     semantic_assessment = {
         "mechanism_assessment": "plausible_in_system",
         "risk_alignment": "supported",
-        "mapping_strength": "direct_curated_pair",
         "mechanism_rationale": "the supplied path governs the concern",
         "risk_alignment_rationale": "the path can affect the reviewed consequence",
     }
@@ -1373,6 +1372,56 @@ def build_mechanism_verification_prompts(
     return system, user
 
 
+def build_ica_hazard_verification_prompts(
+    requests: Sequence[Any],
+    *,
+    correction_feedback: Mapping[str, str] | None = None,
+) -> tuple[str, str]:
+    """Render the narrow independent verifier prompt for final ICAs.
+
+    Only the request's STPA view is serialized.  Content-addressing and
+    provenance fields are intentionally removed before rendering, and the
+    optional correction feedback is request-local typed review text.
+    """
+    if not requests:
+        raise ValueError("ICA hazard verification requires at least one request")
+    payloads: list[dict[str, Any]] = []
+    for request in requests:
+        if not hasattr(request, "model_dump"):
+            raise TypeError("ICA hazard verification requests must be typed models")
+        payload = request.model_dump(mode="json", exclude={"semantic_digest"})
+        payload.pop("schema_version", None)
+        if correction_feedback and request.ica_id in correction_feedback:
+            payload["bounded_correction_feedback"] = correction_feedback[request.ica_id]
+        payloads.append(payload)
+    system = _TEMPLATE_LOADER.render_prompt("ica_hazard_verification_system.j2")
+    user = _TEMPLATE_LOADER.render_prompt(
+        "ica_hazard_verification_user.j2",
+        request_count=len(payloads),
+        requests_yaml=_yaml(payloads),
+    )
+    return system, user
+
+
+def build_ica_hazard_correction_prompts(
+    request: Any,
+    verdict: Any,
+) -> tuple[str, str]:
+    """Render one request-local correction prompt from STPA-only context."""
+    if not hasattr(request, "model_dump") or not hasattr(verdict, "model_dump"):
+        raise TypeError("ICA correction requires typed request and verdict values")
+    request_payload = request.model_dump(mode="json", exclude={"semantic_digest"})
+    request_payload.pop("schema_version", None)
+    verdict_payload = verdict.model_dump(mode="json", exclude={"request_digest"})
+    system = _TEMPLATE_LOADER.render_prompt("ica_hazard_correction_system.j2")
+    user = _TEMPLATE_LOADER.render_prompt(
+        "ica_hazard_correction_user.j2",
+        request_yaml=_yaml(request_payload),
+        verdict_yaml=_yaml(verdict_payload),
+    )
+    return system, user
+
+
 def build_structural_revision_prompts(
     *,
     gaps: Sequence[MissingStructuralConcept],
@@ -1450,6 +1499,8 @@ __all__ = [
     "build_structural_revision_prompts",
     "build_structural_routing_prompts",
     "build_mechanism_verification_prompts",
+    "build_ica_hazard_verification_prompts",
+    "build_ica_hazard_correction_prompts",
     "build_synthesis_slot_prompts",
     "authoritative_hazard_constraint_pairs",
     "project_control_structure_context",

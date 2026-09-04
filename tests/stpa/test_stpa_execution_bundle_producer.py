@@ -174,6 +174,13 @@ def _spec(
                 minimum=0,
             ),
         ),
+        unsafe_outcome_semantic_proposition=(
+            "The response exhibits the unsafe semantic behavior."
+        ),
+        unsafe_outcome_hazard_refs=[item.hazard_id for item in context.hazards],
+        unsafe_outcome_constraint_refs=[
+            item.constraint_id for item in context.constraints
+        ],
         scenario_context=context,
         execution_contract=SemanticExecutionContract(
             requested_environment_basis=RequestedEnvironmentBasis.target_agnostic,
@@ -207,6 +214,22 @@ def test_prepare_seam_returns_digest_bearing_projection_and_derives_binding() ->
     assert validate_execution_projection(
         validated.projection.model_dump(mode="json")
     ).valid
+
+
+def test_prepare_rejects_empty_contextual_lineage_instead_of_broadening() -> None:
+    spec = _spec().model_copy(
+        update={
+            "unsafe_outcome_hazard_refs": [],
+            "unsafe_outcome_constraint_refs": [],
+        }
+    )
+
+    with pytest.raises(ValueError, match="must equal scenario context|cannot be empty"):
+        prepare_execution_projection(
+            spec,
+            _control_structure(),
+            ExecutionRunIdentity(run_id="run-no-lineage-fallback"),
+        )
 
 
 def test_projection_rejects_inconsistent_resource_free_classification() -> None:
@@ -294,9 +317,9 @@ def test_literal_incorrect_action_value_is_supported_without_runtime_requirement
             ica_type=UCAType.incorrect,
             unsafe_outcome_condition=ActionValueCondition(
                 control_action_id="CA-1-1",
-                property="authorization_state",
+                property="semantic_proposition",
                 operator="equals",
-                expected="approved",
+                expected=True,
             ),
         ),
         _control_structure(),
@@ -323,9 +346,9 @@ def test_bundle_publication_is_canonical_index_last_and_tamper_evident(
         ica_type=UCAType.incorrect,
         unsafe_outcome_condition=ActionValueCondition(
             control_action_id="CA-1-1",
-            property="authorization_state",
+            property="semantic_proposition",
             operator="equals",
-            expected="approved",
+            expected=True,
         ),
     )
     run_identity = ExecutionRunIdentity(run_id="run-bundle")
