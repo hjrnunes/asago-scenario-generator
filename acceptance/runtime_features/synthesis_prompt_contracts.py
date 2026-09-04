@@ -54,6 +54,7 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     SynthesisSlotRequest,
 )
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
+    build_structural_routing_prompts,
     build_synthesis_slot_prompts,
     project_obligation_question,
 )
@@ -324,14 +325,13 @@ def _h_inspect_routing_guidance(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     del text, examples
-    from asago_scenario_generator.stpa.obligation_aware import prompts
-
-    loader = TemplateLoader(Path(prompts.__file__).with_name("prompt_templates"))
-    _state(world)["routing_guidance"] = loader.render_prompt(
-        "structural_routing_system.j2",
-        obligation_count=1,
-        instructions="Return one decision.",
+    routing_system, _routing_user = build_structural_routing_prompts(
+        briefs=(_brief(),),
+        loss_analysis=_losses(),
+        control_structure=_structure(),
+        slots=tuple(create_slots(_structure())),
     )
+    _state(world)["routing_guidance"] = routing_system
     return True, ""
 
 
@@ -915,8 +915,8 @@ def _h_obligation_is_provenance(
     prompt = _state(world).get("mechanism_stage5_prompt", "").lower()
     required = (
         "analysis provenance, not causal evidence",
-        "finding` means stpa found a related unsafe-control path",
-        "does not establish that persistent memory was poisoned",
+        "do not establish an attacker mechanism or access path",
+        "a mechanism needs exact supplied capability/access evidence",
     )
     missing = [item for item in required if item not in prompt]
     return not missing, f"scenario obligation boundary is missing: {missing}"
@@ -930,8 +930,7 @@ def _h_mechanism_requires_support(
     prompt = _state(world).get("mechanism_stage5_prompt", "").lower()
     actual = (
         "independent evidence"
-        if "independently supported by an exact reachable capability/access path"
-        in prompt
+        if "a mechanism needs exact supplied capability/access evidence" in prompt
         else "unsupported"
     )
     return actual == expected, f"expected {expected!r}, got {actual!r}"
@@ -1220,6 +1219,10 @@ def _h_stage5_local_causal_handle(
     client.set_response_queue(
         [
             {
+                "stimulus": {
+                    "category": "conversation",
+                    "description": "Earlier coordination turns carry the selected state.",
+                },
                 "defender_vulnerabilities": [
                     {
                         "belief_handle": f"belief_{index}",
@@ -1244,9 +1247,7 @@ def _h_stage5_local_causal_handle(
                         "source_handle": "cause_1",
                         "evidence": "The shared process model may remain stale.",
                         "temporal_condition": None,
-                        "evidence_status": "structural_failure",
-                        "capability_refs": [],
-                        "access_refs": [],
+                        "evidence_status": "bounded_assumption",
                         "bounded_assumption": "Assume synchronization completes late.",
                     }
                 ],
@@ -1263,12 +1264,10 @@ def _h_stage5_local_causal_handle(
                 },
                 "execution_route": {
                     "disposition": "executable_route",
-                    "delivery_class": "direct_prompt",
+                    "delivery_class": "conversation_context",
                     "selected_factor_handle": "cause_1",
-                    "action_kind": "model_output",
-                    "resource_role_handles": [],
-                    "carrier_attacker_influence": "none",
-                    "reason": "The selected shared state explains the direct route.",
+                    "action_kind": "agent_message",
+                    "reason": "The selected shared state explains the coordination message.",
                 },
             }
         ]

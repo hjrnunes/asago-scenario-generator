@@ -65,6 +65,38 @@ class ReferenceType(str, Enum):
     controlled_process = "controlled_process"
 
 
+class ControlActionEffectKind(str, Enum):
+    """Typed observable effect produced by a control action.
+
+    The effect is intentionally independent of the action's prose description.
+    Consumers can therefore select an execution observation without guessing
+    from verbs such as ``send`` or ``update``.  ``None`` on a legacy action is
+    retained as an analytical/legacy value; new Stage 2 output should provide
+    one of these values explicitly.
+    """
+
+    model_output = "model_output"
+    tool_call = "tool_call"
+    state_change = "state_change"
+    agent_message = "agent_message"
+    environment_action = "environment_action"
+
+
+class ControlActionTemporality(str, Enum):
+    """Typed temporal shape of a control action.
+
+    ``continuous`` and ``bounded_duration`` actions have an observable
+    duration.  ``instantaneous`` and ``discrete`` actions are point events;
+    ``unknown`` is explicit uncertainty rather than an inferred duration.
+    """
+
+    instantaneous = "instantaneous"
+    discrete = "discrete"
+    continuous = "continuous"
+    bounded_duration = "bounded_duration"
+    unknown = "unknown"
+
+
 class ElementRef(BaseModel):
     """A reference to a responsibility or controlled process."""
 
@@ -97,17 +129,102 @@ class ProcessModelPart(BaseModel):
         return _validate_id_format(v, "pm_id", "PM-X-Y", "PM-1-1", r"^PM-\d+-\d+$")
 
 
+def normalize_control_action_effect_kind(
+    target: ElementRef | None,
+    effect_kind: ControlActionEffectKind | None,
+) -> ControlActionEffectKind | None:
+    """Apply the deterministic responsibility-target effect rule.
+
+    This helper is also used by tolerant Stage 2 parsing, whose recovery path
+    intentionally uses ``model_construct`` and therefore bypasses Pydantic's
+    model validators.  It accepts legacy missing values but never silently
+    changes an explicitly conflicting effect.
+    """
+    if effect_kind is not None:
+        try:
+            effect_kind = ControlActionEffectKind(effect_kind)
+        except ValueError as exc:
+            raise ValueError(
+                "effect_kind must be one of: "
+                + ", ".join(item.value for item in ControlActionEffectKind)
+            ) from exc
+    if target is None or target.type is not ReferenceType.responsibility:
+        return effect_kind
+    if (
+        effect_kind is not None
+        and effect_kind is not ControlActionEffectKind.agent_message
+    ):
+        raise ValueError(
+            "control actions targeting a responsibility must use "
+            "effect_kind='agent_message'"
+        )
+    return ControlActionEffectKind.agent_message
+
+
 class ControlAction(BaseModel):
     """A control action a controller can execute."""
 
     ca_id: str  # CA-X-Y
     description: str = Field(min_length=1)
     target: ElementRef | None = None
+    effect_kind: ControlActionEffectKind | None = Field(
+        default=None,
+        description=(
+            "Typed observable action effect. Omitted values are retained for "
+            "legacy analytical artifacts."
+        ),
+    )
+    temporality: ControlActionTemporality | None = Field(
+        default=None,
+        description=(
+            "Typed temporal shape of the action; continuous or bounded_duration "
+            "supports duration analysis."
+        ),
+    )
 
     @field_validator("ca_id")
     @classmethod
     def validate_ca_id_format(cls, v: str) -> str:
         return _validate_id_format(v, "ca_id", "CA-X-Y", "CA-1-1", r"^CA-\d+-\d+$")
+
+    @model_validator(mode="before")
+    @classmethod
+    def infer_responsibility_message_effect(cls, value: object) -> object:
+        """Derive the only valid effect for a responsibility target.
+
+        Responsibility-to-responsibility actions are messages between
+        controllers.  The inference is deterministic and does not inspect the
+        action description.  A conflicting explicit value is rejected so a
+        downstream execution planner never has to choose between contradictory
+        typed facts.  A ``before`` validator keeps the model immutable during
+        post-validation; tolerant Stage 2 parsing calls the shared helper
+        explicitly because it uses ``model_construct``.
+        """
+        if not isinstance(value, dict):
+            return value
+        target = value.get("target")
+        target_type = getattr(target, "type", None)
+        if isinstance(target, dict):
+            target_type = target.get("type")
+        if target_type not in {
+            ReferenceType.responsibility,
+            ReferenceType.responsibility.value,
+        }:
+            return value
+        effect_kind = value.get("effect_kind")
+        if effect_kind is not None:
+            try:
+                normalized = ControlActionEffectKind(effect_kind)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("invalid effect_kind") from exc
+            if normalized is not ControlActionEffectKind.agent_message:
+                raise ValueError(
+                    "control actions targeting a responsibility must use "
+                    "effect_kind='agent_message'"
+                )
+        updated = dict(value)
+        updated["effect_kind"] = ControlActionEffectKind.agent_message
+        return updated
 
 
 class FeedbackChannel(BaseModel):
@@ -217,6 +334,7 @@ class ControlStructure(BaseModel):
             self.responsibilities, self.controlled_processes
         )
 
+        _normalize_control_action_semantics(self.responsibilities)
         _validate_element_refs(self.responsibilities, resp_ids, cp_ids)
         _validate_feedback_updates(self.responsibilities, pm_by_resp)
         _validate_coordination_links(self.coordination_links, resp_ids, all_pm_ids)
@@ -372,6 +490,21 @@ def _validate_element_refs(
         _validate_pm_refs(resp, resp_ids, cp_ids)
         _validate_ca_refs(resp, resp_ids, cp_ids)
         _validate_fb_source_refs(resp, resp_ids, cp_ids)
+
+
+def _normalize_control_action_semantics(
+    responsibilities: list[Responsibility],
+) -> None:
+    """Fill derived action semantics after tolerant nested construction."""
+    for responsibility in responsibilities:
+        for index, action in enumerate(responsibility.control_actions):
+            effect_kind = normalize_control_action_effect_kind(
+                action.target, action.effect_kind
+            )
+            if effect_kind != action.effect_kind:
+                responsibility.control_actions[index] = action.model_copy(
+                    update={"effect_kind": effect_kind}
+                )
 
 
 def _validate_pm_refs(

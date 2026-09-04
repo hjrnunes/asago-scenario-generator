@@ -38,9 +38,13 @@ def _context():
     )
 
 
-def _route_payload(route: dict) -> dict:
+def _route_payload(route: dict, *, stimulus: str = "user_message") -> dict:
     """Build the smallest valid corrected Stage 5 response."""
     return {
+        "stimulus": {
+            "category": stimulus,
+            "description": "The supplied test stimulus exercises the selected factor.",
+        },
         "defender_vulnerabilities": [
             {
                 "belief_handle": "belief_1",
@@ -67,9 +71,6 @@ def _route_payload(route: dict) -> dict:
                 "evidence": "The selected structural condition can remain stale.",
                 "temporal_condition": None,
                 "evidence_status": "structural_failure",
-                "capability_refs": [],
-                "access_refs": [],
-                "bounded_assumption": None,
             }
         ],
         "unsafe_outcome": {
@@ -92,28 +93,24 @@ def _h_context(world: World, text: str, examples: dict) -> tuple[bool, str]:
 
 
 def _h_route(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Capture a request-local executable route choice."""
+    """Capture a provider stimulus and request-local executable route choice."""
     match = re.search(
-        r'^the provider selects "([^"]+)" with action "([^"]+)" '
-        r'roles "([^"]+)" and influence "([^"]+)"$',
+        r'^the provider describes stimulus "([^"]+)" and selects "([^"]+)" '
+        r'with action "([^"]+)"$',
         text,
     )
     if match is None:
         return False, f"Could not parse route choice: {text}"
-    delivery, action, roles, influence = match.groups()
-    role_handles = (
-        [] if roles == "none" else [item.strip() for item in roles.split(",")]
-    )
+    stimulus, delivery, action = match.groups()
     world.route_payload = _route_payload(
         {
             "disposition": "executable_route",
             "delivery_class": delivery,
             "selected_factor_handle": "cause_1",
             "action_kind": action,
-            "resource_role_handles": role_handles,
-            "carrier_attacker_influence": influence,
             "reason": "The supplied structural evidence supports this route.",
-        }
+        },
+        stimulus=stimulus,
     )
     return True, ""
 
@@ -148,8 +145,6 @@ def _h_direct_feedback(world: World, text: str, examples: dict) -> tuple[bool, s
             "delivery_class": "direct_prompt",
             "selected_factor_handle": handle,
             "action_kind": "model_output",
-            "resource_role_handles": [],
-            "carrier_attacker_influence": "none",
             "reason": "The provider incorrectly treats feedback as direct input.",
         }
     )
@@ -279,7 +274,7 @@ def register(api: object) -> None:
     """Register route-selection acceptance steps."""
     api.register(r"^a corrected Stage 5 route context is available$", _h_context)
     api.register(
-        r'^the provider selects "[^"]+" with action "[^"]+" roles "[^"]+" and influence "[^"]+"$',
+        r'^the provider describes stimulus "[^"]+" and selects "[^"]+" with action "[^"]+"$',
         _h_route,
     )
     api.register(

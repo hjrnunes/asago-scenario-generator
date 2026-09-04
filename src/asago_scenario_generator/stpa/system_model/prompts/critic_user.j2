@@ -60,8 +60,20 @@ Loss analysis not available.
 
 ## Capability Profile
 
-Zones: {{ capability_profile.zones_active | join(", ") }}
-KC Sub-codes: {{ capability_profile.kc_subcodes | join(", ") }}
+Active functional areas:
+{% for zone in capability_profile.zones_active %}
+- {{ zone }}{% if zone_display_names is defined %}: {{ zone_display_names.get(zone, zone) }}{% endif %}
+{% endfor %}
+Capability codes:
+{% if kc_subcodes_display is defined %}
+{% for code, description in kc_subcodes_display.items() %}
+- {{ code }}: {{ description }}
+{% endfor %}
+{% else %}
+{% for code in capability_profile.kc_subcodes %}
+- {{ code }}
+{% endfor %}
+{% endif %}
 Persistent memory: {{ capability_profile.has_persistent_memory }}
 Multi-agent: {{ capability_profile.multi_agent }}
 HITL: {{ capability_profile.hitl }}

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-import yaml
 from pathlib import Path
 
 from asago_scenario_generator.stpa.infra.llm import LLMClient
@@ -39,13 +38,16 @@ from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 from asago_scenario_generator.stpa.threat_enum.technology_context import context_for
 
 from ._constants import PROMPTS_DIR
-from .context import render_scenario_generation_context
+from .context import render_stage6_scenario_view
 
 __all__ = [
     "generate_narrative",
     "build_narrative_prompts",
     "derive_temporal_action_vector",
+    "NARRATIVE_MAX_COMPLETION_TOKENS",
 ]
+
+NARRATIVE_MAX_COMPLETION_TOKENS = 512
 
 
 def generate_narrative(
@@ -90,7 +92,10 @@ def generate_narrative(
         run_dir=run_dir,
         stage=stage,
         step=step,
+        slot_id=scenario_spec.threat_source.ica_slot_id,
+        scenario_id=scenario_spec.scenario_id,
         temperature=temperature,
+        max_completion_tokens=NARRATIVE_MAX_COMPLETION_TOKENS,
     )
 
     if error is not None:
@@ -119,18 +124,7 @@ def build_narrative_prompts(
         A tuple of (system_prompt, user_prompt).
     """
     context = scenario_spec.scenario_context
-    scenario_spec_yaml = yaml.dump(
-        scenario_spec.model_dump(
-            mode="json", exclude_none=True, exclude={"scenario_context"}
-        ),
-        default_flow_style=False,
-        sort_keys=False,
-        allow_unicode=True,
-    )
-
-    scenario_context_yaml = (
-        render_scenario_generation_context(context) if context is not None else None
-    )
+    scenario_spec_yaml = render_stage6_scenario_view(scenario_spec)
     loss_scenario = scenario_spec.loss_scenario
     ica_text = (
         context.ica.exact_ica_text
@@ -148,7 +142,6 @@ def build_narrative_prompts(
     user_prompt = loader.render_prompt(
         "stage6a_narrative_user.j2",
         scenario_spec_yaml=scenario_spec_yaml,
-        scenario_context_yaml=scenario_context_yaml,
         ica_text=ica_text,
         loss_scenario=loss_scenario,
         technology_context=technology_context,

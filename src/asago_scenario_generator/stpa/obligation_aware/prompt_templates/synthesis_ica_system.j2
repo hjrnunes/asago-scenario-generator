@@ -64,10 +64,18 @@ The structured slot-draft fields are `slot_id`, `is_na`, `na_rationale`, `findin
 `consideration_results`; each finding contains the plain string `deviation`, `hazardous_context`,
 `loss_consequence`, `related_hazard_ids`, `related_constraint_ids`, `process_model_refs`,
 and `feedback_refs`. A finding consideration contains `obligation_handle`,
-`disposition`, `finding_indexes`, and `rationale`. Valid example:
+`disposition`, `finding_indexes`, and `rationale`. In the example below, the
+controller's missing authorization check is the unsafe control condition, the
+unreviewed request reaching the protected operation is the hazardous system
+state, and the unauthorized state change is a plausible loss consequence. An
+optional status update being omitted while no operation is pending would be an
+authorized omission and is not this finding; conversely, describing the system
+as merely "susceptible to misuse" is not a hazardous state, and claiming that
+"the system is compromised" is not a supported loss chain. Valid example:
 {"filled_slots":[{"slot_id":"<slot_id>","is_na":false,"na_rationale":null,
 "findings":[{"deviation":"authorization is not established before the request is accepted",
-"hazardous_context":"the supplied hazardous context","loss_consequence":"the supplied loss consequence occurs",
+"hazardous_context":"an unreviewed request reaches the protected operation",
+"loss_consequence":"the protected operation applies an unauthorized state change",
 "related_hazard_ids":["<hazard_id>"],"related_constraint_ids":["<constraint_id>"],
 "process_model_refs":[],"feedback_refs":[]}],"consideration_results":[{"obligation_handle":
 "<obligation_handle>","disposition":"finding","finding_indexes":[0],

@@ -51,6 +51,7 @@ from asago_scenario_generator.stpa.system_model.heuristics import (
     run_heuristics,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
+    diagnose_loss_analysis_semantics,
     derive_loss_analysis,
 )
 from asago_scenario_generator.stpa.system_model.profile import (
@@ -149,6 +150,7 @@ def run_sp1(
         temperature,
         stage_errors,
         capability_profile,
+        stage_warnings,
     )
 
     # --- Stage 2: Control Structure + heuristics + critic + revision ---
@@ -220,10 +222,11 @@ def _try_derive_loss_analysis(
     temperature: float,
     stage_errors: list[str],
     capability_profile: CapabilityProfile | None = None,
+    stage_warnings: list[str] | None = None,
 ) -> LossAnalysis | None:
     """Run Stage 1a (two calls), recording errors on failure."""
     try:
-        return derive_loss_analysis(
+        analysis = derive_loss_analysis(
             llm_client=llm_client,
             use_case_text=use_case_text,
             risk_cards=risk_cards,
@@ -232,6 +235,16 @@ def _try_derive_loss_analysis(
             temperature=temperature,
             capability_profile=capability_profile,
         )
+        if stage_warnings is not None:
+            stage_warnings.extend(
+                str(item)
+                for item in diagnose_loss_analysis_semantics(
+                    analysis,
+                    use_case_text=use_case_text,
+                    risk_cards=risk_cards,
+                )
+            )
+        return analysis
     except StageError as exc:
         stage_errors.append(str(exc))
         return None
@@ -268,6 +281,78 @@ def _try_derive_capability_profile(
         return None
 
 
+def _stage2_prerequisites_missing(
+    loss_analysis: LossAnalysis | None,
+    capability_profile: CapabilityProfile | None,
+) -> bool:
+    """Return whether Stage 2 lacks either required upstream artifact."""
+    return loss_analysis is None or capability_profile is None
+
+
+def _derive_stage2_control_structure(
+    llm_client: LLMClient,
+    use_case_text: str,
+    loss_analysis: LossAnalysis,
+    capability_profile: CapabilityProfile,
+    run_dir: Path,
+    loader: TemplateLoader,
+    temperature: float,
+    stage_errors: list[str],
+) -> tuple[ControlStructure | None, list[str]]:
+    """Derive Stage 2's structure while retaining a graceful failure result."""
+    try:
+        return derive_control_structure(
+            llm_client=llm_client,
+            use_case_text=use_case_text,
+            loss_analysis=loss_analysis,
+            capability_profile=capability_profile,
+            run_dir=run_dir,
+            template_loader=loader,
+            temperature=temperature,
+        )
+    except StageError as exc:
+        stage_errors.append(str(exc))
+        return None, []
+
+
+def _maybe_apply_revision(
+    control_structure: ControlStructure,
+    *,
+    critic_findings: CriticFindings,
+    llm_client: LLMClient,
+    use_case_text: str,
+    run_dir: Path,
+    loss_analysis: LossAnalysis,
+    loader: TemplateLoader,
+    temperature: float,
+) -> tuple[ControlStructure, list[str], bool]:
+    """Apply a critic revision only when unjustified gaps are present."""
+    if not has_unjustified_gaps(critic_findings):
+        return control_structure, [], False
+
+    # Keep the baseline identity for the applied/not-applied decision.
+    # ``run_revision`` retains that object on provider, validation, or
+    # merge failure; an attempted call must not be reported as an applied
+    # revision in the result or manifest.
+    baseline_control_structure = control_structure
+    control_structure, post_revision_warnings = run_revision(
+        llm_client=llm_client,
+        control_structure=control_structure,
+        critic_findings=critic_findings,
+        use_case_text=use_case_text,
+        run_dir=run_dir,
+        loss_analysis=loss_analysis,
+        template_loader=loader,
+        temperature=temperature,
+    )
+    # Strip empty responsibilities that revision may have introduced
+    control_structure, strip_warnings = strip_empty_responsibilities(control_structure)
+    post_revision_warnings.extend(strip_warnings)
+    revised = control_structure != baseline_control_structure
+    write_yaml(control_structure, run_dir / "control-structure.yaml")
+    return control_structure, post_revision_warnings, revised
+
+
 def _run_stage_2_block(
     llm_client: LLMClient,
     use_case_text: str,
@@ -283,25 +368,24 @@ def _run_stage_2_block(
 
     Returns an empty result when prerequisites are missing or derivation fails.
     """
-    if loss_analysis is None or capability_profile is None:
+    if _stage2_prerequisites_missing(loss_analysis, capability_profile):
         return _Stage2Result()
 
     stage_warnings = [] if stage_warnings is None else stage_warnings
 
-    try:
-        control_structure, merge_warnings = derive_control_structure(
-            llm_client=llm_client,
-            use_case_text=use_case_text,
-            loss_analysis=loss_analysis,
-            capability_profile=capability_profile,
-            run_dir=run_dir,
-            template_loader=loader,
-            temperature=temperature,
-        )
-        stage_warnings.extend(merge_warnings)
-    except StageError as exc:
-        stage_errors.append(str(exc))
+    control_structure, merge_warnings = _derive_stage2_control_structure(
+        llm_client,
+        use_case_text,
+        loss_analysis,
+        capability_profile,
+        run_dir,
+        loader,
+        temperature,
+        stage_errors,
+    )
+    if control_structure is None:
         return _Stage2Result()
+    stage_warnings.extend(merge_warnings)
 
     # Structural heuristics (always run after Call 3)
     heuristic_result = run_heuristics(control_structure, loss_analysis)
@@ -324,26 +408,16 @@ def _run_stage_2_block(
     critic_findings = sanitize_critic_ids(critic_findings)
 
     # Revision (single attempt if unjustified gaps; graceful on failure)
-    post_revision_warnings: list[str] = []
-    revised = False
-    if has_unjustified_gaps(critic_findings):
-        revised = True
-        control_structure, post_revision_warnings = run_revision(
-            llm_client=llm_client,
-            control_structure=control_structure,
-            critic_findings=critic_findings,
-            use_case_text=use_case_text,
-            run_dir=run_dir,
-            loss_analysis=loss_analysis,
-            template_loader=loader,
-            temperature=temperature,
-        )
-        # Strip empty responsibilities that revision may have introduced
-        control_structure, strip_warnings = strip_empty_responsibilities(
-            control_structure
-        )
-        post_revision_warnings.extend(strip_warnings)
-        write_yaml(control_structure, run_dir / "control-structure.yaml")
+    control_structure, post_revision_warnings, revised = _maybe_apply_revision(
+        control_structure,
+        critic_findings=critic_findings,
+        llm_client=llm_client,
+        use_case_text=use_case_text,
+        run_dir=run_dir,
+        loss_analysis=loss_analysis,
+        loader=loader,
+        temperature=temperature,
+    )
 
     return _Stage2Result(
         control_structure=control_structure,

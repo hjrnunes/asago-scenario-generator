@@ -95,7 +95,7 @@ def test_call2b_prompt_declares_exact_semantic_fields_and_example() -> None:
     assert '"feedback"' in text
     assert "`action`" in text
     assert "must not combine" in text.lower()
-    assert "Mask sensitive identifiers before model processing" in text
+    assert "Start greenhouse heating" in text
 
 
 def test_call2b_parser_preserves_meaning_and_feedback_alias() -> None:
@@ -240,7 +240,8 @@ def test_call2b_uses_strict_parser_on_bounded_schema_retry(tmp_path) -> None:
     assert parsed.control_actions[0].description == "Verify the completed transaction"
     assert len(client.calls) == 2
     assert "combined action" in client.calls[1].user_prompt
-    assert '"ca_id"' in client.calls[1].user_prompt
+    assert "ca_id" in client.calls[1].user_prompt
+    assert "JSON schema" not in client.calls[1].user_prompt
 
 
 def test_call2b_parser_rejects_unknown_semantic_field_even_with_description() -> None:

@@ -22,11 +22,11 @@ from asago_scenario_generator.stpa.infra.parallel_llm import (
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
-from asago_scenario_generator.stpa.models.ica_enumeration import ICASlot
+from asago_scenario_generator.stpa.models.ica_enumeration import ICASlot, UCAType
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 
 from ._constants import PROMPTS_DIR
-from .slot_creation import SlotPlaceholder
+from .slot_creation import SlotPlaceholder, is_wrong_duration_eligible
 from .technology_context import build_technology_context
 
 __all__ = [
@@ -163,6 +163,7 @@ def fill_slots_for_responsibility(
         temperature=temperature,
         validation_retries=1,
         validation_retry_feedback=_SLOT_VALIDATION_RETRY_FEEDBACK,
+        validation_retry_include_schema=False,
     )
 
     if error is not None:
@@ -277,6 +278,7 @@ def _build_slot_fill_call_specs(
                 temperature=temperature,
                 validation_retries=1,
                 validation_retry_feedback=_SLOT_VALIDATION_RETRY_FEEDBACK,
+                validation_retry_include_schema=False,
             )
         )
     return call_specs
@@ -308,6 +310,10 @@ def _is_expected_slot(filled_slot: ICASlot, placeholder: SlotPlaceholder) -> boo
         and filled_slot.coordination_link == placeholder.coordination_link
         and filled_slot.control_action == placeholder.control_action
         and filled_slot.uca_type == placeholder.uca_type
+        and (
+            filled_slot.action_temporality is None
+            or filled_slot.action_temporality == placeholder.action_temporality
+        )
     )
 
 
@@ -322,9 +328,33 @@ def _merge_filled_slots(
     """
     merged: list[ICASlot] = []
     for slot in slots:
+        if slot.uca_type is UCAType.wrong_duration and not is_wrong_duration_eligible(
+            slot
+        ):
+            merged.append(
+                ICASlot(
+                    slot_id=slot.slot_id,
+                    responsibility=slot.responsibility,
+                    coordination_link=slot.coordination_link,
+                    control_action=slot.control_action,
+                    action_temporality=slot.action_temporality,
+                    uca_type=slot.uca_type,
+                    is_na=True,
+                    icas=[],
+                    na_justification=(
+                        "The authoritative action temporality is not continuous "
+                        "or bounded_duration."
+                    ),
+                )
+            )
+            continue
         filled_slot = filled_by_id.get(slot.slot_id)
         if filled_slot is not None and _is_expected_slot(filled_slot, slot):
-            merged.append(filled_slot.aligned())
+            merged.append(
+                filled_slot.aligned().model_copy(
+                    update={"action_temporality": slot.action_temporality}
+                )
+            )
         else:
             merged.append(
                 ICASlot(
@@ -332,6 +362,7 @@ def _merge_filled_slots(
                     responsibility=slot.responsibility,
                     coordination_link=slot.coordination_link,
                     control_action=slot.control_action,
+                    action_temporality=slot.action_temporality,
                     uca_type=slot.uca_type,
                     is_na=True,
                     icas=[],

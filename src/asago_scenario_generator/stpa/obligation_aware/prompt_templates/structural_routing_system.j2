@@ -4,6 +4,8 @@ coverage claim, or execution instruction. Return exactly one route in the JSON `
 array for each supplied obligation ({{ obligation_count }} total):
 targeted, proposed_not_applicable, upstream_gap, or unresolved.
 
+{% include "_control_path_method.j2" %}
+
 {{ instructions }}
 
 The obligation_handle is opaque: copy unchanged. Every selectable ID in the index is
@@ -57,17 +59,35 @@ the `controller_ids` value, include both its source and target responsibilities 
 `coordination_link_ids`, and the link's shared PM in `process_model_part_ids`. Never put
 a CL in `responsibility_ids` or replace a CM with a source responsibility's CA.
 
-The route object uses these exact fields: `obligation_id`, `disposition`,
-`semantic_assessment`, `slot_ids`,
-`controller_ids`, `responsibility_ids`, `control_action_ids`, `controlled_process_ids`,
-`coordination_link_ids`, `hazard_ids`, `constraint_ids`, `missing_concepts`, `rationale`,
-and non-empty `evidence`. Valid example:
-{"routes":[{"obligation_id":"<obligation_handle>","disposition":"unresolved",
-"semantic_assessment":{"mechanism_assessment":"insufficient_evidence",
-"risk_alignment":"insufficient_evidence","mapping_strength":"direct_curated_pair",
-"mechanism_rationale":"the required system path is not supplied",
-"risk_alignment_rationale":"the mechanism-to-risk relationship is not established"},
-"evidence":["evidence is insufficient"]}]}.
+The route object's `rationale` is the explanation for the selected route
+disposition. It is separate from the two semantic-assessment rationales:
+`mechanism_rationale` explains only whether the known mechanism is plausible in
+the supplied system, while `risk_alignment_rationale` explains only whether it
+would realize the reviewed risk. Every route also requires non-empty
+`obligation_id`, `evidence`, and the literal `disposition`.
+
+The provider wire shape is disposition-specific. A `targeted` route requires
+non-empty `slot_ids`, `hazard_ids`, and `constraint_ids` in addition to its
+rationale, evidence, and semantic assessment. A `proposed_not_applicable` route
+has no missing concepts or fabricated structural placement. An `upstream_gap`
+route requires non-empty `missing_concepts`, rationale, and evidence. An
+`unresolved` route requires rationale and evidence without structural placement.
+Common empty collections belong only to the inward compiled route; do not add
+them to a branch where they are not meaningful. Category expansion is a way to
+discover questions, never mechanism evidence.
+
+Complete targeted example (the handle is only a schema-valid fixture; copy the
+actual supplied handle unchanged):
+
+```json
+{{ routing_targeted_example }}
+```
+
+Complete unresolved example:
+
+```json
+{{ routing_unresolved_example }}
+```
 
 Do not return route_id or gap_id. The local adapter derives durable route and gap IDs.
 Slot IDs use the exact forms `RESP-*:CA-*:UCA_TYPE` or `CL-*:CM-*:UCA_TYPE`.

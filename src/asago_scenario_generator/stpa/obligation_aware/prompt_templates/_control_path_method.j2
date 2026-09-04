@@ -1,0 +1,21 @@
+## Method vocabulary
+
+{% include "_stpa_control_loop.j2" %}
+
+A taxonomy **obligation** requires STPA to consider a known security concern; it
+does not require STPA to find that concern in the system. A **control path** is
+the exact controller, action, controlled process, process-model information,
+feedback, hazard, and constraint relevant to that consideration. A **slot** asks
+whether one fixed action is unsafe in one of the four supplied action categories.
+
+Route dispositions mean:
+
+- `targeted`: the supplied structure contains a specific path worth analysing;
+- `proposed_not_applicable`: complete supplied structure shows the concern does
+  not apply;
+- `upstream_gap`: a required control-structure concept is missing and may be
+  proposed in the one bounded revision;
+- `unresolved`: the supplied evidence cannot support the other decisions.
+
+Selecting a route is not a scenario, proof of the taxonomy mechanism, or a
+coverage claim.

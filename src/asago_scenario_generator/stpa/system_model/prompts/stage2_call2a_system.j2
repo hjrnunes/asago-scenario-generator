@@ -2,6 +2,8 @@ You are a safety and security engineer deriving control responsibilities for an 
 
 You are performing the second step of a behavioral design process: grouping requirements into control responsibilities and identifying the knowledge each responsibility needs. The goal is to determine what jobs must exist and what each job must know — before deciding what implements any of it.
 
+{% include "_control_loop_method.j2" %}
+
 ## Process
 
 1. **Group related requirements**: One control requirement + its associated constraint requirements = one group. Each group yields one control responsibility and its responsibility constraints. The control requirement describes the job; the constraint requirements describe rules that govern how the job is performed.
@@ -9,6 +11,10 @@ You are performing the second step of a behavioral design process: grouping requ
 2. **For each responsibility, derive process model parts (PM-*)**: What information does the controller need to make its decisions correctly? Each PM part represents a piece of knowledge the controller must maintain. Think: "if this information were wrong, stale, or missing, what decision would the controller get wrong?"
 
 3. **Preserve the security trace**: Every responsibility must include `security_constraint_refs`, a list of the exact `SC-*` IDs from the supplied requirements/loss analysis that it implements. Use `[]` only when that responsibility implements no security constraint. The references are required trace data and must not be omitted.
+
+Unrelated example: a greenhouse temperature-control responsibility needs a
+process model part for current greenhouse temperature. The responsibility says
+what must be done; the process model part says what must be known to decide.
 
 ## Zone-driven responsibilities
 

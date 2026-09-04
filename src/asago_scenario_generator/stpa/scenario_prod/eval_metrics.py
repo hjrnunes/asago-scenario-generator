@@ -6,7 +6,7 @@ properties of the scenario set:
 1. Structural consideration (imported from SP2)
 2. N/A quality (imported from SP2)
 3. BDI grounding
-4. Tree branch coverage
+4. Declared-factor/evidence coverage
 5. Traceability depth
 6. Diversity (Shannon entropy)
 """
@@ -29,6 +29,7 @@ from .validators import (
     collect_valid_tree_ids,
     count_branch_categories,
     get_branch_categories,
+    validate_tree_factor_evidence_coverage,
     validate_traceability,
 )
 
@@ -135,20 +136,49 @@ def _safe_rate(numerator: int, denominator: int) -> float:
 def metric_tree_branch_coverage(
     scenarios: list[ScenarioEnvelope],
 ) -> dict:
-    """Compute fraction of scenarios using ≥2 of 3 branch categories.
+    """Compute declared-factor/evidence coverage for rendered attack trees.
+
+    Contextual scenarios are measured against the route-selected causal
+    factor and its exact evidence.  Historical diagnostic envelopes that have
+    no declared factors retain the old category count as a compatibility
+    fallback; that fallback is not used as the quality criterion for current
+    product scenarios.
 
     Args:
         scenarios: List of scenario envelopes.
 
     Returns:
-        A dict with ``total_scenarios``, ``scenarios_with_2plus_categories``,
-        and ``coverage_rate``.
+        A dict with route-factor coverage, a compatibility category count, and
+        ``coverage_rate``.
     """
     total = len(scenarios)
-    covered = sum(1 for s in scenarios if count_branch_categories(s.attack_tree) >= 2)
+    factor_scenarios = [
+        scenario for scenario in scenarios if scenario.scenario_spec.causal_factors
+    ]
+    covered_factors = sum(
+        1
+        for scenario in factor_scenarios
+        if validate_tree_factor_evidence_coverage(
+            scenario.attack_tree, scenario.scenario_spec
+        ).passed
+    )
+    legacy_scenarios = [
+        scenario for scenario in scenarios if not scenario.scenario_spec.causal_factors
+    ]
+    legacy_covered = sum(
+        1
+        for scenario in legacy_scenarios
+        if count_branch_categories(scenario.attack_tree) >= 2
+    )
+    covered = covered_factors + legacy_covered
     return {
         "total_scenarios": total,
-        "scenarios_with_2plus_categories": covered,
+        "scenarios_with_declared_factor_evidence": covered_factors,
+        "declared_factor_evidence_scenarios": len(factor_scenarios),
+        "declared_factor_evidence_rate": _safe_rate(
+            covered_factors, len(factor_scenarios)
+        ),
+        "scenarios_with_2plus_categories": legacy_covered,
         "coverage_rate": _safe_rate(covered, total),
     }
 

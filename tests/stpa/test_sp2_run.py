@@ -525,9 +525,10 @@ class TestNAQualityGatesInRun:
                 loss_analysis=la,
                 run_dir=Path(tmpdir),
             )
-            # RESP-1 has 8 N/A slots (2 CAs × 4 UCA types) with no structural keywords
-            # CL-1 has 4 N/A slots (unfilled coordination links) also without structural keywords
-            assert len(result.na_quality_result.flagged_slots) == 12
+            # WRONG_DURATION is deterministically justified as inapplicable
+            # when action temporality is undeclared. The other three
+            # categories per action still exercise the prose-quality gate.
+            assert len(result.na_quality_result.flagged_slots) == 9
             # 8/8 = 100% > 75% → ratio flag for RESP-1
             assert len(result.na_quality_result.ratio_flags) == 1
             assert "RESP-1" in result.na_quality_result.ratio_flags[0]

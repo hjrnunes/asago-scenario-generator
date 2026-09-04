@@ -1206,7 +1206,7 @@ def _stage6_text(world: World, call: str) -> str | None:
 def _h_every_prompt_has_table(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Then: every narrative, tree, and Gherkin Stage 6 prompt has the table."""
+    """Then: each Stage 6 call has one alignment table across its prompt pair."""
     table = getattr(world, "stpa_alignment_table", None)
     stage6 = getattr(world, "stpa_stage6", None)
     if table is None or stage6 is None:
@@ -1215,11 +1215,10 @@ def _h_every_prompt_has_table(
         prompts = stage6.get(call)
         if prompts is None:
             return False, f"{call} prompts were not rendered"
-        for prompt in prompts:
-            if "Projection Alignment" not in prompt:
-                return False, f"{call} prompt lacks the alignment heading"
-            if table not in prompt:
-                return False, f"{call} prompt lacks the projection alignment table"
+        occurrences = sum(prompt.count("Projection Alignment") for prompt in prompts)
+        table_occurrences = sum(prompt.count(table) for prompt in prompts)
+        if occurrences != 1 or table_occurrences != 1:
+            return False, f"{call} call does not contain exactly one alignment table"
     return True, ""
 
 
@@ -1476,7 +1475,7 @@ def _h_gherkin_given_pm(world: World, text: str, examples: dict) -> tuple[bool, 
     gherkin_text = _stage6_text(world, "gherkin")
     if gherkin_text is None:
         return False, "Gherkin prompts were not rendered"
-    if "process model state IDs (PM-*)" not in gherkin_text:
+    if '"Given" process-model state ID (PM-*)' not in gherkin_text:
         return False, "Gherkin prompt lacks the Given PM reference instruction"
     rows = _alignment_rows_in_prompts(getattr(world, "stpa_stage6")["gherkin"])
     if rows is None:
@@ -2591,7 +2590,7 @@ def _h_rows_preserve_order_uca_last(
 def _h_every_stage6_prompt_forbids_inventing(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Then: every Stage 6 prompt forbids inventing factors, assertions, steps."""
+    """Then: each Stage 6 system prompt forbids inventing behavior."""
     stage6 = getattr(world, "stpa_stage6", None)
     if stage6 is None:
         return False, "No Stage 6 prompts rendered"
@@ -2600,9 +2599,9 @@ def _h_every_stage6_prompt_forbids_inventing(
         prompts = stage6.get(call)
         if prompts is None:
             return False, f"{call} prompts were not rendered"
-        for prompt in prompts:
-            if phrase not in prompt:
-                return False, f"{call} prompt does not forbid inventing behavior"
+        system_prompt, _user_prompt = prompts
+        if phrase not in system_prompt:
+            return False, f"{call} system prompt does not forbid inventing behavior"
     return True, ""
 
 
@@ -2616,13 +2615,13 @@ def _h_prompt_semantic_ids(world: World, text: str, examples: dict) -> tuple[boo
         prompts = stage6.get(call)
         if prompts is None:
             return False, f"{call} prompts were not rendered"
-        for prompt in prompts:
-            for phrase in phrases:
-                if phrase not in prompt:
-                    return (
-                        False,
-                        f"{call} prompt reduces IDs to positional labels",
-                    )
+        system_prompt, _user_prompt = prompts
+        for phrase in phrases:
+            if phrase not in system_prompt:
+                return (
+                    False,
+                    f"{call} system prompt reduces IDs to positional labels",
+                )
     return True, ""
 
 
@@ -3885,7 +3884,7 @@ def register(api: object) -> None:
         _h_render_stage6_call,
     )
     api.register(
-        r"every narrative, tree, and Gherkin Stage 6 prompt contains a "
+        r"each narrative, tree, and Gherkin Stage 6 call contains exactly one "
         r"projection alignment table",
         _h_every_prompt_has_table,
     )
@@ -4181,8 +4180,8 @@ def register(api: object) -> None:
         _h_rows_preserve_order_uca_last,
     )
     api.register(
-        r"every Stage 6 prompt forbids inventing causal factors, assertions, "
-        r"or steps",
+        r"the system instructions for every Stage 6 call forbid inventing "
+        r"causal factors, assertions, or steps",
         _h_every_stage6_prompt_forbids_inventing,
     )
     api.register(

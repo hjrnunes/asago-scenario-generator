@@ -11,7 +11,21 @@ You are performing the first step of a behavioral design process: converting sec
 
 ## Context
 
-The security constraints below describe conditions that must hold to prevent identified hazards. Each constraint is the inverse of a hazard — it tells you what the system must prevent. Your task is to derive solution-neutral requirements that enforce these constraints.
+The security constraints below describe conditions that must hold to prevent or
+limit identified hazards. Each is derived from a hazardous system state and
+tells you what the system must ensure. Your task is to derive solution-neutral
+requirements that enforce these constraints.
+
+The supplied security constraint is a system-level condition. In the output,
+classification `control` names behaviour the system must perform, while
+classification `constraint` names a rule governing that behaviour; it does not
+create a second kind of STPA security constraint.
+
+Example from an unrelated automated greenhouse: from "air temperature must
+remain within the crop's safe range," derive a control requirement such as
+"determine whether heating is needed from current temperature" and a governing
+rule such as "heating must not be started above the upper safe limit." Neither
+statement chooses a sensor, algorithm, or implementation.
 
 ## Rules
 

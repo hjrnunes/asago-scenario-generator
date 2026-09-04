@@ -3,30 +3,23 @@
 # acceptance-mutation-manifest-end
 
 # critic-revision-fix / critic-gap-detection
-Feature: SP1 Stage 2 — Revision trigger considers all three critic probes
+Feature: SP1 Stage 2 — Revision trigger requires an explicit critic gap
   The completeness critic runs three probes and reports each in its own
   field of CriticFindings: probe 1 fills checklist_results, probe 2
   fills taxonomy_probe_results, and probe 3 (the adversarial probe)
   fills the gaps list.
 
-  has_unjustified_gaps decides whether the revision call happens, and it
-  reads only checklist_results. A run where the generic checklist is
-  clean but the adversarial probe found three exploitable gaps, or where
-  a taxonomy probe reported absent_unjustified, therefore skipped
-  revision entirely — the critic's most system-specific findings were
-  computed, logged, and discarded.
-
-  has_unjustified_gaps must consider all three sources. Any
-  absent_unjustified checklist result, any absent_unjustified taxonomy
-  probe result, or any entry in the gaps list triggers revision. A
-  findings object clean on all three does not. "none" in the tables
-  below means the corresponding dict is empty.
+  has_unjustified_gaps decides whether the revision call happens, but only an
+  explicit typed entry in the gaps list is actionable. Checklist and taxonomy
+  probe statuses are retained as diagnostic context; an absent_unjustified
+  result without an explicit gap must not trigger revision. "none" in the
+  tables below means the corresponding dict is empty.
 
   Background:
     Given the STPA system model critic module is importable
 
   # CRGap-01
-  Scenario Outline: CRGap-01 any probe reporting an unaddressed gap triggers revision
+  Scenario Outline: CRGap-01 only an explicit adversarial gap triggers revision
     Given CriticFindings whose checklist_results are <checklist_statuses>
     And CriticFindings whose taxonomy_probe_results are <taxonomy_statuses>
     And CriticFindings with <gap_count> adversarial gaps
@@ -34,12 +27,12 @@ Feature: SP1 Stage 2 — Revision trigger considers all three critic probes
 
     Examples:
       | checklist_statuses                   | taxonomy_statuses                    | gap_count | revision_outcome |
-      | absent_unjustified                   | none                                 | 0         | triggered        |
-      | present, absent_unjustified          | none                                 | 0         | triggered        |
-      | absent_justified, absent_unjustified | none                                 | 0         | triggered        |
-      | present                              | absent_unjustified                   | 0         | triggered        |
-      | present                              | present, absent_unjustified          | 0         | triggered        |
-      | present                              | absent_justified, absent_unjustified | 0         | triggered        |
+      | absent_unjustified                   | none                                 | 0         | not triggered    |
+      | present, absent_unjustified          | none                                 | 0         | not triggered    |
+      | absent_justified, absent_unjustified | none                                 | 0         | not triggered    |
+      | present                              | absent_unjustified                   | 0         | not triggered    |
+      | present                              | present, absent_unjustified          | 0         | not triggered    |
+      | present                              | absent_justified, absent_unjustified | 0         | not triggered    |
       | present                              | present                              | 1         | triggered        |
       | present                              | present                              | 3         | triggered        |
       | none                                 | none                                 | 2         | triggered        |

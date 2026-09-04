@@ -18,7 +18,11 @@ from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from asago_scenario_generator.models.capability_profile import CapabilityProfile
+from asago_scenario_generator.models.capability_profile import (
+    ZONE_DISPLAY_NAMES,
+    CapabilityProfile,
+    build_kc_subcodes_display,
+)
 from asago_scenario_generator.stpa.infra.llm import LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     StageError,
@@ -30,6 +34,8 @@ from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
+    ControlActionEffectKind,
+    ControlActionTemporality,
     ControlStructure,
     CoordinationLink,
     ControlledProcess,
@@ -38,6 +44,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ReferenceType,
     Responsibility,
     _is_valid_element_ref,
+    normalize_control_action_effect_kind,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
@@ -202,7 +209,17 @@ _CONTROL_ELEMENT_TOP_LEVEL_FIELDS = {
     "feedback_channels",  # historical input spelling; normalized below
     "controlled_processes",
 }
-_CONTROL_ACTION_FIELDS = {"ca_id", "description", "target"}
+_CONTROL_ACTION_FIELDS = {
+    "ca_id",
+    "description",
+    "target",
+    "effect_kind",
+    "temporality",
+    # Accept this descriptive spelling on input while serializing the
+    # canonical ``temporality`` field.  It keeps hand-authored legacy/live
+    # payloads readable without adding a second durable field.
+    "action_temporality",
+}
 _FEEDBACK_FIELDS = {"fb_id", "description", "updates", "source"}
 _CONTROLLED_PROCESS_FIELDS = {"cp_id", "description"}
 _ELEMENT_REF_FIELDS = {"type", "id"}
@@ -327,6 +344,25 @@ def _stage2_element_ref(value: Any, *, field_name: str, item_label: str) -> Elem
         raise ValueError(f"{item_label} has invalid {field_name}: {exc}") from exc
 
 
+def _stage2_optional_enum(
+    value: Any,
+    *,
+    enum_type: type[ControlActionEffectKind] | type[ControlActionTemporality],
+    field_name: str,
+    item_label: str,
+) -> ControlActionEffectKind | ControlActionTemporality | None:
+    """Parse an optional typed Stage 2 action field without tolerant coercion."""
+    if value is None:
+        return None
+    try:
+        return enum_type(value)
+    except (TypeError, ValueError) as exc:
+        allowed = ", ".join(item.value for item in enum_type)
+        raise ValueError(
+            f"{item_label} {field_name} must be one of: {allowed}; got {value!r}"
+        ) from exc
+
+
 def _stage2_control_action(
     value: Any,
     *,
@@ -371,10 +407,31 @@ def _stage2_control_action(
     target = _stage2_element_ref(
         value["target"], field_name="target", item_label=item_label
     )
+    if "temporality" in value and "action_temporality" in value:
+        if value["temporality"] != value["action_temporality"]:
+            raise ValueError(
+                f"{item_label} must provide one matching temporality field, not "
+                "conflicting temporality and action_temporality values"
+            )
+    effect_kind = _stage2_optional_enum(
+        value.get("effect_kind"),
+        enum_type=ControlActionEffectKind,
+        field_name="effect_kind",
+        item_label=item_label,
+    )
+    temporality = _stage2_optional_enum(
+        value.get("temporality", value.get("action_temporality")),
+        enum_type=ControlActionTemporality,
+        field_name="temporality",
+        item_label=item_label,
+    )
+    effect_kind = normalize_control_action_effect_kind(target, effect_kind)
     return ControlAction.model_construct(
         ca_id=ca_id,
         description=description,
         target=target,
+        effect_kind=effect_kind,
+        temporality=temporality,
     )
 
 
@@ -509,7 +566,11 @@ def parse_control_element_set_response(
             owner_numbers.add(number)
 
     actions = [
-        _stage2_control_action(item, index=index, owner_numbers=owner_numbers)
+        _stage2_control_action(
+            item,
+            index=index,
+            owner_numbers=owner_numbers,
+        )
         for index, item in enumerate(payload["control_actions"])
     ]
     feedback_channels = [
@@ -1361,6 +1422,7 @@ def _run_stage2_llm_call(
         json_decode_retries=JSON_DECODE_RETRIES,
         validation_retries=1,
         validation_retry_feedback=_INTERMEDIATE_VALIDATION_RETRY_FEEDBACK,
+        validation_retry_include_schema=False,
     )
     if error_msg is not None:
         raise StageError(stage=STAGE, step=step, message=error_msg)
@@ -1433,6 +1495,12 @@ def _call_2a_responsibilities(
             "use_case_text": use_case_text,
             "requirements": requirement_set.requirements,
             "capability_profile": capability_profile,
+            "zone_display_names": ZONE_DISPLAY_NAMES,
+            "kc_subcodes_display": (
+                build_kc_subcodes_display(capability_profile.kc_subcodes)
+                if capability_profile is not None
+                else {}
+            ),
         },
         response_format=ResponsibilitySet,
         step="call_2a_responsibilities",

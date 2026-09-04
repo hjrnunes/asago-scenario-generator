@@ -148,14 +148,19 @@ changing acceptance behavior, or running the quality sequence.
   considered, but it never forces an ICA or scenario. At provider boundaries,
   deterministic code owns structural categories and identities. ICA providers
   return one plain deviation sentence for each supplied slot; the compiler
-  applies that slot's exact UCA category. Stage 5 providers select only
+  applies that slot's exact UCA category. Provider views must include the
+  action temporality used to decide duration eligibility and a complete,
+  explained reference slice. Stage 5 providers select only
   explained request-local causal handles, which the compiler binds to fixed
   PM/FB/CA sources and kinds, and return exactly one vulnerability for every
-  compiler-owned local defender-belief handle. Coordination, controller,
-  Stage 5 also selects exactly one explained delivery route; deterministic
-  assembly materializes its contract and classification. A missing route is a
-  provider failure, while explicit `analytical_only` remains outside
-  compilation. Require the delivery class to fit the selected causal category:
+  compiler-owned local defender-belief handle. They describe one typed test
+  stimulus and select one compatible causal path; deterministic assembly owns
+  the action kind, resource roles, carrier influence, contract, and
+  classification. File-upload, load-generation, or otherwise unsupported
+  stimuli remain explicit analytical findings rather than being relabelled as
+  a direct prompt. A missing route is a provider failure, while explicit
+  `analytical_only` remains outside compilation. Require the delivery class to
+  fit the selected causal category:
   direct prompt to a process-model flaw, conversation context to a
   process-model flaw or feedback delay, and indirect content to a process-model
   flaw or sensor anomaly. Model-output value conditions are literal semantic
@@ -165,7 +170,7 @@ changing acceptance behavior, or running the quality sequence.
   retain digests, source pins, catalog labels, and bookkeeping identities in
   deterministic code. Derive `semantic_binding_required` from typed
   placeholder presence after the provider response.
-  controlled-process, and local-handle identities must never be published as
+  Controller, controlled-process, and local-handle identities must never be published as
   causal sources, and every intention handle must have an explicit
   causal-factor declaration. Validate capability and access-path claims from
   exact typed causal evidence. Do not treat ordinary adversarial wording, such
@@ -196,6 +201,14 @@ changing acceptance behavior, or running the quality sequence.
   remain `related_but_not_coverage`. Never auto-confirm correspondence.
   Publish the four standard Phase 2 artifacts, and retain a verification
   failure without deleting or invalidating generated scenarios.
+  Publish a stable synthesis `run_status`: `completed` for full candidate
+  yield, `no_candidates` for a valid run with no eligible candidates, `failed`
+  only when requested candidates were attempted with zero published scenarios,
+  and `degraded` for partial or unattempted yield. Keep candidate counts
+  separate from diagnostic-message counts. Product `run` must publish its
+  diagnostics and accounting artifacts before returning non-zero for the
+  attempted zero-yield case; no-candidate and partial-yield outcomes remain
+  successful command results.
 - Keep Phase 4 Task 1 at the typed, offline
   `resolve_hybrid_projection_units` boundary. Accept one closed
   `HybridProjectionInputs` graph assembled only through exact artifact

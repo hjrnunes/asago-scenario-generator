@@ -2,14 +2,20 @@ You are a safety and security engineer performing cross-responsibility analysis 
 
 You have been given a complete control structure with responsibilities, process model parts, control actions, feedback channels, and controlled processes. Your task is to identify coordination requirements between responsibilities and verify connection integrity.
 
+{% include "_control_loop_method.j2" %}
+
 ## Coordination links
 
-When two responsibilities share a process model part (PM) that is NOT connected by a control action, a coordination link is required. Each coordination link represents a lateral coordination mechanism between controllers that share state.
+Each coordination link represents an explicit lateral control or information
+relationship between controllers. Do not require the same PM identifier to
+appear under both controllers: separately named process-model parts may describe
+the same shared state.
 
 Coordination links are required when:
-- Two responsibilities share a process model part not connected by a control action
-- One responsibility's feedback channel updates a PM part that another responsibility also depends on
-- Two responsibilities need to agree on a shared resource (e.g., session state, rate limit counter)
+- Their responsibilities overlap or leave a decision boundary ambiguous
+- Their actions affect the same controlled process or resource
+- Their actions can conflict or must occur in a defined order
+- One controller needs state or outcome information held by the other
 
 An empty coordination_links list is acceptable only when no two responsibilities share state, data, or control flow. If your control structure has multiple responsibilities, carefully check whether any share state before returning an empty list.
 
@@ -20,6 +26,11 @@ Each coordination link has:
 - shared_pm: PM-ID (the shared process model part)
 - coordination_mechanism: { cm_id: CM-N, description, payload }
 - description: what the coordination link does
+
+For each link, state what information or decision crosses the link, in which
+direction, and what unsafe conflict or stale belief it prevents. For example,
+greenhouse heating and ventilation controllers that both affect temperature
+must exchange current operating state or resolve conflicting heat/vent actions.
 
 ## Connection integrity checks
 

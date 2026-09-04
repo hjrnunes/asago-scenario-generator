@@ -2534,14 +2534,14 @@ def _h_topk_complete_structured(
 
     class _DummyResponse:
         class _Msg:
-            parsed = {"val": 1}
-            content = ""
+            parsed = None
+            content = '{"val": 1}'
 
         choices = [type("C", (), {"message": _Msg()})()]
         usage = type("U", (), {"prompt_tokens": 10, "completion_tokens": 20})()
 
     mock_client = MagicMock()
-    mock_client.beta.chat.completions.parse.return_value = _DummyResponse()
+    mock_client.chat.completions.create.return_value = _DummyResponse()
     world.runner_llm_client._client = mock_client
     world.runner_llm_client.complete(
         system_prompt="s",
@@ -2950,7 +2950,13 @@ def _h_rev_critic_unjustified(
                 description="Missing input validation",
                 related_attack_path="Attacker sends crafted input",
                 suggested_remedy="Add input validation",
-            )
+            ),
+            _CG(
+                gap_type="missing_feedback",
+                description="Missing validation-result feedback",
+                related_attack_path="The controller cannot observe rejected input",
+                suggested_remedy="Add validation-result feedback",
+            ),
         ],
         checklist_results={"Input validation": "absent_unjustified"},
         taxonomy_probe_results={},

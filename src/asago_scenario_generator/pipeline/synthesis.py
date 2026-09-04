@@ -21,6 +21,7 @@ import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Mapping, Protocol, runtime_checkable
@@ -62,6 +63,23 @@ REPORT_FILENAME = "synthesis-report.html"
 _MANIFEST_SCHEMA = "stpa-synthesis-manifest-v1"
 _MANIFEST_DOMAIN = "asago-scenario-generator:stpa-synthesis-manifest:v1"
 _MANIFEST_VALUE_DOMAIN = "asago-scenario-generator:stpa-synthesis-value:v1"
+
+
+class SynthesisRunStatus(str, Enum):
+    """Stable product outcome derived from exact scenario candidates.
+
+    ``no_candidates`` is a valid analysis result: there was no eligible
+    scenario candidate to request.  ``failed`` is reserved for the important
+    zero-yield case in which candidates were requested and at least one was
+    attempted, but none was published.  A mixture of published, failed, or
+    skipped candidates is ``degraded``.
+    """
+
+    COMPLETED = "completed"
+    DEGRADED = "degraded"
+    FAILED = "failed"
+    NO_CANDIDATES = "no_candidates"
+    UNKNOWN = "unknown"
 
 
 class SynthesisAdapter(Protocol):
@@ -341,6 +359,17 @@ class SynthesisResult:
         if value is None:
             return ()
         return tuple(value)
+
+    @property
+    def run_status(self) -> str:
+        """Return the stable terminal product status from the manifest."""
+        value = _first_attr(self.manifest, "run_status", "status")
+        return str(value or SynthesisRunStatus.UNKNOWN.value)
+
+    @property
+    def status(self) -> str:
+        """Compatibility alias for callers that use ``result.status``."""
+        return self.run_status
 
 
 def run_synthesis(
@@ -1720,6 +1749,8 @@ def _build_manifest(
         scenario_result=scenario_result,
         counts=counts,
     )
+    scenario_counts = _manifest_scenario_counts(scenario_result, len(scenarios))
+    run_status, run_status_reason = _scenario_generation_status(scenario_counts)
     payload: dict[str, Any] = {
         "schema_version": _MANIFEST_SCHEMA,
         "run_id": f"synthesis-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}",
@@ -1794,12 +1825,14 @@ def _build_manifest(
             realization=realization,
             scenario_count=len(scenarios),
         ),
-        "scenario_counts": {
-            "generated": len(scenarios),
-            # Count only SP3-owned failures; revision/accounting diagnostics
-            # live in their own manifest fields.
-            "failed": len(_first_attr(scenario_result, "stage_errors") or ()),
-        },
+        "run_status": run_status.value,
+        # ``status`` is retained as a concise consumer-facing alias; the
+        # explicit ``run_status`` key makes it clear this is product yield,
+        # not the independently reported Phase 2 status.
+        "status": run_status.value,
+        "run_status_reason": run_status_reason,
+        "scenario_counts": scenario_counts,
+        "candidate_outcomes": _manifest_candidate_outcomes(scenario_result),
         "scenario_errors": list(_first_attr(scenario_result, "stage_errors") or ()),
         "phase2_verification": _manifest_phase2_verification(phase2_verification),
         "revision": _manifest_revision(revision),
@@ -3067,6 +3100,95 @@ def _verify_yaml_round_trip(original: Any, path: Path) -> None:
             raise ValueError(f"{path.name} failed closed-model round-trip equality")
 
 
+def _manifest_candidate_outcomes(result: Any) -> list[dict[str, Any]] | None:
+    """Project explicit terminal records; absence is unknown, not zero failures."""
+    outcomes = _first_attr(result, "candidate_outcomes")
+    if outcomes is None:
+        return None
+    return [
+        {
+            "scenario_id": item.scenario_id,
+            "ica_slot_id": item.ica_slot_id,
+            "ica_id": item.ica_id,
+            "status": getattr(item.status, "value", item.status),
+            "diagnostics": list(item.diagnostics),
+        }
+        for item in outcomes
+    ]
+
+
+def _manifest_scenario_counts(result: Any, generated: int) -> dict[str, int | None]:
+    """Count candidates independently from their possibly repeated diagnostics."""
+    outcomes = _manifest_candidate_outcomes(result)
+    counts: dict[str, int | None] = {
+        "generated": generated,
+        "failed": None,
+        "requested": None,
+        "attempted": None,
+        "skipped": None,
+        "diagnostic_count": len(_first_attr(result, "stage_errors") or ()),
+    }
+    if outcomes is None:
+        return counts
+    failures = {"generation_failed", "rendering_failed", "publication_failed"}
+    published = sum(item["status"] == "published" for item in outcomes)
+    skipped = sum(item["status"] == "skipped" for item in outcomes)
+    counts.update(
+        # Once explicit terminal outcomes exist, ``published`` is the
+        # authoritative yield.  An envelope can exist briefly before the
+        # bundle/index publication fails, so counting envelopes here would
+        # incorrectly turn a zero-publication run into a successful one.
+        generated=published,
+        failed=sum(item["status"] in failures for item in outcomes),
+        requested=len(outcomes),
+        attempted=len(outcomes) - skipped,
+        skipped=skipped,
+    )
+    return counts
+
+
+def _scenario_generation_status(
+    counts: Mapping[str, int | None],
+) -> tuple[SynthesisRunStatus, str]:
+    """Derive a truthful product status from candidate lifecycle counts."""
+    requested = counts.get("requested")
+    attempted = counts.get("attempted")
+    generated = counts.get("generated")
+    if None in (requested, attempted, generated):
+        return (
+            SynthesisRunStatus.UNKNOWN,
+            "candidate_outcomes_unavailable",
+        )
+    choices = (
+        (
+            requested == 0,
+            (SynthesisRunStatus.NO_CANDIDATES, "no_eligible_candidates"),
+        ),
+        (
+            attempted > 0 and generated == 0,
+            (SynthesisRunStatus.FAILED, "zero_yield_after_attempts"),
+        ),
+        (
+            generated == requested and attempted == requested,
+            (
+                SynthesisRunStatus.COMPLETED,
+                "all_requested_candidates_published",
+            ),
+        ),
+        (
+            generated > 0,
+            (SynthesisRunStatus.DEGRADED, "partial_candidate_yield"),
+        ),
+    )
+    return next(
+        (outcome for condition, outcome in choices if condition),
+        (
+            SynthesisRunStatus.DEGRADED,
+            "requested_candidates_not_attempted",
+        ),
+    )
+
+
 def _dump(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
@@ -3341,6 +3463,7 @@ __all__ = [
     "SCENARIO_REALIZATION_FILENAME",
     "SynthesisAdapters",
     "SynthesisInputs",
+    "SynthesisRunStatus",
     "SynthesisResult",
     "run_synthesis",
 ]

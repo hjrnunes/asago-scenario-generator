@@ -49,7 +49,9 @@ Feature: SP1 — Inject capability profile into Stage 2 Call 2a user prompt
   Scenario: CapProfInject-05 rendered Call 2a user prompt contains actual capability profile data
     Given a capability profile with zones_active input,reasoning,tool_execution and multi_agent true and hitl true
     When the Call 2a user prompt is rendered with the capability profile
-    Then the rendered text contains "input, reasoning, tool_execution"
+    Then the rendered text contains "input: Input Surfaces"
+    And the rendered text contains "reasoning: Planning & Reasoning"
+    And the rendered text contains "tool_execution: Tool Execution"
     And the rendered text contains "Multi-agent: True"
     And the rendered text contains "Human-in-the-loop: True"
 
@@ -57,7 +59,8 @@ Feature: SP1 — Inject capability profile into Stage 2 Call 2a user prompt
   Scenario: CapProfInject-06 rendered Call 2a user prompt reflects inactive zones
     Given a capability profile with zones_active input,reasoning and multi_agent false and hitl false and has_persistent_memory false
     When the Call 2a user prompt is rendered with the capability profile
-    Then the rendered text contains "input, reasoning"
+    Then the rendered text contains "input: Input Surfaces"
+    And the rendered text contains "reasoning: Planning & Reasoning"
     And the rendered text contains "Multi-agent: False"
     And the rendered text contains "Human-in-the-loop: False"
     And the rendered text contains "Persistent memory: False"

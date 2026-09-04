@@ -213,17 +213,24 @@ def _run_cli_with_max_workers(max_workers_arg: str | None) -> int | None:
 
     argv = [
         "run_sp1.py",
-        "--use-case", "test.txt",
-        "--risk-extraction", "test.json",
-        "--output-dir", "output/test",
+        "--use-case",
+        "test.txt",
+        "--risk-extraction",
+        "test.json",
+        "--output-dir",
+        "output/test",
     ]
     if max_workers_arg is not None:
         argv.extend(["--max-workers", max_workers_arg])
 
-    with patch.object(runner_mod, "run_sp1") as mock_run, \
-         patch.object(runner_mod, "load_risk_extraction", return_value=[]), \
-         patch.object(runner_mod, "read_use_case", return_value="test"), \
-         patch.object(runner_mod, "resolve_llm_client_from_env", return_value=MockLLMClient()):
+    with (
+        patch.object(runner_mod, "run_sp1") as mock_run,
+        patch.object(runner_mod, "load_risk_extraction", return_value=[]),
+        patch.object(runner_mod, "read_use_case", return_value="test"),
+        patch.object(
+            runner_mod, "resolve_llm_client_from_env", return_value=MockLLMClient()
+        ),
+    ):
         mock_run.return_value = fake_result
         old_argv = sys.argv
         sys.argv = argv
@@ -259,7 +266,9 @@ class TestParallelLLMCalls:
             assert r.result is not None
 
     # ParallelLLM-02
-    def test_parallel_llm_02_results_in_input_order_regardless_of_execution(self, tmp_path):
+    def test_parallel_llm_02_results_in_input_order_regardless_of_execution(
+        self, tmp_path
+    ):
         """Results are in input order even when execution order differs."""
         client = ConcurrentMockLLMClient()
         client.set_response_for(_DummyModel, _DummyModel(value="ok"))
@@ -383,7 +392,9 @@ class TestParallelLLMCalls:
         assert r.call_spec is spec
 
     # ParallelLLM-10
-    def test_parallel_llm_10_failed_call_result_has_model_none_and_error(self, tmp_path):
+    def test_parallel_llm_10_failed_call_result_has_model_none_and_error(
+        self, tmp_path
+    ):
         """Failed LLMCallResult has model None and error set."""
         client = ConcurrentMockLLMClient(model="my-model")
         client.set_response_for(_DummyModel, _DummyModel(value="ok"))
@@ -560,7 +571,9 @@ class TestParallelSP1Compatibility:
         assert "stage_2" in stages
 
     # ParallelSP1-04
-    def test_parallel_sp1_04_sp1_does_not_call_parallel_when_max_workers_1(self, tmp_path):
+    def test_parallel_sp1_04_sp1_does_not_call_parallel_when_max_workers_1(
+        self, tmp_path
+    ):
         """With max_workers=1, SP1 uses safe_llm_call directly, not parallel."""
         with patch(
             "asago_scenario_generator.stpa.system_model.run.parallel_safe_llm_calls"
@@ -584,8 +597,12 @@ class TestParallelSP1Compatibility:
         # don't accept it (they remain sequential).
         import inspect
 
-        from asago_scenario_generator.stpa.system_model.loss_analysis import derive_loss_analysis
-        from asago_scenario_generator.stpa.system_model.profile import derive_capability_profile
+        from asago_scenario_generator.stpa.system_model.loss_analysis import (
+            derive_loss_analysis,
+        )
+        from asago_scenario_generator.stpa.system_model.profile import (
+            derive_capability_profile,
+        )
         from asago_scenario_generator.stpa.system_model.control_structure import (
             derive_control_structure,
         )
@@ -607,6 +624,7 @@ class TestParallelSP1Compatibility:
             LLMCallSpec,
             parallel_safe_llm_calls,
         )
+
         assert parallel_safe_llm_calls is not None
         assert LLMCallSpec is not None
         assert LLMCallResult is not None
@@ -706,7 +724,9 @@ class TestParallelSP2SP3Design:
             assert f"scenario_{expected_scenario}" in r.call_spec.step
 
     # ParallelSP3-04
-    def test_parallel_sp3_04_failure_for_one_scenario_does_not_block_others(self, tmp_path):
+    def test_parallel_sp3_04_failure_for_one_scenario_does_not_block_others(
+        self, tmp_path
+    ):
         """Failure for scenario 2 doesn't block scenarios 1 and 3."""
         client = ConcurrentMockLLMClient()
         client.set_response_for(_DummyModel, _DummyModel(value="ok"))
@@ -719,3 +739,32 @@ class TestParallelSP2SP3Design:
         assert results[0].error is None
         assert results[1].error is not None
         assert results[2].error is None
+
+    def test_parallel_call_can_omit_schema_from_validation_retry(self, tmp_path):
+        """Structured parallel calls pass the compact-retry policy through."""
+        spec = LLMCallSpec(
+            system_prompt="sys",
+            user_prompt="prompt for slot",
+            response_format=_DummyModel,
+            stage="stage_3",
+            step="slot",
+            validation_retries=1,
+            validation_retry_include_schema=False,
+            slot_id="RESP-1:CA-1-1:INCORRECT",
+            scenario_id="SCN-007",
+        )
+        with patch(
+            "asago_scenario_generator.stpa.infra.parallel_llm.safe_llm_call",
+            return_value=(_DummyModel(value="ok"), None, None),
+        ) as mocked:
+            results = parallel_safe_llm_calls(
+                [spec],
+                llm_client=ConcurrentMockLLMClient(),
+                run_dir=tmp_path,
+                max_workers=1,
+            )
+
+        assert results[0].error is None
+        assert mocked.call_args.kwargs["validation_retry_include_schema"] is False
+        assert mocked.call_args.kwargs["slot_id"] == "RESP-1:CA-1-1:INCORRECT"
+        assert mocked.call_args.kwargs["scenario_id"] == "SCN-007"

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from hypothesis import given, settings, strategies as st
 
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlActionTemporality,
+)
 from asago_scenario_generator.stpa.models.ica_enumeration import (
     ICA,
     ICASlot,
@@ -70,12 +73,14 @@ class TestMergeAlignsIds:
             responsibility="RESP-3",
             control_action="CA-3-1",
             uca_type=uca_type,
+            action_temporality=ControlActionTemporality.continuous,
         )
         filled = ICASlot(
             slot_id=slot_id,
             responsibility="RESP-3",
             control_action="CA-3-1",
             uca_type=uca_type,
+            action_temporality=ControlActionTemporality.continuous,
             is_na=False,
             icas=[_ica(raw, index) for index, raw in enumerate(ids, start=1)],
         )

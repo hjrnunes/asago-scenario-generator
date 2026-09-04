@@ -123,6 +123,8 @@ class _FakeSynthesis:
         self.revision_failed = False
         self.fill_structures: list[tuple[Any, Any]] = []
         self.routes: tuple[ObligationRoute, ...] = ()
+        self.scenario_envelopes: tuple[Any, ...] = ("scenario-1",)
+        self.candidate_outcomes: tuple[Any, ...] | None = None
 
     def plan(self, **_: Any) -> Any:
         self.calls.append("plan")
@@ -188,7 +190,10 @@ class _FakeSynthesis:
         self.calls.append("scenarios")
         if self.scenario_failure:
             raise RuntimeError("deterministic SP3 failure")
-        return SimpleNamespace(scenario_envelopes=("scenario-1",))
+        return SimpleNamespace(
+            scenario_envelopes=self.scenario_envelopes,
+            candidate_outcomes=self.candidate_outcomes,
+        )
 
     def account(self, *, plan, **_: Any) -> Any:
         self.calls.append("account")
@@ -305,6 +310,57 @@ def _h_route_mode(world: World, text: str, examples: dict) -> tuple[bool, str]:
 def _h_provider_failure(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     _state(world)["fake"] = _FakeSynthesis("not_required", provider_failure=True)
+    return True, ""
+
+
+def _h_candidate_mode(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    """Select explicit candidate terminal records for yield-status acceptance."""
+    del examples
+    mode = text.rsplit('"', 2)[1]
+    fake = _FakeSynthesis("not_required")
+    if mode == "no_candidates":
+        fake.scenario_envelopes = ()
+        fake.candidate_outcomes = ()
+    elif mode == "zero_yield":
+        fake.scenario_envelopes = ()
+        fake.candidate_outcomes = tuple(
+            SimpleNamespace(
+                scenario_id=f"SCN-{index:03d}",
+                ica_slot_id=f"RESP-{index}:CA-{index}-1:INCORRECT",
+                ica_id=f"ICA-{index}",
+                status="generation_failed",
+                diagnostics=("provider contract failure",),
+            )
+            for index in (1, 2)
+        )
+    elif mode == "partial":
+        fake.scenario_envelopes = ("scenario-1",)
+        fake.candidate_outcomes = (
+            SimpleNamespace(
+                scenario_id="SCN-001",
+                ica_slot_id="RESP-1:CA-1-1:INCORRECT",
+                ica_id="ICA-1",
+                status="published",
+                diagnostics=(),
+            ),
+            SimpleNamespace(
+                scenario_id="SCN-002",
+                ica_slot_id="RESP-2:CA-2-1:INCORRECT",
+                ica_id="ICA-2",
+                status="rendering_failed",
+                diagnostics=("rendering failed",),
+            ),
+            SimpleNamespace(
+                scenario_id="SCN-003",
+                ica_slot_id="RESP-3:CA-3-1:INCORRECT",
+                ica_id="ICA-3",
+                status="skipped",
+                diagnostics=("not attempted",),
+            ),
+        )
+    else:
+        return False, f"unknown candidate outcome mode: {mode}"
+    _state(world)["fake"] = fake
     return True, ""
 
 
@@ -455,6 +511,47 @@ def _h_route_not_coverage(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
+def _h_terminal_status(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del examples
+    expected = text.rsplit('"', 2)[1]
+    actual = _state(world)["result"].status
+    return actual == expected, f"expected {expected}, got {actual}"
+
+
+def _h_candidate_counts(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del examples
+    values = [int(value) for value in __import__("re").findall(r"\d+", text)]
+    if len(values) != 5:
+        return False, f"expected five candidate counts, got {values}"
+    requested, attempted, published, failed, skipped = values
+    counts = _state(world)["result"].manifest["scenario_counts"]
+    actual = (
+        counts.get("requested"),
+        counts.get("attempted"),
+        counts.get("generated"),
+        counts.get("failed"),
+        counts.get("skipped"),
+    )
+    expected = (requested, attempted, published, failed, skipped)
+    return actual == expected, f"expected {expected}, got {actual}"
+
+
+def _h_yield_artifacts(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del text, examples
+    result = _state(world)["result"]
+    expected = {
+        PLAN_FILENAME,
+        CONSIDERATION_FILENAME,
+        ACCOUNTING_FILENAME,
+        SCENARIO_REALIZATION_FILENAME,
+        MANIFEST_FILENAME,
+    }
+    present = {path.name for path in result.output_dir.iterdir()}
+    return expected.issubset(
+        present
+    ), f"missing artifacts: {sorted(expected - present)}"
+
+
 def _h_baseline_retained(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     fake = _state(world)["fake"]
@@ -549,6 +646,10 @@ def register(api: Any) -> None:
         r"a deterministic synthesis provider fails during consideration",
         _h_provider_failure,
     )
+    api.register(
+        r'a deterministic synthesis candidate outcome set "(no_candidates|zero_yield|partial)"',
+        _h_candidate_mode,
+    )
     api.register(r"the product run executes", _h_run)
     api.register(r"Phase 1 planning runs before baseline STPA", _h_stage_order)
     api.register(
@@ -580,6 +681,18 @@ def register(api: Any) -> None:
     api.register(
         r"the route evidence remains separate from taxonomy coverage",
         _h_route_not_coverage,
+    )
+    api.register(
+        r'the synthesis terminal status is "(completed|no_candidates|failed|degraded)"',
+        _h_terminal_status,
+    )
+    api.register(
+        r"synthesis candidate counts are requested (\d+) attempted (\d+) published (\d+) failed (\d+) skipped (\d+)",
+        _h_candidate_counts,
+    )
+    api.register(
+        r"the synthesis diagnostic and accounting artifacts remain available",
+        _h_yield_artifacts,
     )
     api.register(
         r"the synthesis retains the baseline after the revision failure",

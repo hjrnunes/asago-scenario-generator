@@ -32,7 +32,6 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
 )
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
-    render_scenario_generation_context,
 )
 from asago_scenario_generator.stpa.scenario_prod.narrative import (
     build_narrative_prompts,
@@ -589,10 +588,12 @@ def _h_mcp_prompt(world: World, text: str, examples: dict) -> tuple[bool, str]:
     if world.sp3_prompt_stage == "Stage 5 BDI":
         _system, user = build_context_bdi_prompts(context, loader)
     else:
+        spec = _scenario_spec_with_context(context)
         _system, user = build_narrative_prompts(
-            _scenario_spec_with_context(context),
+            spec,
             loader,
         )
+        world.sp3_scenario_spec = spec
     world.sp3_user_prompt = user
     return True, ""
 
@@ -602,10 +603,7 @@ def _h_mcp_complete(world: World, text: str, examples: dict) -> tuple[bool, str]
     prompt = getattr(world, "sp3_user_prompt", "")
     if getattr(world, "sp3_prompt_stage", None) == "Stage 5 BDI":
         return _check_actionable_stage5_context(prompt, world.sp3_context)
-    context = render_scenario_generation_context(world.sp3_context)
-    if not context or context not in prompt:
-        return False, "User prompt does not contain the complete technology context"
-    return True, ""
+    return _check_actionable_stage6_context(prompt, world.sp3_context)
 
 
 def _check_actionable_stage5_context(prompt: str, context: object) -> tuple[bool, str]:
@@ -628,6 +626,33 @@ def _check_actionable_stage5_context(prompt: str, context: object) -> tuple[bool
         return False, "Stage 5 prompt lacks actionable scenario meaning"
     if context.context_digest in prompt or "source_pins:" in prompt:
         return False, "Stage 5 prompt contains integrity-only bookkeeping"
+    return True, ""
+
+
+def _check_actionable_stage6_context(prompt: str, context: object) -> tuple[bool, str]:
+    """Require selected scenario meaning while excluding integrity metadata."""
+    required = (
+        "unsafe_control_action:",
+        "selected_control_path:",
+        "causal_factors:",
+        context.ica.exact_ica_text,
+        context.ica.uca_type_definition,
+        context.target_control_path.control_action.action_id,
+        context.target_control_path.control_action.description,
+        *(item.loss_id for item in context.losses),
+        *(item.description for item in context.losses),
+        *(item.hazard_id for item in context.hazards),
+        *(item.description for item in context.hazards),
+        *(item.constraint_id for item in context.constraints),
+        *(item.description for item in context.constraints),
+        *(item.capability_id for item in context.reachable_capabilities),
+        *(item.description for item in context.reachable_capabilities),
+        *(item.evidence for item in context.reachable_capabilities),
+    )
+    if any(value not in prompt for value in required):
+        return False, "Stage 6 prompt lacks actionable scenario evidence"
+    if context.context_digest in prompt or "source_pins:" in prompt:
+        return False, "Stage 6 prompt contains integrity-only bookkeeping"
     return True, ""
 
 
@@ -696,17 +721,19 @@ def _h_mcp_stage5_requests(world: World, text: str, examples: dict) -> tuple[boo
 
 
 def _h_mcp_stage6_requests(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Check every Stage 6 narrative request for the same exact context."""
-    context = render_scenario_generation_context(world.sp3_context)
+    """Check every Stage 6 request for actionable evidence, not bookkeeping."""
     calls = [
         call
         for call in _logged_calls(world)
         if call.get("stage") == "stage_6" and call.get("step") == "narrative"
     ]
-    if not calls or any(
-        context not in call.get("user_prompt_text", "") for call in calls
-    ):
-        return False, "A Stage 6 narrative request lacks the deterministic context"
+    if not calls:
+        return False, "No Stage 6 narrative request was recorded"
+    for call in calls:
+        prompt = call.get("user_prompt_text", "")
+        passed, reason = _check_actionable_stage6_context(prompt, world.sp3_context)
+        if not passed:
+            return False, reason
     return True, ""
 
 
@@ -934,7 +961,8 @@ def register(api: object) -> None:
         source_order=24036,
     )
     api.register_first(
-        "every Stage 6 narrative request contains the same exact scenario context",
+        "every Stage 6 narrative request contains the actionable scenario "
+        "evidence without integrity bookkeeping",
         _h_mcp_stage6_requests,
         source_order=24037,
     )

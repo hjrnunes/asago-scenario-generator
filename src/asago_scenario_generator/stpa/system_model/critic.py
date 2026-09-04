@@ -15,12 +15,18 @@ from __future__ import annotations
 import copy
 import logging
 import re
+from collections.abc import Mapping
+from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
-from asago_scenario_generator.models.capability_profile import CapabilityProfile
+from asago_scenario_generator.models.capability_profile import (
+    ZONE_DISPLAY_NAMES,
+    CapabilityProfile,
+    build_kc_subcodes_display,
+)
 from asago_scenario_generator.stpa.infra.llm import LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
@@ -42,6 +48,20 @@ STEP_CRITIC = "critic"
 STEP_REVISION = "revision"
 DEFAULT_TEMPERATURE = 0.4
 REVISION_MAX_COMPLETION_TOKENS = 8192
+_REVISION_VALIDATION_FEEDBACK = (
+    "\n\nThe prior response was not a valid RevisionDelta. Return exactly one "
+    "JSON object with the five top-level delta fields shown in the schema "
+    "example. Do not restate the existing control structure; use canonical "
+    "RESP/PM/CA/FB/RC/CP/CL/CM IDs and keep every reference resolvable."
+)
+_CRITIC_VALIDATION_FEEDBACK = (
+    "\n\nThe prior critic response was inconsistent: every checklist or taxonomy "
+    "result marked absent_unjustified must be represented by at least one "
+    "explicit gap. Add a gap whose description states the missing concept, "
+    "whose related_attack_path states the supplied evidence (or that evidence "
+    "is not established), and whose suggested_remedy states what should be "
+    "added. Keep unrelated probe results unchanged."
+)
 logger = logging.getLogger(__name__)
 
 
@@ -67,6 +87,43 @@ class CriticFindings(BaseModel):
     taxonomy_probe_results: dict[str, str] = {}
 
 
+def _validate_critic_findings_consistency(findings: CriticFindings) -> None:
+    """Require an actionable gap for each unjustified critic result."""
+    unjustified = _critic_unjustified_result_names(findings)
+    if unjustified and not findings.gaps:
+        names = ", ".join(unjustified)
+        raise ValueError(
+            "critic absent_unjustified result(s) require at least one explicit "
+            f"gap stating the missing concept and evidence: {names}"
+        )
+    for index, gap in enumerate(findings.gaps):
+        _validate_critic_gap_fields(gap, index)
+
+
+def _critic_unjustified_result_names(findings: CriticFindings) -> tuple[str, ...]:
+    """Return checklist and taxonomy results marked absent without justification."""
+    return tuple(
+        name
+        for results in (
+            findings.checklist_results,
+            findings.taxonomy_probe_results,
+        )
+        for name, status in results.items()
+        if status == "absent_unjustified"
+    )
+
+
+def _validate_critic_gap_fields(gap: CriticGap, index: int) -> None:
+    """Require each explicit gap to retain concept, evidence, and remedy text."""
+    for field_name, label in (
+        ("description", "the missing concept"),
+        ("related_attack_path", "evidence"),
+        ("suggested_remedy", "a remedy"),
+    ):
+        if not getattr(gap, field_name).strip():
+            raise ValueError(f"critic gap {index} must state {label}")
+
+
 class RevisionDelta(BaseModel):
     """Delta schema for the revision LLM call.
 
@@ -75,11 +132,335 @@ class RevisionDelta(BaseModel):
     into the existing ControlStructure.
     """
 
-    new_responsibilities: list[Responsibility] = []
-    new_controlled_processes: list[ControlledProcess] = []
-    new_coordination_links: list[CoordinationLink] = []
-    modified_responsibilities: list[Responsibility] = []
-    dismissed_gaps: list[str] = []
+    # A revision response is a closed wire object.  In particular, accepting
+    # an entire ``ControlStructure`` here would make a malformed or stale
+    # model response look like a successful delta and could silently replace
+    # data that the critic asked us to preserve.
+    model_config = ConfigDict(extra="forbid")
+
+    new_responsibilities: list[Responsibility] = Field(default_factory=list)
+    new_controlled_processes: list[ControlledProcess] = Field(default_factory=list)
+    new_coordination_links: list[CoordinationLink] = Field(default_factory=list)
+    modified_responsibilities: list[Responsibility] = Field(default_factory=list)
+    dismissed_gaps: list[str] = Field(default_factory=list)
+
+
+def _validate_revision_delta_carrier(value: Any) -> None:
+    """Validate the revision wire shape before tolerant model construction.
+
+    The revision call intentionally keeps malformed *identifiers* tolerant:
+    ``id_normalization`` can map a source identifier to the element's final
+    structural position.  That tolerance must not extend to the object graph
+    itself, though.  In particular, tolerant construction turns an omitted
+    ``coordination_mechanism`` into ``None`` and would otherwise let merge code
+    fail while dereferencing it.  This validator therefore checks the nested
+    carrier shape and scalar/container types while leaving the actual ID
+    formats and cross-references to the existing normalization pass.
+
+    Top-level fields remain backward-compatible and may be omitted (they have
+    empty-list defaults), but any field that is supplied must be a list.
+    """
+    if not isinstance(value, Mapping):
+        raise ValueError("RevisionDelta response must be a JSON object")
+    expected = set(RevisionDelta.model_fields)
+    unknown = set(value) - expected
+    if unknown:
+        raise ValueError(
+            "RevisionDelta contains unknown top-level fields: "
+            + ", ".join(sorted(unknown))
+        )
+    for field_name in expected:
+        field_value = value.get(field_name, [])
+        if not isinstance(field_value, list):
+            raise ValueError(f"RevisionDelta {field_name} must be a list")
+
+    _validate_revision_delta_collections(value)
+    _validate_revision_dismissed_gaps(value.get("dismissed_gaps", []))
+
+
+def _validate_revision_delta_collections(value: Mapping[str, Any]) -> None:
+    """Validate the four nested object collections in a revision delta."""
+    for field_name, validator in (
+        ("new_responsibilities", _validate_revision_responsibility),
+        ("modified_responsibilities", _validate_revision_responsibility),
+        ("new_controlled_processes", _validate_revision_controlled_process),
+        ("new_coordination_links", _validate_revision_coordination_link),
+    ):
+        _validate_revision_objects(value.get(field_name, []), validator, field_name)
+
+
+def _valid_revision_gap(value: Any) -> bool:
+    """Return whether a dismissed-gap source string carries content."""
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _validate_revision_dismissed_gaps(values: list[Any]) -> None:
+    """Require each dismissed gap to retain a meaningful source string."""
+    for index, gap in enumerate(values):
+        if not _valid_revision_gap(gap):
+            raise ValueError(
+                "RevisionDelta dismissed_gaps[{}] must be a non-empty string".format(
+                    index
+                )
+            )
+
+
+def _validate_revision_objects(
+    values: list[Any],
+    validator: Any,
+    field_name: str,
+) -> None:
+    """Apply one nested carrier validator with a stable field path."""
+    for index, item in enumerate(values):
+        try:
+            validator(item)
+        except ValueError as exc:
+            raise ValueError(f"{field_name}[{index}]: {exc}") from exc
+
+
+def _require_revision_mapping(
+    value: Any,
+    *,
+    path: str,
+    fields: set[str],
+) -> Mapping[str, Any]:
+    """Require an object with exactly the fields known by its Pydantic type."""
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{path} must be an object")
+    unknown = set(value) - fields
+    if unknown:
+        raise ValueError(
+            f"{path} contains unknown field(s): " + ", ".join(sorted(unknown))
+        )
+    return value
+
+
+def _require_revision_text(
+    value: Any,
+    *,
+    path: str,
+    non_empty: bool = True,
+) -> None:
+    """Require a string, optionally enforcing the model's minimum length."""
+    if not isinstance(value, str):
+        raise ValueError(f"{path} must be a string")
+    if non_empty and not value.strip():
+        raise ValueError(f"{path} must be a non-empty string")
+
+
+def _require_revision_id(value: Any, *, path: str) -> None:
+    """Require a repairable source identifier without imposing its format."""
+    # Source IDs such as ``new-controller`` are deliberately accepted here;
+    # the high-level normalization policy rewrites them deterministically.
+    _require_revision_text(value, path=path)
+
+
+def _require_revision_list(
+    value: Any,
+    *,
+    path: str,
+    item_validator: Any | None = None,
+) -> None:
+    """Require a JSON array and validate each item when requested."""
+    if not isinstance(value, list):
+        raise ValueError(f"{path} must be a list")
+    if item_validator is not None:
+        for index, item in enumerate(value):
+            try:
+                item_validator(item)
+            except ValueError as exc:
+                raise ValueError(f"{path}[{index}]: {exc}") from exc
+
+
+def _validate_revision_element_ref(value: Any, *, path: str) -> None:
+    """Validate the complete shape of a responsibility/process reference."""
+    ref = _require_revision_mapping(value, path=path, fields={"type", "id"})
+    _require_revision_text(ref.get("type"), path=f"{path}.type")
+    _require_revision_id(ref.get("id"), path=f"{path}.id")
+
+
+def _validate_revision_responsibility_constraint(value: Any, *, path: str) -> None:
+    """Validate one nested responsibility constraint."""
+    item = _require_revision_mapping(
+        value,
+        path=path,
+        fields={"rc_id", "description"},
+    )
+    _require_revision_id(item.get("rc_id"), path=f"{path}.rc_id")
+    _require_revision_text(item.get("description"), path=f"{path}.description")
+
+
+def _validate_revision_process_model_part(value: Any, *, path: str) -> None:
+    """Validate one nested process-model part."""
+    item = _require_revision_mapping(
+        value,
+        path=path,
+        fields={"pm_id", "description", "feedback_source"},
+    )
+    _require_revision_id(item.get("pm_id"), path=f"{path}.pm_id")
+    _require_revision_text(item.get("description"), path=f"{path}.description")
+    if "feedback_source" in item and item["feedback_source"] is not None:
+        _validate_revision_element_ref(
+            item["feedback_source"], path=f"{path}.feedback_source"
+        )
+
+
+def _validate_optional_revision_ref(
+    item: Mapping[str, Any],
+    *,
+    field_name: str,
+    path: str,
+) -> None:
+    """Validate an optional typed element reference when it is present."""
+    value = item.get(field_name)
+    if value is not None:
+        _validate_revision_element_ref(value, path=f"{path}.{field_name}")
+
+
+def _validate_revision_enum_fields(
+    item: Mapping[str, Any],
+    *,
+    path: str,
+) -> None:
+    """Validate optional effect/temporality display metadata values."""
+    for name in ("effect_kind", "temporality"):
+        value = item.get(name)
+        if value is not None and not isinstance(value, (str, Enum)):
+            raise ValueError(f"{path}.{name} must be a string")
+
+
+def _validate_revision_control_action(value: Any, *, path: str) -> None:
+    """Validate one nested control action and its optional typed metadata."""
+    item = _require_revision_mapping(
+        value,
+        path=path,
+        fields={"ca_id", "description", "target", "effect_kind", "temporality"},
+    )
+    _require_revision_id(item.get("ca_id"), path=f"{path}.ca_id")
+    _require_revision_text(item.get("description"), path=f"{path}.description")
+    _validate_optional_revision_ref(item, field_name="target", path=path)
+    _validate_revision_enum_fields(item, path=path)
+
+
+def _validate_revision_feedback_channel(value: Any, *, path: str) -> None:
+    """Validate one nested feedback channel."""
+    item = _require_revision_mapping(
+        value,
+        path=path,
+        fields={"fb_id", "description", "updates", "source"},
+    )
+    _require_revision_id(item.get("fb_id"), path=f"{path}.fb_id")
+    _require_revision_text(item.get("description"), path=f"{path}.description")
+    _require_revision_id(item.get("updates"), path=f"{path}.updates")
+    if "source" in item and item["source"] is not None:
+        _validate_revision_element_ref(item["source"], path=f"{path}.source")
+
+
+def _validate_revision_responsibility(value: Any) -> None:
+    """Validate a complete responsibility object before tolerant decoding."""
+    item = _require_revision_mapping(
+        value,
+        path="responsibility",
+        fields={
+            "resp_id",
+            "description",
+            "responsibility_constraints",
+            "security_constraint_refs",
+            "process_model_parts",
+            "control_actions",
+            "feedback_channels",
+        },
+    )
+    _require_revision_id(item.get("resp_id"), path="responsibility.resp_id")
+    _require_revision_text(item.get("description"), path="responsibility.description")
+    _require_revision_list(
+        item.get("responsibility_constraints", []),
+        path="responsibility.responsibility_constraints",
+        item_validator=lambda nested: _validate_revision_responsibility_constraint(
+            nested, path="responsibility.responsibility_constraints[]"
+        ),
+    )
+    _require_revision_list(
+        item.get("security_constraint_refs", []),
+        path="responsibility.security_constraint_refs",
+        item_validator=lambda nested: _require_revision_id(
+            nested, path="responsibility.security_constraint_refs[]"
+        ),
+    )
+    _require_revision_list(
+        item.get("process_model_parts", []),
+        path="responsibility.process_model_parts",
+        item_validator=lambda nested: _validate_revision_process_model_part(
+            nested, path="responsibility.process_model_parts[]"
+        ),
+    )
+    _require_revision_list(
+        item.get("control_actions", []),
+        path="responsibility.control_actions",
+        item_validator=lambda nested: _validate_revision_control_action(
+            nested, path="responsibility.control_actions[]"
+        ),
+    )
+    _require_revision_list(
+        item.get("feedback_channels", []),
+        path="responsibility.feedback_channels",
+        item_validator=lambda nested: _validate_revision_feedback_channel(
+            nested, path="responsibility.feedback_channels[]"
+        ),
+    )
+
+
+def _validate_revision_controlled_process(value: Any) -> None:
+    """Validate a complete controlled-process object."""
+    item = _require_revision_mapping(
+        value,
+        path="controlled_process",
+        fields={"cp_id", "description"},
+    )
+    _require_revision_id(item.get("cp_id"), path="controlled_process.cp_id")
+    _require_revision_text(
+        item.get("description"), path="controlled_process.description"
+    )
+
+
+def _validate_revision_coordination_mechanism(value: Any, *, path: str) -> None:
+    """Validate the required nested coordination mechanism object."""
+    item = _require_revision_mapping(
+        value,
+        path=path,
+        fields={"cm_id", "description", "payload"},
+    )
+    _require_revision_id(item.get("cm_id"), path=f"{path}.cm_id")
+    _require_revision_text(item.get("description"), path=f"{path}.description")
+    _require_revision_text(item.get("payload"), path=f"{path}.payload", non_empty=False)
+
+
+def _validate_revision_coordination_link(value: Any) -> None:
+    """Validate a complete link, including endpoints and its mechanism."""
+    item = _require_revision_mapping(
+        value,
+        path="coordination_link",
+        fields={
+            "link_id",
+            "source",
+            "target",
+            "shared_pm",
+            "coordination_mechanism",
+            "description",
+        },
+    )
+    _require_revision_id(item.get("link_id"), path="coordination_link.link_id")
+    for endpoint in ("source", "target", "shared_pm"):
+        _require_revision_id(item.get(endpoint), path=f"coordination_link.{endpoint}")
+    if "coordination_mechanism" not in item:
+        raise ValueError("coordination_link.coordination_mechanism is required")
+    _validate_revision_coordination_mechanism(
+        item["coordination_mechanism"],
+        path="coordination_link.coordination_mechanism",
+    )
+    _require_revision_text(
+        item.get("description"), path="coordination_link.description"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +513,8 @@ def run_completeness_critic(
         use_case_text=use_case_text,
         control_structure=control_structure,
         capability_profile=capability_profile,
+        zone_display_names=ZONE_DISPLAY_NAMES,
+        kc_subcodes_display=build_kc_subcodes_display(capability_profile.kc_subcodes),
         taxonomy_probes=taxonomy_probes,
         loss_analysis=loss_analysis,
         call3_warnings=call3_warnings,
@@ -146,6 +529,10 @@ def run_completeness_critic(
         stage=STAGE,
         step=STEP_CRITIC,
         temperature=temperature,
+        result_validator=_validate_critic_findings_consistency,
+        validation_retries=1,
+        validation_retry_feedback=_CRITIC_VALIDATION_FEEDBACK,
+        validation_retry_include_schema=False,
     )
     if error_msg is not None:
         return CriticFindings()
@@ -154,10 +541,11 @@ def run_completeness_critic(
 
 
 def has_unjustified_gaps(findings: CriticFindings) -> bool:
-    """Check whether the critic findings contain any unjustified gaps.
+    """Return whether findings contain an explicit actionable structural gap.
 
-    Revision is triggered by an unjustified checklist or taxonomy result, or
-    by any adversarial structural gap.
+    Checklist and taxonomy probe statuses remain diagnostic context. They do
+    not authorize a revision unless the critic also represents the missing
+    concept and evidence in a typed ``CriticGap``.
 
     Args:
         findings: The critic findings to check.
@@ -165,29 +553,17 @@ def has_unjustified_gaps(findings: CriticFindings) -> bool:
     Returns:
         True if revision should be triggered, False otherwise.
     """
-    has_checklist_gaps = _count_unjustified(findings.checklist_results) > 0
-    has_taxonomy_gaps = _count_unjustified(findings.taxonomy_probe_results) > 0
-    has_structural_gaps = len(findings.gaps) > 0
-    return has_checklist_gaps or has_taxonomy_gaps or has_structural_gaps
-
-
-def _count_unjustified(probe_results: dict[str, str]) -> int:
-    """Count ``absent_unjustified`` entries in a probe-result mapping."""
-    return sum(1 for status in probe_results.values() if status == "absent_unjustified")
+    return bool(findings.gaps)
 
 
 def count_findings(findings: CriticFindings) -> int:
     """Count the findings the revision is asked to address.
 
-    A finding is an adversarial structural gap, an ``absent_unjustified``
-    checklist result, or an ``absent_unjustified`` taxonomy probe result —
-    the same three sources that trigger revision.
+    Only explicit structural gaps are actionable revision findings. The
+    checklist and taxonomy maps are retained as diagnostic context and are
+    intentionally excluded from this count.
     """
-    return (
-        len(findings.gaps)
-        + _count_unjustified(findings.checklist_results)
-        + _count_unjustified(findings.taxonomy_probe_results)
-    )
+    return len(findings.gaps)
 
 
 # ---------------------------------------------------------------------------
@@ -291,6 +667,68 @@ def sanitize_critic_ids(findings: CriticFindings) -> CriticFindings:
 # ---------------------------------------------------------------------------
 
 
+def _revision_failure_warnings(error_msg: str) -> list[str]:
+    """Describe a failed revision while distinguishing validation degradation."""
+    warnings = [f"Revision failed: {error_msg}"]
+    if "ValidationError" in error_msg:
+        warnings.append(
+            "Revision degraded: the validated delta was rejected; the "
+            "pre-revision control structure and critic findings were retained."
+        )
+    return warnings
+
+
+def _finish_revision(
+    control_structure: ControlStructure,
+    revision_delta: RevisionDelta,
+    *,
+    critic_findings: CriticFindings,
+    loss_analysis: LossAnalysis | None,
+) -> tuple[ControlStructure, list[str]]:
+    """Merge a validated delta and retain post-revision diagnostics."""
+    revision_warnings = [
+        f"Revision dismissed finding: {justification}"
+        for justification in revision_delta.dismissed_gaps
+    ]
+    revision_warnings.extend(
+        _all_dismissed_no_change_warning(critic_findings, revision_delta)
+    )
+    if (
+        critic_findings.gaps
+        and not _delta_has_changes(revision_delta)
+        and len(revision_delta.dismissed_gaps) < len(critic_findings.gaps)
+    ):
+        revision_warnings.append(
+            "Revision made no structural changes for explicit critic gaps; the "
+            "baseline control structure was retained and those gaps remain "
+            "unresolved."
+        )
+
+    # Merge the delta into the existing ControlStructure
+    try:
+        revised_cs, merge_warnings = _merge_revision_delta(
+            control_structure, revision_delta
+        )
+    except Exception as exc:
+        warning = f"Revision delta merge degraded: {type(exc).__name__}: {exc}"
+        return control_structure, [warning]
+
+    # Warnings are accumulated in chronological order: dismissal → merge →
+    # strip → heuristics, so consumers see the earliest root-cause first.
+    revision_warnings.extend(merge_warnings)
+
+    # Strip empty responsibilities as a safety net
+    revised_cs, strip_warnings = strip_empty_responsibilities(revised_cs)
+    revision_warnings.extend(strip_warnings)
+
+    # Re-run structural heuristics after revision
+    post_revision = run_heuristics(revised_cs, loss_analysis)
+    revision_warnings.extend(post_revision.errors)
+    revision_warnings.extend(post_revision.warnings)
+
+    return revised_cs, revision_warnings
+
+
 def run_revision(
     *,
     llm_client: LLMClient,
@@ -353,44 +791,24 @@ def run_revision(
         step=STEP_REVISION,
         temperature=temperature,
         max_completion_tokens=REVISION_MAX_COMPLETION_TOKENS,
+        # Keep the wire envelope closed, then preserve malformed source IDs
+        # until the complete stitched structure can normalize references.
         allow_unvalidated=True,
+        raw_result_validator=_validate_revision_delta_carrier,
+        validation_retries=1,
+        validation_retry_feedback=_REVISION_VALIDATION_FEEDBACK,
+        validation_retry_include_schema=False,
     )
     if error_msg is not None:
-        return control_structure, [f"Revision failed: {error_msg}"]
+        return control_structure, _revision_failure_warnings(error_msg)
     if revision_delta is None:
         return control_structure, ["Revision failed: unexpected None response"]
-
-    revision_warnings = [
-        f"Revision dismissed finding: {justification}"
-        for justification in revision_delta.dismissed_gaps
-    ]
-    revision_warnings.extend(
-        _all_dismissed_no_change_warning(critic_findings, revision_delta)
+    return _finish_revision(
+        control_structure,
+        revision_delta,
+        critic_findings=critic_findings,
+        loss_analysis=loss_analysis,
     )
-
-    # Merge the delta into the existing ControlStructure
-    try:
-        revised_cs, merge_warnings = _merge_revision_delta(
-            control_structure, revision_delta
-        )
-    except Exception as exc:
-        warning = f"Revision delta merge degraded: {type(exc).__name__}: {exc}"
-        return control_structure, [warning]
-
-    # Warnings are accumulated in chronological order: dismissal → merge →
-    # strip → heuristics, so consumers see the earliest root-cause first.
-    revision_warnings.extend(merge_warnings)
-
-    # Strip empty responsibilities as a safety net
-    revised_cs, strip_warnings = strip_empty_responsibilities(revised_cs)
-    revision_warnings.extend(strip_warnings)
-
-    # Re-run structural heuristics after revision
-    post_revision = run_heuristics(revised_cs, loss_analysis)
-    revision_warnings.extend(post_revision.errors)
-    revision_warnings.extend(post_revision.warnings)
-
-    return revised_cs, revision_warnings
 
 
 def _delta_has_changes(delta: RevisionDelta) -> bool:

@@ -212,15 +212,12 @@ def test_stage5_prompt_separates_delivery_from_internal_causal_proof() -> None:
     )
     prompt = " ".join(f"{system_prompt}\n{user_prompt}".split()).lower()
 
-    assert "how the test stimulus enters the system" in prompt
-    assert "does not need to prove every internal causal step" in prompt
+    assert "`stimulus` is a request-local description of the actual delivery" in prompt
+    assert "does not prove attacker access" in prompt
     assert "direct_prompt" in prompt
     assert "conversation_context" in prompt
-    assert "do not require a reachable capability" in prompt
-    assert (
-        "missing target-specific runtime details makes the route parameterized"
-        in prompt
-    )
+    assert "missing endpoints" in prompt
+    assert "make a known route parameterized, not analytical" in prompt
 
 
 def test_stage5_prompt_contains_only_actionable_context_and_defines_references() -> (
@@ -241,8 +238,8 @@ def test_stage5_prompt_contains_only_actionable_context_and_defines_references()
     assert context.target_control_path.feedback[0].element_id not in prompt
     assert "source_pins:" not in prompt
     assert "catalog_context:" not in prompt
-    assert "Copy the listed hazard and constraint references" in normalized_prompt
-    assert "target-agnostic semantic label" in normalized_prompt
+    assert "copy only the listed hazard/constraint references" in normalized_prompt
+    assert "Use the selected target action in action conditions" in normalized_prompt
     assert "Select only when timing, lateness, staleness" in normalized_prompt
     assert (
         "Select only when the observed feedback value is incorrect" in normalized_prompt
@@ -286,8 +283,10 @@ def test_obligation_mechanism_is_provenance_not_causal_evidence() -> None:
     )
 
     assert "analysis provenance, not causal evidence" in " ".join(stage5_user.split())
-    assert "finding`), found the concern inapplicable" in " ".join(stage5_user.split())
-    assert "does not establish that persistent memory was poisoned" in " ".join(
+    assert "explain why STPA considered this unsafe action" in " ".join(
+        stage5_user.split()
+    )
+    assert "A mechanism needs exact supplied capability/access evidence" in " ".join(
         stage5_system.split()
     )
     for prompt in stage6_prompts:

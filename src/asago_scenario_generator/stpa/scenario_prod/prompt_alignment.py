@@ -120,10 +120,8 @@ def derive_projection_alignment_rows(
 def render_projection_alignment_table(doc: dict[str, Any]) -> str:
     """Render the compact projection alignment table for one candidate.
 
-    Includes the candidate identifier, the UCA reference, and the
-    semantic-structural-ID note so prompts never reduce projection IDs to
-    positional labels.  Empty projections produce an empty string (no
-    table is rendered).
+    Includes only the ordered semantic references needed by the rendering
+    model. Empty projections produce an empty string (no table is rendered).
     """
     rows = derive_projection_alignment_rows(doc)
     if not rows:
@@ -131,8 +129,8 @@ def render_projection_alignment_table(doc: dict[str, Any]) -> str:
     lines = [
         f"Projection ID: {doc['candidate_id']}",
         f"UCA reference: {doc['uca_ref']}",
-        "Projection IDs are semantic structural IDs "
-        "(PM-*, FB-*, CA-*), not positional labels.",
+        "Projection IDs are semantic structural IDs (PM-*, FB-*, CA-*), not "
+        "positional labels. Their meanings are supplied in the scenario evidence.",
         "",
         "| " + " | ".join(PROJECTION_ALIGNMENT_COLUMNS) + " |",
         "| " + " | ".join("---" for _ in PROJECTION_ALIGNMENT_COLUMNS) + " |",

@@ -18,7 +18,7 @@ The stub inspects the request to determine which call it is:
 
 Responses are crafted to pass all stage-local validators:
 - Defender vulnerabilities are non-empty for every PM-* in the prompt.
-- Attack trees use at least 2 of 3 branch categories and reference only
+- Attack trees use at least 1 supported branch category and reference only
   valid PM/FB/CA/RESP IDs extracted from the prompt.
 - Gherkin text has ``Then ... should``, a ``But`` line, and a ``PM-*``
   reference. Returns a structured YAML object (not raw Gherkin) matching
@@ -254,7 +254,7 @@ def _build_narrative_response(user_prompt: str) -> str:
 def _build_attack_tree_response(user_prompt: str) -> str:
     """Build a YAML attack tree for Stage 6 Call B.
 
-    Uses at least 2 of 3 branch categories and references only valid
+    Uses at least 1 supported branch category and references only valid
     IDs extracted from the prompt.
     """
     pm_ids = _extract_pm_ids(user_prompt)

@@ -73,7 +73,7 @@ Feature: Post-SP3 STPA execution projection
     Given causal factors include a process-model flaw for PM-1-1 and a feedback delay for FB-1-1
     When the candidate execution envelope is assembled with temporal assertions
     And the STPA Stage 6 prompts are rendered from the validated projection
-    Then every narrative, tree, and Gherkin Stage 6 prompt contains a projection alignment table
+    Then each narrative, tree, and Gherkin Stage 6 call contains exactly one projection alignment table
     And the table has columns "projection ID,source kind,source ID,assertion ID,assertion predicate,step ID,step kind,order,required reference"
     And the table has exactly one row for each temporal assertion and final UCA step
     And the table rows preserve causal-factor order and place the UCA row last

@@ -131,7 +131,7 @@ def _declare(
 
 def _alignment_section(prompt: str) -> str:
     """Extract the rendered projection alignment table from a prompt."""
-    start = prompt.index("projection_schema:")
+    start = prompt.index("Projection ID:")
     end = prompt.index("Realize the projection rows", start)
     return prompt[start:end].rstrip()
 
@@ -411,9 +411,9 @@ class TestOneAlignmentReachesEveryStage6Call:
             ),
         ]
         for system_prompt, user_prompt in prompt_pairs:
-            for prompt in (system_prompt, user_prompt):
-                assert "Do not invent any causal factor" in prompt
-                assert "semantic structural IDs" in prompt
+            assert "Do not invent any causal factor" in system_prompt
+            assert "semantic structural IDs" in system_prompt
+            assert "Projection Alignment" not in user_prompt
 
     def test_alignment_table_uses_semantic_ids(self):
         """The table references semantic structural IDs, not positions."""
@@ -624,6 +624,10 @@ class TestRunSp3ProductionWiring:
         client.set_response_queue(
             [
                 {
+                    "stimulus": {
+                        "category": "user_message",
+                        "description": "One user message is the typed test stimulus.",
+                    },
                     "defender_vulnerabilities": [
                         {"belief_handle": "belief_1", "vulnerability": "v"}
                     ],
@@ -653,9 +657,6 @@ class TestRunSp3ProductionWiring:
                             "evidence": declaration.evidence,
                             "temporal_condition": declaration.temporal_condition,
                             "evidence_status": declaration.evidence_status.value,
-                            "capability_refs": list(declaration.capability_refs),
-                            "access_refs": list(declaration.access_refs),
-                            "bounded_assumption": declaration.bounded_assumption,
                         }
                         for index, declaration in enumerate(declarations, start=1)
                     ],
@@ -669,8 +670,6 @@ class TestRunSp3ProductionWiring:
                         "delivery_class": "direct_prompt",
                         "selected_factor_handle": "cause_1",
                         "action_kind": "model_output",
-                        "resource_role_handles": [],
-                        "carrier_attacker_influence": "none",
                         "reason": "The declared structural factor supports the direct route.",
                     },
                 },
@@ -776,10 +775,10 @@ class TestRunSp3ProductionWiring:
         stage6_calls = [
             call
             for call in client.calls
-            if call.system_prompt and "Projection Alignment" in call.user_prompt
+            if call.system_prompt and "Projection Alignment" in call.system_prompt
         ]
         assert len(stage6_calls) == 3
-        tables = [_alignment_section(call.user_prompt) for call in stage6_calls]
+        tables = [_alignment_section(call.system_prompt) for call in stage6_calls]
         assert tables[0] == tables[1] == tables[2]
         assert "PM-1-1" in tables[0] and "FB-1-1" in tables[0]
         assert "UNSAFE_CONTROL_ACTION" in tables[0]
@@ -800,9 +799,11 @@ class TestRunSp3ProductionWiring:
         assert len(stage6) == 3
         tables = []
         for call in stage6:
-            prompt = call["user_prompt_text"]
-            assert "Projection Alignment" in prompt
-            tables.append(_alignment_section(prompt))
+            system_prompt = call["system_prompt_text"]
+            user_prompt = call["user_prompt_text"]
+            assert "Projection Alignment" in system_prompt
+            assert "Projection Alignment" not in user_prompt
+            tables.append(_alignment_section(system_prompt))
         assert tables[0] == tables[1] == tables[2]
 
     def test_invalid_reference_stops_before_stage6(self, tmp_path):
@@ -816,7 +817,9 @@ class TestRunSp3ProductionWiring:
             "Stage 5 BDI generation failed" in error for error in result.stage_errors
         )
         stage6_calls = [
-            call for call in client.calls if "Projection Alignment" in call.user_prompt
+            call
+            for call in client.calls
+            if "Projection Alignment" in call.system_prompt
         ]
         assert stage6_calls == []
         assert not (run_dir / "scenarios" / "SCN-001.yaml").exists()

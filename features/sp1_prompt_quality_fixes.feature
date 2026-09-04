@@ -7,8 +7,9 @@ Feature: SP1 Stage 1 prompt quality fixes
   Hazard specificity, loss specificity, and acronym expansion requirements
   live in stage1a_risk_system.j2 — the risk-derivation half of the split
   Stage 1a. The use-case gap analysis procedure moved to its own call and
-  now lives in stage1a_gap_system.j2 / stage1a_gap_user.j2. All changes are
-  to Jinja2 prompt template files — no source code logic changes.
+  now lives in stage1a_gap_system.j2 / stage1a_gap_user.j2. Shared Jinja2
+  method cards teach the distinction between stakeholder loss, hazardous
+  system state, component cause, and preventive constraint.
 
   Background:
     Given the STPA system model prompts directory is available
@@ -29,11 +30,10 @@ Feature: SP1 Stage 1 prompt quality fixes
     And the template text contains "<pattern_text>"
 
     Examples:
-      | pattern_text                                                                 |
-      | LLM outputs are manipulated via prompt injection to bypass security controls  |
-      | System generates biased or discriminatory content                            |
-      | patient chatbot generates an inaccurate surgical procedure explanation        |
-      | refund processing API executes an unauthorized refund amount                 |
+      | pattern_text                                      |
+      | model output is manipulated                       |
+      | component cause such as "the sensor fails."       |
+      | name the affected function or data flow           |
 
   # PQF-03
   Scenario Outline: PQF-03 stage1a_risk_system.j2 contains Loss specificity sub-section
@@ -92,7 +92,7 @@ Feature: SP1 Stage 1 prompt quality fixes
     Examples:
       | gap_user_fragment             |
       | ## Capability Profile Context |
-      | kc_subcodes                   |
+      | capability codes              |
       | ## ID Numbering               |
       | L-{{ next_loss_num }}         |
 
@@ -144,7 +144,7 @@ Feature: SP1 Stage 1 prompt quality fixes
 
     Examples:
       | section_header             |
-      | ## Definitions             |
+      | {% include "_loss_analysis_method.j2" %} |
       | ## Structural requirements |
       | ## ID conventions          |
       | ## Quality requirements    |

@@ -38,17 +38,16 @@ _REQUIRED_CONTENT = {
         "approve or reject request",
         "CA-X-1 Approve request",
         "CA-X-2 Reject request",
-        "A CA containing \"or\", \"and\", or similar conjunctions is likely "
+        'A CA containing "or", "and", or similar conjunctions is likely '
         "composite and should be split",
     ),
     "stage2_call3_system.j2": (
-        "Each coordination link represents a lateral coordination mechanism",
-        "share state, data, or control flow",
-        "Two responsibilities share a process model part not connected by a control action",
-        "One responsibility's feedback channel updates a PM part that another responsibility also depends on",
-        "Two responsibilities need to agree on a shared resource",
-        "An empty coordination_links list is acceptable only when no two responsibilities "
-        "share state, data, or control flow",
+        "Each coordination link represents an explicit lateral control or information",
+        "responsibilities overlap or leave a decision boundary ambiguous",
+        "actions affect the same controlled process or resource",
+        "actions can conflict or must occur in a defined order",
+        "One controller needs state or outcome information held by the other",
+        "greenhouse heating and ventilation controllers",
     ),
 }
 
@@ -83,6 +82,32 @@ def test_sp1_prompt_bug_fixes_preserve_existing_sections(
 ) -> None:
     text = (PROMPTS_DIR / template_name).read_text()
     assert section in text
+
+
+@pytest.mark.parametrize(
+    "template_name",
+    (
+        "stage2_call2a_system.j2",
+        "stage2_call2b_system.j2",
+        "stage2_call3_system.j2",
+    ),
+)
+def test_control_structure_prompts_define_the_feedback_loop(
+    template_name: str,
+) -> None:
+    rendered = TemplateLoader(PROMPTS_DIR).render_prompt(template_name)
+
+    assert "A **controller** is a functional decision maker" in rendered
+    assert "A **process model part** is decision-relevant information" in rendered
+    assert "feedback updates the process model" in rendered
+    assert "the action influences the controlled" in rendered
+
+
+@pytest.mark.parametrize("template_name", ("critic_system.j2", "revision_system.j2"))
+def test_review_prompts_reuse_the_control_loop_method(template_name: str) -> None:
+    text = (PROMPTS_DIR / template_name).read_text()
+
+    assert '{% include "_control_loop_method.j2" %}' in text
 
 
 # ---------------------------------------------------------------------------

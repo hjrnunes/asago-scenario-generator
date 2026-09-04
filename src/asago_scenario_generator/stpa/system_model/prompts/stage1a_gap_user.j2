@@ -28,8 +28,16 @@ The following losses, hazards, and security constraints have already been derive
 
 ## Capability Profile Context
 
-The following kc_subcodes have been identified for this system:
+The following capability codes have been identified for this system. Treat them
+only as a checklist of declared capabilities; a code is not itself a loss,
+hazard, or attack path:
+{% if kc_subcodes_display is defined %}
+{% for code, description in kc_subcodes_display.items() %}
+- {{ code }}: {{ description }}
+{% endfor %}
+{% else %}
 {{ kc_subcodes | join(", ") }}
+{% endif %}
 
 Use these to systematically check whether every capability has corresponding loss/hazard/constraint coverage.
 

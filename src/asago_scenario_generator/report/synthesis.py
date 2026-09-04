@@ -33,6 +33,11 @@ def render_synthesis_report(
     realization_records = _items(realization, "records")
     revision_value = _value(consideration, "revision")
     revision = _value(revision_value, "status")
+    scenario_counts = _mapping(_value(manifest, "scenario_counts"))
+    run_status = str(
+        _value(manifest, "run_status", "scenario_generation_status") or "unknown"
+    )
+    run_status_reason = str(_value(manifest, "run_status_reason") or "unknown")
     final_routes = {
         str(_value(item, "obligation_id", "id")): item
         for item in _items(consideration, "final_routes", "routes")
@@ -42,9 +47,32 @@ def render_synthesis_report(
     }
     title = escape(str(_value(manifest, "run_id") or "Synthesis run"))
     summary_rows = [
+        _row("Scenario generation status", run_status),
+        _row("Scenario status reason", run_status_reason),
         _row("Obligations", len(rows)),
         _row("Accounting rows", len(accounting_rows)),
-        _row("Generated scenarios", len(scenarios)),
+        _row(
+            "Requested candidates",
+            _known_count(scenario_counts.get("requested")),
+        ),
+        _row(
+            "Attempted candidates",
+            _known_count(scenario_counts.get("attempted")),
+        ),
+        _row(
+            "Published candidates",
+            _known_count(scenario_counts.get("generated", len(scenarios))),
+        ),
+        _row(
+            "Generated scenarios",
+            _known_count(scenario_counts.get("generated", len(scenarios))),
+        ),
+        _row("Failed candidates", _known_count(scenario_counts.get("failed"))),
+        _row("Skipped candidates", _known_count(scenario_counts.get("skipped"))),
+        _row(
+            "Diagnostic messages",
+            _known_count(scenario_counts.get("diagnostic_count")),
+        ),
         _row("Revision", revision or "not_required"),
     ]
     accounting_table = [_row(key, value) for key, value in sorted(summary.items())]
@@ -53,7 +81,7 @@ def render_synthesis_report(
         [
             "<h1>Obligation-aware synthesis</h1>",
             f'<p class="run-id">Run: <code>{title}</code></p>',
-            '<p class="notice">Scenario generation is complete. Phase 2 verification is reported separately and never removes scenarios.</p>',
+            f'<p class="notice">{escape(_scenario_status_notice(run_status))} Phase 2 verification is reported separately and never removes scenarios.</p>',
             "<h2>Run summary</h2>",
             "<table><tbody>",
             *summary_rows,
@@ -86,6 +114,7 @@ def render_synthesis_report(
             *(_row(key, value) for key, value in sorted(realization_summary.items())),
             "</tbody></table>",
             _realization_html(realization_records),
+            _candidate_outcomes_html(_value(manifest, "candidate_outcomes")),
             _phase2_html(phase2_verification),
             _scenario_html(scenarios),
         ]
@@ -137,6 +166,35 @@ def _phase2_html(value: Any) -> str:
         "<h2>Phase 2: taxonomy–STPA verification</h2>"
         f"<p>Status: <code>{escape(status)}</code></p>"
         f"<p>{escape(explanation)}</p>" + error_html + diagnostics_html
+    )
+
+
+def _known_count(value: Any) -> Any:
+    """Render absent legacy candidate counts as unknown rather than zero."""
+    return "unknown" if value is None else value
+
+
+def _scenario_status_notice(status: str) -> str:
+    """Describe scenario yield without conflating diagnostics with candidates."""
+    return {
+        "completed": "Scenario generation completed for all requested candidates.",
+        "no_candidates": (
+            "No eligible scenario candidates were available. The analysis "
+            "completed without scenario generation."
+        ),
+        "failed": (
+            "Scenario generation failed. No scenarios were published after "
+            "attempting candidates. Diagnostic and accounting artifacts were "
+            "preserved."
+        ),
+        "degraded": (
+            "Scenario generation completed with degraded yield: some requested "
+            "candidates were failed or skipped."
+        ),
+    }.get(
+        status,
+        "Scenario generation status is unknown because candidate outcomes were "
+        "not reported.",
     )
 
 
@@ -310,6 +368,66 @@ def _scenario_html(scenarios: tuple[Any, ...]) -> str:
         + "".join(rows)
         + "</tbody></table>"
     )
+
+
+def _candidate_outcomes_html(outcomes: Any) -> str:
+    """Render exact candidate terminal records when the adapter supplied them."""
+    values = _candidate_outcome_items(outcomes)
+    if values:
+        return _candidate_outcomes_table(values)
+    return _empty_candidate_outcomes_html(outcomes)
+
+
+def _candidate_outcome_items(outcomes: Any) -> tuple[Any, ...]:
+    """Accept the manifest's direct sequence as well as object wrappers."""
+    if isinstance(outcomes, (list, tuple, set, frozenset)):
+        return tuple(outcomes)
+    return _items(outcomes)
+
+
+def _empty_candidate_outcomes_html(outcomes: Any) -> str:
+    """Explain whether candidate records were empty or unavailable."""
+    if outcomes is None:
+        message = "Candidate outcomes were not reported by this adapter."
+    else:
+        message = "No scenario candidates were requested."
+    return f"<h2>Candidate outcomes</h2><p>{message}</p>"
+
+
+def _candidate_outcomes_table(values: tuple[Any, ...]) -> str:
+    """Render one table row for each exact candidate terminal record."""
+    rows = "".join(_candidate_outcome_row(item) for item in values)
+    return (
+        "<h2>Candidate outcomes</h2>"
+        "<table><thead><tr><th>Scenario</th><th>ICA slot</th><th>ICA</th>"
+        "<th>Status</th><th>Diagnostics</th></tr></thead><tbody>"
+        + rows
+        + "</tbody></table>"
+    )
+
+
+def _candidate_outcome_row(item: Any) -> str:
+    """Render one candidate record without interpreting diagnostic content."""
+    return (
+        "<tr>"
+        f"<td><code>{_candidate_field(item, 'scenario_id', '')}</code></td>"
+        f"<td><code>{_candidate_field(item, 'ica_slot_id', '')}</code></td>"
+        f"<td><code>{_candidate_field(item, 'ica_id', '—')}</code></td>"
+        f"<td>{_candidate_field(item, 'status', 'unknown')}</td>"
+        f"<td>{_candidate_diagnostics(item)}</td>"
+        "</tr>"
+    )
+
+
+def _candidate_field(item: Any, name: str, fallback: str) -> str:
+    """Escape one optional candidate field while retaining its fallback."""
+    return escape(str(_value(item, name) or fallback))
+
+
+def _candidate_diagnostics(item: Any) -> str:
+    """Escape all diagnostics for one candidate as a single report cell."""
+    diagnostics = _value(item, "diagnostics") or ()
+    return escape("; ".join(map(str, diagnostics)) or "—")
 
 
 def _realization_html(records: tuple[Any, ...]) -> str:

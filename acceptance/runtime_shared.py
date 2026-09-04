@@ -2348,6 +2348,10 @@ def _setup_sp3_mock_client(num_threats: int = 2):
     for i in range(num_threats):
         bdi_responses.append(
             {
+                "stimulus": {
+                    "category": "user_message",
+                    "description": "One user message is the typed test stimulus.",
+                },
                 "defender_vulnerabilities": [
                     {
                         "belief_handle": "belief_1",
@@ -2373,6 +2377,7 @@ def _setup_sp3_mock_client(num_threats: int = 2):
                         "source_handle": "cause_1",
                         "evidence": "The selected structural state can remain stale.",
                         "temporal_condition": None,
+                        "evidence_status": "structural_failure",
                     }
                 ],
                 "unsafe_outcome": {
@@ -2389,8 +2394,6 @@ def _setup_sp3_mock_client(num_threats: int = 2):
                     "delivery_class": "direct_prompt",
                     "selected_factor_handle": "cause_1",
                     "action_kind": "model_output",
-                    "resource_role_handles": [],
-                    "carrier_attacker_influence": "none",
                     "reason": "The selected structural factor supports the direct route.",
                 },
             }

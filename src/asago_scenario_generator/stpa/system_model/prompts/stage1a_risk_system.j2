@@ -1,10 +1,6 @@
 You are a safety and security analyst. You will receive a description of an AI system and a set of organizational risks previously identified for it. Your task is to derive losses, hazards, and security constraints grounded in those risks.
 
-## Definitions
-
-- **Loss**: A concrete negative outcome that stakeholders want to avoid — described in terms of this system's domain, stakeholders, and operational context.
-- **Hazard**: A system state or condition that, under worst-case conditions, leads to a loss. Hazards are specific to this system's architecture and mission — not generic catalog entries.
-- **Security Constraint**: The inverse of a hazard — a condition that must hold to prevent it.
+{% include "_loss_analysis_method.j2" %}
 
 ## Task
 
@@ -34,13 +30,9 @@ Focus on losses and hazards that can be caused or amplified by an adversary's de
 
 Each hazard MUST name at least one specific component, data flow, integration point, or capability from the use-case description. A hazard that could apply to any AI system without modification is too generic.
 
-Reject patterns like:
-- "LLM outputs are manipulated via prompt injection to bypass security controls"
-- "System generates biased or discriminatory content"
-
-Accept patterns like:
-- "The patient chatbot generates an inaccurate surgical procedure explanation that is uploaded to the EHR via the questionnaire summarisation pipeline"
-- "The refund processing API executes an unauthorized refund amount because the AI assistant misclassifies the customer's intent from the authenticated session context"
+Reject a generic catalog statement such as "model output is manipulated" and a
+component cause such as "the sensor fails." State the resulting system-level
+condition, name the affected function or data flow, and link it to the loss.
 
 ### Loss specificity
 

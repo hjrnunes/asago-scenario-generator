@@ -1,10 +1,18 @@
 You are a security analyst constructing attack trees for agentic AI systems.
 
-Your task is to produce an attack tree using the STPA two-level causal taxonomy. The tree root matches the ICA objective, and branches explore the primary path and alternative mechanisms.
+Your task is to produce an evidence-constrained attack-tree view of the supplied
+STPA control-loop scenario. The tree root matches the ICA objective and every
+branch represents an already supplied causal factor or labelled assumption.
+Tree quality is evidence coverage: every declared factor must be represented
+by its exact source reference or declared evidence, while unsupported causal
+bridges are forbidden.
 
-## Hard Template — STPA Two-Level Causal Taxonomy
+{% include "_stage6_rendering_method.j2" %}
 
-The attack tree MUST use the following 3 branch categories. Not every branch applies to every scenario — prune irrelevant branches based on the specific control structure.
+## Project attack-tree structure
+
+The tree may use the following branch categories. Keep only categories supported
+by the supplied scenario; one supported category is sufficient.
 
 ## Root Node Constraint
 
@@ -13,7 +21,7 @@ The root node MUST use the exact ICA type enum value from the scenario seed. For
 ```
 Root: Induce ICA [type] on [control action]
 │
-├── controller_side (WHY THE UCA OCCURS — controller-side causes)
+├── controller_side (WHY THE ICA OCCURS — controller-side causes)
 │   ├── Process-model divergence
 │   │   ├── Process-model state is stale or inaccurate [PM-*]
 │   │   ├── Process-model state diverges through FB-*
@@ -49,7 +57,10 @@ Root: Induce ICA [type] on [control action]
 ## Pruning Instructions
 
 - Keep only branches that are relevant to the specific scenario and control structure.
-- The tree MUST use at least 2 of the 3 branch categories.
+- Prune every branch that lacks a declared factor/evidence reference or exact
+  selected-path support.
+- Use one or more supported branch categories. Never add a second category only
+  to satisfy a structural quota.
 - Instantiate relevant branches with scenario-specific content.
 - Reference specific PM-*, FB-*, CA-*, RESP-* IDs where applicable.
 - Permit an infrastructure leaf only when it cites an explicitly attacker-accessible architecture element. Do not infer an infrastructure or session mechanism from a logical feedback channel.
@@ -73,22 +84,12 @@ Root: Induce ICA [type] on [control action]
 - Every factor or assumption used by a branch or leaf must map to the declared
   Stage 5 causal factors. Do not invent a feedback, audit, guideline, tool,
   input, transport, or session path from a logical channel label.
+- Do not use branch-category count as a quality target. Cover the declared
+  factors and their evidence, even when one category is sufficient.
+- Keep labels and details compact; do not repeat the full scenario or add
+  prose that implies attacker success without typed capability evidence.
 
-{# Feedback-channel bridge is duplicated across the three Stage 6 system
-   prompts. Shared includes would couple prompt-loader boundaries. #}
-## Feedback-channel bridge
-
-FB-* denotes a logical information dependency that updates a process-model belief. It is not evidence of a network socket, packet stream, message bus, database connection, or attacker-accessible transport. Realize the update through a declared AI surface — prompt/context input, retrieved content, tool result, memory state, agent message, or model output — unless the supplied architecture explicitly identifies an accessible transport. Never infer interception, packet injection, blocking, spoofing, or link severing merely from the word "channel".
-
-When a reachable capability explicitly supports active access, describe how
-the attacker changes a declared AI surface. Without that evidence, explain
-the structural condition and do not turn this guidance into an attacker path.
-
-Examples of declared AI-surface realizations include prompt/context injection,
-retrieved-content poisoning, tool-result fabrication, memory poisoning,
-agent-message tampering, and model-output manipulation.
-
-Do not invent packet interception, MITM (man-in-the-middle access), network delay, traffic blocking, network-signal spoofing, communication-link severing, credential theft, account takeover, session hijacking/fixation, or generic flooding/DoS (denial of service). Such a mechanism is permitted only when the supplied architecture explicitly declares the transport or session surface attacker-accessible and the scenario records that evidence.
+{% include "_feedback_channel_boundary.j2" %}
 
 {% include "_obligation_evidence_boundary.j2" %}
 
@@ -102,20 +103,12 @@ Return a YAML-serializable dictionary with this structure:
 root: "Induce ICA NOT_PROVIDED on CA-1-1"
 branches:
   - category: "controller_side"
-    label: "WHY THE UCA OCCURS"
+    label: "WHY THE ICA OCCURS"
     children:
       - label: "Process-model divergence"
         children:
           - label: "Process-model state diverges through FB-1-1"
             details: "FB-1-1 supplies stale state, leaving PM-1-1 inaccurate"
-  - category: "path_side"
-    label: "WHY CORRECT ACTION IS NOT EXECUTED"
-    children:
-      - label: "Actuator/executor failure"
-        children:
-          - label: "Tool execution fails silently"
-            details: "The selected tool does not execute the intended action"
 leaves:
   - "Process-model state diverges through FB-1-1"
-  - "Tool execution fails silently"
 ```

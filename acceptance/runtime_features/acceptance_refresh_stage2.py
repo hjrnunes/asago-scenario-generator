@@ -274,6 +274,10 @@ def _h_ar_named_prompts_contains(
 def _h_ar_render_call2a_prompt(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
+    from asago_scenario_generator.models.capability_profile import (
+        ZONE_DISPLAY_NAMES,
+    )
+
     loader = TemplateLoader(_PQF_PROMPTS_DIR)
     profile = world.sp1_profile
     world.template_rendered = loader.render_prompt(
@@ -283,6 +287,7 @@ def _h_ar_render_call2a_prompt(
             _sp1_valid_req_set_dict()
         ).requirements,
         capability_profile=profile,
+        zone_display_names=ZONE_DISPLAY_NAMES,
     )
     return True, ""
 

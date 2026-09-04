@@ -1,7 +1,8 @@
 Feature: SP3 mechanism-context propagation
   Stage 5 receives a purpose-built view of one immutable scenario context,
   containing its useful meaning and copyable references but no integrity
-  bookkeeping. Stage 6 receives the full content-addressed context.
+  bookkeeping. Stage 6 receives a purpose-built view of the same selected
+  evidence; content digests remain outside the reasoning prompt.
 
   Background:
     Given the SP3 prompt assembly modules are importable
@@ -33,4 +34,4 @@ Feature: SP3 mechanism-context propagation
     Given a recording LLM that returns valid Stage 5 and Stage 6 results
     When SP3 runs with the exact scenario context
     Then every Stage 5 BDI request contains the actionable scenario context
-    And every Stage 6 narrative request contains the same exact scenario context
+    And every Stage 6 narrative request contains the actionable scenario evidence without integrity bookkeeping

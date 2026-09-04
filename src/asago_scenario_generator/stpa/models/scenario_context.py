@@ -14,6 +14,10 @@ from asago_scenario_generator.stpa.models.causal_factor import (
     CausalEvidenceStatus,
     CausalFactor,
 )
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlActionEffectKind,
+    ReferenceType,
+)
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 
 
@@ -69,6 +73,23 @@ class DescribedControlAction(ScenarioContextModel):
     action_id: str = Field(min_length=1)
     description: str = Field(min_length=1)
     target_id: str = Field(min_length=1)
+    target_kind: ReferenceType | Literal["coordination_path", "unspecified"] = (
+        "unspecified"
+    )
+    effect_kind: ControlActionEffectKind | None = None
+
+    @model_validator(mode="after")
+    def validate_responsibility_message(self) -> "DescribedControlAction":
+        """Keep responsibility targets and message effects inseparable."""
+        if (
+            self.target_kind is ReferenceType.responsibility
+            and self.effect_kind is not ControlActionEffectKind.agent_message
+        ):
+            raise ValueError(
+                "a responsibility-targeted control action must have "
+                "effect_kind='agent_message'"
+            )
+        return self
 
 
 class ScenarioCoordinationPath(ScenarioContextModel):
@@ -131,9 +152,14 @@ class ScenarioControlPath(ScenarioContextModel):
                 "scenario control path requires exactly one responsibility "
                 "or coordination_path"
             )
-        if has_responsibility and self.controlled_process is None:
+        if (
+            has_responsibility
+            and self.controlled_process is None
+            and self.control_action.target_kind is not ReferenceType.responsibility
+        ):
             raise ValueError(
-                "responsibility control path requires a controlled process"
+                "a responsibility control path requires either a controlled "
+                "process or a responsibility-targeted agent message"
             )
         return self
 
@@ -225,12 +251,39 @@ class ScenarioGenerationContext(ScenarioContextModel):
     @model_validator(mode="after")
     def validate_digest_and_relationships(self) -> "ScenarioGenerationContext":
         """Reject tamper and relationships that do not reach the selected ICA."""
-        if self.context_digest != _context_digest(self.model_dump(mode="json")):
+        current_digest = _context_digest(self.model_dump(mode="json"))
+        legacy_digest = _legacy_context_digest(self)
+        if self.context_digest not in {current_digest, legacy_digest}:
             raise ValueError("context_digest does not match scenario context")
         if self.scenario_identity.ica_id != self.ica.ica_id:
             raise ValueError("scenario identity does not match ICA context")
         _validate_context_relationships(self)
         return self
+
+
+def _legacy_context_digest(context: ScenarioGenerationContext) -> str:
+    """Verify v1 contexts written before typed action semantics were added."""
+    payload = context.model_dump(mode="json")
+    path_payload = payload["target_control_path"]
+    _drop_unset_action_semantics(
+        path_payload["control_action"], context.target_control_path.control_action
+    )
+    for action_payload, action in zip(
+        path_payload.get("related_control_actions", ()),
+        context.target_control_path.related_control_actions,
+        strict=True,
+    ):
+        _drop_unset_action_semantics(action_payload, action)
+    return _context_digest(payload)
+
+
+def _drop_unset_action_semantics(
+    payload: dict[str, Any], action: DescribedControlAction
+) -> None:
+    """Remove only fields absent from a historical serialized action."""
+    for field_name in ("target_kind", "effect_kind"):
+        if field_name not in action.model_fields_set:
+            payload.pop(field_name, None)
 
 
 def _validate_context_relationships(context: ScenarioGenerationContext) -> None:

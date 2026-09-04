@@ -239,12 +239,6 @@ class TestBuildExtraKwargs:
 # -- LLMClient._request_completion ---------------------------------------
 
 
-def _parse_response(parsed: object) -> MagicMock:
-    response = MagicMock()
-    response.choices = [SimpleNamespace(message=SimpleNamespace(parsed=parsed, content="raw"))]
-    return response
-
-
 def _create_response(content: str) -> MagicMock:
     response = MagicMock()
     response.usage = SimpleNamespace(prompt_tokens=3, completion_tokens=4)
@@ -253,15 +247,19 @@ def _create_response(content: str) -> MagicMock:
 
 
 class TestRequestCompletion:
-    def test_parse_branch_returns_parsed(self) -> None:
+    def test_strict_pydantic_branch_retains_raw_content(self) -> None:
         client = _make_client()
-        client._client.beta.chat.completions.parse.return_value = _parse_response("parsed-content")
+        client._client.chat.completions.create.return_value = _create_response(
+            '{"value":"parsed-content"}'
+        )
         response, content = client._request_completion(
             [{"role": "user", "content": "hi"}], _Schema, {}, allow_unvalidated=False
         )
-        assert content == "parsed-content"
-        client._client.beta.chat.completions.parse.assert_called_once()
-        client._client.chat.completions.create.assert_not_called()
+        assert content == '{"value":"parsed-content"}'
+        client._client.chat.completions.create.assert_called_once()
+        call = client._client.chat.completions.create.call_args.kwargs
+        assert call["response_format"] == _json_schema_response_format(_Schema)
+        client._client.beta.chat.completions.parse.assert_not_called()
 
     def test_create_branch_when_allow_unvalidated(self) -> None:
         client = _make_client()
@@ -293,14 +291,16 @@ class TestRequestCompletion:
         client._client.chat.completions.create.assert_called_once()
         client._client.beta.chat.completions.parse.assert_not_called()
 
-    def test_parse_branch_uses_first_choice(self) -> None:
+    def test_strict_pydantic_branch_uses_first_choice(self) -> None:
         """Mutant ``choices[0] -> choices[1]`` must raise on a single choice."""
         client = _make_client()
-        client._client.beta.chat.completions.parse.return_value = _parse_response("parsed")
+        client._client.chat.completions.create.return_value = _create_response(
+            '{"value":"parsed"}'
+        )
         response, content = client._request_completion(
             [{"role": "user", "content": "hi"}], _Schema, {}, allow_unvalidated=False
         )
-        assert content == "parsed"
+        assert content == '{"value":"parsed"}'
 
     def test_create_branch_uses_first_choice(self) -> None:
         """Mutant ``choices[0] -> choices[1]`` must raise on a single choice."""

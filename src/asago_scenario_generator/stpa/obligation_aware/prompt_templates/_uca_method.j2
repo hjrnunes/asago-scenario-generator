@@ -1,11 +1,37 @@
-Four ICA (unsafe control action) types:
+{% include "_stpa_control_loop.j2" %}
+
+Standard STPA calls an unsafe action a UCA (unsafe control action). In this
+project, an ICA is one concrete security finding within a fixed
+controller/action/category slot.
+
+An ICA states the real context in which the fixed controller action becomes
+unsafe and links that action to a hazard. A controller belief or causal failure
+may explain the ICA later, but is not the real hazardous context itself.
+
+Four ICA types:
 
 - NOT_PROVIDED: the required control action is absent when it is needed.
 - INCORRECT: the action is provided, but its value, content, destination, or effect is unsafe.
 - WRONG_TIMING: the action is provided too early, too late, or in an unsafe order.
 - WRONG_DURATION: a continuous action stops too soon, continues too long, or is applied for an unsafe duration.
 
-Timing and duration are distinct. A one-shot action cannot receive a
-WRONG_DURATION finding without explicit continuing behavior. An ICA describes
+Timing and duration are distinct. WRONG_DURATION is eligible only when the
+supplied `action_temporality` is `continuous` or `bounded_duration`; do not
+infer continuing behavior from action prose. An ICA describes
 unsafe controller behavior; a safeguard, recommendation, policy, or
 requirement such as "implement MFA" or "add rate limiting" is not an ICA.
+
+Unrelated example: a greenhouse climate controller providing `start heating`
+while the actual temperature is already above the safe limit is INCORRECT. “The
+temperature reading is delayed” is a possible cause, not the ICA context, and
+“replace the sensor” is a mitigation, not an ICA.
+
+An authorized omission is not automatically unsafe: intentionally omitting an
+optional status update while no protected operation is pending is not a
+NOT_PROVIDED finding. In contrast, a controller executing a protected state
+change for a request that lacks the required approval is an unsafe execution;
+the real hazardous state is the unapproved request being accepted, and a
+plausible loss is the protected record being changed without authorization.
+“The system is susceptible to misuse” is only a susceptibility claim, not a
+hazardous state, and “the system is compromised” is an asserted consequence,
+not a reasoned loss connection.

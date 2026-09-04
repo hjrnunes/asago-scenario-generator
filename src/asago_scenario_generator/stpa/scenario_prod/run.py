@@ -15,6 +15,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -50,7 +51,10 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     ProfileBasis,
     RequestedEnvironmentBasis,
 )
-from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.models.loss_analysis import (
+    LossAnalysis,
+    SecurityConstraint,
+)
 from asago_scenario_generator.stpa.models.scenario_envelope import (
     GherkinSpec,
     ScenarioEnvelope,
@@ -62,7 +66,11 @@ from asago_scenario_generator.stpa.models.scenario_context import (
 
 from ._constants import PROMPTS_DIR
 from .assembly import assemble_envelope
-from .attack_tree import build_attack_tree_prompts, parse_attack_tree
+from .attack_tree import (
+    ATTACK_TREE_MAX_COMPLETION_TOKENS,
+    build_attack_tree_prompts,
+    parse_attack_tree,
+)
 from .bdi_generation import (
     BDIGenerationResult,
     assemble_scenario_spec,
@@ -75,7 +83,6 @@ from .context import build_scenario_generation_context
 from .coverage import compute_coverage_gaps, write_coverage_gaps
 from .execution_bundle import (
     ExecutionBundlePublication,
-    ExecutionBundlePublicationError,
     publish_execution_bundle,
     publish_execution_target_profile,
 )
@@ -85,8 +92,18 @@ from .execution_projection import (
     prepare_execution_projection,
 )
 from .eval_metrics import compute_eval_scorecard, write_eval_scorecard
-from .gherkin import build_gherkin_prompts, find_security_constraint, parse_gherkin_spec
-from .narrative import build_narrative_prompts
+from .gherkin import (
+    GHERKIN_MAX_COMPLETION_TOKENS,
+    apply_gherkin_identity_scaffold,
+    build_gherkin_identity_scaffold,
+    build_gherkin_prompts,
+    find_security_constraint,
+    parse_gherkin_spec,
+)
+from .narrative import (
+    NARRATIVE_MAX_COMPLETION_TOKENS,
+    build_narrative_prompts,
+)
 from .projection import (
     canonical_projection_data,
     export_projection_json,
@@ -102,14 +119,29 @@ from .validators import (
     validate_gherkin_structure,
     validate_loss_hazard_id_references,
     validate_traceability,
-    validate_tree_branch_coverage,
+    validate_tree_factor_evidence_coverage,
     validate_tree_id_references,
     validate_vulnerability_completeness,
 )
 
 DEFAULT_TEMPERATURE = LLM_DEFAULT_TEMPERATURE
 
-__all__ = ["SP3RunResult", "run_sp3"]
+# Stage 6 produces rendering artifacts, not a second analysis.  Keep each
+# provider response bounded by the artifact it is asked to render.  The
+# values are also passed to prompt preflight so a configured model reserves
+# enough room for its response before dispatch.
+STAGE6_MAX_COMPLETION_TOKENS = {
+    "narrative": NARRATIVE_MAX_COMPLETION_TOKENS,
+    "attack_tree": ATTACK_TREE_MAX_COMPLETION_TOKENS,
+    "gherkin": GHERKIN_MAX_COMPLETION_TOKENS,
+}
+
+__all__ = [
+    "SP3CandidateOutcome",
+    "SP3CandidateStatus",
+    "SP3RunResult",
+    "run_sp3",
+]
 
 _EMPTY_ATTACK_TREE: dict = {"root": "", "branches": [], "leaves": []}
 _EMPTY_GHERKIN_SPEC = GherkinSpec(
@@ -122,6 +154,27 @@ _EMPTY_GHERKIN_SPEC = GherkinSpec(
 )
 
 
+class SP3CandidateStatus(str, Enum):
+    """One terminal lifecycle status for a requested SP3 candidate."""
+
+    published = "published"
+    generation_failed = "generation_failed"
+    rendering_failed = "rendering_failed"
+    publication_failed = "publication_failed"
+    skipped = "skipped"
+
+
+@dataclass(frozen=True)
+class SP3CandidateOutcome:
+    """Terminal outcome for one exact scenario/slot/ICA candidate."""
+
+    scenario_id: str
+    ica_slot_id: str
+    ica_id: str | None
+    status: SP3CandidateStatus
+    diagnostics: tuple[str, ...] = ()
+
+
 @dataclass
 class SP3RunResult:
     """Result of a full SP3 run."""
@@ -132,6 +185,31 @@ class SP3RunResult:
     coverage_gaps: dict = field(default_factory=dict)
     stage_errors: list[str] = field(default_factory=list)
     validation_errors: list[str] = field(default_factory=list)
+    # A real SP3 run always returns a tuple, including ``()`` when no
+    # candidates were requested.  Legacy adapters that predate this field may
+    # leave it absent/None; synthesis accounting treats that as unknown.
+    candidate_outcomes: tuple[SP3CandidateOutcome, ...] = ()
+
+
+@dataclass
+class _CandidateOutcomeBuilder:
+    """Mutable assembly state kept private until a run reaches its return."""
+
+    scenario_id: str
+    ica_slot_id: str
+    ica_id: str | None
+    status: SP3CandidateStatus | None = None
+    diagnostics: list[str] = field(default_factory=list)
+
+    def terminal(self) -> SP3CandidateOutcome:
+        """Freeze this candidate exactly once for public result accounting."""
+        return SP3CandidateOutcome(
+            scenario_id=self.scenario_id,
+            ica_slot_id=self.ica_slot_id,
+            ica_id=self.ica_id,
+            status=self.status or SP3CandidateStatus.skipped,
+            diagnostics=tuple(self.diagnostics),
+        )
 
 
 @dataclass(frozen=True)
@@ -216,6 +294,9 @@ def run_sp3(
     temperature = effective_temperature(llm_client, temperature)
 
     stage_errors: list[str] = []
+    candidate_builders = _candidate_outcome_builders(
+        enriched_threat_set.structural_threats
+    )
     requested_basis = _resolve_requested_environment_basis(
         execution_target_profile, requested_environment_basis
     )
@@ -231,6 +312,7 @@ def run_sp3(
         capability_profile=capability_profile,
         scenario_contexts=scenario_contexts,
         requested_environment_basis=requested_basis,
+        candidate_builders=candidate_builders,
     )
     scenario_envelopes, validated_projections = _collect_stage6_artifacts(
         llm_client,
@@ -246,13 +328,25 @@ def run_sp3(
         capability_profile=capability_profile,
         run_identity=run_identity,
         execution_target_profile=execution_target_profile,
+        candidate_builders=candidate_builders,
     )
+    successful_candidate_ids = {
+        envelope.scenario_id for envelope, _projection in validated_projections
+    }
     profile_published = _publish_execution_target_profile(
         run_dir, execution_target_profile, stage_errors
     )
     if profile_published:
-        _publish_validated_projections(
+        publication_error = _publish_validated_projections(
             run_dir, run_identity, validated_projections, stage_errors
+        )
+    else:
+        publication_error = _latest_stage_error(stage_errors)
+    if publication_error is not None:
+        _mark_publication_failures(
+            candidate_builders,
+            successful_candidate_ids,
+            publication_error,
         )
     all_validation_errors, coverage_gaps, eval_scorecard = _stage7_outputs(
         scenario_envelopes,
@@ -286,7 +380,135 @@ def run_sp3(
         coverage_gaps=coverage_gaps,
         stage_errors=stage_errors,
         validation_errors=all_validation_errors,
+        candidate_outcomes=tuple(builder.terminal() for builder in candidate_builders),
     )
+
+
+def _candidate_outcome_builders(threats: list[Any]) -> list[_CandidateOutcomeBuilder]:
+    """Create one stable candidate identity before any provider call."""
+    return [
+        _CandidateOutcomeBuilder(
+            scenario_id=f"SCN-{index + 1:03d}",
+            ica_slot_id=threat.ica_slot_id,
+            ica_id=threat.ica_id,
+        )
+        for index, threat in enumerate(threats)
+    ]
+
+
+def _latest_stage_error(stage_errors: list[str]) -> str | None:
+    """Return the most recent publication diagnostic when one was appended."""
+    return stage_errors[-1] if stage_errors else None
+
+
+def _mark_publication_failures(
+    candidate_builders: list[_CandidateOutcomeBuilder],
+    scenario_ids: set[str],
+    diagnostic: str,
+) -> None:
+    """Convert each affected successful candidate to one publication failure."""
+    for builder in candidate_builders:
+        if builder.scenario_id not in scenario_ids:
+            continue
+        if builder.status is SP3CandidateStatus.published:
+            builder.status = SP3CandidateStatus.publication_failed
+            builder.diagnostics.append(diagnostic)
+
+
+def _candidate_builder_at(
+    candidate_builders: list[_CandidateOutcomeBuilder] | None,
+    index: int,
+) -> _CandidateOutcomeBuilder | None:
+    """Resolve one candidate outcome by the stable threat order."""
+    if candidate_builders is None or index >= len(candidate_builders):
+        return None
+    return candidate_builders[index]
+
+
+def _record_stage5_candidate(
+    result: _Stage5ThreatResult,
+    builder: _CandidateOutcomeBuilder | None,
+    stage_errors: list[str],
+    prior_error_count: int,
+) -> None:
+    """Record Stage 5 diagnostics while leaving valid specs available to Stage 6."""
+    if builder is None:
+        return
+    diagnostics = stage_errors[prior_error_count:]
+    if result.scenario_spec is not None:
+        if diagnostics:
+            builder.status = SP3CandidateStatus.generation_failed
+            builder.diagnostics.extend(diagnostics)
+        else:
+            # Stage 6 assigns the terminal rendering/publication result.
+            builder.status = None
+        return
+    builder.status = SP3CandidateStatus.generation_failed
+    builder.diagnostics.extend(
+        diagnostics or ["Stage 5 did not produce a scenario specification"]
+    )
+
+
+def _skip_stage5_remaining_candidates(
+    candidate_builders: list[_CandidateOutcomeBuilder] | None,
+    index: int,
+) -> None:
+    """Mark candidates after a bounded Stage 5 length circuit break."""
+    if candidate_builders is None:
+        return
+    diagnostic = (
+        "Not attempted after the bounded Stage 5 structured-output "
+        "length-failure circuit breaker."
+    )
+    for remaining in candidate_builders[index + 1 :]:
+        if remaining.status is None:
+            remaining.status = SP3CandidateStatus.skipped
+            remaining.diagnostics.append(diagnostic)
+
+
+def _run_stage5_candidate(
+    llm_client: LLMClient,
+    threat: Any,
+    control_structure: ControlStructure,
+    loss_analysis: LossAnalysis,
+    run_dir: Path,
+    index: int,
+    loader: TemplateLoader,
+    temperature: float,
+    stage_errors: list[str],
+    *,
+    capability_profile: CapabilityProfile | None,
+    scenario_contexts: Mapping[str, ScenarioGenerationContext] | None,
+    requested_environment_basis: RequestedEnvironmentBasis | None,
+    candidate_builders: list[_CandidateOutcomeBuilder] | None,
+) -> _Stage5ThreatResult:
+    """Run one isolated Stage 5 candidate and record its outcome evidence."""
+    prior_error_count = len(stage_errors)
+    try:
+        result = _run_stage5_for_threat(
+            llm_client,
+            threat,
+            control_structure,
+            run_dir,
+            index,
+            loader,
+            temperature,
+            stage_errors,
+            loss_analysis=loss_analysis,
+            capability_profile=capability_profile,
+            scenario_contexts=scenario_contexts,
+            requested_environment_basis=requested_environment_basis,
+        )
+    except Exception as exc:  # noqa: BLE001 - isolate one candidate
+        stage_errors.append(f"Stage 5 candidate failed for SCN-{index + 1:03d}: {exc}")
+        result = _Stage5ThreatResult(None)
+    _record_stage5_candidate(
+        result,
+        _candidate_builder_at(candidate_builders, index),
+        stage_errors,
+        prior_error_count,
+    )
+    return result
 
 
 def _collect_stage5_specs(
@@ -302,29 +524,32 @@ def _collect_stage5_specs(
     capability_profile: CapabilityProfile | None,
     scenario_contexts: Mapping[str, ScenarioGenerationContext] | None,
     requested_environment_basis: RequestedEnvironmentBasis | None,
+    candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
 ) -> list[ScenarioSpec]:
     """Generate and retain the valid Stage 5 specs in threat order."""
     specs: list[ScenarioSpec] = []
     threats = enriched_threat_set.structural_threats
     for index, threat in enumerate(threats):
-        result = _run_stage5_for_threat(
+        result = _run_stage5_candidate(
             llm_client,
             threat,
             control_structure,
+            loss_analysis,
             run_dir,
             index,
             loader,
             temperature,
             stage_errors,
-            loss_analysis=loss_analysis,
             capability_profile=capability_profile,
             scenario_contexts=scenario_contexts,
             requested_environment_basis=requested_environment_basis,
+            candidate_builders=candidate_builders,
         )
         if result.scenario_spec is not None:
             specs.append(result.scenario_spec)
         if result.abort_remaining:
             _record_stage5_abort(stage_errors, len(threats) - index - 1)
+            _skip_stage5_remaining_candidates(candidate_builders, index)
             break
     return specs
 
@@ -338,6 +563,126 @@ def _record_stage5_abort(stage_errors: list[str], remaining: int) -> None:
             "length failures. Verify the serving runtime's structured-output "
             "configuration before retrying the run."
         )
+
+
+def _stage6_diagnostics(
+    stage_errors: list[str],
+    prior_error_count: int,
+    fallback: str,
+) -> tuple[str, ...]:
+    """Return new Stage 6 diagnostics, retaining one fallback when absent."""
+    return tuple(stage_errors[prior_error_count:]) or (fallback,)
+
+
+def _publish_stage6_artifacts(
+    envelope: ScenarioEnvelope,
+    projection_doc: ValidatedExecutionProjection | dict | None,
+    scenarios_dir: Path,
+    stage_errors: list[str],
+    prior_error_count: int,
+    builder: _CandidateOutcomeBuilder | None,
+) -> None:
+    """Write one scenario companion set and assign its publication status."""
+    try:
+        _write_scenario_artifacts(envelope, scenarios_dir, projection_doc)
+    except Exception as exc:  # noqa: BLE001 - isolate publication failure
+        diagnostic = (
+            f"Stage 6 artifact publication failed for {envelope.scenario_id}: {exc}"
+        )
+        stage_errors.append(diagnostic)
+        _mark_candidate_failure(
+            [builder] if builder is not None else None,
+            envelope.scenario_id,
+            SP3CandidateStatus.publication_failed,
+            tuple(stage_errors[prior_error_count:]),
+        )
+        return
+    if builder is not None:
+        builder.status = SP3CandidateStatus.published
+        builder.diagnostics.extend(stage_errors[prior_error_count:])
+
+
+def _render_stage6_candidate(
+    llm_client: LLMClient,
+    spec: ScenarioSpec,
+    control_structure: ControlStructure,
+    loss_analysis: LossAnalysis,
+    run_dir: Path,
+    scenarios_dir: Path,
+    loader: TemplateLoader,
+    temperature: float,
+    max_workers: int,
+    stage_errors: list[str],
+    *,
+    capability_profile: CapabilityProfile | None,
+    run_identity: ExecutionRunIdentity,
+    execution_target_profile: ExecutionTargetProfile | None,
+    candidate_builders: list[_CandidateOutcomeBuilder] | None,
+) -> tuple[ScenarioEnvelope, ValidatedExecutionProjection | dict | None] | None:
+    """Render and persist one Stage 6 candidate, isolating all failure kinds."""
+    prior_error_count = len(stage_errors)
+    try:
+        envelope, projection_doc = _run_stage6_for_spec(
+            llm_client,
+            spec,
+            control_structure,
+            loss_analysis,
+            run_dir,
+            loader,
+            temperature,
+            max_workers,
+            stage_errors,
+            capability_profile=capability_profile,
+            run_identity=run_identity,
+            execution_target_profile=execution_target_profile,
+        )
+    except Exception as exc:  # noqa: BLE001 - isolate one candidate
+        diagnostic = f"Stage 6 rendering failed for {spec.scenario_id}: {exc}"
+        stage_errors.append(diagnostic)
+        _mark_candidate_failure(
+            candidate_builders,
+            spec.scenario_id,
+            SP3CandidateStatus.rendering_failed,
+            tuple(stage_errors[prior_error_count:]),
+        )
+        return None
+    builder = _candidate_builder_for(candidate_builders, spec.scenario_id)
+    if envelope is None:
+        diagnostics = _stage6_diagnostics(
+            stage_errors,
+            prior_error_count,
+            f"Stage 6 rendering produced no envelope for {spec.scenario_id}",
+        )
+        _mark_candidate_failure(
+            candidate_builders,
+            spec.scenario_id,
+            SP3CandidateStatus.rendering_failed,
+            diagnostics,
+        )
+        return None
+    _publish_stage6_artifacts(
+        envelope,
+        projection_doc,
+        scenarios_dir,
+        stage_errors,
+        prior_error_count,
+        builder,
+    )
+    return envelope, projection_doc
+
+
+def _mark_unresolved_stage6_candidates(
+    candidate_builders: list[_CandidateOutcomeBuilder] | None,
+) -> None:
+    """Close any candidate left without a Stage 6 terminal status."""
+    if candidate_builders is None:
+        return
+    for builder in candidate_builders:
+        if builder.status is None:
+            builder.status = SP3CandidateStatus.rendering_failed
+            builder.diagnostics.append(
+                "Stage 6 did not produce a terminal candidate outcome"
+            )
 
 
 def _collect_stage6_artifacts(
@@ -355,6 +700,7 @@ def _collect_stage6_artifacts(
     capability_profile: CapabilityProfile | None,
     run_identity: ExecutionRunIdentity,
     execution_target_profile: ExecutionTargetProfile | None,
+    candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
 ) -> tuple[
     list[ScenarioEnvelope],
     list[tuple[ScenarioEnvelope, ValidatedExecutionProjection]],
@@ -363,12 +709,13 @@ def _collect_stage6_artifacts(
     envelopes: list[ScenarioEnvelope] = []
     validated: list[tuple[ScenarioEnvelope, ValidatedExecutionProjection]] = []
     for spec in scenario_specs:
-        envelope, projection_doc = _run_stage6_for_spec(
+        artifact = _render_stage6_candidate(
             llm_client,
             spec,
             control_structure,
             loss_analysis,
             run_dir,
+            scenarios_dir,
             loader,
             temperature,
             max_workers,
@@ -376,14 +723,43 @@ def _collect_stage6_artifacts(
             capability_profile=capability_profile,
             run_identity=run_identity,
             execution_target_profile=execution_target_profile,
+            candidate_builders=candidate_builders,
         )
-        if envelope is None:
+        if artifact is None:
             continue
+        envelope, projection_doc = artifact
         envelopes.append(envelope)
         if isinstance(projection_doc, ValidatedExecutionProjection):
             validated.append((envelope, projection_doc))
-        _write_scenario_artifacts(envelope, scenarios_dir, projection_doc)
+    _mark_unresolved_stage6_candidates(candidate_builders)
     return envelopes, validated
+
+
+def _candidate_builder_for(
+    candidate_builders: list[_CandidateOutcomeBuilder] | None,
+    scenario_id: str,
+) -> _CandidateOutcomeBuilder | None:
+    """Resolve one mutable outcome by exact scenario identity."""
+    if candidate_builders is None:
+        return None
+    return next(
+        (item for item in candidate_builders if item.scenario_id == scenario_id),
+        None,
+    )
+
+
+def _mark_candidate_failure(
+    candidate_builders: list[_CandidateOutcomeBuilder] | None,
+    scenario_id: str,
+    status: SP3CandidateStatus,
+    diagnostics: tuple[str, ...],
+) -> None:
+    """Assign one terminal failure without creating duplicate candidate rows."""
+    builder = _candidate_builder_for(candidate_builders, scenario_id)
+    if builder is None:
+        return
+    builder.status = status
+    builder.diagnostics.extend(diagnostics)
 
 
 def _publish_validated_projections(
@@ -391,10 +767,10 @@ def _publish_validated_projections(
     run_identity: ExecutionRunIdentity,
     validated_projections: list[tuple[ScenarioEnvelope, ValidatedExecutionProjection]],
     stage_errors: list[str],
-) -> None:
+) -> str | None:
     """Publish the v2 bundle after all accepted pairs have passed preflight."""
     if not validated_projections:
-        return
+        return None
     try:
         publish_execution_bundle(
             run_dir,
@@ -404,8 +780,11 @@ def _publish_validated_projections(
                 for envelope, projection in validated_projections
             ),
         )
-    except (OSError, ValueError) as exc:
-        stage_errors.append(f"Execution bundle publication failed: {exc}")
+    except Exception as exc:  # noqa: BLE001 - isolate bundle publication failure
+        diagnostic = f"Execution bundle publication failed: {exc}"
+        stage_errors.append(diagnostic)
+        return diagnostic
+    return None
 
 
 def _publish_execution_target_profile(
@@ -418,7 +797,7 @@ def _publish_execution_target_profile(
         return True
     try:
         publish_execution_target_profile(run_dir, profile)
-    except (ExecutionBundlePublicationError, OSError, ValueError) as exc:
+    except Exception as exc:  # noqa: BLE001 - isolate profile publication failure
         stage_errors.append(f"Execution target profile publication failed: {exc}")
         return False
     return True
@@ -743,6 +1122,66 @@ def _intention_reference_errors(
     ]
 
 
+def _stage6_projection(
+    spec: ScenarioSpec,
+    control_structure: ControlStructure,
+    stage_errors: list[str],
+    run_identity: ExecutionRunIdentity | None,
+    execution_target_profile: ExecutionTargetProfile | None,
+) -> tuple[ValidatedExecutionProjection | dict | None, str | None]:
+    """Prepare one Stage 6 projection and its shared prompt alignment."""
+    if run_identity is not None:
+        try:
+            projection = prepare_execution_projection(
+                spec,
+                control_structure,
+                run_identity,
+                target_profile=execution_target_profile,
+            )
+        except ExecutionProjectionPreparationError as exc:
+            stage_errors.append(
+                f"Stage 6 projection failed for {spec.scenario_id}: {exc}"
+            )
+            return None, None
+        return projection, projection.alignment_view
+
+    # Only an explicitly direct diagnostic caller (which omits the run
+    # identity) may exercise the historical v1 projection path.  Product
+    # ``run_sp3`` always supplies an identity and therefore fails closed
+    # when Stage 5 omitted the required unsafe outcome.
+    try:
+        legacy_projection = project_execution(spec, control_structure)
+    except ValueError as exc:
+        stage_errors.append(f"Stage 6 projection failed for {spec.scenario_id}: {exc}")
+        return None, None
+    projection = canonical_projection_data(legacy_projection)
+    return projection, render_projection_alignment_table(projection)
+
+
+def _stage6_prompts_or_none(
+    spec: ScenarioSpec,
+    control_structure: ControlStructure,
+    loss_analysis: LossAnalysis,
+    loader: TemplateLoader,
+    stage_errors: list[str],
+    projection_alignment: str | None,
+    capability_profile: CapabilityProfile | None,
+) -> _Stage6Prompts | None:
+    """Build Stage 6 prompts while converting context errors into diagnostics."""
+    try:
+        return _build_stage6_prompts(
+            spec,
+            control_structure,
+            loss_analysis,
+            loader,
+            projection_alignment=projection_alignment,
+            capability_profile=capability_profile,
+        )
+    except ValueError as exc:
+        stage_errors.append(f"Stage 6 context failed for {spec.scenario_id}: {exc}")
+        return None
+
+
 def _run_stage6_for_spec(
     llm_client: LLMClient,
     spec: ScenarioSpec,
@@ -772,55 +1211,44 @@ def _run_stage6_for_spec(
         scenario was rejected before any Stage 6 provider call and no
         artifact is written.
     """
-    projection_doc: ValidatedExecutionProjection | dict | None
-    if run_identity is not None:
-        try:
-            projection_doc = prepare_execution_projection(
-                spec,
-                control_structure,
-                run_identity,
-                target_profile=execution_target_profile,
-            )
-        except ExecutionProjectionPreparationError as exc:
-            stage_errors.append(
-                f"Stage 6 projection failed for {spec.scenario_id}: {exc}"
-            )
-            return None, None
-        projection_alignment = projection_doc.alignment_view
-    else:
-        # Only an explicitly direct diagnostic caller (which omits the run
-        # identity) may exercise the historical v1 projection path.  Product
-        # ``run_sp3`` always supplies an identity and therefore fails closed
-        # when Stage 5 omitted the required unsafe outcome.
-        try:
-            legacy_projection = project_execution(spec, control_structure)
-        except ValueError as e:
-            stage_errors.append(
-                f"Stage 6 projection failed for {spec.scenario_id}: {e}"
-            )
-            return None, None
-        projection_doc = canonical_projection_data(legacy_projection)
-        projection_alignment = render_projection_alignment_table(projection_doc)
-
-    try:
-        prompts = _build_stage6_prompts(
-            spec,
-            control_structure,
-            loss_analysis,
-            loader,
-            projection_alignment=projection_alignment,
-            capability_profile=capability_profile,
-        )
-    except ValueError as e:
-        stage_errors.append(f"Stage 6 context failed for {spec.scenario_id}: {e}")
+    projection_doc, projection_alignment = _stage6_projection(
+        spec,
+        control_structure,
+        stage_errors,
+        run_identity,
+        execution_target_profile,
+    )
+    if projection_doc is None:
+        return None, None
+    prompts = _stage6_prompts_or_none(
+        spec,
+        control_structure,
+        loss_analysis,
+        loader,
+        stage_errors,
+        projection_alignment,
+        capability_profile,
+    )
+    if prompts is None:
         return None, None
 
+    gherkin_security_constraint = find_security_constraint(spec, loss_analysis)
     results = _parallel_stage6_calls(
         llm_client=llm_client,
         run_dir=run_dir,
         prompts=prompts,
         temperature=temperature,
         max_workers=max_workers,
+        slot_id=spec.threat_source.ica_slot_id,
+        scenario_id=spec.scenario_id,
+        gherkin_scaffold=build_gherkin_identity_scaffold(
+            spec,
+            gherkin_security_constraint,
+            loss_analysis,
+        ),
+        gherkin_scenario_spec=spec,
+        gherkin_security_constraint=gherkin_security_constraint,
+        gherkin_loss_analysis=loss_analysis,
     )
 
     prior_error_count = len(stage_errors)
@@ -840,7 +1268,8 @@ def _run_stage6_for_spec(
         stage_errors,
         narrative_text=narrative_text,
     )
-    if len(stage_errors) != prior_error_count:
+    stage6_errors = stage_errors[prior_error_count:]
+    if stage6_errors and not _stage6_quality_errors_are_nonblocking(stage6_errors):
         return None, None
 
     envelope = assemble_envelope(
@@ -852,8 +1281,27 @@ def _run_stage6_for_spec(
         gherkin_raw=gherkin_raw,
         capability_profile=capability_profile,
         control_structure=control_structure,
+        execution_projection=(
+            projection_doc.projection
+            if isinstance(projection_doc, ValidatedExecutionProjection)
+            else None
+        ),
     )
     return envelope, projection_doc
+
+
+def _stage6_quality_errors_are_nonblocking(errors: list[str]) -> bool:
+    """Keep a valid STPA scenario when only factor coverage is incomplete.
+
+    A rendering omission is useful analytical evidence and should be visible
+    in the run diagnostics, but it must not erase the ordinary STPA finding.
+    Unsupported structural bridges remain fatal so a renderer cannot widen
+    the scenario's causal authority.
+    """
+    return bool(errors) and all(
+        error.startswith("Attack tree does not cover declared causal factor")
+        for error in errors
+    )
 
 
 @dataclass
@@ -955,7 +1403,7 @@ def _validate_stage6_tree(
     """Run tree-related validators for Stage 6 artifacts."""
     _extend_validation_errors(
         (
-            validate_tree_branch_coverage(attack_tree),
+            validate_tree_factor_evidence_coverage(attack_tree, spec),
             validate_tree_id_references(attack_tree, control_structure),
             validate_attack_tree_root_label(
                 attack_tree,
@@ -987,6 +1435,112 @@ def _validate_stage6_gherkin(
             stage_errors.extend(id_result.errors)
 
 
+def _stage6_gherkin_parser(
+    gherkin_scaffold: GherkinSpec | None,
+    gherkin_scenario_spec: ScenarioSpec | None,
+    gherkin_security_constraint: SecurityConstraint | None,
+    gherkin_loss_analysis: LossAnalysis | None,
+):
+    """Select the identity-preserving parser for a contextual Gherkin call."""
+    if gherkin_scaffold is None or gherkin_scenario_spec is None:
+        return _parse_gherkin_result
+
+    def _parse_result(result: Any) -> GherkinSpec:
+        parsed = _parse_gherkin_result(result)
+        return apply_gherkin_identity_scaffold(
+            parsed,
+            gherkin_scenario_spec,
+            gherkin_security_constraint,
+            gherkin_loss_analysis,
+        )
+
+    return _parse_result
+
+
+def _run_stage6_gherkin_call(
+    *,
+    llm_client: LLMClient,
+    run_dir: Path,
+    prompt_pair: tuple[str, str],
+    temperature: float,
+    slot_id: str | None,
+    scenario_id: str | None,
+    gherkin_scaffold: GherkinSpec | None,
+    gherkin_scenario_spec: ScenarioSpec | None,
+    gherkin_security_constraint: SecurityConstraint | None,
+    gherkin_loss_analysis: LossAnalysis | None,
+) -> tuple[str | None, str | None]:
+    """Run one structured Gherkin rendering call with bounded correction."""
+    sys_prompt, user_prompt = prompt_pair
+    spec, _result, error = safe_llm_call(
+        llm_client=llm_client,
+        system_prompt=sys_prompt,
+        user_prompt=user_prompt,
+        response_format=GherkinSpec,
+        run_dir=run_dir,
+        stage="stage_6",
+        step="gherkin",
+        slot_id=slot_id,
+        scenario_id=scenario_id,
+        temperature=temperature,
+        max_completion_tokens=STAGE6_MAX_COMPLETION_TOKENS["gherkin"],
+        validation_retries=1,
+        validation_retry_include_schema=False,
+        validation_retry_feedback=(
+            ' Return one closed JSON object with fields "feature", '
+            '"scenario", "given", "when", "then_expected", and '
+            '"then_actual". Every list item must be a separate JSON '
+            "string; do not emit YAML-only continuation syntax."
+        ),
+        result_parser=_stage6_gherkin_parser(
+            gherkin_scaffold,
+            gherkin_scenario_spec,
+            gherkin_security_constraint,
+            gherkin_loss_analysis,
+        ),
+        result_validator=_validate_gherkin_result,
+    )
+    if error is not None or spec is None:
+        return None, error or "Gherkin provider returned no result"
+    return (
+        yaml.safe_dump(
+            spec.model_dump(mode="json"),
+            sort_keys=False,
+            allow_unicode=True,
+        ),
+        None,
+    )
+
+
+def _run_stage6_raw_call(
+    *,
+    llm_client: LLMClient,
+    run_dir: Path,
+    step: str,
+    prompt_pair: tuple[str, str],
+    temperature: float,
+    slot_id: str | None,
+    scenario_id: str | None,
+) -> tuple[str | None, str | None]:
+    """Run one raw Stage 6 rendering call."""
+    sys_prompt, user_prompt = prompt_pair
+    text, _result, error = safe_llm_call_raw(
+        llm_client=llm_client,
+        system_prompt=sys_prompt,
+        user_prompt=user_prompt,
+        run_dir=run_dir,
+        stage="stage_6",
+        step=step,
+        slot_id=slot_id,
+        scenario_id=scenario_id,
+        temperature=temperature,
+        max_completion_tokens=STAGE6_MAX_COMPLETION_TOKENS[step],
+    )
+    if error is not None:
+        return None, error
+    return text, None
+
+
 def _parallel_stage6_calls(
     *,
     llm_client: LLMClient,
@@ -994,6 +1548,12 @@ def _parallel_stage6_calls(
     prompts: _Stage6Prompts,
     temperature: float,
     max_workers: int,
+    slot_id: str | None = None,
+    scenario_id: str | None = None,
+    gherkin_scaffold: GherkinSpec | None = None,
+    gherkin_scenario_spec: ScenarioSpec | None = None,
+    gherkin_security_constraint: SecurityConstraint | None = None,
+    gherkin_loss_analysis: LossAnalysis | None = None,
 ) -> dict[str, tuple[str | None, str | None]]:
     """Execute the 3 Stage 6 calls, optionally in parallel.
 
@@ -1010,48 +1570,28 @@ def _parallel_stage6_calls(
     def _run_call(
         step: str, prompt_pair: tuple[str, str]
     ) -> tuple[str | None, str | None]:
-        sys_prompt, user_prompt = prompt_pair
         if step == "gherkin":
-            spec, _result, error = safe_llm_call(
+            return _run_stage6_gherkin_call(
                 llm_client=llm_client,
-                system_prompt=sys_prompt,
-                user_prompt=user_prompt,
-                response_format=GherkinSpec,
                 run_dir=run_dir,
-                stage="stage_6",
-                step=step,
+                prompt_pair=prompt_pair,
                 temperature=temperature,
-                validation_retries=1,
-                validation_retry_feedback=(
-                    " Return one closed GherkinSpec object. Every list item "
-                    "must be a separate JSON string; do not emit YAML-only "
-                    "continuation syntax."
-                ),
-                result_parser=_parse_gherkin_result,
-                result_validator=_validate_gherkin_result,
+                slot_id=slot_id,
+                scenario_id=scenario_id,
+                gherkin_scaffold=gherkin_scaffold,
+                gherkin_scenario_spec=gherkin_scenario_spec,
+                gherkin_security_constraint=gherkin_security_constraint,
+                gherkin_loss_analysis=gherkin_loss_analysis,
             )
-            if error is not None or spec is None:
-                return None, error or "Gherkin provider returned no result"
-            return (
-                yaml.safe_dump(
-                    spec.model_dump(mode="json"),
-                    sort_keys=False,
-                    allow_unicode=True,
-                ),
-                None,
-            )
-        text, _result, error = safe_llm_call_raw(
+        return _run_stage6_raw_call(
             llm_client=llm_client,
-            system_prompt=sys_prompt,
-            user_prompt=user_prompt,
             run_dir=run_dir,
-            stage="stage_6",
             step=step,
+            prompt_pair=prompt_pair,
             temperature=temperature,
+            slot_id=slot_id,
+            scenario_id=scenario_id,
         )
-        if error is not None:
-            return None, error
-        return text, None
 
     if max_workers > 1:
         with ThreadPoolExecutor(max_workers=3) as executor:
@@ -1126,7 +1666,9 @@ def _validate_envelope_stage7(
     """Run stage-local validators for a single envelope in Stage 7."""
     _extend_validation_errors(
         (
-            validate_tree_branch_coverage(envelope.attack_tree),
+            validate_tree_factor_evidence_coverage(
+                envelope.attack_tree, envelope.scenario_spec
+            ),
             validate_attack_tree_root_label(
                 envelope.attack_tree,
                 envelope.ica_type.value,

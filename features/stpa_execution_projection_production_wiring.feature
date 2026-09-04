@@ -59,10 +59,10 @@ Feature: STPA post-SP3 execution projection production wiring
   Scenario: STPA-PROD-WIRING-05 one validated alignment reaches every Stage 6 call
     Given the validated Stage 5 factor set contains PM-1-1 followed by FB-1-1
     When Stage 6 derives one projection alignment from that validated projection
-    Then the narrative, attack-tree, and Gherkin calls each receive the same alignment table
+    Then each narrative, tree, and Gherkin Stage 6 call contains exactly one projection alignment table
     And the table has one row for PM-1-1, one row for FB-1-1, and one final row for CA-1-1
     And the rows preserve declared factor order and place the unsafe-control-action row last
-    And every Stage 6 prompt forbids inventing causal factors, assertions, or steps
+    And the system instructions for every Stage 6 call forbid inventing causal factors, assertions, or steps
     And the prompt references semantic structural IDs rather than positional labels
 
   # STPA-PROD-WIRING-06

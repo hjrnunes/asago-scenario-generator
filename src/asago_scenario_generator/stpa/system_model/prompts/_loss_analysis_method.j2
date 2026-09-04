@@ -1,0 +1,43 @@
+## STPA loss-analysis method
+
+- A **loss** is an unacceptable outcome for a stakeholder. It is not a cause,
+  failure, or attack technique.
+- A **hazard** is a system-level state or condition inside the analysis boundary
+  that can lead to a loss under worst-case environmental conditions. A failed
+  component may cause a hazard, but the failure is not itself the hazard.
+- A **security constraint** states the condition or behaviour the system must
+  maintain to prevent or limit a hazard. It is derived from the hazardous state,
+  but need not be its literal grammatical inverse.
+
+Do not leave a hazard as a cause or dependency. Phrases such as “availability
+depends on an upstream service,” “the loss is due to a failed component,” or
+“because a channel is compromised” identify evidence about how a state may
+arise. Rewrite the hazard as the observable system-level condition that can
+lead to the loss, and retain the cause or attack mechanism only as supporting
+evidence.
+
+Work from stakeholder consequence to system state to required constraint, and
+preserve every loss -> hazard -> constraint reference.
+
+Adversary action is selection context, not the grammar of the hazard. The
+hazard begins from the unsafe system state; attack and component-failure
+details belong in later causal analysis. For example:
+
+- Cause: an attacker sends a spoofed command. Hazardous state: a robot enters
+  a human-occupied restricted area.
+- Cause: an upstream service fails. Hazardous state: orders continue to be
+  accepted while the system cannot fulfil or safely cancel them.
+
+### Unrelated worked example
+
+For an automated greenhouse:
+
+- Loss: the crop is irreversibly damaged.
+- Hazard: greenhouse air remains above the crop's safe temperature limit.
+- Not a hazard: "the temperature sensor fails"; that is a possible cause of the
+  hazardous temperature state.
+- Constraint: the greenhouse must maintain air temperature within the crop's
+  safe range.
+
+Use the example only to understand the distinctions. Derive the actual result
+solely from the supplied system and evidence.

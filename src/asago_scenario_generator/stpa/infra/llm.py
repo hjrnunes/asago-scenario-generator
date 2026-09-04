@@ -12,7 +12,7 @@ import os
 import time
 from typing import Any
 
-from openai import OpenAI
+from openai import LengthFinishReasonError, OpenAI
 from pydantic import BaseModel, Field
 
 from asago_scenario_generator.model_profiles import DEFAULT_REQUEST_TIMEOUT_SECONDS
@@ -257,9 +257,76 @@ def _apply_legacy_json_fallback(
 
 def _token_usage(response: Any) -> Any:
     """Normalize a response's usage record to a token-count object."""
-    return (
-        response.usage or type("U", (), {"prompt_tokens": 0, "completion_tokens": 0})()
-    )
+    usage = getattr(response, "usage", None)
+    return usage or type("U", (), {"prompt_tokens": 0, "completion_tokens": 0})()
+
+
+def _is_pydantic_model_type(value: Any) -> bool:
+    """Return whether *value* is a concrete Pydantic response model type."""
+    return isinstance(value, type) and issubclass(value, BaseModel)
+
+
+def _response_choice(response: Any) -> Any | None:
+    """Return the first completion choice when an SDK response has one."""
+    choices = getattr(response, "choices", None)
+    if not choices:
+        return None
+    try:
+        return choices[0]
+    except (IndexError, KeyError, TypeError):
+        return None
+
+
+def _response_content(response: Any) -> Any:
+    """Extract only provider message content from a completion response."""
+    choice = _response_choice(response)
+    message = getattr(choice, "message", None) if choice is not None else None
+    return getattr(message, "content", None)
+
+
+def _response_finish_reason(response: Any) -> str | None:
+    """Read a provider finish reason without depending on SDK model classes."""
+    choice = _response_choice(response)
+    reason = getattr(choice, "finish_reason", None) if choice is not None else None
+    return reason if isinstance(reason, str) else None
+
+
+def _locally_parse_response_content(
+    content: Any,
+    response_format: type[BaseModel],
+) -> Any:
+    """Parse strict structured content after raw response capture.
+
+    Returning the original content on a local validation error is deliberate:
+    ``safe_llm_call`` owns contract diagnostics and can log the malformed
+    response together with its usage.  Successful strict calls still expose
+    the parsed model to direct callers, matching the historical API.
+    """
+    if isinstance(content, response_format):
+        return content
+    try:
+        if isinstance(content, dict):
+            return response_format.model_validate(content)
+        if isinstance(content, str):
+            return response_format.model_validate(json.loads(content))
+    except Exception:  # noqa: BLE001 - retain raw content for safe parsing
+        return content
+    return content
+
+
+def _parse_strict_response_content(
+    content: Any,
+    response_format: type[BaseModel] | None,
+    request_unvalidated: bool,
+) -> Any:
+    """Apply local strict validation only after raw provider evidence exists."""
+    if (
+        response_format is None
+        or request_unvalidated
+        or not _is_pydantic_model_type(response_format)
+    ):
+        return content
+    return _locally_parse_response_content(content, response_format)
 
 
 def _top_k_extra_body(top_k: int | None) -> dict[str, Any]:
@@ -413,20 +480,48 @@ class LLMClient:
     ) -> tuple[Any, Any]:
         """Request a completion and return its response plus extracted content."""
         if response_format is not None and not allow_unvalidated:
+            if _is_pydantic_model_type(response_format):
+                # ``beta.parse`` can raise a Pydantic error before exposing
+                # the raw provider message.  Request the same strict schema
+                # through the ordinary completion seam, then validate only
+                # after the raw content and usage have been captured.
+                request_kwargs = {
+                    **extra_kwargs,
+                    "response_format": _json_schema_response_format(response_format),
+                }
+                response = self._client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    **request_kwargs,
+                )
+                if _response_finish_reason(response) == "length":
+                    raise LengthFinishReasonError(completion=response)
+                return response, _response_content(response)
             response = self._client.beta.chat.completions.parse(
                 model=self.model,
                 messages=messages,
                 response_format=response_format,
                 **extra_kwargs,
             )
-            return response, response.choices[0].message.parsed
+            parsed = getattr(
+                getattr(_response_choice(response), "message", None),
+                "parsed",
+                None,
+            )
+            # Some compatible structured endpoints return valid provider JSON
+            # but leave the SDK's ``parsed`` slot empty.  Returning raw content
+            # lets the shared parser classify it without losing response
+            # evidence.
+            return response, parsed if parsed is not None else _response_content(
+                response
+            )
 
         response = self._client.chat.completions.create(
             model=self.model,
             messages=messages,
             **extra_kwargs,
         )
-        return response, response.choices[0].message.content
+        return response, _response_content(response)
 
     def complete(
         self,
@@ -470,6 +565,11 @@ class LLMClient:
 
         duration_ms = (time.perf_counter_ns() - t0) // 1_000_000
         usage = _token_usage(response)
+        content = _parse_strict_response_content(
+            content,
+            response_format,
+            request_unvalidated,
+        )
 
         return LLMResult(
             content=content,

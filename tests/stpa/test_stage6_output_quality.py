@@ -899,8 +899,36 @@ class TestHardeningTreeBranchCoverage:
 
     Kills mutants:
       - line 139: cat in BRANCH_CATEGORIES -> cat not in BRANCH_CATEGORIES
-      - line 154: count < 2 -> count <= 2
+      - branch validation rejects zero supported categories
     """
+
+    def test_one_valid_category_passes(self):
+        """A single evidence-backed category is sufficient."""
+        from asago_scenario_generator.stpa.scenario_prod.validators import (
+            validate_tree_branch_coverage,
+        )
+
+        tree = {
+            "root": "r",
+            "branches": [
+                {"category": "controller_side", "label": "l1", "children": []},
+            ],
+            "leaves": [],
+        }
+        assert validate_tree_branch_coverage(tree).passed
+
+    def test_zero_valid_categories_fails(self):
+        """A tree still needs one supported causal category."""
+        from asago_scenario_generator.stpa.scenario_prod.validators import (
+            validate_tree_branch_coverage,
+        )
+
+        tree = {"root": "r", "branches": [], "leaves": []}
+        result = validate_tree_branch_coverage(tree)
+        assert not result.passed
+        assert result.errors == [
+            "Attack tree uses no supported branch category; need at least 1."
+        ]
 
     def test_two_valid_categories_passes(self):
         """A tree with exactly 2 valid branch categories must pass."""

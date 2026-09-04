@@ -14,6 +14,10 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field, model_validator
 
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlActionTemporality,
+)
+
 if TYPE_CHECKING:
     from asago_scenario_generator.stpa.models.control_structure import ControlStructure
     from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
@@ -76,6 +80,13 @@ class ICASlot(BaseModel):
     responsibility: str | None = None  # resp_id, None for coordination link slots
     coordination_link: str | None = None  # link_id, None for responsibility slots
     control_action: str  # ca_id or cm_id
+    action_temporality: ControlActionTemporality | None = Field(
+        default=None,
+        description=(
+            "Typed temporal shape copied from the authoritative control action; "
+            "missing means a legacy/analytical slot."
+        ),
+    )
     uca_type: UCAType
     is_na: bool
     icas: list[ICA] = Field(default_factory=list)  # empty if is_na

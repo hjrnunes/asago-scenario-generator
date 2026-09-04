@@ -14,9 +14,15 @@ duplicates; cross-references stay valid after merge.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
-from asago_scenario_generator.models.capability_profile import CapabilityProfile
+from asago_scenario_generator.models.capability_profile import (
+    CapabilityProfile,
+    build_kc_subcodes_display,
+)
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.llm import LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError, safe_llm_call
@@ -45,6 +51,198 @@ class _DraftReferenceValidationError(ValueError):
     def __init__(self, message: str, *, feedback: str) -> None:
         super().__init__(message)
         self.feedback = feedback
+
+
+class _DraftSemanticValidationError(ValueError):
+    """Semantic failure that can be sent back through the bounded retry."""
+
+    def __init__(self, message: str, *, feedback: str) -> None:
+        super().__init__(message)
+        self.feedback = feedback
+
+
+@dataclass(frozen=True)
+class LossAnalysisDiagnostic:
+    """A deterministic, human-readable loss-analysis semantic diagnostic."""
+
+    code: str
+    severity: Literal["warning", "error"]
+    message: str
+
+    def __str__(self) -> str:
+        return f"{self.code} ({self.severity}): {self.message}"
+
+
+# These patterns describe generic STPA concepts, not any product or domain.
+# They deliberately identify a component-failure *claim* only when the hazard
+# is phrased as that failure, leaving system conditions such as “temperature
+# remains above the limit” to the normal hazard path.
+_COMPONENT_FAILURE_RE = re.compile(
+    r"\b(?:sensor|component|module|database|service|api|model|tool|server|"
+    r"channel|interface|controller)\s+(?:fails?|failure|crashes?|is\s+"
+    r"(?:broken|compromised|corrupted))\b",
+    re.IGNORECASE,
+)
+_CAUSE_OR_DEPENDENCY_RE = re.compile(
+    r"\b(?:dependent\s+on|depends\s+on|due\s+to|because\s+of|"
+    r"caused\s+by|as\s+a\s+result\s+of|when\s+.+?\s+fails?)\b",
+    re.IGNORECASE,
+)
+_MECHANISM_HAZARD_RE = re.compile(
+    r"\b(?:injection|poison(?:ed|ing)?|spoof(?:ed|ing)?|tamper(?:ed|ing)?|"
+    r"malicious\s+(?:input|content|payload|instruction)|credential\s+theft|"
+    r"command\s+execution|payload|phish(?:ed|ing)?|replay(?:ed|ing)?|"
+    r"flood(?:ed|ing)?|denial[-\s]of[-\s]service)\b",
+    re.IGNORECASE,
+)
+_STATE_CUE_RE = re.compile(
+    r"\b(?:remains?|becomes?|is|are|above|below|exceeds?|contains?|"
+    r"exposes?|allows?|prevents?|receives?|sends?|executes?|persists?|"
+    r"maintains?|outside|within|without|before|after|erodes?|damages?|"
+    r"causes?|violates?|fails?)\b",
+    re.IGNORECASE,
+)
+_ADVERSARIAL_CUE_RE = re.compile(
+    r"\b(?:attack(?:er|ers)?|adversar(?:y|ial)|malicious|spoof(?:ed|ing)?|"
+    r"tamper(?:ed|ing)?|inject(?:ed|ion|ing)?|poison(?:ed|ing)?|"
+    r"manipulat(?:e|ed|ing|ion)|forg(?:e|ed|ing)|unauthori[sz](?:ed|ation)|"
+    r"exploit(?:ed|ing)?|abus(?:e|ed|ing)|crafted|compromis(?:e|ed|ing)|"
+    r"credential|bypass(?:ed|ing)?|impersonat(?:e|ed|ing)|replay(?:ed|ing)?|"
+    r"exfiltrat(?:e|ed|ing|ion)|falsif(?:y|ied|ication)|override|denial)\b",
+    re.IGNORECASE,
+)
+
+
+def diagnose_loss_analysis_semantics(
+    draft: object,
+    *,
+    use_case_text: str = "",
+    risk_cards: Iterable[RiskCard] = (),
+) -> list[LossAnalysisDiagnostic]:
+    """Diagnose generic semantic weaknesses in a loss-analysis graph.
+
+    The diagnostics are intentionally domain-independent.  A hazard should
+    describe a system state or condition inside the analysis boundary, not a
+    failed component.  The graph should also retain an adversarially
+    actionable rationale when the supplied use case or risk evidence contains
+    one.  Diagnostics do not infer a taxonomy mechanism and do not use product
+    names as a proxy for relevance.
+    """
+    hazards = getattr(draft, "hazards", ())
+    descriptions = list(_loss_analysis_text(draft))
+    descriptions.extend(
+        str(card_text)
+        for card in risk_cards
+        for card_text in (
+            getattr(card, "risk_name", ""),
+            getattr(card, "risk_description", ""),
+        )
+    )
+    combined_text = " ".join((use_case_text, *descriptions))
+    diagnostics: list[LossAnalysisDiagnostic] = []
+
+    for hazard in hazards:
+        description = str(getattr(hazard, "description", ""))
+        if _COMPONENT_FAILURE_RE.search(description):
+            hazard_id = getattr(hazard, "hazard_id", "unknown")
+            diagnostics.append(
+                LossAnalysisDiagnostic(
+                    code="hazard_not_system_state",
+                    severity="error",
+                    message=(
+                        f"{hazard_id} is phrased as a component failure; express "
+                        "the resulting system-level hazardous state or condition "
+                        "inside the analysis boundary instead."
+                    ),
+                )
+            )
+        if _CAUSE_OR_DEPENDENCY_RE.search(description):
+            hazard_id = getattr(hazard, "hazard_id", "unknown")
+            diagnostics.append(
+                LossAnalysisDiagnostic(
+                    code="hazard_cause_or_dependency",
+                    severity="warning",
+                    message=(
+                        f"{hazard_id} is phrased as a cause or dependency; rewrite "
+                        "it as the observable system-level state that can lead to "
+                        "the loss, and retain the cause as supporting evidence."
+                    ),
+                )
+            )
+        if _MECHANISM_HAZARD_RE.search(description):
+            hazard_id = getattr(hazard, "hazard_id", "unknown")
+            diagnostics.append(
+                LossAnalysisDiagnostic(
+                    code="hazard_mechanism_phrasing",
+                    severity="warning",
+                    message=(
+                        f"{hazard_id} names an attack mechanism in the hazard; "
+                        "state the resulting system condition and keep the "
+                        "mechanism as a separately supported cause."
+                    ),
+                )
+            )
+        if description and not _STATE_CUE_RE.search(description):
+            hazard_id = getattr(hazard, "hazard_id", "unknown")
+            diagnostics.append(
+                LossAnalysisDiagnostic(
+                    code="hazard_state_unspecified",
+                    severity="warning",
+                    message=(
+                        f"{hazard_id} does not clearly state a system condition; "
+                        "review whether it describes a state that can lead to a loss."
+                    ),
+                )
+            )
+
+    if combined_text.strip() and not _ADVERSARIAL_CUE_RE.search(combined_text):
+        diagnostics.append(
+            LossAnalysisDiagnostic(
+                code="adversarial_relevance_unsubstantiated",
+                severity="warning",
+                message=(
+                    "The supplied loss-analysis text does not identify a generic "
+                    "adversarial action or path; retain the graph only when the "
+                    "use case provides one, rather than assuming taxonomy relevance."
+                ),
+            )
+        )
+    return diagnostics
+
+
+def _loss_analysis_text(draft: object) -> Iterable[str]:
+    """Yield semantic text from either a draft or a merged loss analysis."""
+    for field_name in (
+        "risk_card_losses",
+        "use_case_losses",
+        "hazards",
+        "security_constraints",
+    ):
+        for item in getattr(draft, field_name, ()):
+            description = getattr(item, "description", None)
+            if description:
+                yield str(description)
+
+
+def _validate_draft_semantics(
+    draft: LossAnalysisDraft,
+    *,
+    context: str,
+) -> None:
+    """Reject component-failure hazards while leaving relevance as a diagnostic."""
+    diagnostics = diagnose_loss_analysis_semantics(draft)
+    errors = [item for item in diagnostics if item.severity == "error"]
+    if not errors:
+        return
+    message = "; ".join(str(item) for item in errors)
+    raise _DraftSemanticValidationError(
+        f"{context} draft failed semantic validation: {message}",
+        feedback=(
+            f"Validation feedback: {message} Rewrite each hazard as a "
+            "system-level state or condition, not the failure of a sensor, "
+            "component, service, model, or other implementation element."
+        ),
+    )
 
 
 def derive_loss_analysis(
@@ -100,6 +298,12 @@ def derive_loss_analysis(
         allowed_loss_ids=set(),
         allowed_hazard_ids=set(),
     )
+    # The gap prompt is a review of the first draft, so its context must be
+    # the canonical source-separated view.  Models occasionally put a
+    # risk-card loss in ``use_case_losses`` (or repeat it in both fields).
+    # Classify by the typed provenance and remove exact duplicate records
+    # before rendering the review context and allocating continuation IDs.
+    risk_draft = _canonicalize_draft_losses(risk_draft)
 
     # --- Compute next IDs for gap analysis ---
     next_loss_num = (
@@ -138,6 +342,7 @@ def derive_loss_analysis(
         next_hazard_num=next_hazard_num,
         next_sc_num=next_sc_num,
         kc_subcodes=kc_subcodes,
+        kc_subcodes_display=build_kc_subcodes_display(kc_subcodes),
         allowed_loss_ids={
             loss.loss_id
             for loss in risk_draft.risk_card_losses + risk_draft.use_case_losses
@@ -193,7 +398,11 @@ def _run_stage1a_call(
                 allowed_loss_ids=allowed_loss_ids,
                 allowed_hazard_ids=allowed_hazard_ids,
             )
+            _validate_draft_semantics(draft, context=step)
         except _DraftReferenceValidationError as exc:
+            validation_feedback = exc.feedback
+            raise
+        except _DraftSemanticValidationError as exc:
             validation_feedback = exc.feedback
             raise
 
@@ -231,6 +440,7 @@ def _run_stage1a_call(
             allowed_loss_ids=allowed_loss_ids,
             allowed_hazard_ids=allowed_hazard_ids,
         )
+        _validate_draft_semantics(draft, context=step)
 
     draft, _, retry_error_msg = safe_llm_call(
         llm_client=llm_client,
@@ -375,6 +585,28 @@ def _merge_drafts(
         use_case_losses=all_uc_losses,
         hazards=all_hazards,
         security_constraints=all_constraints,
+    )
+
+
+def _canonicalize_draft_losses(draft: LossAnalysisDraft) -> LossAnalysisDraft:
+    """Return a source-separated, duplicate-free copy of one draft.
+
+    ``LossAnalysisDraft`` retains the two provider-facing containers for
+    compatibility, but provenance is the authority for which final source a
+    loss belongs to.  Canonicalizing before the gap prompt keeps the model
+    from reviewing the same loss twice and makes the next-ID calculation
+    agree with the context shown to it.  A conflicting duplicate ID remains a
+    hard diagnostic; silently choosing one payload would corrupt references.
+    """
+    risk_losses, use_case_losses = _normalize_losses(
+        draft,
+        LossAnalysisDraft(),
+    )
+    return draft.model_copy(
+        update={
+            "risk_card_losses": risk_losses,
+            "use_case_losses": use_case_losses,
+        }
     )
 
 

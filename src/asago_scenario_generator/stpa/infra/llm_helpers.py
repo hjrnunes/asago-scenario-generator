@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -150,6 +151,58 @@ def _stringify_response_content(content: Any) -> str:
     return str(content)
 
 
+def _has_provider_choices(response: Any) -> bool:
+    """Return whether an attached object exposes a usable choice list."""
+    choices = getattr(response, "choices", None)
+    if not choices:
+        return False
+    try:
+        choices[0]
+    except (IndexError, KeyError, TypeError):
+        return False
+    return True
+
+
+def _attached_provider_response(error: BaseException) -> Any | None:
+    """Recover a completion attached to an SDK parse/validation exception.
+
+    OpenAI-compatible SDKs commonly attach the already received completion to
+    ``completion`` when structured parsing fails.  A few adapters use
+    ``response`` or ``raw_response``.  Only objects with a non-empty
+    ``choices`` collection are treated as provider responses; exception text
+    and transport bodies are never copied into the durable response field.
+    """
+    for attribute in ("completion", "response", "raw_response"):
+        attached = getattr(error, attribute, None)
+        if _has_provider_choices(attached):
+            return attached
+    return None
+
+
+def _provider_response_content(response: Any) -> Any:
+    """Extract message content from an attached provider completion."""
+    choices = getattr(response, "choices", None)
+    if not choices:
+        return None
+    try:
+        choice = choices[0]
+    except (IndexError, KeyError, TypeError):
+        return None
+    message = getattr(choice, "message", None)
+    return getattr(message, "content", None)
+
+
+def _provider_response_usage(response: Any) -> tuple[int, int]:
+    """Extract usage counters from an attached provider completion."""
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return 0, 0
+    return (
+        int(getattr(usage, "prompt_tokens", 0) or 0),
+        int(getattr(usage, "completion_tokens", 0) or 0),
+    )
+
+
 def parse_llm_result(result: LLMResult, model_class: type[_T]) -> _T:
     """Parse and validate an LLM result into the specified Pydantic model.
 
@@ -259,6 +312,323 @@ def _result_usage(
     return result.prompt_tokens, result.completion_tokens, result.duration_ms
 
 
+@dataclass
+class _SafeCallState:
+    """Mutable state retained while one bounded structured call is attempted."""
+
+    result: LLMResult | None = None
+    prompt_audit: PromptAudit | None = None
+    raw_result_validation_failed: bool = False
+    result_validation_failed: bool = False
+    result_parser_failed: bool = False
+    draft_parsed: bool = False
+    semantic_validation_passed: bool = False
+
+
+@dataclass(frozen=True)
+class _FailureEvidence:
+    """Safe provider evidence copied into one failed call record."""
+
+    prompt_tokens: int
+    completion_tokens: int
+    duration_ms: int
+    response_content: str | None
+    provider_response_received: bool
+
+
+def _failure_evidence(
+    result: LLMResult | None,
+    error: BaseException,
+) -> _FailureEvidence:
+    """Extract usage/content while excluding exception bodies from evidence."""
+    attached = None if result is not None else _attached_provider_response(error)
+    if result is not None:
+        prompt_tokens, completion_tokens, duration_ms = _result_usage(result)
+        response_content = _stringify_response_content(result.content)
+    else:
+        prompt_tokens, completion_tokens = _provider_response_usage(attached)
+        duration_ms = 0
+        response_content = (
+            _stringify_response_content(_provider_response_content(attached))
+            if attached is not None
+            else None
+        )
+    return _FailureEvidence(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        duration_ms=duration_ms,
+        response_content=response_content,
+        provider_response_received=result is not None or attached is not None,
+    )
+
+
+def _safe_llm_call_client(
+    llm_client: LLMClient,
+    completion_kwargs: dict[str, Any],
+    allow_unvalidated: bool,
+) -> LLMResult:
+    """Call a client, retrying once without unsupported compatibility kwargs."""
+    try:
+        return llm_client.complete(**completion_kwargs)
+    except TypeError as exc:
+        if not _is_unsupported_unvalidated_error(exc, allow_unvalidated):
+            raise
+        completion_kwargs.pop("allow_unvalidated", None)
+        return llm_client.complete(**completion_kwargs)
+
+
+def _validate_raw_result(
+    result: LLMResult,
+    validator: Callable[[Any], None] | None,
+    state: _SafeCallState,
+) -> None:
+    """Run pre-parse validation while retaining its failure classification."""
+    if validator is None:
+        return
+    try:
+        validator(_decode_llm_content(result))
+    except Exception:
+        state.raw_result_validation_failed = True
+        raise
+
+
+def _parse_and_validate_result(
+    result: LLMResult,
+    response_format: type[_T],
+    allow_unvalidated: bool,
+    result_parser: Callable[[LLMResult], _T] | None,
+    result_validator: Callable[[_T], None] | None,
+    state: _SafeCallState,
+) -> _T:
+    """Parse one result and run optional stage-local semantic validation."""
+    try:
+        model = _parse_structured_result(
+            result,
+            response_format,
+            allow_unvalidated,
+            result_parser=result_parser,
+        )
+        state.draft_parsed = True
+    except Exception:
+        state.result_parser_failed = result_parser is not None
+        raise
+    if result_validator is None:
+        return model
+    try:
+        result_validator(model)
+    except Exception:
+        state.result_validation_failed = True
+        raise
+    return model
+
+
+def _perform_safe_call(
+    *,
+    llm_client: LLMClient,
+    system_prompt: str,
+    user_prompt: str,
+    response_format: type[_T],
+    run_dir: Path,
+    stage: str,
+    step: str,
+    temperature: float,
+    max_completion_tokens: int | None,
+    allow_unvalidated: bool,
+    raw_result_validator: Callable[[Any], None] | None,
+    result_validator: Callable[[_T], None] | None,
+    result_parser: Callable[[LLMResult], _T] | None,
+    slot_id: str | None,
+    scenario_id: str | None,
+    prompt_template_hashes: Mapping[str, str] | None,
+    state: _SafeCallState,
+) -> _T:
+    """Execute one complete structured attempt and log a successful result."""
+    state.prompt_audit = _preflight_configured_prompt(
+        llm_client,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        stage=stage,
+        max_completion_tokens=max_completion_tokens,
+    )
+    _enforce_prompt_audit(state.prompt_audit)
+    completion_kwargs = _build_completion_kwargs(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        response_format=response_format,
+        temperature=temperature,
+        max_completion_tokens=max_completion_tokens,
+        allow_unvalidated=allow_unvalidated,
+    )
+    state.result = _safe_llm_call_client(
+        llm_client, completion_kwargs, allow_unvalidated=allow_unvalidated
+    )
+    _validate_raw_result(state.result, raw_result_validator, state)
+    model = _parse_and_validate_result(
+        state.result,
+        response_format,
+        allow_unvalidated,
+        result_parser,
+        result_validator,
+        state,
+    )
+    state.semantic_validation_passed = True
+    log_llm_call(
+        state.result,
+        llm_client.model,
+        run_dir,
+        stage,
+        step,
+        slot_id=slot_id,
+        scenario_id=scenario_id,
+        prompt_audit=state.prompt_audit,
+        prompt_template_hashes=prompt_template_hashes,
+    )
+    return model
+
+
+def _log_structured_failure(
+    *,
+    llm_client: LLMClient,
+    run_dir: Path,
+    stage: str,
+    step: str,
+    attempt_user_prompt: str,
+    system_prompt: str,
+    error: BaseException,
+    state: _SafeCallState,
+    slot_id: str | None,
+    scenario_id: str | None,
+    prompt_template_hashes: Mapping[str, str] | None,
+) -> str:
+    """Log one structured failure and return its stable display message."""
+    error_msg = f"{type(error).__name__}: {error}"
+    evidence = _failure_evidence(state.result, error)
+    log_llm_call_failure(
+        llm_client.model,
+        run_dir,
+        stage,
+        step,
+        error_msg,
+        system_prompt=system_prompt,
+        user_prompt=attempt_user_prompt,
+        prompt_tokens=evidence.prompt_tokens,
+        completion_tokens=evidence.completion_tokens,
+        duration_ms=evidence.duration_ms,
+        prompt_audit=state.prompt_audit,
+        provider_response_received=evidence.provider_response_received,
+        draft_parsed=state.draft_parsed,
+        semantic_validation_passed=state.semantic_validation_passed,
+        compiled=state.semantic_validation_passed,
+        response_content=evidence.response_content,
+        slot_id=slot_id,
+        scenario_id=scenario_id,
+        terminal_error_codes=(_terminal_error_code(error),),
+        prompt_template_hashes=prompt_template_hashes,
+    )
+    return error_msg
+
+
+def _retry_kind(
+    error: BaseException,
+    state: _SafeCallState,
+    json_retries_remaining: int,
+    validation_retries_remaining: int,
+) -> str | None:
+    """Select the existing bounded retry policy without changing precedence."""
+    if isinstance(error, json.JSONDecodeError) and json_retries_remaining:
+        return "json"
+    if _validation_retry_requested(error, state) and validation_retries_remaining:
+        return "validation"
+    return None
+
+
+def _validation_retry_requested(
+    error: BaseException,
+    state: _SafeCallState,
+) -> bool:
+    """Report whether a failure belongs to the existing validation retry set."""
+    if isinstance(error, json.JSONDecodeError):
+        return False
+    return bool(
+        isinstance(error, ValidationError)
+        or state.raw_result_validation_failed
+        or state.result_validation_failed
+        or state.result_parser_failed
+    )
+
+
+def _validate_retry_counts(
+    json_decode_retries: int,
+    validation_retries: int,
+) -> None:
+    """Reject negative retry budgets before beginning a call."""
+    if json_decode_retries < 0 or validation_retries < 0:
+        raise ValueError("retry counts must be non-negative")
+
+
+def _raw_completion_kwargs(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float,
+    max_completion_tokens: int | None,
+) -> dict[str, Any]:
+    """Build the raw text completion request shape."""
+    completion_kwargs: dict[str, Any] = {
+        "system_prompt": system_prompt,
+        "user_prompt": user_prompt,
+        "response_format": None,
+        "temperature": temperature,
+    }
+    if max_completion_tokens is not None:
+        completion_kwargs["max_completion_tokens"] = max_completion_tokens
+    return completion_kwargs
+
+
+def _raw_text(result: LLMResult) -> str:
+    """Coerce a raw completion to text while preserving empty responses."""
+    content = result.content
+    if content is None:
+        return ""
+    return content if isinstance(content, str) else str(content)
+
+
+def _log_raw_failure(
+    *,
+    llm_client: LLMClient,
+    run_dir: Path,
+    stage: str,
+    step: str,
+    system_prompt: str,
+    user_prompt: str,
+    error: BaseException,
+    state: _SafeCallState,
+    slot_id: str | None,
+    scenario_id: str | None,
+) -> str:
+    """Log one raw-text failure while retaining provider response evidence."""
+    error_msg = f"{type(error).__name__}: {error}"
+    evidence = _failure_evidence(state.result, error)
+    log_llm_call_failure(
+        llm_client.model,
+        run_dir,
+        stage,
+        step,
+        error_msg,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        prompt_tokens=evidence.prompt_tokens,
+        completion_tokens=evidence.completion_tokens,
+        duration_ms=evidence.duration_ms,
+        prompt_audit=state.prompt_audit,
+        provider_response_received=evidence.provider_response_received,
+        response_content=evidence.response_content,
+        slot_id=slot_id,
+        scenario_id=scenario_id,
+    )
+    return error_msg
+
+
 def _validation_retry_prompt(
     *,
     original_prompt: str,
@@ -267,11 +637,11 @@ def _validation_retry_prompt(
     response_format: type[BaseModel],
     include_schema: bool,
 ) -> str:
-    """Build a bounded correction prompt with an exact validation error."""
+    """Build a bounded correction prompt with field-specific validation errors."""
     suffix = feedback or ""
     suffix += (
         "\n\nExact validation error from the prior response:\n"
-        f"{type(error).__name__}: {error}"
+        f"{_compact_validation_error(error)}"
     )
     if include_schema:
         schema = json.dumps(
@@ -289,6 +659,28 @@ def _validation_retry_prompt(
             "\n\nReturn one JSON object matching the response schema already supplied."
         )
     return original_prompt + suffix
+
+
+def _compact_validation_error(error: Exception) -> str:
+    """Describe failed fields without echoing prior input or verbose URLs."""
+    if isinstance(error, ValidationError):
+        lines: list[str] = []
+        for item in error.errors(
+            include_url=False,
+            include_context=False,
+            include_input=False,
+        )[:8]:
+            location = ".".join(str(part) for part in item["loc"]) or "response"
+            lines.append(f"- {location}: {item['msg']} ({item['type']})")
+        return "ValidationError:\n" + "\n".join(lines)
+    if isinstance(error, json.JSONDecodeError):
+        return (
+            f"JSONDecodeError at line {error.lineno}, column {error.colno}: {error.msg}"
+        )
+    message = " ".join(str(error).split())
+    if len(message) > 800:
+        message = message[:797] + "..."
+    return f"{type(error).__name__}: {message}"
 
 
 def _parse_structured_result(
@@ -315,6 +707,8 @@ def log_llm_call(
     stage: str,
     step: str,
     *,
+    slot_id: str | None = None,
+    scenario_id: str | None = None,
     prompt_audit: PromptAudit | None = None,
     prompt_template_hashes: Mapping[str, str] | None = None,
 ) -> None:
@@ -339,6 +733,8 @@ def log_llm_call(
         completion_tokens=result.completion_tokens,
         duration_ms=result.duration_ms,
         success=_success,
+        slot_id=slot_id,
+        scenario_id=scenario_id,
         response_content=_response_content,
         provider_response_received=True,
         draft_parsed=True,
@@ -368,6 +764,9 @@ def log_llm_call_failure(
     draft_parsed: bool = False,
     semantic_validation_passed: bool = False,
     compiled: bool = False,
+    response_content: str | None = None,
+    slot_id: str | None = None,
+    scenario_id: str | None = None,
     terminal_error_codes: tuple[str, ...] = ("provider_call_failure",),
     prompt_template_hashes: Mapping[str, str] | None = None,
 ) -> None:
@@ -397,6 +796,9 @@ def log_llm_call_failure(
         duration_ms=duration_ms,
         success=_success,
         error=error,
+        slot_id=slot_id,
+        scenario_id=scenario_id,
+        response_content=response_content,
         provider_response_received=provider_response_received,
         draft_parsed=draft_parsed,
         semantic_validation_passed=semantic_validation_passed,
@@ -417,6 +819,8 @@ def safe_llm_call(
     run_dir: Path,
     stage: str,
     step: str,
+    slot_id: str | None = None,
+    scenario_id: str | None = None,
     temperature: float = 0.4,
     max_completion_tokens: int | None = None,
     allow_unvalidated: bool = False,
@@ -445,6 +849,8 @@ def safe_llm_call(
         run_dir: Directory for call logging.
         stage: Pipeline stage identifier.
         step: Sub-step within the stage.
+        slot_id: Exact ICA slot identity for durable call evidence, when applicable.
+        scenario_id: Exact scenario identity for durable call evidence, when applicable.
         temperature: LLM temperature.
         max_completion_tokens: Optional cap on completion tokens. When
             provided, forwarded to ``llm_client.complete``.
@@ -476,110 +882,58 @@ def safe_llm_call(
     Returns:
         A tuple of (validated_model_or_None, llm_result_or_None, error_or_None).
     """
-    if json_decode_retries < 0 or validation_retries < 0:
-        raise ValueError("retry counts must be non-negative")
+    _validate_retry_counts(json_decode_retries, validation_retries)
 
     json_retries_remaining = json_decode_retries
     validation_retries_remaining = validation_retries
     attempt_user_prompt = user_prompt
     while True:
-        result: LLMResult | None = None
-        prompt_audit: PromptAudit | None = None
-        raw_result_validation_failed = False
-        result_validation_failed = False
-        result_parser_failed = False
-        draft_parsed = False
-        semantic_validation_passed = False
+        state = _SafeCallState()
         try:
-            prompt_audit = _preflight_configured_prompt(
-                llm_client,
-                system_prompt=system_prompt,
-                user_prompt=attempt_user_prompt,
-                stage=stage,
-                max_completion_tokens=max_completion_tokens,
-            )
-            _enforce_prompt_audit(prompt_audit)
-            completion_kwargs = _build_completion_kwargs(
+            model = _perform_safe_call(
+                llm_client=llm_client,
                 system_prompt=system_prompt,
                 user_prompt=attempt_user_prompt,
                 response_format=response_format,
+                run_dir=run_dir,
+                stage=stage,
+                step=step,
                 temperature=temperature,
                 max_completion_tokens=max_completion_tokens,
                 allow_unvalidated=allow_unvalidated,
-            )
-            try:
-                result = llm_client.complete(**completion_kwargs)
-            except TypeError as exc:
-                if not _is_unsupported_unvalidated_error(exc, allow_unvalidated):
-                    raise
-                completion_kwargs.pop("allow_unvalidated", None)
-                result = llm_client.complete(**completion_kwargs)
-            if raw_result_validator is not None:
-                decoded_content = _decode_llm_content(result)
-                try:
-                    raw_result_validator(decoded_content)
-                except Exception:
-                    raw_result_validation_failed = True
-                    raise
-            try:
-                model = _parse_structured_result(
-                    result,
-                    response_format,
-                    allow_unvalidated,
-                    result_parser=result_parser,
-                )
-                draft_parsed = True
-            except Exception:
-                result_parser_failed = result_parser is not None
-                raise
-            if result_validator is not None:
-                try:
-                    result_validator(model)
-                except Exception:
-                    result_validation_failed = True
-                    raise
-            semantic_validation_passed = True
-            log_llm_call(
-                result,
-                llm_client.model,
-                run_dir,
-                stage,
-                step,
-                prompt_audit=prompt_audit,
+                raw_result_validator=raw_result_validator,
+                result_validator=result_validator,
+                result_parser=result_parser,
+                slot_id=slot_id,
+                scenario_id=scenario_id,
                 prompt_template_hashes=prompt_template_hashes,
+                state=state,
             )
-            return model, result, None
+            return model, state.result, None
         except Exception as exc:
-            error_msg = f"{type(exc).__name__}: {exc}"
-            _prompt_tokens, _completion_tokens, _duration_ms = _result_usage(result)
-            log_llm_call_failure(
-                llm_client.model,
-                run_dir,
-                stage,
-                step,
-                error_msg,
+            error_msg = _log_structured_failure(
+                llm_client=llm_client,
+                run_dir=run_dir,
+                stage=stage,
+                step=step,
+                attempt_user_prompt=attempt_user_prompt,
                 system_prompt=system_prompt,
-                user_prompt=attempt_user_prompt,
-                prompt_tokens=_prompt_tokens,
-                completion_tokens=_completion_tokens,
-                duration_ms=_duration_ms,
-                prompt_audit=prompt_audit,
-                provider_response_received=result is not None,
-                draft_parsed=draft_parsed,
-                semantic_validation_passed=semantic_validation_passed,
-                compiled=semantic_validation_passed,
-                terminal_error_codes=(_terminal_error_code(exc),),
+                error=exc,
+                state=state,
+                slot_id=slot_id,
+                scenario_id=scenario_id,
                 prompt_template_hashes=prompt_template_hashes,
             )
-            if isinstance(exc, json.JSONDecodeError) and json_retries_remaining:
+            retry_kind = _retry_kind(
+                exc,
+                state,
+                json_retries_remaining,
+                validation_retries_remaining,
+            )
+            if retry_kind == "json":
                 json_retries_remaining -= 1
                 continue
-            if (
-                isinstance(exc, ValidationError)
-                or raw_result_validation_failed
-                or result_validation_failed
-                or result_parser_failed
-            ) and validation_retries_remaining:
+            if retry_kind == "validation":
                 validation_retries_remaining -= 1
                 attempt_user_prompt = _validation_retry_prompt(
                     original_prompt=user_prompt,
@@ -589,7 +943,7 @@ def safe_llm_call(
                     include_schema=validation_retry_include_schema,
                 )
                 continue
-            return None, result, error_msg
+            return None, state.result, error_msg
 
 
 def _terminal_error_code(error: BaseException) -> str:
@@ -611,8 +965,11 @@ def safe_llm_call_raw(
     run_dir: Path,
     stage: str,
     step: str,
+    slot_id: str | None = None,
+    scenario_id: str | None = None,
     temperature: float = 0.4,
     max_completion_tokens: int | None = None,
+    raw_result_validator: Callable[[Any], None] | None = None,
 ) -> tuple[str | None, LLMResult | None, str | None]:
     """Wrap complete() for raw text responses (no structured response_format).
 
@@ -632,58 +989,58 @@ def safe_llm_call_raw(
         step: Sub-step within the stage.
         temperature: LLM temperature.
         max_completion_tokens: Optional cap on completion tokens.
+        raw_result_validator: Optional validation to run after the provider
+            response is received but before a successful call is logged.  A
+            failure retains the raw response and usage in the failure record.
+        slot_id: Exact ICA slot identity for durable call evidence, when applicable.
+        scenario_id: Exact scenario identity for durable call evidence, when applicable.
 
     Returns:
         A tuple of (raw_text_or_None, llm_result_or_None, error_or_None).
     """
-    result: LLMResult | None = None
-    prompt_audit: PromptAudit | None = None
+    state = _SafeCallState()
     try:
-        prompt_audit = _preflight_configured_prompt(
+        state.prompt_audit = _preflight_configured_prompt(
             llm_client,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             stage=stage,
             max_completion_tokens=max_completion_tokens,
         )
-        _enforce_prompt_audit(prompt_audit)
-        completion_kwargs: dict[str, Any] = {
-            "system_prompt": system_prompt,
-            "user_prompt": user_prompt,
-            "response_format": None,
-            "temperature": temperature,
-        }
-        if max_completion_tokens is not None:
-            completion_kwargs["max_completion_tokens"] = max_completion_tokens
-        result = llm_client.complete(**completion_kwargs)
-        content = result.content
-        if content is None:
-            content = ""
-        if not isinstance(content, str):
-            content = str(content)
-        log_llm_call(
-            result,
-            llm_client.model,
-            run_dir,
-            stage,
-            step,
-            prompt_audit=prompt_audit,
+        _enforce_prompt_audit(state.prompt_audit)
+        state.result = llm_client.complete(
+            **_raw_completion_kwargs(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=temperature,
+                max_completion_tokens=max_completion_tokens,
+            )
         )
-        return content, result, None
-    except Exception as exc:
-        error_msg = f"{type(exc).__name__}: {exc}"
-        _prompt_tokens, _completion_tokens, _duration_ms = _result_usage(result)
-        log_llm_call_failure(
+        content = _raw_text(state.result)
+        if raw_result_validator is not None:
+            raw_result_validator(content)
+        log_llm_call(
+            state.result,
             llm_client.model,
             run_dir,
             stage,
             step,
-            error_msg,
+            slot_id=slot_id,
+            scenario_id=scenario_id,
+            prompt_audit=state.prompt_audit,
+        )
+        return content, state.result, None
+    except Exception as exc:
+        error_msg = _log_raw_failure(
+            llm_client=llm_client,
+            run_dir=run_dir,
+            stage=stage,
+            step=step,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            prompt_tokens=_prompt_tokens,
-            completion_tokens=_completion_tokens,
-            duration_ms=_duration_ms,
-            prompt_audit=prompt_audit,
+            error=exc,
+            state=state,
+            slot_id=slot_id,
+            scenario_id=scenario_id,
         )
-        return None, result, error_msg
+        return None, state.result, error_msg

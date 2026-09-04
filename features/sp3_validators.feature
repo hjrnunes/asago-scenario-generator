@@ -49,14 +49,14 @@ Feature: SP3 Stage 7 — Validators
     Then validation succeeds
 
   # SP3-VAL-07
-  Scenario: SP3-VAL-07 tree branch coverage validator fails on fewer than 2 categories
-    Given a scenario with an attack tree using only 1 branch category
+  Scenario: SP3-VAL-07 tree branch coverage validator fails with no supported category
+    Given a scenario with an attack tree using no branch categories
     When tree branch coverage validation is performed
     Then validation fails with error containing branch
 
   # SP3-VAL-08
-  Scenario: SP3-VAL-08 tree branch coverage validator passes with 2 or more categories
-    Given a scenario with an attack tree using controller_side and path_side categories
+  Scenario: SP3-VAL-08 tree branch coverage validator passes with one supported category
+    Given a scenario with an attack tree using only 1 branch category
     When tree branch coverage validation is performed
     Then validation succeeds
 

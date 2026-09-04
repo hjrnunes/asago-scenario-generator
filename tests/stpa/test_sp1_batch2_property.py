@@ -24,7 +24,10 @@ from typing import Any
 from hypothesis import HealthCheck, assume, given, settings, strategies as st
 from pydantic import BaseModel
 
-from asago_scenario_generator.models.capability_profile import CapabilityProfile
+from asago_scenario_generator.models.capability_profile import (
+    CapabilityProfile,
+    build_kc_subcodes_display,
+)
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from tests.stpa.sp1_helpers import MockLLMClient
@@ -184,9 +187,7 @@ class TestResolveReferencePath:
         deadline=None,
         suppress_health_check=[HealthCheck.function_scoped_fixture],
     )
-    def test_absolute_path_resolves_as_is(
-        self, tmp_path: Path, filename: str
-    ) -> None:
+    def test_absolute_path_resolves_as_is(self, tmp_path: Path, filename: str) -> None:
         """An absolute path is used directly without searching."""
         if not filename.endswith(".md"):
             filename = filename + ".md"
@@ -251,9 +252,7 @@ class TestReadUseCase:
         deadline=None,
         suppress_health_check=[HealthCheck.function_scoped_fixture],
     )
-    def test_plain_content_returned_as_is(
-        self, tmp_path: Path, content: str
-    ) -> None:
+    def test_plain_content_returned_as_is(self, tmp_path: Path, content: str) -> None:
         """Content that doesn't look like a path reference is returned as-is."""
         # Ensure content doesn't accidentally look like a path reference
         assume_content = content
@@ -324,6 +323,7 @@ class TestReadUseCase:
 
 class _DummyModel(BaseModel):
     """Simple model for LLM call testing."""
+
     name: str = "test"
 
 
@@ -369,9 +369,7 @@ class TestMaxCompletionTokensThreading:
         deadline=None,
         suppress_health_check=[HealthCheck.function_scoped_fixture],
     )
-    def test_no_token_cap_passes_none(
-        self, tmp_path: Path, data: Any
-    ) -> None:
+    def test_no_token_cap_passes_none(self, tmp_path: Path, data: Any) -> None:
         """When max_completion_tokens is not provided, complete() receives None."""
         from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
 
@@ -403,9 +401,7 @@ class TestMaxCompletionTokensThreading:
 
         # Verify the revision LLM call receives the token cap
         client = MockLLMClient()
-        client.set_response_for(
-            RevisionDelta, RevisionDelta().model_dump()
-        )
+        client.set_response_for(RevisionDelta, RevisionDelta().model_dump())
 
         # Build a minimal control structure for the revision call
         from asago_scenario_generator.stpa.models.control_structure import (
@@ -422,14 +418,10 @@ class TestMaxCompletionTokensThreading:
                     resp_id="RESP-1",
                     description="Test controller",
                     process_model_parts=[
-                        ProcessModelPart(
-                            pm_id="PM-1-1", description="State"
-                        )
+                        ProcessModelPart(pm_id="PM-1-1", description="State")
                     ],
                     control_actions=[
-                        ControlAction(
-                            ca_id="CA-1-1", description="Action"
-                        )
+                        ControlAction(ca_id="CA-1-1", description="Action")
                     ],
                     feedback_channels=[
                         FeedbackChannel(
@@ -446,7 +438,14 @@ class TestMaxCompletionTokensThreading:
 
         findings = CriticFindings(
             checklist_results={"Input validation": "absent_unjustified"},
-            gaps=[],
+            gaps=[
+                {
+                    "gap_type": "missing_responsibility",
+                    "description": "Input validation responsibility is missing",
+                    "related_attack_path": "The input path has no validation owner",
+                    "suggested_remedy": "Add an input validation responsibility",
+                }
+            ],
         )
 
         run_revision(
@@ -533,10 +532,16 @@ class TestCapabilityProfileRendering:
             use_case_text="Test use case",
             requirements=req_set.requirements,
             capability_profile=profile,
+            kc_subcodes_display=build_kc_subcodes_display(profile.kc_subcodes),
         )
 
         assert "Capability Profile Context" in rendered
-        assert "Active zones:" in rendered
+        assert "Active functional areas:" in rendered
+        assert all(code in rendered for code in kc_subcodes)
+        assert all(
+            description in rendered
+            for description in build_kc_subcodes_display(kc_subcodes).values()
+        )
         assert "Multi-agent:" in rendered
         assert "Human-in-the-loop:" in rendered
         assert "Persistent memory:" in rendered
@@ -564,9 +569,7 @@ class TestCapabilityProfileRendering:
         )
     )
     @settings(max_examples=15, deadline=None)
-    def test_profile_zones_rendered_correctly(
-        self, kc_subcodes: list[str]
-    ) -> None:
+    def test_profile_zones_rendered_correctly(self, kc_subcodes: list[str]) -> None:
         """The rendered zones_active match the profile's zones."""
         profile = _make_capability_profile(kc_subcodes)
         req_set = _make_requirement_set()
@@ -592,9 +595,7 @@ class TestCapabilityProfileRendering:
         )
     )
     @settings(max_examples=15, deadline=None)
-    def test_profile_boolean_flags_rendered(
-        self, kc_subcodes: list[str]
-    ) -> None:
+    def test_profile_boolean_flags_rendered(self, kc_subcodes: list[str]) -> None:
         """The rendered boolean flags match the profile's computed values."""
         profile = _make_capability_profile(kc_subcodes)
         req_set = _make_requirement_set()

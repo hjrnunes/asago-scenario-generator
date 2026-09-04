@@ -31,7 +31,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
 )
 from asago_scenario_generator.stpa.models.scenario_envelope import ScenarioEnvelope
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
-    _context_bdi_provider_payload_type,
+    _ContextBDIProviderPayload,
 )
 from asago_scenario_generator.stpa.scenario_prod.execution_bundle import (
     verify_execution_bundle,
@@ -43,7 +43,10 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     SemanticExecutionContract,
     SemanticExecutionDelivery,
 )
-from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
+from asago_scenario_generator.stpa.scenario_prod.run import (
+    SP3CandidateStatus,
+    run_sp3,
+)
 
 from tests.stpa.sp1_helpers import MockLLMClient, read_calls_jsonl
 
@@ -162,6 +165,10 @@ def _setup_mock_client(num_threats: int = 2) -> MockLLMClient:
     for i in range(num_threats):
         bdi_responses.append(
             {
+                "stimulus": {
+                    "category": "user_message",
+                    "description": "One user message is the typed test stimulus.",
+                },
                 "defender_vulnerabilities": [
                     {
                         "belief_handle": "belief_1",
@@ -183,6 +190,7 @@ def _setup_mock_client(num_threats: int = 2) -> MockLLMClient:
                         "source_handle": "cause_1",
                         "evidence": f"The selected state can be stale ({i + 1}).",
                         "temporal_condition": None,
+                        "evidence_status": "structural_failure",
                     }
                 ],
                 "unsafe_outcome": {
@@ -199,8 +207,6 @@ def _setup_mock_client(num_threats: int = 2) -> MockLLMClient:
                     "delivery_class": "direct_prompt",
                     "selected_factor_handle": "cause_1",
                     "action_kind": "model_output",
-                    "resource_role_handles": [],
-                    "carrier_attacker_influence": "none",
                     "reason": "The selected structural factor supports the direct route.",
                 },
             }
@@ -283,6 +289,10 @@ class TestFullRun:
             )
             assert len(result.scenario_envelopes) == 1
             assert run_dir.exists()
+            assert [outcome.status for outcome in result.candidate_outcomes] == [
+                SP3CandidateStatus.published
+            ]
+            assert result.candidate_outcomes[0].scenario_id == "SCN-001"
 
     def test_public_run_persists_and_reuses_exact_scenario_context(self, tmp_path):
         client = _setup_mock_client(1)
@@ -312,7 +322,9 @@ class TestFullRun:
         assert len(stage6) == 3
         assert context.context_digest not in stage5[0].user_prompt
         assert "source_pins" not in stage5[0].user_prompt
-        assert all(context.context_digest in call.user_prompt for call in stage6)
+        assert all(context.context_digest not in call.user_prompt for call in stage6)
+        assert all("source_pins" not in call.user_prompt for call in stage6)
+        assert all(context.ica.exact_ica_text in call.user_prompt for call in stage6)
         persisted = yaml.safe_load(
             (run_dir / "scenarios/SCN-001.yaml").read_text(encoding="utf-8")
         )
@@ -656,6 +668,10 @@ class TestErrorPaths:
             )
             assert len(result.scenario_envelopes) == 0
             assert any("Stage 5" in e for e in result.stage_errors)
+            assert (
+                result.candidate_outcomes[0].status
+                is SP3CandidateStatus.generation_failed
+            )
 
     def test_stage5_llm_failure_skipped(self):
         """A Stage 5 LLM failure is skipped with an error."""
@@ -683,6 +699,10 @@ class TestErrorPaths:
             assert any(
                 "Stage 5 BDI generation failed" in e for e in result.stage_errors
             )
+            assert (
+                result.candidate_outcomes[0].status
+                is SP3CandidateStatus.generation_failed
+            )
 
     def test_repeated_structured_length_failure_aborts_remaining_threats(self):
         """An exhausted length retry opens the circuit before later threats run."""
@@ -695,7 +715,7 @@ class TestErrorPaths:
         ets = _make_ets(num_threats=3)
         client = MockLLMClient()
         client.set_exception_for(
-            _context_bdi_provider_payload_type(4, 1),
+            _ContextBDIProviderPayload,
             LengthFinishReasonError("structured response reached its length limit"),
         )
 
@@ -713,6 +733,11 @@ class TestErrorPaths:
             "aborted 2 remaining threats" in error and "structured-output" in error
             for error in result.stage_errors
         )
+        assert [outcome.status for outcome in result.candidate_outcomes] == [
+            SP3CandidateStatus.generation_failed,
+            SP3CandidateStatus.skipped,
+            SP3CandidateStatus.skipped,
+        ]
 
     def test_stage6_llm_failure_does_not_publish_contextual_scenario(self):
         """Stage 6 failures retain diagnostics without publishing empty artifacts."""
@@ -723,6 +748,10 @@ class TestErrorPaths:
 
         # Stage 5 BDI response
         bdi = {
+            "stimulus": {
+                "category": "user_message",
+                "description": "One user message is the typed test stimulus.",
+            },
             "defender_vulnerabilities": [
                 {"belief_handle": "belief_1", "vulnerability": "vuln"}
             ],
@@ -741,6 +770,7 @@ class TestErrorPaths:
                     "source_handle": "cause_1",
                     "evidence": "The selected state can be stale.",
                     "temporal_condition": None,
+                    "evidence_status": "structural_failure",
                 }
             ],
             "unsafe_outcome": {
@@ -757,8 +787,6 @@ class TestErrorPaths:
                 "delivery_class": "direct_prompt",
                 "selected_factor_handle": "cause_1",
                 "action_kind": "model_output",
-                "resource_role_handles": [],
-                "carrier_attacker_influence": "none",
                 "reason": "The selected structural factor supports the direct route.",
             },
         }
@@ -777,6 +805,36 @@ class TestErrorPaths:
             )
             assert result.scenario_envelopes == []
             assert any("Stage 6" in e for e in result.stage_errors)
+            assert (
+                result.candidate_outcomes[0].status
+                is SP3CandidateStatus.rendering_failed
+            )
+
+    def test_artifact_write_failure_is_publication_failed(self, monkeypatch, tmp_path):
+        """A rendered candidate whose companion write fails is not published."""
+        from asago_scenario_generator.stpa.scenario_prod import run as run_module
+
+        client = _setup_mock_client(1)
+
+        def fail_write(*_args, **_kwargs):
+            raise OSError("artifact sink unavailable")
+
+        monkeypatch.setattr(run_module, "_write_scenario_artifacts", fail_write)
+        result = run_sp3(
+            llm_client=client,
+            enriched_threat_set=_make_ets(num_threats=1),
+            control_structure=_make_cs(),
+            loss_analysis=_make_loss_analysis(),
+            run_dir=tmp_path,
+        )
+
+        assert (
+            result.candidate_outcomes[0].status is SP3CandidateStatus.publication_failed
+        )
+        assert any(
+            "artifact sink unavailable" in item
+            for item in result.candidate_outcomes[0].diagnostics
+        )
 
     def test_stage5_validation_failure_does_not_reach_stage6(self):
         """A structurally invalid Stage 5 result remains an unresolved scenario."""
@@ -787,6 +845,10 @@ class TestErrorPaths:
         client.set_response_queue(
             [
                 {
+                    "stimulus": {
+                        "category": "user_message",
+                        "description": "One user message is the typed test stimulus.",
+                    },
                     "defender_vulnerabilities": [
                         {"belief_handle": "belief_1", "vulnerability": "vuln"}
                     ],
@@ -805,6 +867,7 @@ class TestErrorPaths:
                             "source_handle": "cause_1",
                             "evidence": "The selected state can be stale.",
                             "temporal_condition": None,
+                            "evidence_status": "structural_failure",
                         }
                     ],
                     "unsafe_outcome": {
@@ -821,8 +884,6 @@ class TestErrorPaths:
                         "delivery_class": "direct_prompt",
                         "selected_factor_handle": "cause_1",
                         "action_kind": "model_output",
-                        "resource_role_handles": [],
-                        "carrier_attacker_influence": "none",
                         "reason": "The selected structural factor supports the direct route.",
                     },
                 }
@@ -839,7 +900,7 @@ class TestErrorPaths:
             )
 
         assert result.scenario_envelopes == []
-        assert client.call_count == 1
+        assert client.call_count == 2
         assert any(
             "Stage 5 BDI generation failed" in error for error in result.stage_errors
         )
@@ -853,6 +914,10 @@ class TestErrorPaths:
         client.set_response_queue(
             [
                 {
+                    "stimulus": {
+                        "category": "user_message",
+                        "description": "One user message is the typed test stimulus.",
+                    },
                     "defender_vulnerabilities": [
                         {"belief_handle": "belief_1", "vulnerability": "vuln"}
                     ],
@@ -871,6 +936,7 @@ class TestErrorPaths:
                             "source_handle": "cause_1",
                             "evidence": "The selected state can be stale.",
                             "temporal_condition": None,
+                            "evidence_status": "structural_failure",
                         }
                     ],
                     "unsafe_outcome": {
@@ -887,8 +953,6 @@ class TestErrorPaths:
                         "delivery_class": "direct_prompt",
                         "selected_factor_handle": "cause_1",
                         "action_kind": "model_output",
-                        "resource_role_handles": [],
-                        "carrier_attacker_influence": "none",
                         "reason": "The selected structural factor supports the direct route.",
                     },
                 },

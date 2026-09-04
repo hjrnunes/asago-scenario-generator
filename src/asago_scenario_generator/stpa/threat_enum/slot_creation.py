@@ -23,10 +23,17 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from asago_scenario_generator.stpa.models.control_structure import ControlStructure
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlActionTemporality,
+    ControlStructure,
+)
 from asago_scenario_generator.stpa.models.ica_enumeration import ICA, UCAType
 
-__all__ = ["SlotPlaceholder", "create_slots"]
+__all__ = [
+    "SlotPlaceholder",
+    "create_slots",
+    "is_wrong_duration_eligible",
+]
 
 
 class SlotPlaceholder(BaseModel):
@@ -43,6 +50,7 @@ class SlotPlaceholder(BaseModel):
     responsibility: str | None = None
     coordination_link: str | None = None
     control_action: str
+    action_temporality: ControlActionTemporality | None = None
     uca_type: UCAType
     is_na: bool = False
     icas: list[ICA] = Field(default_factory=list)
@@ -81,6 +89,7 @@ def create_slots(control_structure: ControlStructure) -> list[SlotPlaceholder]:
                         responsibility=resp.resp_id,
                         coordination_link=None,
                         control_action=ca.ca_id,
+                        action_temporality=ca.temporality,
                         uca_type=uca_type,
                         is_na=False,
                         icas=[],
@@ -95,6 +104,7 @@ def create_slots(control_structure: ControlStructure) -> list[SlotPlaceholder]:
                     responsibility=None,
                     coordination_link=link.link_id,
                     control_action=link.coordination_mechanism.cm_id,
+                    action_temporality=None,
                     uca_type=uca_type,
                     is_na=False,
                     icas=[],
@@ -102,3 +112,29 @@ def create_slots(control_structure: ControlStructure) -> list[SlotPlaceholder]:
             )
 
     return slots
+
+
+def is_wrong_duration_eligible(
+    action_or_temporality: SlotPlaceholder | ControlActionTemporality | str | None,
+) -> bool:
+    """Return whether typed action temporality permits WRONG_DURATION.
+
+    The decision deliberately has no prose fallback.  A missing or explicit
+    ``unknown`` temporal value remains analytical and is not eligible for a
+    duration finding.  Coordination mechanisms have no action temporality and
+    therefore follow the same conservative rule.
+    """
+    if isinstance(action_or_temporality, SlotPlaceholder):
+        temporality = action_or_temporality.action_temporality
+    else:
+        temporality = action_or_temporality
+    if temporality is None:
+        return False
+    try:
+        temporality = ControlActionTemporality(temporality)
+    except (TypeError, ValueError):
+        return False
+    return temporality in {
+        ControlActionTemporality.continuous,
+        ControlActionTemporality.bounded_duration,
+    }

@@ -582,7 +582,10 @@ def _load_scenario_entry(
             )
         ]
     violations: list[ProjectionValidationViolation] = []
-    if canonical_json_bytes(scenario.model_dump(mode="json")) != content:
+    if (
+        canonical_json_bytes(scenario.model_dump(mode="json", exclude_unset=True))
+        != content
+    ):
         violations.append(
             _violation(
                 ProjectionValidationCode.content_digest_mismatch,

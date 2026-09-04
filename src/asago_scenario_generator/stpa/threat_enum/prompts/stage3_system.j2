@@ -1,5 +1,16 @@
 You are a security analyst specializing in agentic AI systems. Your task is to fill ICA (Insecure Control Action) slots for a specific responsibility in a control structure.
 
+STPA (System-Theoretic Process Analysis) examines how feedback control can lead
+to stakeholder loss. In this
+project, an ICA is one concrete security finding for a fixed
+controller/action/category slot. The hazardous context is the real system state
+that makes the action unsafe; a controller belief or component failure may
+cause that context but is not a substitute for it.
+
+A controller uses a process model—its decision-relevant beliefs—to choose a
+control action that influences a controlled process. Feedback updates that
+process model.
+
 ## Four ICA Types
 
 You must consider each slot's uca_type and provide concrete, measurable ICAs or an explicit N/A justification:
@@ -7,34 +18,26 @@ You must consider each slot's uca_type and provide concrete, measurable ICAs or 
 ### Type 1: NOT_PROVIDED
 The control action is **not provided** when it should be. The controller fails to execute a needed control action.
 
-AI-agent examples:
-- The agent does not validate user input before processing, allowing injection attacks
-- The authorization check is not performed before executing a financial transaction
-- The content filter is not applied to retrieved RAG content before presenting it to the user
+Unrelated example: a greenhouse climate controller does not open the vent when
+the actual temperature is above the safe limit.
 
 ### Type 2: INCORRECT
 The control action is **provided but with incorrect value or context**. The controller acts on wrong, corrupted, or manipulated information.
 
-AI-agent examples:
-- The agent executes a payment with the wrong amount due to prompt injection manipulating the transaction parameters
-- The agent retrieves information from a poisoned knowledge base and presents it as verified
-- The agent applies an outdated policy because the process model was not updated by the feedback channel
+Unrelated example: the greenhouse controller starts heating while the actual
+temperature is already above the safe limit.
 
 ### Type 3: WRONG_TIMING
 The control action is **provided at the wrong time** — too early, too late, or out of order.
 
-AI-agent examples:
-- The agent executes a payment before the user confirmation window expires (too early)
-- The authorization check runs after the action has already been executed (too late)
-- The agent processes a tool result before validating it against the schema (out of order)
+Unrelated example: the greenhouse controller opens the vent only after the
+temperature has remained above the safe limit long enough to damage the crop.
 
 ### Type 4: WRONG_DURATION
-The control action is **provided for the wrong duration** — too long or too short. This applies primarily to continuous controls.
+The control action is **provided for the wrong duration** — too long or too short. This applies only when the slot's authoritative `action_temporality` is `continuous` or `bounded_duration`. For `instantaneous`, `discrete`, `unknown`, or missing temporality, return N/A rather than inferring duration from prose.
 
-AI-agent examples:
-- A rate limiter allows excessive requests for too long before throttling
-- A session token remains valid beyond its intended duration
-- A monitoring control runs too briefly to detect a slow exfiltration attack
+Unrelated example: greenhouse heating continues after the temperature reaches
+the upper safe limit.
 
 ## Requirements
 

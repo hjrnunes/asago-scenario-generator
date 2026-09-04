@@ -1,7 +1,7 @@
 """Stage 6 Call B — Attack tree.
 
 One LLM call per scenario produces a YAML-serializable attack tree
-using the STPA two-level causal taxonomy with 3 branch categories:
+using one or more relevant categories from the STPA causal taxonomy:
 controller_side, path_side, coordination_gap.
 """
 
@@ -19,9 +19,16 @@ from asago_scenario_generator.stpa.models.control_structure import ControlStruct
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 
 from ._constants import PROMPTS_DIR
-from .context import render_scenario_generation_context
+from .context import render_stage6_scenario_view
 
-__all__ = ["generate_attack_tree", "build_attack_tree_prompts", "parse_attack_tree"]
+__all__ = [
+    "generate_attack_tree",
+    "build_attack_tree_prompts",
+    "parse_attack_tree",
+    "ATTACK_TREE_MAX_COMPLETION_TOKENS",
+]
+
+ATTACK_TREE_MAX_COMPLETION_TOKENS = 768
 
 # Matches markdown code fences: ```json ... ``` or ```yaml ... ``` or ``` ... ```
 _CODE_FENCE_RE = re.compile(
@@ -69,7 +76,10 @@ def generate_attack_tree(
         run_dir=run_dir,
         stage=stage,
         step=step,
+        slot_id=scenario_spec.threat_source.ica_slot_id,
+        scenario_id=scenario_spec.scenario_id,
         temperature=temperature,
+        max_completion_tokens=ATTACK_TREE_MAX_COMPLETION_TOKENS,
     )
 
     if error is not None:
@@ -160,24 +170,13 @@ def build_attack_tree_prompts(
         A tuple of (system_prompt, user_prompt).
     """
     context = scenario_spec.scenario_context
-    scenario_spec_yaml = yaml.dump(
-        scenario_spec.model_dump(
-            mode="json", exclude_none=True, exclude={"scenario_context"}
-        ),
-        default_flow_style=False,
-        sort_keys=False,
-        allow_unicode=True,
-    )
+    scenario_spec_yaml = render_stage6_scenario_view(scenario_spec)
     control_structure_yaml = yaml.dump(
         control_structure.model_dump(mode="json", exclude_none=True),
         default_flow_style=False,
         sort_keys=False,
         allow_unicode=True,
     )
-    scenario_context_yaml = (
-        render_scenario_generation_context(context) if context is not None else None
-    )
-
     system_prompt = loader.render_prompt(
         "stage6b_tree_system.j2",
         projection_alignment=projection_alignment,
@@ -185,7 +184,6 @@ def build_attack_tree_prompts(
     user_prompt = loader.render_prompt(
         "stage6b_tree_user.j2",
         scenario_spec_yaml=scenario_spec_yaml,
-        scenario_context_yaml=scenario_context_yaml,
         control_structure_yaml=(
             None if context is not None else control_structure_yaml
         ),

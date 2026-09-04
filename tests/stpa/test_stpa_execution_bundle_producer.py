@@ -435,7 +435,7 @@ def test_context_stage5_prompt_describes_constructible_typed_unsafe_condition() 
     assert '"value_type": "integer"' in system_prompt
     assert '"minimum": 0' in system_prompt
     assert '"maximum": null' in system_prompt
-    assert "exactly\n`CA-1-1`" in user_prompt
+    assert "must be exactly `CA-1-1`" in user_prompt
 
 
 @pytest.mark.parametrize(

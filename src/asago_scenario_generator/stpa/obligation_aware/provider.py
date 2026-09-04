@@ -9,18 +9,14 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal, Sequence
+from typing import Annotated, Any, Literal, Sequence
 
 from pydantic import Field, conlist, create_model, field_validator, model_validator
 
-from asago_scenario_generator.models.hybrid_coverage import (
-    ObligationId,
-    TraceReference,
-)
+from asago_scenario_generator.models.hybrid_coverage import ObligationId
 from asago_scenario_generator.models.obligation_consideration import (
     ConsiderationDiagnostic,
     ObligationIcaConsideration,
-    ObligationRouteDisposition,
     ObligationSemanticAssessment,
     StructuralConceptKind,
 )
@@ -280,7 +276,7 @@ class _RoutingProviderPayload(_Model):
     semantic fields by the authoritative models after the response is parsed.
     """
 
-    routes: tuple["_RoutingProviderRoute", ...] = Field(min_length=1)
+    routes: tuple["_RoutingProviderRouteUnion", ...] = Field(min_length=1)
 
 
 class _RoutingProviderMissingConcept(_Model):
@@ -293,13 +289,25 @@ class _RoutingProviderMissingConcept(_Model):
     obligation_id: ObligationId | None = None
 
 
-class _RoutingProviderRoute(_Model):
-    """Provider-facing route semantics without derived route identity."""
+class _RoutingProviderRouteBase(_Model):
+    """Fields shared by each disposition-specific routing branch."""
 
     obligation_id: ObligationId
-    disposition: ObligationRouteDisposition
     semantic_assessment: ObligationSemanticAssessment
-    slot_ids: tuple[str, ...] = ()
+    rationale: str = Field(min_length=1)
+    evidence: tuple[str, ...] = Field(min_length=1)
+
+
+class _RoutingProviderRoute(_RoutingProviderRouteBase):
+    """Provider-facing targeted route semantics without derived identity.
+
+    The historical private name is retained because deterministic callers
+    inspect the provider schema by definition name.  The payload uses this
+    model as one branch of a discriminated union.
+    """
+
+    disposition: Literal["targeted"]
+    slot_ids: tuple[str, ...] = Field(min_length=1)
     controller_ids: tuple[str, ...] = ()
     control_action_ids: tuple[str, ...] = ()
     responsibility_ids: tuple[str, ...] = ()
@@ -307,14 +315,36 @@ class _RoutingProviderRoute(_Model):
     feedback_channel_ids: tuple[str, ...] = ()
     controlled_process_ids: tuple[str, ...] = ()
     coordination_link_ids: tuple[str, ...] = ()
-    hazard_ids: tuple[str, ...] = ()
-    constraint_ids: tuple[str, ...] = ()
-    missing_concepts: tuple[_RoutingProviderMissingConcept, ...] = ()
-    rationale: str | None = None
-    evidence: tuple[str, ...] = Field(min_length=1)
-    model_call_refs: tuple[str, ...] = ()
-    trace_refs: tuple[TraceReference, ...] = ()
-    diagnostics: tuple[ConsiderationDiagnostic, ...] = ()
+    hazard_ids: tuple[str, ...] = Field(min_length=1)
+    constraint_ids: tuple[str, ...] = Field(min_length=1)
+
+
+class _RoutingProviderNotApplicableRoute(_RoutingProviderRouteBase):
+    """Provider-facing proposed non-applicability route."""
+
+    disposition: Literal["proposed_not_applicable"]
+
+
+class _RoutingProviderUpstreamGapRoute(_RoutingProviderRouteBase):
+    """Provider-facing route identifying a missing structural concept."""
+
+    disposition: Literal["upstream_gap"]
+    missing_concepts: tuple[_RoutingProviderMissingConcept, ...] = Field(min_length=1)
+
+
+class _RoutingProviderUnresolvedRoute(_RoutingProviderRouteBase):
+    """Provider-facing route whose supplied evidence cannot decide."""
+
+    disposition: Literal["unresolved"]
+
+
+_RoutingProviderRouteUnion = Annotated[
+    _RoutingProviderRoute
+    | _RoutingProviderNotApplicableRoute
+    | _RoutingProviderUpstreamGapRoute
+    | _RoutingProviderUnresolvedRoute,
+    Field(discriminator="disposition"),
+]
 
 
 _RoutingProviderPayload.model_rebuild()
@@ -334,7 +364,7 @@ def _routing_provider_payload_type(route_count: int) -> type[_Model]:
     if type(route_count) is not int or route_count <= 0:
         raise ValueError("route_count must be a positive integer")
     routes = conlist(
-        _RoutingProviderRoute,
+        _RoutingProviderRouteUnion,
         min_length=route_count,
         max_length=route_count,
     )
@@ -345,11 +375,12 @@ def _routing_provider_payload_type(route_count: int) -> type[_Model]:
     )
 
 
-def _materialize_routing_route(value: _RoutingProviderRoute) -> ObligationRoute:
+def _materialize_routing_route(value: _RoutingProviderRouteUnion) -> ObligationRoute:
     """Derive authoritative route and gap IDs from provider semantics."""
     data = value.model_dump(mode="python")
     data["missing_concepts"] = tuple(
-        concept.model_dump(mode="python") for concept in value.missing_concepts
+        concept.model_dump(mode="python")
+        for concept in getattr(value, "missing_concepts", ())
     )
     return ObligationRoute.model_validate(data)
 
@@ -958,6 +989,7 @@ class ObligationAwareLLMAdapter:
                 "slot_ids",
                 "hazard_ids",
                 "constraint_ids",
+                "rationale",
                 "evidence",
             ),
             valid_example={
@@ -972,6 +1004,7 @@ class ObligationAwareLLMAdapter:
                             "mechanism_rationale": "the required path is not supplied",
                             "risk_alignment_rationale": "alignment is not established",
                         },
+                        "rationale": "the required path is not supplied",
                         "evidence": ["insufficient system-specific evidence"],
                     }
                 ]

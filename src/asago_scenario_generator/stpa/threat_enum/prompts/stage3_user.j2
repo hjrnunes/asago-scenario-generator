@@ -24,7 +24,7 @@ Fill the following ICA slots for responsibility **{{ resp_id }}**. For each slot
 
 - Each ICA must reference valid hazard IDs (H-*) and constraint IDs (SC-*) from the loss analysis above. Use `related_hazards` for H-* and `related_constraints` for SC-*.
 - **ID mapping note:** The control structure's `security_constraint_refs` may use REQ-* from requirements derivation; use SC-* from the loss analysis above for `related_constraints`.
-- Reference process model parts (PM-*) and feedback channels (FB-*) from the control structure where relevant.
+- Reference process model parts (PM-*) and feedback channels (FB-*) from the control structure where relevant. The PM/FB/CA/CP identifiers shown with their descriptions above are the authoritative selectable references: copy an ID exactly when a field asks for it, and do not invent or substitute another ID.
 - Use the technology context to inform AI-specific failure modes.
 - Each slot's `uca_type` (NOT_PROVIDED, INCORRECT, WRONG_TIMING, WRONG_DURATION) is defined in the input slot schema.
 

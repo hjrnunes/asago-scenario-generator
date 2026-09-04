@@ -35,6 +35,7 @@ from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     BDIGenerationResult,
     CausalFactorDeclaration,
+    build_context_bdi_prompts,
     generate_bdi,
     populate_defender_bdi,
 )
@@ -43,6 +44,8 @@ from asago_scenario_generator.stpa.scenario_prod.narrative import (
     build_narrative_prompts,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
+
+from .test_sp3_scenario_continuity import _context
 
 
 PROMPTS_DIR = (
@@ -258,6 +261,24 @@ def test_stage6_tree_prompt_uses_evidence_gated_causal_leaves():
         "infrastructure leaf only when it cites an explicitly "
         "attacker-accessible architecture element"
     ) in prompt
+    assert "one supported category is sufficient" in prompt
+    assert 'label: "WHY THE ICA OCCURS"' in prompt
+
+
+def test_contextual_stage5_defines_loss_scenario_and_bdi() -> None:
+    prompt, _ = build_context_bdi_prompts(_context(), TemplateLoader(PROMPTS_DIR))
+
+    assert "STPA (System-Theoretic Process Analysis)" in prompt
+    assert "A **loss scenario** is the causal explanation" in prompt
+    assert "BDI means Belief–Desire–Intention" in prompt
+
+
+def test_stage6_narrative_treats_dialectic_as_rendering_not_new_analysis() -> None:
+    prompt = TemplateLoader(PROMPTS_DIR).render_prompt("stage6a_narrative_system.j2")
+
+    assert "a rendering convention" in prompt
+    assert "not a new analysis stage" in prompt
+    assert "Say that the process model is correct only when" in prompt
 
 
 def test_stage5_prompt_includes_context_when_profile_is_supplied():

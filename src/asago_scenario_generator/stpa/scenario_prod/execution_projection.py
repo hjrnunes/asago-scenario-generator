@@ -46,6 +46,7 @@ from asago_scenario_generator.stpa.models.execution_projection_v2 import (
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionActionKind,
+    ExecutionDeliveryClass,
     ExecutionResourceKind,
     ExecutionResourcePurpose,
     SemanticExecutionContract,
@@ -570,18 +571,24 @@ def _execution_requirements(
     execution_contract: SemanticExecutionContract,
 ) -> ExecutionRequirements:
     conditions = _projection_conditions(spec, factors)
-    categories = _required_surface_categories(conditions)
+    categories = _required_surface_categories(conditions, execution_contract)
     return ExecutionRequirements(
         requires_multi_turn=_has_condition_type(
             conditions, {"ordering", "delay", "duration", "window", "absence"}
-        ),
+        )
+        or execution_contract.delivery is not None
+        and execution_contract.delivery.delivery_class
+        is ExecutionDeliveryClass.conversation_context,
         requires_tool_execution=_requires_tool_execution(execution_contract),
         requires_persistent_state="persistent_data" in categories,
-        requires_multi_agent=_requires_multi_agent(context),
+        requires_multi_agent=_requires_multi_agent(context, execution_contract),
         requires_real_clock=_has_condition_type(
             conditions, {"delay", "duration", "window"}
         ),
-        requires_state_observation=_has_condition_type(conditions, {"state_value"}),
+        requires_state_observation=(
+            _has_condition_type(conditions, {"state_value"})
+            or execution_contract.action_kind is ExecutionActionKind.state_change
+        ),
         required_surface_categories=tuple(categories),
     )
 
@@ -614,10 +621,37 @@ def _projection_conditions(
 
 def _required_surface_categories(
     conditions: Sequence[SemanticCondition],
+    contract: SemanticExecutionContract | None = None,
 ) -> list[str]:
     categories = ["external_input"]
     if _has_condition_type(conditions, {"state_value"}):
         categories.append("persistent_data")
+    if contract is not None and contract.delivery is not None:
+        categories = _append_surface_category(
+            categories,
+            {
+                ExecutionDeliveryClass.direct_prompt: "external_input",
+                ExecutionDeliveryClass.conversation_context: "external_input",
+                ExecutionDeliveryClass.indirect_content: "tool_result",
+            }[contract.delivery.delivery_class],
+        )
+    if contract is not None:
+        categories = _append_surface_category(
+            categories,
+            {
+                ExecutionActionKind.tool_call: "tool_definition",
+                ExecutionActionKind.state_change: "persistent_data",
+                ExecutionActionKind.agent_message: "agent_message",
+                ExecutionActionKind.environment_action: "environment_event",
+            }.get(contract.action_kind),
+        )
+    return categories
+
+
+def _append_surface_category(categories: list[str], category: str | None) -> list[str]:
+    """Append one semantic surface once, retaining deterministic order."""
+    if category is not None and category not in categories:
+        categories.append(category)
     return categories
 
 
@@ -627,8 +661,14 @@ def _has_condition_type(
     return any(condition.type in types for condition in conditions)
 
 
-def _requires_multi_agent(context: ScenarioGenerationContext | None) -> bool:
+def _requires_multi_agent(
+    context: ScenarioGenerationContext | None,
+    contract: SemanticExecutionContract | None = None,
+) -> bool:
     return bool(
+        contract is not None
+        and contract.action_kind is ExecutionActionKind.agent_message
+    ) or bool(
         context is not None
         and context.target_control_path.coordination_path is not None
     )
@@ -664,31 +704,22 @@ def _trace_refs(
 
 
 def render_execution_projection_alignment(projection: ExecutionProjectionV2) -> str:
-    """Render a deterministic Stage 6 view derived only from the projection."""
+    """Render the ordered semantic references Stage 6 must realize."""
     lines = [
-        f"projection_schema: {projection.schema_version}",
-        f"semantic_digest: {projection.semantic_digest}",
-        f"scenario_id: {projection.scenario_id}",
-        f"candidate_id: {projection.candidate_id}",
-        "steps:",
+        "Ordered causal projection:",
+        f"Projection ID: {projection.candidate_id}",
+        f"UCA reference: {projection.ica_slot_id}",
+        "References are semantic structural IDs; their meanings are supplied "
+        "in the scenario evidence.",
     ]
     lines.extend(
-        f"- {step.step_id} order={step.order} kind={step.kind.value} "
-        f"factor_id={step.factor_id or 'null'} source={step.structural_source_id}"
+        f"- order={step.order} step_ref={step.step_id} kind={step.kind.value} "
+        f"factor_ref={step.factor_id or 'none'} "
+        f"source_ref={step.structural_source_id}"
         for step in projection.steps
     )
-    lines.extend(
-        [
-            f"unsafe_outcome: {projection.unsafe_outcome.outcome_id}",
-            f"unsafe_condition_type: {projection.unsafe_outcome.condition.type}",
-            "causal_factors:",
-        ]
-    )
-    lines.extend(
-        f"- {factor.factor_id} order={factor.order} kind={factor.kind.value} "
-        f"source={factor.structural_source_id} temporal_condition="
-        f"{factor.temporal_condition.type if factor.temporal_condition else 'null'}"
-        for factor in projection.causal_factors
+    lines.append(
+        "The last row is the fixed unsafe control action; do not add or reorder rows."
     )
     return "\n".join(lines)
 

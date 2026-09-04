@@ -74,6 +74,10 @@ ai/findings/*
 !ai/findings/stpa-obligation-aware-prompt-contract-live-qualification-2026-09-01.md
 !ai/findings/stpa-synthesis-semantic-quality-spec.md
 !ai/findings/stpa-only-execution-cutover-spec.md
+!ai/findings/session-handoff-stpa-taxonomy-garak-2026-09-03.md
+!ai/findings/stpa-garak-readiness-corrections-spec.md
+!ai/findings/klarna-live-prompt-contract-recovery-fixes-spec-2026-09-04.md
+!ai/findings/stpa-execution-environment-basis-default-fix-spec-2026-09-04.md
 opencode.json
 
 # Preserve the organization-managed Claude project scaffold only

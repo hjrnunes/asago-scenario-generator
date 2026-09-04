@@ -880,10 +880,15 @@ class TestCallLogOrderingAndProfileSkip:
         # The gap call is the second call
         gap_call = client.calls[1]
         if has_profile:
-            # kc_subcodes from the profile should appear in the gap user prompt
-            assert "kc_subcodes" in gap_call.user_prompt
-            for kc in kc_subcodes:
+            # Codes appear with their plain-language meanings, not as an
+            # unexplained serialized field name.
+            from asago_scenario_generator.models.capability_profile import (
+                build_kc_subcodes_display,
+            )
+
+            for kc, description in build_kc_subcodes_display(kc_subcodes).items():
                 assert kc in gap_call.user_prompt
+                assert description in gap_call.user_prompt
         else:
             # With no profile, kc_subcodes should be empty
             # The template may still render the section header but with no values

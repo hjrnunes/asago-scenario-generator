@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import re
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.models.obligation_consideration import (
@@ -47,6 +47,7 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
 from asago_scenario_generator.stpa.threat_enum.slot_creation import (
     SlotPlaceholder,
     create_slots,
+    is_wrong_duration_eligible,
 )
 
 
@@ -54,6 +55,9 @@ SLOT_RESPONSE_DIGEST_DOMAIN = (
     "asago-scenario-generator:stpa-obligation-slot-response:v1"
 )
 _SYNTHESIS_SLOT_MAX_COMPLETION_TOKENS = 8192
+_WRONG_DURATION_NA_JUSTIFICATION = (
+    "The authoritative action temporality is not continuous or bounded_duration."
+)
 
 
 def _slot_prompt_budget(
@@ -293,6 +297,50 @@ def _routed_for_target(
     return tuple(item[0] for item in selected), tuple(item[1] for item in selected)
 
 
+def _requires_provider_slot_analysis(slot: SlotPlaceholder) -> bool:
+    """Return whether a slot needs a provider-produced ICA analysis.
+
+    ``WRONG_DURATION`` has a deterministic structural applicability rule.  A
+    missing, unknown, instantaneous, discrete, or coordination-link
+    temporality cannot express an unsafe duration, so those slots are
+    materialized as N/A locally and any provider result for them is ignored.
+    Every other UCA remains advisory and is compiled from the provider result.
+    """
+    return not (
+        slot.uca_type is UCAType.wrong_duration and not is_wrong_duration_eligible(slot)
+    )
+
+
+def _duration_inapplicable_slot(slot: SlotPlaceholder) -> ICASlot:
+    """Materialize the canonical structural N/A for an ineligible duration."""
+    return ICASlot(
+        slot_id=slot.slot_id,
+        responsibility=slot.responsibility,
+        coordination_link=slot.coordination_link,
+        control_action=slot.control_action,
+        action_temporality=slot.action_temporality,
+        uca_type=slot.uca_type,
+        is_na=True,
+        na_justification=_WRONG_DURATION_NA_JUSTIFICATION,
+    )
+
+
+def _duration_inapplicable_pair(
+    route: ObligationRoute,
+    slot: SlotPlaceholder,
+) -> ObligationIcaConsideration:
+    """Record deterministic N/A evidence for a routed duration slot."""
+    return ObligationIcaConsideration(
+        route_id=route.route_id,
+        obligation_id=route.obligation_id,
+        slot_id=slot.slot_id,
+        disposition="proposed_not_applicable",
+        evidence=("typed-action-temporality",),
+        structural_inventory_complete=True,
+        rationale=_WRONG_DURATION_NA_JUSTIFICATION,
+    )
+
+
 def build_synthesis_slot_requests(
     *,
     briefs: Sequence[NeutralObligationBrief],
@@ -368,6 +416,7 @@ def _fallback_slot(slot: SlotPlaceholder, detail: str) -> ICASlot:
         responsibility=slot.responsibility,
         coordination_link=slot.coordination_link,
         control_action=slot.control_action,
+        action_temporality=slot.action_temporality,
         uca_type=slot.uca_type,
         is_na=True,
         na_justification=detail,
@@ -381,6 +430,10 @@ def _slot_matches(value: ICASlot, expected: SlotPlaceholder) -> bool:
         and value.responsibility == expected.responsibility
         and value.coordination_link == expected.coordination_link
         and value.control_action == expected.control_action
+        and (
+            value.action_temporality is None
+            or value.action_temporality == expected.action_temporality
+        )
         and value.uca_type == expected.uca_type
     )
 
@@ -485,31 +538,6 @@ def _looks_like_safeguard(text: str) -> bool:
         "maintain ",
     )
     return normalized.startswith(imperative_prefixes)
-
-
-def _has_continuing_behavior(action_description: str, deviation: str) -> bool:
-    """Require explicit evidence before a WRONG_DURATION finding."""
-    text = f"{action_description} {deviation}".lower()
-    return any(
-        marker in text
-        for marker in (
-            "continuous",
-            "continuously",
-            "ongoing",
-            "persistent",
-            "remains",
-            "remain valid",
-            "for too long",
-            "for too short",
-            "duration",
-            "until",
-            "while",
-            "session",
-            "rate limit",
-            "monitor",
-            "stream",
-        )
-    )
 
 
 def _compile_finding(
@@ -629,11 +657,9 @@ def _validate_finding_type(
         raise ValueError(
             "finding describes a safeguard rather than unsafe control behavior"
         )
-    if slot.uca_type is UCAType.wrong_duration and not _has_continuing_behavior(
-        action_description, deviation
-    ):
+    if slot.uca_type is UCAType.wrong_duration and not is_wrong_duration_eligible(slot):
         raise ValueError(
-            "WRONG_DURATION requires explicit continuing behavior for the action"
+            "WRONG_DURATION requires continuous or bounded_duration action temporality"
         )
 
 
@@ -722,6 +748,7 @@ def compile_ica_slot_draft(
             responsibility=slot.responsibility,
             coordination_link=slot.coordination_link,
             control_action=slot.control_action,
+            action_temporality=slot.action_temporality,
             uca_type=slot.uca_type,
             is_na=True,
             na_justification=draft.na_rationale,
@@ -745,10 +772,98 @@ def compile_ica_slot_draft(
         responsibility=slot.responsibility,
         coordination_link=slot.coordination_link,
         control_action=slot.control_action,
+        action_temporality=slot.action_temporality,
         uca_type=slot.uca_type,
         is_na=False,
         icas=compiled,
     ).aligned()
+
+
+def _validate_legacy_ica_references(
+    ica: ICA,
+    *,
+    hazard_ids: set[str],
+    constraint_ids: set[str],
+) -> None:
+    """Reject legacy references that are outside the authoritative analysis."""
+    if set(ica.related_hazards) - hazard_ids:
+        raise ValueError("legacy ICA references an unknown hazard")
+    if set(ica.related_constraints) - constraint_ids:
+        raise ValueError("legacy ICA references an unknown constraint")
+
+
+def _legacy_ica_text(
+    ica: ICA,
+    *,
+    owner_description: str,
+    action_description: str,
+) -> str:
+    """Reject safeguard prose and add authoritative owner/action context."""
+    if _looks_like_safeguard(ica.ica_text):
+        raise ValueError(
+            "finding describes a safeguard rather than unsafe control behavior"
+        )
+    text = ica.ica_text.strip()
+    if owner_description not in text or action_description not in text:
+        text = f"{owner_description} issues '{action_description}': {text}"
+    return text
+
+
+def _compile_legacy_icas(
+    value: ICASlot,
+    *,
+    owner_description: str,
+    action_description: str,
+    loss_analysis: LossAnalysis,
+) -> list[ICA]:
+    """Validate and prefix the historical provider ICA entries."""
+    hazard_ids = {item.hazard_id for item in loss_analysis.hazards}
+    constraint_ids = {item.constraint_id for item in loss_analysis.security_constraints}
+    compiled: list[ICA] = []
+    for ica in value.icas:
+        _validate_legacy_ica_references(
+            ica,
+            hazard_ids=hazard_ids,
+            constraint_ids=constraint_ids,
+        )
+        text = _legacy_ica_text(
+            ica,
+            owner_description=owner_description,
+            action_description=action_description,
+        )
+        # Preserve the provider-local label until consideration evidence has
+        # selected this exact ICA; the enclosing fill seam aligns positions to
+        # canonical slot-relative IDs.
+        compiled.append(ica.model_copy(update={"ica_text": text}))
+    return compiled
+
+
+def _legacy_slot_metadata(slot: SlotPlaceholder) -> dict[str, Any]:
+    """Return compiler-owned identity fields for a legacy slot response."""
+    return {
+        "responsibility": slot.responsibility,
+        "coordination_link": slot.coordination_link,
+        "control_action": slot.control_action,
+        "action_temporality": slot.action_temporality,
+        "uca_type": slot.uca_type,
+    }
+
+
+def _apply_legacy_slot_result(
+    value: ICASlot,
+    *,
+    slot: SlotPlaceholder,
+    compiled: list[ICA],
+) -> ICASlot:
+    """Apply compiler-owned identity while retaining legacy N/A semantics."""
+    metadata = _legacy_slot_metadata(slot)
+    if value.is_na:
+        return value.model_copy(update=metadata)
+    if not compiled:
+        raise ValueError("non-N/A slot requires at least one compiled finding")
+    # Keep provider-local ICA labels until the pair adapter has selected them;
+    # the enclosing fill seam aligns positions to canonical ``slot:N`` IDs.
+    return value.model_copy(update={"icas": compiled, **metadata})
 
 
 def _compile_legacy_slot(
@@ -761,35 +876,18 @@ def _compile_legacy_slot(
     """Adapt the historical final-slot shape while enforcing new semantics."""
     if not _slot_matches(value, slot):
         raise ValueError(f"slot {slot.slot_id} changed its authoritative identity")
+    if not _requires_provider_slot_analysis(slot):
+        return _duration_inapplicable_slot(slot)
     owner_description, action_description, _target_process, _pm_ids, _fb_ids = (
         _slot_authority(slot, control_structure)
     )
-    hazard_ids = {item.hazard_id for item in loss_analysis.hazards}
-    constraint_ids = {item.constraint_id for item in loss_analysis.security_constraints}
-    compiled: list[ICA] = []
-    for ica in value.icas:
-        if set(ica.related_hazards) - hazard_ids:
-            raise ValueError("legacy ICA references an unknown hazard")
-        if set(ica.related_constraints) - constraint_ids:
-            raise ValueError("legacy ICA references an unknown constraint")
-        if _looks_like_safeguard(ica.ica_text):
-            raise ValueError(
-                "finding describes a safeguard rather than unsafe control behavior"
-            )
-        text = ica.ica_text.strip()
-        if owner_description not in text or action_description not in text:
-            text = f"{owner_description} issues '{action_description}': {text}"
-        # Preserve the provider-local label until consideration evidence has
-        # selected this exact ICA; the enclosing fill seam aligns positions to
-        # canonical slot-relative IDs.
-        compiled.append(ica.model_copy(update={"ica_text": text}))
-    if value.is_na:
-        return value
-    if not compiled:
-        raise ValueError("non-N/A slot requires at least one compiled finding")
-    # Keep provider-local ICA labels until the pair adapter has selected them;
-    # the enclosing fill seam aligns positions to canonical ``slot:N`` IDs.
-    return value.model_copy(update={"icas": compiled})
+    compiled = _compile_legacy_icas(
+        value,
+        owner_description=owner_description,
+        action_description=action_description,
+        loss_analysis=loss_analysis,
+    )
+    return _apply_legacy_slot_result(value, slot=slot, compiled=compiled)
 
 
 def compile_slot_provider_entry(
@@ -952,6 +1050,59 @@ def _draft_finding_consideration(
     )
 
 
+def _unresolved_diagnostic_code(error: BaseException | None) -> str:
+    """Map a request failure to its stable local diagnostic code."""
+    if isinstance(error, PromptBudgetExceeded):
+        return "prompt_budget_exceeded"
+    if isinstance(error, PromptContractError):
+        return "prompt_contract_invalid"
+    return "slot_response_unresolved"
+
+
+def _record_unresolved_slot_fallbacks(
+    request: SynthesisSlotRequest,
+    detail: str,
+    *,
+    all_filled: dict[str, ICASlot],
+    successful_slots: set[str] | None,
+) -> None:
+    """Materialize unresolved provider slots as explicit fallback N/A values."""
+    for slot in request.slots:
+        slot_id = slot.slot_id
+        if not _requires_provider_slot_analysis(slot):
+            continue
+        if successful_slots is not None and slot_id in successful_slots:
+            continue
+        all_filled[slot_id] = _fallback_slot(slot, detail)
+
+
+def _unresolved_response_digest(response: SynthesisSlotResponse | None) -> str | None:
+    """Return a response digest even when the adapter omitted one."""
+    if response is None:
+        return None
+    return response.response_digest or compute_framed_digest(
+        SLOT_RESPONSE_DIGEST_DOMAIN,
+        response.model_dump(mode="json"),
+    )
+
+
+def _record_unresolved_pairs(
+    request: SynthesisSlotRequest,
+    expected: Mapping[str, SlotPlaceholder],
+    detail: str,
+    *,
+    all_pairs: list[ObligationIcaConsideration],
+    call_ref: str,
+) -> None:
+    """Retain unresolved evidence for each routed, provider-owned slot."""
+    for route in request.routed_routes:
+        for slot_id in sorted(set(route.slot_ids).intersection(expected)):
+            slot = expected[slot_id]
+            if not _requires_provider_slot_analysis(slot):
+                continue
+            all_pairs.append(_unresolved_pair(route, slot, detail, call_ref=call_ref))
+
+
 def _record_request_unresolved(
     request: SynthesisSlotRequest,
     expected: Mapping[str, SlotPlaceholder],
@@ -967,51 +1118,38 @@ def _record_request_unresolved(
     error: BaseException | None = None,
 ) -> None:
     """Retain one failed target request as unresolved local evidence."""
-    diagnostic_code = (
-        "prompt_budget_exceeded"
-        if isinstance(error, PromptBudgetExceeded)
-        else "prompt_contract_invalid"
-        if isinstance(error, PromptContractError)
-        else "slot_response_unresolved"
-    )
     diagnostics.append(
         ConsiderationDiagnostic(
-            code=diagnostic_code,
+            code=_unresolved_diagnostic_code(error),
             detail=detail,
             refs=(request.target_id,),
         )
     )
-    for slot in request.slots:
-        if successful_slots is None or slot.slot_id not in successful_slots:
-            all_filled[slot.slot_id] = _fallback_slot(slot, detail)
+    _record_unresolved_slot_fallbacks(
+        request,
+        detail,
+        all_filled=all_filled,
+        successful_slots=successful_slots,
+    )
     call_ref = call_ref or f"stpa-slot:{request.target_id}"
-    response_digest = None
-    if response is not None:
-        response_digest = response.response_digest or compute_framed_digest(
-            SLOT_RESPONSE_DIGEST_DOMAIN,
-            response.model_dump(mode="json"),
-        )
     evidence.append(
         ConsiderationCallEvidence(
             call_id=call_ref,
             request_digest=request.semantic_digest,
-            response_digest=response_digest,
+            response_digest=_unresolved_response_digest(response),
             model_profile=request.controls.model_profile,
             model_name=request.controls.model_name,
             attempt_count=1,
             outcome="unresolved",
         )
     )
-    for route in request.routed_routes:
-        for slot_id in sorted(set(route.slot_ids).intersection(expected)):
-            all_pairs.append(
-                _unresolved_pair(
-                    route,
-                    expected[slot_id],
-                    detail,
-                    call_ref=call_ref,
-                )
-            )
+    _record_unresolved_pairs(
+        request,
+        expected,
+        detail,
+        all_pairs=all_pairs,
+        call_ref=call_ref,
+    )
 
 
 def _validate_pair(
@@ -1097,6 +1235,490 @@ class SlotFillRunResult:
         return self.result.considerations
 
 
+@dataclass(slots=True)
+class _SlotFillState:
+    """Mutable accumulator for one bounded slot-fill run."""
+
+    all_filled: dict[str, ICASlot]
+    successful_slots: set[str]
+    all_pairs: list[ObligationIcaConsideration]
+    evidence: list[ConsiderationCallEvidence]
+    diagnostics: list[ConsiderationDiagnostic]
+
+
+def _initial_slot_fill_state(
+    routes: Sequence[ObligationRoute],
+    slots: Sequence[SlotPlaceholder],
+) -> tuple[dict[str, SlotPlaceholder], _SlotFillState]:
+    """Seed deterministic duration outcomes and routed evidence."""
+    slot_by_id = {slot.slot_id: slot for slot in slots}
+    all_filled = _duration_inapplicable_slots(slots)
+    all_pairs = _duration_inapplicable_pairs(routes, slot_by_id)
+    return slot_by_id, _SlotFillState(
+        all_filled=all_filled,
+        successful_slots=set(),
+        all_pairs=all_pairs,
+        evidence=[],
+        diagnostics=[],
+    )
+
+
+def _duration_inapplicable_slots(
+    slots: Sequence[SlotPlaceholder],
+) -> dict[str, ICASlot]:
+    """Materialize every deterministic duration N/A in a target map."""
+    return {
+        slot.slot_id: _duration_inapplicable_slot(slot)
+        for slot in slots
+        if not _requires_provider_slot_analysis(slot)
+    }
+
+
+def _duration_inapplicable_pairs(
+    routes: Sequence[ObligationRoute],
+    slot_by_id: Mapping[str, SlotPlaceholder],
+) -> list[ObligationIcaConsideration]:
+    """Collect routed evidence for deterministic duration N/A slots."""
+    all_pairs: list[ObligationIcaConsideration] = []
+    for route in routes:
+        if route.disposition != "targeted":
+            continue
+        for slot_id in sorted(set(route.slot_ids)):
+            slot = slot_by_id[slot_id]
+            if not _requires_provider_slot_analysis(slot):
+                all_pairs.append(_duration_inapplicable_pair(route, slot))
+    return all_pairs
+
+
+def _request_totals(
+    requests: Sequence[SynthesisSlotRequest],
+) -> dict[str, int]:
+    """Count budget-split requests per target for stable call IDs."""
+    totals: dict[str, int] = {}
+    for request in requests:
+        totals[request.target_id] = totals.get(request.target_id, 0) + 1
+    return totals
+
+
+def _request_call_ref(
+    request: SynthesisSlotRequest,
+    target_totals: Mapping[str, int],
+    target_parts: dict[str, int],
+) -> str:
+    """Allocate the deterministic call reference for one request part."""
+    target_parts[request.target_id] = target_parts.get(request.target_id, 0) + 1
+    if target_totals[request.target_id] == 1:
+        return f"stpa-slot:{request.target_id}"
+    return f"stpa-slot:{request.target_id}:part-{target_parts[request.target_id]}"
+
+
+def _coerce_request_response(
+    method: Any,
+    request: SynthesisSlotRequest,
+) -> tuple[SynthesisSlotResponse | None, Exception | None]:
+    """Call one provider target and retain request-binding failures locally."""
+    try:
+        response = _coerce_response(method(request), request)
+        if response.request_digest != request.semantic_digest:
+            raise ValueError("slot response is bound to another request")
+    except Exception as exc:  # noqa: BLE001 - retain request-local failures
+        return None, exc
+    return response, None
+
+
+def _compile_response_entry(
+    value: Any,
+    *,
+    request: SynthesisSlotRequest,
+    expected: Mapping[str, SlotPlaceholder],
+    by_id: Mapping[str, ICASlot],
+    diagnostics: list[ConsiderationDiagnostic],
+    loss_analysis: LossAnalysis,
+    control_structure: ControlStructure,
+) -> tuple[str, ICASlot] | None:
+    """Compile one response entry or record its non-fatal identity issue."""
+    slot_id = getattr(value, "slot_id", None)
+    expected_slot = expected.get(slot_id)
+    if expected_slot is None:
+        diagnostics.append(
+            ConsiderationDiagnostic(
+                code="unexpected_slot_identity",
+                detail=(
+                    f"Response for {request.target_id} contained an unexpected slot "
+                    f"{slot_id}"
+                ),
+                refs=(request.target_id, str(slot_id)),
+            )
+        )
+        return None
+    if slot_id in by_id:
+        diagnostics.append(
+            ConsiderationDiagnostic(
+                code="duplicate_slot_identity",
+                detail=f"Response for {request.target_id} repeated slot {slot_id}",
+                refs=(request.target_id, slot_id),
+            )
+        )
+        return None
+    if not _requires_provider_slot_analysis(expected_slot):
+        return None
+    compiled = compile_slot_provider_entry(
+        value,
+        slot=expected_slot,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    ).aligned()
+    return slot_id, compiled
+
+
+def _compile_response_slots(
+    response: SynthesisSlotResponse,
+    *,
+    request: SynthesisSlotRequest,
+    expected: Mapping[str, SlotPlaceholder],
+    diagnostics: list[ConsiderationDiagnostic],
+    loss_analysis: LossAnalysis,
+    control_structure: ControlStructure,
+) -> tuple[dict[str, ICASlot], Exception | None]:
+    """Compile all provider slot entries while retaining local failures."""
+    by_id: dict[str, ICASlot] = {}
+    for value in response.filled_slots:
+        try:
+            compiled = _compile_response_entry(
+                value,
+                request=request,
+                expected=expected,
+                by_id=by_id,
+                diagnostics=diagnostics,
+                loss_analysis=loss_analysis,
+                control_structure=control_structure,
+            )
+        except (TypeError, ValueError) as exc:
+            return by_id, exc
+        if compiled is not None:
+            slot_id, slot = compiled
+            by_id[slot_id] = slot
+    return by_id, None
+
+
+def _expected_slot_map(
+    request: SynthesisSlotRequest,
+) -> dict[str, SlotPlaceholder]:
+    """Index one request's authoritative slots by their exact identities."""
+    return {slot.slot_id: slot for slot in request.slots}
+
+
+def _conflicting_slots(
+    by_id: Mapping[str, ICASlot],
+    state: _SlotFillState,
+) -> tuple[str, ...]:
+    """Find repeated target parts that disagree with accepted slot results."""
+    return tuple(
+        sorted(
+            slot_id
+            for slot_id, value in by_id.items()
+            if slot_id in state.successful_slots and state.all_filled[slot_id] != value
+        )
+    )
+
+
+def _fill_missing_request_slots(
+    request: SynthesisSlotRequest,
+    by_id: Mapping[str, ICASlot],
+    state: _SlotFillState,
+) -> None:
+    """Fill provider-owned slots omitted by a successful response."""
+    for slot in request.slots:
+        if slot.slot_id in state.successful_slots:
+            continue
+        if not _requires_provider_slot_analysis(slot):
+            continue
+        state.all_filled[slot.slot_id] = by_id.get(
+            slot.slot_id,
+            _fallback_slot(
+                slot, "No valid slot result was returned by the bounded adapter."
+            ),
+        )
+
+
+def _validate_request_slots(
+    request: SynthesisSlotRequest,
+    state: _SlotFillState,
+    *,
+    loss_analysis: LossAnalysis,
+    control_structure: ControlStructure,
+) -> Exception | None:
+    """Validate one target's assembled slots without aborting other targets."""
+    try:
+        request_enumeration = ICAEnumeration(
+            slots=[state.all_filled[slot.slot_id] for slot in request.slots]
+        )
+        request_enumeration.validate_against(loss_analysis, control_structure)
+    except Exception as exc:  # noqa: BLE001 - retain request-local failures
+        return exc
+    return None
+
+
+def _routed_provider_slot_ids(
+    route: ObligationRoute,
+    expected: Mapping[str, SlotPlaceholder],
+) -> tuple[str, ...]:
+    """Return routed slot IDs whose analysis remains provider-owned."""
+    return tuple(
+        sorted(
+            slot_id
+            for slot_id in set(route.slot_ids).intersection(expected)
+            if _requires_provider_slot_analysis(expected[slot_id])
+        )
+    )
+
+
+def _record_request_failure(
+    request: SynthesisSlotRequest,
+    expected: Mapping[str, SlotPlaceholder],
+    response: SynthesisSlotResponse | None,
+    detail: str,
+    *,
+    state: _SlotFillState,
+    call_ref: str,
+    error: BaseException,
+) -> None:
+    """Record a request-local failure through the common unresolved seam."""
+    _record_request_unresolved(
+        request,
+        expected,
+        detail,
+        response=response,
+        all_filled=state.all_filled,
+        all_pairs=state.all_pairs,
+        evidence=state.evidence,
+        diagnostics=state.diagnostics,
+        call_ref=call_ref,
+        successful_slots=state.successful_slots,
+        error=error,
+    )
+
+
+def _record_routed_pair(
+    route: ObligationRoute,
+    slot_id: str,
+    expected: Mapping[str, SlotPlaceholder],
+    pair_by_key: Mapping[tuple[str, str], ObligationIcaConsideration],
+    *,
+    call_ref: str,
+    state: _SlotFillState,
+) -> None:
+    """Validate or retain unresolved evidence for one routed pair."""
+    slot = expected[slot_id]
+    pair = pair_by_key.get((route.obligation_id, slot_id))
+    if pair is None:
+        state.all_pairs.append(
+            _unresolved_pair(
+                route,
+                slot,
+                "Routed obligation/slot pair was not returned by the adapter.",
+                call_ref=call_ref,
+            )
+        )
+        return
+    try:
+        state.all_pairs.append(_validate_pair(pair, route, slot, state.all_filled))
+    except (TypeError, ValueError) as exc:
+        state.all_pairs.append(
+            _unresolved_pair(
+                route,
+                slot,
+                f"Routed pair failed exact validation: {type(exc).__name__}: {exc}",
+                call_ref=call_ref,
+            )
+        )
+
+
+def _record_request_pairs(
+    request: SynthesisSlotRequest,
+    expected: Mapping[str, SlotPlaceholder],
+    pair_by_key: Mapping[tuple[str, str], ObligationIcaConsideration],
+    *,
+    call_ref: str,
+    state: _SlotFillState,
+) -> None:
+    """Validate each provider-owned slot pair in a successful request."""
+    for route in request.routed_routes:
+        for slot_id in _routed_provider_slot_ids(route, expected):
+            _record_routed_pair(
+                route,
+                slot_id,
+                expected,
+                pair_by_key,
+                call_ref=call_ref,
+                state=state,
+            )
+
+
+def _record_response_error(
+    request: SynthesisSlotRequest,
+    expected: Mapping[str, SlotPlaceholder],
+    response: SynthesisSlotResponse | None,
+    response_error: Exception | None,
+    *,
+    state: _SlotFillState,
+    call_ref: str,
+) -> bool:
+    """Record a provider-call failure and report whether processing should stop."""
+    if response_error is None:
+        return False
+    _record_request_failure(
+        request,
+        expected,
+        response,
+        f"Slot response could not be validated: {type(response_error).__name__}: {response_error}",
+        state=state,
+        call_ref=call_ref,
+        error=response_error,
+    )
+    return True
+
+
+def _process_valid_response(
+    response: SynthesisSlotResponse,
+    request: SynthesisSlotRequest,
+    expected: Mapping[str, SlotPlaceholder],
+    *,
+    loss_analysis: LossAnalysis,
+    control_structure: ControlStructure,
+    state: _SlotFillState,
+    call_ref: str,
+) -> None:
+    """Compile, validate, and accept one request after response coercion."""
+    by_id, compile_error = _compile_response_slots(
+        response,
+        request=request,
+        expected=expected,
+        diagnostics=state.diagnostics,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    )
+    if compile_error is not None:
+        _record_request_failure(
+            request,
+            expected,
+            response,
+            "Slot response failed typed ICA draft validation: "
+            f"{type(compile_error).__name__}: {compile_error}",
+            state=state,
+            call_ref=call_ref,
+            error=compile_error,
+        )
+        return
+    conflicts = _conflicting_slots(by_id, state)
+    if conflicts:
+        detail = (
+            "Repeated obligation batch changed the authoritative ICA findings "
+            "for slot(s): " + ", ".join(conflicts)
+        )
+        _record_request_failure(
+            request,
+            expected,
+            response,
+            detail,
+            state=state,
+            call_ref=call_ref,
+            error=ValueError(detail),
+        )
+        return
+    _fill_missing_request_slots(request, by_id, state)
+    validation_error = _validate_request_slots(
+        request,
+        state,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    )
+    if validation_error is not None:
+        _record_request_failure(
+            request,
+            expected,
+            response,
+            "Slot response failed exact STPA reference validation: "
+            f"{type(validation_error).__name__}: {validation_error}",
+            state=state,
+            call_ref=call_ref,
+            error=validation_error,
+        )
+        return
+    state.successful_slots.update(by_id)
+    _record_accepted_request(response, request, call_ref=call_ref, state=state)
+
+
+def _record_accepted_request(
+    response: SynthesisSlotResponse,
+    request: SynthesisSlotRequest,
+    *,
+    call_ref: str,
+    state: _SlotFillState,
+) -> None:
+    """Record accepted response evidence and validate each routed pair."""
+    structured_pairs = _draft_considerations(response, request, state.all_filled)
+    pair_by_key = {
+        (pair.obligation_id, pair.slot_id): pair
+        for pair in (*response.considerations, *structured_pairs)
+    }
+    response_digest = response.response_digest or compute_framed_digest(
+        SLOT_RESPONSE_DIGEST_DOMAIN,
+        response.model_dump(mode="json"),
+    )
+    state.evidence.append(
+        ConsiderationCallEvidence(
+            call_id=call_ref,
+            request_digest=request.semantic_digest,
+            response_digest=response_digest,
+            model_profile=request.controls.model_profile,
+            model_name=request.controls.model_name,
+            attempt_count=1,
+            outcome="accepted",
+        )
+    )
+    _record_request_pairs(
+        request,
+        {slot.slot_id: slot for slot in request.slots},
+        pair_by_key,
+        call_ref=call_ref,
+        state=state,
+    )
+
+
+def _process_slot_request(
+    method: Any,
+    request: SynthesisSlotRequest,
+    *,
+    loss_analysis: LossAnalysis,
+    control_structure: ControlStructure,
+    state: _SlotFillState,
+    call_ref: str,
+) -> None:
+    """Process one bounded target request and retain all local failures."""
+    expected = _expected_slot_map(request)
+    response, response_error = _coerce_request_response(method, request)
+    if _record_response_error(
+        request,
+        expected,
+        response,
+        response_error,
+        state=state,
+        call_ref=call_ref,
+    ):
+        return
+    response = cast(SynthesisSlotResponse, response)
+    _process_valid_response(
+        response,
+        request,
+        expected,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+        state=state,
+        call_ref=call_ref,
+    )
+
+
 def fill_synthesis_slots(
     adapter: SlotAnalysisAdapter,
     *,
@@ -1116,231 +1738,30 @@ def fill_synthesis_slots(
     )
     requests = _budgeted_synthesis_slot_requests(adapter, requests)
     method = _adapter_method(adapter)
-    all_filled: dict[str, ICASlot] = {}
-    successful_slots: set[str] = set()
-    all_pairs: list[ObligationIcaConsideration] = []
-    evidence: list[ConsiderationCallEvidence] = []
-    diagnostics: list[ConsiderationDiagnostic] = []
-
-    target_totals: dict[str, int] = {}
-    for request in requests:
-        target_totals[request.target_id] = target_totals.get(request.target_id, 0) + 1
+    all_slots = final_slot_universe(control_structure)
+    _slot_by_id, state = _initial_slot_fill_state(routes, all_slots)
+    target_totals = _request_totals(requests)
     target_parts: dict[str, int] = {}
 
     for request in requests:
-        expected = {slot.slot_id: slot for slot in request.slots}
-        target_parts[request.target_id] = target_parts.get(request.target_id, 0) + 1
-        call_ref = (
-            f"stpa-slot:{request.target_id}"
-            if target_totals[request.target_id] == 1
-            else f"stpa-slot:{request.target_id}:part-{target_parts[request.target_id]}"
-        )
-        response: SynthesisSlotResponse | None = None
-        error: Exception | None = None
-        try:
-            response = _coerce_response(method(request), request)
-            if response.request_digest != request.semantic_digest:
-                raise ValueError("slot response is bound to another request")
-        except Exception as exc:  # noqa: BLE001 - retain request-local failures
-            error = exc
-        if error is not None:
-            detail = (
-                f"Slot response could not be validated: {type(error).__name__}: {error}"
-            )
-            _record_request_unresolved(
-                request,
-                expected,
-                detail,
-                response=response,
-                all_filled=all_filled,
-                all_pairs=all_pairs,
-                evidence=evidence,
-                diagnostics=diagnostics,
-                call_ref=call_ref,
-                successful_slots=successful_slots,
-                error=error,
-            )
-            continue
-
-        assert response is not None
-        by_id: dict[str, ICASlot] = {}
-        compile_error: Exception | None = None
-        for value in response.filled_slots:
-            slot_id = getattr(value, "slot_id", None)
-            expected_slot = expected.get(slot_id)
-            if expected_slot is None:
-                diagnostics.append(
-                    ConsiderationDiagnostic(
-                        code="unexpected_slot_identity",
-                        detail=f"Response for {request.target_id} contained an unexpected slot {slot_id}",
-                        refs=(request.target_id, str(slot_id)),
-                    )
-                )
-                continue
-            if slot_id in by_id:
-                diagnostics.append(
-                    ConsiderationDiagnostic(
-                        code="duplicate_slot_identity",
-                        detail=f"Response for {request.target_id} repeated slot {slot_id}",
-                        refs=(request.target_id, slot_id),
-                    )
-                )
-                continue
-            try:
-                by_id[slot_id] = compile_slot_provider_entry(
-                    value,
-                    slot=expected_slot,
-                    loss_analysis=loss_analysis,
-                    control_structure=control_structure,
-                ).aligned()
-            except (TypeError, ValueError) as exc:
-                compile_error = exc
-                break
-        if compile_error is not None:
-            detail = (
-                "Slot response failed typed ICA draft validation: "
-                f"{type(compile_error).__name__}: {compile_error}"
-            )
-            _record_request_unresolved(
-                request,
-                expected,
-                detail,
-                response=response,
-                all_filled=all_filled,
-                all_pairs=all_pairs,
-                evidence=evidence,
-                diagnostics=diagnostics,
-                call_ref=call_ref,
-                successful_slots=successful_slots,
-                error=compile_error,
-            )
-            continue
-        conflicting_slots = tuple(
-            sorted(
-                slot_id
-                for slot_id, value in by_id.items()
-                if slot_id in successful_slots and all_filled[slot_id] != value
-            )
-        )
-        if conflicting_slots:
-            detail = (
-                "Repeated obligation batch changed the authoritative ICA findings "
-                "for slot(s): " + ", ".join(conflicting_slots)
-            )
-            _record_request_unresolved(
-                request,
-                expected,
-                detail,
-                response=response,
-                all_filled=all_filled,
-                all_pairs=all_pairs,
-                evidence=evidence,
-                diagnostics=diagnostics,
-                call_ref=call_ref,
-                successful_slots=successful_slots,
-                error=ValueError(detail),
-            )
-            continue
-        for slot in request.slots:
-            if slot.slot_id in successful_slots:
-                continue
-            all_filled[slot.slot_id] = by_id.get(
-                slot.slot_id,
-                _fallback_slot(
-                    slot, "No valid slot result was returned by the bounded adapter."
-                ),
-            )
-
-        # Validate ICA references at the request boundary so one malformed
-        # target cannot abort the entire synthesis after other targets have
-        # already been retained.  A failed target is represented uniformly
-        # as N/A slots plus unresolved routed pairs below.
-        try:
-            request_enumeration = ICAEnumeration(
-                slots=[all_filled[slot.slot_id] for slot in request.slots]
-            )
-            request_enumeration.validate_against(loss_analysis, control_structure)
-        except Exception as exc:  # noqa: BLE001 - retain request-local failures
-            detail = (
-                "Slot response failed exact STPA reference validation: "
-                f"{type(exc).__name__}: {exc}"
-            )
-            _record_request_unresolved(
-                request,
-                expected,
-                detail,
-                response=response,
-                all_filled=all_filled,
-                all_pairs=all_pairs,
-                evidence=evidence,
-                diagnostics=diagnostics,
-                call_ref=call_ref,
-                successful_slots=successful_slots,
-                error=exc,
-            )
-            continue
-
-        successful_slots.update(by_id)
-
-        structured_pairs = _draft_considerations(
-            response,
+        _process_slot_request(
+            method,
             request,
-            all_filled,
+            loss_analysis=loss_analysis,
+            control_structure=control_structure,
+            state=state,
+            call_ref=_request_call_ref(request, target_totals, target_parts),
         )
-        pair_by_key = {
-            (pair.obligation_id, pair.slot_id): pair
-            for pair in (*response.considerations, *structured_pairs)
-        }
-        response_digest = response.response_digest or compute_framed_digest(
-            SLOT_RESPONSE_DIGEST_DOMAIN,
-            response.model_dump(mode="json"),
-        )
-        evidence.append(
-            ConsiderationCallEvidence(
-                call_id=call_ref,
-                request_digest=request.semantic_digest,
-                response_digest=response_digest,
-                model_profile=request.controls.model_profile,
-                model_name=request.controls.model_name,
-                attempt_count=1,
-                outcome="accepted",
-            )
-        )
-        for route in request.routed_routes:
-            for slot_id in sorted(set(route.slot_ids).intersection(expected)):
-                slot = expected[slot_id]
-                pair = pair_by_key.get((route.obligation_id, slot_id))
-                if pair is None:
-                    all_pairs.append(
-                        _unresolved_pair(
-                            route,
-                            slot,
-                            "Routed obligation/slot pair was not returned by the adapter.",
-                            call_ref=call_ref,
-                        )
-                    )
-                    continue
-                try:
-                    all_pairs.append(_validate_pair(pair, route, slot, all_filled))
-                except (TypeError, ValueError) as exc:
-                    all_pairs.append(
-                        _unresolved_pair(
-                            route,
-                            slot,
-                            f"Routed pair failed exact validation: {type(exc).__name__}: {exc}",
-                            call_ref=call_ref,
-                        )
-                    )
 
-    ordered_slots = tuple(all_filled[key] for key in sorted(all_filled))
+    ordered_slots = tuple(state.all_filled[key] for key in sorted(state.all_filled))
     enumeration = ICAEnumeration(slots=list(ordered_slots))
     enumeration.validate_against(loss_analysis, control_structure)
     final = SynthesisSlotFillResult(
         ica_enumeration=enumeration,
-        considerations=tuple(all_pairs),
+        considerations=tuple(state.all_pairs),
         requests=requests,
-        call_evidence=tuple(evidence),
-        diagnostics=tuple(diagnostics),
+        call_evidence=tuple(state.evidence),
+        diagnostics=tuple(state.diagnostics),
     )
     return SlotFillRunResult(result=final)
 

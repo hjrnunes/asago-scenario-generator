@@ -42,6 +42,10 @@ class LLMCallSpec:
         temperature: LLM temperature (default 0.4).
         validation_retries: Number of Pydantic-validation retries (default 0).
         validation_retry_feedback: Optional text appended only to retry prompts.
+        validation_retry_include_schema: Whether a retry repeats the complete
+            response schema. Structured transports normally set this false.
+        slot_id: Exact ICA slot identity for call evidence, when applicable.
+        scenario_id: Exact scenario identity for call evidence, when applicable.
     """
 
     system_prompt: str
@@ -52,6 +56,9 @@ class LLMCallSpec:
     temperature: float = 0.4
     validation_retries: int = 0
     validation_retry_feedback: str | None = None
+    validation_retry_include_schema: bool = True
+    slot_id: str | None = None
+    scenario_id: str | None = None
 
 
 @dataclass
@@ -90,9 +97,12 @@ def _execute_single_call(
         run_dir=run_dir,
         stage=spec.stage,
         step=spec.step,
+        slot_id=spec.slot_id,
+        scenario_id=spec.scenario_id,
         temperature=spec.temperature,
         validation_retries=spec.validation_retries,
         validation_retry_feedback=spec.validation_retry_feedback,
+        validation_retry_include_schema=spec.validation_retry_include_schema,
     )
     if error is not None:
         return LLMCallResult(

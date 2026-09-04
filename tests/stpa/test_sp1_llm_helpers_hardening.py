@@ -27,6 +27,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     StageError,
     _is_unsupported_unvalidated_error,
     _stringify_response_content,
+    _validation_retry_prompt,
     log_llm_call,
     log_llm_call_failure,
     parse_llm_result_unvalidated,
@@ -460,6 +461,29 @@ class TestSafeCallKwargsAndFailureUsage:
         assert entry["published"] is False
         assert entry["terminal_error_codes"] == ["provider_contract_failure"]
 
+    def test_failed_response_and_request_identity_are_preserved(
+        self, tmp_path: Path
+    ) -> None:
+        parsed, result, error = safe_llm_call(
+            llm_client=_ParseFailureClient(),
+            system_prompt="system",
+            user_prompt="user",
+            response_format=_ValidatedModel,
+            run_dir=tmp_path,
+            stage="stage_5",
+            step="scenario_context",
+            slot_id="RESP-1:CA-1-1:INCORRECT",
+            scenario_id="SCN-007",
+        )
+
+        assert parsed is None
+        assert result is not None
+        assert error is not None
+        entry = json.loads((tmp_path / "calls.jsonl").read_text().splitlines()[0])
+        assert entry["response_content"] == '{"item_id": "malformed"}'
+        assert entry["slot_id"] == "RESP-1:CA-1-1:INCORRECT"
+        assert entry["scenario_id"] == "SCN-007"
+
     def test_unexpected_type_error_is_not_treated_as_compat(
         self, tmp_path: Path
     ) -> None:
@@ -523,3 +547,22 @@ class TestCompatGateAndStageError:
         assert error.stage == "stage_2"
         assert error.step == "call_1"
         assert str(error) == "stage_2/call_1: offline"
+
+    def test_retry_prompt_reports_fields_without_echoing_invalid_input(self) -> None:
+        with pytest.raises(ValidationError) as captured:
+            _ValidatedModel.model_validate({"item_id": "malformed"})
+
+        prompt = _validation_retry_prompt(
+            original_prompt="original",
+            feedback="Correct the named field.",
+            error=captured.value,
+            response_format=_ValidatedModel,
+            include_schema=False,
+        )
+
+        assert "item_id" in prompt
+        assert "malformed source ID" in prompt
+        assert "input_value" not in prompt
+        assert '"malformed"' not in prompt
+        assert "Expected response schema" not in prompt
+        assert "response schema already supplied" in prompt

@@ -248,6 +248,26 @@ obligation concern, and causal evidence. Stage 5 receives only its actionable
 semantic projection; Stage 6 retains the complete content-addressed artifact.
 _Avoid_: global STPA dump, unrelated constraints
 
+**Test stimulus**:
+The provider-described way adversarial input reaches one selected causal path,
+using a closed request-local category. Deterministic compilation derives the
+resource roles required by that category and the fixed target action; an
+unsupported upload or traffic/load stimulus remains analytical.
+_Avoid_: runtime binding, inferred resource set, delivery label chosen from prose
+
+**Scenario candidate outcome**:
+The single terminal generation/publication result for one exact
+scenario/ICA-slot/ICA identity. Its diagnostic messages are retained
+separately and do not increase the candidate count.
+_Avoid_: error-message count, provider-call success flag
+
+**Synthesis terminal status**:
+The product-level yield outcome derived from exact candidate records:
+`completed`, `no_candidates`, `failed` after attempted zero yield, or
+`degraded` for partial/unattempted yield. It does not promote Phase 2
+verification diagnostics into a scenario-generation failure.
+_Avoid_: provider transport status, diagnostic-message count, coverage status
+
 **Scenario realization**:
 The separate account of whether a generated scenario retained an exact ICA and
 its obligation concern. It does not alter the structural obligation accounting

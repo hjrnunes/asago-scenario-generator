@@ -36,4 +36,6 @@ __all__ = (
     "hybrid_scenario_projection",
     "synthesis",
     "synthesis_prompt_contracts",
+    "prompt_audit_corrections",
+    "prompt_contract_recovery",
 )

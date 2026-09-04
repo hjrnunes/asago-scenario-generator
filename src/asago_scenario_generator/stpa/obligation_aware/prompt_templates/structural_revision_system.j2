@@ -5,6 +5,14 @@ opaque gap_handle, copied unchanged, choose exactly one of:
 - dismiss_unsupported: explain why the supplied evidence does not justify the gap;
 - unresolved: state what evidence is still missing.
 
+{% include "_stpa_control_loop.j2" %}
+
+An addition must have the relationship required by its concept: a hazard links to a loss;
+a constraint governs a hazard; a responsibility implements a constraint; a process-model
+part states what its controller must know; feedback updates that part; and a control action
+influences a responsibility or controlled process. Propose only the concept named by the
+gap and the connections needed to make it meaningful.
+
 {{ instructions }}
 No final STPA ID is supplied or invented by the model. The deterministic compiler allocates
 final IDs only after validating the complete delta. Do not prescribe an attack sequence,

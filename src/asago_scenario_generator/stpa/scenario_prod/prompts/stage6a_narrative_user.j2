@@ -1,14 +1,9 @@
-## Scenario Specification
+## Validated Scenario Evidence
 
 {{ scenario_spec_yaml }}
 
-{% if scenario_context_yaml %}
----
-
-## Immutable Scenario Generation Context
-
-{{ scenario_context_yaml }}
-{% endif %}
+Taxonomy entries are analysis provenance, not causal evidence; they do not
+prove a mechanism or attacker access.
 
 ---
 
@@ -29,14 +24,17 @@
 
 {% endif %}
 
-{% include "_stage6_projection_alignment.j2" %}
-{% include "_obligation_evidence_boundary.j2" %}
 ## Your Task
 
 Write the 7-step causal narrative following the dialectic structure defined in
 the system prompt. Track attacker and defender beliefs only when attacker
 access is supported; otherwise track the declared structural condition. Be
 specific about which structural elements are involved at each step.
+
+Keep one compact paragraph per step (at most two sentences each, roughly 400
+words total). Use every declared factor in projection order, and do not bridge
+unrelated structural elements or state attacker success without exact typed
+capability evidence.
 
 The narrative must realize the projection alignment table in table order. The final scenario step must state the exact ICA type and control action from the table's required reference.
 

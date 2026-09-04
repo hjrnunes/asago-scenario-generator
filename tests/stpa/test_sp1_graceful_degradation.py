@@ -313,10 +313,10 @@ class TestRevisionGracefulDegradation:
         )
         entries = read_calls_jsonl(tmp_path)
         rev_entries = [e for e in entries if e["step"] == "revision"]
-        assert len(rev_entries) == 1
-        assert rev_entries[0]["stage"] == "stage_2"
-        assert rev_entries[0]["success"] is False
-        assert "error" in rev_entries[0]
+        assert len(rev_entries) == 2
+        assert all(entry["stage"] == "stage_2" for entry in rev_entries)
+        assert all(entry["success"] is False for entry in rev_entries)
+        assert all("error" in entry for entry in rev_entries)
 
     def test_gd_03_revision_llm_exception_returns_pre_revision_cs(self, tmp_path):
         """SP1-GD-03: revision LLM exception returns pre-revision CS with warning."""
@@ -337,10 +337,10 @@ class TestRevisionGracefulDegradation:
         assert any("Revision failed" in w for w in warnings)
         entries = read_calls_jsonl(tmp_path)
         rev_entries = [e for e in entries if e["step"] == "revision"]
-        assert len(rev_entries) == 1
-        assert rev_entries[0]["stage"] == "stage_2"
-        assert rev_entries[0]["success"] is False
-        assert "error" in rev_entries[0]
+        assert len(rev_entries) == 2
+        assert all(entry["stage"] == "stage_2" for entry in rev_entries)
+        assert all(entry["success"] is False for entry in rev_entries)
+        assert all("error" in entry for entry in rev_entries)
 
 
 class TestCriticGracefulDegradation:

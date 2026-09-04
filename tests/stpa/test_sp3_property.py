@@ -407,14 +407,14 @@ class TestTreeBranchCoverageProperty:
     @given(
         categories=st.lists(
             st.sampled_from(BRANCH_CATEGORIES),
-            min_size=2,
+            min_size=1,
             max_size=3,
             unique=True,
         )
     )
     @settings(max_examples=30, deadline=None)
     def test_valid_tree_passes_validator(self, categories):
-        """Trees with ≥2 valid categories always pass validation."""
+        """Trees with at least one valid category always pass validation."""
         tree = {
             "root": "r",
             "branches": [
@@ -430,8 +430,8 @@ class TestTreeBranchCoverageProperty:
         category=st.sampled_from(BRANCH_CATEGORIES),
     )
     @settings(max_examples=10, deadline=None)
-    def test_single_category_fails_validator(self, category):
-        """Trees with only 1 category always fail validation."""
+    def test_single_category_passes_validator(self, category):
+        """One evidenced category is a complete tree."""
         tree = {
             "root": "r",
             "branches": [
@@ -440,7 +440,7 @@ class TestTreeBranchCoverageProperty:
             "leaves": [],
         }
         result = validate_tree_branch_coverage(tree)
-        assert not result.passed
+        assert result.passed
 
     @given(
         n_valid=st.integers(min_value=0, max_value=5),

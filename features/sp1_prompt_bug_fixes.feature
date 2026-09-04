@@ -45,11 +45,12 @@ Feature: SP1 prompt bug fixes
 
     Examples:
       | coordination_text                                                                                       |
-      | Coordination links are required when                                                                    |
-      | lateral coordination mechanism between controllers that share state                                     |
-      | Two responsibilities share a process model part not connected by a control action                       |
-      | Two responsibilities need to agree on a shared resource                                                 |
-      | An empty coordination_links list is acceptable only when no two responsibilities share state, data, or control flow |
+      | Coordination links are required when                                      |
+      | explicit lateral control or information                                   |
+      | responsibilities overlap or leave a decision boundary ambiguous           |
+      | actions affect the same controlled process or resource                     |
+      | actions can conflict or must occur in a defined order                      |
+      | One controller needs state or outcome information held by the other       |
 
   # SP1 prompt bug fixes-04
   Scenario Outline: SP1 prompt bug fixes-04 Call 2a requires zone-driven responsibilities

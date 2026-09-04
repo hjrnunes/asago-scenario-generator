@@ -117,21 +117,21 @@ class TestTopKNoneNoExtraBody:
 
 
 # ---------------------------------------------------------------------------
-# LLM-TOPK-05: top_k forwarded in extra_body for structured parse calls
+# LLM-TOPK-05: top_k forwarded while retaining raw structured responses
 # ---------------------------------------------------------------------------
 
 
-class TestTopKInStructuredParseCall:
-    """LLM-TOPK-05: top_k is forwarded via extra_body in beta.chat.completions.parse()."""
+class TestTopKInStructuredCreateCall:
+    """LLM-TOPK-05: structured create keeps top_k and the raw response."""
 
     @pytest.mark.parametrize("top_k_value", [40, 1])
-    def test_topk_05_parse_call_includes_extra_body_top_k(self, top_k_value):
-        """The parse call receives extra_body with top_k, not a top-level top_k."""
+    def test_topk_05_create_call_includes_extra_body_top_k(self, top_k_value):
+        """The create call receives both strict schema and nested top_k."""
         client = _make_client(top_k=top_k_value)
 
         mock_client = MagicMock()
-        mock_client.beta.chat.completions.parse.return_value = _DummyResponse(
-            parsed={"val": 1}, content=""
+        mock_client.chat.completions.create.return_value = _DummyResponse(
+            content='{"val": 1}'
         )
         client._client = mock_client
 
@@ -144,12 +144,13 @@ class TestTopKInStructuredParseCall:
             response_format=_Model,
         )
 
-        parse_call = mock_client.beta.chat.completions.parse
-        assert parse_call.called
-        call_kwargs = parse_call.call_args.kwargs
+        create_call = mock_client.chat.completions.create
+        assert create_call.called
+        call_kwargs = create_call.call_args.kwargs
         assert "extra_body" in call_kwargs
         assert call_kwargs["extra_body"]["top_k"] == top_k_value
         assert "top_k" not in call_kwargs
+        assert call_kwargs["response_format"]["type"] == "json_schema"
 
 
 # ---------------------------------------------------------------------------

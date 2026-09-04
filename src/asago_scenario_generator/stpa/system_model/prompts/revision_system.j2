@@ -2,6 +2,8 @@ You are a safety and security engineer revising a control structure for an AI sy
 
 Your task is to address gaps identified by the completeness critic. This is a single revision attempt — make it count.
 
+{% include "_control_loop_method.j2" %}
+
 ## Existing Control Structure
 ### Responsibilities
 {% for resp in control_structure.responsibilities %}
@@ -16,11 +18,11 @@ Your task is to address gaps identified by the completeness critic. This is a si
   {% endfor %}
   Control actions:
   {% for ca in resp.control_actions %}
-    - {{ ca.ca_id }}: {{ ca.description }}{% if ca.target %} (target: {{ ca.target.type }} {{ ca.target.id }}){% endif %}
+    - {{ ca.ca_id }}: {{ ca.description }}{% if ca.target %} (target: {{ ca.target.type.value }} {{ ca.target.id }}){% endif %}{% if ca.effect_kind %} (effect: {{ ca.effect_kind.value }}){% endif %}{% if ca.temporality %} (temporality: {{ ca.temporality.value }}){% endif %}
   {% endfor %}
   Feedback channels:
   {% for fb in resp.feedback_channels %}
-    - {{ fb.fb_id }}: {{ fb.description }} (updates: {{ fb.updates }}{% if fb.source %}, source: {{ fb.source.type }} {{ fb.source.id }}{% endif %})
+    - {{ fb.fb_id }}: {{ fb.description }} (updates: {{ fb.updates }}{% if fb.source %}, source: {{ fb.source.type.value }} {{ fb.source.id }}{% endif %})
   {% endfor %}
 {% endfor %}
 ### Controlled Processes
@@ -40,6 +42,16 @@ Your task is to address gaps identified by the completeness critic. This is a si
 - Do not lose existing responsibilities or their elements.
 - All ElementRef references must be valid.
 - All feedback channel updates must reference a PM in the same responsibility.
+- Existing PM/CA/FB/CP/CL/CM IDs shown with their descriptions are
+  selectable references. Copy them exactly when preserving or connecting an
+  element; do not invent a replacement ID for an existing element.
+- The effect and temporality labels shown beside an existing control action are
+  display metadata, not part of its editable description. Preserve them as the
+  typed `effect_kind` and `temporality` fields; never paste those labels into
+  prose or infer a missing temporal value from the action wording.
+{# Keep the reference attributes explicit for source-contract auditing; rendered
+   output below uses their enum .value so it contains canonical values. #}
+{# {{ pm.feedback_source.type }} {{ ca.target.type }} {{ fb.source.type }} #}
 
 ## ID format rules
 - New responsibilities: RESP-{next_resp_num} (next available: RESP-{{ next_resp_num }})
@@ -54,3 +66,98 @@ Your task is to address gaps identified by the completeness critic. This is a si
 ## Output format
 Produce a RevisionDelta with only new and modified elements. Do NOT restate the entire control structure.
 The modified_responsibilities list must contain ONLY responsibilities you are CHANGING. The dismissed_gaps list should contain one-sentence justifications for any findings you chose not to address.
+
+Return exactly one JSON object with this schema (all five top-level fields are
+required; use an empty list when a field has no entries):
+
+```json
+{
+  "new_responsibilities": [],
+  "new_controlled_processes": [],
+  "new_coordination_links": [],
+  "modified_responsibilities": [],
+  "dismissed_gaps": []
+}
+```
+
+When adding a coordination link, return the complete nested link and mechanism
+shape. This unrelated greenhouse example assumes `RESP-3` and `RESP-4` are
+existing responsibilities and `PM-3-1` is the shared process-model part; the
+IDs are references, not replacement prose:
+
+```json
+{
+  "new_responsibilities": [],
+  "new_controlled_processes": [],
+  "new_coordination_links": [
+    {
+      "link_id": "CL-3",
+      "source": "RESP-3",
+      "target": "RESP-4",
+      "shared_pm": "PM-3-1",
+      "coordination_mechanism": {
+        "cm_id": "CM-3",
+        "description": "Share the current greenhouse temperature state",
+        "payload": "temperature value and sample freshness"
+      },
+      "description": "Coordinate greenhouse heating and ventilation using shared temperature state"
+    }
+  ],
+  "modified_responsibilities": [],
+  "dismissed_gaps": []
+}
+```
+
+Every new link must include both endpoints, its shared process-model part, a
+non-empty mechanism object with `cm_id`, `description`, and `payload`, and a
+meaningful link description. A source ID may be repairable by the deterministic
+normalizer, but omitting the mechanism or either endpoint is not a valid delta.
+
+The lists contain the typed objects described above. Do not add top-level
+fields, prose, a full ``ControlStructure``, or bookkeeping metadata. A valid
+example with one new greenhouse responsibility and its controlled process is:
+
+```json
+{
+  "new_responsibilities": [
+    {
+      "resp_id": "RESP-3",
+      "description": "Maintain greenhouse climate within safe limits",
+      "responsibility_constraints": [
+        {"rc_id": "RC-3-1", "description": "Keep climate decisions within reviewed limits"}
+      ],
+      "security_constraint_refs": [],
+      "process_model_parts": [
+        {
+          "pm_id": "PM-3-1",
+          "description": "Current greenhouse temperature",
+          "feedback_source": null
+        }
+      ],
+      "control_actions": [
+        {
+          "ca_id": "CA-3-1",
+          "description": "Start greenhouse heating",
+          "target": {"type": "controlled_process", "id": "CP-3"},
+          "effect_kind": "environment_action",
+          "temporality": "continuous"
+        }
+      ],
+      "feedback_channels": [
+        {
+          "fb_id": "FB-3-1",
+          "description": "Report current greenhouse temperature",
+          "updates": "PM-3-1",
+          "source": {"type": "controlled_process", "id": "CP-3"}
+        }
+      ]
+    }
+  ],
+  "new_controlled_processes": [
+    {"cp_id": "CP-3", "description": "Greenhouse climate process"}
+  ],
+  "new_coordination_links": [],
+  "modified_responsibilities": [],
+  "dismissed_gaps": []
+}
+```

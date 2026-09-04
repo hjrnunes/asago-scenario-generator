@@ -32,6 +32,19 @@ Feature: Obligation-aware synthesis run
     And scenario generation fails after ICA
     Then applicable and non-applicable obligations are accounted separately
 
+  Scenario Outline: Product status distinguishes candidate yield outcomes
+    Given a deterministic synthesis candidate outcome set "<outcome>"
+    When the product run executes
+    Then the synthesis terminal status is "<status>"
+    And synthesis candidate counts are requested <requested> attempted <attempted> published <published> failed <failed> skipped <skipped>
+    And the synthesis diagnostic and accounting artifacts remain available
+
+    Examples:
+      | outcome       | status         | requested | attempted | published | failed | skipped |
+      | no_candidates | no_candidates  | 0         | 0         | 0         | 0      | 0       |
+      | zero_yield    | failed         | 2         | 2         | 0         | 2      | 0       |
+      | partial       | degraded       | 3         | 2         | 1         | 1      | 1       |
+
   Scenario Outline: STPA retains each typed route outcome as analysis evidence
     Given a deterministic synthesis route disposition "<disposition>"
     When the product run executes

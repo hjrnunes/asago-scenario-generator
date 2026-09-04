@@ -6,13 +6,23 @@ is evidenced, the narrative is a dialectic between the attacker BDI and the
 defender BDI; otherwise it tracks the structural condition without inventing
 an attacker path.
 
+{% include "_stage6_rendering_method.j2" %}
+
+BDI means Belief–Desire–Intention: what each actor believes, wants, and intends
+to do in the supplied scenario.
+
 ## 7-Step Dialectic Structure
+
+This seven-step dialectic is a rendering convention for showing causal state
+and actor beliefs in order; it is not a new analysis stage.
 
 The narrative MUST follow these 7 steps in order:
 
-1. **The defender's process model starts correct** — Describe the initial state where the defender's process model accurately reflects reality.
+1. **Establish the relevant baseline** — Describe the supplied initial state.
+   Say that the process model is correct only when the supplied causal sequence
+   establishes that it begins correct.
 
-2. **The causal transition occurs** — If the exact scenario context contains a
+2. **The causal condition is established** — If the exact scenario context contains a
    reachable_capability factor, describe the attacker using only its copied
    capability and access-path references. If it contains a bounded_assumption,
    label that assumption explicitly and do not present it as fact. If no
@@ -20,10 +30,10 @@ The narrative MUST follow these 7 steps in order:
    (for example staleness, lateness, or an inadequate control algorithm); do
    not force or invent an attacker manipulation.
 
-3. **The process model diverges from reality** — If a reachable capability is
-   declared, describe the resulting change from that supported mechanism;
-   otherwise describe the stale, missing, incorrect, or mistimed condition
-   that makes the process model diverge without attributing it to an attacker.
+3. **Relate the process model to reality** — If the sequence establishes a
+   transition, describe how the process model diverges. If it begins stale,
+   missing, or incorrect, describe that supplied state without inventing an
+   earlier correct state or attributing it to an attacker.
 
 4. **The defender acts on the resulting belief** — Describe the defender
    making decisions based on the corrupted, stale, or otherwise inadequate
@@ -34,6 +44,11 @@ The narrative MUST follow these 7 steps in order:
 6. **The hazard is realized** — Describe the system-level hazard that results from the ICA.
 
 7. **The loss follows** — Describe the ultimate loss to stakeholders.
+
+Keep the rendering concise: one compact paragraph per step, no more than two
+sentences per step, and no more than roughly 400 words total. Do not add a
+causal bridge, interface, privilege, or attacker success claim that is absent
+from the declared factors and typed capability evidence.
 
 ## Requirements
 
@@ -47,22 +62,12 @@ The narrative MUST follow these 7 steps in order:
   bounded_assumption must be labelled in the prose.
 - The narrative should be prose, not bullet points.
 - Each step should be a distinct paragraph or section.
+- Do not claim that the attacker changed a surface or reached a target unless
+  the context contains the exact reachable capability and access path. A
+  structural failure can remain an analytical finding without attacker
+  success.
 
-{# Feedback-channel bridge is duplicated across the three Stage 6 system
-   prompts. Shared includes would couple prompt-loader boundaries. #}
-## Feedback-channel bridge
-
-FB-* denotes a logical information dependency that updates a process-model belief. It is not evidence of a network socket, packet stream, message bus, database connection, or attacker-accessible transport. Realize the update through a declared AI surface — prompt/context input, retrieved content, tool result, memory state, agent message, or model output — unless the supplied architecture explicitly identifies an accessible transport. Never infer interception, packet injection, blocking, spoofing, or link severing merely from the word "channel".
-
-When a reachable capability explicitly supports active access, describe how
-the attacker changes a declared AI surface. Without that evidence, explain
-the structural condition and do not turn this guidance into an attacker path.
-
-Examples of declared AI-surface realizations include prompt/context injection,
-retrieved-content poisoning, tool-result fabrication, memory poisoning,
-agent-message tampering, and model-output manipulation.
-
-Do not invent packet interception, MITM (man-in-the-middle access), network delay, traffic blocking, network-signal spoofing, communication-link severing, credential theft, account takeover, session hijacking/fixation, or generic flooding/DoS (denial of service). Such a mechanism is permitted only when the supplied architecture explicitly declares the transport or session surface attacker-accessible and the scenario records that evidence.
+{% include "_feedback_channel_boundary.j2" %}
 
 {% include "_obligation_evidence_boundary.j2" %}
 

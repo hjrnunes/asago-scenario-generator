@@ -702,13 +702,48 @@ def _call_with_optional_feedback(
 
 
 def _routing_validation_feedback(error: BaseException) -> str:
-    """Describe the prior local failure without replaying provider formatting."""
+    """Give one stable, field-specific repair instruction for a route retry."""
     detail = " ".join(str(error).replace("\r", " ").replace("\n", " ").split())
     if len(detail) > _ROUTING_RETRY_ERROR_MAX_CHARS:
         detail = detail[:_ROUTING_RETRY_ERROR_MAX_CHARS].rstrip() + "..."
+    lowered = detail.lower()
+    if any(
+        marker in lowered
+        for marker in (
+            "opaque obligation identity mismatch",
+            "unexpected obligation id",
+        )
+    ):
+        repair = (
+            "Repair code copied_opaque_identity_mismatch: copy every supplied "
+            "obligation_id byte-for-byte, including its final character; do not "
+            "normalize, regenerate, or substitute an opaque handle."
+        )
+    elif "rationale" in lowered:
+        repair = (
+            "Repair code missing_route_rationale: every route branch must contain "
+            "a non-empty string rationale explaining the selected disposition. "
+            'For example: {"disposition":"unresolved","rationale":"the '
+            'required system path is not supplied","evidence":["evidence '
+            'is insufficient"]}.'
+        )
+    elif "disposition" in lowered:
+        repair = (
+            "Repair code missing_route_disposition: include the required literal "
+            "disposition on every route (targeted, proposed_not_applicable, "
+            "upstream_gap, or unresolved)."
+        )
+    else:
+        repair = (
+            "Use the disposition-specific route shape: targeted requires a "
+            "non-empty slot_ids, hazard_ids, constraint_ids, rationale, and "
+            "evidence; upstream_gap requires non-empty missing_concepts, "
+            "rationale, and evidence; other branches require rationale and "
+            "evidence without fabricated structural placement."
+        )
     return (
         "The previous response failed local validation. Correct only the invalid "
-        "fields using this exact local validation error: "
+        f"fields. {repair} The exact local validation error was: "
         f"{type(error).__name__}: {detail}. "
         "Use only the exact typed hazard/constraint pair(s) named by this error; "
         "do not infer pairings from descriptions. "
@@ -932,7 +967,9 @@ def _route_batch(
             actual_ids = {item.obligation_id for item in candidate.routes}
             if actual_ids != expected_ids or len(candidate.routes) != len(batch):
                 raise ValueError(
-                    "routing response must account for every batch obligation exactly once"
+                    "routing response must account for every batch obligation exactly "
+                    "once; copied opaque obligation identity mismatch "
+                    f"(expected={sorted(expected_ids)}, actual={sorted(actual_ids)})"
                 )
             for route in candidate.routes:
                 brief = next(

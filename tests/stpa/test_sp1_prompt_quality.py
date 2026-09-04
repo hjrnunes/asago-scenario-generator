@@ -38,6 +38,7 @@ def _render(template_name: str, **variables: object) -> str:
 # stage1a_risk_system quality checks
 # ---------------------------------------------------------------------------
 
+
 def test_pqf_01_stage1a_risk_quality_section_follows_structural_requirements() -> None:
     text = _text(_STAGE1A_RISK_SYSTEM)
     assert "## Quality requirements" in text
@@ -47,13 +48,14 @@ def test_pqf_01_stage1a_risk_quality_section_follows_structural_requirements() -
 
 
 def test_pqf_02_stage1a_risk_hazard_specificity_patterns() -> None:
-    text = _text(_STAGE1A_RISK_SYSTEM)
+    text = _render(_STAGE1A_RISK_SYSTEM)
     assert "### Hazard specificity" in text
     assert "at least one specific component" in text
     assert "too generic" in text
-    assert "LLM outputs are manipulated via prompt injection to bypass security controls" in text
-    assert "patient chatbot generates an inaccurate surgical procedure explanation" in text
-    assert "refund processing API executes an unauthorized refund amount" in text
+    assert "greenhouse air remains above the crop's safe temperature limit" in text
+    assert 'Not a hazard: "the temperature sensor fails"' in text
+    assert "patient chatbot" not in text
+    assert "refund processing API" not in text
 
 
 def test_pqf_03_stage1a_risk_loss_specificity() -> None:
@@ -118,6 +120,7 @@ def test_pqf_08_stage1a_risk_user_preserves_jinja_variables() -> None:
 # stage1a_gap_system quality checks
 # ---------------------------------------------------------------------------
 
+
 def test_pqf_09_stage1a_gap_system_has_gap_analysis_method() -> None:
     text = _text(_STAGE1A_GAP_SYSTEM)
     assert "## Gap analysis method" in text
@@ -140,14 +143,20 @@ def test_pqf_11_stage1a_gap_user_renders_with_existing_analysis() -> None:
     )
 
     losses = [
-        Loss(loss_id="L-1", description="Test loss", provenance=LossProvenance.risk_card,
-             source_risk_cards=["R-1"]),
+        Loss(
+            loss_id="L-1",
+            description="Test loss",
+            provenance=LossProvenance.risk_card,
+            source_risk_cards=["R-1"],
+        ),
     ]
     hazards = [
         Hazard(hazard_id="H-1", description="Test hazard", related_losses=["L-1"]),
     ]
     constraints = [
-        SecurityConstraint(constraint_id="SC-1", description="Test SC", related_hazards=["H-1"]),
+        SecurityConstraint(
+            constraint_id="SC-1", description="Test SC", related_hazards=["H-1"]
+        ),
     ]
     rendered = _render(
         _STAGE1A_GAP_USER,
@@ -178,6 +187,7 @@ def test_pqf_12_stage1a_gap_user_preserves_jinja_variables() -> None:
 # ---------------------------------------------------------------------------
 # stage1b revision quality checks
 # ---------------------------------------------------------------------------
+
 
 def test_pqf_13_stage1b_kc_taxonomy_in_prompt() -> None:
     text = _text(_STAGE1B_SYSTEM)
@@ -219,7 +229,9 @@ def test_pqf_18_stage1b_user_preserves_use_case_variable() -> None:
 # ---------------------------------------------------------------------------
 
 _st_safe_text = st.text(
-    alphabet=st.characters(blacklist_categories=("Cs",), blacklist_characters=("{", "}")),
+    alphabet=st.characters(
+        blacklist_categories=("Cs",), blacklist_characters=("{", "}")
+    ),
     min_size=1,
     max_size=200,
 )
@@ -230,14 +242,15 @@ class TestTemplateRenderingProperties:
 
     @given(template_name=st.sampled_from(_ZERO_VAR_SYSTEM_TEMPLATES))
     @settings(max_examples=20, deadline=None)
-    def test_pqp_01_zero_var_system_template_renders_to_raw_text(
+    def test_pqp_01_zero_var_system_template_fully_renders(
         self,
         template_name: str,
     ) -> None:
-        """A zero-variable system template renders identically to its raw text."""
+        """A zero-variable system template resolves all shared method partials."""
         rendered = _render(template_name)
-        raw = _text(template_name)
-        assert rendered == raw
+        assert rendered.strip()
+        assert "{%" not in rendered
+        assert "{{" not in rendered
 
     @given(template_name=st.sampled_from(_ZERO_VAR_SYSTEM_TEMPLATES))
     @settings(max_examples=20, deadline=None)
@@ -268,7 +281,9 @@ class TestTemplateRenderingProperties:
         use_case_text: str,
     ) -> None:
         """stage1a_risk_user.j2 always includes the provided use_case_text verbatim."""
-        rendered = _render(_STAGE1A_RISK_USER, use_case_text=use_case_text, risk_cards=[])
+        rendered = _render(
+            _STAGE1A_RISK_USER, use_case_text=use_case_text, risk_cards=[]
+        )
         assert use_case_text in rendered
 
     @given(use_case_text=_st_safe_text)
@@ -278,7 +293,9 @@ class TestTemplateRenderingProperties:
         use_case_text: str,
     ) -> None:
         """stage1a_risk_user.j2 with empty risk_cards shows the fallback message."""
-        rendered = _render(_STAGE1A_RISK_USER, use_case_text=use_case_text, risk_cards=[])
+        rendered = _render(
+            _STAGE1A_RISK_USER, use_case_text=use_case_text, risk_cards=[]
+        )
         assert "No organizational risks provided" in rendered
 
     @given(use_case_text=_st_safe_text)

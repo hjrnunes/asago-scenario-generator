@@ -244,6 +244,8 @@ def run_cmd(
     typer.echo(f"  Plan: {result.artifact_paths[PLAN_FILENAME]}")
     if result.report_path is not None:
         typer.echo(f"  Report: {result.report_path}")
+    status = _synthesis_run_status(result)
+    typer.echo(f"  Scenario generation: {status}")
     typer.echo(
         "  Phase 2 verification: "
         f"{getattr(result.phase2_verification, 'status', 'failed')}"
@@ -251,6 +253,23 @@ def run_cmd(
     assessment_path = result.artifact_paths.get("hybrid-coverage-assessment.yaml")
     if assessment_path is not None:
         typer.echo(f"  Phase 2 assessment: {assessment_path}")
+    if status == "failed":
+        typer.echo(
+            "Error: scenario generation published no scenarios after "
+            "attempting candidates; diagnostic artifacts were preserved.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+
+def _synthesis_run_status(result: Any) -> str:
+    """Read the stable product status without coupling the CLI to internals."""
+    value = getattr(result, "run_status", None) or getattr(result, "status", None)
+    if value is None:
+        manifest = getattr(result, "manifest", None)
+        if isinstance(manifest, dict):
+            value = manifest.get("run_status") or manifest.get("status")
+    return str(getattr(value, "value", value) or "unknown")
 
 
 def build_taxonomy_inputs(

@@ -579,10 +579,31 @@ body.
 
 Stage 2 retries a semantically empty requirement or responsibility response
 once with corrective feedback. Stage 3 likewise retries a schema-invalid slot
-response once.
+response once. ICA prompt views carry the authoritative action temporality used
+for duration decisions; structural revision responses validate complete nested
+objects before merge, so an attempted revision is not reported as applied when
+its delta is rejected.
 If Stage 5 reaches the completion-length limit on both its normal and concise
 retry attempts, it records a fatal diagnostic and aborts the remaining threats
 instead of repeating a likely deployment-level structured-output failure.
+
+Stage 5 asks for a typed stimulus and causal explanation. The compiler derives
+the fixed action kind, resource roles, and carrier bookkeeping from that typed
+choice. A file upload or traffic/load scenario is retained as analytical when
+the supported execution routes cannot represent it; it is not relabelled as a
+single direct prompt. The synthesis manifest reports candidate outcomes once
+per exact scenario/slot/ICA identity and reports diagnostic-message count
+separately.
+
+The synthesis manifest also publishes a stable `run_status`: `completed` when
+all requested candidates are published, `no_candidates` when no eligible
+candidate was available, `failed` when candidates were attempted but none was
+published, and `degraded` for partial or not-yet-attempted yield. Its
+`scenario_counts` keeps requested, attempted, published (`generated`), failed,
+and skipped candidates independent from diagnostic-message count. The product
+`run` command writes and reports all diagnostics and accounting artifacts
+before returning a non-zero result for the attempted zero-yield `failed` case;
+no-candidate analysis and partial yield remain successful command outcomes.
 
 STPA result and manifest diagnostics retain `stage_errors` for fatal stage
 failures and add `stage_warnings` for recoverable normalization, stitching, and

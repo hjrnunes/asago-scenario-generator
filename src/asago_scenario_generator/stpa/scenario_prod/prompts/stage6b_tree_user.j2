@@ -1,14 +1,9 @@
-## Scenario Specification
+## Validated Scenario Evidence
 
 {{ scenario_spec_yaml }}
 
-{% if scenario_context_yaml %}
----
-
-## Immutable Scenario Generation Context
-
-{{ scenario_context_yaml }}
-{% endif %}
+Taxonomy entries are analysis provenance, not causal evidence; they do not
+prove a mechanism or attacker access.
 
 {% if control_structure_yaml %}
 ---
@@ -20,15 +15,15 @@
 
 ---
 
-{% include "_stage6_projection_alignment.j2" %}
-{% include "_obligation_evidence_boundary.j2" %}
 ## Your Task
 
-Produce an attack tree using the STPA two-level causal taxonomy defined in the system prompt.
+Produce an attack tree using the evidence-constrained control-loop structure
+defined in the system prompt.
 
 1. Instantiate the relevant branches from the hard template.
 2. Prune irrelevant branches based on the specific control structure.
-3. Ensure the tree uses at least 2 of the 3 branch categories (controller_side, path_side, coordination_gap).
+3. Use only supported branch categories; one is sufficient when the evidence
+   supports only one.
 4. Reference specific PM-*, FB-*, CA-*, RESP-* IDs where applicable.
 5. The root node MUST be exactly: "Induce ICA {{ ica_type }} on {{ control_action }}". Use the exact ICA type enum value — do not substitute or paraphrase.
 6. Temporal-factor leaf references (PM-*, FB-*, CA-*) must preserve the projection order defined in the alignment table: earlier rows before later rows, with the unsafe control action row last.
@@ -42,5 +37,10 @@ Produce an attack tree using the STPA two-level causal taxonomy defined in the s
    assert access. Include a new manipulation interface only for an exact
    reachable capability and its own access references; label every bounded
    assumption explicitly.
+
+Cover each declared causal factor with its exact source reference or declared
+evidence phrase. Prune unsupported bridges, unrelated IDs, and branches that
+claim attacker success without exact typed capability evidence. Keep the tree
+compact; category count is not a quality target.
 
 Return the attack tree as a YAML-serializable dictionary matching the structure defined in the system prompt.

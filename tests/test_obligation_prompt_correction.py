@@ -24,6 +24,9 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossProvenance,
     SecurityConstraint,
 )
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlActionTemporality,
+)
 from asago_scenario_generator.stpa.models.ica_enumeration import (
     ICA,
     ICAEnumeration,
@@ -137,6 +140,24 @@ def test_provider_question_is_compact_and_explains_opaque_handle() -> None:
     assert "mapping_pins" not in user
 
 
+def test_routing_prompt_defines_repeated_concern_once_per_batch() -> None:
+    """Repeated pattern context is a glossary entry, not duplicated prose."""
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    brief = build_neutral_briefs(make_plan(), (pattern,))[0]
+    second = brief.model_copy(update={"obligation_id": brief.obligation_id + "-2"})
+
+    _system, user = build_structural_routing_prompts(
+        briefs=(brief, second),
+        loss_analysis=_loss_analysis(),
+        control_structure=_control_structure(),
+        slots=create_slots(_control_structure()),
+    )
+
+    assert user.count(brief.attack_pattern_name) == 1
+    assert user.count("known_concern_ref:") == 2
+    assert "analyst_instruction:" not in user
+
+
 @pytest.mark.parametrize(
     ("first_relation", "expected"),
     [
@@ -184,6 +205,83 @@ def test_mapping_strength_rejects_missing_or_malformed_exact_evidence() -> None:
         )
 
 
+def test_later_weak_edge_weakens_the_complete_mapping_path() -> None:
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    plan = make_plan(
+        mappings=[
+            {
+                "source_id": "risk-a",
+                "target_id": "CATEGORY-1",
+                "relation": "skos:exactMatch",
+            },
+            {
+                "source_id": "CATEGORY-1",
+                "target_id": pattern.id,
+                "relation": "skos:relatedMatch",
+            },
+        ]
+    )
+
+    question = project_obligation_question(build_neutral_briefs(plan, (pattern,))[0])
+
+    assert question.mapping_strength.label == "related_category_expansion"
+
+
+def test_one_weaker_path_prevents_strongest_path_promotion() -> None:
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    plan = make_plan(
+        mappings=[
+            {
+                "source_id": "risk-a",
+                "target_id": pattern.id,
+                "relation": "skos:exactMatch",
+            },
+            {
+                "source_id": "risk-a",
+                "target_id": "CATEGORY-1",
+                "relation": "skos:broadMatch",
+            },
+            {
+                "source_id": "CATEGORY-1",
+                "target_id": pattern.id,
+                "relation": "attacks_via",
+            },
+        ]
+    )
+
+    question = project_obligation_question(build_neutral_briefs(plan, (pattern,))[0])
+
+    assert question.mapping_strength.label == "broad_category_expansion"
+
+
+@pytest.mark.parametrize(
+    ("relation", "expected"),
+    [
+        ("skos:exactMatch", "direct_curated_pair"),
+        ("skos:broadMatch", "broad_category_expansion"),
+        ("skos:relatedMatch", "related_category_expansion"),
+        ("unreviewed_relation", "related_category_expansion"),
+    ],
+)
+def test_direct_pair_label_respects_the_declared_relation(
+    relation: str, expected: str
+) -> None:
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    plan = make_plan(
+        mappings=[
+            {
+                "source_id": "risk-a",
+                "target_id": pattern.id,
+                "relation": relation,
+            }
+        ]
+    )
+
+    question = project_obligation_question(build_neutral_briefs(plan, (pattern,))[0])
+
+    assert question.mapping_strength.label == expected
+
+
 def test_obligation_aware_provider_instructions_live_in_jinja_templates() -> None:
     """Prompt projectors stay in Python while provider prose lives in Jinja."""
     template_dir = Path(prompt_module.__file__).with_name("prompt_templates")
@@ -209,6 +307,23 @@ def test_obligation_aware_provider_instructions_live_in_jinja_templates() -> Non
     source = inspect.getsource(prompt_module)
     assert "You are performing structural STPA analysis" not in source
     assert "Fill every supplied STPA ICA slot" not in source
+
+
+def test_synthesis_prompt_defines_stpa_local_ica_and_true_context() -> None:
+    template_dir = Path(prompt_module.__file__).with_name("prompt_templates")
+    prompt = TemplateLoader(template_dir).render_prompt(
+        "synthesis_ica_system.j2",
+        requested_slot_count=1,
+        requested_consideration_count=1,
+        instructions="Return one result.",
+    )
+
+    assert "Standard STPA calls an unsafe action a UCA" in prompt
+    assert "In this\nproject, an ICA is one concrete security finding" in prompt
+    assert "real context" in prompt
+    assert "controller belief" in prompt
+    assert "A routed obligation is advisory" in prompt
+    assert "A route never\nforces an ICA finding" in prompt
 
 
 def test_target_prompt_view_deduplicates_losses_by_exact_identity() -> None:
@@ -292,6 +407,7 @@ def test_focused_verifier_retains_path_without_granting_mechanism_credit(
         slot_ids=(slot.slot_id,),
         hazard_ids=("H-1",),
         constraint_ids=("SC-1",),
+        rationale="The selected control path is relevant to the concern.",
         evidence=("provider-route",),
     )
 
@@ -304,7 +420,20 @@ def test_focused_verifier_retains_path_without_granting_mechanism_credit(
             self.calls += 1
             self.prompts.append(kwargs["user_prompt"])
             content = (
-                {"routes": [route.model_dump(mode="json", exclude={"route_id"})]}
+                {
+                    "routes": [
+                        route.model_dump(
+                            mode="json",
+                            exclude={
+                                "route_id",
+                                "missing_concepts",
+                                "model_call_refs",
+                                "trace_refs",
+                                "diagnostics",
+                            },
+                        )
+                    ]
+                }
                 if self.calls == 1
                 else {
                     "verdicts": [
@@ -730,6 +859,50 @@ def test_structured_ica_draft_rejects_safeguard_and_wrong_uca_type() -> None:
             loss_analysis=_loss_analysis(),
             control_structure=structure,
         )
+
+
+def test_wrong_duration_uses_typed_temporality_not_prose() -> None:
+    structure = _control_structure()
+    slot = next(
+        item
+        for item in create_slots(structure)
+        if item.uca_type is UCAType.wrong_duration
+    )
+    draft = SlotIcaDraft(
+        slot_id=slot.slot_id,
+        is_na=False,
+        findings=(
+            IcaFindingDraft(
+                deviation=IcaDeviationDraft(
+                    duration_deviation="the action continues for too long"
+                ),
+                hazardous_context="the unsafe state persists",
+                loss_consequence="the protected operation is harmed",
+                related_hazard_ids=("H-1",),
+                related_constraint_ids=("SC-1",),
+            ),
+        ),
+    )
+    with pytest.raises(ValueError, match="action temporality"):
+        compile_ica_slot_draft(
+            draft,
+            slot=slot,
+            loss_analysis=_loss_analysis(),
+            control_structure=structure,
+        )
+
+    eligible_slot = slot.model_copy(
+        update={"action_temporality": ControlActionTemporality.continuous}
+    )
+    result = compile_ica_slot_draft(
+        draft,
+        slot=eligible_slot,
+        loss_analysis=_loss_analysis(),
+        control_structure=structure,
+    )
+
+    assert not result.is_na
+    assert result.action_temporality is ControlActionTemporality.continuous
 
 
 def test_provider_preflight_blocks_oversized_ica_before_dispatch(tmp_path) -> None:

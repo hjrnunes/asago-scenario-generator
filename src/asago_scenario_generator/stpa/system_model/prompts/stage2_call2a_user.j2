@@ -15,7 +15,16 @@ Source constraint: {{ req.source_constraint }}
 {% if capability_profile %}
 ## Capability Profile Context
 
-Active zones: {{ capability_profile.zones_active | join(", ") }}
+Active functional areas:
+{% for zone in capability_profile.zones_active %}
+- {{ zone }}{% if zone_display_names is defined %}: {{ zone_display_names.get(zone, zone) }}{% endif %}
+{% endfor %}
+Declared capabilities:
+{% if kc_subcodes_display is defined %}
+{% for code, description in kc_subcodes_display.items() %}
+- {{ code }}: {{ description }}
+{% endfor %}
+{% endif %}
 Multi-agent: {{ capability_profile.multi_agent }}
 Human-in-the-loop: {{ capability_profile.hitl }}
 Persistent memory: {{ capability_profile.has_persistent_memory }}

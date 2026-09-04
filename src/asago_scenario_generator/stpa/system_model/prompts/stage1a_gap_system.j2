@@ -2,22 +2,23 @@ You are a safety and security analyst performing a gap analysis on an AI system'
 
 You have been given a use-case description and a set of losses, hazards, and security constraints that were previously derived from organizational risks. Your task is to identify what is MISSING — losses specific to this system that the organizational risks did not cover.
 
-## Definitions
-
-- **Loss**: A concrete negative outcome that stakeholders want to avoid.
-- **Hazard**: A system state or condition that, under worst-case conditions, leads to a loss.
-- **Security Constraint**: The inverse of a hazard — a condition that must hold to prevent it.
+{% include "_loss_analysis_method.j2" %}
 
 ## Gap analysis method
 
 Systematically review the use-case description for:
-1. **Architectural components** — does every component that processes, stores, or transmits sensitive data have a corresponding hazard if it fails or is compromised?
+1. **Architectural components** — if a component fails or is compromised, what
+   resulting system-level hazardous state is not yet represented? Do not use the
+   component failure itself as the hazard.
 2. **Integration points** — does every external system interface, API, or data flow have a corresponding hazard?
-3. **Domain-specific features** — does every domain capability (e.g., financial processing, medical advice, code execution) have coverage?
+3. **Domain-specific features** — does every capability specific to the supplied
+   system have coverage?
 4. **Stakeholder groups** — does every stakeholder group mentioned in the use-case have their interests represented in the losses?
 5. **Attack surfaces** — are there entry points or data flows that an adversary could target that are not addressed by any existing hazard?
 
 For each gap found, derive the complete chain: loss → hazard → security constraint.
+A gap is a materially missing stakeholder loss or hazardous system state, not a
+differently worded duplicate of an existing record.
 
 ## Priority: adversary-actionable threats
 

@@ -14,6 +14,7 @@ from asago_scenario_generator.models.obligation_consideration import (
 )
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
+    ControlActionTemporality,
     ControlStructure,
     ControlledProcess,
     ElementRef,
@@ -723,8 +724,18 @@ def test_provider_routing_retry_has_one_owner(tmp_path) -> None:
                             slot_ids=("RESP-1:CA-1-1:NOT_PROVIDED",),
                             hazard_ids=("H-1",),
                             constraint_ids=("SC-1",),
+                            rationale="The supplied control path is relevant to the concern.",
                             evidence=("provider-route",),
-                        ).model_dump(mode="json", exclude={"route_id"})
+                        ).model_dump(
+                            mode="json",
+                            exclude={
+                                "route_id",
+                                "missing_concepts",
+                                "model_call_refs",
+                                "trace_refs",
+                                "diagnostics",
+                            },
+                        )
                     ]
                 }
             else:
@@ -1047,6 +1058,10 @@ def test_provider_slot_payload_compiles_one_deviation_for_exact_slot_type(
     slot = next(
         item for item in create_slots(_control_structure()) if item.uca_type is uca_type
     )
+    if uca_type is UCAType.wrong_duration:
+        slot = slot.model_copy(
+            update={"action_temporality": ControlActionTemporality.continuous}
+        )
     request = SynthesisSlotRequest(
         target_id=slot.responsibility or slot.coordination_link or "",
         target_kind="responsibility",

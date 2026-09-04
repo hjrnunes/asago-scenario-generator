@@ -30,6 +30,9 @@ from asago_scenario_generator.stpa.models.control_structure import (
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.models.canonical import compute_framed_digest
+from asago_scenario_generator.pipeline.risk_pattern_crosswalk import (
+    resolve_risk_pattern_mapping_strength,
+)
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     PromptReference,
     ProviderApplicability,
@@ -74,6 +77,9 @@ _PROHIBITED_PROMPT_KEYS = (
     "raw_mapping",
 )
 _ABSOLUTE_PATH = re.compile(r"(?:^|[\s\"'])/(?:Users|private|tmp|var|home)/")
+_STRUCTURAL_REFERENCE_TOKEN = re.compile(
+    r"\b(?:RESP|CA|FB|CP|PM|RC|SC|H|L|REQ|CL|CM)-[A-Za-z0-9][A-Za-z0-9_.:-]*\b"
+)
 
 _MAPPING_STRENGTH_MEANINGS = {
     "direct_curated_pair": (
@@ -183,6 +189,64 @@ def _yaml(value: Any) -> str:
     )
 
 
+def _routing_wire_examples() -> tuple[str, str]:
+    """Render complete route examples through the exact provider wire model."""
+    # Import lazily: provider.py imports this module for prompt construction.
+    from asago_scenario_generator.stpa.obligation_aware.provider import (
+        _routing_provider_payload_type,
+    )
+
+    payload_type = _routing_provider_payload_type(1)
+    common = {
+        "obligation_id": "ob:v1:" + "0" * 64,
+        "evidence": ["sanitized structural evidence"],
+    }
+    semantic_assessment = {
+        "mechanism_assessment": "plausible_in_system",
+        "risk_alignment": "supported",
+        "mapping_strength": "direct_curated_pair",
+        "mechanism_rationale": "the supplied path governs the concern",
+        "risk_alignment_rationale": "the path can affect the reviewed consequence",
+    }
+    targeted = payload_type.model_validate(
+        {
+            "routes": [
+                {
+                    **common,
+                    "disposition": "targeted",
+                    "semantic_assessment": semantic_assessment,
+                    "slot_ids": ["RESP-1:CA-1-1:NOT_PROVIDED"],
+                    "hazard_ids": ["H-1"],
+                    "constraint_ids": ["SC-1"],
+                    "rationale": "the selected owner, slot, hazard, and constraint form a path worth analysing",
+                }
+            ]
+        }
+    )
+    unresolved = payload_type.model_validate(
+        {
+            "routes": [
+                {
+                    **common,
+                    "disposition": "unresolved",
+                    "semantic_assessment": {
+                        **semantic_assessment,
+                        "mechanism_assessment": "insufficient_evidence",
+                        "risk_alignment": "insufficient_evidence",
+                        "mechanism_rationale": "the required system path is not supplied",
+                        "risk_alignment_rationale": "the mechanism-to-risk relationship is not established",
+                    },
+                    "rationale": "the supplied evidence cannot support a structural placement",
+                }
+            ]
+        }
+    )
+    return tuple(
+        json.dumps(item.model_dump(mode="json"), separators=(",", ":"))
+        for item in (targeted, unresolved)
+    )
+
+
 def authoritative_hazard_constraint_pairs(
     loss_analysis: LossAnalysis,
 ) -> tuple[tuple[str, str], ...]:
@@ -258,14 +322,7 @@ def _fact_views(
                 value = fact_evidence.value
                 view = ProviderApplicabilityFact(
                     fact_id=fact.fact_id,
-                    name=(
-                        f"{fact.namespace} fact {fact.fact_id}"
-                        + (
-                            f" ({'.'.join(fact.property_path)})"
-                            if fact.property_path
-                            else ""
-                        )
-                    ),
+                    name=_plain_fact_name(fact),
                     value=value,
                     status=fact_evidence.status,
                     meaning=(
@@ -283,6 +340,40 @@ def _fact_views(
         return item.fact_id, item.status, item.name
 
     return tuple(sorted(relevant, key=key)), tuple(sorted(missing, key=key))
+
+
+def _plain_fact_name(fact: Any) -> str:
+    """Describe a qualification fact without requiring identifier knowledge."""
+    source = ".".join(fact.property_path) if fact.property_path else fact.fact_id
+    words = source.replace("_", " ").replace(".", " ").strip()
+    return f"Declared {fact.namespace} evidence: {words}"
+
+
+def _routing_question_payload(item: ProviderObligationQuestion) -> dict[str, Any]:
+    """Remove repeated instructions and non-semantic fact keys from one row."""
+    payload = item.model_dump(mode="json")
+    payload.pop("analyst_instruction", None)
+    concern = payload.pop("known_concern")
+    payload["known_concern_ref"] = concern["attack_pattern_id"]
+    applicability = payload.get("applicability", {})
+    for collection in ("relevant_facts", "missing_or_conflicting_facts"):
+        for fact in applicability.get(collection, []):
+            fact.pop("fact_id", None)
+    return payload
+
+
+def _routing_concern_catalog(
+    questions: Sequence[ProviderObligationQuestion],
+) -> list[dict[str, str]]:
+    """Render each repeated attack-pattern concern once per routing batch."""
+    by_id: dict[str, dict[str, str]] = {}
+    for question in questions:
+        concern = question.known_concern.model_dump(mode="json")
+        identity = concern["attack_pattern_id"]
+        previous = by_id.setdefault(identity, concern)
+        if previous != concern:
+            raise ValueError(f"conflicting concern descriptions for {identity}")
+    return [by_id[identity] for identity in sorted(by_id)]
 
 
 def project_obligation_question(
@@ -351,7 +442,7 @@ def project_obligation_question(
 
 
 def mapping_strength_for_brief(brief: NeutralObligationBrief) -> str:
-    """Reduce exact typed mapping paths to one conservative plain label."""
+    """Reduce every complete mapping path to one conservative plain label."""
     path_relations = [
         _mapping_relations(evidence.detail)
         for evidence in brief.applicability_evidence
@@ -359,14 +450,7 @@ def mapping_strength_for_brief(brief: NeutralObligationBrief) -> str:
     ]
     if not path_relations:
         raise ValueError("obligation question requires mapping-path evidence")
-    labels = tuple(_mapping_path_strength(path) for path in path_relations)
-    priority = {
-        "direct_curated_pair": 0,
-        "exact_then_category_expansion": 1,
-        "broad_category_expansion": 2,
-        "related_category_expansion": 3,
-    }
-    return min(labels, key=priority.__getitem__)
+    return resolve_risk_pattern_mapping_strength(path_relations)
 
 
 def _mapping_relations(detail: str) -> tuple[str, ...]:
@@ -377,18 +461,6 @@ def _mapping_relations(detail: str) -> tuple[str, ...]:
         return tuple(str(edge["relation"]).lower() for edge in path)
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise ValueError("mapping evidence is not a typed mapping path") from exc
-
-
-def _mapping_path_strength(relations: tuple[str, ...]) -> str:
-    """Classify one canonical path without exposing its raw payload."""
-    if len(relations) <= 1:
-        return "direct_curated_pair"
-    first = relations[0]
-    if "exact" in first:
-        return "exact_then_category_expansion"
-    if "related" in first:
-        return "related_category_expansion"
-    return "broad_category_expansion"
 
 
 def _reference_map(control_structure: ControlStructure) -> dict[str, PromptReference]:
@@ -486,16 +558,89 @@ def _context_references(
         return refs
     if not isinstance(loss_analysis, LossAnalysis):
         raise TypeError("loss_analysis must be a LossAnalysis")
-    refs.update(
-        {
+    refs.update(_loss_analysis_references(loss_analysis))
+    return refs
+
+
+def _loss_analysis_references(
+    loss_analysis: LossAnalysis,
+) -> dict[str, PromptReference]:
+    """Project explanatory references for loss-analysis records."""
+    return {
+        **{
             item.constraint_id: PromptReference(
                 id=item.constraint_id,
                 description=item.description,
             )
             for item in loss_analysis.security_constraints
-        }
+        },
+        **{
+            item.hazard_id: PromptReference(
+                id=item.hazard_id,
+                description=item.description,
+            )
+            for item in loss_analysis.hazards
+        },
+        **{
+            item.loss_id: PromptReference(
+                id=item.loss_id,
+                description=item.description,
+            )
+            for item in (
+                *loss_analysis.risk_card_losses,
+                *loss_analysis.use_case_losses,
+            )
+        },
+    }
+
+
+def _description_references(
+    target_index: ProviderTargetIndex,
+    references: Mapping[str, PromptReference],
+) -> tuple[PromptReference, ...]:
+    """Retain known IDs mentioned in target prose as explained context.
+
+    A target slice can contain a legitimate sentence such as ``CL-5 shares
+    state with CP-2`` even when that controlled process is not an endpoint of
+    the selected link.  Preflight quite correctly rejects an unexplained
+    token, so carry the known record in a separate, non-edge collection.  Any
+    unknown token is intentionally *not* synthesized; the existing preflight
+    audit remains the closed-world error for that case.
+    """
+    mentions = _description_reference_ids(target_index.model_dump(mode="python"))
+    return tuple(
+        references[identity] for identity in sorted(mentions) if identity in references
     )
-    return refs
+
+
+def _description_reference_ids(value: Any) -> set[str]:
+    """Collect known-ID candidates from one serialized prompt value."""
+    if isinstance(value, Mapping):
+        return _mapping_description_reference_ids(value)
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return _collection_description_reference_ids(value)
+    return set()
+
+
+def _mapping_description_reference_ids(value: Mapping[str, Any]) -> set[str]:
+    """Collect description tokens and recurse through a mapping's values."""
+    description = value.get("description")
+    mentions = (
+        set(_STRUCTURAL_REFERENCE_TOKEN.findall(description))
+        if isinstance(description, str)
+        else set()
+    )
+    for child in value.values():
+        mentions.update(_description_reference_ids(child))
+    return mentions
+
+
+def _collection_description_reference_ids(value: Sequence[Any]) -> set[str]:
+    """Collect description tokens from a serialized collection."""
+    mentions: set[str] = set()
+    for child in value:
+        mentions.update(_description_reference_ids(child))
+    return mentions
 
 
 def _selected_context_slots(
@@ -566,6 +711,7 @@ def _project_responsibility_context(
                     id=action.ca_id,
                     description=action.description,
                     owner=refs[responsibility.resp_id],
+                    action_temporality=action.temporality,
                     target_process=(
                         target
                         if action.target is not None
@@ -628,6 +774,7 @@ def _project_coordination_context(
                 description=link.coordination_mechanism.description,
                 owner=refs[link.source],
                 target_process=None,
+                action_temporality=None,
             )
         )
     return paths, actions
@@ -684,6 +831,7 @@ def _project_slot_context(
                     "copy this slot handle unchanged in the response."
                 ),
                 uca_type=slot.uca_type,
+                action_temporality=slot.action_temporality,
                 owner=owner,
                 control_action=action,
                 target_process=(
@@ -837,7 +985,7 @@ def project_control_structure_context(
         target_id,
         selected_cp_ids,
     )
-    return ProviderTargetIndex(
+    target_index = ProviderTargetIndex(
         target_id=resolved_target if target_id is not None else None,
         target_kind=target_kind,
         responsibilities=tuple(sorted(responsibility_views, key=lambda item: item.id)),
@@ -852,6 +1000,11 @@ def project_control_structure_context(
         losses=tuple(sorted(loss_views, key=lambda item: item.id)),
         hazards=tuple(sorted(hazard_views, key=lambda item: item.id)),
         constraints=tuple(sorted(constraint_views, key=lambda item: item.id)),
+    )
+    return target_index.model_copy(
+        update={
+            "referenced_records": _description_references(target_index, refs),
+        }
     )
 
 
@@ -1086,6 +1239,11 @@ def _compact_routing_target_payload(index: ProviderTargetIndex) -> dict[str, Any
             "id": ref_id(item),
             "owner_id": ref_id(item.owner),
             "target_process_id": ref_id(item.target_process),
+            "action_temporality": (
+                item.action_temporality.value
+                if item.action_temporality is not None
+                else None
+            ),
         }
         for item in index.control_actions
     ]
@@ -1110,6 +1268,11 @@ def _compact_routing_target_payload(index: ProviderTargetIndex) -> dict[str, Any
                 "type are stated in the slots relationship table.",
             ),
             "uca_type": item.uca_type.value,
+            "action_temporality": (
+                item.action_temporality.value
+                if item.action_temporality is not None
+                else None
+            ),
             "owner_id": ref_id(item.owner),
             "control_action_id": ref_id(item.control_action),
             "target_process_id": ref_id(item.target_process),
@@ -1137,6 +1300,7 @@ def _compact_routing_target_payload(index: ProviderTargetIndex) -> dict[str, Any
     ]
     controlled_process_ids = tuple(ref_id(item) for item in index.controlled_processes)
     loss_ids = tuple(ref_id(item) for item in index.losses)
+    referenced_records = [{"id": ref_id(item)} for item in index.referenced_records]
     return {
         "target_id": index.target_id,
         "target_kind": index.target_kind,
@@ -1148,6 +1312,7 @@ def _compact_routing_target_payload(index: ProviderTargetIndex) -> dict[str, Any
         "feedback_channels": feedback_channels,
         "slots": slots,
         "loss_ids": loss_ids,
+        "referenced_records": referenced_records,
         "hazards": hazards,
         "constraints": constraints,
         "id_glossary": [
@@ -1171,15 +1336,21 @@ def build_structural_routing_prompts(
         control_structure=control_structure,
         slots=slots,
     )
+    routing_targeted_example, routing_unresolved_example = _routing_wire_examples()
     system = _TEMPLATE_LOADER.render_prompt(
         "structural_routing_system.j2",
         obligation_count=len(context.obligation_questions),
         instructions=context.instructions,
+        routing_targeted_example=routing_targeted_example,
+        routing_unresolved_example=routing_unresolved_example,
     )
     user = _TEMPLATE_LOADER.render_prompt(
         "structural_routing_user.j2",
+        known_concern_catalog_yaml=_yaml(
+            _routing_concern_catalog(context.obligation_questions)
+        ),
         obligation_questions_yaml=_yaml(
-            [item.model_dump(mode="json") for item in context.obligation_questions]
+            [_routing_question_payload(item) for item in context.obligation_questions]
         ),
         hazard_constraint_pair_ledger=_hazard_constraint_pair_ledger(loss_analysis),
         target_index_yaml=_yaml(_compact_routing_target_payload(context.target_index)),

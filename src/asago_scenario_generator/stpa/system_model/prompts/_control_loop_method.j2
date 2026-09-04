@@ -1,0 +1,18 @@
+## Control-loop vocabulary
+
+- A **controller** is a functional decision maker, not necessarily a software
+  component. A **responsibility** is behaviour allocated to that controller.
+- A **responsibility constraint** governs how that responsibility is performed.
+- A **process model part** is decision-relevant information the controller must
+  keep accurate, such as the current state, authorization, or operating limit.
+- A **control action** is information or a command sent to influence a
+  **controlled process**.
+- **Feedback** is information returned from a responsibility or controlled
+  process to update a process model part.
+- **Coordination** is the control or information relationship needed when
+  controllers share state, affect the same process, or can issue conflicting or
+  order-dependent actions.
+
+The functional loop is: feedback updates the process model; the controller uses
+that model to choose a control action; the action influences the controlled
+process.

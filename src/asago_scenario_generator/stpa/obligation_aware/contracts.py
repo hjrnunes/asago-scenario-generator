@@ -34,7 +34,10 @@ from asago_scenario_generator.models.obligation_consideration import (
     StructuralRevisionDelta,
     StructuralConceptKind,
 )
-from asago_scenario_generator.stpa.models.control_structure import ControlStructure
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlActionTemporality,
+    ControlStructure,
+)
 from asago_scenario_generator.stpa.models.ica_enumeration import (
     ICAEnumeration,
     ICASlot,
@@ -464,12 +467,14 @@ class ProviderControlAction(PromptReference):
 
     owner: PromptReference
     target_process: PromptReference | None = None
+    action_temporality: ControlActionTemporality | None = None
 
 
 class ProviderSlot(PromptReference):
     """One deterministic slot paired with its authoritative action and owner."""
 
     uca_type: UCAType
+    action_temporality: ControlActionTemporality | None = None
     owner: PromptReference | None = None
     control_action: PromptReference
     target_process: PromptReference | None = None
@@ -533,6 +538,11 @@ class ProviderTargetIndex(_Model):
     losses: tuple[PromptReference, ...] = ()
     hazards: tuple[ProviderHazard, ...] = ()
     constraints: tuple[ProviderConstraint, ...] = ()
+    # References mentioned in selected prose but not represented by an edge
+    # in this target's graph.  They are explained, selectable context only;
+    # keeping them separate prevents a textual mention from becoming a false
+    # ownership or causal relationship.
+    referenced_records: tuple[PromptReference, ...] = ()
 
 
 class ProviderRoutedRoute(_Model):

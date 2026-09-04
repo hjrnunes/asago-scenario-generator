@@ -6,9 +6,9 @@ Covers five invariant families:
    number that collides with an existing ID of that kind.
 2. **ID-space independence**: ``next_cm_num`` depends only on ``cm_id``
    values, and ``next_cl_num`` depends only on ``link_id`` values.
-3. **has_unjustified_gaps iff**: ``has_unjustified_gaps`` is True iff at
-   least one of the three probes (checklist, taxonomy, structural gaps)
-   reports something unjustified.
+3. **has_unjustified_gaps iff**: ``has_unjustified_gaps`` is True iff the
+   findings contain at least one explicit structural gap. Checklist and
+   taxonomy statuses remain diagnostic context.
 4. **Dismissal visibility**: every ``dismissed_gaps`` entry surfaces in
    the returned warnings from ``run_revision``.
 5. **Merge conservation**: when the RevisionDelta contains no
@@ -77,17 +77,13 @@ def _make_resp(num: int) -> Responsibility:
         process_model_parts=[
             ProcessModelPart(pm_id=f"PM-{num}-1", description="State")
         ],
-        control_actions=[
-            ControlAction(ca_id=f"CA-{num}-1", description="Action")
-        ],
+        control_actions=[ControlAction(ca_id=f"CA-{num}-1", description="Action")],
         feedback_channels=[
             FeedbackChannel(
                 fb_id=f"FB-{num}-1",
                 description="Feedback",
                 updates=f"PM-{num}-1",
-                source=ElementRef(
-                    type=ReferenceType.responsibility, id=resp_id
-                ),
+                source=ElementRef(type=ReferenceType.responsibility, id=resp_id),
             )
         ],
     )
@@ -140,9 +136,7 @@ def st_control_structure(draw) -> ControlStructure:
             )
         )
         for cl_num, cm_num in zip(cl_nums, cm_nums):
-            coordination_links.append(
-                _make_cl(cl_num, cm_num, resp_a=1, resp_b=2)
-            )
+            coordination_links.append(_make_cl(cl_num, cm_num, resp_a=1, resp_b=2))
 
     return ControlStructure(
         responsibilities=responsibilities,
@@ -163,9 +157,7 @@ class TestNextIdsCollisionFree:
     def test_next_resp_num_above_all_existing(self, cs):
         """next_resp_num > max(existing resp_id numbers)."""
         ids = _compute_next_ids(cs)
-        existing_resp_nums = {
-            int(r.resp_id.split("-")[1]) for r in cs.responsibilities
-        }
+        existing_resp_nums = {int(r.resp_id.split("-")[1]) for r in cs.responsibilities}
         assert ids["next_resp_num"] not in existing_resp_nums
 
     @given(cs=st_control_structure())
@@ -251,15 +243,13 @@ def st_two_cs_same_link_ids_diff_cm_ids(draw):
     cs_a = ControlStructure(
         responsibilities=[_make_resp(i) for i in range(1, n_resps + 1)],
         coordination_links=[
-            _make_cl(cl_num, cm_num, 1, 2)
-            for cl_num, cm_num in zip(cl_nums, cm_nums_a)
+            _make_cl(cl_num, cm_num, 1, 2) for cl_num, cm_num in zip(cl_nums, cm_nums_a)
         ],
     )
     cs_b = ControlStructure(
         responsibilities=[_make_resp(i) for i in range(1, n_resps + 1)],
         coordination_links=[
-            _make_cl(cl_num, cm_num, 1, 2)
-            for cl_num, cm_num in zip(cl_nums, cm_nums_b)
+            _make_cl(cl_num, cm_num, 1, 2) for cl_num, cm_num in zip(cl_nums, cm_nums_b)
         ],
     )
     return cs_a, cs_b
@@ -300,15 +290,13 @@ def st_two_cs_same_cm_ids_diff_link_ids(draw):
     cs_a = ControlStructure(
         responsibilities=[_make_resp(i) for i in range(1, n_resps + 1)],
         coordination_links=[
-            _make_cl(cl_num, cm_num, 1, 2)
-            for cl_num, cm_num in zip(cl_nums_a, cm_nums)
+            _make_cl(cl_num, cm_num, 1, 2) for cl_num, cm_num in zip(cl_nums_a, cm_nums)
         ],
     )
     cs_b = ControlStructure(
         responsibilities=[_make_resp(i) for i in range(1, n_resps + 1)],
         coordination_links=[
-            _make_cl(cl_num, cm_num, 1, 2)
-            for cl_num, cm_num in zip(cl_nums_b, cm_nums)
+            _make_cl(cl_num, cm_num, 1, 2) for cl_num, cm_num in zip(cl_nums_b, cm_nums)
         ],
     )
     return cs_a, cs_b
@@ -336,16 +324,26 @@ class TestIdSpaceIndependence:
         # When cm_id sets differ, next_cm_num is derived from cm_ids only.
         # It might coincidentally be the same if max+1 happens to match,
         # but next_cm_num must be determined solely by the cm_id values.
-        expected_a = max(
-            (int(cl.coordination_mechanism.cm_id.split("-")[1])
-             for cl in cs_a.coordination_links),
-            default=0,
-        ) + 1
-        expected_b = max(
-            (int(cl.coordination_mechanism.cm_id.split("-")[1])
-             for cl in cs_b.coordination_links),
-            default=0,
-        ) + 1
+        expected_a = (
+            max(
+                (
+                    int(cl.coordination_mechanism.cm_id.split("-")[1])
+                    for cl in cs_a.coordination_links
+                ),
+                default=0,
+            )
+            + 1
+        )
+        expected_b = (
+            max(
+                (
+                    int(cl.coordination_mechanism.cm_id.split("-")[1])
+                    for cl in cs_b.coordination_links
+                ),
+                default=0,
+            )
+            + 1
+        )
         assert ids_a["next_cm_num"] == expected_a
         assert ids_b["next_cm_num"] == expected_b
 
@@ -365,25 +363,29 @@ class TestIdSpaceIndependence:
         cs_a, cs_b = pair
         ids_a = _compute_next_ids(cs_a)
         ids_b = _compute_next_ids(cs_b)
-        expected_a = max(
-            (int(cl.link_id.split("-")[1]) for cl in cs_a.coordination_links),
-            default=0,
-        ) + 1
-        expected_b = max(
-            (int(cl.link_id.split("-")[1]) for cl in cs_b.coordination_links),
-            default=0,
-        ) + 1
+        expected_a = (
+            max(
+                (int(cl.link_id.split("-")[1]) for cl in cs_a.coordination_links),
+                default=0,
+            )
+            + 1
+        )
+        expected_b = (
+            max(
+                (int(cl.link_id.split("-")[1]) for cl in cs_b.coordination_links),
+                default=0,
+            )
+            + 1
+        )
         assert ids_a["next_cl_num"] == expected_a
         assert ids_b["next_cl_num"] == expected_b
 
 
 # ---------------------------------------------------------------------------
-# 3. has_unjustified_gaps iff at least one probe reports something unjustified
+# 3. has_unjustified_gaps iff an explicit structural gap is present
 # ---------------------------------------------------------------------------
 
-st_status = st.sampled_from(
-    ["present", "absent_justified", "absent_unjustified"]
-)
+st_status = st.sampled_from(["present", "absent_justified", "absent_unjustified"])
 st_checklist_key = st.sampled_from(
     [
         "Input validation",
@@ -411,26 +413,26 @@ def st_critic_findings(draw) -> CriticFindings:
     """Generate CriticFindings with random combinations of the three probes."""
     n_checklist = draw(st.integers(min_value=0, max_value=4))
     checklist_keys = draw(
-        st.lists(st_checklist_key, min_size=n_checklist, max_size=n_checklist, unique=True)
+        st.lists(
+            st_checklist_key, min_size=n_checklist, max_size=n_checklist, unique=True
+        )
     )
-    checklist_results = {
-        key: draw(st_status) for key in checklist_keys
-    }
+    checklist_results = {key: draw(st_status) for key in checklist_keys}
 
     n_taxonomy = draw(st.integers(min_value=0, max_value=3))
     taxonomy_keys = draw(
         st.lists(st_taxonomy_key, min_size=n_taxonomy, max_size=n_taxonomy, unique=True)
     )
-    taxonomy_results = {
-        key: draw(st_status) for key in taxonomy_keys
-    }
+    taxonomy_results = {key: draw(st_status) for key in taxonomy_keys}
 
     n_gaps = draw(st.integers(min_value=0, max_value=3))
     gaps = [
         CriticGap(
-            gap_type=draw(st.sampled_from(
-                ["missing_responsibility", "missing_feedback", "missing_pm_part"]
-            )),
+            gap_type=draw(
+                st.sampled_from(
+                    ["missing_responsibility", "missing_feedback", "missing_pm_part"]
+                )
+            ),
             description=f"Gap {i}",
             related_attack_path=f"Attack {i}",
             suggested_remedy=f"Fix {i}",
@@ -446,25 +448,13 @@ def st_critic_findings(draw) -> CriticFindings:
 
 
 class TestHasUnjustifiedGapsIff:
-    """has_unjustified_gaps is True iff at least one probe is unjustified."""
+    """Only explicit structural gaps authorize revision."""
 
     @given(findings=st_critic_findings())
     @settings(max_examples=100, deadline=None)
     def test_iff_at_least_one_unjustified(self, findings):
-        """has_unjustified_gaps == (structural gaps OR unjustified checklist OR unjustified taxonomy)."""
-        has_structural = len(findings.gaps) > 0
-        has_checklist_unjustified = any(
-            s == "absent_unjustified"
-            for s in findings.checklist_results.values()
-        )
-        has_taxonomy_unjustified = any(
-            s == "absent_unjustified"
-            for s in findings.taxonomy_probe_results.values()
-        )
-        expected = (
-            has_structural or has_checklist_unjustified or has_taxonomy_unjustified
-        )
-        assert has_unjustified_gaps(findings) == expected
+        """Probe statuses alone do not authorize revision."""
+        assert has_unjustified_gaps(findings) == bool(findings.gaps)
 
     @given(findings=st_critic_findings())
     @settings(max_examples=100, deadline=None)
@@ -489,8 +479,8 @@ class TestHasUnjustifiedGapsIff:
         taxonomy=st.dictionaries(st_taxonomy_key, st_status, min_size=0, max_size=2),
     )
     @settings(max_examples=80, deadline=None)
-    def test_only_checklist_unjustified_triggers(self, checklist, taxonomy):
-        """A single absent_unjustified in checklist triggers revision (no gaps, clean taxonomy)."""
+    def test_probe_only_unjustified_does_not_trigger(self, checklist, taxonomy):
+        """Absent results without explicit gaps remain diagnostic only."""
         clean_taxonomy = {
             k: v if v != "absent_unjustified" else "present"
             for k, v in taxonomy.items()
@@ -500,8 +490,7 @@ class TestHasUnjustifiedGapsIff:
             checklist_results=checklist,
             taxonomy_probe_results=clean_taxonomy,
         )
-        expected = any(v == "absent_unjustified" for v in checklist.values())
-        assert has_unjustified_gaps(findings) == expected
+        assert has_unjustified_gaps(findings) is False
 
 
 # ---------------------------------------------------------------------------
@@ -512,7 +501,7 @@ st_dismissal_text = st.text(
     alphabet=st.characters(blacklist_categories=("Cs", "Cc")),
     min_size=1,
     max_size=60,
-)
+).filter(lambda value: bool(value.strip()))
 
 
 def _make_base_cs() -> ControlStructure:
@@ -533,6 +522,12 @@ def _make_critic_findings_for_revision() -> CriticFindings:
                 related_attack_path="Attacker sends crafted input",
                 suggested_remedy="Add input validation responsibility",
             ),
+            CriticGap(
+                gap_type="missing_feedback",
+                description="Missing outcome feedback",
+                related_attack_path="The selected action has no outcome check",
+                suggested_remedy="Add an outcome feedback channel",
+            ),
         ],
         checklist_results={"Input validation": "absent_unjustified"},
         taxonomy_probe_results={},
@@ -542,11 +537,7 @@ def _make_critic_findings_for_revision() -> CriticFindings:
 class TestDismissalVisibility:
     """Every dismissed_gaps entry surfaces in run_revision warnings."""
 
-    @given(
-        dismissals=st.lists(
-            st_dismissal_text, min_size=0, max_size=5, unique=True
-        )
-    )
+    @given(dismissals=st.lists(st_dismissal_text, min_size=0, max_size=5, unique=True))
     @settings(
         max_examples=50,
         deadline=None,
@@ -578,11 +569,7 @@ class TestDismissalVisibility:
                 f"Dismissal '{d}' not found in warnings: {warnings}"
             )
 
-    @given(
-        dismissals=st.lists(
-            st_dismissal_text, min_size=1, max_size=5, unique=True
-        )
-    )
+    @given(dismissals=st.lists(st_dismissal_text, min_size=1, max_size=5, unique=True))
     @settings(
         max_examples=50,
         deadline=None,
@@ -654,18 +641,21 @@ def st_cs_with_links(draw) -> ControlStructure:
     cl_nums = draw(
         st.lists(
             st.integers(min_value=1, max_value=20),
-            min_size=n_links, max_size=n_links, unique=True,
+            min_size=n_links,
+            max_size=n_links,
+            unique=True,
         )
     )
     cm_nums = draw(
         st.lists(
             st.integers(min_value=1, max_value=20),
-            min_size=n_links, max_size=n_links, unique=True,
+            min_size=n_links,
+            max_size=n_links,
+            unique=True,
         )
     )
     coordination_links = [
-        _make_cl(cl_num, cm_num, 1, 2)
-        for cl_num, cm_num in zip(cl_nums, cm_nums)
+        _make_cl(cl_num, cm_num, 1, 2) for cl_num, cm_num in zip(cl_nums, cm_nums)
     ]
     return ControlStructure(
         responsibilities=responsibilities,
@@ -741,9 +731,7 @@ class TestMergeConservation:
                 "dismissed_gaps": [],
             },
         )
-        original_descriptions = [
-            cl.description for cl in cs.coordination_links
-        ]
+        original_descriptions = [cl.description for cl in cs.coordination_links]
         original_payloads = [
             cl.coordination_mechanism.payload for cl in cs.coordination_links
         ]
@@ -756,9 +744,9 @@ class TestMergeConservation:
         )
         n_links = len(cs.coordination_links)
         assert len(revised.coordination_links) == n_links
-        assert [
-            cl.link_id for cl in revised.coordination_links
-        ] == _canonical_link_ids(n_links)
+        assert [cl.link_id for cl in revised.coordination_links] == _canonical_link_ids(
+            n_links
+        )
         assert [
             cl.coordination_mechanism.cm_id for cl in revised.coordination_links
         ] == _canonical_cm_ids(n_links)
@@ -830,21 +818,8 @@ def _count_all_dismissed(warnings: list[str]) -> int:
 
 
 def _dismiss_all(findings: CriticFindings) -> list[str]:
-    """One dismissal justification per finding in *findings*."""
-    n = (
-        len(findings.gaps)
-        + sum(
-            1
-            for status in findings.checklist_results.values()
-            if status == "absent_unjustified"
-        )
-        + sum(
-            1
-            for status in findings.taxonomy_probe_results.values()
-            if status == "absent_unjustified"
-        )
-    )
-    return [f"finding {i + 1} is a false positive" for i in range(n)]
+    """One dismissal justification per actionable gap in *findings*."""
+    return [f"finding {i + 1} is a false positive" for i in range(len(findings.gaps))]
 
 
 class TestAllDismissedWarning:
@@ -897,9 +872,7 @@ class TestAllDismissedWarning:
             ("modified_responsibilities", [_make_resp(1)]),
         ],
     )
-    def test_any_change_suppresses_warning(
-        self, tmp_path, change_field, change_value
-    ):
+    def test_any_change_suppresses_warning(self, tmp_path, change_field, change_value):
         findings = _make_critic_findings_for_revision()
         delta = RevisionDelta(
             dismissed_gaps=_dismiss_all(findings),
@@ -959,9 +932,7 @@ class TestAllDismissedWarning:
     ):
         """The warning fires exactly when findings exist and all are dismissed."""
         required = _dismiss_all(findings)
-        dismissals = required + [
-            f"extra {i}" for i in range(extra_dismissals)
-        ]
+        dismissals = required + [f"extra {i}" for i in range(extra_dismissals)]
         warnings = _revision_warnings(
             tmp_path,
             delta=RevisionDelta(dismissed_gaps=dismissals),
@@ -986,9 +957,7 @@ class TestMergeGuardCorrectness:
         """A new_responsibility whose resp_id already exists is not added."""
         cs = _make_base_cs()
         dup_resp = _make_resp(1)  # RESP-1 already in cs
-        dup_resp = dup_resp.model_copy(
-            update={"description": "DUPLICATE description"}
-        )
+        dup_resp = dup_resp.model_copy(update={"description": "DUPLICATE description"})
         client = MockLLMClient()
         client.set_response_for(
             RevisionDelta,
@@ -1036,9 +1005,7 @@ class TestMergeGuardCorrectness:
         assert any("Renumber" in w for w in warnings), (
             f"Expected a renumber warning but got: {warnings}"
         )
-        cl2 = next(
-            cl for cl in revised.coordination_links if cl.link_id == "CL-2"
-        )
+        cl2 = next(cl for cl in revised.coordination_links if cl.link_id == "CL-2")
         assert cl2.coordination_mechanism.cm_id == "CM-2", (
             f"Colliding new link CL-2 should be renumbered to CM-2 but got "
             f"{cl2.coordination_mechanism.cm_id}"
@@ -1067,12 +1034,8 @@ class TestMergeGuardCorrectness:
             use_case_text="Test",
             run_dir=tmp_path,
         )
-        assert [
-            cl.link_id for cl in revised.coordination_links
-        ] == ["CL-1", "CL-2"]
-        cl2 = next(
-            cl for cl in revised.coordination_links if cl.link_id == "CL-2"
-        )
+        assert [cl.link_id for cl in revised.coordination_links] == ["CL-1", "CL-2"]
+        cl2 = next(cl for cl in revised.coordination_links if cl.link_id == "CL-2")
         assert cl2.coordination_mechanism.cm_id == "CM-2", (
             "New link in final position 2 must publish CM-2, not the "
             f"source cm_id CM-5; got {cl2.coordination_mechanism.cm_id}"
@@ -1143,11 +1106,12 @@ class TestRevisionDeltaPublishedIds:
     def test_merged_ids_are_deterministic_from_final_position(
         self, n_existing, n_new, prefix
     ):
-        cs = ControlStructure(responsibilities=[_make_resp(i) for i in range(1, n_existing + 1)])
+        cs = ControlStructure(
+            responsibilities=[_make_resp(i) for i in range(1, n_existing + 1)]
+        )
         delta = RevisionDelta.model_construct(
             new_responsibilities=[
-                _unvalidated_new_resp(prefix, index)
-                for index in range(1, n_new + 1)
+                _unvalidated_new_resp(prefix, index) for index in range(1, n_new + 1)
             ],
             new_controlled_processes=[
                 ControlledProcess.model_construct(
@@ -1174,7 +1138,9 @@ class TestRevisionDeltaPublishedIds:
     )
     @settings(max_examples=25, deadline=None)
     def test_unique_source_ids_resolve_after_merge(self, n_existing, prefix):
-        cs = ControlStructure(responsibilities=[_make_resp(i) for i in range(1, n_existing + 1)])
+        cs = ControlStructure(
+            responsibilities=[_make_resp(i) for i in range(1, n_existing + 1)]
+        )
         added = _unvalidated_new_resp(prefix, 1)
         delta = RevisionDelta.model_construct(
             new_responsibilities=[added],
@@ -1207,7 +1173,9 @@ class TestRevisionDeltaPublishedIds:
     @given(n_existing=st.integers(min_value=1, max_value=4))
     @settings(max_examples=20, deadline=None)
     def test_canonical_merged_structure_is_idempotent(self, n_existing):
-        cs = ControlStructure(responsibilities=[_make_resp(i) for i in range(1, n_existing + 1)])
+        cs = ControlStructure(
+            responsibilities=[_make_resp(i) for i in range(1, n_existing + 1)]
+        )
         once, _ = _merge_revision_delta(cs, RevisionDelta())
         twice, _ = _merge_revision_delta(once, RevisionDelta())
         assert twice.model_dump() == once.model_dump()

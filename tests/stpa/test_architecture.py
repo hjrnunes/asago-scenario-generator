@@ -918,6 +918,8 @@ _SCENARIO_PROD_LAYERS: dict[str, int] = {
     "_constants": 0,
     "enrichment": 0,
     "context": 0,
+    # Purpose-specific prompt projections are a pure leaf over inward models.
+    "prompt_views": 0,
     "assembly": 1,
     "bdi_generation": 1,
     "narrative": 1,
@@ -1334,23 +1336,24 @@ _BRIDGE_TEMPLATES = (
 
 
 def _bridge_body(path: Path) -> str:
-    """Return the shared FB-bridge paragraphs of a system prompt template."""
+    """Return the shared FB-bridge partial included by a system prompt."""
     text = path.read_text(encoding="utf-8")
-    start = text.index(_BRIDGE_ANCHOR)
-    end = text.index("records that evidence.", start) + len("records that evidence.")
-    return text[start:end].strip()
+    include = '{% include "_feedback_channel_boundary.j2" %}'
+    assert text.count(include) == 1
+    partial = path.parent / "_feedback_channel_boundary.j2"
+    return partial.read_text(encoding="utf-8").strip()
 
 
 class TestFeedbackBridgeDuplication:
-    """The FB-bridge rule is duplicated across Stage 6 prompts on purpose.
+    """The FB-bridge rule is shared across all Stage 6 prompts.
 
-    ``TemplateLoader`` is bound to one prompts directory.  Keep the
-    templates self-contained and lock the shared prose so it cannot drift
-    independently between the three Stage 6 calls.
+    ``TemplateLoader`` is bound to one prompts directory. Keep the common
+    boundary in that directory and require every Stage 6 template to include
+    it exactly once so the instructions cannot drift.
     """
 
     def test_bridge_prose_is_identical(self):
-        """All three Stage 6 system prompts share the same FB-bridge body."""
+        """All three Stage 6 system prompts include the same FB-bridge body."""
         bodies = [_bridge_body(path) for path in _BRIDGE_TEMPLATES]
         assert all(_BRIDGE_ANCHOR in body for body in bodies)
         assert len(set(bodies)) == 1

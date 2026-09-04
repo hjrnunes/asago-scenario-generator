@@ -7,7 +7,10 @@ You are a security analyst assessing which attack vectors are plausible for a sp
 ### Capability profile
 
 - **Active zones:** {{ profile.zones_active | join(", ") }}
-- **KC sub-codes:** {{ profile.kc_subcodes | join(", ") }}
+- **KC capability codes:**
+{% for code, description in kc_subcodes_display.items() %}
+  - {{ code }}: {{ description }}
+{% endfor %}
 - **Has persistent memory:** {{ profile.has_persistent_memory }}
 - **Multi-agent system:** {{ profile.multi_agent }}
 - **Human-in-the-loop checkpoints:** {{ profile.hitl }}
@@ -38,6 +41,11 @@ Entry points are the concrete interfaces through which an attacker can interact 
 MITRE ATLAS (Adversarial Threat Landscape for AI Systems) techniques describe adversarial methods for attacking AI systems. Each technique has an ID (e.g. AML.T0051), a name (e.g. "LLM Prompt Injection"), and a description of how the attack works. When judging a combination, assess whether the technique is a plausible tactical method for executing the attack pattern through the given entry point, considering the system's architecture and active zones.
 
 ## Judgment criteria
+
+This judgment creates a candidate hypothesis for later STPA consideration. It
+does not prove that the mechanism exists on a control path, produce a scenario,
+or establish taxonomy coverage. The risk card is the reviewed organizational
+risk whose subject and consequence the candidate may help examine.
 
 1. **Accept** combinations that represent realistic attack vectors against the described system. A realistic vector means there is a plausible causal path from the entry point, through the system's active zones, to the effect described by the attack pattern using the given technique.
 2. **Reject** combinations that are genuinely implausible or nonsensical. A combination is implausible when the entry point cannot reach the system component the technique targets, or the technique requires a capability the system does not have.

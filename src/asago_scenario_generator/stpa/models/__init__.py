@@ -7,6 +7,8 @@ re-exported.
 
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
+    ControlActionEffectKind,
+    ControlActionTemporality,
     ControlStructure,
     ControlledProcess,
     CoordinationLink,
@@ -19,6 +21,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
     Responsibility,
     ResponsibilityConstraint,
     check_structural_heuristics,
+    normalize_control_action_effect_kind,
 )
 from asago_scenario_generator.stpa.models.enriched_threat_set import (
     CatalogMapping,
@@ -190,6 +193,8 @@ __all__ = [
     "SecurityConstraint",
     # control_structure
     "ControlAction",
+    "ControlActionEffectKind",
+    "ControlActionTemporality",
     "ControlStructure",
     "ControlledProcess",
     "CoordinationLink",
@@ -202,6 +207,7 @@ __all__ = [
     "Responsibility",
     "ResponsibilityConstraint",
     "check_structural_heuristics",
+    "normalize_control_action_effect_kind",
     # ica_enumeration
     "ICA",
     "ICAEnumeration",

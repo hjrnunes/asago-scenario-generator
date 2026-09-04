@@ -27,7 +27,7 @@ Process Model Parts:
 
 For the responsibilities above, derive:
 
-1. **Control actions** for each responsibility — discrete outputs the controller produces. Assign a target (RESP-* or CP-*) for each.
+1. **Control actions** for each responsibility — discrete outputs the controller produces. Assign a target (RESP-* or CP-*) for each. Include typed `effect_kind` (`model_output`, `tool_call`, `state_change`, `agent_message`, or `environment_action`) and typed `temporality` (`instantaneous`, `discrete`, `continuous`, `bounded_duration`, or `unknown`). A responsibility target requires `effect_kind: "agent_message"`.
 2. **Feedback channels** for each responsibility — how each PM part stays current. Assign a source (RESP-* or CP-*) for each. **Every PM-X-Y must appear in at least one FB's updates field.**
 3. **Controlled processes** — external entities referenced by CA targets or FB sources that are not responsibilities.
 
@@ -35,7 +35,8 @@ Verify before returning: every PM-X-Y listed above has at least one correspondin
 
 Return one JSON object using exactly these top-level keys: `control_actions`,
 `feedback`, and `controlled_processes`.  Each control action must have separate
-`ca_id`, meaningful `description`, and explicit `target` fields.  Each feedback
+`ca_id`, meaningful `description`, explicit `target`, typed `effect_kind`, and
+typed `temporality` fields.  Each feedback
 item must have separate `fb_id`, `description`, `updates`, and `source` fields.
 Never combine an ID and description in an `action` string and never use an
 `action` property.

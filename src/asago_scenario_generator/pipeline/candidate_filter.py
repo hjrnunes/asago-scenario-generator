@@ -11,7 +11,10 @@ from typing import Any
 from pydantic import ValidationError
 
 from asago_scenario_generator.llm.client import LLMClient, LLMResult
-from asago_scenario_generator.models.capability_profile import CapabilityProfile
+from asago_scenario_generator.models.capability_profile import (
+    CapabilityProfile,
+    build_kc_subcodes_display,
+)
 from asago_scenario_generator.pipeline.candidate_models import (
     BatchFilterDraftV2,
     BatchFilterResponse,
@@ -950,6 +953,7 @@ def filter_candidates(
         "filter_system.j2",
         use_case=use_case,
         profile=profile,
+        kc_subcodes_display=build_kc_subcodes_display(profile.kc_subcodes),
     )
 
     total_accepted = 0

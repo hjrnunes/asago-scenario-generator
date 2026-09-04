@@ -10,6 +10,9 @@ import yaml
 from asago_scenario_generator.models.obligation_consideration import ObligationRoute
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.infra.prompt_preflight import PromptBudget
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlActionTemporality,
+)
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     IcaDeviationDraft,
     IcaFindingDraft,
@@ -123,6 +126,9 @@ def test_provider_retries_schema_valid_draft_when_compile_semantics_fail(
         sorted(create_slots(_control_structure()), key=lambda item: item.slot_id)
     )
     slot = next(item for item in slots if item.uca_type.value == "WRONG_DURATION")
+    slot = slot.model_copy(
+        update={"action_temporality": ControlActionTemporality.continuous}
+    )
     invalid = SlotIcaDraft(
         slot_id=slot.slot_id,
         is_na=False,
@@ -133,7 +139,7 @@ def test_provider_retries_schema_valid_draft_when_compile_semantics_fail(
                 ),
                 hazardous_context="the action leaves the process unsafe",
                 loss_consequence="the protected operation is harmed",
-                related_hazard_ids=("H-1",),
+                related_hazard_ids=("H-404",),
                 related_constraint_ids=("SC-1",),
             ),
         ),
@@ -143,11 +149,12 @@ def test_provider_retries_schema_valid_draft_when_compile_semantics_fail(
             "findings": (
                 invalid.findings[0].model_copy(
                     update={
+                        "related_hazard_ids": ("H-1",),
                         "deviation": IcaDeviationDraft(
                             duration_deviation=(
                                 "the continuous action continues too long after the session ends"
                             )
-                        )
+                        ),
                     }
                 ),
             )
@@ -194,7 +201,7 @@ def test_provider_retries_schema_valid_draft_when_compile_semantics_fail(
         for line in (tmp_path / "calls.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     assert entries[0]["success"] is False
-    assert "continuing behavior" in entries[0]["error"]
+    assert "unknown hazards: H-404" in entries[0]["error"]
     assert entries[1]["success"] is True
 
 

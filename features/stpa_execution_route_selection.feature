@@ -1,24 +1,25 @@
 # STPA-EXEC-ROUTE-01 through STPA-EXEC-ROUTE-08
 Feature: STPA Stage 5 execution-route selection
-  Stage 5 chooses a request-local route from the supplied evidence. Deterministic
-  assembly maps that choice to a semantic contract without inventing a target.
+  Stage 5 describes the test stimulus and chooses a request-local route from the
+  supplied evidence. Deterministic assembly derives resource roles and attacker
+  influence and maps the choice to a semantic contract without inventing a target.
 
   Background:
     Given a corrected Stage 5 route context is available
 
   Scenario Outline: STPA-EXEC-ROUTE-01 executable route choices are materialized
-    Given the provider selects "<delivery>" with action "<action>" roles "<roles>" and influence "<influence>"
+    Given the provider describes stimulus "<stimulus>" and selects "<delivery>" with action "<action>"
     When corrected Stage 5 materializes the route
     Then the materialized execution contract is "executable_route"
     And the contract uses delivery "<delivery>" and action "<action>"
     And the contract has domain requirements "<requirements>"
 
     Examples:
-      | delivery            | action          | roles                   | influence | requirements    |
-      | direct_prompt       | model_output    | none                    | none      | none            |
-      | conversation_context| model_output    | none                    | none      | none            |
-      | indirect_content    | model_output    | role_stimulus_carrier   | direct    | stimulus_carrier|
-      | direct_prompt       | tool_call       | role_target_action      | none      | target_action   |
+      | stimulus         | delivery             | action       | requirements     |
+      | user_message     | direct_prompt        | model_output | none             |
+      | conversation     | conversation_context | model_output | none             |
+      | retrieved_content| indirect_content     | model_output | stimulus_carrier |
+      | user_message     | direct_prompt        | tool_call    | target_action    |
 
   Scenario: STPA-EXEC-ROUTE-05 analytical-only is explicit
     Given the provider selects an explicit analytical-only route

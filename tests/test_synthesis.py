@@ -14,8 +14,11 @@ from asago_scenario_generator.pipeline.obligation_contracts import RiskCardInput
 from asago_scenario_generator.pipeline.synthesis import (
     SynthesisAdapters,
     SynthesisInputs,
+    SynthesisRunStatus,
+    _scenario_generation_status,
     run_synthesis,
 )
+from asago_scenario_generator.report.synthesis import _candidate_outcomes_html
 
 
 def _plan(*, gap: bool = False) -> SimpleNamespace:
@@ -62,6 +65,8 @@ class _FakeAdapters:
     with_evidence: bool = False
     revision_result: object | None = None
     scenario_errors: tuple[str, ...] = ()
+    candidate_outcomes: tuple[object, ...] | None = None
+    scenario_envelopes: tuple[object, ...] | None = None
     phase2_failure: bool = False
 
     def plan(self, *, taxonomy_inputs, **_) -> object:
@@ -154,8 +159,13 @@ class _FakeAdapters:
             ("scenarios", (ica_enumeration, loss_analysis, control_structure))
         )
         return SimpleNamespace(
-            scenario_envelopes=("scenario-1",),
+            scenario_envelopes=(
+                ("scenario-1",)
+                if self.scenario_envelopes is None
+                else self.scenario_envelopes
+            ),
             stage_errors=self.scenario_errors,
+            candidate_outcomes=self.candidate_outcomes,
         )
 
     def account(self, *, plan, consideration, ica_enumeration, **_) -> object:
@@ -372,11 +382,254 @@ def test_synthesis_manifest_retains_plain_scenario_failures(tmp_path: Path) -> N
         ),
     )
 
-    assert result.manifest["scenario_counts"] == {"generated": 1, "failed": 1}
+    assert result.manifest["scenario_counts"] == {
+        "generated": 1,
+        "failed": None,
+        "requested": None,
+        "attempted": None,
+        "skipped": None,
+        "diagnostic_count": 1,
+    }
     assert result.manifest["scenario_errors"] == [
         "Stage 6 context failed for SCN-001: ambiguous constraint"
     ]
     assert result.manifest["stage_errors"] == []
+
+
+def test_synthesis_counts_candidates_separately_from_diagnostics(
+    tmp_path: Path,
+) -> None:
+    """Two failed candidates remain two failures despite four error messages."""
+    outcomes = tuple(
+        SimpleNamespace(
+            scenario_id=f"SCN-{index:03d}",
+            ica_slot_id=f"RESP-{index}:CA-{index}-1:INCORRECT",
+            ica_id=f"ICA-{index}",
+            status=status,
+            diagnostics=(),
+        )
+        for index, status in enumerate(
+            ("published", "generation_failed", "rendering_failed", "skipped"), 1
+        )
+    )
+    result = run_synthesis(
+        _inputs(tmp_path),
+        SynthesisAdapters.from_object(
+            _FakeAdapters(
+                calls=[],
+                candidate_outcomes=outcomes,
+                scenario_errors=("first", "second", "third", "fourth"),
+            )
+        ),
+    )
+
+    assert result.manifest["scenario_counts"] == {
+        "generated": 1,
+        "failed": 2,
+        "requested": 4,
+        "attempted": 3,
+        "skipped": 1,
+        "diagnostic_count": 4,
+    }
+    assert [item["status"] for item in result.manifest["candidate_outcomes"]] == [
+        "published",
+        "generation_failed",
+        "rendering_failed",
+        "skipped",
+    ]
+    report = result.report_path.read_text(encoding="utf-8")
+    assert "Failed candidates</th><td>2" in report
+    assert "Diagnostic messages</th><td>4" in report
+
+
+def test_synthesis_no_eligible_candidates_has_distinct_valid_status(
+    tmp_path: Path,
+) -> None:
+    """An empty candidate set is a valid analysis outcome, not a failure."""
+    result = run_synthesis(
+        _inputs(tmp_path),
+        SynthesisAdapters.from_object(
+            _FakeAdapters(
+                calls=[],
+                scenario_envelopes=(),
+                candidate_outcomes=(),
+            )
+        ),
+    )
+
+    assert result.manifest["run_status"] == "no_candidates"
+    assert result.manifest["scenario_counts"] == {
+        "generated": 0,
+        "failed": 0,
+        "requested": 0,
+        "attempted": 0,
+        "skipped": 0,
+        "diagnostic_count": 0,
+    }
+    assert result.status == "no_candidates"
+    assert (tmp_path / "synthesis-manifest.yaml").exists()
+    report = result.report_path.read_text(encoding="utf-8")
+    assert "Scenario generation status</th><td>no_candidates" in report
+    assert "No eligible scenario candidates were available." in report
+
+
+def test_synthesis_attempted_zero_yield_is_failed_after_artifacts_publish(
+    tmp_path: Path,
+) -> None:
+    """Attempted candidates with no published scenarios are a failed outcome."""
+    outcomes = tuple(
+        SimpleNamespace(
+            scenario_id=f"SCN-{index:03d}",
+            ica_slot_id=f"RESP-{index}:CA-{index}-1:INCORRECT",
+            ica_id=f"ICA-{index}",
+            status="generation_failed",
+            diagnostics=("provider contract failure",),
+        )
+        for index in (1, 2)
+    )
+    result = run_synthesis(
+        _inputs(tmp_path),
+        SynthesisAdapters.from_object(
+            _FakeAdapters(
+                calls=[],
+                scenario_envelopes=(),
+                candidate_outcomes=outcomes,
+            )
+        ),
+    )
+
+    assert result.manifest["run_status"] == "failed"
+    assert result.manifest["scenario_counts"] == {
+        "generated": 0,
+        "failed": 2,
+        "requested": 2,
+        "attempted": 2,
+        "skipped": 0,
+        "diagnostic_count": 0,
+    }
+    assert result.status == "failed"
+    assert {
+        "taxonomy-obligation-plan.yaml",
+        "obligation-consideration.yaml",
+        "obligation-accounting.yaml",
+        "scenario-realization.yaml",
+        "synthesis-manifest.yaml",
+        "synthesis-report.html",
+    }.issubset({path.name for path in tmp_path.iterdir()})
+    report = result.report_path.read_text(encoding="utf-8")
+    assert "Scenario generation status</th><td>failed" in report
+    assert "No scenarios were published after attempting candidates." in report
+
+
+def test_synthesis_partial_yield_is_degraded_with_separate_candidate_counts(
+    tmp_path: Path,
+) -> None:
+    """A mixed candidate result is degraded while every candidate stays visible."""
+    outcomes = (
+        SimpleNamespace(
+            scenario_id="SCN-001",
+            ica_slot_id="RESP-1:CA-1-1:INCORRECT",
+            ica_id="ICA-1",
+            status="published",
+            diagnostics=(),
+        ),
+        SimpleNamespace(
+            scenario_id="SCN-002",
+            ica_slot_id="RESP-2:CA-2-1:INCORRECT",
+            ica_id="ICA-2",
+            status="rendering_failed",
+            diagnostics=("rendering failed",),
+        ),
+        SimpleNamespace(
+            scenario_id="SCN-003",
+            ica_slot_id="RESP-3:CA-3-1:INCORRECT",
+            ica_id="ICA-3",
+            status="skipped",
+            diagnostics=("not attempted",),
+        ),
+    )
+    result = run_synthesis(
+        _inputs(tmp_path),
+        SynthesisAdapters.from_object(
+            _FakeAdapters(
+                calls=[],
+                scenario_envelopes=("scenario-1",),
+                candidate_outcomes=outcomes,
+            )
+        ),
+    )
+
+    assert result.manifest["run_status"] == "degraded"
+    assert result.manifest["scenario_counts"] == {
+        "generated": 1,
+        "failed": 1,
+        "requested": 3,
+        "attempted": 2,
+        "skipped": 1,
+        "diagnostic_count": 0,
+    }
+    assert [item["status"] for item in result.manifest["candidate_outcomes"]] == [
+        "published",
+        "rendering_failed",
+        "skipped",
+    ]
+    report = result.report_path.read_text(encoding="utf-8")
+    assert "Scenario generation status</th><td>degraded" in report
+    assert "Published candidates</th><td>1" in report
+    assert "Failed candidates</th><td>1" in report
+    assert "Skipped candidates</th><td>1" in report
+
+
+def test_synthesis_status_helper_covers_each_terminal_count_shape() -> None:
+    """Each public terminal status remains a deterministic count mapping."""
+    cases = (
+        (
+            {"requested": None, "attempted": None, "generated": None},
+            (SynthesisRunStatus.UNKNOWN, "candidate_outcomes_unavailable"),
+        ),
+        (
+            {"requested": 0, "attempted": 0, "generated": 0},
+            (SynthesisRunStatus.NO_CANDIDATES, "no_eligible_candidates"),
+        ),
+        (
+            {"requested": 2, "attempted": 2, "generated": 0},
+            (SynthesisRunStatus.FAILED, "zero_yield_after_attempts"),
+        ),
+        (
+            {"requested": 2, "attempted": 2, "generated": 2},
+            (SynthesisRunStatus.COMPLETED, "all_requested_candidates_published"),
+        ),
+        (
+            {"requested": 3, "attempted": 2, "generated": 1},
+            (SynthesisRunStatus.DEGRADED, "partial_candidate_yield"),
+        ),
+        (
+            {"requested": 2, "attempted": 0, "generated": 0},
+            (SynthesisRunStatus.DEGRADED, "requested_candidates_not_attempted"),
+        ),
+    )
+    for counts, expected in cases:
+        assert _scenario_generation_status(counts) == expected
+
+
+def test_candidate_outcomes_report_has_distinct_empty_and_record_views() -> None:
+    """The report distinguishes unavailable, empty, and populated outcomes."""
+    assert "not reported" in _candidate_outcomes_html(None)
+    assert "No scenario candidates were requested." in _candidate_outcomes_html(())
+    report = _candidate_outcomes_html(
+        (
+            SimpleNamespace(
+                scenario_id="SCN-<1>",
+                ica_slot_id="SLOT-1",
+                ica_id=None,
+                status=None,
+                diagnostics=("bad <diagnostic>",),
+            ),
+        )
+    )
+    assert "SCN-&lt;1&gt;" in report
+    assert "bad &lt;diagnostic&gt;" in report
+    assert "<td><code>—</code></td>" in report
 
 
 def test_synthesis_manifest_keeps_revision_as_compact_evidence_mapping(
@@ -861,8 +1114,8 @@ def test_scenario_failure_is_recorded_without_erasing_accounting(
     assert result.accounting is not None
 
 
-def test_synthesis_context_preparation_keeps_valid_siblings() -> None:
-    """One unsupported hierarchical control path must not erase valid scenarios."""
+def test_synthesis_context_preparation_supports_typed_agent_messages() -> None:
+    """A responsibility-target action becomes a typed agent-message path."""
     from asago_scenario_generator.pipeline.synthesis import (
         _build_synthesis_scenario_contexts,
     )
@@ -958,16 +1211,19 @@ def test_synthesis_context_preparation_keeps_valid_siblings() -> None:
             related_constraints=("SC-1",),
         )
 
-    unsupported = threat("RESP-2", "CA-2-1")
+    agent_message = threat("RESP-2", "CA-2-1")
     supported = threat("RESP-1", "CA-1-1")
 
     contexts = _build_synthesis_scenario_contexts(
-        (unsupported, supported),
+        (agent_message, supported),
         control_structure,
         loss_analysis,
         briefs=(),
         ica_considerations=(),
     )
 
-    assert tuple(contexts) == (supported.ica_id,)
+    assert tuple(contexts) == (agent_message.ica_id, supported.ica_id)
+    message_path = contexts[agent_message.ica_id].target_control_path.control_action
+    assert message_path.target_kind.value == "responsibility"
+    assert message_path.effect_kind.value == "agent_message"
     assert contexts[supported.ica_id].scenario_identity.scenario_id == "SCN-002"

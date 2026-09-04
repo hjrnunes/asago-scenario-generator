@@ -2,6 +2,8 @@ You are a safety and security engineer completing the control loop design for an
 
 You have been given a set of control responsibilities, each with responsibility constraints and process model parts. Your task is to derive the remaining control elements: what outputs each responsibility produces (control actions), how each piece of knowledge stays current (feedback channels), and what external entities the system interacts with (controlled processes).
 
+{% include "_control_loop_method.j2" %}
+
 The response is one JSON object with exactly these top-level collections:
 `control_actions`, `feedback`, and `controlled_processes`.  Do not return a
 `ControlElementSet` wrapper, YAML, prose, or an alternate collection name.
@@ -16,6 +18,17 @@ The response is one JSON object with exactly these top-level collections:
    `CA-1-1` belongs to `RESP-1`).  The target is an explicit ElementRef to one
    supplied responsibility or controlled process whose decision-making needs
    this action's output.
+
+   Also provide the typed action semantics for each newly derived CA:
+   `effect_kind` must be one of `model_output`, `tool_call`, `state_change`,
+   `agent_message`, or `environment_action`; `temporality` must be one of
+   `instantaneous`, `discrete`, `continuous`, `bounded_duration`, or
+   `unknown`.  These are semantic fields, not guesses from action wording.
+   A CA targeting a responsibility is an inter-controller message and MUST
+   use `effect_kind: "agent_message"`.  Use `unknown` only when the supplied
+   structure cannot establish the temporal shape.  `continuous` and
+   `bounded_duration` are the only values eligible for duration analysis;
+   timing is not duration.
 
 2. **Feedback channels (FB-*)**: What information updates each process model part? For every PM-X-Y in the responsibilities, you MUST create at least one feedback channel whose `updates` field references that PM. No orphan PMs — every PM must be kept current by some feedback channel.  In the JSON response this collection is named `feedback`; each item has `fb_id`, `description`, `updates`, and `source`.
 
@@ -34,7 +47,8 @@ All ElementRef references must point to existing responsibilities or controlled 
 ## Connection rules
 
 - **Feedback source**: the responsibility or controlled process that HAS the required information.
-- **Control action target**: the responsibility or controlled process whose decision-making NEEDS the information.
+- **Control action target**: the responsibility or controlled process influenced
+  by the action.
 
 ## Solution-neutrality
 
@@ -59,20 +73,22 @@ separate fields:
   "control_actions": [
     {
       "ca_id": "CA-1-1",
-      "description": "Mask sensitive identifiers before model processing",
-      "target": {"type": "controlled_process", "id": "CP-1"}
+      "description": "Start greenhouse heating",
+      "target": {"type": "controlled_process", "id": "CP-1"},
+      "effect_kind": "environment_action",
+      "temporality": "continuous"
     }
   ],
   "feedback": [
     {
       "fb_id": "FB-1-1",
-      "description": "Report masking outcome and validation failures",
+      "description": "Report current greenhouse temperature",
       "updates": "PM-1-1",
       "source": {"type": "controlled_process", "id": "CP-1"}
     }
   ],
   "controlled_processes": [
-    {"cp_id": "CP-1", "description": "Transaction processor"}
+    {"cp_id": "CP-1", "description": "Greenhouse climate"}
   ]
 }
 ```
@@ -80,5 +96,8 @@ separate fields:
 `ca_id` is not a description.  The model must not combine an ID and its
 description in an `action` string, must not return an `action` property, and
 must not leave required
-semantic fields empty.  A response with `action`, a missing `ca_id`, or a
+semantic fields empty.  Newly derived actions must include the typed
+`effect_kind` and `temporality` fields.  Historical payloads that omit these
+optional fields remain loadable for compatibility and are treated as legacy
+analytical evidence.  A response with `action`, a missing `ca_id`, or a
 missing `description` is invalid and will be rejected.

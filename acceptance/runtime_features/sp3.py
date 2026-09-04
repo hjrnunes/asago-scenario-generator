@@ -1012,7 +1012,12 @@ def _h_sp3_llm_narrative(world: World, text: str, examples: dict) -> tuple[bool,
             or "FB-" in text
         )
     ):
-        if "only 1 branch" in text:
+        if "no branch categories" in text:
+            client.set_response_for(
+                None,
+                json.dumps({"root": "r", "branches": [], "leaves": []}),
+            )
+        elif "only 1 branch" in text:
             client.set_response_for(
                 None,
                 json.dumps(
@@ -1823,7 +1828,9 @@ def _h_sp3_scenario_vuln(world: World, text: str, examples: dict) -> tuple[bool,
 
 def _h_sp3_scenario_tree(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: a scenario with an attack tree using N branch categories."""
-    if "only 1 branch" in text:
+    if "no branch categories" in text:
+        world.sp3_attack_tree = {"root": "r", "branches": [], "leaves": []}
+    elif "only 1 branch" in text:
         world.sp3_attack_tree = {
             "root": "r",
             "branches": [{"category": "controller_side", "label": "l", "children": []}],
@@ -5047,11 +5054,9 @@ def _h_072o_loss_ids_before_task(
     if task_pos == -1:
         return False, "No 'Your Task' heading found"
     for loss in la.risk_card_losses + la.use_case_losses:
-        loss_pos = prompt.find(loss.loss_id)
+        loss_pos = prompt.find(loss.loss_id, task_pos)
         if loss_pos == -1:
-            return False, f"Loss ID '{loss.loss_id}' not found in prompt"
-        if loss_pos < task_pos:
-            return False, f"Loss ID '{loss.loss_id}' appears before 'Your Task' heading"
+            return False, f"Loss ID '{loss.loss_id}' not found in the task instructions"
     return True, ""
 
 
@@ -5330,6 +5335,10 @@ def _h_sp3_robustness_stage6_responses(
 def _sp3_robustness_valid_bdi() -> object:
     """Build the valid structured BDI response used by retry scenarios."""
     return {
+        "stimulus": {
+            "category": "user_message",
+            "description": "One user message is the typed test stimulus.",
+        },
         "defender_vulnerabilities": [
             {"belief_handle": "belief_1", "vulnerability": "vulnerability"},
             {
@@ -5352,6 +5361,7 @@ def _sp3_robustness_valid_bdi() -> object:
                 "source_handle": "cause_1",
                 "evidence": "The selected structural state can remain stale.",
                 "temporal_condition": None,
+                "evidence_status": "structural_failure",
             }
         ],
         "unsafe_outcome": {
@@ -5368,8 +5378,6 @@ def _sp3_robustness_valid_bdi() -> object:
             "delivery_class": "direct_prompt",
             "selected_factor_handle": "cause_1",
             "action_kind": "model_output",
-            "resource_role_handles": [],
-            "carrier_attacker_influence": "none",
             "reason": "The selected structural factor supports the direct route.",
         },
     }

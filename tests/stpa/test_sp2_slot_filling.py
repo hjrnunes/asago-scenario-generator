@@ -14,6 +14,7 @@ from asago_scenario_generator.models.capability_profile import (
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
+    ControlActionTemporality,
     ControlStructure,
     CoordinationLink,
     CoordinationMechanism,
@@ -38,7 +39,10 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     SecurityConstraint,
 )
 from asago_scenario_generator.stpa.threat_enum._constants import PROMPTS_DIR
-from asago_scenario_generator.stpa.threat_enum.slot_creation import SlotPlaceholder, create_slots
+from asago_scenario_generator.stpa.threat_enum.slot_creation import (
+    SlotPlaceholder,
+    create_slots,
+)
 from asago_scenario_generator.stpa.threat_enum.slot_filling import (
     ICASlotFillResult,
     build_slot_filling_prompts,
@@ -67,9 +71,11 @@ def _make_test_control_structure() -> ControlStructure:
         process_model_parts=[ProcessModelPart(pm_id="PM-1-1", description="State")],
         control_actions=[
             ControlAction(
-                ca_id=f"CA-1-{j+1}",
-                description=f"Action {j+1}",
-                target=ElementRef(type=ReferenceType.controlled_process, id=f"CP-{j+1}"),
+                ca_id=f"CA-1-{j + 1}",
+                description=f"Action {j + 1}",
+                target=ElementRef(
+                    type=ReferenceType.controlled_process, id=f"CP-{j + 1}"
+                ),
             )
             for j in range(2)
         ],
@@ -88,9 +94,11 @@ def _make_test_control_structure() -> ControlStructure:
         process_model_parts=[ProcessModelPart(pm_id="PM-2-1", description="State")],
         control_actions=[
             ControlAction(
-                ca_id=f"CA-2-{j+1}",
-                description=f"Action {j+1}",
-                target=ElementRef(type=ReferenceType.controlled_process, id=f"CP-{j+1}"),
+                ca_id=f"CA-2-{j + 1}",
+                description=f"Action {j + 1}",
+                target=ElementRef(
+                    type=ReferenceType.controlled_process, id=f"CP-{j + 1}"
+                ),
             )
             for j in range(2)
         ],
@@ -166,37 +174,41 @@ def _make_valid_slot_fill_result(resp_id: str, ca_ids: list[str]) -> dict:
             slot_id = f"{resp_id}:{ca_id}:{uca_type.value}"
             if uca_type == UCAType.wrong_duration:
                 # N/A slot with structural keyword
-                filled_slots.append({
-                    "slot_id": slot_id,
-                    "responsibility": resp_id,
-                    "coordination_link": None,
-                    "control_action": ca_id,
-                    "uca_type": uca_type.value,
-                    "is_na": True,
-                    "icas": [],
-                    "na_justification": "Action is atomic with no duration component",
-                })
+                filled_slots.append(
+                    {
+                        "slot_id": slot_id,
+                        "responsibility": resp_id,
+                        "coordination_link": None,
+                        "control_action": ca_id,
+                        "uca_type": uca_type.value,
+                        "is_na": True,
+                        "icas": [],
+                        "na_justification": "Action is atomic with no duration component",
+                    }
+                )
             else:
                 # Non-N/A slot with a concrete ICA
-                filled_slots.append({
-                    "slot_id": slot_id,
-                    "responsibility": resp_id,
-                    "coordination_link": None,
-                    "control_action": ca_id,
-                    "uca_type": uca_type.value,
-                    "is_na": False,
-                    "icas": [
-                        {
-                            "ica_id": f"{slot_id}:1",
-                            "ica_text": f"Concrete failure for {ca_id} {uca_type.value}",
-                            "hazardous_context": "Attacker context",
-                            "loss_scenario": "Attack chain leading to harm",
-                            "related_hazards": ["H-1"],
-                            "related_constraints": ["SC-1"],
-                        }
-                    ],
-                    "na_justification": None,
-                })
+                filled_slots.append(
+                    {
+                        "slot_id": slot_id,
+                        "responsibility": resp_id,
+                        "coordination_link": None,
+                        "control_action": ca_id,
+                        "uca_type": uca_type.value,
+                        "is_na": False,
+                        "icas": [
+                            {
+                                "ica_id": f"{slot_id}:1",
+                                "ica_text": f"Concrete failure for {ca_id} {uca_type.value}",
+                                "hazardous_context": "Attacker context",
+                                "loss_scenario": "Attack chain leading to harm",
+                                "related_hazards": ["H-1"],
+                                "related_constraints": ["SC-1"],
+                            }
+                        ],
+                        "na_justification": None,
+                    }
+                )
     return {"filled_slots": filled_slots}
 
 
@@ -222,14 +234,16 @@ class TestOneCallPerResponsibility:
         # We need different responses per call. Since MockLLMClient uses a queue
         # based on response_format, we need to use the queue approach
         client2 = MockLLMClient()
-        client2.set_response_queue([
-            ICASlotFillResult.model_validate(
-                _make_valid_slot_fill_result("RESP-1", ["CA-1-1", "CA-1-2"])
-            ),
-            ICASlotFillResult.model_validate(
-                _make_valid_slot_fill_result("RESP-2", ["CA-2-1", "CA-2-2"])
-            ),
-        ])
+        client2.set_response_queue(
+            [
+                ICASlotFillResult.model_validate(
+                    _make_valid_slot_fill_result("RESP-1", ["CA-1-1", "CA-1-2"])
+                ),
+                ICASlotFillResult.model_validate(
+                    _make_valid_slot_fill_result("RESP-2", ["CA-2-1", "CA-2-2"])
+                ),
+            ]
+        )
 
         with TemporaryDirectory() as tmpdir:
             fill_all_slots(
@@ -246,14 +260,16 @@ class TestOneCallPerResponsibility:
         # Check stage label in calls.jsonl
         with TemporaryDirectory() as tmpdir2:
             client3 = MockLLMClient()
-            client3.set_response_queue([
-                ICASlotFillResult.model_validate(
-                    _make_valid_slot_fill_result("RESP-1", ["CA-1-1", "CA-1-2"])
-                ),
-                ICASlotFillResult.model_validate(
-                    _make_valid_slot_fill_result("RESP-2", ["CA-2-1", "CA-2-2"])
-                ),
-            ])
+            client3.set_response_queue(
+                [
+                    ICASlotFillResult.model_validate(
+                        _make_valid_slot_fill_result("RESP-1", ["CA-1-1", "CA-1-2"])
+                    ),
+                    ICASlotFillResult.model_validate(
+                        _make_valid_slot_fill_result("RESP-2", ["CA-2-1", "CA-2-2"])
+                    ),
+                ]
+            )
             fill_all_slots(
                 llm_client=client3,
                 control_structure=cs,
@@ -274,11 +290,7 @@ class TestOneCallPerResponsibility:
         cs = _make_test_control_structure()
         la = _make_test_loss_analysis()
         cp = _make_test_capability_profile()
-        slots = [
-            slot
-            for slot in create_slots(cs)
-            if slot.responsibility == "RESP-1"
-        ]
+        slots = [slot for slot in create_slots(cs) if slot.responsibility == "RESP-1"]
         invalid = _make_valid_slot_fill_result("RESP-1", ["CA-1-1", "CA-1-2"])
         invalid["filled_slots"][0]["icas"] = []
         valid = _make_valid_slot_fill_result("RESP-1", ["CA-1-1", "CA-1-2"])
@@ -309,11 +321,7 @@ class TestOneCallPerResponsibility:
     def test_schema_invalid_slot_retry_is_bounded(self):
         """Two contradictory responses produce two logged failures, then stop."""
         cs = _make_test_control_structure()
-        slots = [
-            slot
-            for slot in create_slots(cs)
-            if slot.responsibility == "RESP-1"
-        ]
+        slots = [slot for slot in create_slots(cs) if slot.responsibility == "RESP-1"]
         invalid = _make_valid_slot_fill_result("RESP-1", ["CA-1-1", "CA-1-2"])
         invalid["filled_slots"][0]["icas"] = []
         client = MockLLMClient()
@@ -399,14 +407,16 @@ class TestFilledNonNASlot:
         slots = create_slots(cs)
 
         client = MockLLMClient()
-        client.set_response_queue([
-            ICASlotFillResult.model_validate(
-                _make_valid_slot_fill_result("RESP-1", ["CA-1-1", "CA-1-2"])
-            ),
-            ICASlotFillResult.model_validate(
-                _make_valid_slot_fill_result("RESP-2", ["CA-2-1", "CA-2-2"])
-            ),
-        ])
+        client.set_response_queue(
+            [
+                ICASlotFillResult.model_validate(
+                    _make_valid_slot_fill_result("RESP-1", ["CA-1-1", "CA-1-2"])
+                ),
+                ICASlotFillResult.model_validate(
+                    _make_valid_slot_fill_result("RESP-2", ["CA-2-1", "CA-2-2"])
+                ),
+            ]
+        )
 
         with TemporaryDirectory() as tmpdir:
             filled = fill_all_slots(
@@ -441,14 +451,16 @@ class TestFilledNASlot:
         slots = create_slots(cs)
 
         client = MockLLMClient()
-        client.set_response_queue([
-            ICASlotFillResult.model_validate(
-                _make_valid_slot_fill_result("RESP-1", ["CA-1-1", "CA-1-2"])
-            ),
-            ICASlotFillResult.model_validate(
-                _make_valid_slot_fill_result("RESP-2", ["CA-2-1", "CA-2-2"])
-            ),
-        ])
+        client.set_response_queue(
+            [
+                ICASlotFillResult.model_validate(
+                    _make_valid_slot_fill_result("RESP-1", ["CA-1-1", "CA-1-2"])
+                ),
+                ICASlotFillResult.model_validate(
+                    _make_valid_slot_fill_result("RESP-2", ["CA-2-1", "CA-2-2"])
+                ),
+            ]
+        )
 
         with TemporaryDirectory() as tmpdir:
             filled = fill_all_slots(
@@ -483,14 +495,16 @@ class TestLossScenario:
         slots = create_slots(cs)
 
         client = MockLLMClient()
-        client.set_response_queue([
-            ICASlotFillResult.model_validate(
-                _make_valid_slot_fill_result("RESP-1", ["CA-1-1", "CA-1-2"])
-            ),
-            ICASlotFillResult.model_validate(
-                _make_valid_slot_fill_result("RESP-2", ["CA-2-1", "CA-2-2"])
-            ),
-        ])
+        client.set_response_queue(
+            [
+                ICASlotFillResult.model_validate(
+                    _make_valid_slot_fill_result("RESP-1", ["CA-1-1", "CA-1-2"])
+                ),
+                ICASlotFillResult.model_validate(
+                    _make_valid_slot_fill_result("RESP-2", ["CA-2-1", "CA-2-2"])
+                ),
+            ]
+        )
 
         with TemporaryDirectory() as tmpdir:
             filled = fill_all_slots(
@@ -556,14 +570,16 @@ class TestParallelizable:
         slots = create_slots(cs)
 
         client = MockLLMClient()
-        client.set_response_queue([
-            ICASlotFillResult.model_validate(
-                _make_valid_slot_fill_result("RESP-1", ["CA-1-1", "CA-1-2"])
-            ),
-            ICASlotFillResult.model_validate(
-                _make_valid_slot_fill_result("RESP-2", ["CA-2-1", "CA-2-2"])
-            ),
-        ])
+        client.set_response_queue(
+            [
+                ICASlotFillResult.model_validate(
+                    _make_valid_slot_fill_result("RESP-1", ["CA-1-1", "CA-1-2"])
+                ),
+                ICASlotFillResult.model_validate(
+                    _make_valid_slot_fill_result("RESP-2", ["CA-2-1", "CA-2-2"])
+                ),
+            ]
+        )
 
         with TemporaryDirectory() as tmpdir:
             filled = fill_all_slots(
@@ -578,8 +594,12 @@ class TestParallelizable:
 
         assert client.call_count == 2
         # Verify RESP-1 and RESP-2 slots are filled
-        resp1_filled = [s for s in filled if s.responsibility == "RESP-1" and (s.is_na or s.icas)]
-        resp2_filled = [s for s in filled if s.responsibility == "RESP-2" and (s.is_na or s.icas)]
+        resp1_filled = [
+            s for s in filled if s.responsibility == "RESP-1" and (s.is_na or s.icas)
+        ]
+        resp2_filled = [
+            s for s in filled if s.responsibility == "RESP-2" and (s.is_na or s.icas)
+        ]
         assert len(resp1_filled) > 0
         assert len(resp2_filled) > 0
 
@@ -599,14 +619,16 @@ class TestCallLogging:
         slots = create_slots(cs)
 
         client = MockLLMClient()
-        client.set_response_queue([
-            ICASlotFillResult.model_validate(
-                _make_valid_slot_fill_result("RESP-1", ["CA-1-1", "CA-1-2"])
-            ),
-            ICASlotFillResult.model_validate(
-                _make_valid_slot_fill_result("RESP-2", ["CA-2-1", "CA-2-2"])
-            ),
-        ])
+        client.set_response_queue(
+            [
+                ICASlotFillResult.model_validate(
+                    _make_valid_slot_fill_result("RESP-1", ["CA-1-1", "CA-1-2"])
+                ),
+                ICASlotFillResult.model_validate(
+                    _make_valid_slot_fill_result("RESP-2", ["CA-2-1", "CA-2-2"])
+                ),
+            ]
+        )
 
         with TemporaryDirectory() as tmpdir:
             fill_all_slots(
@@ -895,8 +917,13 @@ class TestFilledICAIdentifiers:
             f"{slot_id}:3",
         ]
         assert [
-            (ica.ica_text, ica.hazardous_context, ica.loss_scenario,
-             ica.related_hazards, ica.related_constraints)
+            (
+                ica.ica_text,
+                ica.hazardous_context,
+                ica.loss_scenario,
+                ica.related_hazards,
+                ica.related_constraints,
+            )
             for ica in merged.icas
         ] == [
             ("ICA 1", "Context", "Scenario", ["H-1"], ["SC-1"]),
@@ -912,6 +939,19 @@ class TestFilledICAIdentifiers:
         [merged] = _merge_filled_slots([placeholder], {slot_id: filled})
 
         assert merged.icas[0].ica_id == f"{slot_id}:1"
+
+    def test_wrong_duration_is_deterministically_na_for_discrete_action(self):
+        slot_id = "RESP-3:CA-3-1:WRONG_DURATION"
+        placeholder = self._placeholder(slot_id, UCAType.wrong_duration).model_copy(
+            update={"action_temporality": ControlActionTemporality.discrete}
+        )
+        filled = self._slot(slot_id, UCAType.wrong_duration, [f"{slot_id}:1"])
+
+        [merged] = _merge_filled_slots([placeholder], {slot_id: filled})
+
+        assert merged.is_na
+        assert merged.icas == []
+        assert "not continuous" in merged.na_justification
 
 
 def _make_ica() -> ICA:

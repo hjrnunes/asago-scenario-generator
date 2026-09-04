@@ -230,7 +230,11 @@ Obligation-aware ICA filling follows the same ownership rule. The provider
 returns one plain deviation sentence for a supplied slot; it does not choose a
 deviation field or UCA category. The deterministic compiler applies the exact
 `NOT_PROVIDED`, `INCORRECT`, `WRONG_TIMING`, or `WRONG_DURATION` category from
-the authoritative slot before validating and publishing the ICA.
+the authoritative slot before validating and publishing the ICA. The prompt
+view carries that slot's action temporality and a closed local reference slice;
+the provider is never asked to infer a value that deterministic validation
+already owns. Nested structural-revision objects are validated before merge,
+and the run distinguishes a requested revision from one actually applied.
 
 The root atomically publishes `taxonomy-obligation-plan.yaml`,
 `obligation-consideration.yaml`, `obligation-accounting.yaml`,
@@ -260,8 +264,20 @@ outcome where scenario evidence exists, and show both the full applicable
 denominator and survivor denominators. Provider call evidence separately
 records response receipt, typed parsing, semantic validation, compilation,
 publication, and terminal error codes; compatibility `success` is not the sole
-stage-quality signal. Standalone diagnostic `stpa-run` does not import or
-require synthesis artifacts.
+stage-quality signal. Scenario candidate outcomes are counted once by exact
+scenario/slot/ICA identity, separately from their possibly multiple diagnostic
+messages. An adapter without candidate outcomes reports those counts as
+unknown rather than treating error strings as candidates. Standalone
+diagnostic `stpa-run` does not import or require synthesis artifacts.
+
+The synthesis manifest derives a stable `run_status` from those candidate
+records. `completed` means every requested candidate was published;
+`no_candidates` is a valid analysis with no eligible candidates; `failed`
+means candidates were attempted but produced zero published scenarios; and
+`degraded` records partial or unattempted yield. The product `run` persists and
+reports its diagnostic/accounting sidecars before returning non-zero for the
+attempted zero-yield status. Phase 2 verification remains independently
+non-blocking, and cannot change this scenario-generation status.
 
 Correspondence is split into reviewable `correspondence-proposals-v1` and
 `correspondence-reconciliation-v1` artifacts. A proposal names exact obligation,

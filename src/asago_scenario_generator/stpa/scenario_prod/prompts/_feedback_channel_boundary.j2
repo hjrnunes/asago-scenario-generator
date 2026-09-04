@@ -1,0 +1,25 @@
+## Feedback-channel boundary
+
+FB-* denotes a logical information dependency that updates a process-model belief.
+It is not evidence of a network socket, packet stream, message bus,
+database connection, or attacker-accessible transport. Realize the update
+through a declared AI surface—prompt/context input, retrieved content, tool result,
+memory state, agent message, or model output—unless the supplied
+architecture explicitly identifies an accessible transport.
+
+When exact reachable-capability evidence supports active access, describe how
+the attacker changes a declared AI surface. Without that evidence, explain the
+structural condition instead.
+
+Examples of declared AI-surface realizations are prompt/context injection,
+retrieved-content poisoning, tool-result fabrication, memory poisoning,
+agent-message tampering, and model-output manipulation. Use one only when the
+scenario evidence names that surface and supports access to it.
+
+Never infer packet interception, man-in-the-middle access (MITM), network delay,
+traffic blocking, network-signal spoofing, communication-link severing,
+credential theft, account takeover, session hijacking or fixation
+(session hijacking/fixation), or generic flooding or denial of service
+(generic flooding/DoS) from the word “channel.” Active manipulation
+requires exact supplied access evidence; otherwise describe the structural
+condition. No reachable capabilities means no invented interface or privilege.

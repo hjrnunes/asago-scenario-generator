@@ -251,8 +251,13 @@ class TestVulnerabilityCompleteness:
 class TestTreeBranchCoverage:
     """SP3-VAL-07, SP3-VAL-08."""
 
-    def test_fails_on_one_category(self):
+    def test_passes_with_one_category(self):
         tree = {"root": "r", "branches": [{"category": "controller_side", "label": "l", "children": []}], "leaves": []}
+        result = validate_tree_branch_coverage(tree)
+        assert result.passed
+
+    def test_fails_without_a_supported_category(self):
+        tree = {"root": "r", "branches": [], "leaves": []}
         result = validate_tree_branch_coverage(tree)
         assert not result.passed
         assert any("branch" in e for e in result.errors)

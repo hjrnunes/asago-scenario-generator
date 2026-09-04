@@ -49,9 +49,7 @@ def _make_control_structure() -> ControlStructure:
                 process_model_parts=[
                     ProcessModelPart(pm_id="PM-1-1", description="State 1")
                 ],
-                control_actions=[
-                    ControlAction(ca_id="CA-1-1", description="Action 1")
-                ],
+                control_actions=[ControlAction(ca_id="CA-1-1", description="Action 1")],
                 feedback_channels=[
                     FeedbackChannel(
                         fb_id="FB-1-1",
@@ -69,9 +67,7 @@ def _make_control_structure() -> ControlStructure:
                 process_model_parts=[
                     ProcessModelPart(pm_id="PM-2-1", description="State 2")
                 ],
-                control_actions=[
-                    ControlAction(ca_id="CA-2-1", description="Action 2")
-                ],
+                control_actions=[ControlAction(ca_id="CA-2-1", description="Action 2")],
                 feedback_channels=[
                     FeedbackChannel(
                         fb_id="FB-2-1",
@@ -265,7 +261,11 @@ class TestCriticExecution:
             multi_agent=False,
             hitl=False,
             entry_points=[
-                {"name": "User chat", "direction": "input", "controllability": "direct"},
+                {
+                    "name": "User chat",
+                    "direction": "input",
+                    "controllability": "direct",
+                },
             ],
             confidence="medium",
             kc_subcodes=["KC1.1", "KC6.3.3"],
@@ -289,14 +289,9 @@ class TestCriticExecution:
     def test_critic_11_only_justified_gaps_no_revision(self):
         """SP1-CRITIC-11: only justified gaps do not trigger revision."""
         data = _valid_critic_findings_dict()
-        # Clear all three probes so the fixture genuinely matches the
-        # scenario name ("only justified gaps").  The original test only
-        # overrode checklist_results but left gaps and taxonomy_probe_results
-        # from _valid_critic_findings_dict() — which contains real
-        # structural gaps.  Under the corrected three-probe logic
-        # (has_unjustified_gaps checks gaps, checklist, AND taxonomy),
-        # those gaps correctly trigger revision.  Fix the fixture, not
-        # the implementation.
+        # Clear the explicit gap set so the fixture genuinely matches the
+        # scenario name ("only justified gaps"). Probe statuses are retained
+        # only as diagnostic context and cannot trigger revision by themselves.
         data["checklist_results"] = {
             "Input validation": "present",
             "Authorization": "absent_justified",
@@ -403,7 +398,9 @@ class TestRevision:
         # Control structure listing is in the system prompt
         assert "RESP-1" in system_prompt or "RESP-2" in system_prompt
         # Critic findings are in the user prompt
-        assert "Missing input validation" in user_prompt or "gaps" in user_prompt.lower()
+        assert (
+            "Missing input validation" in user_prompt or "gaps" in user_prompt.lower()
+        )
 
     def test_rev_04_heuristics_rerun_after_revision(self, tmp_path):
         """SP1-REV-04: structural heuristics are re-run after revision."""
@@ -510,9 +507,7 @@ class TestRevision:
                     "process_model_parts": [
                         {"pm_id": "PM-3-1", "description": "State 3"}
                     ],
-                    "control_actions": [
-                        {"ca_id": "CA-3-1", "description": "Action 3"}
-                    ],
+                    "control_actions": [{"ca_id": "CA-3-1", "description": "Action 3"}],
                     "feedback_channels": [
                         {
                             "fb_id": "FB-3-1",

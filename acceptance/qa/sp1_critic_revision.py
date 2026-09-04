@@ -16,9 +16,8 @@ Behaviors verified here
 1. ``REVISION_MAX_COMPLETION_TOKENS`` is 8192 and is forwarded to the LLM
    client. All three 2026-08-10 production runs died with
    ``LengthFinishReasonError`` at exactly 4096 completion tokens.
-2. ``has_unjustified_gaps`` triggers revision from any of the three critic
-   probes — ``checklist_results``, ``taxonomy_probe_results``, and the
-   adversarial ``gaps`` list — not from ``checklist_results`` alone.
+2. ``has_unjustified_gaps`` triggers revision only from explicit typed
+   adversarial ``gaps``; checklist and taxonomy statuses remain diagnostic.
 3. ``_compute_next_ids`` returns ``next_cm_num`` derived from the nested
    ``coordination_mechanism.cm_id`` values, and ``revision_system.j2``
    states it. (``lrya``.)
@@ -331,7 +330,7 @@ def run_static_checks(runner: QARunner) -> None:
             "The cap must come from the module constant, not a literal",
         )
 
-    # --- Issue 3: has_unjustified_gaps reads all three probes ---------------
+    # --- Issue 3: only explicit typed gaps trigger revision -----------------
     hug = _find_function(tree, "has_unjustified_gaps")
     runner.check(
         "crf-static-06: has_unjustified_gaps is defined",
@@ -339,12 +338,21 @@ def run_static_checks(runner: QARunner) -> None:
     )
     if hug is not None:
         hug_src = ast.get_source_segment(_read(CRITIC_FILE), hug) or ""
-        for field in ("checklist_results", "taxonomy_probe_results", "gaps"):
-            runner.check(
-                f"crf-static-07[{field}]: has_unjustified_gaps reads findings.{field}",
-                f"findings.{field}" in hug_src,
-                "All three critic probes must be able to trigger revision",
-            )
+        runner.check(
+            "crf-static-07[checklist_results]: has_unjustified_gaps ignores probe statuses",
+            "findings.checklist_results" not in hug_src,
+            "Checklist statuses are diagnostic and cannot authorize revision",
+        )
+        runner.check(
+            "crf-static-07[taxonomy_probe_results]: has_unjustified_gaps ignores probe statuses",
+            "findings.taxonomy_probe_results" not in hug_src,
+            "Taxonomy statuses are diagnostic and cannot authorize revision",
+        )
+        runner.check(
+            "crf-static-07[gaps]: has_unjustified_gaps reads findings.gaps",
+            "findings.gaps" in hug_src,
+            "Explicit typed gaps must authorize revision",
+        )
 
     # --- Issue 4 / lrya: next_cm_num ---------------------------------------
     cni = _find_function(tree, "_compute_next_ids")
@@ -958,7 +966,7 @@ def run_dynamic_checks(runner: QARunner, ir_dir: Path = IR_DIR) -> None:
             f"{exc}\n{traceback.format_exc()}",
         )
 
-    # --- D2: has_unjustified_gaps over all three probes ---------------------
+    # --- D2: has_unjustified_gaps requires explicit typed gaps ---------------
     try:
         from asago_scenario_generator.stpa.system_model.critic import (
             has_unjustified_gaps,
@@ -968,7 +976,7 @@ def run_dynamic_checks(runner: QARunner, ir_dir: Path = IR_DIR) -> None:
             (
                 "checklist absent_unjustified",
                 {"checklist_results": {"a": "absent_unjustified"}},
-                True,
+                False,
             ),
             (
                 "checklist mixed with one absent_unjustified",
@@ -979,7 +987,7 @@ def run_dynamic_checks(runner: QARunner, ir_dir: Path = IR_DIR) -> None:
                         "c": "absent_unjustified",
                     }
                 },
-                True,
+                False,
             ),
             (
                 "taxonomy absent_unjustified",
@@ -987,7 +995,7 @@ def run_dynamic_checks(runner: QARunner, ir_dir: Path = IR_DIR) -> None:
                     "checklist_results": {"a": "present"},
                     "taxonomy_probe_results": {"t": "absent_unjustified"},
                 },
-                True,
+                False,
             ),
             (
                 "taxonomy mixed with one absent_unjustified",
@@ -998,7 +1006,7 @@ def run_dynamic_checks(runner: QARunner, ir_dir: Path = IR_DIR) -> None:
                         "t2": "absent_unjustified",
                     },
                 },
-                True,
+                False,
             ),
             (
                 "adversarial gap only",
@@ -1192,9 +1200,11 @@ def run_dynamic_checks(runner: QARunner, ir_dir: Path = IR_DIR) -> None:
 
         cs = _qa_control_structure()
 
-        # Findings with 2 unjustified items (1 gap + 1 checklist).
+        # Findings with two explicit actionable gaps. The checklist result is
+        # retained as diagnostic context and does not increase the revision
+        # finding count.
         findings_two = _qa_findings(
-            gaps=[_gap()],
+            gaps=[_gap(), _gap("Missing validation-result feedback")],
             checklist_results={"Input validation": "absent_unjustified"},
         )
 

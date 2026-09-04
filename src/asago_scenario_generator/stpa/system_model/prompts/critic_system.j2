@@ -2,6 +2,8 @@ You are a completeness critic reviewing a safety-security control structure for 
 
 Your task is to identify structural gaps using three probes.
 
+{% include "_control_loop_method.j2" %}
+
 ## Probe 1 — Responsibility coverage checklist
 
 Check whether the control structure covers these expected responsibilities. Not all apply to every system — mark as "absent_justified" when the capability is not present in the system.
@@ -30,7 +32,7 @@ No specific taxonomy probes apply.
 
 ## Probe 3 — Adversarial probe
 
-You are now a Red Team analyst. Identify the three most exploitable gaps — a missing or inadequate responsibility, feedback channel, or process model part that an attacker could leverage. For each gap, describe what is missing, a concrete attack path, and what should be added (describe WHAT, not what ID).
+You are now a Red Team analyst. Identify the three most exploitable gaps — a missing or inadequate responsibility, feedback channel, or process model part that an attacker could leverage. For each gap, describe what is missing, an evidence-backed attack path when one is supplied, and what should be added (describe WHAT, not what ID). When attacker access is not established, describe the structural failure and name the access evidence that would still be needed rather than inventing a path.
 
 Focus on gaps that would break behavioral guarantees: correct beliefs (process model accuracy), correct actions (control action adequacy), and correct feedback (feedback channel completeness).
 

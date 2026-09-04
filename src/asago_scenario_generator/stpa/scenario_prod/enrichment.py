@@ -16,6 +16,15 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
     Responsibility,
 )
+from asago_scenario_generator.stpa.models.execution_classification import (
+    BindingCompleteness,
+    ExecutionActionKind,
+    ExecutionDeliveryClass,
+    ExecutionProfileFit,
+)
+from asago_scenario_generator.stpa.models.execution_projection_v2 import (
+    ExecutionProjectionV2,
+)
 from asago_scenario_generator.stpa.models.scenario_envelope import (
     ConsumerHints,
     SystemContext,
@@ -118,7 +127,8 @@ def compute_consumer_hints(
     capability_profile: CapabilityProfile,
     attack_tree: dict,
     narrative: str,
-    primary_attack_zone: str,
+    primary_attack_zone: str | None = None,
+    execution_projection: ExecutionProjectionV2 | None = None,
 ) -> ConsumerHints:
     """Compute deterministic consumer hints for adapter filtering.
 
@@ -128,27 +138,36 @@ def compute_consumer_hints(
         capability_profile: The SP1 capability profile.
         attack_tree: The Stage 6 attack tree dict.
         narrative: The Stage 6 narrative text.
-        primary_attack_zone: The primary attack zone for this scenario
-            (e.g. ``"input"``, ``"tool_execution"``).
+        primary_attack_zone: Legacy primary attack zone for this scenario
+            (e.g. ``"input"``, ``"tool_execution"``).  It is ignored when
+            ``execution_projection`` is supplied.
+        execution_projection: Optional validated v2 projection.  When
+            supplied, typed execution requirements and observability are the
+            sole source for readiness; the legacy zone/text heuristics are
+            used only when it is absent.
 
     Returns:
         A populated :class:`ConsumerHints`.
     """
+    if execution_projection is not None:
+        return _typed_consumer_hints(execution_projection)
+
+    zone = primary_attack_zone or "input"
     requires_tool_execution = _tree_mentions_tools(attack_tree)
     requires_multi_turn = _narrative_indicates_multi_turn(narrative)
     requires_multi_agent = capability_profile.multi_agent
     requires_persistent_state = capability_profile.has_persistent_memory
 
-    garak = _garak_testability(primary_attack_zone)
+    garak = _garak_testability(zone)
     midojo = _midojo_testability(
-        primary_attack_zone,
+        zone,
         requires_tool_execution,
         requires_multi_agent,
         requires_persistent_state,
     )
 
     return ConsumerHints(
-        primary_attack_zone=primary_attack_zone,
+        primary_attack_zone=zone,
         requires_tool_execution=requires_tool_execution,
         requires_multi_turn=requires_multi_turn,
         requires_multi_agent=requires_multi_agent,
@@ -156,6 +175,109 @@ def compute_consumer_hints(
         garak_testability=garak,
         midojo_testability=midojo,
     )
+
+
+def _typed_consumer_hints(projection: ExecutionProjectionV2) -> ConsumerHints:
+    """Derive readiness from the immutable execution projection only."""
+    requirements = projection.execution_requirements
+    contract = projection.execution_contract
+    classification = projection.execution_classification
+    requires_tool_execution = requirements.requires_tool_execution
+    requires_multi_turn = requirements.requires_multi_turn
+    requires_multi_agent = requirements.requires_multi_agent
+    requires_persistent_state = requirements.requires_persistent_state
+    zone = _typed_primary_attack_zone(contract.action_kind, contract.delivery)
+    garak = _typed_garak_testability(projection)
+    midojo = _typed_midojo_testability(
+        classification,
+        requirements,
+        contract.action_kind,
+    )
+    return ConsumerHints(
+        primary_attack_zone=zone,
+        requires_tool_execution=requires_tool_execution,
+        requires_multi_turn=requires_multi_turn,
+        requires_multi_agent=requires_multi_agent,
+        requires_persistent_state=requires_persistent_state,
+        garak_testability=garak,
+        midojo_testability=midojo,
+    )
+
+
+def _typed_primary_attack_zone(
+    action_kind: ExecutionActionKind | None,
+    delivery: object | None,
+) -> str:
+    """Expose a compatibility zone derived from typed route semantics."""
+    delivery_class = getattr(delivery, "delivery_class", None)
+    if delivery_class is ExecutionDeliveryClass.indirect_content:
+        return "tool_execution"
+    if action_kind is ExecutionActionKind.agent_message:
+        return "inter_agent"
+    if action_kind in {
+        ExecutionActionKind.tool_call,
+        ExecutionActionKind.environment_action,
+    }:
+        return "tool_execution"
+    if action_kind is ExecutionActionKind.state_change:
+        return "memory"
+    return (
+        "input"
+        if delivery_class is not ExecutionDeliveryClass.conversation_context
+        else "reasoning"
+    )
+
+
+def _typed_garak_testability(projection: ExecutionProjectionV2) -> str:
+    """Assess Garak readiness from typed observability and binding state."""
+    classification = projection.execution_classification
+    requirements = projection.execution_requirements
+    contract = projection.execution_contract
+    if classification.binding_completeness is not BindingCompleteness.concrete:
+        return "low"
+    if classification.profile_fit in {
+        ExecutionProfileFit.invalid,
+        ExecutionProfileFit.unsupported,
+        ExecutionProfileFit.ambiguous,
+    }:
+        return "low"
+    if requirements.requires_real_clock or requirements.requires_state_observation:
+        return "low"
+    if contract.action_kind is not ExecutionActionKind.model_output:
+        return "low"
+    if contract.delivery is None:
+        return "low"
+    if contract.delivery.delivery_class is ExecutionDeliveryClass.indirect_content:
+        return "medium"
+    return "high"
+
+
+def _typed_midojo_testability(
+    classification: object,
+    requirements: object,
+    action_kind: ExecutionActionKind | None,
+) -> str:
+    """Assess agent/tool harness readiness from typed requirements."""
+    if (
+        getattr(classification, "binding_completeness", None)
+        is not BindingCompleteness.concrete
+    ):
+        return "low"
+    if getattr(requirements, "requires_tool_execution", False):
+        return (
+            "high"
+            if action_kind
+            in {
+                ExecutionActionKind.tool_call,
+                ExecutionActionKind.environment_action,
+            }
+            else "medium"
+        )
+    if getattr(requirements, "requires_multi_agent", False) or getattr(
+        requirements, "requires_persistent_state", False
+    ):
+        return "medium"
+    return "low"
 
 
 def _tree_mentions_tools(attack_tree: dict) -> bool:

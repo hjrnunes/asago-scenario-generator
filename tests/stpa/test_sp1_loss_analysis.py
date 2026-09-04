@@ -470,8 +470,8 @@ class TestStage1aLossAnalysis:
         )
         # The gap call is the second call
         gap_call = client.calls[1]
-        assert "kc_subcodes" in gap_call.user_prompt
         assert "KC1.1" in gap_call.user_prompt
+        assert "Large Language Model (LLM)" in gap_call.user_prompt
 
     def test_la_15_empty_risk_cards_produces_empty_risk_losses(self, tmp_path):
         """Risk-grounded call with no risk cards produces empty risk_card_losses."""

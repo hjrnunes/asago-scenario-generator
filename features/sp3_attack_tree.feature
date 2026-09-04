@@ -8,7 +8,8 @@ Feature: SP3 Stage 6 Call B — Attack tree
   categories: controller-side causes, path-side causes, and coordination gap.
   The LLM instantiates relevant branches and prunes irrelevant ones. The tree
   must use at least 2 of the 3 categories. Branch references to PM, FB, CA,
-  and RESP IDs must be valid.
+  and RESP IDs must be valid. One supported category is sufficient when the
+  evidence supports no independent second cause.
 
   Background:
     Given the SP3 attack tree module is importable
@@ -63,8 +64,8 @@ Feature: SP3 Stage 6 Call B — Attack tree
     And the tree does not contain a coordination_gap branch
 
   # SP3-TREE-06
-  Scenario: SP3-TREE-06 post-call validation requires at least 2 of 3 branch categories
-    Given an LLM that returns a tree with only 1 branch category
+  Scenario: SP3-TREE-06 post-call validation requires at least 1 branch category
+    Given an LLM that returns a tree with no branch categories
     When attack tree branch coverage validation is performed
     Then validation fails with error containing branch
 

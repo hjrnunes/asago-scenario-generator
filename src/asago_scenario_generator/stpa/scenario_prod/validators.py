@@ -34,6 +34,7 @@ __all__ = [
     "validate_vulnerability_completeness",
     "validate_active_access_grounding",
     "validate_tree_branch_coverage",
+    "validate_tree_factor_evidence_coverage",
     "validate_gherkin_structure",
     "validate_loss_hazard_id_references",
     "validate_attack_tree_root_label",
@@ -219,7 +220,7 @@ def get_branch_categories(attack_tree: dict) -> set[str]:
 
 
 def validate_tree_branch_coverage(attack_tree: dict) -> ValidationResult:
-    """Validate that the attack tree uses at least 2 of 3 branch categories.
+    """Validate that the attack tree uses at least one supported category.
 
     Args:
         attack_tree: The attack tree dict (YAML-serializable).
@@ -228,14 +229,117 @@ def validate_tree_branch_coverage(attack_tree: dict) -> ValidationResult:
         A :class:`ValidationResult`.
     """
     count = count_branch_categories(attack_tree)
-    if count < 2:
+    if count < 1:
         return ValidationResult.failure(
-            [
-                f"Attack tree uses only {count} branch categor"
-                f"{'y' if count == 1 else 'ies'}, need at least 2."
-            ]
+            ["Attack tree uses no supported branch category; need at least 1."]
         )
     return ValidationResult.success()
+
+
+def validate_tree_factor_evidence_coverage(
+    attack_tree: dict,
+    scenario_spec: ScenarioSpec,
+) -> ValidationResult:
+    """Require an attack tree to cover declared factors with exact evidence.
+
+    Branch-category counts are a presentation property, not evidence that a
+    tree explains a scenario.  For a contextual Stage 5 result, the factor
+    selected by the execution route must occur by its exact structural source
+    ID (or by its complete normalized evidence phrase), and structural
+    references outside the selected path are rejected.  Additional declared
+    factors may remain provenance-only. Empty-factor legacy fixtures are kept
+    valid for compatibility with the historical diagnostic adapter.
+
+    The check is deliberately structural: it never treats an adversarial verb
+    as proof of access and never imports taxonomy mechanism text into the
+    allowed evidence set.
+    """
+    factors = _selected_tree_factors(scenario_spec)
+    if not factors:
+        return ValidationResult.success()
+
+    tree_text = _flatten_tree_to_text(attack_tree)
+    normalized_tree = _normalize_evidence_text(tree_text)
+    errors: list[str] = []
+    for factor in factors:
+        source_id = factor.source_id
+        if source_id in tree_text:
+            continue
+        evidence = _normalize_evidence_text(factor.description)
+        if evidence and evidence in normalized_tree:
+            continue
+        errors.append(
+            f"Attack tree does not cover declared causal factor {source_id} "
+            "with its declared evidence."
+        )
+
+    allowed_refs = _allowed_tree_evidence_refs(scenario_spec)
+    for reference in _structural_tree_references(tree_text):
+        if reference in allowed_refs:
+            continue
+        errors.append(
+            f"Attack tree references unsupported causal bridge {reference}; "
+            "only selected-path and declared-factor evidence is allowed."
+        )
+    return ValidationResult(passed=not errors, errors=errors)
+
+
+def _selected_tree_factors(scenario_spec: ScenarioSpec) -> tuple[object, ...]:
+    """Return the route-selected factor, leaving provenance-only factors out."""
+    factors = tuple(scenario_spec.causal_factors)
+    contract = scenario_spec.execution_contract
+    factor_id = getattr(getattr(contract, "delivery", None), "factor_id", None)
+    if isinstance(factor_id, str) and factor_id.startswith("CF-"):
+        try:
+            index = int(factor_id[3:]) - 1
+        except ValueError:
+            index = -1
+        if 0 <= index < len(factors):
+            return (factors[index],)
+    return factors[:1]
+
+
+def _normalize_evidence_text(value: str) -> str:
+    """Normalize prose enough for exact phrase evidence matching."""
+    return " ".join(re.findall(r"[a-z0-9]+", value.lower().replace("-", " ")))
+
+
+def _structural_tree_references(tree_text: str) -> set[str]:
+    """Return all closed structural IDs mentioned by one tree."""
+    return {
+        match.group(0)
+        for pattern, _label in _TREE_ID_SPECS
+        for match in re.finditer(pattern, tree_text)
+    }
+
+
+def _allowed_tree_evidence_refs(scenario_spec: ScenarioSpec) -> set[str]:
+    """Return exact references the selected scenario tree may explain."""
+    allowed = {factor.source_id for factor in scenario_spec.causal_factors}
+    allowed.add(scenario_spec.target_control_action)
+    context = scenario_spec.scenario_context
+    if context is None:
+        return allowed
+    path = context.target_control_path
+    allowed.update(item.element_id for item in path.process_model_parts)
+    allowed.update(item.element_id for item in path.feedback)
+    allowed.update(item.action_id for item in path.related_control_actions)
+    allowed.add(path.control_action.action_id)
+    allowed.add(path.controller.element_id)
+    if path.responsibility is not None:
+        allowed.add(path.responsibility.element_id)
+    if path.coordination_path is not None:
+        coordination = path.coordination_path
+        allowed.update(
+            {
+                coordination.link_id,
+                coordination.source.element_id,
+                coordination.target.element_id,
+                coordination.shared_process_model.element_id,
+                coordination.coordination_mechanism.element_id,
+            }
+        )
+    return allowed
 
 
 def validate_gherkin_structure(gherkin: GherkinSpec | str) -> ValidationResult:

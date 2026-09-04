@@ -96,9 +96,7 @@ def _spec(control_structure: ControlStructure | None = None) -> ScenarioSpec:
         target_control_action=CONTROL_ACTION,
         ica_type=UCA_TYPE,
         defender_bdi=DefenderBDI(
-            beliefs=[
-                DefenderBelief(pm_id="PM-1-1", content="b", vulnerability="v")
-            ],
+            beliefs=[DefenderBelief(pm_id="PM-1-1", content="b", vulnerability="v")],
             desires=[DefenderDesire(resp_id=CONTROLLER, content="d")],
             intentions=[DefenderIntention(ca_id=CONTROL_ACTION, content="i")],
         ),
@@ -159,9 +157,7 @@ def _contains_tokens(row_cells: list[str], tokens: list[str]) -> bool:
 def _rows_from_table(table_text: str) -> list[list[str]]:
     """Parse the rendered markdown table into per-row cell lists."""
     lines = [
-        line.strip()
-        for line in table_text.splitlines()
-        if line.strip().startswith("|")
+        line.strip() for line in table_text.splitlines() if line.strip().startswith("|")
     ]
     rows: list[list[str]] = []
     for line in lines:
@@ -284,7 +280,9 @@ class TestProj0401PromptRendering:
                 spec, loader, projection_alignment=table
             ),
             lambda loader, spec, table: build_attack_tree_prompts(
-                spec, make_minimal_control_structure(), loader,
+                spec,
+                make_minimal_control_structure(),
+                loader,
                 projection_alignment=table,
             ),
             lambda loader, spec, table: build_gherkin_prompts(
@@ -297,8 +295,8 @@ class TestProj0401PromptRendering:
         ],
         ids=["narrative", "tree", "gherkin"],
     )
-    def test_system_and_user_prompts_contain_the_table(self, render_prompts):
-        """Both the system and the user prompt of each call carry the table."""
+    def test_each_prompt_pair_contains_one_table(self, render_prompts):
+        """Each Stage 6 call receives one copy of the alignment table."""
         doc = _doc(
             [
                 _factor(CausalFactorKind.process_model_flaw, "PM-1-1"),
@@ -307,17 +305,15 @@ class TestProj0401PromptRendering:
         )
         table = render_projection_alignment_table(doc)
         system_prompt, user_prompt = render_prompts(_loader(), _spec(), table)
-        for prompt in (system_prompt, user_prompt):
-            assert "Projection Alignment" in prompt
-            assert "| projection ID |" in prompt
-            assert "EXEC:RESP-1:CA-1-1:WRONG_TIMING" in prompt
-            assert "semantic structural IDs" in prompt
+        assert "Projection Alignment" in system_prompt
+        assert "Projection Alignment" not in user_prompt
+        assert "| projection ID |" in system_prompt
+        assert "EXEC:RESP-1:CA-1-1:WRONG_TIMING" in system_prompt
+        assert "semantic structural IDs" in system_prompt
 
     def test_default_builders_have_no_table(self):
         """Without the optional argument the builders stay backward compatible."""
-        system_prompt, user_prompt = build_narrative_prompts(
-            _spec(), _loader()
-        )
+        system_prompt, user_prompt = build_narrative_prompts(_spec(), _loader())
         assert "Projection Alignment" not in system_prompt
         assert "Projection Alignment" not in user_prompt
 
@@ -343,11 +339,9 @@ class TestProj0402NarrativeConstraints:
         """The narrative prompt requires PM-1-1 before FB-1-1 before CA-1-1."""
         text = self._narrative_text()
         assert "strictly in table order" in text
-        body = text[text.index("Projection Alignment"):]
+        body = text[text.index("Projection Alignment") :]
         rows = _rows_from_table(body)
-        order_by_id = {
-            cells[0]: int(cells[7]) for cells in rows if cells[7].isdigit()
-        }
+        order_by_id = {cells[0]: int(cells[7]) for cells in rows if cells[7].isdigit()}
         assert order_by_id["PM-1-1"] < order_by_id["FB-1-1"]
         assert order_by_id["FB-1-1"] < order_by_id["CA-1-1"]
 
@@ -360,7 +354,10 @@ class TestProj0402NarrativeConstraints:
     def test_forbids_inventing_projection_elements(self):
         """The narrative prompt forbids inventing factors, assertions, steps."""
         text = self._narrative_text()
-        assert "Do not invent any causal factor, temporal assertion, or scenario step" in text
+        assert (
+            "Do not invent any causal factor, temporal assertion, or scenario step"
+            in text
+        )
 
     def test_preserves_feedback_transport_distinction(self):
         """FB-1-1 stays a logical dependency, never an inferred transport."""
@@ -396,7 +393,7 @@ class TestProj0403AttackTreeConstraints:
     def test_requires_known_structural_references(self):
         """The tree prompt requires the known references PM-1-1 and CA-1-1."""
         text = self._tree_text()
-        body = text[text.index("Projection Alignment"):]
+        body = text[text.index("Projection Alignment") :]
         rows = _rows_from_table(body)
         row_ids = {cells[0] for cells in rows}
         assert "PM-1-1" in row_ids
@@ -406,11 +403,9 @@ class TestProj0403AttackTreeConstraints:
         """Temporal-factor leaf references preserve projection order."""
         text = self._tree_text()
         assert "preserve the projection order" in text
-        body = text[text.index("Projection Alignment"):]
+        body = text[text.index("Projection Alignment") :]
         rows = _rows_from_table(body)
-        order_by_id = {
-            cells[0]: int(cells[7]) for cells in rows if cells[7].isdigit()
-        }
+        order_by_id = {cells[0]: int(cells[7]) for cells in rows if cells[7].isdigit()}
         assert order_by_id["PM-1-1"] < order_by_id["CA-1-1"]
 
     def test_forbids_unproven_infrastructure_mechanisms(self):
@@ -442,7 +437,7 @@ class TestProj0404GherkinConstraints:
     def test_requires_given_reference_to_pm(self):
         """The Gherkin prompt requires a Given reference to PM-1-1."""
         text = self._gherkin_text()
-        assert "process model state IDs (PM-*)" in text
+        assert '"Given" process-model state ID (PM-*)' in text
         assert "PM-1-1" in text
 
     def test_requires_exact_ica_type_and_control_action(self):
@@ -480,26 +475,27 @@ class TestProj0405NoDrift:
         doc = self._doc_with_anomalies()
         first_rows = derive_projection_alignment_rows(doc)
         second_rows = derive_projection_alignment_rows(doc)
-        first_payload = json.dumps(
-            first_rows, sort_keys=True, separators=(",", ":")
-        )
-        second_payload = json.dumps(
-            second_rows, sort_keys=True, separators=(",", ":")
-        )
+        first_payload = json.dumps(first_rows, sort_keys=True, separators=(",", ":"))
+        second_payload = json.dumps(second_rows, sort_keys=True, separators=(",", ":"))
         assert first_payload == second_payload
-        assert (
-            render_projection_alignment_table(doc)
-            == render_projection_alignment_table(doc)
-        )
+        assert render_projection_alignment_table(
+            doc
+        ) == render_projection_alignment_table(doc)
 
     def test_assertion_rows_follow_validator_mapping(self):
         """Each assertion row source and predicate equals the validator mapping."""
         doc = self._doc_with_anomalies()
         factors = [
-            CausalFactor(kind=CausalFactorKind.sensor_anomaly, source_id="FB-1-1",
-                         description="f"),
-            CausalFactor(kind=CausalFactorKind.actuator_anomaly, source_id="CA-1-1",
-                         description="f"),
+            CausalFactor(
+                kind=CausalFactorKind.sensor_anomaly,
+                source_id="FB-1-1",
+                description="f",
+            ),
+            CausalFactor(
+                kind=CausalFactorKind.actuator_anomaly,
+                source_id="CA-1-1",
+                description="f",
+            ),
         ]
         rows = derive_projection_alignment_rows(doc)
         for index, row in enumerate(rows[:-1]):
@@ -512,10 +508,16 @@ class TestProj0405NoDrift:
         """Each factor step row source and kind equals the validator mapping."""
         doc = self._doc_with_anomalies()
         factors = [
-            CausalFactor(kind=CausalFactorKind.sensor_anomaly, source_id="FB-1-1",
-                         description="f"),
-            CausalFactor(kind=CausalFactorKind.actuator_anomaly, source_id="CA-1-1",
-                         description="f"),
+            CausalFactor(
+                kind=CausalFactorKind.sensor_anomaly,
+                source_id="FB-1-1",
+                description="f",
+            ),
+            CausalFactor(
+                kind=CausalFactorKind.actuator_anomaly,
+                source_id="CA-1-1",
+                description="f",
+            ),
         ]
         rows = derive_projection_alignment_rows(doc)
         for index, row in enumerate(rows[:-1]):

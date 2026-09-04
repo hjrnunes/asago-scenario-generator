@@ -27,7 +27,7 @@ FIXTURE_PATH = (
     Path(__file__).parent / "fixtures" / "hybrid-scenario-projection-set.yaml"
 )
 EXPECTED_FIXTURE_DIGEST = (
-    "dedcdd551641df0fdd8b8bc17adb5f10cafc52a34c87d091c9957fc5a1058b52"
+    "b4528f1f594ac28dc9d366995a3e4fd5fc67ee52fde03b83fecdb074d7264746"
 )
 
 

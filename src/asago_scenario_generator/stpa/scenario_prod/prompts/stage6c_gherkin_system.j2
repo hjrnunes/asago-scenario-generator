@@ -2,6 +2,8 @@ You are a security analyst producing Gherkin behavior specifications for agentic
 
 Your task is to produce a Gherkin behavior specification using the should/but structure. The Given-When-Then maps to control structure state transitions.
 
+{% include "_stage6_rendering_method.j2" %}
+
 ## Given-When-Then-Should-But Structure
 
 The Gherkin MUST follow this structure:
@@ -20,13 +22,27 @@ Scenario: [scenario title]
 
 ### Requirements
 
-1. **Given steps must reference process model states** — Use PM-* IDs or process model descriptions to set up the initial state.
+Keep the specification concise: one short sentence per step and no more than
+eight total steps. Render the declared factor evidence in order; do not add a
+causal bridge, interface, privilege, or attacker-success claim that is not
+supported by the typed scenario context.
+
+1. **Given steps must reference process model states** — When the supplied
+   scenario provides a PM-* reference, use that exact reference together with
+   its process-model description to set up the initial state.
 
 2. **The "should" clause** is always derivable from the security constraint. It describes the safe/expected behavior that the security constraint mandates.
 
 3. **The "But" clause** shows the ICA (Insecure Control Action). It must reference:
    - The ICA type (NOT_PROVIDED, INCORRECT, WRONG_TIMING, WRONG_DURATION)
-   - The control action (CA-* ID)
+   - The exact selected control action (CA-* or coordination action CM-* ID)
+
+The accepted scenario is authoritative for identity-bearing rendering.  The
+deterministic scaffold in the user input supplies the selected PM Given,
+action/UCA, expected constraint, actual unsafe condition, and loss.  Preserve
+those clauses exactly.  Provider prose may fill only bounded trigger/context
+sentences; it must not select a nearby CA-* action for a CM-* scenario,
+replace the selected action, or invent a new condition, capability, or route.
 
 4. **Loss references** — Include a reference to the realized loss (L-* ID) in the consequences.
 
@@ -45,21 +61,7 @@ Scenario: [scenario title]
 
 Reference ONLY the Loss IDs (L-*) and Hazard IDs (H-*) provided in the input. Do not invent new IDs.
 
-{# Feedback-channel bridge is duplicated across the three Stage 6 system
-   prompts. Shared includes would couple prompt-loader boundaries. #}
-## Feedback-channel bridge
-
-FB-* denotes a logical information dependency that updates a process-model belief. It is not evidence of a network socket, packet stream, message bus, database connection, or attacker-accessible transport. Realize the update through a declared AI surface — prompt/context input, retrieved content, tool result, memory state, agent message, or model output — unless the supplied architecture explicitly identifies an accessible transport. Never infer interception, packet injection, blocking, spoofing, or link severing merely from the word "channel".
-
-When a reachable capability explicitly supports active access, describe how
-the attacker changes a declared AI surface. Without that evidence, explain
-the structural condition and do not turn this guidance into an attacker path.
-
-Examples of declared AI-surface realizations include prompt/context injection,
-retrieved-content poisoning, tool-result fabrication, memory poisoning,
-agent-message tampering, and model-output manipulation.
-
-Do not invent packet interception, MITM (man-in-the-middle access), network delay, traffic blocking, network-signal spoofing, communication-link severing, credential theft, account takeover, session hijacking/fixation, or generic flooding/DoS (denial of service). Such a mechanism is permitted only when the supplied architecture explicitly declares the transport or session surface attacker-accessible and the scenario records that evidence.
+{% include "_feedback_channel_boundary.j2" %}
 
 {% include "_obligation_evidence_boundary.j2" %}
 

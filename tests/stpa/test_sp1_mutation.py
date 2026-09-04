@@ -267,7 +267,7 @@ class TestHasUnjustifiedGaps:
         assert has_unjustified_gaps(findings) is False
 
     def test_mixed_with_one_unjustified(self):
-        """Mixed with one absent_unjustified → has unjustified gaps."""
+        """Mixed probe statuses without a typed gap remain diagnostic only."""
         findings = CriticFindings(
             gaps=[],
             checklist_results={
@@ -276,15 +276,15 @@ class TestHasUnjustifiedGaps:
                 "c": "absent_unjustified",
             },
         )
-        assert has_unjustified_gaps(findings) is True
+        assert has_unjustified_gaps(findings) is False
 
     def test_only_unjustified(self):
-        """All absent_unjustified → has unjustified gaps."""
+        """Absent-unjustified statuses without a typed gap do not trigger."""
         findings = CriticFindings(
             gaps=[],
             checklist_results={"a": "absent_unjustified"},
         )
-        assert has_unjustified_gaps(findings) is True
+        assert has_unjustified_gaps(findings) is False
 
 
 # ---------------------------------------------------------------------------
@@ -621,11 +621,8 @@ class TestRunSp1Mutation:
         )
         assert result.revised is False
 
-    def test_revised_true_when_unjustified_gaps(self, tmp_path):
-        """result.revised is True when critic finds unjustified gaps.
-
-        Covers the revised=True line and kills the True→False mutant.
-        """
+    def test_revised_false_when_attempted_revision_is_invalid(self, tmp_path):
+        """An attempted but invalid revision does not claim it was applied."""
         client = _make_mock_client(
             critic_findings=_with_unjustified_gaps_dict(),
             revised_cs=_valid_control_structure_dict(),
@@ -636,7 +633,7 @@ class TestRunSp1Mutation:
             risk_cards=_make_risk_cards(),
             run_dir=tmp_path,
         )
-        assert result.revised is True
+        assert result.revised is False
 
     def test_manifest_stage_1b_call_count_zero_when_profile_skipped(self, tmp_path):
         """Manifest stage_1b.call_count is 0 when profile is pre-loaded.
