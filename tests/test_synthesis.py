@@ -1148,6 +1148,43 @@ def test_scenario_failure_is_recorded_without_erasing_accounting(
     assert result.accounting is not None
 
 
+def test_accounting_receives_the_verified_ordinary_ica_enumeration() -> None:
+    """Verifier metadata must not masquerade as the ICA enumeration."""
+    from asago_scenario_generator.pipeline.synthesis import _run_accounting
+
+    ordinary = SimpleNamespace(slots=("slot",))
+    verification = SimpleNamespace(records=())
+    wrapped = SimpleNamespace(
+        ica_enumeration=ordinary,
+        considerations=(),
+        ica_hazard_verification=verification,
+    )
+    received: dict[str, object] = {}
+    expected = object()
+
+    def account(**kwargs: object) -> object:
+        received.update(kwargs)
+        return expected
+
+    result = _run_accounting(
+        plan=SimpleNamespace(),
+        consideration=SimpleNamespace(),
+        routes=(),
+        ica_enumeration=wrapped,
+        scenario_result=SimpleNamespace(),
+        loss_analysis=SimpleNamespace(),
+        control_structure=SimpleNamespace(),
+        inputs=SimpleNamespace(output_dir=Path(".")),
+        snapshot=SimpleNamespace(),
+        adapters=SynthesisAdapters(account=account),
+        calls=[],
+    )
+
+    assert result is expected
+    assert received["ica_enumeration"] is ordinary
+    assert received["ica_verification"] is verification
+
+
 def test_synthesis_context_preparation_supports_typed_agent_messages() -> None:
     """A responsibility-target action becomes a typed agent-message path."""
     from asago_scenario_generator.pipeline.synthesis import (

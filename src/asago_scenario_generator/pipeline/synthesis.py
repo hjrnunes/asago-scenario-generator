@@ -1606,6 +1606,9 @@ def _run_accounting(
     source_pins: tuple[Any, ...] = (),
 ) -> Any:
     """Derive provisional accounting from the complete Phase 1 universe."""
+    ordinary_icas = _first_attr(ica_enumeration, "ica_enumeration") or ica_enumeration
+    pairs = _ica_considerations(ica_enumeration)
+    verification = _first_attr(ica_enumeration, "ica_hazard_verification")
     if adapters.account is not None:
         try:
             result = _invoke(
@@ -1614,11 +1617,9 @@ def _run_accounting(
                 obligation_plan=plan,
                 consideration=consideration,
                 routes=routes,
-                ica_enumeration=ica_enumeration,
-                ica_considerations=_ica_considerations(ica_enumeration),
-                ica_verification=_first_attr(
-                    ica_enumeration, "ica_hazard_verification"
-                ),
+                ica_enumeration=ordinary_icas,
+                ica_considerations=pairs,
+                ica_verification=verification,
                 source_pins=source_pins,
                 scenario_result=scenario_result,
                 loss_analysis=loss_analysis,
@@ -1637,7 +1638,7 @@ def _run_accounting(
         if _is_authoritative_plan(plan):
             raise ValueError("typed obligation accounting adapter returned no artifact")
     calls.append("account")
-    return _fallback_accounting(plan, consideration, routes, ica_enumeration)
+    return _fallback_accounting(plan, consideration, routes, ordinary_icas)
 
 
 def _run_realization(

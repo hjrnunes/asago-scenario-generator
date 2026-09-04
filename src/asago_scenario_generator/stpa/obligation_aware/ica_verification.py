@@ -1113,17 +1113,21 @@ def _verify_correction_requests(
 ) -> list[ConsiderationCallEvidence]:
     if not correction_requests:
         return []
-    corrected_requests, feedback = _correction_verification_inputs(correction_requests)
-    try:
-        correction_by_id = _run_correction_verification(
-            method, corrected_requests, feedback
+    correction_by_id: dict[str, IcaHazardVerificationVerdict] = {}
+    call_evidence: list[ConsiderationCallEvidence] = []
+    for index, group in enumerate(_correction_request_groups(correction_requests), 1):
+        corrected_requests, feedback = _correction_verification_inputs(group)
+        try:
+            correction_by_id.update(
+                _run_correction_verification(method, corrected_requests, feedback)
+            )
+            outcome = "accepted"
+        except Exception as exc:  # noqa: BLE001 - retain first verdict and failure
+            _record_correction_verification_failure(diagnostics, group, exc)
+            outcome = "technical_failure"
+        call_evidence.append(
+            _call_evidence(batch_id, f"correction-verification:{index}", outcome)
         )
-        outcome = "accepted"
-    except Exception as exc:  # noqa: BLE001 - retain first verdict and failure
-        _record_correction_verification_failure(diagnostics, correction_requests, exc)
-        correction_by_id = {}
-        outcome = "technical_failure"
-    call_evidence = [_call_evidence(batch_id, "correction-verification", outcome)]
     for request, first_verdict, corrected_request in correction_requests:
         _record_correction_result(
             request,
@@ -1134,6 +1138,40 @@ def _verify_correction_requests(
             diagnostics,
         )
     return call_evidence
+
+
+def _correction_request_groups(
+    values: Sequence[
+        tuple[
+            IcaHazardVerificationRequest,
+            IcaHazardVerificationVerdict,
+            IcaHazardVerificationRequest,
+        ]
+    ],
+) -> tuple[
+    tuple[
+        tuple[
+            IcaHazardVerificationRequest,
+            IcaHazardVerificationVerdict,
+            IcaHazardVerificationRequest,
+        ],
+        ...,
+    ],
+    ...,
+]:
+    grouped: dict[
+        str,
+        list[
+            tuple[
+                IcaHazardVerificationRequest,
+                IcaHazardVerificationVerdict,
+                IcaHazardVerificationRequest,
+            ]
+        ],
+    ] = {}
+    for value in values:
+        grouped.setdefault(_verification_group_key(value[2]), []).append(value)
+    return tuple(tuple(grouped[key]) for key in sorted(grouped))
 
 
 def _correction_verification_inputs(
@@ -1280,19 +1318,8 @@ def verify_final_ica_batch(
             requests,
             "no ICA hazard verification adapter was supplied",
         )
-    records: dict[str, IcaHazardVerificationRecord] = {}
-    try:
-        initial_raw = _invoke_verification_method(method, requests)
-        initial_verdicts, _ = _coerce_provider_result(initial_raw, requests)
-    except Exception as exc:  # noqa: BLE001 - provider boundary is typed below
-        return enumeration, _failed_batch(
-            batch_id,
-            requests,
-            f"initial ICA hazard verification failed: {type(exc).__name__}: {exc}",
-        )
-    call_evidence = [_call_evidence(batch_id, "initial", "accepted")]
-    records, unsupported, initial_diagnostics = _collect_initial_results(
-        requests, initial_verdicts
+    records, unsupported, initial_diagnostics, call_evidence = (
+        _verify_initial_request_groups(method, requests, batch_id=batch_id)
     )
     diagnostics.extend(initial_diagnostics)
 
@@ -1324,6 +1351,68 @@ def verify_final_ica_batch(
     )
     corrected_enumeration = _apply_corrected_requests(enumeration, records)
     return _exclude_unsupported_icas(corrected_enumeration, batch), batch
+
+
+def _verify_initial_request_groups(
+    method: Any,
+    requests: Sequence[IcaHazardVerificationRequest],
+    *,
+    batch_id: str,
+) -> tuple[
+    dict[str, IcaHazardVerificationRecord],
+    list[tuple[IcaHazardVerificationRequest, IcaHazardVerificationVerdict]],
+    list[ConsiderationDiagnostic],
+    list[ConsiderationCallEvidence],
+]:
+    records: dict[str, IcaHazardVerificationRecord] = {}
+    unsupported: list[
+        tuple[IcaHazardVerificationRequest, IcaHazardVerificationVerdict]
+    ] = []
+    diagnostics: list[ConsiderationDiagnostic] = []
+    call_evidence: list[ConsiderationCallEvidence] = []
+    for index, group in enumerate(_verification_request_groups(requests), 1):
+        try:
+            raw = _invoke_verification_method(method, group)
+            verdicts, _ = _coerce_provider_result(raw, group)
+            group_records, group_unsupported, group_diagnostics = (
+                _collect_initial_results(group, verdicts)
+            )
+            records.update(group_records)
+            unsupported.extend(group_unsupported)
+            diagnostics.extend(group_diagnostics)
+            outcome = "accepted"
+        except Exception as exc:  # noqa: BLE001 - isolate this target batch
+            detail = (
+                f"initial ICA hazard verification failed: {type(exc).__name__}: {exc}"
+            )
+            for request in group:
+                records[request.ica_id] = _provider_failure_record(
+                    request,
+                    attempt=1,
+                    status="provider_failure",
+                    error=detail,
+                )
+                diagnostics.append(
+                    _verification_diagnostic(
+                        "ica_hazard_verification_provider_failure", request, detail
+                    )
+                )
+            outcome = "technical_failure"
+        call_evidence.append(_call_evidence(batch_id, f"initial:{index}", outcome))
+    return records, unsupported, diagnostics, call_evidence
+
+
+def _verification_request_groups(
+    requests: Sequence[IcaHazardVerificationRequest],
+) -> tuple[tuple[IcaHazardVerificationRequest, ...], ...]:
+    grouped: dict[str, list[IcaHazardVerificationRequest]] = {}
+    for request in requests:
+        grouped.setdefault(_verification_group_key(request), []).append(request)
+    return tuple(tuple(grouped[key]) for key in sorted(grouped))
+
+
+def _verification_group_key(request: IcaHazardVerificationRequest) -> str:
+    return request.responsibility_id or request.slot_id.split(":", 1)[0]
 
 
 def _verification_method(adapter: Any) -> Any | None:

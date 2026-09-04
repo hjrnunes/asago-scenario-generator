@@ -791,6 +791,18 @@ def test_context_stage5_retains_analytical_only_route_with_typed_gap(tmp_path) -
     )
     assert result.execution_contract.delivery is None
     assert result.execution_contract.gaps[0].evidence_refs == ("CF-1",)
+    spec = assemble_scenario_spec(
+        populate_defender_bdi(_control_structure(), "RESP-1"),
+        result,
+        _threat(),
+        _control_structure(),
+        scenario_context=context,
+    )
+    assert spec.execution_contract is not None
+    assert (
+        spec.execution_contract.disposition
+        is ExecutionContractDisposition.analytical_only
+    )
 
 
 def test_context_stage5_materializes_indirect_carrier_role(tmp_path) -> None:

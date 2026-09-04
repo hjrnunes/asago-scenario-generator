@@ -145,9 +145,17 @@ def _stpa_inputs() -> tuple[ICAEnumeration, LossAnalysis, ControlStructure]:
     loss_analysis = LossAnalysis(
         risk_card_losses=[],
         use_case_losses=[
-            Loss(loss_id="L-1", description="Integrity loss", provenance=LossProvenance.use_case)
+            Loss(
+                loss_id="L-1",
+                description="Integrity loss",
+                provenance=LossProvenance.use_case,
+            )
         ],
-        hazards=[Hazard(hazard_id="H-1", description="Unsafe release", related_losses=["L-1"])],
+        hazards=[
+            Hazard(
+                hazard_id="H-1", description="Unsafe release", related_losses=["L-1"]
+            )
+        ],
         security_constraints=[
             SecurityConstraint(
                 constraint_id="SC-1",
@@ -170,7 +178,9 @@ def _stpa_inputs() -> tuple[ICAEnumeration, LossAnalysis, ControlStructure]:
                 ],
             )
         ],
-        controlled_processes=[ControlledProcess(cp_id="CP-1", description="Production")],
+        controlled_processes=[
+            ControlledProcess(cp_id="CP-1", description="Production")
+        ],
     )
     slot = ICASlot(
         slot_id="RESP-1:CA-1-1:INCORRECT",
@@ -200,6 +210,80 @@ def _stpa_inputs() -> tuple[ICAEnumeration, LossAnalysis, ControlStructure]:
     return ICAEnumeration(slots=[slot]), loss_analysis, control_structure
 
 
+def test_verification_batches_are_isolated_by_responsibility() -> None:
+    enumeration, loss_analysis, control_structure = _stpa_inputs()
+    responsibility = Responsibility(
+        resp_id="RESP-2",
+        description="Independent release controller",
+        control_actions=[
+            ControlAction(
+                ca_id="CA-2-1",
+                description="Approve independent release",
+                target={"type": "controlled_process", "id": "CP-1"},
+            )
+        ],
+    )
+    second_slot = ICASlot(
+        slot_id="RESP-2:CA-2-1:INCORRECT",
+        responsibility="RESP-2",
+        control_action="CA-2-1",
+        uca_type="INCORRECT",
+        is_na=False,
+        icas=[
+            ICA(
+                ica_id="RESP-2:CA-2-1:INCORRECT:1",
+                ica_text="Approve the independent release without the gate",
+                hazardous_context="The gate is unsatisfied",
+                loss_scenario="Integrity is lost",
+                related_hazards=["H-1"],
+                related_constraints=["SC-1"],
+            )
+        ],
+    )
+    enumeration = ICAEnumeration(slots=[*enumeration.slots, second_slot])
+    control_structure = control_structure.model_copy(
+        update={
+            "responsibilities": [
+                *control_structure.responsibilities,
+                responsibility,
+            ]
+        }
+    )
+
+    class IsolatedProvider:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, ...]] = []
+
+        def verify_ica_hazards(self, requests, *, correction_feedback=None):
+            ids = tuple(request.responsibility_id for request in requests)
+            self.calls.append(ids)
+            if ids == ("RESP-1", "RESP-1"):
+                raise RuntimeError("first responsibility is unavailable")
+            return [
+                {
+                    "ica_id": request.ica_id,
+                    "verdict": "supported",
+                    "rationale": "The supplied STPA path is coherent.",
+                }
+                for request in requests
+            ]
+
+    adapter = IsolatedProvider()
+    filtered, batch = verify_final_ica_batch(
+        adapter,
+        enumeration,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    )
+
+    assert adapter.calls == [("RESP-1", "RESP-1"), ("RESP-2",)]
+    assert batch.provider_failure_count == 2
+    assert batch.supported_count == 1
+    assert len(filtered.slots) == 2
+    assert len(filtered.slots[0].icas) == 2
+    assert len(filtered.slots[1].icas) == 1
+
+
 class _CorrectionFake:
     def __init__(self) -> None:
         self.calls: list[bool] = []
@@ -211,8 +295,7 @@ class _CorrectionFake:
                 "ica_id": request.ica_id,
                 "verdict": (
                     "supported"
-                    if correction_feedback
-                    or request.ica_id.endswith(":2")
+                    if correction_feedback or request.ica_id.endswith(":2")
                     else "insufficient_evidence"
                 ),
                 "rationale": "The supplied STPA path is coherent.",
@@ -242,11 +325,7 @@ def test_unsupported_ica_gets_one_correction_and_siblings_continue() -> None:
     assert adapter.calls == [False, True]
     assert batch.supported_count == 2
     assert batch.unsupported_count == 0
-    corrected = next(
-        record
-        for record in batch.records
-        if record.ica_id.endswith(":1")
-    )
+    corrected = next(record for record in batch.records if record.ica_id.endswith(":1"))
     assert corrected.corrected_request is not None
     assert corrected.attempts[0].request_digest != corrected.attempts[1].request_digest
     assert len(filtered.slots[0].icas) == 2
@@ -287,8 +366,10 @@ def test_exhausted_correction_excludes_only_affected_ica() -> None:
 
 def test_incomplete_lineage_excludes_only_unprojectable_ica() -> None:
     enumeration, loss_analysis, control_structure = _stpa_inputs()
-    incomplete = enumeration.slots[0].icas[0].model_copy(
-        update={"related_hazards": ["H-missing"]}
+    incomplete = (
+        enumeration.slots[0]
+        .icas[0]
+        .model_copy(update={"related_hazards": ["H-missing"]})
     )
     slot = enumeration.slots[0].model_copy(
         update={"icas": [incomplete, enumeration.slots[0].icas[1]]}
@@ -326,7 +407,11 @@ def _single_ica_inputs() -> tuple[ICAEnumeration, LossAnalysis, ControlStructure
     slot = enumeration.slots[0].model_copy(
         update={"icas": [enumeration.slots[0].icas[0]]}
     )
-    return enumeration.model_copy(update={"slots": [slot]}), loss_analysis, control_structure
+    return (
+        enumeration.model_copy(update={"slots": [slot]}),
+        loss_analysis,
+        control_structure,
+    )
 
 
 def _finding_pair(enumeration: ICAEnumeration) -> ObligationIcaConsideration:

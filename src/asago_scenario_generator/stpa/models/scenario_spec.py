@@ -151,7 +151,8 @@ class ScenarioSpec(BaseModel):
                 "scenario unsafe_outcome_constraint_refs must equal scenario context"
             )
         if self.execution_contract is not None:
-            if self.execution_contract.action_kind.value == "model_output":
+            action_kind = self.execution_contract.action_kind
+            if action_kind is not None and action_kind.value == "model_output":
                 normalize_semantic_proposition(
                     self.unsafe_outcome_semantic_proposition,
                     required=True,
