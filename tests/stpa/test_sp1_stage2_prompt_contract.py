@@ -98,6 +98,22 @@ def test_call2b_prompt_declares_exact_semantic_fields_and_example() -> None:
     assert "Start greenhouse heating" in text
 
 
+def test_call2b_prompt_defines_typed_action_kinds_without_prose_inference() -> None:
+    text = (PROMPTS_DIR / "stage2_call2b_system.j2").read_text()
+
+    assert "text or structured output returned by the tested model" in text
+    assert "structured invocation emitted by the tested agent" in text
+    assert "change to session or persistent state" in text
+    assert "internal message to another responsibility" in text
+    assert "external side effect that is not merely model" in text
+    assert "returning advice to a user" in text
+    assert "structured refund invocation" in text
+    assert "updating a session" in text
+    assert "sending a risk flag" in text
+    assert "activating a physical alarm" in text
+    assert "never infer" in text.lower()
+
+
 def test_call2b_parser_preserves_meaning_and_feedback_alias() -> None:
     parsed = parse_control_element_set_response(
         _valid_payload(), responsibilities=_responsibilities().responsibilities

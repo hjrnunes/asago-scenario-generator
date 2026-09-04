@@ -572,6 +572,19 @@ analytical-only and cannot reach compilation. Only domain resources influence
 this classification; chat surfaces, clocks, observers, locators, credentials,
 and endpoint details remain runtime-readiness concerns.
 
+An omitted environment request remains omitted through contract materialization.
+For a resource-bearing route, the contract therefore carries a null requested
+basis and classification `parameterized / none / needs_binding /
+no_execution_claim`; the diagnostic is `environment_profile_not_supplied`.
+An explicit target or simulation request is retained and reports its exact
+missing-profile diagnostic when no profile is supplied. A resource-free route
+derives `target_agnostic` even when a global profile is available. The typed
+action kind is equally independent of prose: `model_output` is the externally
+returned model/agent response and needs no domain resource, whereas
+`agent_message` is an internal coordination message that retains an
+`agent_channel` requirement. Tool calls, state changes, and external actions
+retain their corresponding domain resources.
+
 `run` may receive `--execution-target-profile` and an explicit
 `--requested-environment-basis`. The profile is a reviewed, content-addressed
 semantic inventory with no secrets or live connection details. A simulation
@@ -587,8 +600,13 @@ to exact resources before runtime readiness and platform compilation. This
 consumer step may supply endpoints, credentials, locators, observers, and
 platform syntax, but it cannot change the producer's delivery route, causal
 factor, operation, action, or oracle. Analytical-only cases are excluded from
-compilation and parameterized cases remain pending until an exact binding is
-available.
+compilation and parameterized cases remain pending until the caller explicitly
+selects an exact target or simulation profile. For a null producer request,
+the consumer may use either selected profile basis, but it never defaults an
+internal agent channel, indirect carrier, target action, state store, external
+action, or real clock to ordinary chat. Mixed bundles preserve each case's
+independent target-agnostic, pending, target-bound, and simulation-bound
+state.
 
 Tolerant SP1 response graphs remain raw until deterministic ID/reference
 normalization produces valid typed artifacts; invalid intermediate Pydantic

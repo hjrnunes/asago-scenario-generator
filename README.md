@@ -136,8 +136,19 @@ be explicit and complete; missing target information never creates a mock.
 Profiles contain semantic resource facts, not URLs, credentials, or secrets.
 That path is classified as a concrete simulated case, not as a real target
 integration.
-No profile is a valid mode and produces target-agnostic or parameterized
-scenarios as appropriate.
+No profile is a valid mode. Omission remains omission: a resource-free route
+can be `target_agnostic`, while a resource-bearing route remains
+`parameterized` with environment basis `none` and a `needs_binding` profile
+fit. A caller may state a future `target_profile` or `simulation_profile`
+basis without supplying the profile; that records the requested basis and its
+exact missing-profile diagnostic, but does not create a binding.
+
+The action kind is typed at the control-structure boundary. `model_output` is
+the externally returned text or structured value from the tested model or
+agent and needs no domain resource; `agent_message` is an internal message to
+another responsibility or agent and retains an `agent_channel` requirement.
+`tool_call`, `state_change`, and `environment_action` likewise retain their
+domain action requirements. Prose never relabels an explicitly typed effect.
 
 The artifact generator receives the published scenario and, when the contract
 needs environment resources, an explicitly selected profile. It creates one
@@ -146,7 +157,11 @@ resources, then handles runtime readiness and platform compilation.
 Target-agnostic model conversations need no profile. The consumer may not
 change the delivery route, causal factor, operation, action, or oracle. An
 analytical-only case stops before compilation; a parameterized case remains
-pending until it is bound.
+pending until it is bound. For a parameterized contract whose request is
+`null`, the consumer's caller must explicitly select a matching target or
+simulation profile; the consumer never chooses one by default. Mixed bundles
+keep each case's independent target-agnostic, pending, target-bound, or
+simulation-bound state.
 
 At model boundaries, code retains control of structural identity. The ICA
 provider returns one short deviation clause and code applies the supplied slot's

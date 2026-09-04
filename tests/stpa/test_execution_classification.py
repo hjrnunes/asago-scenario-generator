@@ -40,6 +40,7 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
 )
 from asago_scenario_generator.stpa.scenario_prod.execution_classification import (
     classify_scenario_execution,
+    resolve_contract_environment_request,
 )
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
     _validate_assembled_environment_basis,
@@ -73,7 +74,8 @@ def _direct_contract() -> SemanticExecutionContract:
 def _tool_contract(
     *,
     exact_resource_id: str | None = None,
-    requested_basis: RequestedEnvironmentBasis = RequestedEnvironmentBasis.target_profile,
+    requested_basis: RequestedEnvironmentBasis
+    | None = RequestedEnvironmentBasis.target_profile,
 ) -> SemanticExecutionContract:
     return SemanticExecutionContract(
         requested_environment_basis=requested_basis,
@@ -155,6 +157,62 @@ def test_direct_prompt_is_concrete_target_agnostic() -> None:
     assert result.profile_fit is ExecutionProfileFit.not_required
     assert result.claim_scope is ExecutionClaimScope.model_behavior_only
     assert result.diagnostics == ()
+
+
+@pytest.mark.parametrize(
+    ("has_resources", "requested", "expected"),
+    (
+        (False, None, RequestedEnvironmentBasis.target_agnostic),
+        (
+            False,
+            RequestedEnvironmentBasis.target_agnostic,
+            RequestedEnvironmentBasis.target_agnostic,
+        ),
+        (
+            False,
+            RequestedEnvironmentBasis.target_profile,
+            RequestedEnvironmentBasis.target_agnostic,
+        ),
+        (
+            False,
+            RequestedEnvironmentBasis.simulation_profile,
+            RequestedEnvironmentBasis.target_agnostic,
+        ),
+        (True, None, None),
+        (
+            True,
+            RequestedEnvironmentBasis.target_profile,
+            RequestedEnvironmentBasis.target_profile,
+        ),
+        (
+            True,
+            RequestedEnvironmentBasis.simulation_profile,
+            RequestedEnvironmentBasis.simulation_profile,
+        ),
+    ),
+)
+def test_resolve_contract_environment_request_is_resource_sensitive(
+    has_resources: bool,
+    requested: RequestedEnvironmentBasis | None,
+    expected: RequestedEnvironmentBasis | None,
+) -> None:
+    requirements = _tool_contract().resource_requirements if has_resources else ()
+
+    assert resolve_contract_environment_request(requirements, requested) is expected
+
+
+def test_resource_bearing_contract_can_retain_unspecified_basis() -> None:
+    contract = _tool_contract(requested_basis=None)
+
+    assert contract.requested_environment_basis is None
+
+
+def test_unspecified_resource_basis_has_distinct_diagnostic() -> None:
+    result = classify_scenario_execution(
+        _tool_contract(requested_basis=None), _outcome(), None
+    )
+
+    assert result.diagnostics[0].code.value == "environment_profile_not_supplied"
 
 
 def test_parameterized_role_without_profile_is_retained() -> None:

@@ -98,17 +98,41 @@ _Avoid_: platform readiness, model confidence, simulation status
 **Environment basis**:
 Whether execution meaning is target-agnostic, backed by a reviewed target
 profile, backed by an explicit simulation profile, or has no execution basis.
+An omitted request is the last case when domain resources are required: it is
+an unresolved choice, not an implicit real-target request. A resource-free
+model-output route may derive `target_agnostic`; a resource-bearing route
+remains `parameterized` with basis `none` until a target or simulation is
+selected explicitly.
 _Avoid_: binding completeness, deployment readiness
 
 **Execution target profile**:
 A reviewed, content-addressed description of the semantic resources and
 interfaces available in one real or deliberately simulated environment.
+Supplying one is the consumer's explicit choice for a pending parameterized
+contract; it does not rewrite the producer's route or turn an omitted request
+into a default target.
 _Avoid_: capability inference, credential file, runtime receipt
 
 **Bound execution case**:
 One immutable pairing of a verified scenario with one exact target or
 simulation resource mapping, created before runtime readiness and compilation.
+It can be created without a profile only for a resource-free,
+target-agnostic model-output case. A pending parameterized case is not bound
+until its caller selects a matching target or simulation profile.
 _Avoid_: scenario, runtime binding set, platform artifact
+
+**Model output**:
+The externally returned text or structured value from the tested model or
+agent invocation. It uses neutral runtime surfaces and does not imply a
+domain-specific environment resource.
+_Avoid_: internal coordination message, target operation
+
+**Agent message**:
+An internal message sent between responsibilities, controllers, or separately
+addressable agents. It requires an `agent_channel` semantic resource and must
+not be represented as ordinary user/model chat merely because a chat adapter
+can send text.
+_Avoid_: model output, generic conversation history
 
 **Analytical-only scenario**:
 An admitted safety finding whose delivery path, operation or observable oracle

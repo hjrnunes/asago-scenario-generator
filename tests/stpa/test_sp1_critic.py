@@ -251,6 +251,22 @@ class TestCriticExecution:
         assert "Test use case description" in user_prompt
         assert "kc_subcodes" not in user_prompt.lower() or "KC" in user_prompt
 
+    def test_critic_prompt_checks_typed_action_kind_conflicts(self, tmp_path):
+        client = MockLLMClient()
+        client.set_response_for(CriticFindings, _valid_critic_findings_dict())
+        run_completeness_critic(
+            llm_client=client,
+            control_structure=_make_control_structure(),
+            capability_profile=_make_capability_profile(),
+            use_case_text="Test use case",
+            run_dir=tmp_path,
+        )
+
+        prompt = client.calls[0].system_prompt
+        assert "typed `effect_kind`" in prompt
+        assert "action-kind consistency gap" in prompt
+        assert "never silently relabel" in prompt.lower()
+
     def test_critic_09_taxonomy_probes_conditioned_on_profile(self, tmp_path):
         """SP1-CRITIC-09: taxonomy probes are conditioned on capability profile."""
         client = MockLLMClient()

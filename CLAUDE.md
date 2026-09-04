@@ -47,7 +47,12 @@ supplied target or simulation profile; it may add runtime details but cannot
 change the route's meaning. `run` accepts optional
 `--execution-target-profile` and `--requested-environment-basis` inputs.
 Profiles contain semantic resource facts only: no URLs, credentials, or
-secrets. Bundle publication is preflighted and atomic with the canonical
+secrets. Omission remains omission: resource-free model output may be
+`target_agnostic`, while a resource-bearing contract retains a null request,
+`parameterized` completeness, and `none` environment basis until its caller
+selects a target or simulation profile. `agent_message` remains an internal
+agent-channel requirement; it is not ordinary `model_output` chat. Bundle
+publication is preflighted and atomic with the canonical
 JSON index replaced last; updates use immutable content-addressed generations
 so the live index never points at bytes being replaced. Historical v1 projection validation remains
 read-only and must not grow execution or persistence dependencies.

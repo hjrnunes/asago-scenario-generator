@@ -32,6 +32,7 @@ __all__ = (
     "stpa",
     "stpa_execution_bundle",
     "stpa_execution_route",
+    "stpa_execution_environment_basis",
     "phase4_task1_hybrid_projection",
     "hybrid_scenario_projection",
     "synthesis",

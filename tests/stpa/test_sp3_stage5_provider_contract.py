@@ -234,13 +234,16 @@ def test_unsafe_condition_wire_types_select_each_authorized_branch(
     duration_eligible,
     expected,
 ) -> None:
-    assert set(
-        _unsafe_types(
-            uca_type,
-            state_subject_refs=state_subject_refs,
-            duration_eligible=duration_eligible,
+    assert (
+        set(
+            _unsafe_types(
+                uca_type,
+                state_subject_refs=state_subject_refs,
+                duration_eligible=duration_eligible,
+            )
         )
-    ) == expected
+        == expected
+    )
 
 
 def test_unsafe_condition_wire_types_skip_unbound_timing_and_reject_duration() -> None:
@@ -366,9 +369,7 @@ def test_context_prompt_examples_skip_unavailable_evidence_branch() -> None:
     examples = _context_prompt_examples(context, choices, provider_types)
 
     evidence = json.loads(examples["evidence"])
-    assert {item["evidence_status"] for item in evidence} == {
-        "structural_failure"
-    }
+    assert {item["evidence_status"] for item in evidence} == {"structural_failure"}
 
 
 def test_context_provider_retries_one_missing_route_discriminator_with_focused_feedback(
@@ -421,6 +422,24 @@ def test_stage5_derives_indirect_tool_roles_from_typed_choices(tmp_path) -> None
         requirement.purpose.value
         for requirement in result.execution_contract.resource_requirements
     ] == ["stimulus_carrier", "target_action"]
+    assert result.execution_contract.requested_environment_basis is None
+
+
+def test_stage5_preserves_omitted_basis_for_resource_bearing_route(tmp_path) -> None:
+    context = _typed_tool_context()
+    client = MockLLMClient()
+    client.set_response_queue([_provider_payload()])
+
+    result, error = generate_bdi_for_context(
+        client,
+        context,
+        tmp_path,
+        requested_environment_basis=None,
+    )
+
+    assert error is None
+    assert result is not None
+    assert result.execution_contract.requested_environment_basis is None
 
 
 def test_stage5_prompt_explains_stimulus_categories_and_factor_delivery_choices() -> (

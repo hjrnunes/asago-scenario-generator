@@ -30,6 +30,23 @@ The response is one JSON object with exactly these top-level collections:
    `bounded_duration` are the only values eligible for duration analysis;
    timing is not duration.
 
+   Interpret each typed `effect_kind` exactly as follows:
+   - `model_output`: text or structured output returned by the tested model or
+     agent invocation;
+   - `tool_call`: a structured invocation emitted by the tested agent;
+   - `state_change`: a change to session or persistent state;
+   - `agent_message`: an internal message to another responsibility,
+     controller, or separately addressable agent;
+   - `environment_action`: an external side effect that is not merely model
+     output, a tool call, or a state mutation.
+   Domain-neutral contrasts: returning advice to a user is `model_output`;
+   emitting a structured refund invocation is `tool_call`; updating a session
+   record is `state_change`; sending a risk flag to another controller is
+   `agent_message`; activating a physical alarm is `environment_action`.
+   The typed field is authoritative.  Do not recover an action kind from
+   verbs or other prose in the description; never infer it from description
+   prose.
+
 2. **Feedback channels (FB-*)**: What information updates each process model part? For every PM-X-Y in the responsibilities, you MUST create at least one feedback channel whose `updates` field references that PM. No orphan PMs — every PM must be kept current by some feedback channel.  In the JSON response this collection is named `feedback`; each item has `fb_id`, `description`, `updates`, and `source`.
 
    For each FB, assign a **source** — the responsibility or controlled process that has the required information.

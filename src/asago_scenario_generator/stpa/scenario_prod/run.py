@@ -943,9 +943,7 @@ def _stage5_bdi(
         run_dir,
         loader=loader,
         temperature=temperature,
-        requested_environment_basis=(
-            requested_environment_basis or RequestedEnvironmentBasis.target_profile
-        ),
+        requested_environment_basis=requested_environment_basis,
     )
     if error is None and llm_result is not None:
         return llm_result, None

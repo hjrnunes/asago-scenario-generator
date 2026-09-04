@@ -224,6 +224,7 @@ class InventoryCompleteness(str, Enum):
 class ExecutionDiagnosticCode(str, Enum):
     """Closed deterministic diagnostic vocabulary."""
 
+    environment_profile_not_supplied = "environment_profile_not_supplied"
     target_profile_not_supplied = "target_profile_not_supplied"
     target_resource_unresolved = "target_resource_unresolved"
     target_resource_ambiguous = "target_resource_ambiguous"
@@ -429,9 +430,7 @@ def _derive_executable_basis(
     if contract.requested_environment_basis is not None:
         return
     if requirements:
-        raise ValueError(
-            "resource-bearing executable routes require an explicit environment basis"
-        )
+        return
     object.__setattr__(
         contract,
         "requested_environment_basis",

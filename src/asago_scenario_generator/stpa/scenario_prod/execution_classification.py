@@ -15,14 +15,36 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionDiagnosticCode,
     ExecutionProfileFit,
     ExecutionResourcePurpose,
+    ExecutionResourceRequirement,
     ExecutionTargetProfile,
     InventoryCompleteness,
     ProfileAuthority,
     ProfileBasis,
+    RequestedEnvironmentBasis,
     ResolvedExecutionBinding,
     SemanticExecutionContract,
 )
 from asago_scenario_generator.stpa.models.execution_projection_v2 import UnsafeOutcome
+
+
+def resolve_contract_environment_request(
+    requirements: tuple[ExecutionResourceRequirement, ...],
+    requested: RequestedEnvironmentBasis | None,
+) -> RequestedEnvironmentBasis | None:
+    """Resolve the canonical contract basis from resources and caller intent.
+
+    Resource-free routes are executable against the model/runtime surface and
+    therefore normalize every requested basis to ``target_agnostic``.  A
+    resource-bearing route may retain an omitted basis while it remains
+    parameterized; an explicit target or simulation request is preserved for
+    later profile matching.  ``target_agnostic`` is invalid when semantic
+    resources are present.
+    """
+    if not requirements:
+        return RequestedEnvironmentBasis.target_agnostic
+    if requested is RequestedEnvironmentBasis.target_agnostic:
+        raise ValueError("target_agnostic contracts cannot require domain resources")
+    return requested
 
 
 def classify_scenario_execution(
@@ -156,12 +178,15 @@ def _classify_without_profile(
     requirements: Sequence,
 ) -> ExecutionClassification:
     """Retain resource roles as unresolved when no profile was supplied."""
-    code = (
-        ExecutionDiagnosticCode.simulation_contract_missing
-        if contract.requested_environment_basis is not None
-        and contract.requested_environment_basis.value == "simulation_profile"
-        else ExecutionDiagnosticCode.target_profile_not_supplied
-    )
+    if contract.requested_environment_basis is None:
+        code = ExecutionDiagnosticCode.environment_profile_not_supplied
+    elif (
+        contract.requested_environment_basis
+        is RequestedEnvironmentBasis.simulation_profile
+    ):
+        code = ExecutionDiagnosticCode.simulation_contract_missing
+    else:
+        code = ExecutionDiagnosticCode.target_profile_not_supplied
     return _classification(
         BindingCompleteness.parameterized,
         EnvironmentBasis.none,
@@ -673,4 +698,7 @@ def _classification(
     )
 
 
-__all__ = ["classify_scenario_execution"]
+__all__ = [
+    "classify_scenario_execution",
+    "resolve_contract_environment_request",
+]

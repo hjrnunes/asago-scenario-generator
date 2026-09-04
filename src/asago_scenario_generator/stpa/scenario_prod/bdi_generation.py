@@ -70,6 +70,9 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionSurface,
     RequestedEnvironmentBasis,
 )
+from asago_scenario_generator.stpa.scenario_prod.execution_classification import (
+    resolve_contract_environment_request,
+)
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
     CoordinationLink,
@@ -990,9 +993,7 @@ def generate_bdi_for_context(
     stage: str = "stage_5",
     step: str = "bdi_generation",
     temperature: float = 0.4,
-    requested_environment_basis: RequestedEnvironmentBasis = (
-        RequestedEnvironmentBasis.target_profile
-    ),
+    requested_environment_basis: RequestedEnvironmentBasis | None = None,
 ) -> tuple[BDIGenerationResult | None, str | None]:
     """Execute corrected Stage 5 with one caller-selected environment basis."""
     if loader is None:
@@ -1050,7 +1051,7 @@ def _finish_context_bdi(
     choices: tuple[_CausalSourceChoice, ...],
     belief_choices: tuple[tuple[str, DescribedElement], ...],
     context: ScenarioGenerationContext,
-    requested_environment_basis: RequestedEnvironmentBasis,
+    requested_environment_basis: RequestedEnvironmentBasis | None,
 ) -> tuple[BDIGenerationResult | None, str | None]:
     """Compile one parsed provider draft or preserve its closed failure."""
     if error is not None or draft is None:
@@ -2806,7 +2807,7 @@ def _materialize_execution_contract(
     choices: dict[str, _CausalSourceChoice],
     unsafe_outcome: UnsafeOutcomeDeclaration,
     context: ScenarioGenerationContext,
-    requested_environment_basis: RequestedEnvironmentBasis,
+    requested_environment_basis: RequestedEnvironmentBasis | None,
     *,
     stimulus: _ContextStimulusDraft | None = None,
 ) -> SemanticExecutionContract:
@@ -2837,10 +2838,8 @@ def _materialize_execution_contract(
         context,
         stimulus=stimulus,
     )
-    basis = (
-        RequestedEnvironmentBasis.target_agnostic
-        if not requirements
-        else requested_environment_basis
+    basis = resolve_contract_environment_request(
+        requirements, requested_environment_basis
     )
     return SemanticExecutionContract(
         requested_environment_basis=basis,
@@ -3436,7 +3435,7 @@ def _materialize_context_bdi(
     choices: tuple[_CausalSourceChoice, ...],
     belief_choices: tuple[tuple[str, DescribedElement], ...],
     context: ScenarioGenerationContext,
-    requested_environment_basis: RequestedEnvironmentBasis,
+    requested_environment_basis: RequestedEnvironmentBasis | None,
 ) -> BDIGenerationResult:
     """Resolve provider-local handles to exact context-owned structural IDs."""
     choices_by_handle = {choice.handle: choice for choice in choices}

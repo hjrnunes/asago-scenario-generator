@@ -28,6 +28,18 @@ Process Model Parts:
 For the responsibilities above, derive:
 
 1. **Control actions** for each responsibility — discrete outputs the controller produces. Assign a target (RESP-* or CP-*) for each. Include typed `effect_kind` (`model_output`, `tool_call`, `state_change`, `agent_message`, or `environment_action`) and typed `temporality` (`instantaneous`, `discrete`, `continuous`, `bounded_duration`, or `unknown`). A responsibility target requires `effect_kind: "agent_message"`.
+   Use these exact action meanings: `model_output` is text or structured output
+   returned by the tested model or agent invocation; `tool_call` is a
+   structured invocation emitted by the tested agent; `state_change` changes
+   session or persistent state; `agent_message` is an internal message to
+   another responsibility, controller, or separately addressable agent; and
+   `environment_action` is an external side effect that is not merely model
+   output, a tool call, or a state mutation.  Returning advice to a user is
+   model output, a structured refund invocation is a tool call, updating a
+   session record is a state change, sending a risk flag to another controller
+   is an agent message, and activating a physical alarm is an environment
+   action.  Treat the typed field as authoritative; never infer it from
+   description verbs.
 2. **Feedback channels** for each responsibility — how each PM part stays current. Assign a source (RESP-* or CP-*) for each. **Every PM-X-Y must appear in at least one FB's updates field.**
 3. **Controlled processes** — external entities referenced by CA targets or FB sources that are not responsibilities.
 

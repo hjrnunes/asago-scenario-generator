@@ -1,6 +1,6 @@
 # STPA execution environment-basis default correction
 
-Status: proposed for approval  
+Status: approved; implementation complete
 Date: 2026-09-04  
 Repositories: `asago-scenario-generator`, `asago-artifact-generator`  
 Evidence run: `output/runs/20260904-klarna-gemma4-oc-wire-contract-recovery-v2`
@@ -439,4 +439,3 @@ The work is complete when omission remains omission, target-agnostic cases are
 derived only from genuinely resource-free model behavior, parameterized cases
 can later bind to an explicitly selected target or simulation, and both
 repositories report the distinction without inventing execution evidence.
-
