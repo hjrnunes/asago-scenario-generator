@@ -1,0 +1,468 @@
+responsibilities:
+- resp_id: RESP-1
+  description: Manage the privacy and redaction of sensitive data transmitted to external
+    models.
+  responsibility_constraints:
+  - rc_id: RC-1-1
+    description: Data flows between the authenticated user context and the foundation
+      model must not contain unredacted PII/NPI.
+  security_constraint_refs:
+  - SC-1
+  process_model_parts:
+  - pm_id: PM-1-1
+    description: Definition of PII/NPI data types
+  - pm_id: PM-1-2
+    description: Current outbound data payload content
+  control_actions:
+  - ca_id: CA-1-1
+    description: Redact PII/NPI from outbound payload
+    target:
+      type: controlled_process
+      id: CP-1
+    effect_kind: state_change
+    temporality: instantaneous
+  feedback_channels:
+  - fb_id: FB-1-1
+    description: Update PII definitions from compliance registry
+    updates: PM-1-1
+    source:
+      type: controlled_process
+      id: CP-6
+  - fb_id: FB-1-2
+    description: Observe outbound payload content
+    updates: PM-1-2
+    source:
+      type: responsibility
+      id: RESP-1
+- resp_id: RESP-2
+  description: Validate and authorize financial mutations and backend API integrations.
+  responsibility_constraints:
+  - rc_id: RC-2-1
+    description: Financial mutations must not be executed via backend APIs unless
+      they satisfy all business rules and authorization requirements.
+  - rc_id: RC-2-2
+    description: Authorization for backend API calls must not be derived solely from
+      the AI's output or reasoning.
+  security_constraint_refs:
+  - SC-2
+  - SC-8
+  process_model_parts:
+  - pm_id: PM-2-1
+    description: User authorization tokens and permissions
+  - pm_id: PM-2-2
+    description: Business rules for financial mutations
+  - pm_id: PM-2-3
+    description: Requested mutation parameters
+  control_actions:
+  - ca_id: CA-2-1
+    description: Authorize backend API mutation
+    target:
+      type: controlled_process
+      id: CP-2
+    effect_kind: tool_call
+    temporality: instantaneous
+  - ca_id: CA-2-2
+    description: Reject unauthorized mutation request
+    target:
+      type: responsibility
+      id: RESP-1
+    effect_kind: agent_message
+    temporality: instantaneous
+  feedback_channels:
+  - fb_id: FB-2-1
+    description: Retrieve user authorization status
+    updates: PM-2-1
+    source:
+      type: controlled_process
+      id: CP-7
+  - fb_id: FB-2-2
+    description: Fetch current financial mutation business rules
+    updates: PM-2-2
+    source:
+      type: controlled_process
+      id: CP-8
+  - fb_id: FB-2-3
+    description: Extract mutation parameters from AI intent
+    updates: PM-2-3
+    source:
+      type: responsibility
+      id: RESP-9
+- resp_id: RESP-3
+  description: Ensure the accuracy, currency, and grounding of policy and financial
+    information.
+  responsibility_constraints:
+  - rc_id: RC-3-1
+    description: Policy information incorporated into responses must be verified as
+      current and accurate.
+  - rc_id: RC-3-2
+    description: Financial terms in user outputs must match the values stored in the
+      authoritative backend database.
+  security_constraint_refs:
+  - SC-3
+  - SC-5
+  process_model_parts:
+  - pm_id: PM-3-1
+    description: Authoritative backend financial data
+  - pm_id: PM-3-2
+    description: Current approved policy documentation
+  - pm_id: PM-3-3
+    description: Retrieved RAG context
+  control_actions:
+  - ca_id: CA-3-1
+    description: Provide grounded policy response
+    target:
+      type: controlled_process
+      id: CP-3
+    effect_kind: model_output
+    temporality: discrete
+  feedback_channels:
+  - fb_id: FB-3-1
+    description: Sync authoritative backend financial data
+    updates: PM-3-1
+    source:
+      type: controlled_process
+      id: CP-2
+  - fb_id: FB-3-2
+    description: Update approved policy documentation
+    updates: PM-3-2
+    source:
+      type: controlled_process
+      id: CP-9
+  - fb_id: FB-3-3
+    description: Capture RAG retrieval results
+    updates: PM-3-3
+    source:
+      type: responsibility
+      id: RESP-3
+- resp_id: RESP-4
+  description: Enforce session-based data isolation and context boundaries.
+  responsibility_constraints:
+  - rc_id: RC-4-1
+    description: Prompt context must not contain data from any user other than the
+      currently authenticated user.
+  - rc_id: RC-4-2
+    description: Order-specific context must not persist beyond the active authenticated
+      session.
+  - rc_id: RC-4-3
+    description: Conversation threads must not permit access to data from other user
+      sessions.
+  - rc_id: RC-4-4
+    description: AI responses must not reference merchants not associated with the
+      authenticated user's transactions.
+  - rc_id: RC-4-5
+    description: Input data must not allow for the modification of the system's approved
+      information whitelist via prompt manipulation.
+  security_constraint_refs:
+  - SC-4
+  - SC-11
+  - SC-12
+  - SC-15
+  - SC-16
+  process_model_parts:
+  - pm_id: PM-4-1
+    description: Current authenticated user identity
+  - pm_id: PM-4-2
+    description: Active session status
+  - pm_id: PM-4-3
+    description: User-specific merchant/order history
+  - pm_id: PM-4-4
+    description: System information whitelist
+  control_actions:
+  - ca_id: CA-4-1
+    description: Clear session-specific context
+    target:
+      type: controlled_process
+      id: CP-4
+    effect_kind: state_change
+    temporality: instantaneous
+  feedback_channels:
+  - fb_id: FB-4-1
+    description: Identify current authenticated user
+    updates: PM-4-1
+    source:
+      type: controlled_process
+      id: CP-7
+  - fb_id: FB-4-2
+    description: Monitor session state
+    updates: PM-4-2
+    source:
+      type: controlled_process
+      id: CP-4
+  - fb_id: FB-4-3
+    description: Load user merchant/order history
+    updates: PM-4-3
+    source:
+      type: controlled_process
+      id: CP-2
+  - fb_id: FB-4-4
+    description: Monitor information whitelist adherence
+    updates: PM-4-4
+    source:
+      type: responsibility
+      id: RESP-3
+- resp_id: RESP-5
+  description: Monitor conversational patterns for security violations and rate limits.
+  responsibility_constraints:
+  - rc_id: RC-5-1
+    description: The system must not allow automated harvesting of merchant or product-specific
+      data via high-frequency inquiries.
+  security_constraint_refs:
+  - SC-6
+  - SC-17
+  process_model_parts:
+  - pm_id: PM-5-1
+    description: Request frequency per user/session
+  - pm_id: PM-5-2
+    description: Anomalous interaction patterns/heuristics
+  control_actions:
+  - ca_id: CA-5-1
+    description: Flag high-frequency request pattern
+    target:
+      type: responsibility
+      id: RESP-6
+    effect_kind: agent_message
+    temporality: instantaneous
+  feedback_channels:
+  - fb_id: FB-5-1
+    description: Track request frequency
+    updates: PM-5-1
+    source:
+      type: controlled_process
+      id: CP-10
+  - fb_id: FB-5-2
+    description: Detect anomalous interaction heuristics
+    updates: PM-5-2
+    source:
+      type: responsibility
+      id: RESP-5
+- resp_id: RESP-6
+  description: Manage escalation to human oversight for regulated or ambiguous topics.
+  responsibility_constraints:
+  - rc_id: RC-6-1
+    description: The logic for routing to human agents must remain functional and
+      resistant to user-driven manipulation.
+  security_constraint_refs:
+  - SC-7
+  - SC-9
+  process_model_parts:
+  - pm_id: PM-6-1
+    description: Criteria for regulated topics
+  - pm_id: PM-6-2
+    description: Ambiguity/confidence thresholds
+  - pm_id: PM-6-3
+    description: Status of secondary verification mechanisms
+  control_actions:
+  - ca_id: CA-6-1
+    description: Route conversation to human agent
+    target:
+      type: controlled_process
+      id: CP-5
+    effect_kind: environment_action
+    temporality: discrete
+  feedback_channels:
+  - fb_id: FB-6-1
+    description: Update regulated topic definitions
+    updates: PM-6-1
+    source:
+      type: controlled_process
+      id: CP-9
+  - fb_id: FB-6-2
+    description: Calculate model confidence scores
+    updates: PM-6-2
+    source:
+      type: responsibility
+      id: RESP-9
+  - fb_id: FB-6-3
+    description: Verify secondary verification mechanism status
+    updates: PM-6-3
+    source:
+      type: responsibility
+      id: RESP-6
+- resp_id: RESP-7
+  description: Audit and log financial state changes.
+  responsibility_constraints:
+  - rc_id: RC-7-1
+    description: Audit trails for financial writes must explicitly distinguish between
+      AI-initiated and user-initiated actions.
+  - rc_id: RC-7-2
+    description: Refund processes must not result in partial or corrupted state changes.
+  security_constraint_refs:
+  - SC-10
+  - SC-14
+  process_model_parts:
+  - pm_id: PM-7-1
+    description: Transaction/payment status state
+  - pm_id: PM-7-2
+    description: Origin of the instruction (AI vs User)
+  - pm_id: PM-7-3
+    description: Atomicity requirements for refund operations
+  control_actions:
+  - ca_id: CA-7-1
+    description: Commit financial transaction log
+    target:
+      type: controlled_process
+      id: CP-2
+    effect_kind: state_change
+    temporality: instantaneous
+  feedback_channels:
+  - fb_id: FB-7-1
+    description: Sync transaction/payment status
+    updates: PM-7-1
+    source:
+      type: controlled_process
+      id: CP-2
+  - fb_id: FB-7-2
+    description: Log instruction origin
+    updates: PM-7-2
+    source:
+      type: controlled_process
+      id: CP-11
+  - fb_id: FB-7-3
+    description: Monitor refund atomicity constraints
+    updates: PM-7-3
+    source:
+      type: responsibility
+      id: RESP-2
+- resp_id: RESP-8
+  description: Monitor policy response accuracy and compliance metrics.
+  responsibility_constraints: []
+  security_constraint_refs:
+  - SC-13
+  process_model_parts:
+  - pm_id: PM-8-1
+    description: Policy-related query accuracy trends
+  - pm_id: PM-8-2
+    description: Real-time accuracy metric thresholds
+  control_actions:
+  - ca_id: CA-8-1
+    description: Trigger compliance alert for inaccuracy
+    target:
+      type: responsibility
+      id: RESP-6
+    effect_kind: agent_message
+    temporality: instantaneous
+  feedback_channels:
+  - fb_id: FB-8-1
+    description: Track policy query accuracy
+    updates: PM-8-1
+    source:
+      type: controlled_process
+      id: CP-12
+  - fb_id: FB-8-2
+    description: Monitor real-time accuracy metrics
+    updates: PM-8-2
+    source:
+      type: responsibility
+      id: RESP-8
+- resp_id: RESP-9
+  description: Validate tool parameters and execution logic.
+  responsibility_constraints: []
+  security_constraint_refs: []
+  process_model_parts:
+  - pm_id: PM-9-1
+    description: Tool-specific operational limits
+  - pm_id: PM-9-2
+    description: Tool parameter schema requirements
+  control_actions:
+  - ca_id: CA-9-1
+    description: Validate tool call parameters against schema
+    target:
+      type: responsibility
+      id: RESP-2
+    effect_kind: agent_message
+    temporality: instantaneous
+  feedback_channels:
+  - fb_id: FB-9-1
+    description: Update tool operational limits
+    updates: PM-9-1
+    source:
+      type: controlled_process
+      id: CP-8
+  - fb_id: FB-9-2
+    description: Validate parameter schema compliance
+    updates: PM-9-2
+    source:
+      type: responsibility
+      id: RESP-9
+controlled_processes:
+- cp_id: CP-1
+  description: Outbound Data Stream
+- cp_id: CP-2
+  description: Klarna Backend Financial Systems
+- cp_id: CP-3
+  description: Conversational User Interface
+- cp_id: CP-4
+  description: User Session Management
+- cp_id: CP-5
+  description: Human Agent Routing System
+- cp_id: CP-6
+  description: Compliance and PII Registry
+- cp_id: CP-7
+  description: Authentication Provider
+- cp_id: CP-8
+  description: Business Rule Engine
+- cp_id: CP-9
+  description: Policy Knowledge Base
+- cp_id: CP-10
+  description: Traffic and Rate Limiting Gateway
+- cp_id: CP-11
+  description: Audit Logging Infrastructure
+- cp_id: CP-12
+  description: Compliance Monitoring Dashboard
+coordination_links:
+- link_id: CL-1
+  source: RESP-2
+  target: RESP-1
+  shared_pm: PM-1-2
+  coordination_mechanism:
+    cm_id: CM-1
+    description: Data redaction verification before backend mutation
+    payload: mutation_payload_content
+  description: RESP-2 (Financial Mutations) must ensure that the payload it intends
+    to send to the backend does not contain unredacted PII/NPI that should have been
+    handled by RESP-1, preventing sensitive data leakage into financial logs.
+- link_id: CL-2
+  source: RESP-3
+  target: RESP-4
+  shared_pm: PM-4-3
+  coordination_mechanism:
+    cm_id: CM-2
+    description: Context synchronization
+    payload: user_transaction_context
+  description: RESP-3 (Grounding) requires the specific user order/merchant context
+    held by RESP-4 to ensure RAG retrieval is scoped only to the authenticated user's
+    history, preventing cross-user data leakage.
+- link_id: CL-3
+  source: RESP-6
+  target: RESP-8
+  shared_pm: PM-8-1
+  coordination_mechanism:
+    cm_id: CM-3
+    description: Accuracy reporting
+    payload: escalation_reason_and_accuracy_score
+  description: RESP-8 (Compliance Monitoring) needs the outcomes of escalations managed
+    by RESP-6 to calculate policy accuracy trends and detect when the AI is providing
+    'confident-but-wrong' answers.
+- link_id: CL-4
+  source: RESP-9
+  target: RESP-2
+  shared_pm: PM-2-3
+  coordination_mechanism:
+    cm_id: CM-4
+    description: Parameter validation handshake
+    payload: validated_tool_parameters
+  description: RESP-9 (Tool Validation) must provide validated parameters to RESP-2
+    (Financial Mutations) to ensure that instructions sent to the backend (CP-2) adhere
+    to schema and operational limits, preventing malformed or unauthorized financial
+    commands.
+- link_id: CL-5
+  source: RESP-5
+  target: RESP-6
+  shared_pm: PM-6-2
+  coordination_mechanism:
+    cm_id: CM-5
+    description: Anomaly-driven escalation
+    payload: suspicious_pattern_alert
+  description: RESP-5 (Security Monitoring) may trigger an immediate escalation in
+    RESP-6 if anomalous interaction patterns (e.g., rapid-fire queries attempting
+    to probe limits) are detected, overriding standard confidence thresholds.

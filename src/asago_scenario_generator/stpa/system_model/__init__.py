@@ -8,6 +8,7 @@ from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.control_structure import (  # noqa: E402
     ControlElementSet,
     CoordinationAnalysis,
+    ControlStructureDerivationResult,
     Requirement,
     RequirementSet,
     ResponsibilitySet,
@@ -33,6 +34,18 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
 )  # noqa: E402
 from asago_scenario_generator.stpa.system_model.profile import derive_capability_profile  # noqa: E402
 from asago_scenario_generator.stpa.system_model.run import SP1RunResult, run_sp1  # noqa: E402
+from asago_scenario_generator.stpa.system_model.semantic_review import (  # noqa: E402
+    ActionEffectReview,
+    ConstraintHazardReview,
+    ControlStructureSemanticReview,
+    ControlStructureSemanticReviewResult,
+    HazardSemanticReview,
+    SemanticReviewEvidence,
+    SecurityConstraintReview,
+    SemanticReviewResult,
+    SourceEvidence,
+    apply_control_structure_semantic_review,
+)
 
 __all__ = [
     # constants
@@ -46,6 +59,17 @@ __all__ = [
     "ControlElementSet",
     "parse_control_element_set_response",
     "CoordinationAnalysis",
+    "ControlStructureDerivationResult",
+    "ActionEffectReview",
+    "ConstraintHazardReview",
+    "ControlStructureSemanticReview",
+    "ControlStructureSemanticReviewResult",
+    "HazardSemanticReview",
+    "SemanticReviewEvidence",
+    "SecurityConstraintReview",
+    "SemanticReviewResult",
+    "SourceEvidence",
+    "apply_control_structure_semantic_review",
     "ControlStructureNormalization",
     "CriticFindings",
     "CriticGap",

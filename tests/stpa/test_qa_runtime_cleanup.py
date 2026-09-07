@@ -17,8 +17,9 @@ _PROJECT_ROOT = next(
     for path in Path(__file__).resolve().parents
     if (path / "pyproject.toml").is_file()
 )
-sys.path.insert(0, str(_PROJECT_ROOT / "acceptance"))
 sys.path.insert(0, str(_PROJECT_ROOT / "acceptance" / "qa"))
+# Runtime modules take precedence over same-named executable QA scripts.
+sys.path.insert(0, str(_PROJECT_ROOT / "acceptance"))
 
 from qa_harness import (  # noqa: E402
     QARunner,
@@ -162,17 +163,18 @@ def test_acceptance_refresh_registration_preserves_characterization():
     acceptance_refresh.register(api)
 
     assert acceptance_refresh.FEATURE_ID == "acceptance_refresh"
-    assert len(api.entries) == 39
+    assert len(api.entries) == 40
     feature_entries = [entry for entry in api.entries if entry[3] is not None]
     global_entries = [entry for entry in api.entries if entry[3] is None]
     assert len(feature_entries) == 13
-    assert len(global_entries) == 26
+    assert len(global_entries) == 27
     assert [entry[2] for entry in feature_entries] == list(range(21826, 21839))
-    assert [entry[2] for entry in global_entries] == list(range(21916, 21942))
+    assert [entry[2] for entry in global_entries] == [21942, *range(21916, 21942)]
     assert all(entry[3] == "acceptance_refresh" for entry in feature_entries)
     assert api.feature is None
 
     expected_patterns = [
+        "the Call 2b wire schema forbids external effects on responsibility targets$",
         "the `CoordinationAnalysis` model (?:does not )?declare",
         "(?:an LLM that returns a )?(?:valid )?CoordinationAnalysis",
         "Stage 2 Call 3 coordination derivation is run",

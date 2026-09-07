@@ -58,6 +58,14 @@ def run_cmd(
             "The run publishes its canonical copy before the execution bundle."
         ),
     ),
+    target_observations: Path | None = typer.Option(
+        None,
+        "--target-observations",
+        help=(
+            "Optional normalized target runtime-context JSON/YAML containing "
+            "state/read observations paired with --target-profile."
+        ),
+    ),
     requested_environment_basis: str | None = typer.Option(
         None,
         "--basis",
@@ -108,6 +116,8 @@ def run_cmd(
         _validate_file(capability_profile, "capability profile file")
     if execution_target_profile is not None:
         _validate_file(execution_target_profile, "execution target profile file")
+    if target_observations is not None:
+        _validate_file(target_observations, "target observations file")
     if cross_taxonomy is not None:
         _validate_file(cross_taxonomy, "cross-taxonomy file")
     if max_workers < 1:
@@ -135,6 +145,9 @@ def run_cmd(
         from asago_scenario_generator.stpa.models.execution_classification import (
             ExecutionTargetProfile,
             RequestedEnvironmentBasis,
+        )
+        from asago_scenario_generator.stpa.scenario_prod.target_observations import (
+            TargetObservationSnapshot,
         )
 
         # The product workflow preserves every reviewed taxonomy record because
@@ -168,6 +181,20 @@ def run_cmd(
                 target_payload
             )
             execution_target_profile_value.assert_integrity()
+        target_observations_value = None
+        if target_observations is not None:
+            if execution_target_profile_value is None:
+                raise ValueError("--target-observations requires --target-profile")
+            target_observations_value = TargetObservationSnapshot.from_runtime_context(
+                _load_payload(target_observations, "target observations")
+            )
+            if (
+                target_observations_value.target_profile_digest
+                != execution_target_profile_value.semantic_digest
+            ):
+                raise ValueError(
+                    "target observations profile pin does not match target profile"
+                )
         requested_basis = None
         if requested_environment_basis is not None:
             try:
@@ -206,6 +233,7 @@ def run_cmd(
             output_dir=output_dir,
             capability_profile=profile_value,
             execution_target_profile=execution_target_profile_value,
+            target_observations=target_observations_value,
             requested_environment_basis=requested_basis,
             capability_snapshot=(
                 typed_inputs.capability_snapshot if typed_inputs is not None else None

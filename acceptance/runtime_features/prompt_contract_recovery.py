@@ -198,12 +198,19 @@ def _route_fixture(world: World, text: str, examples: dict) -> tuple[bool, str]:
     else:
         route = {
             "disposition": "executable_route",
-            "delivery_class": delivery,
-            "selected_factor_handle": "cause_1",
             "action_kind": action,
             "reason": "The stated stimulus exercises the selected controller belief.",
         }
-    response = _route_payload(route)
+    carrier_assumption = (
+        "Assume attacker-influenced content reaches the model through the selected carrier."
+        if stimulus in {"retrieved_content", "tool_content"}
+        else None
+    )
+    response = _route_payload(
+        route,
+        stimulus=stimulus,
+        bounded_assumption=carrier_assumption,
+    )
     response["stimulus"] = {
         "category": stimulus,
         "description": "Exercise the selected stale authorization belief through the stated input.",

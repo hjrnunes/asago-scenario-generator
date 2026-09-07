@@ -31,6 +31,8 @@ _REQUIRED_CONTENT = {
         "When `inter_agent` is active: require a responsibility for inter-agent "
         "coordination and message validation",
         "This is a hard requirement, not a suggestion",
+        "Security requirements do not exhaust the control structure",
+        "Functional responsibilities must carry every exact",
     ),
     "stage2_call2b_system.j2": (
         "Each CA is a single discrete action the controller takes",
@@ -40,6 +42,8 @@ _REQUIRED_CONTENT = {
         "CA-X-2 Reject request",
         'A CA containing "or", "and", or similar conjunctions is likely '
         "composite and should be split",
+        "Security safeguards do not exhaust control actions",
+        "internal request/prompt payload is not",
     ),
     "stage2_call3_system.j2": (
         "Each coordination link represents an explicit lateral control or information",
@@ -101,6 +105,41 @@ def test_control_structure_prompts_define_the_feedback_loop(
     assert "A **process model part** is decision-relevant information" in rendered
     assert "feedback updates the process model" in rendered
     assert "the action influences the controlled" in rendered
+
+
+def test_stage2_functional_coverage_rules_are_present_in_both_prompt_halves() -> None:
+    """Call 2a/2b preserve explicit functions and typed action boundaries."""
+    loader = TemplateLoader(PROMPTS_DIR)
+    call2a_system = loader.render_prompt("stage2_call2a_system.j2")
+    call2a_user = (PROMPTS_DIR / "stage2_call2a_user.j2").read_text()
+    call2b_system = loader.render_prompt("stage2_call2b_system.j2")
+    call2b_user = (PROMPTS_DIR / "stage2_call2b_user.j2").read_text()
+
+    normalized_call2a_system = " ".join(call2a_system.split())
+    normalized_call2b_system = " ".join(call2b_system.split())
+    assert "externally meaningful function" in normalized_call2a_system
+    assert (
+        "every exact `SC-*` whose constraint governs their outcome"
+        in normalized_call2a_system
+    )
+    assert "externally meaningful functions" in call2a_user
+    assert "Reuse the same" in call2a_user
+    assert "discrete control action or actions that realize that function" in (
+        normalized_call2b_system
+    )
+    assert (
+        "controlled process declared in this same response" in normalized_call2b_system
+    )
+    assert "functional outputs" in call2b_user
+    assert "internal request/prompt payload is not `model_output`" in call2b_user
+    assert "Identify functional responsibilities first" in call2a_system
+    assert (
+        "Do not mechanically create one controller per security constraint"
+        in call2a_system
+    )
+    assert "Primary control actions (CA-*) first" in call2b_system
+    assert "not a substitute for delivering the answer" in call2b_user
+    assert "Governing security constraints:" in call2b_user
 
 
 @pytest.mark.parametrize("template_name", ("critic_system.j2", "revision_system.j2"))

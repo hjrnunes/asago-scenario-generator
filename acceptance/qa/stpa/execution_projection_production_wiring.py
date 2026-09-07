@@ -233,9 +233,6 @@ def _call_type(system_prompt: str) -> str:
 
 
 def _bdi_response(system_prompt: str, user_prompt: str) -> dict[str, Any]:
-    belief_handles = tuple(
-        dict.fromkeys(re.findall(r"belief_handle: (belief_\d+)", user_prompt))
-    )
     choices = {
         (kind, source_id): handle
         for handle, kind, source_id in re.findall(
@@ -258,13 +255,6 @@ def _bdi_response(system_prompt: str, user_prompt: str) -> dict[str, Any]:
         for factor in STATE.causal_factors
     ]
     return {
-        "defender_vulnerabilities": [
-            {
-                "belief_handle": handle,
-                "vulnerability": "The selected process-model state can be stale.",
-            }
-            for handle in belief_handles
-        ],
         "attacker_bdi": {
             "beliefs": ["The selected process-model state can be stale."],
             "desires": ["Induce the selected unsafe control action."],

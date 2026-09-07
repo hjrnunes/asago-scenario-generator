@@ -144,7 +144,7 @@ def st_critic_findings(draw) -> CriticFindings:
     for i in range(n_taxonomy):
         key = f"Probe_{i}_{draw(st_description)}"
         taxonomy_probe_results[key] = draw(st.sampled_from([
-            "present", "absent",
+            "present", "absent_justified", "absent_unjustified",
         ]))
     return CriticFindings(
         gaps=gaps,

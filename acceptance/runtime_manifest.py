@@ -13,6 +13,8 @@ if RUNTIME_ROOT not in sys.path:
     sys.path.insert(0, RUNTIME_ROOT)
 
 MODULES = (
+    "stpa_semantic_review",
+    "stpa_target_observations",
     "foundation",
     "infrastructure",
     "models",
@@ -51,6 +53,8 @@ MODULES = (
     "synthesis_prompt_contracts",
     "prompt_audit_corrections",
     "prompt_contract_recovery",
+    "mcp_target_discovery_primitive_input",
+    "stage1a_section_correction",
 )
 
 

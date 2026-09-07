@@ -491,7 +491,9 @@ def _make_mock_client(
                 _valid_requirement_set_dict(),  # Stage 2 Call 1
                 _valid_responsibility_set_dict(),  # Stage 2 Call 2a
                 valid_control_element_set_dict(),  # Stage 2 Call 2b
-                valid_empty_coordination_analysis_dict(),  # Stage 2 Call 3
+                valid_empty_coordination_analysis_dict(
+                    constraint_ids=("SC-1", "SC-2")
+                ),  # Stage 2 Call 3
                 findings,  # Critic
                 revised_cs,  # Revision
             ]
@@ -506,7 +508,8 @@ def _make_mock_client(
         client.set_response_for(ResponsibilitySet, _valid_responsibility_set_dict())
         client.set_response_for(ControlElementSet, valid_control_element_set_dict())
         client.set_response_for(
-            CoordinationAnalysis, valid_empty_coordination_analysis_dict()
+            CoordinationAnalysis,
+            valid_empty_coordination_analysis_dict(constraint_ids=("SC-1", "SC-2")),
         )
         client.set_response_for(CriticFindings, findings)
 

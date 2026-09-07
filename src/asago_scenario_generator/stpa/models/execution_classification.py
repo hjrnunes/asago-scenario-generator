@@ -29,6 +29,8 @@ EXECUTION_TARGET_PROFILE_SCHEMA_VERSION = "execution-target-profile-v1"
 EXECUTION_CONTRACT_DIGEST_FRAME = EXECUTION_CONTRACT_SCHEMA_VERSION
 EXECUTION_CLASSIFICATION_DIGEST_FRAME = EXECUTION_CLASSIFICATION_SCHEMA_VERSION
 EXECUTION_TARGET_PROFILE_DIGEST_FRAME = EXECUTION_TARGET_PROFILE_SCHEMA_VERSION
+MCP_INVENTORY_SCHEMA_VERSION = "mcp-inventory-v1"
+MCP_INVENTORY_DIGEST_FRAME = MCP_INVENTORY_SCHEMA_VERSION
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
 
 
@@ -184,10 +186,75 @@ class ProfileBasis(str, Enum):
 
 
 class ProfileAuthority(str, Enum):
-    """How the profile's resource facts were established."""
+    """Legacy compatibility enum retained for import compatibility.
+
+    Target profiles now expose the two independent authority dimensions
+    :class:`InventoryAuthority` and :class:`SemanticAuthority`.  This enum is
+    intentionally not used by the revised wire contract.
+    """
 
     reviewed = "reviewed"
     inferred = "inferred"
+
+
+class InventoryAuthority(str, Enum):
+    """Authority of the protocol inventory itself."""
+
+    observed = "observed"
+
+
+class SemanticAuthority(str, Enum):
+    """Authority of semantic interpretations attached to an inventory."""
+
+    inferred = "inferred"
+    reviewed = "reviewed"
+
+
+class SourceProtocol(str, Enum):
+    """Protocol from which an execution target inventory was observed."""
+
+    mcp = "mcp"
+    simulation = "simulation"
+
+
+class TargetInterpretationDisposition(str, Enum):
+    """Closed interpretation outcome for one observed tool."""
+
+    supported = "supported"
+    ambiguous = "ambiguous"
+    contradictory = "contradictory"
+    unresolved = "unresolved"
+
+
+class TargetOperationEffect(str, Enum):
+    """Bounded likely effect vocabulary for an interpreted tool."""
+
+    read = "read"
+    create = "create"
+    update = "update"
+    delete = "delete"
+    execute = "execute"
+    notify = "notify"
+    escalate = "escalate"
+    observe = "observe"
+    unknown = "unknown"
+
+
+class TargetStateEffect(str, Enum):
+    """Bounded likely state-effect vocabulary for an interpreted tool."""
+
+    none = "none"
+    may_change = "may_change"
+    changes = "changes"
+    unknown = "unknown"
+
+
+class InterpreterVerifierAgreement(str, Enum):
+    """Typed agreement state between the interpretation and verifier passes."""
+
+    agree = "agree"
+    disagree = "disagree"
+    unverified = "unverified"
 
 
 class AttackerInfluence(str, Enum):
@@ -214,11 +281,11 @@ class ExecutionSurface(str, Enum):
 
 
 class InventoryCompleteness(str, Enum):
-    """Whether a role search can be treated as unique."""
+    """Completeness of a protocol inventory observation."""
 
     unknown = "unknown"
-    inferred_partial = "inferred_partial"
-    reviewed_complete = "reviewed_complete"
+    observed_partial = "observed_partial"
+    observed_complete = "observed_complete"
 
 
 class ExecutionDiagnosticCode(str, Enum):
@@ -290,10 +357,9 @@ class ExecutionResourceRequirement(_Model):
     )
     operation: StrictStr = Field(
         min_length=1,
-        pattern=(
-            r"^(?:[a-z][a-z0-9]*(?:_[a-z0-9]+)*|"
-            r"(?:CA|CM)-[A-Za-z0-9._-]+)$"
-        ),
+        # MCP tool names are copied exactly and may contain hyphens; the
+        # identity field is deliberately broader than semantic role labels.
+        pattern=r"^[A-Za-z][A-Za-z0-9._-]*$",
     )
     required_surfaces: tuple[ExecutionSurface, ...] = Field(min_length=1)
     required_properties: tuple[StrictStr, ...] = ()
@@ -569,28 +635,170 @@ def _reject_unused_agent_channel(
         raise ValueError("agent_channel requirements are unused by this action kind")
 
 
+class DiscoveryMode(str, Enum):
+    """Whether discovery only observes the protocol or may call tools."""
+
+    schema_only = "schema_only"
+    disposable_test_environment = "disposable_test_environment"
+
+
+class TargetDiscoveryDiagnosticCode(str, Enum):
+    """Closed scanner diagnostic vocabulary."""
+
+    inventory_protocol_failure = "inventory_protocol_failure"
+    unsupported_protocol = "unsupported_protocol"
+    duplicate_tool_name = "duplicate_tool_name"
+    malformed_tool = "malformed_tool"
+    malformed_schema = "malformed_schema"
+    incomplete_pagination = "incomplete_pagination"
+    interpretation_missing = "interpretation_missing"
+    interpretation_invalid = "interpretation_invalid"
+    interpretation_unknown_reference = "interpretation_unknown_reference"
+    interpretation_contradictory = "interpretation_contradictory"
+    verifier_disagreement = "verifier_disagreement"
+    interpreter_failure = "interpreter_failure"
+    active_inspection_disabled = "active_inspection_disabled"
+    active_inspection_failure = "active_inspection_failure"
+
+
+class TargetDiscoverySeverity(str, Enum):
+    """Severity of one scanner diagnostic."""
+
+    warning = "warning"
+    error = "error"
+
+
+class DiscoveryProvenance(_Model):
+    """Non-secret identities and prompt pins for one discovery run."""
+
+    scanner_id: StrictStr = Field(min_length=1)
+    interpreter_id: StrictStr = Field(min_length=1)
+    verifier_id: StrictStr = Field(min_length=1)
+    scanner_contract_version: StrictStr = Field(
+        default=EXECUTION_TARGET_PROFILE_SCHEMA_VERSION, min_length=1
+    )
+    interpreter_prompt_hash: StrictStr | None = Field(
+        default=None, pattern=SHA256_PATTERN
+    )
+    verifier_prompt_hash: StrictStr | None = Field(default=None, pattern=SHA256_PATTERN)
+    model_profile: StrictStr | None = Field(default=None, min_length=1)
+    model_name: StrictStr | None = Field(default=None, min_length=1)
+
+
+class McpToolObservation(_Model):
+    """Exact, semantic-neutral fields copied from one MCP ``tools/list`` row."""
+
+    name: StrictStr = Field(min_length=1)
+    source_observation_sha256: StrictStr = Field(pattern=SHA256_PATTERN)
+    title: StrictStr | None = Field(default=None, min_length=1)
+    description: StrictStr | None = None
+    input_schema: dict[str, Any]
+    output_schema: Any = None
+    annotations: dict[str, Any] | None = None
+    argument_names: tuple[StrictStr, ...] = ()
+
+    @field_validator("input_schema", "output_schema", "annotations", mode="before")
+    @classmethod
+    def freeze_json_fields(cls, value: Any) -> Any:
+        """Retain JSON shape while closing nested mutable values."""
+        return _freeze_json(value)
+
+    @model_validator(mode="after")
+    def validate_observation(self) -> "McpToolObservation":
+        """Validate the input schema and derive exact argument names."""
+        _validate_json_schema(self.input_schema, "input_schema")
+        if self.output_schema is not None and isinstance(self.output_schema, dict):
+            _validate_json_schema(self.output_schema, "output_schema")
+        properties = self.input_schema.get("properties", {})
+        if properties is None:
+            properties = {}
+        if not isinstance(properties, Mapping):
+            raise ValueError("input_schema.properties must be a mapping")
+        names = tuple(sorted(str(name) for name in properties))
+        if any(not name for name in names):
+            raise ValueError("input_schema property names must be non-empty")
+        object.__setattr__(self, "argument_names", names)
+        return self
+
+    @property
+    def tool_name(self) -> str:
+        """Return the protocol tool name under the resource vocabulary."""
+        return self.name
+
+
+class McpInventoryObservation(_DigestModel):
+    """Content-addressed normalized result of one MCP ``tools/list``."""
+
+    _digest_frame = MCP_INVENTORY_DIGEST_FRAME
+    schema_version: Literal[MCP_INVENTORY_SCHEMA_VERSION] = MCP_INVENTORY_SCHEMA_VERSION
+    target_id: StrictStr = Field(min_length=1)
+    authorization_scope_id: StrictStr = Field(min_length=1)
+    source_protocol: Literal["mcp"] = "mcp"
+    tools: tuple[McpToolObservation, ...] = ()
+    pagination_complete: StrictBool = True
+    page_count: int = Field(default=1, ge=1)
+
+    @model_validator(mode="after")
+    def canonicalize_and_digest(self) -> "McpInventoryObservation":
+        """Sort tools by exact protocol name and derive the inventory digest."""
+        tools = tuple(sorted(self.tools, key=lambda item: item.name))
+        names = tuple(item.name for item in tools)
+        _ensure_unique_nonempty(names, "MCP tool names")
+        object.__setattr__(self, "tools", tools)
+        expected = self.compute_semantic_digest()
+        if self.semantic_digest is not None and self.semantic_digest != expected:
+            raise ValueError("semantic_digest does not match MCP inventory content")
+        object.__setattr__(self, "semantic_digest", expected)
+        return self
+
+    @classmethod
+    def from_json(cls, text: str | bytes) -> "McpInventoryObservation":
+        """Load one normalized inventory from JSON and verify its digest."""
+        import json
+
+        try:
+            value = json.loads(text)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"invalid MCP inventory JSON: {exc}") from exc
+        if not isinstance(value, dict):
+            raise ValueError("MCP inventory JSON must be an object")
+        inventory = cls.model_validate(value)
+        inventory.assert_integrity()
+        return inventory
+
+
+# Short names make the public scanner API read naturally while preserving a
+# descriptive model name for callers that need to distinguish observations
+# from semantic interpretations.
+McpInventory = McpInventoryObservation
+McpInventoryTool = McpToolObservation
+
+
 class TargetProfileOperation(_Model):
-    """One reviewed operation exposed by an execution target resource."""
+    """One exact operation exposed by a target resource.
+
+    For an MCP resource the protocol tool name is the operation identity.  A
+    separate semantic operation label is retained for simulation resources;
+    MCP profile validation applies the exact-name rule at the resource/profile
+    boundary.  Model output may describe MCP meaning only through
+    ``TargetSemanticInterpretation``.
+    """
 
     operation_id: StrictStr = Field(min_length=1)
-    semantic_operation: StrictStr = Field(
-        min_length=1,
-        pattern=(
-            r"^(?:[a-z][a-z0-9]*(?:_[a-z0-9]+)*|"
-            r"(?:CA|CM)-[A-Za-z0-9._-]+)$"
-        ),
-    )
+    semantic_operation: StrictStr | None = Field(default=None, min_length=1)
     argument_names: tuple[StrictStr, ...] = ()
     observable_properties: tuple[StrictStr, ...] = ()
 
     @model_validator(mode="after")
     def validate_operation(self) -> "TargetProfileOperation":
+        """Canonicalize operation metadata without changing its identity."""
+        semantic_operation = self.semantic_operation or self.operation_id
         argument_names = tuple(sorted(self.argument_names))
         observable_properties = tuple(sorted(self.observable_properties))
         _ensure_unique_nonempty(argument_names, "argument_names")
         _ensure_unique_nonempty(observable_properties, "observable_properties")
-        _ensure_lower_snake(argument_names, "argument_names")
         _ensure_lower_snake(observable_properties, "observable_properties")
+        object.__setattr__(self, "semantic_operation", semantic_operation)
         object.__setattr__(self, "argument_names", argument_names)
         object.__setattr__(self, "observable_properties", observable_properties)
         return self
@@ -629,148 +837,404 @@ class SimulationBehavior(_Model):
 
 
 class TargetProfileResource(_Model):
-    """One semantic resource record in a target or simulation profile."""
+    """One semantic resource in either an MCP or simulation profile.
+
+    MCP resources use the populated ``tool_name``/schema fields and exactly
+    one operation.  Simulation resources retain the original generic resource
+    vocabulary and must be paired with ``simulation_behavior`` by the profile
+    branch; they do not need to pretend that an MCP inventory exists.
+    """
 
     resource_id: StrictStr = Field(min_length=1)
-    resource_kind: ExecutionResourceKind
-    role_ids: tuple[StrictStr, ...] = ()
-    structural_refs: tuple[StrictStr, ...] = ()
-    attacker_influence: AttackerInfluence
+    resource_kind: ExecutionResourceKind = ExecutionResourceKind.tool
+    target_id: StrictStr | None = Field(default=None, min_length=1)
+    tool_name: StrictStr | None = Field(default=None, min_length=1)
+    title: StrictStr | None = Field(default=None, min_length=1)
+    description: StrictStr | None = None
+    input_schema: dict[str, Any] = Field(default_factory=dict)
+    output_schema: Any = None
+    annotations: dict[str, Any] | None = None
+    argument_names: tuple[StrictStr, ...] = ()
     surfaces: tuple[ExecutionSurface, ...] = ()
     operations: tuple[TargetProfileOperation, ...] = ()
-    interface_schema: dict[str, Any] = Field(default_factory=dict)
-    evidence_refs: tuple[StrictStr, ...] = ()
-    authority: ProfileAuthority = ProfileAuthority.reviewed
+    evidence_refs: tuple[StrictStr, ...] = Field(min_length=1)
+    # These fields remain semantic-resource conveniences used by the existing
+    # execution matcher.  Discovery leaves them empty/unknown: interpretation
+    # is represented by the separate typed record below.
+    role_ids: tuple[StrictStr, ...] = ()
+    structural_refs: tuple[StrictStr, ...] = ()
+    attacker_influence: AttackerInfluence = AttackerInfluence.unknown
     simulation_behavior: SimulationBehavior | None = None
 
-    @field_validator("interface_schema", mode="before")
+    @field_validator("input_schema", "output_schema", "annotations", mode="before")
     @classmethod
-    def freeze_mapping(
-        cls, value: Mapping[str, Any] | None
-    ) -> dict[str, Any] | FrozenDict | None:
+    def freeze_interface_json(cls, value: Any) -> Any:
+        """Close exact interface JSON while retaining opaque output schemas."""
         return _freeze_json(value)
 
     @model_validator(mode="after")
     def validate_target_profile_resource(self) -> "TargetProfileResource":
-        for field_name in (
-            "role_ids",
-            "structural_refs",
-            "surfaces",
-            "evidence_refs",
-        ):
-            _ensure_unique_nonempty(getattr(self, field_name), field_name)
-        _ensure_lower_snake(self.role_ids, "role_ids")
-        for field_name in ("role_ids", "structural_refs", "evidence_refs"):
-            object.__setattr__(
-                self, field_name, tuple(sorted(getattr(self, field_name)))
-            )
-        object.__setattr__(
-            self,
-            "surfaces",
-            tuple(sorted(self.surfaces, key=lambda item: item.value)),
-        )
+        """Validate exact MCP fields while retaining generic simulation shape."""
+        _validate_json_schema(self.input_schema, "input_schema")
+        if self.output_schema is not None and isinstance(self.output_schema, dict):
+            _validate_json_schema(self.output_schema, "output_schema")
+        schema_properties = self.input_schema.get("properties", {})
+        if schema_properties is None:
+            schema_properties = {}
+        if not isinstance(schema_properties, Mapping):
+            raise ValueError("input_schema.properties must be a mapping")
+        derived_args = tuple(sorted(str(name) for name in schema_properties))
+        provided_args = tuple(sorted(self.argument_names))
+        if provided_args and derived_args and provided_args != derived_args:
+            raise ValueError("argument_names must match input_schema properties")
+        effective_args = derived_args or provided_args
+        _ensure_unique_nonempty(effective_args, "argument_names")
+        object.__setattr__(self, "argument_names", effective_args)
+        surfaces = tuple(sorted(set(self.surfaces), key=lambda item: item.value))
+        object.__setattr__(self, "surfaces", surfaces)
+        evidence_refs = tuple(sorted(self.evidence_refs))
+        _ensure_unique_nonempty(evidence_refs, "evidence_refs")
+        object.__setattr__(self, "evidence_refs", evidence_refs)
+        for field_name in ("role_ids", "structural_refs"):
+            values = tuple(sorted(getattr(self, field_name)))
+            _ensure_unique_nonempty(values, field_name)
+            object.__setattr__(self, field_name, values)
         operations = tuple(sorted(self.operations, key=lambda item: item.operation_id))
         _ensure_unique_ids(operations, "operation_id", "resource operations")
-        _ensure_unique_nonempty(
-            tuple(item.semantic_operation for item in operations),
-            "semantic_operation",
-        )
+        if self.tool_name is not None:
+            if self.resource_kind is not ExecutionResourceKind.tool:
+                raise ValueError("tool_name is only valid for tool resources")
+            if self.target_id is None:
+                raise ValueError("MCP tool resources require target_id")
+            if not {
+                ExecutionSurface.tool_call,
+                ExecutionSurface.tool_result,
+            }.issubset(surfaces):
+                raise ValueError(
+                    "MCP resources require tool_call and tool_result surfaces"
+                )
+            if len(operations) != 1:
+                raise ValueError("MCP resources require exactly one operation")
+            operation = operations[0]
+            if operation.operation_id != self.tool_name:
+                raise ValueError("MCP operation_id must equal tool_name")
+            if operation.semantic_operation != self.tool_name:
+                raise ValueError(
+                    "MCP semantic_operation must equal the exact tool name"
+                )
+            if operation.argument_names != self.argument_names:
+                raise ValueError("operation argument_names must match input schema")
         object.__setattr__(self, "operations", operations)
-        if self.authority is ProfileAuthority.reviewed and not self.evidence_refs:
-            raise ValueError("reviewed resources require evidence_refs")
+        return self
+
+
+class TargetSemanticInterpretation(_Model):
+    """Typed, model-assisted interpretation of one observed MCP tool."""
+
+    resource_id: StrictStr = Field(min_length=1)
+    tool_name: StrictStr = Field(min_length=1)
+    disposition: TargetInterpretationDisposition
+    likely_effect: TargetOperationEffect = TargetOperationEffect.unknown
+    likely_state_effect: TargetStateEffect = TargetStateEffect.unknown
+    semantic_roles: tuple[StrictStr, ...] = ()
+    observer_resource_ids: tuple[StrictStr, ...] = ()
+    evidence_refs: tuple[StrictStr, ...] = Field(min_length=1)
+    rationale: StrictStr = Field(min_length=1)
+    interpreter_verifier_agreement: InterpreterVerifierAgreement = (
+        InterpreterVerifierAgreement.unverified
+    )
+
+    @model_validator(mode="after")
+    def canonicalize_interpretation(self) -> "TargetSemanticInterpretation":
+        """Canonicalize set-like labels and preserve typed agreement."""
+        roles = tuple(sorted(self.semantic_roles))
+        _ensure_unique_nonempty(roles, "semantic_roles")
+        _ensure_lower_snake(roles, "semantic_roles")
+        observers = tuple(sorted(self.observer_resource_ids))
+        _ensure_unique_nonempty(observers, "observer_resource_ids")
+        evidence = tuple(sorted(self.evidence_refs))
+        _ensure_unique_nonempty(evidence, "evidence_refs")
+        object.__setattr__(self, "semantic_roles", roles)
+        object.__setattr__(self, "observer_resource_ids", observers)
+        object.__setattr__(self, "evidence_refs", evidence)
+        return self
+
+    @property
+    def agreement(self) -> InterpreterVerifierAgreement:
+        """Compatibility spelling for the typed interpreter/verifier state."""
+        return self.interpreter_verifier_agreement
+
+
+class TargetDiscoveryDiagnostic(_Model):
+    """One retained scanner or interpretation diagnostic."""
+
+    code: TargetDiscoveryDiagnosticCode
+    severity: TargetDiscoverySeverity = TargetDiscoverySeverity.error
+    detail: StrictStr = Field(min_length=1)
+    tool_name: StrictStr | None = Field(default=None, min_length=1)
+    evidence_refs: tuple[StrictStr, ...] = ()
+
+    @model_validator(mode="after")
+    def canonicalize_evidence(self) -> "TargetDiscoveryDiagnostic":
+        """Canonicalize evidence references without hiding diagnostics."""
+        evidence_refs = tuple(sorted(self.evidence_refs))
+        _ensure_unique_nonempty(evidence_refs, "evidence_refs")
+        object.__setattr__(self, "evidence_refs", evidence_refs)
         return self
 
 
 class ExecutionTargetProfile(_DigestModel):
-    """Reviewed, content-addressed semantic target or simulation inventory."""
+    """Closed, content-addressed execution target profile produced by discovery."""
 
     _digest_frame = EXECUTION_TARGET_PROFILE_DIGEST_FRAME
     schema_version: Literal[EXECUTION_TARGET_PROFILE_SCHEMA_VERSION] = (
         EXECUTION_TARGET_PROFILE_SCHEMA_VERSION
     )
-    profile_id: StrictStr = Field(min_length=1)
-    environment_id: StrictStr = Field(min_length=1)
-    basis: ProfileBasis
-    authority: ProfileAuthority
-    inventory_completeness: InventoryCompleteness
-    evidence_refs: tuple[StrictStr, ...] = ()
+    target_id: StrictStr = Field(min_length=1)
+    authorization_scope_id: StrictStr = Field(min_length=1)
+    basis: ProfileBasis = ProfileBasis.target
+    inventory_authority: InventoryAuthority | None = None
+    semantic_authority: SemanticAuthority
+    inventory_completeness: InventoryCompleteness = InventoryCompleteness.unknown
+    source_protocol: SourceProtocol
+    source_inventory_digest: StrictStr | None = Field(
+        default=None, pattern=SHA256_PATTERN
+    )
+    discovery_provenance: DiscoveryProvenance | None = None
+    inventory: McpInventoryObservation | None = None
     resources: tuple[TargetProfileResource, ...] = ()
+    interpretations: tuple[TargetSemanticInterpretation, ...] = ()
+    diagnostics: tuple[TargetDiscoveryDiagnostic, ...] = ()
 
     @model_validator(mode="after")
     def validate_execution_target_profile(self) -> "ExecutionTargetProfile":
-        evidence_refs = _canonicalize_profile_evidence(self.evidence_refs)
-        object.__setattr__(self, "evidence_refs", evidence_refs)
-        resources = _canonicalize_profile_resources(self.resources)
+        """Enforce one closed MCP or simulation profile shape."""
+        resources = tuple(sorted(self.resources, key=lambda item: item.resource_id))
+        _ensure_unique_ids(resources, "resource_id", "profile resources")
         object.__setattr__(self, "resources", resources)
-        _validate_profile_simulation_shape(self.basis, resources)
-        _validate_profile_authority(self.authority, evidence_refs)
-        _set_profile_digest(self)
+
+        if self.source_protocol is SourceProtocol.mcp:
+            self._validate_mcp_branch(resources)
+        elif self.source_protocol is SourceProtocol.simulation:
+            self._validate_simulation_branch(resources)
+        else:  # pragma: no cover - Enum validation closes this branch
+            raise ValueError("unsupported execution target profile protocol")
+
+        interpretations = tuple(
+            sorted(self.interpretations, key=lambda item: item.resource_id)
+        )
+        _ensure_unique_ids(interpretations, "resource_id", "profile interpretations")
+        object.__setattr__(self, "interpretations", interpretations)
+        diagnostics = tuple(
+            sorted(
+                self.diagnostics,
+                key=lambda item: (item.tool_name or "", item.code.value, item.detail),
+            )
+        )
+        object.__setattr__(self, "diagnostics", diagnostics)
+        expected = self.compute_semantic_digest()
+        if self.semantic_digest is not None and self.semantic_digest != expected:
+            raise ValueError("semantic_digest does not match target profile")
+        object.__setattr__(self, "semantic_digest", expected)
         return self
 
+    def _validate_mcp_branch(
+        self, resources: tuple[TargetProfileResource, ...]
+    ) -> None:
+        """Require complete identity closure for an observed MCP inventory."""
+        if self.basis is not ProfileBasis.target:
+            raise ValueError("MCP profiles require basis=target")
+        if self.inventory_authority is not InventoryAuthority.observed:
+            raise ValueError("MCP inventory authority must be observed")
+        if self.inventory is None:
+            raise ValueError("MCP profiles require an embedded inventory")
+        if self.source_inventory_digest is None:
+            raise ValueError("MCP profiles require source_inventory_digest")
+        if self.discovery_provenance is None:
+            raise ValueError("MCP profiles require discovery_provenance")
+        if self.inventory.target_id != self.target_id:
+            raise ValueError("inventory target_id does not match profile target_id")
+        if self.inventory.authorization_scope_id != self.authorization_scope_id:
+            raise ValueError(
+                "inventory authorization_scope_id does not match profile scope"
+            )
+        if self.source_inventory_digest != self.inventory.semantic_digest:
+            raise ValueError(
+                "source_inventory_digest does not match embedded inventory"
+            )
+        if self.inventory_completeness is InventoryCompleteness.observed_complete:
+            if not self.inventory.pagination_complete:
+                raise ValueError(
+                    "observed_complete profiles require complete inventory pagination"
+                )
+            inventory_error_codes = {
+                TargetDiscoveryDiagnosticCode.inventory_protocol_failure,
+                TargetDiscoveryDiagnosticCode.unsupported_protocol,
+                TargetDiscoveryDiagnosticCode.duplicate_tool_name,
+                TargetDiscoveryDiagnosticCode.malformed_tool,
+                TargetDiscoveryDiagnosticCode.malformed_schema,
+                TargetDiscoveryDiagnosticCode.incomplete_pagination,
+            }
+            if any(
+                item.severity is TargetDiscoverySeverity.error
+                and item.code in inventory_error_codes
+                for item in self.diagnostics
+            ):
+                raise ValueError(
+                    "observed_complete profiles cannot contain discovery errors"
+                )
 
-def _canonicalize_profile_evidence(values: Sequence[str]) -> tuple[str, ...]:
-    """Return deterministic profile-level evidence references."""
-    evidence_refs = tuple(sorted(values))
-    _ensure_unique_nonempty(evidence_refs, "evidence_refs")
-    return evidence_refs
+        expected_resources = {
+            mcp_resource_id(self.target_id, tool.name): tool
+            for tool in self.inventory.tools
+        }
+        if set(item.resource_id for item in resources) != set(expected_resources):
+            raise ValueError(
+                "profile resources must close exactly over inventory tools"
+            )
+        for resource in resources:
+            tool = expected_resources[resource.resource_id]
+            if resource.target_id != self.target_id or resource.tool_name != tool.name:
+                raise ValueError(
+                    "profile resource does not match source inventory tool"
+                )
+            if resource.resource_id != mcp_resource_id(self.target_id, tool.name):
+                raise ValueError("MCP resource_id does not match target and tool")
+            if resource.title != tool.title:
+                raise ValueError("profile resource title drifted from inventory")
+            if resource.description != tool.description:
+                raise ValueError("profile resource description drifted from inventory")
+            if resource.input_schema != tool.input_schema:
+                raise ValueError("profile resource input_schema drifted from inventory")
+            if resource.output_schema != tool.output_schema:
+                raise ValueError(
+                    "profile resource output_schema drifted from inventory"
+                )
+            if resource.annotations != tool.annotations:
+                raise ValueError("profile resource annotations drifted from inventory")
+            if resource.argument_names != tool.argument_names:
+                raise ValueError(
+                    "profile resource argument_names drifted from inventory"
+                )
+            if not set(resource.evidence_refs).issubset(
+                set(mcp_inventory_evidence_refs(tool.name))
+            ):
+                raise ValueError(
+                    "MCP resource evidence_refs must resolve to inventory fields"
+                )
+            if resource.simulation_behavior is not None:
+                raise ValueError("MCP resources cannot contain simulation_behavior")
+            if len(resource.operations) != 1:
+                raise ValueError("MCP resources require exactly one operation")
+            operation = resource.operations[0]
+            if operation.operation_id != tool.name:
+                raise ValueError("MCP operation_id must equal the exact tool name")
+            if operation.semantic_operation != tool.name:
+                raise ValueError(
+                    "MCP semantic_operation must equal the exact tool name"
+                )
+            if operation.argument_names != tool.argument_names:
+                raise ValueError("MCP operation arguments drifted from inventory")
+
+        resource_ids = set(expected_resources)
+        interpretations = tuple(self.interpretations)
+        if set(item.resource_id for item in interpretations) != resource_ids:
+            raise ValueError(
+                "profile interpretations must contain one record per inventory tool"
+            )
+        for interpretation in interpretations:
+            if interpretation.resource_id not in resource_ids:
+                raise ValueError("interpretation references an unknown resource")
+            expected_name = expected_resources[interpretation.resource_id].name
+            if interpretation.tool_name != expected_name:
+                raise ValueError("interpretation tool_name does not match resource")
+            if not set(interpretation.evidence_refs).issubset(
+                set(mcp_inventory_evidence_refs(expected_name))
+            ):
+                raise ValueError(
+                    "interpretation evidence_refs must resolve to inventory fields"
+                )
+            if any(
+                ref not in resource_ids for ref in interpretation.observer_resource_ids
+            ):
+                raise ValueError("interpretation observer references unknown resource")
+
+    def _validate_simulation_branch(
+        self, resources: tuple[TargetProfileResource, ...]
+    ) -> None:
+        """Require explicit simulation behavior without fake MCP evidence."""
+        if self.basis is not ProfileBasis.simulation:
+            raise ValueError("simulation profiles require basis=simulation")
+        if self.inventory_authority is not None:
+            raise ValueError("simulation profiles cannot claim observed inventory")
+        if self.source_inventory_digest is not None:
+            raise ValueError("simulation profiles cannot carry source_inventory_digest")
+        if self.discovery_provenance is not None:
+            raise ValueError("simulation profiles cannot carry discovery_provenance")
+        if self.inventory is not None:
+            raise ValueError("simulation profiles cannot carry an MCP inventory")
+        if self.inventory_completeness is not InventoryCompleteness.unknown:
+            raise ValueError(
+                "simulation profiles require unknown inventory_completeness"
+            )
+        if self.interpretations:
+            raise ValueError("simulation profiles cannot carry MCP interpretations")
+        for resource in resources:
+            if resource.simulation_behavior is None:
+                raise ValueError(
+                    "simulation profiles require simulation_behavior for every resource"
+                )
+
+    @property
+    def profile_id(self) -> str:
+        """Return the target ID under the retired profile vocabulary."""
+        return self.target_id
+
+    @property
+    def environment_id(self) -> str:
+        """Return the target ID under the retired environment vocabulary."""
+        return self.target_id
+
+    @property
+    def authority(self) -> SemanticAuthority:
+        """Return semantic authority; the wire field is no longer overloaded."""
+        return self.semantic_authority
 
 
-def _canonicalize_profile_resources(
-    values: Sequence[TargetProfileResource],
-) -> tuple[TargetProfileResource, ...]:
-    """Return deterministic, uniquely identified profile resources."""
-    resources = tuple(sorted(values, key=lambda item: item.resource_id))
-    _ensure_unique_ids(resources, "resource_id", "profile resources")
-    return resources
+def mcp_resource_id(target_id: str, tool_name: str) -> str:
+    """Derive the stable resource ID from target and exact MCP tool identity."""
+    if not target_id or not tool_name:
+        raise ValueError("target_id and tool_name must be non-empty")
+    return f"mcp:{target_id}:{tool_name}"
 
 
-def _validate_profile_simulation_shape(
-    basis: ProfileBasis,
-    resources: Sequence[TargetProfileResource],
-) -> None:
-    """Require simulation behavior exactly when the profile is a simulation."""
-    if basis is ProfileBasis.simulation:
-        _require_simulation_behavior(resources)
-        return
-    _reject_simulation_behavior(resources)
-
-
-def _require_simulation_behavior(
-    resources: Sequence[TargetProfileResource],
-) -> None:
-    """Require every simulated resource to define deterministic behavior."""
-    missing = tuple(
-        item.resource_id for item in resources if item.simulation_behavior is None
+def mcp_inventory_evidence_refs(tool_name: str) -> tuple[str, ...]:
+    """Return the closed inventory-field evidence namespace for one tool."""
+    if not tool_name:
+        raise ValueError("tool_name must be non-empty")
+    prefix = f"inventory:tool:{tool_name}"
+    return (
+        prefix,
+        f"{prefix}:name",
+        f"{prefix}:title",
+        f"{prefix}:description",
+        f"{prefix}:input_schema",
+        f"{prefix}:output_schema",
+        f"{prefix}:annotations",
+        f"{prefix}:argument_names",
     )
-    if missing:
-        raise ValueError(
-            "simulation profiles require simulation_behavior for every resource"
-        )
 
 
-def _reject_simulation_behavior(
-    resources: Sequence[TargetProfileResource],
-) -> None:
-    """Reject simulation behavior in a real target profile."""
-    if any(item.simulation_behavior is not None for item in resources):
-        raise ValueError("target profiles cannot contain simulation_behavior")
+def _validate_json_schema(value: Mapping[str, Any], field_name: str) -> None:
+    """Validate one observed JSON Schema without rewriting its object order."""
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{field_name} must be a JSON object")
+    try:
+        import jsonschema
 
-
-def _validate_profile_authority(
-    authority: ProfileAuthority,
-    evidence_refs: Sequence[str],
-) -> None:
-    """Require evidence when the profile claims reviewed authority."""
-    if authority is ProfileAuthority.reviewed and not evidence_refs:
-        raise ValueError("reviewed profiles require evidence_refs")
-
-
-def _set_profile_digest(profile: ExecutionTargetProfile) -> None:
-    """Derive and verify the profile's content address."""
-    expected = profile.compute_semantic_digest()
-    if profile.semantic_digest is not None and profile.semantic_digest != expected:
-        raise ValueError("semantic_digest does not match target profile")
-    object.__setattr__(profile, "semantic_digest", expected)
+        jsonschema.Draft202012Validator.check_schema(dict(value))
+    except Exception as exc:  # noqa: BLE001 - normalize validator exceptions
+        raise ValueError(f"{field_name} is not a valid JSON Schema: {exc}") from exc
 
 
 class ResolvedExecutionBinding(_Model):
@@ -823,6 +1287,12 @@ class ExecutionClassification(_ClassificationDigestModel):
     environment_basis: EnvironmentBasis
     profile_fit: ExecutionProfileFit
     claim_scope: ExecutionClaimScope
+    inventory_authority: InventoryAuthority | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    semantic_authority: SemanticAuthority | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     resolved_bindings: tuple[ResolvedExecutionBinding, ...] = ()
     unresolved_requirement_ids: tuple[StrictStr, ...] = ()
     ambiguous_matches: tuple[AmbiguousExecutionMatch, ...] = ()
@@ -934,18 +1404,38 @@ __all__ = [
     "ExecutionSemanticGapCode",
     "ExecutionSurface",
     "ExecutionTargetProfile",
+    "DiscoveryMode",
+    "DiscoveryProvenance",
+    "InventoryAuthority",
     "InventoryCompleteness",
+    "InterpreterVerifierAgreement",
+    "McpInventory",
+    "McpInventoryObservation",
+    "McpInventoryTool",
+    "McpToolObservation",
     "ProfileAuthority",
     "ProfileBasis",
     "RequestedEnvironmentBasis",
     "ResolvedExecutionBinding",
+    "SemanticAuthority",
     "SemanticExecutionGap",
     "SemanticExecutionContract",
     "SemanticExecutionDelivery",
+    "SourceProtocol",
+    "TargetDiscoveryDiagnostic",
+    "TargetDiscoveryDiagnosticCode",
+    "TargetDiscoverySeverity",
+    "TargetInterpretationDisposition",
+    "TargetOperationEffect",
     "TargetProfileOperation",
     "TargetProfileResource",
+    "TargetSemanticInterpretation",
+    "TargetStateEffect",
     "SimulationBehavior",
+    "mcp_inventory_evidence_refs",
+    "mcp_resource_id",
     "EXECUTION_CLASSIFICATION_SCHEMA_VERSION",
     "EXECUTION_CONTRACT_SCHEMA_VERSION",
     "EXECUTION_TARGET_PROFILE_SCHEMA_VERSION",
+    "MCP_INVENTORY_SCHEMA_VERSION",
 ]

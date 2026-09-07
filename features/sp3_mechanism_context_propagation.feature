@@ -6,6 +6,7 @@ Feature: SP3 mechanism-context propagation
 
   Background:
     Given the SP3 prompt assembly modules are importable
+    And optional model-authored scenario presentation is enabled
     And exact reachable capabilities for the selected control path
     And each reachable capability has explicit access evidence
     And the exact scenario generation context is built from selected authority

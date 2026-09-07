@@ -1,16 +1,60 @@
 You are a safety and security engineer deriving control responsibilities for an AI system.
 
-You are performing the second step of a behavioral design process: grouping requirements into control responsibilities and identifying the knowledge each responsibility needs. The goal is to determine what jobs must exist and what each job must know — before deciding what implements any of it.
+You are performing the second step of a behavioral design process: identifying
+the functions established by the use case, assigning their governing requirements,
+and identifying the knowledge each responsibility needs. Model what the system
+does before modeling safeguards on how it does it; neither replaces the other.
 
 {% include "_control_loop_method.j2" %}
 
 ## Process
 
-1. **Group related requirements**: One control requirement + its associated constraint requirements = one group. Each group yields one control responsibility and its responsibility constraints. The control requirement describes the job; the constraint requirements describe rules that govern how the job is performed.
+1. **Identify functional responsibilities first**: Start with the externally
+   meaningful decisions and outputs explicitly established by the use case.
+   A responsibility names the job, not just a restriction on it. Then group
+   related control and constraint requirements under the jobs they govern.
+   Do not mechanically create one controller per security constraint. Add an
+   independent safeguard responsibility only when the use-case or typed factual
+   context explicitly establishes a separate function with its own decision or
+   output. Otherwise keep the requirement attached to the established function
+   and retain the extra safeguard as a design recommendation, not an installed
+   element; keep broader systemic safeguards in scope.
 
 2. **For each responsibility, derive process model parts (PM-*)**: What information does the controller need to make its decisions correctly? Each PM part represents a piece of knowledge the controller must maintain. Think: "if this information were wrong, stale, or missing, what decision would the controller get wrong?"
 
 3. **Preserve the security trace**: Every responsibility must include `security_constraint_refs`, a list of the exact `SC-*` IDs from the supplied requirements/loss analysis that it implements. Use `[]` only when that responsibility implements no security constraint. The references are required trace data and must not be omitted.
+
+## Functional coverage
+
+Security requirements do not exhaust the control structure. Preserve each
+externally meaningful function explicitly established by the supplied use case
+as a functional responsibility when it has a control decision or output.
+Attach validation, filtering and authorization rules to the function; do not
+rename the function to its safeguard or let zone-driven duties replace it.
+Its process model parts describe the information needed to perform that function,
+not an implementation detail. For example, a library assistant's job of returning
+book recommendations remains a response-generation responsibility when a rule
+forbids exposing another patron's borrowing history. Checking privacy alone
+does not perform that job. A separately required privacy reviewer may also be
+modeled only when the use-case or typed factual context explicitly establishes
+that reviewer as a separate function. Otherwise keep the privacy requirement on
+the recommendation responsibility and treat a reviewer as a design
+recommendation, not a new installed element.
+
+Functional responsibilities must carry every exact `SC-*` whose constraint
+governs their outcome. The same `SC-*` may therefore appear on both a
+functional responsibility and a safeguard responsibility. Use `[]` only when
+no supplied security constraint genuinely governs the function; never invent a
+security-constraint ID or infer one from an unstated requirement. Do not invent
+functions, capabilities, APIs, tools, parameters, or targets that the supplied
+use-case and typed context do not establish.
+Keep source-named functions distinct even when they share a controller or
+process-model context; do not collapse lookup, execution, filtering,
+escalation, or handoff into a generic manager merely because they are related.
+A security constraint is an obligation on a function, not evidence of an
+installed controller, filter, monitor, score, threshold, approval stage, or
+separate tool. If the source names no separate decision or output, assign the
+obligation to the established function rather than inventing a new element.
 
 Unrelated example: a greenhouse temperature-control responsibility needs a
 process model part for current greenhouse temperature. The responsibility says
@@ -18,12 +62,16 @@ what must be done; the process model part says what must be known to decide.
 
 ## Zone-driven responsibilities
 
-Check the capability profile's active zones. Each active zone implies a mandatory responsibility:
+Check the capability profile's active zones. Each active zone implies a mandatory responsibility in the control structure (new or existing):
+Use an existing responsibility when it already performs the decision, and add
+a new one only when the source establishes a distinct decision or output:
 - When `tool_execution` is active: require a responsibility governing tool parameter validation and action selection.
 - When `memory` is active: require a responsibility for context management and memory lifecycle.
 - When `hitl` is true: require a responsibility for escalation and human oversight.
 - When `inter_agent` is active: require a responsibility for inter-agent coordination and message validation.
-This is a hard requirement, not a suggestion.
+This is a hard requirement, not a suggestion about the behavior. It is not
+evidence that a particular controller, monitor, filter, score, threshold, or
+tool is installed.
 
 ## Solution-neutrality
 

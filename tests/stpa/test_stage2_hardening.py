@@ -55,7 +55,9 @@ def _resp(resp_id: str = "RESP-1") -> Responsibility:
         resp_id=resp_id,
         description="Controller",
         process_model_parts=[
-            ProcessModelPart(pm_id=f"PM-{resp_id.split('-')[-1]}-1", description="State")
+            ProcessModelPart(
+                pm_id=f"PM-{resp_id.split('-')[-1]}-1", description="State"
+            )
         ],
         control_actions=[
             ControlAction(ca_id=f"CA-{resp_id.split('-')[-1]}-1", description="Action")
@@ -360,19 +362,23 @@ def _setup_full_mock_client() -> MockLLMClient:
     client.set_response_for(ResponsibilitySet, valid_responsibility_set_dict())
     client.set_response_for(ControlElementSet, valid_control_element_set_dict())
     client.set_response_for(
-        CoordinationAnalysis, valid_empty_coordination_analysis_dict()
+        CoordinationAnalysis,
+        valid_empty_coordination_analysis_dict(constraint_ids=("SC-1", "SC-2")),
     )
-    client.set_response_for(CriticFindings, {
-        "gaps": [],
-        "checklist_results": {
-            "Input validation": "present",
-            "Authorization": "present",
-            "Action selection": "present",
-            "Outcome verification": "present",
-            "Context management": "present",
-            "Multi-agent coordination": "present",
-            "Human-in-the-loop": "present",
+    client.set_response_for(
+        CriticFindings,
+        {
+            "gaps": [],
+            "checklist_results": {
+                "Input validation": "present",
+                "Authorization": "present",
+                "Action selection": "present",
+                "Outcome verification": "present",
+                "Context management": "present",
+                "Multi-agent coordination": "present",
+                "Human-in-the-loop": "present",
+            },
+            "taxonomy_probe_results": {},
         },
-        "taxonomy_probe_results": {},
-    })
+    )
     return client

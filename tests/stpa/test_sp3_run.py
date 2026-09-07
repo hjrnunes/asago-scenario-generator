@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import hashlib
+
+import pytest
 import yaml
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -39,16 +42,68 @@ from asago_scenario_generator.stpa.scenario_prod.execution_bundle import (
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionActionKind,
     ExecutionDeliveryClass,
+    ExecutionTargetProfile,
+    McpInventoryObservation,
     RequestedEnvironmentBasis,
     SemanticExecutionContract,
     SemanticExecutionDelivery,
 )
+from asago_scenario_generator.models.canonical import canonical_json_bytes
 from asago_scenario_generator.stpa.scenario_prod.run import (
     SP3CandidateStatus,
     run_sp3,
 )
 
 from tests.stpa.sp1_helpers import MockLLMClient, read_calls_jsonl
+
+
+def _target_profile_fixture() -> ExecutionTargetProfile:
+    """Load the producer-owned target profile fixture for orchestration tests."""
+    contract_root = (
+        Path(__file__).resolve().parents[2] / "data/contracts/stpa-execution"
+    )
+    payload = json.loads(
+        (contract_root / "target-profile-v1/valid/minimal.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    for tool in payload["inventory"]["tools"]:
+        tool.setdefault(
+            "source_observation_sha256",
+            hashlib.sha256(
+                canonical_json_bytes(
+                    {
+                        key: value
+                        for key, value in tool.items()
+                        if key != "source_observation_sha256"
+                    }
+                )
+            ).hexdigest(),
+        )
+    payload["inventory"].pop("semantic_digest", None)
+    inventory = McpInventoryObservation.model_validate(payload["inventory"])
+    payload["inventory"] = inventory.model_dump(mode="json")
+    payload["source_inventory_digest"] = inventory.semantic_digest
+    payload.pop("semantic_digest", None)
+    return ExecutionTargetProfile.model_validate(payload)
+
+
+def test_execution_publication_needs_no_presentation_model_calls(tmp_path) -> None:
+    client = _setup_mock_client(num_threats=1)
+    result = run_sp3(
+        llm_client=client,
+        enriched_threat_set=_make_ets(num_threats=1),
+        control_structure=_make_cs(),
+        loss_analysis=_make_loss_analysis(),
+        run_dir=tmp_path,
+    )
+    assert len(result.scenario_envelopes) == 1
+    assert client.call_count == 1
+    assert result.stage_errors == []
+    assert verify_execution_bundle(tmp_path).valid
+    envelope = result.scenario_envelopes[0]
+    assert "hypothesis" in envelope.narrative.lower()
+    assert envelope.scenario_spec.loss_scenario in envelope.narrative
 
 
 def _make_cs() -> ControlStructure:
@@ -169,12 +224,6 @@ def _setup_mock_client(num_threats: int = 2) -> MockLLMClient:
                     "category": "user_message",
                     "description": "One user message is the typed test stimulus.",
                 },
-                "defender_vulnerabilities": [
-                    {
-                        "belief_handle": "belief_1",
-                        "vulnerability": f"vulnerability {i + 1}",
-                    }
-                ],
                 "attacker_bdi": {
                     "beliefs": [f"attacker belief {i + 1}"],
                     "desires": ["induce ICA"],
@@ -191,6 +240,7 @@ def _setup_mock_client(num_threats: int = 2) -> MockLLMClient:
                         "evidence": f"The selected state can be stale ({i + 1}).",
                         "temporal_condition": None,
                         "evidence_status": "structural_failure",
+                        "selected_for_route": True,
                     }
                 ],
                 "unsafe_outcome": {
@@ -205,8 +255,6 @@ def _setup_mock_client(num_threats: int = 2) -> MockLLMClient:
                 },
                 "execution_route": {
                     "disposition": "executable_route",
-                    "delivery_class": "direct_prompt",
-                    "selected_factor_handle": "cause_1",
                     "action_kind": "model_output",
                     "reason": "The selected structural factor supports the direct route.",
                 },
@@ -269,6 +317,90 @@ def _setup_mock_client(num_threats: int = 2) -> MockLLMClient:
     return client
 
 
+class _ProfilePublicationObservingClient(MockLLMClient):
+    """Record whether the target profile exists before the first provider call."""
+
+    def __init__(self, run_dir: Path) -> None:
+        super().__init__()
+        self.run_dir = run_dir
+        self.profile_present_on_first_call: bool | None = None
+
+    def complete(self, *args, **kwargs):
+        if not self.calls:
+            self.profile_present_on_first_call = (
+                self.run_dir / "execution-target-profile.json"
+            ).is_file()
+        return super().complete(*args, **kwargs)
+
+
+def test_run_sp3_publishes_target_profile_before_stage5_provider_call(tmp_path):
+    """Stage 5 must never run before the verified profile copy is available."""
+    run_dir = tmp_path / "run"
+    client = _ProfilePublicationObservingClient(run_dir)
+
+    result = run_sp3(
+        llm_client=client,
+        enriched_threat_set=_make_ets(num_threats=1),
+        control_structure=_make_cs(),
+        loss_analysis=_make_loss_analysis(),
+        run_dir=run_dir,
+        execution_target_profile=_target_profile_fixture(),
+    )
+
+    assert result.scenario_envelopes == []
+    assert client.profile_present_on_first_call is True
+    assert (run_dir / "execution-target-profile.json").is_file()
+
+
+def test_run_sp3_rejects_tampered_target_profile_before_provider_call(tmp_path):
+    """A tampered profile cannot reach Stage 5 or be published."""
+    run_dir = tmp_path / "run"
+    client = _ProfilePublicationObservingClient(run_dir)
+    profile = _target_profile_fixture().model_copy(update={"target_id": "tampered"})
+
+    with pytest.raises(ValueError, match="semantic_digest"):
+        run_sp3(
+            llm_client=client,
+            enriched_threat_set=_make_ets(num_threats=1),
+            control_structure=_make_cs(),
+            loss_analysis=_make_loss_analysis(),
+            run_dir=run_dir,
+            execution_target_profile=profile,
+        )
+
+    assert client.calls == []
+    assert not (run_dir / "execution-target-profile.json").exists()
+
+
+def test_run_sp3_skips_provider_work_when_profile_publication_fails(
+    tmp_path, monkeypatch
+):
+    """A profile publication failure closes the run before provider work."""
+    run_dir = tmp_path / "run"
+    client = _ProfilePublicationObservingClient(run_dir)
+
+    def fail_publication(*_args, **_kwargs):
+        raise OSError("injected profile publication failure")
+
+    monkeypatch.setattr(
+        "asago_scenario_generator.stpa.scenario_prod.run.publish_execution_target_profile",
+        fail_publication,
+    )
+
+    result = run_sp3(
+        llm_client=client,
+        enriched_threat_set=_make_ets(num_threats=1),
+        control_structure=_make_cs(),
+        loss_analysis=_make_loss_analysis(),
+        run_dir=run_dir,
+        execution_target_profile=_target_profile_fixture(),
+    )
+
+    assert result.scenario_envelopes == []
+    assert client.calls == []
+    assert any("profile publication failed" in error for error in result.stage_errors)
+
+
 class TestFullRun:
     """SP3-RUN-01 through SP3-RUN-20."""
 
@@ -300,6 +432,7 @@ class TestFullRun:
         run_dir = tmp_path / "run"
 
         result = run_sp3(
+            render_presentation=True,
             llm_client=client,
             enriched_threat_set=_make_ets(num_threats=1),
             control_structure=_make_cs(),
@@ -405,6 +538,7 @@ class TestFullRun:
 
         with TemporaryDirectory() as tmpdir:
             run_sp3(
+                render_presentation=True,
                 llm_client=client,
                 enriched_threat_set=ets,
                 control_structure=cs,
@@ -443,6 +577,7 @@ class TestFullRun:
 
         with TemporaryDirectory() as tmpdir:
             run_sp3(
+                render_presentation=True,
                 llm_client=client,
                 enriched_threat_set=ets,
                 control_structure=cs,
@@ -546,6 +681,7 @@ class TestFullRun:
 
         with TemporaryDirectory() as tmpdir:
             run_sp3(
+                render_presentation=True,
                 llm_client=client,
                 enriched_threat_set=ets,
                 control_structure=cs,
@@ -753,9 +889,6 @@ class TestErrorPaths:
                 "category": "user_message",
                 "description": "One user message is the typed test stimulus.",
             },
-            "defender_vulnerabilities": [
-                {"belief_handle": "belief_1", "vulnerability": "vuln"}
-            ],
             "attacker_bdi": {
                 "beliefs": ["b"],
                 "desires": ["d"],
@@ -772,6 +905,7 @@ class TestErrorPaths:
                     "evidence": "The selected state can be stale.",
                     "temporal_condition": None,
                     "evidence_status": "structural_failure",
+                    "selected_for_route": True,
                 }
             ],
             "unsafe_outcome": {
@@ -786,8 +920,6 @@ class TestErrorPaths:
             },
             "execution_route": {
                 "disposition": "executable_route",
-                "delivery_class": "direct_prompt",
-                "selected_factor_handle": "cause_1",
                 "action_kind": "model_output",
                 "reason": "The selected structural factor supports the direct route.",
             },
@@ -799,6 +931,7 @@ class TestErrorPaths:
 
         with TemporaryDirectory() as tmpdir:
             result = run_sp3(
+                render_presentation=True,
                 llm_client=client,
                 enriched_threat_set=ets,
                 control_structure=cs,
@@ -851,9 +984,6 @@ class TestErrorPaths:
                         "category": "user_message",
                         "description": "One user message is the typed test stimulus.",
                     },
-                    "defender_vulnerabilities": [
-                        {"belief_handle": "belief_1", "vulnerability": "vuln"}
-                    ],
                     "attacker_bdi": {
                         "beliefs": ["b"],
                         "desires": ["d"],
@@ -870,6 +1000,7 @@ class TestErrorPaths:
                             "evidence": "The selected state can be stale.",
                             "temporal_condition": None,
                             "evidence_status": "structural_failure",
+                            "selected_for_route": True,
                         }
                     ],
                     "unsafe_outcome": {
@@ -884,8 +1015,6 @@ class TestErrorPaths:
                     },
                     "execution_route": {
                         "disposition": "executable_route",
-                        "delivery_class": "direct_prompt",
-                        "selected_factor_handle": "cause_1",
                         "action_kind": "model_output",
                         "reason": "The selected structural factor supports the direct route.",
                     },
@@ -921,9 +1050,6 @@ class TestErrorPaths:
                         "category": "user_message",
                         "description": "One user message is the typed test stimulus.",
                     },
-                    "defender_vulnerabilities": [
-                        {"belief_handle": "belief_1", "vulnerability": "vuln"}
-                    ],
                     "attacker_bdi": {
                         "beliefs": ["b"],
                         "desires": ["d"],
@@ -940,6 +1066,7 @@ class TestErrorPaths:
                             "evidence": "The selected state can be stale.",
                             "temporal_condition": None,
                             "evidence_status": "structural_failure",
+                            "selected_for_route": True,
                         }
                     ],
                     "unsafe_outcome": {
@@ -954,8 +1081,6 @@ class TestErrorPaths:
                     },
                     "execution_route": {
                         "disposition": "executable_route",
-                        "delivery_class": "direct_prompt",
-                        "selected_factor_handle": "cause_1",
                         "action_kind": "model_output",
                         "reason": "The selected structural factor supports the direct route.",
                     },
@@ -985,6 +1110,7 @@ class TestErrorPaths:
 
         with TemporaryDirectory() as tmpdir:
             result = run_sp3(
+                render_presentation=True,
                 llm_client=client,
                 enriched_threat_set=ets,
                 control_structure=cs,

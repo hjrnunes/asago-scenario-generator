@@ -1,0 +1,75 @@
+schema_version: klarna-v22-ca3-1-replay-v1
+source:
+  run_root: output/runs/20260905-klarna-gemma4-oc-miniklarna-v22
+  embedded_loss_analysis: klarna-v22-loss-analysis.yaml
+  embedded_control_structure: klarna-v22-control-structure.yaml
+  loss_analysis_sha256: 89bcc9bcc431e3f14528969fd57b229d765f35b5eed2723d137cb03f2eddd2ae
+  control_structure_sha256: dd6e16a286c0dfe78cf84f6e5025605eba07c9421d7b02b98bb411a536263fc4
+  calls_file: calls.jsonl
+records:
+  - zero_based_call_index: 48
+    one_based_call_number: 49
+    slot_id: RESP-3:CA-3-1:INCORRECT
+    model: gemma-4-26b-a4b-it
+    system_prompt_hash: 8e0726d7fcccd63fb5e2e20d71510143320a3818edbaed63b22e7cb108833165
+    user_prompt_hash: d7d6bdf0204bc570bec4683613afb15d0320aab24a04d0ed31a66dfa57183a3c
+    rendered_prompt_digest: e61797f17c174d82b65c7e71bbe2f19fd6876569ce9264748c741012d2f04c0e
+    response_sha256: 482a22ca3f030ee7e9c6313bbeea64a5693c022347707fac3c7bb0d219dd3a7c
+    response:
+      filled_slots:
+        - slot_id: RESP-3:CA-3-1:INCORRECT
+          is_na: false
+          na_rationale: null
+          findings:
+            - deviation: the response content contains inaccurate, hallucinated, or outdated information regarding fees, interest, or policies
+              hazardous_context: the AI assistant outputs unverified information to the user
+              loss_consequence: regulatory non-compliance and legal penalties resulting from inaccurate financial advice or policy misrepresentation
+              related_hazard_ids: [H-3]
+              related_constraint_ids: [SC-3]
+              process_model_refs: [PM-3-2, PM-3-3]
+              feedback_refs: [FB-3-2, FB-3-3]
+          consideration_results: []
+  - zero_based_call_index: 49
+    one_based_call_number: 50
+    slot_id: RESP-3:CA-3-1:NOT_PROVIDED
+    model: gemma-4-26b-a4b-it
+    system_prompt_hash: 8e0726d7fcccd63fb5e2e20d71510143320a3818edbaed63b22e7cb108833165
+    user_prompt_hash: 159cc5412d60252ec49e2afafb057dd6be1b668e348cac9e59ad52ba02134f94
+    rendered_prompt_digest: f61b20ab8df3e5116998f51ab3ceaab62fe398c6ca527c39c7cba5ebf96dd5ec
+    response_sha256: bc8d60133158f69b69d8459b2a6a16a3a258002b4114520d84ebfd34e4448fa9
+    response:
+      filled_slots:
+        - slot_id: RESP-3:CA-3-1:NOT_PROVIDED
+          is_na: false
+          na_rationale: null
+          findings:
+            - deviation: a grounded policy response is not provided when the user requests information regarding fees, interest, or policies
+              hazardous_context: the user is presented with no response or an ungrounded response during a critical financial inquiry
+              loss_consequence: the user receives inaccurate or unverified information leading to regulatory non-compliance or reputational damage
+              related_hazard_ids: [H-3]
+              related_constraint_ids: [SC-3]
+              process_model_refs: [PM-3-2, PM-3-3]
+              feedback_refs: [FB-3-2, FB-3-3]
+          consideration_results: []
+  - zero_based_call_index: 51
+    one_based_call_number: 52
+    slot_id: RESP-3:CA-3-1:WRONG_TIMING
+    model: gemma-4-26b-a4b-it
+    system_prompt_hash: 8e0726d7fcccd63fb5e2e20d71510143320a3818edbaed63b22e7cb108833165
+    user_prompt_hash: c55c7023b6c16c105f255993996099023e6f93ef3c614ca88be4c3401335cf17
+    rendered_prompt_digest: abf0add706fbda84195ee2b8da1400bfb8a330adc883e099ee30da783c75b63a
+    response_sha256: 3cbd0337c55093cb87e184bc07c4aeb610236090a91b846c1d595687fbd7eb08
+    response:
+      filled_slots:
+        - slot_id: RESP-3:CA-3-1:WRONG_TIMING
+          is_na: false
+          na_rationale: null
+          findings:
+            - deviation: the response is provided before the RAG context is verified for accuracy
+              hazardous_context: the conversational interface provides a response containing unverified or outdated policy information
+              loss_consequence: regulatory non-compliance and legal penalties resulting from inaccurate financial advice or policy misrepresentation
+              related_hazard_ids: [H-3]
+              related_constraint_ids: [SC-3]
+              process_model_refs: [PM-3-3]
+              feedback_refs: [FB-3-3]
+          consideration_results: []

@@ -216,6 +216,23 @@ def _context():
     )
 
 
+def test_target_derived_temporal_slot_builds_scenario_context() -> None:
+    slot_id = "RESP-1:CA-1-1:INCORRECT:instantaneous"
+    threat = _threat().model_copy(
+        update={"ica_slot_id": slot_id, "ica_id": f"{slot_id}:1"}
+    )
+
+    context = build_scenario_generation_context(
+        threat,
+        _control_structure(),
+        _loss_analysis(),
+        scenario_id="SCN-001",
+    )
+
+    assert context.scenario_identity.ica_slot_id == slot_id
+    assert context.ica.uca_type is UCAType.incorrect
+
+
 @pytest.mark.parametrize(
     ("delivery_class", "factor_handle"),
     (
@@ -445,12 +462,6 @@ def test_context_stage5_compiles_local_handles_to_exact_structural_sources(
                     "category": "user_message",
                     "description": "One user message is the typed test stimulus.",
                 },
-                "defender_vulnerabilities": [
-                    {
-                        "belief_handle": "belief_1",
-                        "vulnerability": "The batch count can remain stale.",
-                    }
-                ],
                 "attacker_bdi": {
                     "beliefs": ["The controller can act on a stale batch count."],
                     "desires": ["Induce the selected unsafe action."],
@@ -467,6 +478,7 @@ def test_context_stage5_compiles_local_handles_to_exact_structural_sources(
                         "evidence": "The selected process-model state stays stale.",
                         "temporal_condition": None,
                         "evidence_status": "structural_failure",
+                        "selected_for_route": True,
                     }
                 ],
                 "unsafe_outcome": {
@@ -481,8 +493,6 @@ def test_context_stage5_compiles_local_handles_to_exact_structural_sources(
                 },
                 "execution_route": {
                     "disposition": "executable_route",
-                    "delivery_class": "direct_prompt",
-                    "selected_factor_handle": "cause_1",
                     "action_kind": "model_output",
                     "reason": "The stale state explains the direct adversarial route.",
                 },
@@ -497,7 +507,7 @@ def test_context_stage5_compiles_local_handles_to_exact_structural_sources(
     assert result.causal_factors[0].kind is CausalFactorKind.process_model_flaw
     assert result.causal_factors[0].source_id == "PM-1-1"
     assert result.defender_vulnerabilities == {
-        "PM-1-1": "The batch count can remain stale."
+        "PM-1-1": "The selected process-model state stays stale."
     }
     assert "PM-1-1" in result.attacker_bdi.intentions[0]
     assert "cause_1" not in result.model_dump_json()
@@ -512,12 +522,6 @@ def test_context_stage5_materializes_executable_route_from_local_handles(
     client.set_response_queue(
         [
             {
-                "defender_vulnerabilities": [
-                    {
-                        "belief_handle": "belief_1",
-                        "vulnerability": "The batch count can remain stale.",
-                    }
-                ],
                 "attacker_bdi": {
                     "beliefs": ["The controller can act on stale state."],
                     "desires": ["Induce the selected unsafe action."],
@@ -538,6 +542,7 @@ def test_context_stage5_materializes_executable_route_from_local_handles(
                         "evidence": "The selected process-model state stays stale.",
                         "temporal_condition": None,
                         "evidence_status": "structural_failure",
+                        "selected_for_route": True,
                     }
                 ],
                 "unsafe_outcome": {
@@ -552,8 +557,6 @@ def test_context_stage5_materializes_executable_route_from_local_handles(
                 },
                 "execution_route": {
                     "disposition": "executable_route",
-                    "delivery_class": "direct_prompt",
-                    "selected_factor_handle": "cause_1",
                     "action_kind": "model_output",
                     "reason": "The stale state explains the direct adversarial route.",
                 },
@@ -636,12 +639,6 @@ def test_context_stage5_missing_execution_route_is_provider_failure(tmp_path) ->
     client.set_response_queue(
         [
             {
-                "defender_vulnerabilities": [
-                    {
-                        "belief_handle": "belief_1",
-                        "vulnerability": "The batch count can remain stale.",
-                    }
-                ],
                 "attacker_bdi": {
                     "beliefs": ["The controller can act on stale state."],
                     "desires": ["Induce the selected unsafe action."],
@@ -671,12 +668,6 @@ def test_context_stage5_missing_execution_route_is_provider_failure(tmp_path) ->
                 },
             },
             {
-                "defender_vulnerabilities": [
-                    {
-                        "belief_handle": "belief_1",
-                        "vulnerability": "The batch count can remain stale.",
-                    }
-                ],
                 "attacker_bdi": {
                     "beliefs": ["The controller can act on stale state."],
                     "desires": ["Induce the selected unsafe action."],
@@ -730,12 +721,6 @@ def test_context_stage5_retains_analytical_only_route_with_typed_gap(tmp_path) -
                     "category": "file_upload",
                     "description": "The unsupported upload path cannot be replayed.",
                 },
-                "defender_vulnerabilities": [
-                    {
-                        "belief_handle": "belief_1",
-                        "vulnerability": "The batch count can remain stale.",
-                    }
-                ],
                 "attacker_bdi": {
                     "beliefs": ["The controller can act on stale state."],
                     "desires": ["Induce the selected unsafe action."],
@@ -752,6 +737,7 @@ def test_context_stage5_retains_analytical_only_route_with_typed_gap(tmp_path) -
                         "evidence": "The selected process-model state stays stale.",
                         "temporal_condition": None,
                         "evidence_status": "structural_failure",
+                        "selected_for_route": False,
                     }
                 ],
                 "unsafe_outcome": {
@@ -760,7 +746,15 @@ def test_context_stage5_retains_analytical_only_route_with_typed_gap(tmp_path) -
                         "control_action_id": "CA-1-1",
                         "property": "authorization_state",
                         "operator": "equals",
-                        "expected": "approved",
+                        "expected": {
+                            "binding_ref": "SEM-test-authorization-state",
+                            "value_type": "string",
+                            "description": (
+                                "The deployment-specific authorization state is unknown."
+                            ),
+                            "minimum": None,
+                            "maximum": None,
+                        },
                     },
                     "semantic_proposition": None,
                 },
@@ -812,12 +806,6 @@ def test_context_stage5_materializes_indirect_carrier_role(tmp_path) -> None:
     client.set_response_queue(
         [
             {
-                "defender_vulnerabilities": [
-                    {
-                        "belief_handle": "belief_1",
-                        "vulnerability": "The batch count can remain stale.",
-                    }
-                ],
                 "attacker_bdi": {
                     "beliefs": ["The controller can act on stale state."],
                     "desires": ["Induce the selected unsafe action."],
@@ -837,7 +825,9 @@ def test_context_stage5_materializes_indirect_carrier_role(tmp_path) -> None:
                         "source_handle": "cause_1",
                         "evidence": "The selected process-model state stays stale.",
                         "temporal_condition": None,
-                        "evidence_status": "structural_failure",
+                        "evidence_status": "bounded_assumption",
+                        "bounded_assumption": "The supplied retrieval path admits test-controlled content.",
+                        "selected_for_route": True,
                     }
                 ],
                 "unsafe_outcome": {
@@ -852,8 +842,6 @@ def test_context_stage5_materializes_indirect_carrier_role(tmp_path) -> None:
                 },
                 "execution_route": {
                     "disposition": "executable_route",
-                    "delivery_class": "indirect_content",
-                    "selected_factor_handle": "cause_1",
                     "action_kind": "model_output",
                     "reason": "The supplied carrier role brings the content into context.",
                 },
@@ -888,9 +876,6 @@ def test_context_stage5_carrier_influence_is_request_local(tmp_path) -> None:
             "category": "retrieved_content",
             "description": "Retrieved content carries the selected state.",
         },
-        "defender_vulnerabilities": [
-            {"belief_handle": "belief_1", "vulnerability": "The state is stale."}
-        ],
         "attacker_bdi": {
             "beliefs": ["The state is stale."],
             "desires": ["Induce the selected action."],
@@ -901,9 +886,11 @@ def test_context_stage5_carrier_influence_is_request_local(tmp_path) -> None:
         "causal_factors": [
             {
                 "source_handle": "cause_1",
-                "evidence": "The selected carrier is attacker-controlled.",
+                "evidence": "The selected carrier is hypothesized to admit attacker content.",
                 "temporal_condition": None,
-                "evidence_status": "structural_failure",
+                "evidence_status": "bounded_assumption",
+                "bounded_assumption": "The test can alter content at the supplied retrieval path.",
+                "selected_for_route": True,
             }
         ],
         "unsafe_outcome": {
@@ -918,8 +905,6 @@ def test_context_stage5_carrier_influence_is_request_local(tmp_path) -> None:
         },
         "execution_route": {
             "disposition": "executable_route",
-            "delivery_class": "indirect_content",
-            "selected_factor_handle": "cause_1",
             "action_kind": "model_output",
             "reason": "The typed retrieved-content stimulus exercises the state.",
         },
@@ -942,9 +927,6 @@ def test_context_stage5_model_output_uses_semantic_proposition_without_state_rol
     context = _context()
     client = MockLLMClient()
     payload = {
-        "defender_vulnerabilities": [
-            {"belief_handle": "belief_1", "vulnerability": "The state is stale."}
-        ],
         "attacker_bdi": {
             "beliefs": ["The state is stale."],
             "desires": ["Induce the selected action."],
@@ -962,6 +944,7 @@ def test_context_stage5_model_output_uses_semantic_proposition_without_state_rol
                 "evidence": "The state store's identity is part of the attack.",
                 "temporal_condition": None,
                 "evidence_status": "structural_failure",
+                "selected_for_route": True,
             }
         ],
         "unsafe_outcome": {
@@ -976,8 +959,6 @@ def test_context_stage5_model_output_uses_semantic_proposition_without_state_rol
         },
         "execution_route": {
             "disposition": "executable_route",
-            "delivery_class": "direct_prompt",
-            "selected_factor_handle": "cause_1",
             "action_kind": "model_output",
             "reason": "The named state store is part of the attack meaning.",
         },
@@ -994,10 +975,11 @@ def test_context_stage5_model_output_uses_semantic_proposition_without_state_rol
 
 def test_context_provider_schema_excludes_compiler_contract() -> None:
     """The provider wire schema cannot emit the materialized contract."""
-    schema = _context_bdi_provider_payload_type(2, 1).model_json_schema()
+    schema = _context_bdi_provider_payload_type(2).model_json_schema()
 
     assert "execution_contract" not in schema.get("properties", {})
     assert "execution_route" in schema.get("properties", {})
+    assert "defender_vulnerabilities" not in schema.get("properties", {})
     assert "semantic_binding_required" not in json.dumps(schema)
 
 
@@ -1014,12 +996,6 @@ def test_context_stage5_preserves_explicit_assumption_when_status_is_mislabeled(
                     "category": "user_message",
                     "description": "One user message is the typed test stimulus.",
                 },
-                "defender_vulnerabilities": [
-                    {
-                        "belief_handle": "belief_1",
-                        "vulnerability": "The batch count may remain stale.",
-                    }
-                ],
                 "attacker_bdi": {
                     "beliefs": ["The controller may act on a stale batch count."],
                     "desires": ["Induce the selected unsafe action."],
@@ -1037,6 +1013,7 @@ def test_context_stage5_preserves_explicit_assumption_when_status_is_mislabeled(
                         "temporal_condition": None,
                         "evidence_status": "bounded_assumption",
                         "bounded_assumption": "Assume the update arrives late.",
+                        "selected_for_route": True,
                     }
                 ],
                 "unsafe_outcome": {
@@ -1051,8 +1028,6 @@ def test_context_stage5_preserves_explicit_assumption_when_status_is_mislabeled(
                 },
                 "execution_route": {
                     "disposition": "executable_route",
-                    "delivery_class": "direct_prompt",
-                    "selected_factor_handle": "cause_1",
                     "action_kind": "model_output",
                     "reason": "The stale state explains the direct adversarial route.",
                 },
@@ -1076,12 +1051,6 @@ def test_context_stage5_intentions_must_reference_a_declared_factor(tmp_path) ->
     client.set_response_queue(
         [
             {
-                "defender_vulnerabilities": [
-                    {
-                        "belief_handle": "belief_1",
-                        "vulnerability": "The batch count can remain stale.",
-                    }
-                ],
                 "attacker_bdi": {
                     "beliefs": ["The controller can act on stale state."],
                     "desires": ["Induce the selected unsafe action."],
@@ -1102,6 +1071,7 @@ def test_context_stage5_intentions_must_reference_a_declared_factor(tmp_path) ->
                         "evidence": "The selected process-model state stays stale.",
                         "temporal_condition": None,
                         "evidence_status": "structural_failure",
+                        "selected_for_route": True,
                     }
                 ],
                 "unsafe_outcome": {
@@ -1116,8 +1086,6 @@ def test_context_stage5_intentions_must_reference_a_declared_factor(tmp_path) ->
                 },
                 "execution_route": {
                     "disposition": "executable_route",
-                    "delivery_class": "direct_prompt",
-                    "selected_factor_handle": "cause_1",
                     "action_kind": "model_output",
                     "reason": "The stale state explains the direct adversarial route.",
                 },
@@ -1127,12 +1095,6 @@ def test_context_stage5_intentions_must_reference_a_declared_factor(tmp_path) ->
                     "category": "user_message",
                     "description": "One user message is the typed test stimulus.",
                 },
-                "defender_vulnerabilities": [
-                    {
-                        "belief_handle": "belief_1",
-                        "vulnerability": "The batch count can remain stale.",
-                    }
-                ],
                 "attacker_bdi": {
                     "beliefs": ["The controller can act on stale state."],
                     "desires": ["Induce the selected unsafe action."],
@@ -1149,6 +1111,7 @@ def test_context_stage5_intentions_must_reference_a_declared_factor(tmp_path) ->
                         "evidence": "The selected process-model state stays stale.",
                         "temporal_condition": None,
                         "evidence_status": "structural_failure",
+                        "selected_for_route": True,
                     }
                 ],
                 "unsafe_outcome": {
@@ -1163,8 +1126,6 @@ def test_context_stage5_intentions_must_reference_a_declared_factor(tmp_path) ->
                 },
                 "execution_route": {
                     "disposition": "executable_route",
-                    "delivery_class": "direct_prompt",
-                    "selected_factor_handle": "cause_1",
                     "action_kind": "model_output",
                     "reason": "The stale state explains the direct adversarial route.",
                 },
@@ -1179,10 +1140,10 @@ def test_context_stage5_intentions_must_reference_a_declared_factor(tmp_path) ->
     assert "intention source handles must have declared causal factors" in error
 
 
-def test_context_stage5_requires_one_vulnerability_for_every_selected_belief(
+def test_context_stage5_derives_public_pm_annotations_from_causal_factors(
     tmp_path,
 ) -> None:
-    """The provider cannot omit a selected defender belief from its response."""
+    """One causal story drives exact PM evidence and unselected markers."""
     context = build_scenario_generation_context(
         _coordination_threat(),
         _coordination_control_structure(),
@@ -1190,13 +1151,11 @@ def test_context_stage5_requires_one_vulnerability_for_every_selected_belief(
         scenario_id="SCN-CL-001",
     )
     client = MockLLMClient()
-    invalid_response = {
-        "defender_vulnerabilities": [
-            {
-                "belief_handle": "belief_1",
-                "vulnerability": "The selected state may remain stale.",
-            }
-        ],
+    response = {
+        "stimulus": {
+            "category": "conversation",
+            "description": "Earlier coordination turns carry the selected state.",
+        },
         "attacker_bdi": {
             "beliefs": ["The selected state may remain stale."],
             "desires": ["Induce the selected unsafe action."],
@@ -1213,6 +1172,7 @@ def test_context_stage5_requires_one_vulnerability_for_every_selected_belief(
                 "evidence": "The selected state remains stale.",
                 "temporal_condition": None,
                 "evidence_status": "structural_failure",
+                "selected_for_route": True,
             }
         ],
         "unsafe_outcome": {
@@ -1221,18 +1181,35 @@ def test_context_stage5_requires_one_vulnerability_for_every_selected_belief(
                 "control_action_id": "CM-1",
                 "property": "authorization_state",
                 "operator": "equals",
-                "expected": "approved",
+                "expected": {
+                    "binding_ref": "SEM-test-coordination-state",
+                    "value_type": "string",
+                    "description": "The coordination authorization state is unknown.",
+                    "minimum": None,
+                    "maximum": None,
+                },
             },
             "semantic_proposition": None,
         },
+        "execution_route": {
+            "disposition": "executable_route",
+            "action_kind": "agent_message",
+            "reason": "The selected structural factor affects the coordination message.",
+        },
     }
-    client.set_response_queue([invalid_response, invalid_response])
+    client.set_response_queue([response])
 
     result, error = generate_bdi_for_context(client, context, tmp_path)
 
-    assert result is None
-    assert error is not None
-    assert "defender_vulnerabilities" in error
+    assert error is None
+    assert result is not None
+    assert result.defender_vulnerabilities == {
+        "PM-1-1": "The selected state remains stale.",
+        "PM-2-1": "Not selected as a causal factor in this scenario.",
+    }
+    assert result.defender_vulnerabilities[result.causal_factors[0].source_id] == (
+        result.causal_factors[0].evidence
+    )
 
 
 def test_context_rejects_unknown_coordination_link() -> None:
@@ -1383,16 +1360,6 @@ def test_run_sp3_realizes_coordination_slot_without_relabeled_identity(
     client.set_response_queue(
         [
             {
-                "defender_vulnerabilities": [
-                    {
-                        "belief_handle": "belief_1",
-                        "vulnerability": "The shared state can be stale.",
-                    },
-                    {
-                        "belief_handle": "belief_2",
-                        "vulnerability": "The verification state can be stale.",
-                    },
-                ],
                 "attacker_bdi": {
                     "beliefs": ["The coordination state can be manipulated."],
                     "desires": ["Induce the coordination ICA."],
@@ -1413,6 +1380,7 @@ def test_run_sp3_realizes_coordination_slot_without_relabeled_identity(
                         "evidence": "The shared policy state can be stale when synchronized.",
                         "temporal_condition": None,
                         "evidence_status": "structural_failure",
+                        "selected_for_route": True,
                     }
                 ],
                 "unsafe_outcome": {
@@ -1421,14 +1389,20 @@ def test_run_sp3_realizes_coordination_slot_without_relabeled_identity(
                         "control_action_id": "CM-1",
                         "property": "authorization_state",
                         "operator": "equals",
-                        "expected": "approved",
+                        "expected": {
+                            "binding_ref": "SEM-test-coordination-state",
+                            "value_type": "string",
+                            "description": (
+                                "The coordination authorization state is unknown."
+                            ),
+                            "minimum": None,
+                            "maximum": None,
+                        },
                     },
                     "semantic_proposition": None,
                 },
                 "execution_route": {
                     "disposition": "executable_route",
-                    "delivery_class": "conversation_context",
-                    "selected_factor_handle": "cause_1",
                     "action_kind": "agent_message",
                     "reason": "The selected structural factor affects the coordination message.",
                 },

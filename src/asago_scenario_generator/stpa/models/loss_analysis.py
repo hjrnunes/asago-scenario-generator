@@ -8,7 +8,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import AliasChoices, BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
 from asago_scenario_generator.stpa.models._validation import check_duplicate_ids
 
@@ -31,6 +31,12 @@ class Loss(BaseModel):
         default_factory=list,
         description="Risk ID references; empty for use_case/critic_derived provenance.",
     )
+
+    @field_validator("source_risk_cards")
+    @classmethod
+    def canonicalize_source_risk_cards(cls, value: list[str]) -> list[str]:
+        """Treat repeated provenance references as one set-like citation."""
+        return sorted(set(value))
 
 
 class Hazard(BaseModel):
@@ -58,10 +64,12 @@ class LossAnalysisDraft(BaseModel):
     merged :class:`LossAnalysis`.
     """
 
-    risk_card_losses: list[Loss] = Field(default_factory=list)
-    use_case_losses: list[Loss] = Field(default_factory=list)
-    hazards: list[Hazard] = Field(default_factory=list)
-    security_constraints: list[SecurityConstraint] = Field(default_factory=list)
+    risk_card_losses: list[Loss] = Field(default_factory=list, max_length=16)
+    use_case_losses: list[Loss] = Field(default_factory=list, max_length=16)
+    hazards: list[Hazard] = Field(default_factory=list, max_length=16)
+    security_constraints: list[SecurityConstraint] = Field(
+        default_factory=list, max_length=16
+    )
 
     @model_validator(mode="before")
     @classmethod

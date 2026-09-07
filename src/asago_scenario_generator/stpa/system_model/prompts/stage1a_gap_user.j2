@@ -8,6 +8,16 @@
 
 The following losses, hazards, and security constraints have already been derived. Do not duplicate them. You may reference their IDs in new hazards or constraints.
 
+Treat this as the complete prior dependency view.  If you add a gap, emit its
+new loss before referencing it from a hazard, and emit that hazard before
+referencing it from a security constraint.  Existing IDs may be reused exactly
+as shown; do not invent replacement IDs.
+
+If the prior view contains losses but no complete hazards/constraints, finish
+that dependency graph in this response.  An empty result is appropriate only
+when the prior view is already a complete graph and no materially new gap is
+grounded by the use-case evidence.
+
 ### Losses
 {% for loss in existing_losses %}
 - **{{ loss.loss_id }}** ({{ loss.provenance }}): {{ loss.description }}
@@ -60,8 +70,13 @@ Review the use-case description and identify losses, hazards, and security const
 2. Every integration point and external system interface
 3. Every domain-specific feature and capability
 4. Every stakeholder group's interests
-5. Every attack surface an adversary could target
+5. Every attack surface identified by supplied evidence, while retaining
+   grounded operational or systemic gaps even when no attack path is supplied
 
 For each gap, derive the complete chain: loss → hazard → security constraint.
 
-Do not duplicate existing entries. New hazards and constraints may reference existing IDs where appropriate. Focus on adversary-actionable threats.
+Do not duplicate existing entries. New hazards and constraints may reference
+existing IDs where appropriate. Include every materially grounded gap, whether
+operational, systemic, or adversary-actionable. Do not require an adversary,
+entry point, or concrete attack path for inclusion; treat adversarial
+relevance as later causal analysis.

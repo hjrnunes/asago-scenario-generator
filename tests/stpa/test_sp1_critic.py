@@ -16,6 +16,7 @@ from asago_scenario_generator.models.capability_profile import (
 )
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
+    ControlActionEffectKind,
     ControlStructure,
     ElementRef,
     FeedbackChannel,
@@ -147,6 +148,78 @@ def _valid_critic_findings_dict() -> dict:
             "Tool parameter validation": "present",
         },
     }
+
+
+def _effect_kind_revision_delta(effect_kind: str) -> dict:
+    """Build one small revision payload for typed-action seam tests."""
+    return {
+        "new_responsibilities": [
+            {
+                "resp_id": "RESP-3",
+                "description": "Input classification",
+                "responsibility_constraints": [],
+                "security_constraint_refs": [],
+                "process_model_parts": [
+                    {"pm_id": "PM-3-1", "description": "Input state"}
+                ],
+                "control_actions": [
+                    {
+                        "ca_id": "CA-3-1",
+                        "description": "Classify intent",
+                        "target": {"type": "responsibility", "id": "RESP-3"},
+                        "effect_kind": effect_kind,
+                        "temporality": "instantaneous",
+                    }
+                ],
+                "feedback_channels": [
+                    {
+                        "fb_id": "FB-3-1",
+                        "description": "Classification result",
+                        "updates": "PM-3-1",
+                        "source": {"type": "responsibility", "id": "RESP-3"},
+                    }
+                ],
+            }
+        ],
+        "new_controlled_processes": [],
+        "new_coordination_links": [],
+        "modified_responsibilities": [],
+        "dismissed_gaps": [],
+    }
+
+
+def test_critic_wire_cannot_put_narrative_or_empty_keys_in_probe_maps():
+    """Saved Gemma runaway used prose and empty keys inside the status maps."""
+    import pytest
+
+    for results in (
+        {"rag_retrieval_integrity": "### CriticFindings: a long narrative"},
+        {"": "present"},
+        {f"probe-{index}": "present" for index in range(6)},
+    ):
+        with pytest.raises(ValueError):
+            CriticFindings.model_validate(
+                {
+                    "gaps": [],
+                    "checklist_results": {},
+                    "taxonomy_probe_results": results,
+                }
+            )
+    schema = CriticFindings.model_json_schema()
+    assert set(schema["required"]) == {
+        "gaps",
+        "checklist_results",
+        "taxonomy_probe_results",
+    }
+    for field in ("checklist_results", "taxonomy_probe_results"):
+        wire = schema["properties"][field]
+        assert "maxProperties" not in wire
+        assert "propertyNames" not in wire
+        assert wire["additionalProperties"]["enum"] == [
+            "present",
+            "absent_justified",
+            "absent_unjustified",
+        ]
 
 
 class TestCriticFindings:
@@ -320,6 +393,118 @@ class TestCriticExecution:
 
 class TestRevision:
     """SP1-REV-01 through SP1-REV-08."""
+
+    def test_revision_schema_and_prompt_expose_closed_action_effect_enum(
+        self, tmp_path
+    ):
+        """Revision providers receive exact effect values and their meanings."""
+        schema = RevisionDelta.model_json_schema()
+        effect_schema = schema["$defs"]["ControlActionEffectKind"]
+        assert effect_schema["enum"] == [item.value for item in ControlActionEffectKind]
+        for fragment in (
+            "model_output",
+            "tool_call",
+            "state_change",
+            "agent_message",
+            "environment_action",
+        ):
+            assert fragment in effect_schema["description"]
+
+        client = MockLLMClient()
+        client.set_response_for(RevisionDelta, RevisionDelta().model_dump())
+        run_revision(
+            llm_client=client,
+            control_structure=_make_control_structure(),
+            critic_findings=CriticFindings.model_validate(
+                _valid_critic_findings_dict()
+            ),
+            use_case_text="Test",
+            run_dir=tmp_path,
+        )
+        prompt = client.calls[0].system_prompt
+        assert "effect_kind` is a closed enum" in prompt
+        assert "do not invent synonyms such as" in prompt
+        assert "internal_state_update" in prompt
+        assert 'MUST use `effect_kind: "agent_message"`' in prompt
+
+    def test_revision_invalid_effect_kind_preserves_baseline(self, tmp_path):
+        """A captured invalid enum remains a visible fallback, not a merge."""
+        original = _make_control_structure()
+        invalid_delta = _effect_kind_revision_delta("internal_state_update")
+        client = MockLLMClient()
+        client.set_response_for(RevisionDelta, invalid_delta)
+
+        revised, warnings = run_revision(
+            llm_client=client,
+            control_structure=original,
+            critic_findings=CriticFindings.model_validate(
+                _valid_critic_findings_dict()
+            ),
+            use_case_text="Test",
+            run_dir=tmp_path,
+        )
+
+        assert revised == original
+        assert len(revised.responsibilities) == 2
+        assert len(warnings) == 1
+        assert "Revision delta merge degraded" in warnings[0]
+        assert "invalid effect_kind" in warnings[0]
+
+    def test_revision_valid_effect_kind_merges_at_public_seam(self, tmp_path):
+        """The canonical replacement for a responsibility target still merges."""
+        delta = _effect_kind_revision_delta("agent_message")
+        client = MockLLMClient()
+        client.set_response_for(RevisionDelta, delta)
+
+        revised, warnings = run_revision(
+            llm_client=client,
+            control_structure=_make_control_structure(),
+            critic_findings=CriticFindings.model_validate(
+                _valid_critic_findings_dict()
+            ),
+            use_case_text="Test",
+            run_dir=tmp_path,
+        )
+
+        assert warnings == []
+        added = next(
+            item for item in revised.responsibilities if item.resp_id == "RESP-3"
+        )
+        assert (
+            added.control_actions[0].effect_kind
+            is ControlActionEffectKind.agent_message
+        )
+
+    @pytest.mark.parametrize("replacement_refs", [[], ["SC-2"]])
+    def test_additive_revision_preserves_existing_constraint_ownership(
+        self, tmp_path, replacement_refs
+    ):
+        original = _make_control_structure()
+        original.responsibilities[0].security_constraint_refs = ["SC-1"]
+        replacement = original.responsibilities[0].model_dump(mode="json")
+        replacement["security_constraint_refs"] = replacement_refs
+        replacement["description"] = "Controller with additional execution feedback"
+        client = MockLLMClient()
+        client.set_response_for(
+            RevisionDelta, {"modified_responsibilities": [replacement]}
+        )
+        revised, _warnings = run_revision(
+            llm_client=client,
+            control_structure=original,
+            critic_findings=CriticFindings.model_validate(
+                _valid_critic_findings_dict()
+            ),
+            use_case_text="Test",
+            run_dir=tmp_path,
+        )
+        assert revised.responsibilities[0].security_constraint_refs == sorted(
+            {"SC-1", *replacement_refs}
+        )
+        assert original.responsibilities[0].security_constraint_refs == ["SC-1"]
+        assert (
+            "Existing governing security-constraint links: SC-1"
+            in client.calls[0].system_prompt
+        )
 
     def test_rev_01_revised_control_structure_valid(self, tmp_path):
         """SP1-REV-01: revision call produces a valid ControlStructure."""

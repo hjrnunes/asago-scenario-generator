@@ -50,6 +50,10 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
     RequestedEnvironmentBasis,
 )
+from asago_scenario_generator.stpa.scenario_prod.target_observations import (
+    TARGET_OBSERVATIONS_FILENAME,
+    TargetObservationSnapshot,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +61,7 @@ PLAN_FILENAME = "taxonomy-obligation-plan.yaml"
 CONSIDERATION_FILENAME = "obligation-consideration.yaml"
 ACCOUNTING_FILENAME = "obligation-accounting.yaml"
 SCENARIO_REALIZATION_FILENAME = "scenario-realization.yaml"
+TARGET_REALIZATION_FILENAME = "target-realization.yaml"
 MANIFEST_FILENAME = "synthesis-manifest.yaml"
 REPORT_FILENAME = "synthesis-report.html"
 
@@ -109,6 +114,7 @@ class SynthesisInputs:
     capability_profile: Any | None = None
     capability_snapshot: Any | None = None
     execution_target_profile: ExecutionTargetProfile | None = None
+    target_observations: TargetObservationSnapshot | None = None
     requested_environment_basis: RequestedEnvironmentBasis | None = None
     taxonomy_inputs: TaxonomyObligationInputs | Any | None = None
     prebuilt_plan: Any | None = None
@@ -170,12 +176,45 @@ class SynthesisInputs:
                     "execution_target_profile must be an ExecutionTargetProfile"
                 )
             self.execution_target_profile.assert_integrity()
+        if self.target_observations is not None:
+            if not isinstance(self.target_observations, TargetObservationSnapshot):
+                raise TypeError(
+                    "target_observations must be a TargetObservationSnapshot"
+                )
+            self.target_observations.assert_integrity()
+            if self.execution_target_profile is None:
+                raise ValueError(
+                    "target_observations requires execution_target_profile"
+                )
+            if (
+                self.target_observations.target_profile_digest
+                != self.execution_target_profile.semantic_digest
+            ):
+                raise ValueError(
+                    "target_observations profile pin does not match target profile"
+                )
         if self.requested_environment_basis is not None and not isinstance(
             self.requested_environment_basis, RequestedEnvironmentBasis
         ):
             raise TypeError(
                 "requested_environment_basis must be a RequestedEnvironmentBasis"
             )
+
+
+def _systemic_inputs(inputs: SynthesisInputs) -> SynthesisInputs:
+    """Return the target-blind input view used by every pre-realization stage."""
+    if (
+        inputs.execution_target_profile is None
+        and inputs.requested_environment_basis is None
+        and inputs.target_observations is None
+    ):
+        return inputs
+    return replace(
+        inputs,
+        execution_target_profile=None,
+        requested_environment_basis=None,
+        target_observations=None,
+    )
 
 
 @dataclass(frozen=True)
@@ -199,6 +238,7 @@ class SynthesisAdapters:
     fill_icas: Callable[..., Any] | None = None
     verify_icas: Callable[..., Any] | None = None
     correct_icas: Callable[..., Any] | None = None
+    target_realize: Callable[..., Any] | None = None
     scenarios: Callable[..., Any] | None = None
     account: Callable[..., Any] | None = None
     realize: Callable[..., Any] | None = None
@@ -208,6 +248,7 @@ class SynthesisAdapters:
     persist_consideration: Callable[..., Any] | None = None
     persist_accounting: Callable[..., Any] | None = None
     persist_realization: Callable[..., Any] | None = None
+    persist_target_realization: Callable[..., Any] | None = None
     report: Callable[..., Any] | None = None
     manifest: Callable[..., Any] | None = None
 
@@ -273,6 +314,11 @@ class SynthesisAdapters:
                 "verify_ica_batch",
                 "verify_final_icas",
             ),
+            "target_realize": (
+                "target_realize",
+                "realize_target_operations",
+                "map_target_operations",
+            ),
             "correct_icas": (
                 "correct_icas",
                 "correct_ica_hazard",
@@ -321,6 +367,10 @@ class SynthesisAdapters:
                 "persist_realization",
                 "write_scenario_realization",
             ),
+            "persist_target_realization": (
+                "persist_target_realization",
+                "write_target_realization",
+            ),
             "report": ("report", "render_report", "generate_report"),
             "manifest": ("manifest", "build_manifest", "write_manifest"),
         }
@@ -355,6 +405,7 @@ class SynthesisResult:
     phase2_verification: Any
     manifest: Any
     output_dir: Path
+    target_realization: Any | None = None
     report_path: Path | None = None
     artifact_paths: dict[str, Path] = field(default_factory=dict)
     ica_considerations: tuple[Any, ...] = field(default_factory=tuple)
@@ -453,14 +504,15 @@ def run_synthesis(
         baseline, "control_structure", "final_control_structure"
     )
     if baseline_loss is None or baseline_control is None:
-        raise ValueError(
-            "baseline STPA adapter must return loss_analysis and control_structure"
-        )
+        raise ValueError(_baseline_failure_message(baseline))
+    stage_warnings.extend(_baseline_diagnostics(baseline))
 
     # Provider construction is deliberately after the provider-free Phase 1
     # planner and ordinary SP1 baseline.  The same object then reaches
     # routing, bounded revision/recheck, and ICA filling.
-    resolved = _ensure_obligation_provider(resolved, inputs, output_dir)
+    resolved = _ensure_obligation_provider(
+        resolved, _systemic_inputs(inputs), output_dir
+    )
 
     initial_consideration = _run_consideration(
         briefs,
@@ -532,7 +584,7 @@ def run_synthesis(
                 loss_analysis=final_loss,
                 control_structure=final_control,
                 revision=revision_result,
-                inputs=inputs,
+                inputs=_systemic_inputs(inputs),
                 capability_snapshot=capability_snapshot,
                 obligation_adapter=resolved.obligation_adapter,
                 output_dir=inputs.output_dir,
@@ -588,28 +640,45 @@ def run_synthesis(
         resolved,
         calls,
     )
+    target_realization = _run_target_realization(
+        ica_enumeration=ica_enumeration,
+        loss_analysis=final_loss,
+        control_structure=final_control,
+        capability_profile=capability_profile,
+        inputs=inputs,
+        adapters=resolved,
+        calls=calls,
+    )
+    effective_control, effective_icas = _target_realized_stpa_inputs(
+        target_realization=target_realization,
+        loss_analysis=final_loss,
+        control_structure=final_control,
+        ica_enumeration=ica_enumeration,
+        capability_profile=capability_profile,
+    )
     scenario_result = _run_scenarios(
-        ica_enumeration,
+        effective_icas,
         briefs,
         final_routes,
         plan,
         final_loss,
-        final_control,
+        effective_control,
         capability_profile,
         inputs,
         capability_snapshot,
         resolved,
         calls,
         stage_errors,
+        target_realization=target_realization,
     )
     accounting = _run_accounting(
         plan,
         consideration,
         final_routes,
-        ica_enumeration,
+        effective_icas,
         scenario_result,
         final_loss,
-        final_control,
+        effective_control,
         inputs,
         capability_snapshot,
         resolved,
@@ -618,8 +687,8 @@ def run_synthesis(
             plan=plan,
             consideration=consideration,
             final_loss=final_loss,
-            final_control=final_control,
-            ica_enumeration=ica_enumeration,
+            final_control=effective_control,
+            ica_enumeration=effective_icas,
         ),
     )
     realization = _run_realization(
@@ -634,8 +703,8 @@ def run_synthesis(
         accounting=accounting,
         capability_snapshot=capability_snapshot,
         loss_analysis=final_loss,
-        control_structure=final_control,
-        ica_enumeration=ica_enumeration,
+        control_structure=effective_control,
+        ica_enumeration=effective_icas,
         scenario_result=scenario_result,
         output_dir=output_dir,
         adapters=resolved,
@@ -664,6 +733,11 @@ def run_synthesis(
         resolved.persist_realization,
         "realization",
     )
+    target_realization_path = _persist_target_realization(
+        output_dir,
+        target_realization,
+        resolved.persist_target_realization,
+    )
     manifest = _build_manifest(
         inputs=inputs,
         capability_profile=capability_profile,
@@ -676,6 +750,7 @@ def run_synthesis(
         consideration=consideration,
         accounting=accounting,
         realization=realization,
+        target_realization=target_realization,
         ica_enumeration=ica_enumeration,
         scenario_result=scenario_result,
         phase2_verification=phase2_verification,
@@ -702,6 +777,7 @@ def run_synthesis(
         consideration,
         accounting,
         realization,
+        target_realization,
         scenario_result,
         phase2_verification,
         resolved.report,
@@ -714,6 +790,15 @@ def run_synthesis(
         SCENARIO_REALIZATION_FILENAME: realization_path,
         MANIFEST_FILENAME: manifest_path,
     }
+    if target_realization_path is not None:
+        artifact_paths[TARGET_REALIZATION_FILENAME] = target_realization_path
+    target_observations_path = (
+        output_dir / TARGET_OBSERVATIONS_FILENAME
+        if inputs.target_observations is not None
+        else None
+    )
+    if target_observations_path is not None and target_observations_path.exists():
+        artifact_paths[TARGET_OBSERVATIONS_FILENAME] = target_observations_path
     if report_path is not None:
         artifact_paths[REPORT_FILENAME] = report_path
     artifact_paths.update(
@@ -733,6 +818,7 @@ def run_synthesis(
         scenario_result=scenario_result,
         accounting=accounting,
         realization=realization,
+        target_realization=target_realization,
         phase2_verification=phase2_verification,
         manifest=manifest,
         output_dir=output_dir,
@@ -748,6 +834,29 @@ def run_synthesis(
 # ---------------------------------------------------------------------------
 # Stage adapters
 # ---------------------------------------------------------------------------
+
+
+def _baseline_diagnostics(baseline: object) -> list[str]:
+    """Carry nonfatal baseline findings past later stage-manifest replacement."""
+    categories = (
+        "stage_warnings",
+        "heuristic_errors",
+        "heuristic_warnings",
+        "solution_neutrality_warnings",
+        "post_revision_warnings",
+    )
+    return [
+        f"Baseline {category}: {warning}"
+        for category in categories
+        for warning in (_first_attr(baseline, category) or ())
+    ]
+
+
+def _baseline_failure_message(baseline: object) -> str:
+    errors = _first_attr(baseline, "stage_errors") or ()
+    if errors:
+        return "baseline STPA failed: " + "; ".join(str(error) for error in errors)
+    return "baseline STPA adapter must return loss_analysis and control_structure"
 
 
 def _resolve_adapters(adapters: SynthesisAdapters | object | None) -> SynthesisAdapters:
@@ -780,6 +889,7 @@ def _production_defaults() -> SynthesisAdapters:
         revise=_default_revision,
         recheck=_default_recheck,
         fill_icas=_default_fill_icas,
+        target_realize=_default_target_realize,
         scenarios=_default_scenarios,
         account=_default_account,
         realize=_default_realize,
@@ -825,7 +935,9 @@ def _prepare_capability_profile(
             "synthesis requires capability_profile or a capability preparation adapter"
         )
     profile = _invoke(
-        adapters.prepare_capability, inputs=inputs, output_dir=inputs.output_dir
+        adapters.prepare_capability,
+        inputs=_systemic_inputs(inputs),
+        output_dir=inputs.output_dir,
     )
     calls.append("capability")
     if profile is None:
@@ -881,7 +993,7 @@ def _prepare_taxonomy_inputs(
             )
         value = _invoke(
             adapters.build_taxonomy_inputs,
-            inputs=inputs,
+            inputs=_systemic_inputs(inputs),
             capability_profile=profile,
             capability_snapshot=snapshot,
             risk_cards=inputs.risk_cards,
@@ -1035,7 +1147,7 @@ def _run_plan(
     plan = _invoke(
         adapters.plan_obligations,
         taxonomy_inputs=taxonomy_inputs,
-        inputs=inputs,
+        inputs=_systemic_inputs(inputs),
         output_dir=inputs.output_dir,
     )
     calls.append("plan")
@@ -1111,7 +1223,7 @@ def _build_briefs(
             adapters.build_briefs,
             plan=plan,
             obligation_plan=plan,
-            inputs=inputs,
+            inputs=_systemic_inputs(inputs),
             capability_snapshot=snapshot,
             taxonomy_inputs=taxonomy_inputs,
         )
@@ -1143,9 +1255,10 @@ def _run_baseline(
     """Run ordinary SP1 over the shared profile and reviewed risks."""
     if adapters.baseline is None:
         raise ValueError("synthesis has no baseline STPA adapter")
+    baseline_inputs = _systemic_inputs(inputs)
     result = _invoke(
         adapters.baseline,
-        inputs=inputs,
+        inputs=baseline_inputs,
         use_case=inputs.use_case,
         risk_cards=inputs.risk_cards,
         capability_profile=profile,
@@ -1184,7 +1297,7 @@ def _run_consideration(
         obligation_plan=plan,
         loss_analysis=loss_analysis,
         control_structure=control_structure,
-        inputs=inputs,
+        inputs=_systemic_inputs(inputs),
         capability_snapshot=snapshot,
         obligation_adapter=adapters.obligation_adapter,
         output_dir=inputs.output_dir,
@@ -1227,7 +1340,7 @@ def _run_revision(
             control_structure=control_structure,
             baseline_loss_analysis=loss_analysis,
             baseline_control_structure=control_structure,
-            inputs=inputs,
+            inputs=_systemic_inputs(inputs),
             capability_snapshot=snapshot,
             obligation_adapter=adapters.obligation_adapter,
             output_dir=inputs.output_dir,
@@ -1302,7 +1415,7 @@ def _run_ica(
         control_structure=control_structure,
         capability_profile=profile,
         capability_snapshot=snapshot,
-        inputs=inputs,
+        inputs=_systemic_inputs(inputs),
         obligation_adapter=adapters.obligation_adapter,
         output_dir=inputs.output_dir,
         max_workers=inputs.max_workers,
@@ -1316,7 +1429,7 @@ def _run_ica(
         adapters=adapters,
         loss_analysis=loss_analysis,
         control_structure=control_structure,
-        inputs=inputs,
+        inputs=_systemic_inputs(inputs),
     )
 
 
@@ -1375,7 +1488,7 @@ def _run_ica_verification(
             enumeration=ordinary,
             loss_analysis=loss_analysis,
             control_structure=control_structure,
-            inputs=inputs,
+            inputs=_systemic_inputs(inputs),
             output_dir=inputs.output_dir,
             batch_id="synthesis-ica-hazard-verification",
         )
@@ -1474,6 +1587,89 @@ def _attach_ica_verification(
     )
 
 
+def _run_target_realization(
+    *,
+    ica_enumeration: Any,
+    loss_analysis: Any,
+    control_structure: Any,
+    capability_profile: Any,
+    inputs: SynthesisInputs,
+    adapters: SynthesisAdapters,
+    calls: list[str],
+) -> Any | None:
+    """Run the additive target lens only for an observed target profile."""
+    from asago_scenario_generator.models.target_realization import (
+        TargetRealizationResult,
+    )
+    from asago_scenario_generator.stpa.models.execution_classification import (
+        ProfileBasis,
+    )
+
+    profile = inputs.execution_target_profile
+    if profile is None or profile.basis is ProfileBasis.simulation:
+        return None
+    if adapters.target_realize is None:
+        raise ValueError("synthesis has no target-realization adapter")
+    ordinary_icas = _first_attr(ica_enumeration, "ica_enumeration") or ica_enumeration
+    result = _invoke(
+        adapters.target_realize,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+        ica_enumeration=ordinary_icas,
+        capability_profile=capability_profile,
+        execution_target_profile=profile,
+        inputs=inputs,
+        output_dir=inputs.output_dir,
+        temperature=inputs.temperature,
+    )
+    calls.append("target_realization")
+    if not isinstance(result, TargetRealizationResult):
+        raise TypeError(
+            "target-realization adapter must return TargetRealizationResult"
+        )
+    result.assert_integrity()
+    if result.profile_digest != profile.semantic_digest:
+        raise ValueError("target realization does not match execution target profile")
+    return result
+
+
+def _target_realized_stpa_inputs(
+    *,
+    target_realization: Any | None,
+    loss_analysis: Any,
+    control_structure: Any,
+    ica_enumeration: Any,
+    capability_profile: Any,
+) -> tuple[Any, Any]:
+    """Return the separately attested baseline-plus-target STPA union."""
+    if target_realization is None or target_realization.effective_view is None:
+        return control_structure, ica_enumeration
+
+    from asago_scenario_generator.models.target_realization import (
+        SystemicStpaBaseline,
+    )
+    from asago_scenario_generator.pipeline.target_realization import (
+        project_target_realization_to_stpa,
+    )
+
+    ordinary_icas = _first_attr(ica_enumeration, "ica_enumeration") or ica_enumeration
+    baseline = SystemicStpaBaseline.from_stpa(
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+        ica_enumeration=ordinary_icas,
+        baseline_id=target_realization.baseline_id,
+        declared_capabilities=_declared_capability_labels(capability_profile),
+    )
+    projection = project_target_realization_to_stpa(
+        baseline,
+        loss_analysis,
+        control_structure,
+        ordinary_icas,
+        target_realization,
+    )
+    return projection.control_structure, projection.ica_enumeration
+
+
 def _run_scenarios(
     ica_enumeration: Any,
     briefs: tuple[Any, ...],
@@ -1487,6 +1683,8 @@ def _run_scenarios(
     adapters: SynthesisAdapters,
     calls: list[str],
     stage_errors: list[str],
+    *,
+    target_realization: Any | None = None,
 ) -> Any:
     """Run ordinary STPA SP3 from final ICAs and structure."""
     if adapters.scenarios is None:
@@ -1507,6 +1705,8 @@ def _run_scenarios(
             capability_snapshot=snapshot,
             execution_target_profile=inputs.execution_target_profile,
             requested_environment_basis=inputs.requested_environment_basis,
+            target_realization=target_realization,
+            target_observations=inputs.target_observations,
             inputs=inputs,
             output_dir=inputs.output_dir,
             max_workers=inputs.max_workers,
@@ -1851,6 +2051,30 @@ def _persist_sidecar(
     return path
 
 
+def _persist_target_realization(
+    output_dir: Path,
+    artifact: Any | None,
+    writer: Callable[..., Any] | None,
+) -> Path | None:
+    """Publish the additive target lens only when a target was supplied."""
+    if artifact is None:
+        return None
+    if writer is None:
+        from asago_scenario_generator.pipeline.target_realization_persistence import (
+            write_target_realization,
+        )
+
+        return write_target_realization(output_dir, artifact)
+    path = _persist_sidecar(
+        output_dir,
+        TARGET_REALIZATION_FILENAME,
+        artifact,
+        writer,
+        "target_realization",
+    )
+    return path
+
+
 def _persist_manifest(
     output_dir: Path,
     manifest: Any,
@@ -1893,6 +2117,7 @@ def _build_manifest(
     revision: Any,
     stage_errors: list[str],
     stage_warnings: list[str],
+    target_realization: Any | None = None,
     provider_stages: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Construct a digest-bound manifest from stage authorities."""
@@ -1925,6 +2150,7 @@ def _build_manifest(
         consideration=consideration,
         accounting=accounting,
         realization=realization,
+        target_realization=target_realization,
         ica_enumeration=ica_enumeration,
         scenario_result=scenario_result,
         counts=counts,
@@ -1981,6 +2207,12 @@ def _build_manifest(
         "scenario_realization_digest": source_artifacts["scenario_realization"][
             "semantic_digest"
         ],
+        "execution_target_profile_digest": (
+            source_artifacts.get("execution_target_profile", {}).get("semantic_digest")
+        ),
+        "target_realization_digest": (
+            source_artifacts.get("target_realization", {}).get("semantic_digest")
+        ),
         "scenario_collection_digest": source_artifacts["scenario_collection"][
             "semantic_digest"
         ],
@@ -2056,7 +2288,7 @@ def _manifest_phase2_verification(value: Any) -> dict[str, Any]:
     reconciliation = _first_attr(value, "reconciliation")
     proposals = _first_attr(value, "proposals")
     diagnostics = _first_attr(assessment, "diagnostics")
-    return {
+    artifacts = {
         "status": _first_attr(value, "status") or "failed",
         "resource_map_mode": _first_attr(value, "resource_map_mode"),
         "proposal_set_digest": _semantic_digest(proposals),
@@ -2069,6 +2301,7 @@ def _manifest_phase2_verification(value: Any) -> dict[str, Any]:
         "network_calls": _first_attr(assessment, "network_calls") or 0,
         "model_calls": _first_attr(assessment, "model_calls") or 0,
     }
+    return artifacts
 
 
 def _manifest_prompt_call_evidence(output_dir: Path) -> list[dict[str, Any]]:
@@ -2164,6 +2397,7 @@ def _manifest_source_artifacts(
     consideration: Any,
     accounting: Any,
     realization: Any,
+    target_realization: Any | None,
     ica_enumeration: Any,
     scenario_result: Any,
     counts: Mapping[str, int],
@@ -2178,7 +2412,7 @@ def _manifest_source_artifacts(
     scenarios = tuple(
         _first_attr(scenario_result, "scenario_envelopes", "envelopes") or ()
     )
-    return {
+    artifacts = {
         "use_case": _manifest_artifact_identity(
             "use-case", "use-case-text-v1", inputs.use_case
         ),
@@ -2239,6 +2473,19 @@ def _manifest_source_artifacts(
             "scenario-realization", "stpa-scenario-realization-v1", realization
         ),
     }
+    if inputs.execution_target_profile is not None:
+        artifacts["execution_target_profile"] = _manifest_artifact_identity(
+            "execution-target-profile",
+            "execution-target-profile-v1",
+            inputs.execution_target_profile,
+        )
+    if target_realization is not None:
+        artifacts["target_realization"] = _manifest_artifact_identity(
+            "target-realization",
+            "target-realization-v1",
+            target_realization,
+        )
+    return artifacts
 
 
 def _manifest_call_evidence(value: Any) -> tuple[Any, ...]:
@@ -2374,6 +2621,7 @@ def _render_report(
     consideration: Any,
     accounting: Any,
     realization: Any,
+    target_realization: Any,
     scenario_result: Any,
     phase2_verification: Any,
     renderer: Callable[..., Any] | None,
@@ -2388,6 +2636,7 @@ def _render_report(
             consideration=consideration,
             accounting=accounting,
             realization=realization,
+            target_realization=target_realization,
             scenario_result=scenario_result,
             phase2_verification=phase2_verification,
         )
@@ -2402,6 +2651,7 @@ def _render_report(
             consideration=consideration,
             accounting=accounting,
             realization=realization,
+            target_realization=target_realization,
             scenario_result=scenario_result,
             phase2_verification=phase2_verification,
         )
@@ -2655,6 +2905,76 @@ def _default_fill_icas(**kwargs: Any) -> Any:
     )
 
 
+def _default_target_realize(
+    *,
+    loss_analysis: Any,
+    control_structure: Any,
+    ica_enumeration: Any,
+    capability_profile: Any,
+    execution_target_profile: ExecutionTargetProfile,
+    inputs: SynthesisInputs,
+    output_dir: Path,
+    **_: Any,
+) -> Any:
+    """Run model-assisted target realization after systemic ICA completion."""
+    from asago_scenario_generator.models.target_realization import (
+        SystemicStpaBaseline,
+    )
+    from asago_scenario_generator.pipeline.target_realization import (
+        realize_target_derived_icas,
+        realize_target_operations,
+    )
+    from asago_scenario_generator.stpa.infra.llm import effective_temperature
+    from asago_scenario_generator.stpa.pipeline.llm_config import resolve_llm_client
+    from asago_scenario_generator.stpa.target_realization import (
+        TargetDerivedICALlmFinder,
+        TargetRealizationLlmInterpreter,
+    )
+
+    baseline = SystemicStpaBaseline.from_stpa(
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+        ica_enumeration=ica_enumeration,
+        declared_capabilities=_declared_capability_labels(capability_profile),
+    )
+    client, _profile_name = resolve_llm_client(
+        inputs.profile,
+        inputs.sp2_profile,
+        str(inputs.profiles_file),
+    )
+    interpreter = TargetRealizationLlmInterpreter(
+        client,
+        output_dir,
+        temperature=effective_temperature(client, inputs.temperature),
+    )
+    mapped = realize_target_operations(
+        baseline,
+        execution_target_profile,
+        lambda: interpreter,
+    )
+    finder = TargetDerivedICALlmFinder(
+        client,
+        output_dir,
+        temperature=effective_temperature(client, inputs.temperature),
+    )
+    return realize_target_derived_icas(
+        baseline,
+        mapped,
+        lambda: finder,
+    )
+
+
+def _declared_capability_labels(profile: Any) -> tuple[str, ...]:
+    """Return exact declared operation labels without interpreting prose."""
+    labels = {
+        str(item.name)
+        for collection_name in ("tool_inventory", "external_integrations")
+        for item in tuple(getattr(profile, collection_name, None) or ())
+        if getattr(item, "name", None)
+    }
+    return tuple(sorted(labels))
+
+
 def _default_scenarios(
     *,
     ica_enumeration: Any,
@@ -2665,6 +2985,8 @@ def _default_scenarios(
     output_dir: Path,
     execution_target_profile: ExecutionTargetProfile | None = None,
     requested_environment_basis: RequestedEnvironmentBasis | None = None,
+    target_realization: Any | None = None,
+    target_observations: TargetObservationSnapshot | None = None,
     briefs: tuple[Any, ...] = (),
     ica_considerations: tuple[Any, ...] = (),
     **_: Any,
@@ -2707,6 +3029,8 @@ def _default_scenarios(
         scenario_contexts=scenario_contexts,
         execution_target_profile=execution_target_profile,
         requested_environment_basis=requested_environment_basis,
+        target_realization=target_realization,
+        target_observations=target_observations,
     )
 
 

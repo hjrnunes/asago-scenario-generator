@@ -21,6 +21,7 @@ def render_synthesis_report(
     realization: Any,
     scenario_result: Any,
     phase2_verification: Any,
+    target_realization: Any = None,
 ) -> Path:
     """Render synthesis results together with non-blocking Phase 2 verification."""
     output_dir = Path(output_dir)
@@ -86,6 +87,7 @@ def render_synthesis_report(
             "<table><tbody>",
             *summary_rows,
             "</tbody></table>",
+            _analysis_diagnostics_html(manifest),
             "<h2>Provisional accounting</h2>",
             "<table><thead><tr><th>Disposition</th><th>Count</th></tr></thead><tbody>",
             *accounting_table,
@@ -115,6 +117,7 @@ def render_synthesis_report(
             "</tbody></table>",
             _realization_html(realization_records),
             _candidate_outcomes_html(_value(manifest, "candidate_outcomes")),
+            _target_realization_html(target_realization),
             _phase2_html(phase2_verification),
             _scenario_html(scenarios),
         ]
@@ -132,6 +135,39 @@ def render_synthesis_report(
         + "</body></html>\n"
     )
     return atomic_write_text(output_dir / REPORT_FILENAME, content)
+
+
+def _target_realization_html(value: Any) -> str:
+    """Render target mapping counts without blending them into STPA coverage."""
+    if value is None:
+        return (
+            "<h2>Target realization</h2>"
+            "<p>No execution target profile was supplied; scenarios remain "
+            "target-agnostic or parameterized.</p>"
+        )
+    summary = _mapping(_value(value, "summary"))
+    rows = "".join(
+        _row(key.replace("_", " ").title(), item)
+        for key, item in sorted(summary.items())
+    )
+    authorities = ""
+    source_artifacts = _mapping(_value(value, "source_artifacts"))
+    if source_artifacts:
+        authorities = "".join(
+            _row(key.replace("_", " ").title(), item)
+            for key, item in sorted(source_artifacts.items())
+        )
+    details = f"<table><tbody>{rows}</tbody></table>" if rows else ""
+    authority_details = (
+        f"<table><tbody>{authorities}</tbody></table>" if authorities else ""
+    )
+    return (
+        "<h2>Target realization</h2>"
+        "<p>This additive pass maps baseline control actions to observed target "
+        "operations. It does not remove or rewrite systemic STPA findings.</p>"
+        + details
+        + authority_details
+    )
 
 
 def _phase2_html(value: Any) -> str:
@@ -172,6 +208,24 @@ def _phase2_html(value: Any) -> str:
 def _known_count(value: Any) -> Any:
     """Render absent legacy candidate counts as unknown rather than zero."""
     return "unknown" if value is None else value
+
+
+def _analysis_diagnostics_html(manifest: Any) -> str:
+    """Expose retained analysis findings separately from candidate yield."""
+    rows = [
+        _row(label, message)
+        for field, label in (("stage_errors", "Error"), ("stage_warnings", "Warning"))
+        for message in _items(manifest, field)
+    ]
+    if not rows:
+        return ""
+    return (
+        "<h2>Analysis diagnostics</h2>"
+        "<p>These findings describe analysis quality, not candidate counts "
+        "or observed test outcomes.</p><table><tbody>"
+        + "".join(rows)
+        + "</tbody></table>"
+    )
 
 
 def _scenario_status_notice(status: str) -> str:

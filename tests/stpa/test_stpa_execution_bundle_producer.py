@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from jsonschema import Draft202012Validator
 
 from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactor,
@@ -38,6 +41,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ElementRef,
     ReferenceType,
 )
+from asago_scenario_generator.models.canonical import canonical_json_bytes
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
 )
@@ -49,6 +53,7 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
     SemanticBindingValueType,
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
+    AttackerInfluence,
     BindingCompleteness,
     EnvironmentBasis,
     ExecutionActionKind,
@@ -56,13 +61,36 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionClaimScope,
     ExecutionDeliveryClass,
     ExecutionProfileFit,
+    ExecutionResourceKind,
+    ExecutionResourcePurpose,
+    ExecutionSurface,
     ExecutionTargetProfile,
+    DiscoveryProvenance,
+    InventoryAuthority,
     InventoryCompleteness,
-    ProfileAuthority,
+    McpInventoryObservation,
+    McpToolObservation,
     ProfileBasis,
     RequestedEnvironmentBasis,
+    SemanticAuthority,
+    SourceProtocol,
+    TargetInterpretationDisposition,
+    TargetOperationEffect,
+    TargetProfileOperation,
+    TargetProfileResource,
+    TargetStateEffect,
+    mcp_resource_id,
     SemanticExecutionContract,
     SemanticExecutionDelivery,
+)
+from asago_scenario_generator.models.target_realization import (
+    TargetOperationObservation,
+    TargetOperationRecord,
+    TargetOperationReference,
+    TargetRealizationDisposition,
+    TargetRealizationResult,
+    TargetRealizationRow,
+    TargetRealizationSummary,
 )
 from asago_scenario_generator.stpa.scenario_prod.execution_projection import (
     prepare_execution_projection,
@@ -194,6 +222,135 @@ def _spec(
     )
 
 
+def _target_profile_fixture() -> ExecutionTargetProfile:
+    """Load the producer-owned target profile contract fixture."""
+    payload = json.loads(
+        (CONTRACT_ROOT / "target-profile-v1/valid/minimal.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    for tool in payload["inventory"]["tools"]:
+        tool.setdefault(
+            "source_observation_sha256",
+            hashlib.sha256(
+                canonical_json_bytes(
+                    {
+                        key: value
+                        for key, value in tool.items()
+                        if key != "source_observation_sha256"
+                    }
+                )
+            ).hexdigest(),
+        )
+    payload["inventory"].pop("semantic_digest", None)
+    inventory = McpInventoryObservation.model_validate(payload["inventory"])
+    payload["inventory"] = inventory.model_dump(mode="json")
+    payload["source_inventory_digest"] = inventory.semantic_digest
+    payload.pop("semantic_digest", None)
+    return ExecutionTargetProfile.model_validate(payload)
+
+
+def _target_realization_fixture(
+    profile: ExecutionTargetProfile,
+) -> TargetRealizationResult:
+    """Build an empty, digest-bearing realization for pin-only tests."""
+    return TargetRealizationResult(
+        baseline_id="baseline-fixture",
+        baseline_digest="b" * 64,
+        profile_id=profile.profile_id,
+        profile_digest=profile.semantic_digest,
+        summary=TargetRealizationSummary(
+            baseline_control_actions=0,
+            observed_operations=0,
+            supported=0,
+            ambiguous=0,
+            unmapped=0,
+            contradictory=0,
+        ),
+    )
+
+
+def _supported_target_realization_fixture(
+    profile: ExecutionTargetProfile,
+) -> TargetRealizationResult:
+    """Build the exact supported row needed by a target-bound contract."""
+    operation_ref = TargetOperationReference(
+        resource_id="mcp:fixture-target:process_refund",
+        operation_id="process_refund",
+    )
+    operation = TargetOperationObservation(
+        reference=operation_ref,
+        description="Process a refund.",
+        argument_names=("amount", "order_id"),
+        effect="update",
+        state_effect="changes",
+        state_changing=True,
+        evidence_refs=("inventory:tool:process_refund",),
+    )
+    return TargetRealizationResult(
+        baseline_id="baseline-fixture",
+        baseline_digest="b" * 64,
+        profile_id=profile.profile_id,
+        profile_digest=profile.semantic_digest,
+        rows=(
+            TargetRealizationRow(
+                control_action_id="CA-1-1",
+                controller_id="RESP-1",
+                disposition=TargetRealizationDisposition.supported,
+                candidate_operations=(operation_ref,),
+                selected_operation=operation_ref,
+                evidence_refs=("inventory:tool:process_refund",),
+            ),
+        ),
+        operation_records=(
+            TargetOperationRecord(
+                operation=operation,
+                disposition=TargetRealizationDisposition.supported,
+                baseline_control_action_ids=("CA-1-1",),
+                evidence_refs=("inventory:tool:process_refund",),
+            ),
+        ),
+        summary=TargetRealizationSummary(
+            baseline_control_actions=1,
+            observed_operations=1,
+            supported=1,
+            ambiguous=0,
+            unmapped=0,
+            contradictory=0,
+        ),
+    )
+
+
+def _exact_target_contract() -> SemanticExecutionContract:
+    """Build one indirect route with an exact target operation requirement."""
+    return SemanticExecutionContract(
+        requested_environment_basis=RequestedEnvironmentBasis.target_profile,
+        delivery=SemanticExecutionDelivery(
+            delivery_class=ExecutionDeliveryClass.indirect_content,
+            factor_id="CF-1",
+            source_role="attacker_influenced_content",
+            carrier_requirement_id="REQ-1",
+        ),
+        action_kind=ExecutionActionKind.model_output,
+        resource_requirements=(
+            {
+                "requirement_id": "REQ-1",
+                "purpose": ExecutionResourcePurpose.stimulus_carrier,
+                "factor_id": "CF-1",
+                "owner_ref": "PM-1-1",
+                "acceptable_resource_kinds": (ExecutionResourceKind.tool,),
+                "role_id": "attacker_influenced_content_source",
+                "operation": "process_refund",
+                "required_surfaces": (ExecutionSurface.tool_result,),
+                "required_attacker_influence": AttackerInfluence.indirect,
+                "exact_resource_id": "mcp:fixture-target:process_refund",
+                "late_bindable": False,
+                "evidence_refs": ("CF-1",),
+            },
+        ),
+    )
+
+
 def test_prepare_seam_returns_digest_bearing_projection_and_derives_binding() -> None:
     validated = prepare_execution_projection(
         _spec(),
@@ -214,6 +371,284 @@ def test_prepare_seam_returns_digest_bearing_projection_and_derives_binding() ->
     assert validate_execution_projection(
         validated.projection.model_dump(mode="json")
     ).valid
+
+
+def test_projection_rejects_outcome_ordered_before_itself() -> None:
+    projection = prepare_execution_projection(
+        _spec(), _control_structure(), ExecutionRunIdentity(run_id="run-1")
+    ).projection.model_dump(mode="json")
+    projection.pop("semantic_digest")
+    projection["unsafe_outcome"]["condition"] = {
+        "type": "ordering",
+        "reference_step_id": projection["steps"][-1]["step_id"],
+        "relation": "before",
+    }
+    projection["unsafe_outcome"]["semantic_binding_required"] = False
+    with pytest.raises(ValueError, match="ordering cannot compare.*itself"):
+        ExecutionProjectionV2.model_validate(projection)
+
+
+@pytest.mark.parametrize("authority", ["profile", "realization"])
+def test_prepare_rejects_unpaired_target_authority_without_exact_requirements(
+    authority: str,
+) -> None:
+    """Target lineage is paired even when the route has no exact resource."""
+    profile = _target_profile_fixture()
+    realization = _target_realization_fixture(profile)
+    kwargs = {
+        "target_profile": profile if authority == "profile" else None,
+        "target_realization": realization if authority == "realization" else None,
+    }
+
+    with pytest.raises(ValueError, match="must be supplied together"):
+        prepare_execution_projection(
+            _spec(),
+            _control_structure(),
+            ExecutionRunIdentity(run_id=f"run-unpaired-{authority}"),
+            **kwargs,
+        )
+
+
+@pytest.mark.parametrize("authority", ["profile", "realization"])
+def test_prepare_rejects_tampered_target_authority_without_exact_requirements(
+    authority: str,
+) -> None:
+    """Both target authorities are integrity-checked before pin-only output."""
+    profile = _target_profile_fixture()
+    realization = _target_realization_fixture(profile)
+    if authority == "profile":
+        profile = profile.model_copy(update={"target_id": "tampered-target"})
+    else:
+        realization = realization.model_copy(update={"profile_id": "tampered-profile"})
+
+    with pytest.raises(ValueError, match="semantic_digest"):
+        prepare_execution_projection(
+            _spec(),
+            _control_structure(),
+            ExecutionRunIdentity(run_id=f"run-tampered-{authority}"),
+            target_profile=profile,
+            target_realization=realization,
+        )
+
+
+def test_prepare_pins_both_target_authorities_without_exact_requirements() -> None:
+    """A resource-free projection preserves a supplied target lineage pair."""
+    profile = _target_profile_fixture()
+    realization = _target_realization_fixture(profile)
+
+    validated = prepare_execution_projection(
+        _spec(),
+        _control_structure(),
+        ExecutionRunIdentity(run_id="run-paired-pin-only"),
+        target_profile=profile,
+        target_realization=realization,
+    )
+
+    pins = validated.projection.trace_refs.source_pins
+    assert pins.execution_target_profile == profile.semantic_digest
+    assert pins.target_realization == realization.semantic_digest
+    assert validated.projection.execution_classification.target_profile_digest == (
+        profile.semantic_digest
+    )
+    assert (
+        validated.projection.execution_classification.environment_basis.value
+        == "target_agnostic"
+    )
+
+
+def test_prepare_validates_exact_target_selection_and_operation() -> None:
+    """A target-bound contract must match its attested selected operation."""
+    profile = _target_profile_fixture()
+    realization = _supported_target_realization_fixture(profile)
+    spec = _spec().model_copy(update={"execution_contract": _exact_target_contract()})
+
+    validated = prepare_execution_projection(
+        spec,
+        _control_structure(),
+        ExecutionRunIdentity(run_id="run-exact-target"),
+        target_profile=profile,
+        target_realization=realization,
+    )
+
+    assert validated.projection.trace_refs.source_pins.target_realization == (
+        realization.semantic_digest
+    )
+
+
+def test_prepare_accepts_exact_target_derived_operation_lineage() -> None:
+    """A target-derived action resolves through its supported operation record."""
+    profile = _target_profile_fixture()
+    payload = _supported_target_realization_fixture(profile).model_dump(
+        mode="python", exclude={"semantic_digest"}
+    )
+    payload["rows"] = ()
+    record = dict(payload["operation_records"][0])
+    record.update(
+        {
+            "baseline_control_action_ids": (),
+            "target_derived_control_action_id": "CA-1-1",
+            "provenance": "target_derived",
+        }
+    )
+    payload["operation_records"] = (record,)
+    payload["target_derived_control_actions"] = (
+        {
+            "control_action_id": "CA-1-1",
+            "controller_id": "RESP-1",
+            "description": "Process the exact target refund operation.",
+            "effect_kind": "tool_call",
+            "temporality": "instantaneous",
+            "provenance": "target_derived",
+        },
+    )
+    payload["summary"].update(
+        {
+            "baseline_control_actions": 0,
+            "supported": 0,
+            "target_derived": 1,
+        }
+    )
+    realization = TargetRealizationResult.model_validate(payload)
+    spec = _spec().model_copy(update={"execution_contract": _exact_target_contract()})
+
+    validated = prepare_execution_projection(
+        spec,
+        _control_structure(),
+        ExecutionRunIdentity(run_id="run-exact-target-derived"),
+        target_profile=profile,
+        target_realization=realization,
+    )
+
+    assert validated.projection.trace_refs.source_pins.target_realization == (
+        realization.semantic_digest
+    )
+
+
+@pytest.mark.parametrize(
+    "realization_update, expected_message",
+    [
+        ({"rows": ()}, "supported realization row"),
+        (
+            {
+                "rows": (
+                    TargetRealizationRow(
+                        control_action_id="CA-1-1",
+                        controller_id="RESP-1",
+                        disposition=TargetRealizationDisposition.ambiguous,
+                    ),
+                )
+            },
+            "supported realization row",
+        ),
+    ],
+    ids=["missing-row", "unsupported-row"],
+)
+def test_prepare_rejects_non_supported_exact_target_selection(
+    realization_update: dict, expected_message: str
+) -> None:
+    """Exact target requirements cannot fall back from an absent selection."""
+    profile = _target_profile_fixture()
+    realization_payload = _supported_target_realization_fixture(profile).model_dump(
+        mode="python", exclude={"semantic_digest"}
+    )
+    realization_payload.update(realization_update)
+    if not realization_payload["rows"]:
+        realization_payload["summary"]["baseline_control_actions"] = 0
+    realization = TargetRealizationResult.model_validate(realization_payload)
+    spec = _spec().model_copy(update={"execution_contract": _exact_target_contract()})
+
+    with pytest.raises(ValueError, match=expected_message):
+        prepare_execution_projection(
+            spec,
+            _control_structure(),
+            ExecutionRunIdentity(run_id="run-exact-target-invalid-selection"),
+            target_profile=profile,
+            target_realization=realization,
+        )
+
+
+def test_prepare_rejects_exact_target_operation_mismatch() -> None:
+    """The contract's exact operation must equal the selected realization."""
+    profile = _target_profile_fixture()
+    realization = _supported_target_realization_fixture(profile)
+    base_contract = _exact_target_contract()
+    requirement = base_contract.resource_requirements[0].model_copy(
+        update={"operation": "different_operation"}
+    )
+    contract_payload = base_contract.model_dump(
+        mode="python", exclude={"semantic_digest"}
+    )
+    contract_payload["resource_requirements"] = (requirement,)
+    contract = SemanticExecutionContract.model_validate(contract_payload)
+    spec = _spec().model_copy(update={"execution_contract": contract})
+
+    with pytest.raises(ValueError, match="does not match target realization"):
+        prepare_execution_projection(
+            spec,
+            _control_structure(),
+            ExecutionRunIdentity(run_id="run-exact-target-mismatch"),
+            target_profile=profile,
+            target_realization=realization,
+        )
+
+
+def test_stage5_target_operation_resolver_uses_supported_baseline_row() -> None:
+    """Stage 5 receives the exact operation selected for a baseline action."""
+    from asago_scenario_generator.stpa.scenario_prod.run import (
+        _target_operation_for_context,
+    )
+
+    realization = _supported_target_realization_fixture(_target_profile_fixture())
+    context = SimpleNamespace(
+        target_control_path=SimpleNamespace(
+            control_action=SimpleNamespace(action_id="CA-1-1")
+        )
+    )
+
+    operation = _target_operation_for_context(realization, context)
+
+    assert operation is not None
+    assert operation.operation_id == "process_refund"
+
+
+def test_stage5_target_operation_resolver_returns_none_without_a_selection() -> None:
+    """An action without a baseline or derived selection remains unbound."""
+    from asago_scenario_generator.stpa.scenario_prod.run import (
+        _target_operation_for_context,
+    )
+
+    realization = _target_realization_fixture(_target_profile_fixture())
+    context = SimpleNamespace(
+        target_control_path=SimpleNamespace(
+            control_action=SimpleNamespace(action_id="CA-1-1")
+        )
+    )
+
+    assert _target_operation_for_context(realization, context) is None
+
+
+def test_stage5_target_operation_resolver_rejects_unrecorded_selection() -> None:
+    """A selected operation must have exactly one corresponding observation."""
+    from asago_scenario_generator.stpa.scenario_prod.run import (
+        _operation_for_supported_row,
+    )
+
+    operation_ref = TargetOperationReference(
+        resource_id="mcp:fixture-target:process_refund",
+        operation_id="process_refund",
+    )
+    row = TargetRealizationRow(
+        control_action_id="CA-1-1",
+        controller_id="RESP-1",
+        disposition=TargetRealizationDisposition.supported,
+        candidate_operations=(operation_ref,),
+        selected_operation=operation_ref,
+    )
+
+    with pytest.raises(ValueError, match="not uniquely recorded"):
+        _operation_for_supported_row(
+            _target_realization_fixture(_target_profile_fixture()), row
+        )
 
 
 def test_prepare_rejects_empty_contextual_lineage_instead_of_broadening() -> None:
@@ -268,6 +703,7 @@ def test_projection_rejects_bindings_on_analytical_classification() -> None:
         environment_basis=EnvironmentBasis.none,
         profile_fit=ExecutionProfileFit.invalid,
         claim_scope=ExecutionClaimScope.no_execution_claim,
+        unresolved_requirement_ids=("REQ-1",),
         target_profile_digest="a" * 64,
     )
     payload = validated.projection.model_dump(mode="json", exclude={"semantic_digest"})
@@ -428,13 +864,79 @@ def test_bundle_publication_is_canonical_index_last_and_tamper_evident(
 
 
 def test_target_profile_publication_uses_canonical_shared_writer(tmp_path) -> None:
+    tool = McpToolObservation(
+        name="process_refund",
+        source_observation_sha256=hashlib.sha256(
+            canonical_json_bytes(
+                {
+                    "name": "process_refund",
+                    "description": "Process a refund.",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"order_id": {"type": "string"}},
+                    },
+                    "output_schema": "opaque",
+                }
+            )
+        ).hexdigest(),
+        description="Process a refund.",
+        input_schema={
+            "type": "object",
+            "properties": {"order_id": {"type": "string"}},
+        },
+        output_schema="opaque",
+    )
+    inventory = McpInventoryObservation(
+        target_id="target-profile-1",
+        authorization_scope_id="target-scope",
+        tools=(tool,),
+    )
+    resource = TargetProfileResource(
+        resource_id=mcp_resource_id("target-profile-1", tool.name),
+        resource_kind="tool",
+        target_id="target-profile-1",
+        tool_name=tool.name,
+        description=tool.description,
+        input_schema=tool.input_schema,
+        output_schema=tool.output_schema,
+        argument_names=tool.argument_names,
+        surfaces=("tool_call", "tool_result"),
+        operations=(
+            TargetProfileOperation(
+                operation_id=tool.name,
+                semantic_operation=tool.name,
+                argument_names=tool.argument_names,
+            ),
+        ),
+        evidence_refs=("inventory:tool:process_refund",),
+    )
     profile = ExecutionTargetProfile(
-        profile_id="target-profile-1",
-        environment_id="target-1",
+        target_id="target-profile-1",
+        authorization_scope_id="target-scope",
         basis=ProfileBasis.target,
-        authority=ProfileAuthority.reviewed,
-        inventory_completeness=InventoryCompleteness.reviewed_complete,
-        evidence_refs=("review:target",),
+        inventory_authority=InventoryAuthority.observed,
+        semantic_authority=SemanticAuthority.inferred,
+        inventory_completeness=InventoryCompleteness.observed_complete,
+        source_protocol=SourceProtocol.mcp,
+        source_inventory_digest=inventory.semantic_digest,
+        discovery_provenance=DiscoveryProvenance(
+            scanner_id="fixture-scanner",
+            interpreter_id="fixture-interpreter",
+            verifier_id="fixture-verifier",
+        ),
+        inventory=inventory,
+        resources=(resource,),
+        interpretations=(
+            {
+                "resource_id": resource.resource_id,
+                "tool_name": tool.name,
+                "disposition": TargetInterpretationDisposition.supported,
+                "likely_effect": TargetOperationEffect.update,
+                "likely_state_effect": TargetStateEffect.changes,
+                "evidence_refs": ("inventory:tool:process_refund:description",),
+                "rationale": "The observed description names a refund operation.",
+            },
+        ),
     )
 
     path = publish_execution_target_profile(tmp_path, profile)
@@ -479,6 +981,26 @@ def test_contract_valid_projection_fixtures_round_trip(fixture: Path) -> None:
     )
     relative = f"valid/{fixture.name}"
     assert payload["semantic_digest"] == digests["semantic_digests"][relative]
+
+
+def test_projection_contract_schema_requires_paired_target_lineage() -> None:
+    """The portable schema rejects either target authority without its pair."""
+    schema = json.loads(
+        (CONTRACT_ROOT / "projection-v2/schema.json").read_text(encoding="utf-8")
+    )
+    payload = json.loads(
+        (CONTRACT_ROOT / "projection-v2/valid/fully-bound.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    source_pins = payload["trace_refs"]["source_pins"]
+    source_pins["execution_target_profile"] = "a" * 64
+    source_pins["target_realization"] = "b" * 64
+    validator = Draft202012Validator(schema)
+
+    assert not list(validator.iter_errors(payload))
+    del source_pins["target_realization"]
+    assert list(validator.iter_errors(payload))
 
 
 @pytest.mark.parametrize(

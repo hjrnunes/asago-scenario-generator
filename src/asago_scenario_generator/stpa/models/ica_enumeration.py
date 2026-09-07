@@ -23,6 +23,29 @@ if TYPE_CHECKING:
     from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 
 
+def classify_ica_semantics(
+    uca_type: str, *, action_state: str, hazard_path: str
+) -> str:
+    """Combine reviewed action/harm facts with the fixed category, not model prose.
+
+    Callers validate their closed review vocabularies before invoking this pure
+    rule. Unknown categories raise KeyError; they are not an inferred decision.
+    """
+    expected = {
+        "NOT_PROVIDED": "absent",
+        "INCORRECT": "performed_unsafe",
+        "WRONG_TIMING": "wrong_timing",
+        "WRONG_DURATION": "wrong_duration",
+    }[uca_type]
+    if hazard_path == "contradictory":
+        return "contradictory"
+    if action_state == "undetermined":
+        return "insufficient_evidence"
+    if action_state != expected:
+        return "contradictory"
+    return hazard_path
+
+
 class UCAType(str, Enum):
     """Type of Unsafe Control Action."""
 
@@ -37,6 +60,12 @@ class ICA(BaseModel):
 
     ica_id: str  # RESP-X:CA-Y:TYPE-Z:N
     ica_text: str
+    deviation: str | None = Field(
+        default=None,
+        min_length=1,
+        exclude_if=lambda value: value is None,
+        description="Original deviation clause, separate from the rendered controller/action sentence.",
+    )
     hazardous_context: str
     loss_scenario: str
     related_hazards: list[str] = Field(
@@ -91,6 +120,13 @@ class ICASlot(BaseModel):
     is_na: bool
     icas: list[ICA] = Field(default_factory=list)  # empty if is_na
     na_justification: str | None = None  # required if is_na
+    unresolved_reason: str | None = Field(
+        default=None,
+        description=(
+            "Typed reason why this slot could not be analyzed; unlike a true "
+            "N/A decision, an unresolved slot retains no ICA findings."
+        ),
+    )
 
     def aligned(self) -> ICASlot:
         """Return a copy whose ICA identifiers match this slot's positions."""
@@ -98,6 +134,24 @@ class ICASlot(BaseModel):
 
     @model_validator(mode="after")
     def validate_na_exclusivity(self) -> ICASlot:
+        if self.unresolved_reason is not None:
+            if not self.unresolved_reason.strip():
+                raise ValueError(
+                    f"ICA slot {self.slot_id} unresolved_reason must be non-empty."
+                )
+            if self.is_na:
+                raise ValueError(
+                    f"ICA slot {self.slot_id} cannot be both unresolved and is_na=true."
+                )
+            if self.icas:
+                raise ValueError(
+                    f"ICA slot {self.slot_id} is unresolved but icas is non-empty."
+                )
+            if self.na_justification is not None:
+                raise ValueError(
+                    f"ICA slot {self.slot_id} is unresolved but na_justification is set."
+                )
+            return self
         if self.is_na:
             if self.na_justification is None:
                 raise ValueError(

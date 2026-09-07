@@ -113,7 +113,9 @@ def _control_element_response() -> dict:
 
 def _coordination_response() -> dict:
     """Return the minimum valid Call 3 response."""
-    return {"coordination_links": [], "integrity_findings": []}
+    from tests.stpa.sp1_helpers import valid_empty_coordination_analysis_dict
+
+    return valid_empty_coordination_analysis_dict()
 
 
 def _stage2_client(responsibility_response: dict) -> MockLLMClient:
@@ -163,12 +165,13 @@ def test_stage2_requires_and_preserves_security_constraint_refs(tmp_path) -> Non
 
 def test_stage2_preserves_security_constraint_refs(tmp_path) -> None:
     """The explicit Call 2a trace survives control-structure assembly."""
-    control_structure, _warnings = derive_control_structure(
+    result = derive_control_structure(
         llm_client=_stage2_client(_responsibility_response()),
         use_case_text="Test",
         loss_analysis=_loss_analysis(),
         run_dir=tmp_path,
     )
+    control_structure = result.control_structure
 
     assert control_structure.responsibilities[0].security_constraint_refs == ["SC-1"]
 

@@ -542,7 +542,10 @@ def _slot_from_ica_enumeration(
 def _ica_slot_disposition(
     value: Any, ica_ids: tuple[str, ...]
 ) -> tuple[StructuralDisposition, tuple[str, ...]]:
-    """Project the mutually exclusive ICA versus justified-N/A state."""
+    """Project ICA, explicit N/A, and unresolved slot states distinctly."""
+    unresolved_reason = getattr(value, "unresolved_reason", None)
+    if unresolved_reason is not None:
+        return "unresolved", (unresolved_reason,)
     if value.is_na:
         return "justified_na", (value.na_justification,)
     return "ica", ica_ids

@@ -14,6 +14,7 @@ the persistence adapter.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Sequence
 from typing import Annotated, Any, Literal
 
@@ -365,7 +366,7 @@ def _responsibility_slot_reference_keys(slot: Any) -> set[tuple[str, str]]:
     if slot.coordination_link is not None:
         raise ValueError(f"ICA slot {slot.slot_id} has ambiguous controller identity")
     expected = f"{slot.responsibility}:{slot.control_action}:{slot.uca_type.value}"
-    _require_slot_identity(slot.slot_id, expected)
+    _require_slot_identity(slot, expected)
     return {("RESP", slot.responsibility), ("CA", slot.control_action)}
 
 
@@ -374,15 +375,21 @@ def _coordination_slot_reference_keys(slot: Any) -> set[tuple[str, str]]:
     if slot.coordination_link is None:
         raise ValueError(f"ICA slot {slot.slot_id} has no controller identity")
     expected = f"{slot.coordination_link}:{slot.control_action}:{slot.uca_type.value}"
-    _require_slot_identity(slot.slot_id, expected)
+    _require_slot_identity(slot, expected)
     return {("CL", slot.coordination_link), ("CM", slot.control_action)}
 
 
-def _require_slot_identity(slot_id: str, expected: str) -> None:
-    """Reject a slot whose content does not match its exact identity."""
-    if slot_id != expected:
+def _require_slot_identity(slot: Any, expected: str) -> None:
+    """Reject a slot whose content does not match an exact supported identity."""
+    temporality = getattr(slot, "action_temporality", None)
+    temporal_text = getattr(temporality, "value", temporality) or "unknown"
+    temporal_suffix = (
+        re.sub(r"[^a-z0-9]+", "_", str(temporal_text).lower()).strip("_") or "unknown"
+    )
+    accepted = {expected, f"{expected}:{temporal_suffix}"}
+    if slot.slot_id not in accepted:
         raise ValueError(
-            f"ICA slot {slot_id} does not match its controller/action/type identity"
+            f"ICA slot {slot.slot_id} does not match its controller/action/type identity"
         )
 
 
@@ -421,6 +428,12 @@ def _canonical_ica_enumeration_payload(ica_enumeration: Any) -> dict[str, Any]:
     slots = []
     for slot in payload["slots"]:
         slot = dict(slot)
+        # ``unresolved_reason`` was added as an explicit third structural
+        # disposition.  Preserve the v1 digest for historical resolved/N/A
+        # slots by omitting its null default; a non-null reason remains
+        # semantic content and is therefore retained in the pin.
+        if slot.get("unresolved_reason") is None:
+            slot.pop("unresolved_reason", None)
         icas = []
         for ica in slot["icas"]:
             ica = dict(ica)

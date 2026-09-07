@@ -39,6 +39,7 @@ from .acceptance_refresh_stage2 import (
     _h_ar_stage2_calls_ready,
     _h_ar_stage2_run,
     _h_ar_valid_responsibility_set,
+    _h_ar_wire_target_effects,
 )
 
 FEATURE_ID = "acceptance_refresh"
@@ -47,6 +48,11 @@ FEATURE_ID = "acceptance_refresh"
 def register(api: object) -> None:
     """Register the characterized feature-scoped and global handlers."""
     api.set_feature(None)
+    api.register_first(
+        "the Call 2b wire schema forbids external effects on responsibility targets$",
+        _h_ar_wire_target_effects,
+        source_order=21942,
+    )
     api.set_feature(FEATURE_ID)
     api.register_first(
         "the `CoordinationAnalysis` model (?:does not )?declare",

@@ -21,9 +21,13 @@ dev = [
     "pytest",
     "ruff",
 ]
+target-discovery = [
+    "mcp>=1.9.0,<2",
+]
 
 [project.scripts]
 asago-scenario-generator = "asago_scenario_generator.cli:app"
+asago-target-scan = "asago_scenario_generator.target_discovery.cli:app"
 
 [dependency-groups]
 dev = [

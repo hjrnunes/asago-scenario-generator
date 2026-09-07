@@ -1,0 +1,23 @@
+Decide whether this exact observed operation implements this control action. When
+independent systemic authority is supplied, also check the selected controller
+and relevance against that authority; do not use the operation as evidence for
+its own parent/constraint association.
+Return `verified`, `rejected`, or `unverified`, with a concise reason and exact
+evidence references.
+
+CONTROL_ACTION_BEGIN
+{{ action_yaml }}CONTROL_ACTION_END
+
+OBSERVED_OPERATIONS_BEGIN
+{{ operations_yaml }}OBSERVED_OPERATIONS_END
+
+INDEPENDENT_SYSTEMIC_AUTHORITY_BEGIN
+{{ semantic_context_yaml }}INDEPENDENT_SYSTEMIC_AUTHORITY_END
+
+The verifier must compare the action's immediate effect and recipient with the
+observed operation's actual outcome. A prerequisite, trigger, validation or
+internal signal is not the same operation as a completed transfer, and an
+acknowledgement is not completion. Return `effect_match`, `recipient_match`,
+and `completion_match` explicitly; do not return `verified` unless the exact
+axis rule in the system instructions is satisfied. A tool call is allowed for
+an `agent_message` action when its observed implementation is an exact match.

@@ -11,6 +11,10 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ControlActionEffectKind,
     ControlStructure,
     CoordinationLink,
+    coordination_process_model_owner,
+)
+from asago_scenario_generator.models.target_realization import (
+    TargetOperationObservation,
 )
 from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
@@ -47,6 +51,27 @@ _UCA_DEFINITIONS = {
         "A continuous action stops too soon, continues too long, or has an unsafe duration."
     ),
 }
+
+
+def execution_implementation_kind(
+    control_action: "DescribedControlAction",
+    target_operation: TargetOperationObservation | None = None,
+) -> ControlActionEffectKind | None:
+    """Return the execution implementation kind for one selected action.
+
+    A target-realization row is an additive implementation attestation.  Its
+    exact observed operation therefore supplies the Stage 5 implementation
+    kind (an MCP/tool invocation) without changing the systemic action's
+    conceptual target or effect stored in :class:`ScenarioControlPath`.
+    Without that attestation, preserve the baseline action effect exactly.
+    The explicit type check prevents a caller from turning arbitrary context
+    into an execution claim.
+    """
+    if target_operation is not None:
+        if not isinstance(target_operation, TargetOperationObservation):
+            raise TypeError("target_operation must be a TargetOperationObservation")
+        return ControlActionEffectKind.tool_call
+    return control_action.effect_kind
 
 
 def build_scenario_generation_context(
@@ -270,7 +295,7 @@ def _stage6_execution_route_view(
 
 def _parse_selected_slot(threat: StructuralThreat) -> tuple[str, str, UCAType]:
     parts = threat.ica_slot_id.split(":")
-    if len(parts) != 3:
+    if len(parts) not in {3, 4} or any(not part for part in parts):
         raise ValueError(f"Invalid ICA slot ID format: {threat.ica_slot_id}")
     try:
         uca_type = UCAType(parts[2])
@@ -351,18 +376,15 @@ def _coordination_control_path(
 
     source = _responsibility(control_structure, link.source)
     target = _responsibility(control_structure, link.target)
-    pm_owners = [
-        responsibility
-        for responsibility in (source, target)
-        if any(
-            item.pm_id == link.shared_pm for item in responsibility.process_model_parts
-        )
-    ]
-    if len(pm_owners) != 1:
+    try:
+        pm_owner = coordination_process_model_owner(control_structure, link)
+    except ValueError as exc:
+        # Preserve the context seam's stable diagnostic while delegating the
+        # endpoint-owner rule to the shared typed control-structure authority.
         raise ValueError(
             f"coordination link {link_id!r} shared PM {link.shared_pm!r} "
             "is not owned by exactly one endpoint responsibility"
-        )
+        ) from exc
 
     endpoint_responsibilities = (source, target)
     process_models = _described_process_models(endpoint_responsibilities)
@@ -383,7 +405,7 @@ def _coordination_control_path(
             element_id=link.shared_pm,
             description=next(
                 item.description
-                for owner in pm_owners
+                for owner in (pm_owner,)
                 for item in owner.process_model_parts
                 if item.pm_id == link.shared_pm
             ),

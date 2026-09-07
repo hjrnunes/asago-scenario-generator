@@ -195,6 +195,28 @@ def test_authority_from_artifacts_validates_and_projects_exact_path_identities()
     assert authority.inventory_complete is True
 
 
+def test_authority_accepts_target_derived_slot_temporality_identity() -> None:
+    plan, resource_map, control, enumeration, loss_analysis, _ = (
+        _authoritative_artifacts()
+    )
+    slot = enumeration.slots[0]
+    temporal_slot_id = f"{slot.slot_id}:unknown"
+    temporal_ica = slot.icas[0].model_copy(update={"ica_id": f"{temporal_slot_id}:1"})
+    temporal_enumeration = ICAEnumeration(
+        slots=[
+            slot.model_copy(
+                update={"slot_id": temporal_slot_id, "icas": [temporal_ica]}
+            )
+        ]
+    )
+
+    authority = CorrespondenceAuthority.from_artifacts(
+        resource_map, plan, control, temporal_enumeration, loss_analysis
+    )
+
+    assert authority.structural_findings[0].ica_slot_id == temporal_slot_id
+
+
 def test_authority_from_artifacts_rejects_substituted_or_invalid_authority() -> None:
     plan, resource_map, control, enumeration, loss_analysis, _ = (
         _authoritative_artifacts()

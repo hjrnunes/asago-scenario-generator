@@ -72,7 +72,14 @@ class ControlActionEffectKind(str, Enum):
     Consumers can therefore select an execution observation without guessing
     from verbs such as ``send`` or ``update``.  ``None`` on a legacy action is
     retained as an analytical/legacy value; new Stage 2 output should provide
-    one of these values explicitly.
+    one of these values explicitly.  The closed wire values mean:
+
+    - ``model_output``: text or structured output returned to the caller;
+    - ``tool_call``: a structured operation invocation emitted by the agent;
+    - ``state_change``: a session or persistent state update;
+    - ``agent_message``: an internal message to another controller;
+    - ``environment_action``: an external side effect beyond output, invocation,
+      or state mutation.
     """
 
     model_output = "model_output"
@@ -340,6 +347,28 @@ class ControlStructure(BaseModel):
         _validate_coordination_links(self.coordination_links, resp_ids, all_pm_ids)
 
         return self
+
+
+def coordination_process_model_owner(
+    structure: ControlStructure, link: CoordinationLink
+) -> Responsibility:
+    """Resolve a coordination link's shared state to exactly one endpoint.
+
+    Stage 2 checks this before accepting its provider response; later scenario
+    assembly uses the same rule rather than discovering a different contract.
+    """
+    owners = [
+        resp
+        for resp in structure.responsibilities
+        if resp.resp_id in (link.source, link.target)
+        and any(pm.pm_id == link.shared_pm for pm in resp.process_model_parts)
+    ]
+    if len(owners) != 1:
+        raise ValueError(
+            f"coordination link '{link.link_id}' shared PM '{link.shared_pm}' "
+            "is not owned by exactly one endpoint responsibility"
+        )
+    return owners[0]
 
 
 def _check_all_duplicate_ids(

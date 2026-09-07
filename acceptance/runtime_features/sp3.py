@@ -935,8 +935,12 @@ def _h_sp3_system_prompt_contains(
         return True, ""
     prompt = world.sp3_llm_client.calls[0].system_prompt
     if "defender vulnerability annotation" in text.lower():
-        if "vulnerability" not in prompt.lower():
-            return False, "System prompt missing vulnerability annotation instructions"
+        prompt_lower = prompt.lower()
+        if "vulnerability" not in prompt_lower and "causal factor" not in prompt_lower:
+            return False, (
+                "System prompt missing defender vulnerability/causal-factor "
+                "instructions"
+            )
     elif "attacker BDI generation" in text.lower():
         if "attacker" not in prompt.lower():
             return False, "System prompt missing attacker BDI generation instructions"
@@ -3055,6 +3059,7 @@ def _h_sp3_full_run(world: World, text: str, examples: dict) -> tuple[bool, str]
     world.sp3_run_dir = run_dir
     max_workers = getattr(world, "sp3_max_workers", 1)
     world.sp3_run_result = run_sp3(
+        render_presentation=getattr(world, "render_presentation", False),
         llm_client=world.sp3_llm_client,
         enriched_threat_set=world.enriched_threat_set,
         control_structure=world.control_structure,
@@ -5339,13 +5344,6 @@ def _sp3_robustness_valid_bdi() -> object:
             "category": "user_message",
             "description": "One user message is the typed test stimulus.",
         },
-        "defender_vulnerabilities": [
-            {"belief_handle": "belief_1", "vulnerability": "vulnerability"},
-            {
-                "belief_handle": "belief_2",
-                "vulnerability": "the outcome state is not refreshed",
-            },
-        ],
         "attacker_bdi": {
             "beliefs": ["attacker belief"],
             "desires": ["induce ICA"],
@@ -5359,6 +5357,7 @@ def _sp3_robustness_valid_bdi() -> object:
         "causal_factors": [
             {
                 "source_handle": "cause_1",
+                "selected_for_route": True,
                 "evidence": "The selected structural state can remain stale.",
                 "temporal_condition": None,
                 "evidence_status": "structural_failure",
@@ -5376,8 +5375,6 @@ def _sp3_robustness_valid_bdi() -> object:
         },
         "execution_route": {
             "disposition": "executable_route",
-            "delivery_class": "direct_prompt",
-            "selected_factor_handle": "cause_1",
             "action_kind": "model_output",
             "reason": "The selected structural factor supports the direct route.",
         },

@@ -209,9 +209,12 @@ only request-local causal handles; the deterministic adapter binds each handle
 to its fixed factor kind and exact PM/FB/CA source. Coordination and controller
 IDs remain explained context but cannot be published as causal-factor sources,
 and every attacker intention must cite a handle with a declared factor.
-Defender vulnerabilities use a second closed local-handle list with exact
-cardinality, so the provider cannot omit a selected process-model belief or
-replace its identity. All Stage 6 renderers consume that same context, so an
+The contextual provider supplies one causal statement per declared handle.
+Defender-belief annotations are derived from that statement's exact PM source;
+the provider does not separately rewrite it. An undeclared PM is marked as not
+selected in this scenario, not as proven free of vulnerabilities. The public
+BDI result retains complete belief annotations and the legacy non-contextual
+provider seam is unchanged. All Stage 6 renderers consume that same context, so an
 unrelated global constraint cannot leak into a scenario. An adversary may take
 advantage of a declared structural failure without that prose being mistaken
 for a new access path. Capability and access-path assertions are validated
@@ -278,6 +281,12 @@ means candidates were attempted but produced zero published scenarios; and
 reports its diagnostic/accounting sidecars before returning non-zero for the
 attempted zero-yield status. Phase 2 verification remains independently
 non-blocking, and cannot change this scenario-generation status.
+
+Baseline assembly, heuristic, solution-neutrality and post-revision findings
+are retained with their source category in synthesis `stage_warnings` and the
+report's Analysis diagnostics section. Later stage-manifest writes must not
+erase them. These diagnostics do not change candidate counts or claim that a
+known analysis gap was resolved merely because scenarios were published.
 
 Correspondence is split into reviewable `correspondence-proposals-v1` and
 `correspondence-reconciliation-v1` artifacts. A proposal names exact obligation,
@@ -524,6 +533,83 @@ Product `run` and diagnostic `stpa-run` remain unaware of both checks.
 
 ## STPA execution
 
+Stage 2 derives use-case functions and their primary outputs before attaching
+security safeguards. Its prompts keep functional duties separate from rules
+governing them: filtering a response does not replace returning a response.
+Existing independently required safeguards remain modeled. Bounded structural
+response repairs preserve valid function descriptions and ownership rather than
+inviting a wholesale redesign for an extra JSON field. These are generation
+instructions, not a claim that schema validation proves functional completeness.
+
+Systemic and target-derived ICA review share the pure
+`models.ica_enumeration.classify_ica_semantics` rule. Providers must describe
+the named action state and the supported/contradictory/unknown hazard path;
+code compares those facts with the fixed UCA category. A target reviewer cannot
+confirm a finding using only an aggregate positive label, and its prompt must
+not invent an omitted prevention sequence to connect a missing operation to
+unauthorized execution. Supported harmful omissions remain eligible; failure of
+one action is not automatically harmful when an allowed alternative still
+satisfies the constraint. The shared rule validates consistency of explicit
+reviews, not their factual truth; inspection of live findings remains necessary.
+
+The existing Stage 2 coordination call also returns a complete typed semantic
+review, interpreted by `system_model.semantic_review`. It can reconcile each
+hazard and constraint description against the supplied use case and losses,
+each responsibility's exact governing constraint set and each action's effect kind,
+but cannot rename/merge controllers, change action meaning/targets, invent
+constraints, or produce ICAs. Unknown effects and empty constraint sets require
+explicit rationales. Provider responses missing complete exact-ID decisions
+use the existing bounded validation retry. The normal coordination call sends a
+required review schema with exact hazard/constraint/responsibility/action ID choices and list
+counts through structured output; the consumer additionally checks uniqueness.
+It does not advertise an optional review and later reject its omission.
+Hazard/constraint rows explicitly preserve, revise or leave meaning unresolved.
+A revision requires a changed description and a verbatim source quotation from
+the supplied use case or exact loss; source presence is validated separately
+from the reviewer's interpretation. Losses, all identities, ordering and
+hazard-to-loss links are immutable. Unresolved rows name the missing fact;
+constraints cannot reference unresolved hazards, and unresolved constraints
+cannot retain hazard edges or responsibility ownership. Both drafts are persisted
+before the call; the successful review and resulting loss/control graphs are
+separate artifacts. Legitimate source-authorized functions must remain possible,
+and restrictions on provider-bound prompts must not silently become restrictions
+on customer-bound output.
+This occurs before target realization and receives no target inventory.
+The later completeness revision preserves those established owner/constraint
+links when replacing a responsibility; it cannot erase them by omitting the
+field or returning an empty list. Its prompt displays the links explicitly as
+copy-through provenance. Revoking ownership belongs to semantic review, not
+an additive completeness repair.
+Coordination links must place their shared process-model element at exactly one
+endpoint responsibility. Stage 2 and scenario-context assembly use the same
+`coordination_process_model_owner` resolver, so a defect can use the existing
+Stage 2 correction instead of failing after scenario generation starts.
+
+`scenario_prod.outcome_grounding` separates literal source presence from
+semantic interpretation. For action/state value comparisons, Stage 5 may cite
+an exact supplied constraint/action text and its verbatim literal quotation.
+If citation evidence is absent, `resolve_outcome_grounding` may instead find
+the exact typed scalar or object key in the supplied `TargetObservationSnapshot`
+JSON observations. It retains all matching references and JSON paths; repeated
+occurrences are still evidence of presence. It does not search schemas,
+defaults, examples, or arbitrary prompt prose. An invalid explicit citation
+remains unresolved and cannot trigger the absent-citation fallback. This
+resolution is shared by materialization and its audit, with no citation-only
+provider retry or additional model call.
+Unmatched evidence retains the subject/property/operator but materializes a
+typed unresolved reference value; it never derives policy from tool schemas.
+The ordinary model-output Boolean proposition is exempt because it is a truth
+predicate, not an argument reference value. Per-context grounding audit records
+preserve the proposed and compiled conditions and cited source, explicitly
+without independent interpretation verification. These are audit sidecars,
+not runtime observations or an additional consumer input. The existing bundle
+contract carries the resulting literal or placeholder unchanged.
+Provider state-condition subjects use the explained local process-model handles,
+just like temporal references. Compilation resolves the handle and checks it
+against the declared causal factors; a provider never needs to reconstruct a
+hidden process-model identifier. This does not establish runtime observability
+of an internal state.
+
 The product `run` composes taxonomy-obligation planning with the STPA stages
 described below. The advanced `stpa-run` command executes the same baseline
 STPA stages without taxonomy-obligation completeness. Both paths construct
@@ -541,6 +627,21 @@ handles; deterministic assembly resolves them to the fixed STPA identities and
 resource-requirement templates. It does not ask the model to label a result
 concrete or executable.
 
+At the provider wire, the stimulus category is the sole delivery input and an
+executable response marks exactly one declared
+`causal_factors[].selected_for_route` factor; an analytical-only response marks
+none. Deterministic compilation derives the delivery class and maps that marker
+to the existing final factor identity. It does not add evidence or retag a
+factor, and the published execution route and contract remain unchanged.
+The selected ingress is independent of the target action kind: direct user input
+may lead to a tool call as well as a model response. Indirect stimuli require the
+selected factor's existing `reachable_capability` or `bounded_assumption` evidence
+branch. `structural_failure` alone cannot establish attacker influence over a
+tool/retrieval result and is rejected through the existing bounded response
+correction. A prospective carrier remains a declared hypothesis, not an observed
+attack. Accurate target returns are background evidence; a mistaken interpretation
+belongs to the process model, not an additional sensor fault.
+
 Delivery/factor fidelity is a closed structural check. Direct prompt accepts a
 selected process-model flaw; conversation context accepts a process-model flaw
 or feedback delay; and indirect content accepts a process-model flaw or sensor
@@ -551,12 +652,22 @@ unknown complete-response strings; the consumer may evaluate them with a
 semantic response judge.
 
 Final non-N/A ICAs cross an independent STPA attribution check before Stage 5.
-Its closed prompt view contains only the authoritative action/category and the
-selected hazard, constraint, and reachable-loss meaning. Contradictory or
+Its closed prompt view contains the authoritative action, original deviation,
+and selected hazard, constraint, and reachable-loss meaning. The proposed UCA
+category and category-bearing ICA identity stay in code: the model describes
+the action state using a request-local reference, and code compares that state
+with the fixed slot. Previous verdicts are not supplied as semantic evidence
+during the recheck. Optional original `ICA.deviation` avoids asking the reviewer
+to extract a clause from compiler-rendered prose; absent values are omitted so
+historical identities remain unchanged. Contradictory or
 insufficient attribution permits one separate ICA-author correction followed
 by one independent recheck; unchanged or still-unsupported material is retained
-as an explicit exclusion while sibling ICAs proceed. Taxonomy concepts and
-mapping evidence do not enter this verifier. Mapping strength is instead
+as an explicit exclusion while sibling ICAs proceed. A technical correction/recheck
+failure retains its provider-failure disposition and original semantic attempt,
+but cannot admit the rejected ICA. Unverified replacement prose is never
+applied to the enumeration; only independently supported corrections are applied.
+An initial provider outage with no semantic verdict remains distinguishable.
+Taxonomy concepts and mapping evidence do not enter this verifier. Mapping strength is instead
 derived deterministically from the complete pinned relation path.
 
 Every executable unsafe outcome has a bounded semantic proposition as well as
@@ -578,6 +689,11 @@ action, hazard, constraint, capability, and access references remain only when
 the response has a named field that copies them, with their meanings stated in
 the prompt. Deterministic assembly derives `semantic_binding_required` from
 typed placeholder presence; the provider cannot declare that redundant flag.
+Provider validation and materialization use the same explained-prose and temporal
+normalization. Temporal placeholders have exact condition/field namespaces,
+including separate causal-factor and outcome occurrences. Unknown time values
+remain typed placeholders; explicit discrete temporality does not acquire a
+duration merely because a finding requests the WRONG_DURATION category.
 
 The producer classifies binding completeness as `concrete`, `parameterized`, or
 `analytical_only`, independently of the environment basis
@@ -603,13 +719,51 @@ returned model/agent response and needs no domain resource, whereas
 retain their corresponding domain resources.
 
 `run` may receive `--execution-target-profile` and an explicit
-`--requested-environment-basis`. The profile is a reviewed, content-addressed
-semantic inventory with no secrets or live connection details. A simulation
-profile is selected explicitly and supplies a complete mock contract; the
-producer never invents one from missing target information. With no profile,
-the producer retains exact logical requirements for later binding. A complete
-simulation profile produces a concrete simulated case, not a target-integrated
-claim.
+`--requested-environment-basis`. The profile is a content-addressed, closed
+semantic inventory with no secrets or live connection details. Metadata-free
+MCP profiles are produced independently by the optional `asago-target-scan
+mcp` command: the default scan performs `tools/list` only and writes a
+self-contained profile plus sanitized inventory, manifest, and call accounting.
+Secret-like values are removed from prompt views and persisted discovery
+artifacts while each sanitized tool row retains the SHA-256 of the original
+normalized observation. Optional disposable-environment inspection may invoke
+only verifier-agreed read/observe tools whose schema admits an empty argument
+object, and remains bounded by the caller's explicit call limit.
+MCP profiles retain separate `inventory_authority: observed` and
+`semantic_authority: inferred|reviewed` fields, and each operation preserves
+the exact MCP tool name as both `operation_id` and `semantic_operation`.
+Product `run` strictly loads the profile file and does not import or invoke
+MCP transport. All systemic STPA stages, including baseline ICA enumeration,
+receive a target-blind input view. Only after that baseline is complete does
+the separately attested target-realization lens relate exact observed
+operations to systemic control actions. It may add one bounded, independently
+verified target-specific extension, but cannot alter or remove baseline
+records. Stage 5 receives an exact target operation only from a supported
+realization row; unresolved and ambiguous relationships remain visible and
+cannot become execution requirements. That verified implementation can be a
+tool call even when the systemic action relates conceptual responsibilities;
+`execution_implementation_kind` specializes execution without changing the
+baseline relationship. Operation-led extensions retain the observed description
+and argument schema in code. The provider selects only the systemic association,
+which the existing independent verifier checks against the selected controller
+and governing constraints. Handoff alone is not evidence of completed approval.
+Target-backed projections pin the
+profile and realization digests as a required pair. A simulation profile is selected explicitly and supplies a
+complete mock contract; the producer never invents one from missing target
+information. With no profile, the producer retains exact logical requirements
+for later binding. A complete simulation profile produces a concrete simulated
+case, not a target-integrated claim.
+
+Optional `--target-observations` is a separate Stage 5 companion loaded from a
+normalized capture document. `TargetObservationSnapshot` in
+`stpa.scenario_prod.target_observations` pairs bounded state/read text with the
+exact profile digest and a content digest. It is stripped from systemic inputs,
+does not alter `ScenarioGenerationContext`, and is persisted as
+`target-observations.yaml`. Explained observation references may be cited by
+`ComparisonEvidence`, or exact JSON presence may be resolved without a citation;
+either validates source presence, not rule
+interpretation or enforcement. Outcome-grounding records retain the companion
+digest. The normal pipeline does not discover or call target tools to obtain it.
 
 The artifact generator consumes the published contract and profile through its
 own resolver. It creates one bound execution case, matching each logical role
@@ -629,7 +783,13 @@ Tolerant SP1 response graphs remain raw until deterministic ID/reference
 normalization produces valid typed artifacts; invalid intermediate Pydantic
 objects are never serialized. Stage 1a classifies losses from either
 intermediate container by typed provenance, deduplicates identical repeats,
-and reports conflicting IDs as fatal stage errors. Stage 2 rejects empty
+and reports conflicting IDs as fatal stage errors. Its provider wire requires
+all four collections explicitly, bounded at 16 records each. A bounded repair
+retains a collection when the correction is empty and replaces the collection
+when the correction is nonempty; it does not union obsolete records by ID.
+Exact repeats of the accepted risk baseline are removed, while changed reused
+identities are rejected on both initial gap responses and corrections.
+Stage 2 rejects empty
 requirement/responsibility sets, and an exhausted fallback is fatal. The
 STPA retry contract is bounded: Stage 2 retries a JSON-decoding failure or a
 semantically empty requirement/responsibility result once, while Stage 1a
@@ -668,7 +828,17 @@ projection document — schema version, candidate identity, UCA reference,
 factor-to-assertion and factor-to-step mapping, canonical predicates, the
 final unsafe-control-action step, and typed provenance — and returns typed
 violations aligned with the taxonomy `projection_validation` contract.
-Stage 6 narrative, attack-tree, and Gherkin prompts render the same
+Normal publication renders narrative, attack-tree and Gherkin summaries
+deterministically through `render_scenario_summary`. They retain the selected
+causal evidence and describe a hypothesis, not an observed test result.
+`run_sp3(render_presentation=True)` explicitly opts into the three additional
+model-authored renderings; the default execution path makes none of those calls.
+Stage 5 prompt views teach condition field semantics without supplying invented
+request-specific values. Temporal outcomes reuse the factor-condition local
+handle resolver, and target-backed action-value predicates must name an observed
+input-schema argument.
+
+Optional Stage 6 narrative, attack-tree, and Gherkin prompts render the same
 validator-derived projection alignment table (`stpa.scenario_prod.prompt_alignment`),
 keyed by semantic structural IDs, when the optional `projection_alignment`
 argument is supplied to their builders. The current product seam is the

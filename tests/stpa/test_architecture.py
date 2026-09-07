@@ -359,6 +359,7 @@ class TestModelsDoNotImportHigherLayers:
 # Dependency layers within system_model (lower = closer to IO/constants).
 # A module at layer N may import from modules at layer <= N.
 _SYSTEM_MODEL_LAYERS: dict[str, int] = {
+    "semantic_review": 0,
     "_constants": 0,
     "id_normalization": 0,
     "heuristics": 1,
@@ -915,6 +916,9 @@ SCENARIO_PROD_DIR = STPA_ROOT / "scenario_prod"
 # Dependency layers within scenario_prod (lower = closer to leaf).
 # A module at layer N may import from modules at layer <= N.
 _SCENARIO_PROD_LAYERS: dict[str, int] = {
+    "target_observations": 0,
+    "outcome_grounding": 0,
+    "presentation": 1,
     "_constants": 0,
     "enrichment": 0,
     "context": 0,

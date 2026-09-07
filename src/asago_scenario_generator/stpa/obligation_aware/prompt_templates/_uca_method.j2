@@ -15,6 +15,13 @@ Four ICA types:
 - WRONG_TIMING: the action is provided too early, too late, or in an unsafe order.
 - WRONG_DURATION: a continuous action stops too soon, continues too long, or is applied for an unsafe duration.
 
+Apply the category to the exact named action, not a neighbouring safeguard.
+For `release a laboratory sample`, missing approval is not NOT_PROVIDED release:
+it is a different missing action, or a condition making an actual release unsafe.
+For `send an alarm`, INCORRECT requires an alarm that is sent with unsafe content,
+destination or effect; `no alarm is sent` belongs to NOT_PROVIDED. Do not duplicate
+one omission across both categories merely to fill the slots.
+
 Timing and duration are distinct. WRONG_DURATION is eligible only when the
 supplied `action_temporality` is `continuous` or `bounded_duration`; do not
 infer continuing behavior from action prose. An ICA describes

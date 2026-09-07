@@ -85,6 +85,7 @@ Feature: SP1 Stage 2 — Control Structure derivation
     When Stage 2 Call 2b control elements derivation is run
     Then a ControlElementSet model is produced
     And the ControlElementSet contains controlled process CP-1
+    And the Call 2b wire schema forbids external effects on responsibility targets
 
   # SP1-S2-09
   Scenario Outline: SP1-S2-09 each Stage 2 call is logged with its own step name

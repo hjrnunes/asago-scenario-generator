@@ -7,13 +7,19 @@ from __future__ import annotations
 
 import json
 
+import yaml
 
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     Stage1Profile,
 )
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
-from asago_scenario_generator.stpa.models.control_structure import ControlStructure
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlStructure,
+)
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    CoordinationAnalysis,
+)
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
@@ -108,8 +114,28 @@ def _run3_gap_draft_dict() -> dict:
             "related_losses": ["L-1", "L-2"],
         }
     )
-    draft["security_constraints"][0]["related_hazards"] = ["H-8", "H-1"]
+    draft["security_constraints"][0].update(
+        {"constraint_id": "SC-7", "related_hazards": ["H-8", "H-1"]}
+    )
     return draft
+
+
+def _coordination_with_constraints(
+    constraint_count: int, *, hazard_count: int | None = None
+) -> dict:
+    """Build a complete Call 3 review for a synthetic loss graph."""
+    hazard_count = hazard_count or constraint_count
+    return valid_empty_coordination_analysis_dict(
+        constraint_ids=tuple(f"SC-{index}" for index in range(1, constraint_count + 1)),
+        hazard_ids=tuple(f"H-{index}" for index in range(1, hazard_count + 1)),
+    )
+
+
+def _reviewed_coordination_for_run() -> dict:
+    payload = _coordination_with_constraints(2)
+    payload["semantic_review"]["constraints"][0]["related_hazards"] = ["H-2"]
+    payload["semantic_review"]["constraints"][1]["related_hazards"] = []
+    return payload
 
 
 def _setup_mock_client(
@@ -150,9 +176,7 @@ def _setup_mock_client(
     client.set_response_for(ControlElementSet, valid_control_element_set_dict())
 
     # Stage 2 Call 3: CoordinationAnalysis
-    client.set_response_for(
-        CoordinationAnalysis, valid_empty_coordination_analysis_dict()
-    )
+    client.set_response_for(CoordinationAnalysis, _coordination_with_constraints(2))
 
     # Critic: CriticFindings
     if critic_findings is not None:
@@ -226,6 +250,10 @@ class TestRunOrchestration:
                 _run3_gap_draft_dict(),
             ],
         )
+        client.set_response_for(
+            CoordinationAnalysis,
+            _coordination_with_constraints(7, hazard_count=8),
+        )
 
         result = run_sp1(
             llm_client=client,
@@ -240,7 +268,8 @@ class TestRunOrchestration:
         assert len(result.loss_analysis.security_constraints) == 7
 
         entries = [
-            json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
+            json.loads(line)
+            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
         ]
         stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
         assert [entry["success"] for entry in stage1a_entries] == [False, True, True]
@@ -259,6 +288,43 @@ class TestRunOrchestration:
         assert (tmp_path / "loss-analysis.yaml").exists()
         assert (tmp_path / "capability-profile.yaml").exists()
         assert (tmp_path / "control-structure.yaml").exists()
+
+    def test_run_publishes_reviewed_loss_analysis_and_retains_stage1a_draft(
+        self, tmp_path
+    ):
+        client = _setup_mock_client()
+        client.set_response_for(CoordinationAnalysis, _reviewed_coordination_for_run())
+        result = run_sp1(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=make_risk_cards(),
+            run_dir=tmp_path,
+        )
+        assert result.loss_analysis is not None
+        assert result.loss_analysis.security_constraints[0].related_hazards == ["H-2"]
+        assert result.loss_analysis.security_constraints[1].related_hazards == []
+        draft = LossAnalysis.model_validate(
+            yaml.safe_load((tmp_path / "loss-analysis-draft.yaml").read_text())
+        )
+        canonical = LossAnalysis.model_validate(
+            yaml.safe_load((tmp_path / "loss-analysis.yaml").read_text())
+        )
+        assert draft.security_constraints[0].related_hazards == ["H-1"]
+        assert canonical.model_dump() == result.loss_analysis.model_dump()
+        entries = [
+            json.loads(line)
+            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
+        ]
+        assert (
+            len(
+                [
+                    entry
+                    for entry in entries
+                    if entry["stage"] == "stage_2" and entry["step"].startswith("call_")
+                ]
+            )
+            == 4
+        )
 
     def test_run_02_stages_execute_in_order(self, tmp_path):
         """SP1-RUN-02: stages execute in order 1b then 1a then 2."""

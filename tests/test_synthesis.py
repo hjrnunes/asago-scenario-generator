@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, replace
+from html import escape
 from pathlib import Path
 from types import SimpleNamespace
 
 import yaml
+import pytest
 
 from asago_scenario_generator.data.loaders import load_reviewed_risk_extraction
 from asago_scenario_generator.pipeline.obligation_contracts import RiskCardInput
@@ -19,6 +21,13 @@ from asago_scenario_generator.pipeline.synthesis import (
     run_synthesis,
 )
 from asago_scenario_generator.report.synthesis import _candidate_outcomes_html
+from asago_scenario_generator.models.target_realization import (
+    TargetRealizationResult,
+    TargetRealizationSummary,
+)
+from asago_scenario_generator.stpa.models.execution_classification import (
+    ExecutionTargetProfile,
+)
 
 
 def _plan(*, gap: bool = False) -> SimpleNamespace:
@@ -207,6 +216,34 @@ class _FakeAdapters:
         )
 
 
+@dataclass
+class _TargetAwareFakeAdapters(_FakeAdapters):
+    """Record the target boundary while returning an empty typed lens."""
+
+    def target_realize(
+        self,
+        *,
+        inputs,
+        execution_target_profile,
+        **_,
+    ) -> TargetRealizationResult:
+        self.calls.append(("target_realization", (inputs, execution_target_profile)))
+        return TargetRealizationResult(
+            baseline_id="baseline:fixture",
+            baseline_digest="baseline-digest",
+            profile_id=execution_target_profile.target_id,
+            profile_digest=execution_target_profile.semantic_digest,
+            summary=TargetRealizationSummary(
+                baseline_control_actions=0,
+                observed_operations=0,
+                supported=0,
+                ambiguous=0,
+                unmapped=0,
+                contradictory=0,
+            ),
+        )
+
+
 def _inputs(tmp_path: Path) -> SynthesisInputs:
     return SynthesisInputs(
         use_case="A system that handles requests",
@@ -240,6 +277,103 @@ def test_synthesis_plans_before_baseline_and_keeps_shared_snapshot(
     baseline_inputs, snapshot = fake.calls[1][1]
     assert baseline_inputs is result.inputs
     assert snapshot.profile == "profile"
+
+
+def test_failed_baseline_retains_stage_diagnostic_before_obligation_calls(
+    tmp_path: Path,
+) -> None:
+    fake = _FakeAdapters(calls=[])
+    error = "stage_2/call_3_coordination: provider rejected unsupported response schema"
+    adapters = replace(
+        SynthesisAdapters.from_object(fake),
+        baseline=lambda **_: SimpleNamespace(
+            loss_analysis="baseline-loss", control_structure=None, stage_errors=[error]
+        ),
+    )
+
+    with pytest.raises(
+        ValueError, match="provider rejected unsupported response schema"
+    ):
+        run_synthesis(_inputs(tmp_path), adapters)
+
+    assert [name for name, _ in fake.calls] == ["plan"]
+
+
+def test_synthesis_retains_baseline_diagnostics_without_changing_yield(tmp_path):
+    """Later stage manifests must not erase the baseline's unresolved findings."""
+    diagnostics = {
+        "stage_warnings": ["An <input> repair was required."],
+        "heuristic_errors": ["A feedback connection remains missing."],
+        "heuristic_warnings": ["A responsibility has no feedback."],
+        "solution_neutrality_warnings": [
+            "An implementation assumption needs evidence."
+        ],
+        "post_revision_warnings": [
+            "Revision made no structural changes; the explicit gaps remain unresolved."
+        ],
+    }
+    fake = _FakeAdapters(calls=[])
+    adapters = replace(
+        SynthesisAdapters.from_object(fake),
+        baseline=lambda **_: SimpleNamespace(
+            loss_analysis="baseline-loss",
+            control_structure="baseline-control",
+            **diagnostics,
+        ),
+    )
+
+    result = run_synthesis(_inputs(tmp_path), adapters)
+
+    expected = [
+        f"Baseline {category}: {warning}"
+        for category, warnings in diagnostics.items()
+        for warning in warnings
+    ]
+    saved = yaml.safe_load((tmp_path / "synthesis-manifest.yaml").read_text())
+    assert result.stage_warnings == expected
+    assert result.manifest["stage_warnings"] == expected
+    assert saved["stage_warnings"] == expected
+    assert result.scenario_envelopes == ("scenario-1",)
+    assert result.stage_errors == []
+    assert diagnostics["stage_warnings"] == ["An <input> repair was required."]
+    assert result.report_path is not None
+    report = result.report_path.read_text()
+    assert "Analysis diagnostics" in report
+    assert all(escape(warning) in report for warning in expected)
+    assert "An <input> repair" not in report
+
+
+def test_target_profile_is_absent_from_systemic_baseline_inputs(
+    tmp_path: Path,
+) -> None:
+    """The primitive target input first appears at the target lens boundary."""
+    fixture = Path("data/contracts/stpa-execution/target-profile-v1/valid/minimal.json")
+    profile = ExecutionTargetProfile.model_validate(
+        json.loads(fixture.read_text(encoding="utf-8"))
+    )
+    profile.assert_integrity()
+    fake = _TargetAwareFakeAdapters(calls=[])
+    inputs = replace(
+        _inputs(tmp_path),
+        execution_target_profile=profile,
+    )
+
+    result = run_synthesis(inputs, SynthesisAdapters.from_object(fake))
+
+    names = [name for name, _ in fake.calls]
+    assert names.index("baseline") < names.index("target_realization")
+    baseline_inputs, _snapshot = fake.calls[names.index("baseline")][1]
+    realization_inputs, seen_profile = fake.calls[names.index("target_realization")][1]
+    assert baseline_inputs.execution_target_profile is None
+    assert realization_inputs is inputs
+    assert seen_profile is profile
+    assert result.target_realization is not None
+    assert (
+        result.manifest["source_artifacts"]["execution_target_profile"][
+            "semantic_digest"
+        ]
+        == profile.semantic_digest
+    )
 
 
 def test_phase2_failure_is_last_and_does_not_erase_scenarios(tmp_path: Path) -> None:
@@ -1065,9 +1199,7 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
                 {
                     "ica_id": request.ica_id,
                     "verdict": (
-                        "supported"
-                        if correction_feedback
-                        else "insufficient_evidence"
+                        "supported" if correction_feedback else "insufficient_evidence"
                     ),
                     "rationale": "The typed STPA path is coherent after one correction.",
                 }

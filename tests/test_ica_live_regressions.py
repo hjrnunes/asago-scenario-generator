@@ -24,6 +24,10 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
 from asago_scenario_generator.stpa.obligation_aware.provider import (
     ObligationAwareLLMAdapter,
 )
+from asago_scenario_generator.stpa.obligation_aware import provider as provider_module
+from asago_scenario_generator.stpa.obligation_aware import (
+    slot_filling as slot_filling_module,
+)
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 from asago_scenario_generator.stpa.obligation_aware.routing import build_neutral_briefs
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
@@ -203,6 +207,76 @@ def test_provider_retries_schema_valid_draft_when_compile_semantics_fail(
     assert entries[0]["success"] is False
     assert "unknown hazards: H-404" in entries[0]["error"]
     assert entries[1]["success"] is True
+
+
+def test_provider_compiles_strict_slot_draft_once_before_outer_fill(
+    monkeypatch, tmp_path
+):
+    """A canonical provider slot must not re-enter the legacy compiler."""
+    compile_calls: list[type] = []
+    original_compile = slot_filling_module.compile_slot_provider_entry
+
+    def counted_compile(value, **kwargs):
+        compile_calls.append(type(value))
+        return original_compile(value, **kwargs)
+
+    # The adapter imports the compiler at module scope, while the outer seam
+    # owns its own reference.  Patching both makes the assertion cover both
+    # possible compilation sites without reaching into call internals.
+    monkeypatch.setattr(provider_module, "compile_slot_provider_entry", counted_compile)
+    monkeypatch.setattr(
+        slot_filling_module, "compile_slot_provider_entry", counted_compile
+    )
+
+    # Use a tiny direct request so the provider response can be fed through
+    # the outer seam without introducing a second target or unrelated routes.
+    request = _provider_slot_request()
+
+    class NAFakeClient:
+        model = "captured-single-compile"
+
+        def complete(self, **kwargs):
+            slot_id = request.slots[0].slot_id
+            return LLMResult(
+                content={
+                    "filled_slots": [
+                        {
+                            "slot_id": slot_id,
+                            "is_na": True,
+                            "na_rationale": "No finding applies to this slot.",
+                            "findings": [],
+                            "consideration_results": [],
+                        }
+                    ]
+                },
+                prompt_tokens=1,
+                completion_tokens=1,
+                duration_ms=1,
+                system_prompt=kwargs["system_prompt"],
+                user_prompt=kwargs["user_prompt"],
+            )
+
+    provider = ObligationAwareLLMAdapter(
+        NAFakeClient(),
+        run_dir=tmp_path,
+        controls=request.controls,
+    )
+    response = provider.fill(request)
+
+    assert compile_calls == [SlotIcaDraft]
+    diagnostics = []
+    compiled, error = slot_filling_module._compile_response_slots(
+        response,
+        request=request,
+        expected={slot.slot_id: slot for slot in request.slots},
+        diagnostics=diagnostics,
+        loss_analysis=request.loss_analysis,
+        control_structure=request.control_structure,
+    )
+    assert error is None
+    assert diagnostics == []
+    assert tuple(compiled) == (request.slots[0].slot_id,)
+    assert compile_calls == [SlotIcaDraft]
 
 
 def test_local_ica_preflight_failure_is_recorded_before_provider_dispatch(

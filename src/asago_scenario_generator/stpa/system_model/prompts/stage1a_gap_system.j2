@@ -14,15 +14,39 @@ Systematically review the use-case description for:
 3. **Domain-specific features** — does every capability specific to the supplied
    system have coverage?
 4. **Stakeholder groups** — does every stakeholder group mentioned in the use-case have their interests represented in the losses?
-5. **Attack surfaces** — are there entry points or data flows that an adversary could target that are not addressed by any existing hazard?
+5. **Attack surfaces** — when supplied evidence identifies
+   entry points or data flows that an adversary could target, account for them;
+   missing attack evidence does not exclude an otherwise grounded gap.
 
 For each gap found, derive the complete chain: loss → hazard → security constraint.
 A gap is a materially missing stakeholder loss or hazardous system state, not a
 differently worded duplicate of an existing record.
 
-## Priority: adversary-actionable threats
+Use the existing analysis as a closed dependency boundary.  Start by declaring
+any new, grounded use-case loss; then add a hazard that references only an
+existing or newly declared loss; then add a constraint that references only an
+existing or newly declared hazard.  Never return a hazard or constraint with a
+dangling ID.  If the existing analysis already covers the supplied system and
+there is no grounded gap, return all four collections empty only when that
+prior analysis already contains a complete hazard/constraint graph.  If losses
+are present but their dependent graph is incomplete, complete that graph in
+this call even when no new use-case loss is needed.
 
-Focus on gaps where an adversary could deliberately cause or amplify the loss. Omit operational risks with no adversarial vector (e.g., carbon footprint, natural data drift) unless there is a concrete attack path.
+Return only materially distinct gaps. Return no more than 16 new losses, 16 new
+hazards, and 16 new security constraints, and never repeat a record to fill the
+response.
+
+## Relevance and causal follow-up
+
+Include materially missing stakeholder losses and system-level hazardous states
+grounded in the use-case, including ordinary operational or systemic gaps. Do
+not require an adversary, entry point, or concrete attack path for inclusion.
+Adversarial relevance is a later causal-feasibility question; when attack
+evidence is present, retain it as supporting context rather than making it a
+prerequisite. Do not invent gaps merely to cover every capability or fill a
+quota.
+
+## Permitted behavior and constraint grounding
 
 ## Structural requirements
 
@@ -40,7 +64,11 @@ Each hazard MUST name at least one specific component, data flow, integration po
 
 ### When no gaps exist
 
-An empty result is acceptable if the organizational risks genuinely cover every adversary-actionable threat surface in this system. Do not invent gaps to fill a quota. But a use-case description with multiple integration points, domain-specific features, and stakeholder groups will almost always have gaps.
+An empty result is acceptable if the existing analysis genuinely covers every
+materially grounded loss and hazardous system state in this use-case.
+Do not invent gaps to fill a quota. But a use-case description with multiple
+integration points, domain-specific features, and stakeholder groups will
+often have gaps.
 
 ### Acronym expansion
 

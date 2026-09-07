@@ -262,7 +262,8 @@ def _setup_valid_mock_client() -> MockLLMClient:
     client.set_response_for(ResponsibilitySet, _valid_responsibility_set_dict())
     client.set_response_for(ControlElementSet, valid_control_element_set_dict())
     client.set_response_for(
-        CoordinationAnalysis, valid_empty_coordination_analysis_dict()
+        CoordinationAnalysis,
+        valid_empty_coordination_analysis_dict(constraint_ids=("SC-1", "SC-2")),
     )
     client.set_response_for(CriticFindings, valid_critic_findings_dict_no_gaps())
     return client

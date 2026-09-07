@@ -20,6 +20,24 @@ from asago_scenario_generator.pipeline.obligation_phase2_evidence import (
 from asago_scenario_generator.pipeline.scenario_realization import (
     build_scenario_realization_assessment,
 )
+from asago_scenario_generator.pipeline.target_realization import (
+    TargetDerivedICAFactory,
+    TargetDerivedICAInterpreter,
+    TargetRealizationStpaProjection,
+    TargetRealizationExtensionFactory,
+    TargetRealizationExtensionInterpreter,
+    TargetRealizationInterpreter,
+    TargetRealizationInterpreterFactory,
+    reconcile_declared_observed_capabilities,
+    realize_target_derived_icas,
+    realize_target_operations,
+    project_target_realization_to_stpa,
+)
+from asago_scenario_generator.pipeline.target_realization_persistence import (
+    persist_target_realization,
+    read_target_realization,
+    write_target_realization,
+)
 
 __all__ = [
     "batch_neutral_obligation_briefs",
@@ -34,6 +52,20 @@ __all__ = [
     "create_obligation_batches",
     "derive_obligation_accounting",
     "derive_phase2_evidence_from_accounting",
+    "reconcile_declared_observed_capabilities",
+    "realize_target_derived_icas",
+    "realize_target_operations",
+    "project_target_realization_to_stpa",
+    "TargetRealizationStpaProjection",
+    "TargetDerivedICAFactory",
+    "TargetDerivedICAInterpreter",
+    "TargetRealizationExtensionFactory",
+    "TargetRealizationExtensionInterpreter",
+    "TargetRealizationInterpreter",
+    "TargetRealizationInterpreterFactory",
+    "persist_target_realization",
+    "read_target_realization",
+    "write_target_realization",
     "validate_obligation_routes",
     "validate_routes",
 ]

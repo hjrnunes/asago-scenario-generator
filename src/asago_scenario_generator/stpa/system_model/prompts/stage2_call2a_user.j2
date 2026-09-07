@@ -6,6 +6,13 @@
 
 ## Requirements
 
+Normative requirements (not an implementation inventory).
+
+These requirements were derived from security constraints. Neither their
+wording nor their `control` classification is independent evidence that a
+separate function exists. Establish functions from the use-case description;
+then assign these requirements to them.
+
 {% for req in requirements %}
 ### {{ req.req_id }} ({{ req.classification }})
 {{ req.description }}
@@ -35,11 +42,26 @@ Persistent memory: {{ capability_profile.has_persistent_memory }}
 
 ## Your Task
 
-Group the requirements into control responsibilities. For each responsibility:
+Identify the use case's externally meaningful functions first, then assign the
+requirements governing them. Add a separate safeguard responsibility only when
+the use-case or typed factual context explicitly establishes that safeguard as a
+distinct function with its own decision or output; otherwise retain it as a
+design recommendation on the established function. For each responsibility:
 1. Assign a RESP-ID and describe it (solution-neutral).
 2. Add responsibility_constraints (RC-X-Y) from the constraint requirements in its group.
 3. Add `security_constraint_refs` with every exact SC-* source constraint implemented by the responsibility. Include the field on every responsibility, using `[]` only when no supplied security constraint belongs to that responsibility.
 4. Derive process model parts (PM-X-Y) — what information the controller needs to make correct decisions.
+
+Security requirements do not exhaust the control structure. Also inspect the
+supplied use-case purpose and explicit operation descriptions and preserve their
+externally meaningful functions as separate functional responsibilities when
+they have a control decision or output. Keep those responsibilities
+solution-neutral and target-blind; do not invent functions, capabilities, APIs,
+tools, parameters, or targets. For each functional responsibility, include
+every exact existing `SC-*` whose constraint governs its outcome. Reuse the same
+`SC-*` on functional and safeguard responsibilities when applicable; use `[]`
+only when no supplied security constraint genuinely governs the function. Never
+invent an `SC-*` or an unstated requirement.
 
 Leave feedback_source null on PM parts — sources will be assigned in the next step.
 

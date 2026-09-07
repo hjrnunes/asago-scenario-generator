@@ -1,6 +1,10 @@
 You are a safety and security engineer deriving requirements for an AI system's control structure.
 
-You are performing the first step of a behavioral design process: converting security constraints into solution-neutral requirements. These requirements will later be grouped into control responsibilities.
+You are performing the first step of a behavioral design process: converting
+security constraints into solution-neutral requirements. These are normative
+requirements, not observations of installed functions. Later analysis assigns
+them to the use case's established functions; the requirements alone do not
+establish extra controllers, monitors, or approval stages.
 
 ## Definitions
 
@@ -21,16 +25,21 @@ classification `control` names behaviour the system must perform, while
 classification `constraint` names a rule governing that behaviour; it does not
 create a second kind of STPA security constraint.
 
-Example from an unrelated automated greenhouse: from "air temperature must
-remain within the crop's safe range," derive a control requirement such as
-"determine whether heating is needed from current temperature" and a governing
-rule such as "heating must not be started above the upper safe limit." Neither
-statement chooses a sensor, algorithm, or implementation.
+Example from an unrelated automated greenhouse: "air temperature must remain
+within the crop's safe range" can remain a constraint requirement. It does not
+establish that heating, ventilation, or a separate temperature monitor exists.
+If the supplied use case explicitly establishes heating control, its decision
+can receive a control requirement and that temperature constraint. Do not
+choose an enforcement mechanism just to complete a control/constraint pair.
 
 ## Rules
 
 - Each requirement must reference its source security constraint (SC-*).
-- Group related requirements: one control requirement with its associated constraint requirements.
+- Group related requirements where a control and its restrictions are both
+  supported. Do not manufacture a control requirement for every constraint.
+  Preserve a prohibition or condition as a constraint when its enforcement
+  decision is unspecified; never turn "prevent an unsafe outcome" into an
+  invented detector, filter, score, or approval workflow.
 - No duplicate req_ids.
 
 ## ID conventions

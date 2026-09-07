@@ -1,0 +1,91 @@
+{
+  "tools": [
+    {
+      "name": "lookup_order",
+      "description": "Look up an order by its identifier.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "order_id": {"type": "string"}
+        },
+        "required": ["order_id"]
+      },
+      "outputSchema": "opaque",
+      "annotations": null
+    },
+    {
+      "name": "get_account_details",
+      "description": "Read account details for the customer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": "opaque",
+      "annotations": null
+    },
+    {
+      "name": "retrieve_policy",
+      "description": "Retrieve the applicable payment policy.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": "opaque",
+      "annotations": null
+    },
+    {
+      "name": "schedule_payment",
+      "description": "Schedule a payment for an order.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "order_id": {"type": "string"},
+          "amount": {"type": "number"}
+        },
+        "required": ["order_id", "amount"]
+      },
+      "outputSchema": "opaque",
+      "annotations": null
+    },
+    {
+      "name": "process_refund",
+      "description": "Process a refund for an order.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "order_id": {"type": "string"},
+          "amount": {"type": "number"}
+        },
+        "required": ["order_id", "amount"]
+      },
+      "outputSchema": "opaque",
+      "annotations": null
+    },
+    {
+      "name": "escalate_to_human",
+      "description": "Hand the customer case to a human agent.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "reason": {"type": "string"}
+        },
+        "required": ["reason"]
+      },
+      "outputSchema": "opaque",
+      "annotations": null
+    },
+    {
+      "name": "get_klarna_state_summary",
+      "description": "Observe a summary of the current Klarna state.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": "opaque",
+      "annotations": null
+    }
+  ]
+}

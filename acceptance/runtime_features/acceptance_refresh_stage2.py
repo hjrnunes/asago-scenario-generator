@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import re
 
+from jsonschema import Draft202012Validator
+
 from runtime_shared import (
     ElementRef,
     LossAnalysis,
@@ -34,6 +36,36 @@ _KNOWN_RETIRED_STEPS = frozenset(
         "merge_connection_set",
     }
 )
+
+
+def _h_ar_wire_target_effects(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    call = next(
+        call
+        for call in _ar_client(world).calls
+        if issubclass(call["response_format"], _SP1ControlElementSet)
+    )
+    validator = Draft202012Validator(call["response_format"].model_json_schema())
+    action = {
+        "ca_id": "CA-1-1",
+        "description": "Deliver a message",
+        "target": {"type": "responsibility", "id": "RESP-1"},
+        "effect_kind": "agent_message",
+        "temporality": "discrete",
+    }
+    payload = {"control_actions": [action], "feedback": [], "controlled_processes": []}
+    assert not list(validator.iter_errors(payload))
+    for effect in ("model_output", "tool_call", "state_change", "environment_action"):
+        action["effect_kind"] = effect
+        assert list(validator.iter_errors(payload)), effect
+    action["target"] = {"type": "controlled_process", "id": "CP-1"}
+    payload["controlled_processes"] = [
+        {"cp_id": "CP-1", "description": "Caller interface"}
+    ]
+    action["effect_kind"] = "model_output"
+    assert not list(validator.iter_errors(payload))
+    return True, ""
 
 
 def _h_ar_module_export(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -172,7 +204,7 @@ def _h_ar_stage2_run(world: World, text: str, examples: dict) -> tuple[bool, str
     _ar_stage2_defaults(world)
     template_loader = TemplateLoader(_PQF_PROMPTS_DIR)
     world.template_loader = template_loader
-    world.control_structure, world.sp1_warnings = _sp1_derive_control_structure(
+    derivation = _sp1_derive_control_structure(
         llm_client=_ar_client(world),
         use_case_text=world.sp1_use_case_text,
         loss_analysis=LossAnalysis.model_validate(_sp1_valid_la_dict()),
@@ -180,6 +212,9 @@ def _h_ar_stage2_run(world: World, text: str, examples: dict) -> tuple[bool, str
         template_loader=template_loader,
         temperature=0.4,
     )
+    world.loss_analysis = derivation.loss_analysis
+    world.control_structure = derivation.control_structure
+    world.sp1_warnings = derivation.warnings
     return True, ""
 
 
@@ -354,7 +389,8 @@ def _h_ar_call3_prompt(world: World, text: str, examples: dict) -> tuple[bool, s
         (
             call["user_prompt"]
             for call in reversed(calls)
-            if call["response_format"] is _SP1CoordinationAnalysis
+            if isinstance(call["response_format"], type)
+            and issubclass(call["response_format"], _SP1CoordinationAnalysis)
         ),
         "",
     )

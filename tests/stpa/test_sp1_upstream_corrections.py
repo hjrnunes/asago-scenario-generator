@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
     ControlActionEffectKind,
@@ -124,6 +125,46 @@ def test_gap_prompt_receives_source_separated_deduplicated_losses(tmp_path) -> N
 
     gap_prompt = client.calls[1].user_prompt
     assert gap_prompt.count("Unauthorized transaction") == 1
+
+
+def test_risk_prompt_keeps_complete_semantic_fields_in_compact_view(tmp_path) -> None:
+    """Prompt compaction removes duplicate metadata, not reviewed meaning."""
+    card = RiskCard(
+        risk_id="atlas-compact-1",
+        risk_name="A reviewed risk",
+        risk_description=(
+            "Description begins with context, preserves this middle fact, and "
+            "ends with the operational boundary."
+        ),
+        taxonomy="ibm-risk-atlas",
+        confidence=0.9,
+        grounding_confidence="high",
+        threat="A hidden threat field should stay out of the compact view.",
+        vulnerability="A hidden vulnerability field should stay out of the compact view.",
+        consequence=(
+            "Consequence begins with context, preserves this middle fact, and "
+            "ends with the stakeholder harm."
+        ),
+        impact="A hidden impact field should stay out of the compact view.",
+    )
+    client = MockLLMClient()
+    client.set_response_for(LossAnalysisDraft, [valid_risk_draft_dict(), valid_gap_draft_dict()])
+
+    derive_loss_analysis(
+        llm_client=client,
+        use_case_text="The complete use-case context remains available.",
+        risk_cards=[card],
+        run_dir=tmp_path,
+    )
+
+    prompt = client.calls[0].user_prompt
+    assert "atlas-compact-1" in prompt
+    assert card.risk_name in prompt
+    assert card.risk_description in prompt
+    assert card.consequence in prompt
+    assert card.threat not in prompt
+    assert card.vulnerability not in prompt
+    assert card.impact not in prompt
 
 
 def test_semantic_diagnostics_are_generic_and_distinguish_context_from_cause() -> None:

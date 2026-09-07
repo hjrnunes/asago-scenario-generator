@@ -71,6 +71,12 @@ Feature: Obligation-aware synthesis run
     Then the provider failure is retained as local unresolved evidence
     And the synthesis still writes accounting and manifest sidecars
 
+  Scenario: Baseline diagnostics survive persistence without changing candidate yield
+    Given a deterministic synthesis baseline has an unresolved warning
+    When the product run executes
+    Then the baseline warning survives the persisted manifest and report
+    And the published candidate count remains unchanged
+
   Scenario: The public CLI has one normal scenario-generation command
     Given a deterministic synthesis revision is not required
     Then run is the normal command and retired generation commands are absent

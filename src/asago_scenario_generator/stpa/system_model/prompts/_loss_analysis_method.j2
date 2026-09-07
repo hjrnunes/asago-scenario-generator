@@ -19,9 +19,56 @@ evidence.
 Work from stakeholder consequence to system state to required constraint, and
 preserve every loss -> hazard -> constraint reference.
 
-Adversary action is selection context, not the grammar of the hazard. The
-hazard begins from the unsafe system state; attack and component-failure
-details belong in later causal analysis. For example:
+Constraints are requirements, not observations of installed controls. Preserve
+the supplied triggering condition when one is stated. Do not replace it with
+invented monitoring, scores, thresholds, queues, or extra approval stages. For
+example, "hold a sample for review when its identity cannot be established"
+must not become "hold it when an identity-confidence score falls below 0.8"
+unless that score and threshold were supplied. A newly derived requirement
+may state what must hold without claiming how the system measures or enforces
+it. Keep unknown quantitative limits unspecified rather than making them up.
+
+Treat source-stated authenticated or otherwise authorized operations as
+legitimate baseline behavior. Express each constraint as the safe relationship
+among the source-established action, authorization or request, and intended
+effect (including recipient, quantity, destination, timing, or outcome). Do not
+blanket-ban a permitted function or invent a secondary verifier, review step,
+API, or other protective mechanism; preserve a supplied human-review trigger
+when the source actually states one. Other protective mechanisms remain design
+choices, not established inputs.
+
+A stated permission, authorization, or conditional exception remains part of
+the behavior being analyzed. Preserve conditions such as "only when" or
+"unless"; do not turn a permitted operation into an unconditional denial or a
+conditional operation into an always-on action. If the source does not state
+the actor, recipient, authority, or trigger, record that fact as unknown rather
+than supplying one. Authorized processing of sensitive information is not a
+loss by itself; identify the unsupported recipient, boundary, or harmful effect
+that would make it unsafe.
+
+### Dependency order is part of the result
+
+Produce the graph in this order, even though all three collections are in one
+JSON object:
+
+1. Declare grounded **losses** first.  A loss must be supported by the supplied
+   risk or use-case evidence; do not create a placeholder loss merely to give a
+   hazard an ID.
+2. Declare **hazards** only after their loss IDs exist in this response or in
+   the explicitly supplied prior analysis.  Every `related_losses` value must
+   resolve to one of those declared losses.
+3. Declare **security constraints** only after their hazard IDs exist.  Every
+   `related_hazards` value must resolve to one of those declared hazards.
+
+Never return hazards or constraints that point to undeclared `L-*` or `H-*`
+IDs.  If no grounded loss is supported, return no dependent hazards or
+constraints; an empty dependent collection is safer than a dangling chain.
+
+Adversary action is selection context, not the grammar of the hazard. A
+hazardous state is not evidence that an attacker reached it, that use was
+unauthorized, or that a particular recipient or mechanism exists. The hazard
+begins from the unsafe system state; attack and component-failure details
+belong in later causal analysis. For example:
 
 - Cause: an attacker sends a spoofed command. Hazardous state: a robot enters
   a human-occupied restricted area.
@@ -38,6 +85,19 @@ For an automated greenhouse:
   hazardous temperature state.
 - Constraint: the greenhouse must maintain air temperature within the crop's
   safe range.
+
+For a warehouse dispatch service:
+
+- Normal behavior: an authorized request dispatches the requested quantity to
+  its authorized recipient.
+- Hazard: the system dispatches the wrong quantity or sends the dispatch to a
+  recipient not authorized by the request.
+- Constraint: preserve the authorized recipient and quantity in the dispatch
+  effect; do not ban authorized dispatch or invent a secondary review step.
+
+An authorized account-record lookup is likewise not itself a loss. The loss
+begins with an unsupported recipient or boundary, or with a harmful effect;
+whether an attacker caused that state is a later causal question.
 
 Use the example only to understand the distinctions. Derive the actual result
 solely from the supplied system and evidence.

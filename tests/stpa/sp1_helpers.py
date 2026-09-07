@@ -17,16 +17,75 @@ from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 
 
-def valid_empty_coordination_analysis_dict() -> dict:
+def valid_empty_coordination_analysis_dict(
+    *,
+    constraint_ids: tuple[str, ...] = ("SC-1",),
+    hazard_ids: tuple[str, ...] | None = None,
+    responsibility_ids: tuple[str, ...] = ("RESP-1",),
+    action_ids: tuple[str, ...] = ("CA-1-1",),
+) -> dict:
     """Minimal CoordinationAnalysis with no links and no findings.
 
     Used by tests that only need Call 3 to produce a valid (but empty)
     CoordinationAnalysis so the assembled ControlStructure has no
     coordination links.
     """
+    constraints = []
+    if hazard_ids is None:
+        hazard_ids = tuple(
+            f"H-{constraint_id.rsplit('-', 1)[-1]}" for constraint_id in constraint_ids
+        )
+    hazard_id_set = set(hazard_ids)
+    hazards = [
+        {
+            "hazard_id": hazard_id,
+            "disposition": "preserve",
+            "revised_description": None,
+            "missing_fact": None,
+            "source_evidence": [],
+            "rationale": "The supplied hazard wording is retained.",
+        }
+        for hazard_id in hazard_ids
+    ]
+    for constraint_id in constraint_ids:
+        suffix = constraint_id.rsplit("-", 1)[-1]
+        related_hazards = [f"H-{suffix}"] if f"H-{suffix}" in hazard_id_set else []
+        constraints.append(
+            {
+                "constraint_id": constraint_id,
+                "disposition": "preserve",
+                "revised_description": None,
+                "missing_fact": None,
+                "related_hazards": related_hazards,
+                "source_evidence": [],
+                "rationale": "The supplied constraint retains its hazard relation.",
+            }
+        )
     return {
         "coordination_links": [],
         "integrity_findings": [],
+        "semantic_review": {
+            "hazards": hazards,
+            "constraints": constraints,
+            "responsibilities": [
+                {
+                    "responsibility_id": responsibility_id,
+                    "constraint_refs": (
+                        [constraint_ids[index]] if index < len(constraint_ids) else []
+                    ),
+                    "rationale": "The action owner enforces the supplied confirmation constraint.",
+                }
+                for index, responsibility_id in enumerate(responsibility_ids)
+            ],
+            "actions": [
+                {
+                    "control_action_id": action_id,
+                    "effect_kind": "agent_message",
+                    "rationale": "The action targets an internal responsibility.",
+                }
+                for action_id in action_ids
+            ],
+        },
     }
 
 
@@ -445,7 +504,8 @@ def setup_sp1_mock_client() -> MockLLMClient:
     client.set_response_for(ResponsibilitySet, valid_responsibility_set_dict())
     client.set_response_for(ControlElementSet, valid_control_element_set_dict())
     client.set_response_for(
-        CoordinationAnalysis, valid_empty_coordination_analysis_dict()
+        CoordinationAnalysis,
+        valid_empty_coordination_analysis_dict(constraint_ids=("SC-1", "SC-2")),
     )
     client.set_response_for(CriticFindings, valid_critic_findings_dict_no_gaps())
     return client

@@ -4,6 +4,14 @@ Your task is to identify structural gaps using three probes.
 
 {% include "_control_loop_method.j2" %}
 
+Ground findings in the supplied behavior. A hazard or security constraint
+describes a state or obligation, not an installed controller, filter, monitor,
+score, threshold, approval path, tool, or controlled process. An explicit
+requirement may still justify a proposed missing safeguard; label it as a
+design recommendation rather than observed coverage. Preserve authorized and
+conditional operations, and do not claim a safeguard exists merely because the
+requirement names it.
+
 ## Probe 1 — Responsibility coverage checklist
 
 Check whether the control structure covers these expected responsibilities. Not all apply to every system — mark as "absent_justified" when the capability is not present in the system.
@@ -32,7 +40,21 @@ No specific taxonomy probes apply.
 
 ## Probe 3 — Adversarial probe
 
-You are now a Red Team analyst. Identify the three most exploitable gaps — a missing or inadequate responsibility, feedback channel, or process model part that an attacker could leverage. For each gap, describe what is missing, an evidence-backed attack path when one is supplied, and what should be added (describe WHAT, not what ID). When attacker access is not established, describe the structural failure and name the access evidence that would still be needed rather than inventing a path.
+You are now a Red Team analyst. Identify the three most exploitable gaps — a
+missing or inadequate responsibility, feedback channel, or process model part
+that an attacker could leverage. First distinguish a missing function,
+feedback path, or process-model fact established by the source from a safeguard
+that is merely suggested by a requirement. Report source/function omissions as
+structural gaps, and report an explicitly proposed safeguard as a design gap
+when the requirement calls for its decision or output. In either case, state
+whether evidence shows existing coverage; a recommendation is not an observed
+installed capability or an attackable controller. For each gap, describe what
+is missing, an evidence-backed attack path when one is supplied, and what
+should be added (describe WHAT, not what ID). An attack path requires supplied
+attacker access and the relevant operation or state; otherwise describe only
+the structural failure and the access evidence still needed. Do not infer a
+recipient, mechanism, or misuse from hazard or constraint wording, and preserve
+source-stated authorized or conditional behavior.
 
 Focus on gaps that would break behavioral guarantees: correct beliefs (process model accuracy), correct actions (control action adequacy), and correct feedback (feedback channel completeness).
 
@@ -59,7 +81,26 @@ description prose or verb heuristics.
 ## False positive guidance
 
 Not every system needs every capability. If a checklist item or probe targets a capability the system genuinely does not have (e.g., multi-agent coordination for a single-agent system), mark it "absent_justified." Only flag gaps where the capability IS present but the control structure fails to govern it.
+A proposed safeguard may be a legitimate design gap when the source requires
+its decision or output; do not mark it present from requirement wording alone.
 
 ## Output format
 
 Produce a CriticFindings with gaps, checklist_results, and taxonomy_probe_results. Do NOT suggest specific IDs in remedies. Describe WHAT should be added (e.g., 'a responsibility for input validation'), not what ID it should have (e.g., not 'add RESP-5' and not 'add PM-0-1'). Let the revision model assign IDs using the provided ID format rules.
+
+Return one JSON object with exactly those three fields. Put ALL narrative
+findings, including adversarial and action-kind findings, in the top-level
+`gaps` array. Each gap has exactly `gap_type` (missing_responsibility,
+missing_feedback, or missing_pm_part), `description`, `related_attack_path`,
+and `suggested_remedy`. Use concise, evidence-specific sentences.
+
+Both result maps contain statuses only: `present`, `absent_justified`, or
+`absent_unjustified`. Use a short nonempty snake_case name per checklist item
+or supplied taxonomy probe. Do not create extra keys for adversarial findings,
+action-kind reviews, headings, explanations or another CriticFindings object.
+Never put Markdown, narrative, or empty keys inside these maps. An
+`absent_unjustified` status requires an explicit corresponding top-level gap.
+Use an empty array/map when there are no gaps/applicable taxonomy probes.
+
+Shape example (the example status is not evidence for this system):
+{"gaps": [], "checklist_results": {"input_validation_intent_classification": "present"}, "taxonomy_probe_results": {}}

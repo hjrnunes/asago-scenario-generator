@@ -23,6 +23,7 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
 from asago_scenario_generator.stpa.obligation_aware.provider import (
     ObligationAwareLLMAdapter,
     _routing_provider_payload_type,
+    _slot_provider_payload_type,
 )
 from asago_scenario_generator.stpa.obligation_aware.routing import (
     _ROUTING_RETRY_ERROR_MAX_CHARS,
@@ -65,6 +66,48 @@ def _routing_semantics() -> dict[str, str]:
 def _brief():
     pattern = AttackPattern.model_validate(get_test_raw_pattern())
     return build_neutral_briefs(make_plan(), (pattern,))[0]
+
+
+def test_routing_schema_cannot_retype_an_obligation_digest():
+    expected = "ob:v1:" + "1" * 64
+    wire = _routing_provider_payload_type(1, obligation_ids=(expected,))
+    route = {
+        "obligation_id": "ob:v1:" + "2" * 64,
+        "disposition": "unresolved",
+        "semantic_assessment": _routing_semantics(),
+        "rationale": "No structural route supplied.",
+        "evidence": ["Supplied structure"],
+    }
+    with pytest.raises(ValidationError, match="obligation_id"):
+        wire.model_validate({"routes": [route]})
+    route["obligation_id"] = expected
+    assert wire.model_validate({"routes": [route]}).routes[0].obligation_id == expected
+
+
+def test_slot_schema_requires_one_exact_constraint_not_concatenated_ids():
+    wire = _slot_provider_payload_type(1, 0, constraint_ids=("SC-2", "SC-4", "SC-5"))
+    finding = {
+        "deviation": "sanitization occurs after downstream processing",
+        "hazardous_context": "unprocessed input reaches downstream components",
+        "loss_consequence": "unauthorized action",
+        "related_hazard_ids": ["H-2"],
+        "related_constraint_ids": ['SC-2", "SC-4", "SC-5'],
+    }
+    payload = {
+        "filled_slots": [
+            {
+                "slot_id": "RESP-1:CA-1-1:WRONG_TIMING",
+                "is_na": False,
+                "findings": [finding],
+            }
+        ]
+    }
+    with pytest.raises(ValidationError, match="related_constraint_ids"):
+        wire.model_validate(payload)
+    finding["related_constraint_ids"] = ["SC-2"]
+    assert wire.model_validate(payload).filled_slots[0].findings[
+        0
+    ].related_constraint_ids == ("SC-2",)
 
 
 def test_routing_wire_schema_requires_disposition_specific_fields() -> None:

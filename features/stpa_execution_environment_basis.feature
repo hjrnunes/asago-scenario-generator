@@ -91,7 +91,7 @@ Feature: STPA execution environment-basis default correction
     Given a resource-free model-output contract
     When the contract is classified with a reviewed target profile
     Then the classification axes are "concrete/target_agnostic/not_required/model_behavior_only"
-    And no selected profile digest is pinned in the classification
+    And the supplied profile is retained only as lineage without resource bindings
 
   # STPA-EXEC-BASIS-13
   Scenario: Stage 2 defines typed action semantics and domain-neutral contrasts

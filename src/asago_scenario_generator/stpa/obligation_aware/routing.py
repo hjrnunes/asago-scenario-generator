@@ -373,7 +373,6 @@ def _validate_mechanism_route_meaning(route: ObligationRoute) -> None:
     if assessment is None:
         return
     _validate_disposition_mechanism(route.disposition, assessment)
-    _validate_supported_alignment(assessment)
 
 
 def _validate_disposition_mechanism(
@@ -405,18 +404,27 @@ def _require_absent_nonapplicable_mechanism(
 
 
 def _validate_supported_alignment(assessment: ObligationSemanticAssessment) -> None:
-    """A supported conceptual relationship cannot use an absent mechanism."""
-    if not _supported_alignment_is_plausible(assessment):
-        raise ValueError("supported risk alignment cannot use an absent mechanism")
+    """Retain the historical helper without coupling independent judgements.
+
+    Risk alignment answers whether the reviewed concern is conceptually
+    relevant.  Mechanism assessment answers whether that mechanism is present
+    in this system.  A provider may therefore report ``supported`` alongside
+    ``absent_from_system`` while deciding that the route is not applicable;
+    the route-disposition validator remains responsible for rejecting an
+    absent mechanism on a ``targeted`` route.
+    """
+    del assessment
 
 
 def _supported_alignment_is_plausible(
     assessment: ObligationSemanticAssessment,
 ) -> bool:
-    """Allow missing path evidence while rejecting a mechanism proven absent."""
-    return assessment.risk_alignment != "supported" or (
-        assessment.mechanism_assessment != "absent_from_system"
-    )
+    """Return whether the independent risk-alignment value is well-formed."""
+    return assessment.risk_alignment in {
+        "supported",
+        "mismatch",
+        "insufficient_evidence",
+    }
 
 
 def _validate_targeted_route(
@@ -875,6 +883,72 @@ def _unresolved_routes(
     )
 
 
+def _unresolved_route_record(
+    brief: NeutralObligationBrief,
+    error: BaseException,
+    *,
+    route: ObligationRoute | None = None,
+    request: StructuralRoutingRequest,
+) -> ObligationRoute:
+    """Retain one invalid route as unresolved without dropping its siblings.
+
+    A batch-level identity or protocol failure cannot be associated with one
+    record and still uses :func:`_unresolved_routes`.  Once exact route
+    cardinality is known, semantic/reference validation is record-local: keep
+    the independent semantic assessment as evidence when available, but do
+    not retain an untrusted structural path or hazard/constraint selection.
+    """
+    detail = f"{type(error).__name__}: {error}"
+    route_refs = () if route is None else (route.route_id or "",)
+    diagnostic = ConsiderationDiagnostic(
+        code="routing_record_validation_failed",
+        detail=detail,
+        obligation_ids=(brief.obligation_id,),
+        refs=(request.batch_id, *route_refs),
+    )
+    assessment = None if route is None else route.semantic_assessment
+    return ObligationRoute(
+        obligation_id=brief.obligation_id,
+        disposition="unresolved",
+        semantic_assessment=assessment,
+        rationale="This obligation's routing record failed local validation.",
+        evidence=("routing-validation",),
+        diagnostics=(diagnostic,),
+    )
+
+
+def _validate_route_records(
+    candidate: StructuralRoutingResponse,
+    batch: Sequence[NeutralObligationBrief],
+    *,
+    references: dict[str, set[str]],
+    loss_analysis: LossAnalysis,
+    control_structure: ControlStructure,
+    slots: Sequence[SlotPlaceholder],
+) -> tuple[tuple[ObligationRoute, ...], dict[str, BaseException]]:
+    """Validate known routes independently and retain valid siblings."""
+    brief_by_id = {brief.obligation_id: brief for brief in batch}
+    valid: list[ObligationRoute] = []
+    errors: dict[str, BaseException] = {}
+    for route in candidate.routes:
+        brief = brief_by_id[route.obligation_id]
+        try:
+            _validate_semantic_assessment(route, brief)
+            _validate_route(
+                route,
+                route.obligation_id,
+                references,
+                loss_analysis=loss_analysis,
+                control_structure=control_structure,
+                slots=slots,
+            )
+        except (TypeError, ValueError) as exc:
+            errors[route.obligation_id] = exc
+        else:
+            valid.append(route)
+    return tuple(valid), errors
+
+
 @dataclass(frozen=True, slots=True)
 class RoutingRunResult:
     """Deterministic result of one initial or recheck routing pass."""
@@ -952,6 +1026,9 @@ def _route_batch(
     response: StructuralRoutingResponse | None = None
     error: BaseException | None = None
     attempts = 0
+    partial_candidate: StructuralRoutingResponse | None = None
+    partial_routes: tuple[ObligationRoute, ...] = ()
+    partial_errors: dict[str, BaseException] = {}
     for attempt in range(controls.validation_retries + 1):
         attempts = attempt + 1
         try:
@@ -971,33 +1048,53 @@ def _route_batch(
                     "once; copied opaque obligation identity mismatch "
                     f"(expected={sorted(expected_ids)}, actual={sorted(actual_ids)})"
                 )
-            for route in candidate.routes:
-                brief = next(
-                    item for item in batch if item.obligation_id == route.obligation_id
+            valid_routes, record_errors = _validate_route_records(
+                candidate,
+                batch,
+                references=references,
+                loss_analysis=loss_analysis,
+                control_structure=control_structure,
+                slots=slots,
+            )
+            if record_errors:
+                partial_candidate = candidate
+                partial_routes = valid_routes
+                partial_errors = record_errors
+                error = ValueError(
+                    "routing records failed local validation: "
+                    + "; ".join(
+                        f"{obligation_id}: {type(record_error).__name__}: "
+                        f"{record_error}"
+                        for obligation_id, record_error in sorted(record_errors.items())
+                    )
                 )
-                _validate_semantic_assessment(route, brief)
-                _validate_route(
-                    route,
-                    route.obligation_id,
-                    references,
-                    loss_analysis=loss_analysis,
-                    control_structure=control_structure,
-                    slots=slots,
-                )
+                if attempt < controls.validation_retries:
+                    continue
+                break
             candidate = _apply_mechanism_verification(adapter, request, candidate)
-            for route in candidate.routes:
-                brief = next(
-                    item for item in batch if item.obligation_id == route.obligation_id
+            valid_routes, record_errors = _validate_route_records(
+                candidate,
+                batch,
+                references=references,
+                loss_analysis=loss_analysis,
+                control_structure=control_structure,
+                slots=slots,
+            )
+            if record_errors:
+                partial_candidate = candidate
+                partial_routes = valid_routes
+                partial_errors = record_errors
+                error = ValueError(
+                    "verified routing records failed local validation: "
+                    + "; ".join(
+                        f"{obligation_id}: {type(record_error).__name__}: "
+                        f"{record_error}"
+                        for obligation_id, record_error in sorted(record_errors.items())
+                    )
                 )
-                _validate_semantic_assessment(route, brief)
-                _validate_route(
-                    route,
-                    route.obligation_id,
-                    references,
-                    loss_analysis=loss_analysis,
-                    control_structure=control_structure,
-                    slots=slots,
-                )
+                if attempt < controls.validation_retries:
+                    continue
+                break
             response = candidate
             break
         except PromptBudgetExceeded as exc:
@@ -1007,6 +1104,46 @@ def _route_batch(
             error = exc
     if response is None:
         assert error is not None
+        if partial_candidate is not None and partial_errors:
+            unresolved_by_id = {
+                brief.obligation_id: _unresolved_route_record(
+                    brief,
+                    partial_errors[brief.obligation_id],
+                    route=next(
+                        route
+                        for route in partial_candidate.routes
+                        if route.obligation_id == brief.obligation_id
+                    ),
+                    request=request,
+                )
+                for brief in batch
+                if brief.obligation_id in partial_errors
+            }
+            retained_routes = tuple(
+                sorted(
+                    (*partial_routes, *unresolved_by_id.values()),
+                    key=lambda route: route.obligation_id,
+                )
+            )
+            detail = (
+                f"{request.batch_id} retained valid sibling routes; unresolved "
+                "record(s): "
+                + "; ".join(
+                    f"{obligation_id}: {type(record_error).__name__}: {record_error}"
+                    for obligation_id, record_error in sorted(partial_errors.items())
+                )
+            )
+            return (
+                request,
+                retained_routes,
+                _call_evidence(
+                    partial_candidate,
+                    request,
+                    attempts,
+                    outcome="unresolved",
+                ),
+                detail,
+            )
         detail = (
             f"{request.batch_id} exhausted validation: {type(error).__name__}: {error}"
         )

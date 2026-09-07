@@ -31,16 +31,26 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionResourcePurpose,
     ExecutionSurface,
     ExecutionTargetProfile,
+    DiscoveryProvenance,
+    InventoryAuthority,
     InventoryCompleteness,
-    ProfileAuthority,
+    McpToolObservation,
     ProfileBasis,
     RequestedEnvironmentBasis,
+    McpInventoryObservation,
+    SemanticAuthority,
     SemanticExecutionContract,
     SemanticExecutionDelivery,
     SimulationBehavior,
+    SourceProtocol,
+    TargetInterpretationDisposition,
+    TargetOperationEffect,
     TargetProfileOperation,
     TargetProfileResource,
+    TargetSemanticInterpretation,
+    TargetStateEffect,
     ExecutionResourceRequirement,
+    InterpreterVerifierAgreement,
 )
 from asago_scenario_generator.stpa.models.execution_projection_v2 import (
     UnsafeOutcome,
@@ -219,46 +229,125 @@ def _resource_free_contract() -> SemanticExecutionContract:
 
 
 def _profile(profile_basis: str) -> ExecutionTargetProfile:
-    """Build a reviewed profile that exactly matches an agent-channel role."""
+    """Build a reviewed target or explicit simulation profile for one route."""
     basis = (
         ProfileBasis.simulation
         if profile_basis == "simulation"
         else ProfileBasis.target
     )
-    behavior = (
-        SimulationBehavior(
-            inputs={"message": "fixture"},
-            outputs={"agent_message_observable": True},
-            observation_points=("agent_channel",),
+    if basis is ProfileBasis.simulation:
+        resource = TargetProfileResource(
+            resource_id="agent-channel-1",
+            resource_kind=ExecutionResourceKind.agent_channel,
+            role_ids=("agent_message",),
+            structural_refs=("RESP-1",),
+            attacker_influence=AttackerInfluence.direct,
+            surfaces=(ExecutionSurface.agent_message,),
+            operations=(
+                TargetProfileOperation(
+                    operation_id="deliver-1",
+                    semantic_operation="deliver_agent_message",
+                    observable_properties=("agent_message_observable",),
+                ),
+            ),
+            evidence_refs=("review:agent-channel",),
+            simulation_behavior=SimulationBehavior(
+                inputs={"message": "fixture"},
+                outputs={"agent_message_observable": True},
+                observation_points=("agent_channel",),
+            ),
         )
-        if basis is ProfileBasis.simulation
-        else None
+        return ExecutionTargetProfile(
+            target_id="simulation-target",
+            authorization_scope_id="simulation-scope",
+            basis=basis,
+            source_protocol=SourceProtocol.simulation,
+            semantic_authority=SemanticAuthority.reviewed,
+            inventory_completeness=InventoryCompleteness.unknown,
+            resources=(resource,),
+        )
+
+    target_id = "target"
+    tool_name = "deliver_agent_message"
+    resource_id = f"mcp:{target_id}:{tool_name}"
+    input_schema = {
+        "type": "object",
+        "properties": {"message": {"type": "string"}},
+        "required": ["message"],
+    }
+    output_schema = {
+        "type": "object",
+        "properties": {"agent_message_observable": {"type": "boolean"}},
+    }
+    tool = McpToolObservation(
+        name=tool_name,
+        source_observation_sha256=(
+            "15585938bfaaeaea7044265646d4bda1b81d6eb342a4c3d16272071d59999376"
+        ),
+        title="Agent message",
+        description="Deliver one message to the agent channel.",
+        input_schema=input_schema,
+        output_schema=output_schema,
+        annotations=None,
+    )
+    inventory = McpInventoryObservation(
+        target_id=target_id,
+        authorization_scope_id="target-scope",
+        tools=(tool,),
     )
     resource = TargetProfileResource(
-        resource_id="agent-channel-1",
-        resource_kind=ExecutionResourceKind.agent_channel,
+        resource_id=resource_id,
+        resource_kind=ExecutionResourceKind.tool,
+        target_id=target_id,
+        tool_name=tool_name,
+        title=tool.title,
+        description=tool.description,
+        input_schema=input_schema,
+        output_schema=output_schema,
+        annotations=None,
+        argument_names=tool.argument_names,
+        surfaces=(ExecutionSurface.tool_call, ExecutionSurface.tool_result),
         role_ids=("agent_message",),
         structural_refs=("RESP-1",),
         attacker_influence=AttackerInfluence.direct,
-        surfaces=(ExecutionSurface.agent_message,),
         operations=(
             TargetProfileOperation(
-                operation_id="deliver-1",
-                semantic_operation="deliver_agent_message",
+                operation_id=tool_name,
+                semantic_operation=tool_name,
+                argument_names=tool.argument_names,
                 observable_properties=("agent_message_observable",),
             ),
         ),
-        evidence_refs=("review:agent-channel",),
-        simulation_behavior=behavior,
+        evidence_refs=("inventory:tool:deliver_agent_message",),
+    )
+    interpretation = TargetSemanticInterpretation(
+        resource_id=resource_id,
+        tool_name=tool_name,
+        disposition=TargetInterpretationDisposition.supported,
+        likely_effect=TargetOperationEffect.execute,
+        likely_state_effect=TargetStateEffect.none,
+        semantic_roles=("agent_message",),
+        evidence_refs=("inventory:tool:deliver_agent_message",),
+        rationale="The exact tool description exposes the agent-message route.",
+        interpreter_verifier_agreement=InterpreterVerifierAgreement.agree,
     )
     return ExecutionTargetProfile(
-        profile_id=f"{profile_basis}-profile",
-        environment_id=f"{profile_basis}-environment",
+        target_id=target_id,
+        authorization_scope_id="target-scope",
         basis=basis,
-        authority=ProfileAuthority.reviewed,
-        inventory_completeness=InventoryCompleteness.reviewed_complete,
-        evidence_refs=("review:environment",),
+        inventory_authority=InventoryAuthority.observed,
+        semantic_authority=SemanticAuthority.reviewed,
+        inventory_completeness=InventoryCompleteness.observed_complete,
+        source_protocol=SourceProtocol.mcp,
+        source_inventory_digest=inventory.semantic_digest,
+        discovery_provenance=DiscoveryProvenance(
+            scanner_id="acceptance-scanner",
+            interpreter_id="acceptance-interpreter",
+            verifier_id="acceptance-verifier",
+        ),
+        inventory=inventory,
         resources=(resource,),
+        interpretations=(interpretation,),
     )
 
 
@@ -274,16 +363,6 @@ def _stage5_payload(delivery: str, action: str) -> dict[str, Any]:
             "category": stimulus,
             "description": "The supplied stimulus exercises the selected factor.",
         },
-        "defender_vulnerabilities": [
-            {
-                "belief_handle": "belief_1",
-                "vulnerability": "The selected belief can be stale.",
-            },
-            {
-                "belief_handle": "belief_2",
-                "vulnerability": "The selected schema belief can be stale.",
-            },
-        ],
         "attacker_bdi": {
             "beliefs": ["The controller can act on stale state."],
             "desires": ["Induce the selected unsafe action."],
@@ -297,6 +376,7 @@ def _stage5_payload(delivery: str, action: str) -> dict[str, Any]:
         "causal_factors": [
             {
                 "source_handle": "cause_1",
+                "selected_for_route": True,
                 "evidence": "The selected structural condition can remain stale.",
                 "temporal_condition": None,
                 "evidence_status": "structural_failure",
@@ -316,8 +396,6 @@ def _stage5_payload(delivery: str, action: str) -> dict[str, Any]:
         },
         "execution_route": {
             "disposition": "executable_route",
-            "delivery_class": delivery,
-            "selected_factor_handle": "cause_1",
             "action_kind": action,
             "reason": "The supplied structural evidence supports this route.",
         },
@@ -594,6 +672,24 @@ def _h_profile_classify(world: World, text: str, examples: dict) -> tuple[bool, 
         return False, f"Could not parse profile kind: {text}"
     state = _state(world)
     state["profile"] = _profile(match.group(1))
+    if state["profile"].basis is ProfileBasis.target:
+        # Target profiles require the producer's exact operation selection;
+        # role-only matching remains reserved for explicit simulations.
+        requirement = state["contract"].resource_requirements[0]
+        selected_requirement = ExecutionResourceRequirement.model_validate(
+            requirement.model_dump(mode="python")
+            | {
+                "exact_resource_id": "mcp:target:deliver_agent_message",
+                "acceptable_resource_kinds": (ExecutionResourceKind.tool,),
+                "required_surfaces": (ExecutionSurface.tool_call,),
+                "late_bindable": False,
+            }
+        )
+        contract_payload = state["contract"].model_dump(
+            mode="python", exclude={"semantic_digest"}
+        )
+        contract_payload["resource_requirements"] = (selected_requirement,)
+        state["contract"] = SemanticExecutionContract.model_validate(contract_payload)
     state["classification"] = classify_scenario_execution(
         state["contract"], _outcome(), state["profile"]
     )
@@ -623,14 +719,28 @@ def _h_resource_free(world: World, text: str, examples: dict) -> tuple[bool, str
 
 def _target_profile_without_resources() -> ExecutionTargetProfile:
     """Build a profile that must not affect a resource-free classification."""
+    inventory = McpInventoryObservation(
+        target_id="global-target",
+        authorization_scope_id="global-scope",
+        tools=(),
+    )
     return ExecutionTargetProfile(
-        profile_id="global-target",
-        environment_id="global-target",
+        target_id="global-target",
+        authorization_scope_id="global-scope",
         basis=ProfileBasis.target,
-        authority=ProfileAuthority.reviewed,
-        inventory_completeness=InventoryCompleteness.reviewed_complete,
-        evidence_refs=("review:global",),
+        inventory_authority=InventoryAuthority.observed,
+        semantic_authority=SemanticAuthority.reviewed,
+        inventory_completeness=InventoryCompleteness.observed_complete,
+        source_protocol=SourceProtocol.mcp,
+        source_inventory_digest=inventory.semantic_digest,
+        discovery_provenance=DiscoveryProvenance(
+            scanner_id="acceptance-scanner",
+            interpreter_id="acceptance-interpreter",
+            verifier_id="acceptance-verifier",
+        ),
+        inventory=inventory,
         resources=(),
+        interpretations=(),
     )
 
 
@@ -648,14 +758,18 @@ def _h_resource_free_classify(
 
 
 def _h_no_profile_digest(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Assert a resource-free result does not pin an irrelevant profile."""
+    """Retain supplied-input lineage without making a resource-free case dependent on tools."""
     del text, examples
     result = _state(world).get("classification")
     if result is None:
         return False, "classification is unavailable"
     return (
-        result.target_profile_digest is None,
-        "resource-free classification pinned a profile digest",
+        result.target_profile_digest == _state(world)["profile"].semantic_digest
+        and not result.resolved_bindings
+        and not result.unresolved_requirement_ids
+        and not result.ambiguous_matches
+        and not result.unsupported_requirement_ids,
+        "resource-free classification must retain source lineage without resource bindings",
     )
 
 
@@ -883,7 +997,7 @@ def register(api: object) -> None:
         _h_resource_free_classify,
     )
     api.register(
-        r"^no selected profile digest is pinned in the classification$",
+        r"^the supplied profile is retained only as lineage without resource bindings$",
         _h_no_profile_digest,
     )
     api.register(

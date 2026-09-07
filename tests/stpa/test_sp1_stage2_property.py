@@ -60,7 +60,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossProvenance,
     SecurityConstraint,
 )
-from tests.stpa.sp1_helpers import MockLLMClient
+from tests.stpa.sp1_helpers import MockLLMClient, valid_empty_coordination_analysis_dict
 
 
 # ---------------------------------------------------------------------------
@@ -122,9 +122,11 @@ def _make_control_element_set(
         control_actions.append(
             ControlAction(ca_id=f"CA-{num}-1", description=f"CA {num}-1")
         )
-        source = ElementRef(
-            type=ReferenceType.controlled_process, id="CP-1"
-        ) if controlled_processes else None
+        source = (
+            ElementRef(type=ReferenceType.controlled_process, id="CP-1")
+            if controlled_processes
+            else None
+        )
         feedback_channels.append(
             FeedbackChannel(
                 fb_id=f"FB-{num}-1",
@@ -334,9 +336,7 @@ class TestOrphanPmRepairCompleteness:
                 resp_id=f"RESP-{num}",
                 description=f"Controller {num}",
                 process_model_parts=[
-                    ProcessModelPart(
-                        pm_id=f"PM-{num}-{j}", description=f"PM {num}-{j}"
-                    )
+                    ProcessModelPart(pm_id=f"PM-{num}-{j}", description=f"PM {num}-{j}")
                     for j in range(1, n_pms + 1)
                 ],
                 control_actions=[
@@ -391,8 +391,7 @@ class TestRcPmIdNamespaceDistinction:
         resp_nums = list(range(1, n_resps + 1))
         resp_set = ResponsibilitySet(
             responsibilities=[
-                _make_responsibility(n, n_pms=n_pms, n_rcs=n_rcs)
-                for n in resp_nums
+                _make_responsibility(n, n_pms=n_pms, n_rcs=n_rcs) for n in resp_nums
             ]
         )
         elem_set = _make_control_element_set(resp_nums)
@@ -468,27 +467,56 @@ class TestCallLogOrdering:
         client = MockLLMClient()
         client.set_response_for(
             RequirementSet,
-            {"requirements": [
-                {"req_id": "REQ-1", "description": "R", "classification": "control", "source_constraint": "SC-1"}
-            ]},
+            {
+                "requirements": [
+                    {
+                        "req_id": "REQ-1",
+                        "description": "R",
+                        "classification": "control",
+                        "source_constraint": "SC-1",
+                    }
+                ]
+            },
         )
         client.set_response_for(
             ResponsibilitySet,
-            {"responsibilities": [
-                {"resp_id": "RESP-1", "description": "C1", "security_constraint_refs": ["SC-1"], "process_model_parts": [{"pm_id": "PM-1-1", "description": "S"}]}
-            ]},
+            {
+                "responsibilities": [
+                    {
+                        "resp_id": "RESP-1",
+                        "description": "C1",
+                        "security_constraint_refs": ["SC-1"],
+                        "process_model_parts": [
+                            {"pm_id": "PM-1-1", "description": "S"}
+                        ],
+                    }
+                ]
+            },
         )
         client.set_response_for(
             ControlElementSet,
             {
-                "control_actions": [{"ca_id": "CA-1-1", "description": "A", "target": {"type": "responsibility", "id": "RESP-1"}}],
-                "feedback_channels": [{"fb_id": "FB-1-1", "description": "F", "updates": "PM-1-1", "source": {"type": "responsibility", "id": "RESP-1"}}],
+                "control_actions": [
+                    {
+                        "ca_id": "CA-1-1",
+                        "description": "A",
+                        "target": {"type": "responsibility", "id": "RESP-1"},
+                    }
+                ],
+                "feedback_channels": [
+                    {
+                        "fb_id": "FB-1-1",
+                        "description": "F",
+                        "updates": "PM-1-1",
+                        "source": {"type": "responsibility", "id": "RESP-1"},
+                    }
+                ],
                 "controlled_processes": [],
             },
         )
         client.set_response_for(
             CoordinationAnalysis,
-            {"coordination_links": [], "integrity_findings": []},
+            valid_empty_coordination_analysis_dict(),
         )
 
         derive_control_structure(
@@ -504,8 +532,8 @@ class TestCallLogOrdering:
         # Verify ordering by response_format
         assert client.calls[0].response_format is RequirementSet
         assert client.calls[1].response_format is ResponsibilitySet
-        assert client.calls[2].response_format is ControlElementSet
-        assert client.calls[3].response_format is CoordinationAnalysis
+        assert issubclass(client.calls[2].response_format, ControlElementSet)
+        assert issubclass(client.calls[3].response_format, CoordinationAnalysis)
 
         # Verify call-log step names in calls.jsonl
         calls_file = tmp_path / "calls.jsonl"
@@ -524,27 +552,56 @@ class TestCallLogOrdering:
         client = MockLLMClient()
         client.set_response_for(
             RequirementSet,
-            {"requirements": [
-                {"req_id": "REQ-1", "description": "R", "classification": "control", "source_constraint": "SC-1"}
-            ]},
+            {
+                "requirements": [
+                    {
+                        "req_id": "REQ-1",
+                        "description": "R",
+                        "classification": "control",
+                        "source_constraint": "SC-1",
+                    }
+                ]
+            },
         )
         client.set_response_for(
             ResponsibilitySet,
-            {"responsibilities": [
-                {"resp_id": "RESP-1", "description": "C1", "security_constraint_refs": ["SC-1"], "process_model_parts": [{"pm_id": "PM-1-1", "description": "S"}]}
-            ]},
+            {
+                "responsibilities": [
+                    {
+                        "resp_id": "RESP-1",
+                        "description": "C1",
+                        "security_constraint_refs": ["SC-1"],
+                        "process_model_parts": [
+                            {"pm_id": "PM-1-1", "description": "S"}
+                        ],
+                    }
+                ]
+            },
         )
         client.set_response_for(
             ControlElementSet,
             {
-                "control_actions": [{"ca_id": "CA-1-1", "description": "A", "target": {"type": "responsibility", "id": "RESP-1"}}],
-                "feedback_channels": [{"fb_id": "FB-1-1", "description": "F", "updates": "PM-1-1", "source": {"type": "responsibility", "id": "RESP-1"}}],
+                "control_actions": [
+                    {
+                        "ca_id": "CA-1-1",
+                        "description": "A",
+                        "target": {"type": "responsibility", "id": "RESP-1"},
+                    }
+                ],
+                "feedback_channels": [
+                    {
+                        "fb_id": "FB-1-1",
+                        "description": "F",
+                        "updates": "PM-1-1",
+                        "source": {"type": "responsibility", "id": "RESP-1"},
+                    }
+                ],
                 "controlled_processes": [],
             },
         )
         client.set_response_for(
             CoordinationAnalysis,
-            {"coordination_links": [], "integrity_findings": []},
+            valid_empty_coordination_analysis_dict(),
         )
 
         derive_control_structure(

@@ -16,6 +16,11 @@ from typing import Any
 from pydantic import ValidationError
 
 from asago_scenario_generator.models.canonical import compute_framed_digest
+from asago_scenario_generator.models.target_realization import (
+    TargetOperationReference,
+    TargetRealizationDisposition,
+    TargetRealizationResult,
+)
 from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactor,
     validate_factor_sources,
@@ -49,6 +54,7 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionDeliveryClass,
     ExecutionResourceKind,
     ExecutionResourcePurpose,
+    ExecutionResourceRequirement,
     SemanticExecutionContract,
     ExecutionTargetProfile,
 )
@@ -70,6 +76,7 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
 )
 
 from .execution_classification import classify_scenario_execution
+from .outcome_grounding import scope_temporal_condition_bindings
 
 
 _RUNTIME_KEYS = frozenset(
@@ -148,6 +155,7 @@ def prepare_execution_projection(
     *,
     execution_contract: SemanticExecutionContract | None = None,
     target_profile: ExecutionTargetProfile | None = None,
+    target_realization: TargetRealizationResult | None = None,
 ) -> ValidatedExecutionProjection:
     """Validate and freeze one contextual ``ScenarioSpec`` as v2 intent.
 
@@ -161,6 +169,7 @@ def prepare_execution_projection(
         run_identity,
         execution_contract,
         target_profile,
+        target_realization,
     )
     context = _validate_prepare_authority(spec, control_structure)
     factors = _build_projection_factors(spec.causal_factors)
@@ -175,6 +184,7 @@ def prepare_execution_projection(
         raise ExecutionProjectionPreparationError(
             "contextual v2 projection requires an explicit Stage 5 execution contract"
         )
+    _validate_target_realization(contract, spec, target_profile, target_realization)
     projection = _build_projection(
         spec,
         control_structure,
@@ -185,6 +195,7 @@ def prepare_execution_projection(
         constraint_refs,
         contract,
         target_profile,
+        target_realization,
     )
     return _freeze_validated_projection(projection)
 
@@ -195,6 +206,7 @@ def _validate_prepare_types(
     run_identity: ExecutionRunIdentity,
     execution_contract: SemanticExecutionContract | None,
     target_profile: ExecutionTargetProfile | None,
+    target_realization: TargetRealizationResult | None,
 ) -> None:
     if not isinstance(spec, ScenarioSpec):
         raise ExecutionProjectionPreparationError("spec must be a ScenarioSpec")
@@ -217,6 +229,107 @@ def _validate_prepare_types(
     ):
         raise ExecutionProjectionPreparationError(
             "target_profile must be an ExecutionTargetProfile"
+        )
+    if target_realization is not None and not isinstance(
+        target_realization, TargetRealizationResult
+    ):
+        raise ExecutionProjectionPreparationError(
+            "target_realization must be a TargetRealizationResult"
+        )
+
+
+def _validate_target_realization(
+    contract: SemanticExecutionContract,
+    spec: ScenarioSpec,
+    target_profile: ExecutionTargetProfile | None,
+    target_realization: TargetRealizationResult | None,
+) -> None:
+    """Close exact target selections over their profile and realization authority."""
+    exact_requirements = tuple(
+        item
+        for item in contract.resource_requirements
+        if item.exact_resource_id is not None
+    )
+    authority = _validate_target_authority_pair(
+        target_profile,
+        target_realization,
+        exact_requirements=bool(exact_requirements),
+    )
+    if authority is None or not exact_requirements:
+        return
+    _, realization = authority
+    selected = _selected_target_operation(realization, spec.target_control_action)
+    _validate_exact_target_requirements(exact_requirements, selected)
+
+
+def _validate_target_authority_pair(
+    target_profile: ExecutionTargetProfile | None,
+    target_realization: TargetRealizationResult | None,
+    *,
+    exact_requirements: bool,
+) -> tuple[ExecutionTargetProfile, TargetRealizationResult] | None:
+    """Validate the optional target lineage before producing any projection."""
+    if (target_profile is None) != (target_realization is None):
+        raise ExecutionProjectionPreparationError(
+            "target_profile and target_realization must be supplied together"
+        )
+    if target_profile is None or target_realization is None:
+        if exact_requirements:
+            raise ExecutionProjectionPreparationError(
+                "exact target requirements require profile and target realization"
+            )
+        return None
+    target_profile.assert_integrity()
+    target_realization.assert_integrity()
+    if target_realization.profile_digest != target_profile.semantic_digest:
+        raise ExecutionProjectionPreparationError(
+            "target realization profile pin does not match target profile"
+        )
+    return target_profile, target_realization
+
+
+def _selected_target_operation(
+    realization: TargetRealizationResult,
+    control_action_id: str,
+) -> TargetOperationReference:
+    """Return the exact supported operation for a baseline or derived action."""
+    baseline = tuple(
+        item.selected_operation
+        for item in realization.rows
+        if item.control_action_id == control_action_id
+        and item.disposition is TargetRealizationDisposition.supported
+        and item.selected_operation is not None
+    )
+    derived = tuple(
+        record.operation_ref
+        for record in realization.operation_records
+        if record.target_derived_control_action_id == control_action_id
+        and record.disposition is TargetRealizationDisposition.supported
+    )
+    selected = baseline + derived
+    if not selected:
+        raise ExecutionProjectionPreparationError(
+            "exact target requirements require a supported realization row"
+        )
+    if len(selected) != 1:
+        raise ExecutionProjectionPreparationError(
+            "exact target requirements resolve to conflicting target operations"
+        )
+    return selected[0]
+
+
+def _validate_exact_target_requirements(
+    requirements: Sequence[ExecutionResourceRequirement],
+    selected: TargetOperationReference,
+) -> None:
+    """Require every exact contract requirement to match the selected operation."""
+    if any(
+        item.exact_resource_id != selected.resource_id
+        or item.operation != selected.operation_id
+        for item in requirements
+    ):
+        raise ExecutionProjectionPreparationError(
+            "execution contract target operation does not match target realization"
         )
 
 
@@ -331,7 +444,13 @@ def _build_projection_factors(
             capability_refs=tuple(factor.capability_refs),
             access_refs=tuple(factor.access_refs),
             bounded_assumption=factor.bounded_assumption,
-            temporal_condition=conditions[index - 1],
+            temporal_condition=(
+                scope_temporal_condition_bindings(
+                    conditions[index - 1], f"factor-{index}"
+                )
+                if conditions[index - 1] is not None
+                else None
+            ),
         )
         for index, factor in enumerate(causal_factors, start=1)
     )
@@ -347,6 +466,7 @@ def _build_projection(
     constraint_refs: tuple[str, ...],
     execution_contract: SemanticExecutionContract,
     target_profile: ExecutionTargetProfile | None,
+    target_realization: TargetRealizationResult | None,
 ) -> ExecutionProjectionV2:
     steps = _build_projection_steps(factors, spec.target_control_action)
     outcome = _build_unsafe_outcome(spec, hazard_refs, constraint_refs)
@@ -377,7 +497,13 @@ def _build_projection(
         execution_contract=execution_contract,
         execution_classification=classification,
         trace_refs=_trace_refs(
-            spec, control_structure, context, hazard_refs, constraint_refs
+            spec,
+            control_structure,
+            context,
+            hazard_refs,
+            constraint_refs,
+            target_profile,
+            target_realization,
         ),
     )
 
@@ -444,6 +570,7 @@ def _build_unsafe_outcome(
         raise ExecutionProjectionPreparationError(
             "contextual v2 projection requires a non-null unsafe outcome condition"
         )
+    condition = scope_temporal_condition_bindings(condition, "outcome")
     return UnsafeOutcome(
         outcome_id="OUTCOME-1",
         control_action_id=spec.target_control_action,
@@ -714,26 +841,54 @@ def _trace_refs(
     context: ScenarioGenerationContext,
     hazard_refs: Sequence[str],
     constraint_refs: Sequence[str],
+    target_profile: ExecutionTargetProfile | None,
+    target_realization: TargetRealizationResult | None,
 ) -> ExecutionTraceRefs:
+    """Build the exact structural and target lineage references."""
+    return ExecutionTraceRefs(
+        obligation_ids=tuple(
+            item.obligation_id for item in context.obligation_considerations
+        ),
+        attack_pattern_ids=tuple(
+            item.attack_pattern_id for item in context.obligation_considerations
+        ),
+        loss_ids=tuple(item.loss_id for item in context.losses),
+        hazard_ids=tuple(hazard_refs),
+        constraint_ids=tuple(constraint_refs),
+        source_pins=_trace_source_pins(
+            control_structure,
+            context,
+            target_profile,
+            target_realization,
+        ),
+    )
+
+
+def _trace_source_pins(
+    control_structure: ControlStructure,
+    context: ScenarioGenerationContext,
+    target_profile: ExecutionTargetProfile | None,
+    target_realization: TargetRealizationResult | None,
+) -> ExecutionSourcePins:
+    """Build source pins from the exact authorities used by the projection."""
     context_pins = {
         item.source_kind: item.semantic_digest for item in context.source_pins
     }
-    source_pins = ExecutionSourcePins(
+    return ExecutionSourcePins(
         control_structure=compute_framed_digest(
             "stpa-control-structure-v1", control_structure.model_dump(mode="json")
         ),
         loss_analysis=context_pins["loss_relationships"],
         ica_enumeration=context_pins["structural_threat"],
         scenario_context=context.context_digest,
-    )
-    considerations = context.obligation_considerations if context is not None else ()
-    return ExecutionTraceRefs(
-        obligation_ids=tuple(item.obligation_id for item in considerations),
-        attack_pattern_ids=tuple(item.attack_pattern_id for item in considerations),
-        loss_ids=tuple(item.loss_id for item in context.losses),
-        hazard_ids=tuple(hazard_refs),
-        constraint_ids=tuple(constraint_refs),
-        source_pins=source_pins,
+        execution_target_profile=(
+            target_profile.semantic_digest if target_profile is not None else None
+        ),
+        target_realization=(
+            target_realization.semantic_digest
+            if target_realization is not None
+            else None
+        ),
     )
 
 

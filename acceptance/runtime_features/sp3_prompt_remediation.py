@@ -698,6 +698,7 @@ def _h_mcp_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     world.sp3_run_dir = Path(tempfile.mkdtemp())
     context = world.sp3_context
     world.sp3_result = run_sp3(
+        render_presentation=getattr(world, "render_presentation", False),
         llm_client=world.sp3_llm_client,
         enriched_threat_set=_make_sp3_ets(),
         control_structure=_make_sp3_cs(),

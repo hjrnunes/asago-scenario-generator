@@ -111,6 +111,11 @@ def test_stage2_semantic_failure_gets_one_corrective_retry(tmp_path):
     assert len(attempts) == 2
     assert [entry["success"] for entry in attempts] == [False, True]
     assert "ValueError" in attempts[0]["error"]
+    assert (
+        "Prior structured response to correct in place"
+        in attempts[1]["user_prompt_text"]
+    )
+    assert '"responsibilities": []' in attempts[1]["user_prompt_text"]
 
 
 def test_stage2_semantic_failure_retry_is_bounded(tmp_path):
@@ -245,7 +250,9 @@ def test_stage1a_calls_forward_exact_completion_cap(tmp_path):
     )
 
     stage1a_calls = [
-        call for call in client.calls if call.response_format is LossAnalysisDraft
+        call
+        for call in client.calls
+        if call.response_format and issubclass(call.response_format, LossAnalysisDraft)
     ]
     assert len(stage1a_calls) == 2
     assert [call.max_completion_tokens for call in stage1a_calls] == [8192, 8192]

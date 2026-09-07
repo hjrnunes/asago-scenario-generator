@@ -20,7 +20,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from asago_scenario_generator.models.capability_profile import (
     ZONE_DISPLAY_NAMES,
@@ -82,9 +82,35 @@ class CriticGap(BaseModel):
 class CriticFindings(BaseModel):
     """Findings from the completeness critic."""
 
+    model_config = ConfigDict(
+        extra="forbid",
+        # Internal callers may still construct empty findings on a recorded
+        # provider failure. The generation contract must request every section.
+        json_schema_extra={
+            "required": ["gaps", "checklist_results", "taxonomy_probe_results"]
+        },
+    )
     gaps: list[CriticGap] = []
-    checklist_results: dict[str, str] = {}
-    taxonomy_probe_results: dict[str, str] = {}
+    checklist_results: dict[
+        str,
+        Literal["present", "absent_justified", "absent_unjustified"],
+    ] = Field(default_factory=dict)
+    taxonomy_probe_results: dict[
+        str,
+        Literal["present", "absent_justified", "absent_unjustified"],
+    ] = Field(default_factory=dict)
+
+    @field_validator("checklist_results", "taxonomy_probe_results")
+    @classmethod
+    def validate_result_names(cls, value: dict[str, str], info: ValidationInfo):
+        """Bound maps locally; deployed guided decoding lacks property limits."""
+        limit = 7 if info.field_name == "checklist_results" else 5
+        if len(value) > limit:
+            raise ValueError(f"{info.field_name} may contain at most {limit} probes")
+        for name in value:
+            if not name.strip() or len(name) > 100:
+                raise ValueError("critic probe names must contain 1–100 characters")
+        return value
 
 
 def _validate_critic_findings_consistency(findings: CriticFindings) -> None:
@@ -926,7 +952,19 @@ def _replace_modified_resps(
             "Modified responsibility resp_id must match an existing "
             f"canonical responsibility ID; unknown ID(s): {unknown}."
         )
-    return [copy.deepcopy(modified_map.get(r.resp_id, r)) for r in resps]
+    return [_revised_responsibility(r, modified_map.get(r.resp_id, r)) for r in resps]
+
+
+def _revised_responsibility(
+    original: Responsibility, replacement: Responsibility
+) -> Responsibility:
+    """A completeness revision cannot revoke already established ownership links."""
+    revised = copy.deepcopy(replacement)
+    revised.security_constraint_refs = sorted(
+        set(original.security_constraint_refs)
+        | set(replacement.security_constraint_refs)
+    )
+    return revised
 
 
 def _next_free_cm_id(used_cm_ids: set[str]) -> str:
@@ -986,7 +1024,8 @@ def _stitch_revision_delta(
     that source ID is later rewritten.  Published IDs are assigned later
     from the stitched list positions.
 
-    - Replaces ``modified_responsibilities`` by source ``resp_id``.
+    - Replaces ``modified_responsibilities`` by source ``resp_id`` while
+      retaining their established governing security-constraint links.
     - Appends new responsibilities, processes, and links whose source
       IDs are not already present.
     - Records ``cm_id`` collisions among newly added links so the

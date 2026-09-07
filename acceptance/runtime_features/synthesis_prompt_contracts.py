@@ -1234,15 +1234,6 @@ def _h_stage5_local_causal_handle(
                     "category": "conversation",
                     "description": "Earlier coordination turns carry the selected state.",
                 },
-                "defender_vulnerabilities": [
-                    {
-                        "belief_handle": f"belief_{index}",
-                        "vulnerability": "The selected state may become stale.",
-                    }
-                    for index, _item in enumerate(
-                        context.target_control_path.process_model_parts, start=1
-                    )
-                ],
                 "attacker_bdi": {
                     "beliefs": ["The selected state may become stale."],
                     "desires": ["Induce the selected unsafe action."],
@@ -1256,6 +1247,7 @@ def _h_stage5_local_causal_handle(
                 "causal_factors": [
                     {
                         "source_handle": "cause_1",
+                        "selected_for_route": True,
                         "evidence": "The shared process model may remain stale.",
                         "temporal_condition": None,
                         "evidence_status": "bounded_assumption",
@@ -1268,14 +1260,18 @@ def _h_stage5_local_causal_handle(
                         "control_action_id": "CM-1",
                         "property": "policy_state",
                         "operator": "equals",
-                        "expected": "approved",
+                        "expected": {
+                            "binding_ref": "SEM-acceptance-policy-state",
+                            "value_type": "string",
+                            "description": "The policy state is unknown in this fixture.",
+                            "minimum": None,
+                            "maximum": None,
+                        },
                     },
                     "semantic_proposition": None,
                 },
                 "execution_route": {
                     "disposition": "executable_route",
-                    "delivery_class": "conversation_context",
-                    "selected_factor_handle": "cause_1",
                     "action_kind": "agent_message",
                     "reason": "The selected shared state explains the coordination message.",
                 },
@@ -1628,6 +1624,18 @@ def _h_failed_recheck_with_sibling(
         for diagnostic in batch.diagnostics
     )
     return True, ""
+
+
+def _h_failed_repair_ineligible(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text, examples
+    state = _state(world)
+    failed = set(state["ica_provider_failure_ids"])
+    retained = {ica.ica_id for slot in state["ica_filtered"].slots for ica in slot.icas}
+    return bool(failed) and failed.isdisjoint(retained), (
+        "a previously rejected ICA became eligible after its repair failed"
+    )
 
 
 def _h_na_verification(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -2061,6 +2069,10 @@ def register(api: Any) -> None:
         _h_provider_failure,
     )
     api.register(r"the supported sibling remains eligible", _h_sibling_eligible)
+    api.register(
+        r"the rejected ICA with a failed repair is not eligible",
+        _h_failed_repair_ineligible,
+    )
     api.register(
         r"the final ICA provider failure is recorded separately",
         _h_failure_recorded,

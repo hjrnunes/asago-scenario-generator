@@ -11,6 +11,7 @@ from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
     IcaHazardVerificationRequest,
     IcaHazardVerificationVerdict,
     IcaLossContext,
+    build_ica_hazard_verification_request,
     filter_ica_considerations,
     verify_final_ica_batch,
 )
@@ -141,6 +142,96 @@ def test_routing_provider_wire_does_not_expose_mapping_strength() -> None:
     assert "mapping_strength" not in assessment.get("properties", {})
 
 
+def test_verification_prompt_explains_conditional_and_alternative_controls() -> None:
+    system, _ = build_ica_hazard_verification_prompts((_request(),))
+
+    assert '"if A, require B"' in system
+    assert "supervisor signs OR an automated check passes" in system
+    assert "missing supervisor sign-off alone" in system
+    assert "unspecified specialist" in system
+    assert "`insufficient_evidence`, not a repaired story" in system
+
+
+def test_verification_request_projects_action_recipient_and_direction() -> None:
+    from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
+        build_ica_hazard_verification_request,
+    )
+
+    enumeration, loss_analysis, control_structure = _stpa_inputs()
+    action = ControlAction.model_validate(
+        {
+            **control_structure.responsibilities[0].control_actions[0].model_dump(),
+            "effect_kind": "model_output",
+        }
+    )
+    responsibility = control_structure.responsibilities[0].model_copy(
+        update={"control_actions": [action]}
+    )
+    control_structure = control_structure.model_copy(
+        update={"responsibilities": [responsibility]}
+    )
+
+    request = build_ica_hazard_verification_request(
+        enumeration.slots[0].icas[0],
+        enumeration.slots[0],
+        loss_analysis,
+        control_structure,
+    )
+
+    assert request.action_recipient == "Production"
+    assert request.action_direction == "output"
+    assert request.action_effect_kind == "model_output"
+
+
+def test_verification_prompt_compares_provider_input_with_customer_output() -> None:
+    base = _request().model_dump(mode="python", exclude={"semantic_digest"})
+    negative_constraint = {
+        **base["constraints"][0],
+        "description": "Send the record to a storage provider for processing.",
+    }
+    negative_payload = {
+        **base,
+        "constraints": (negative_constraint,),
+        "action_recipient": "the borrowing member",
+        "action_direction": "output",
+        "action_effect_kind": "model_output",
+    }
+    positive_constraint = {
+        **negative_constraint,
+        "description": "Show the record to the borrowing member.",
+    }
+    positive_payload = {
+        **negative_payload,
+        "constraints": (positive_constraint,),
+    }
+    negative = IcaHazardVerificationRequest.model_validate(negative_payload)
+    positive = IcaHazardVerificationRequest.model_validate(positive_payload)
+
+    system, user = build_ica_hazard_verification_prompts((negative, positive))
+
+    assert "provider (provider input)" in system
+    assert "customer (customer output)" in system
+    assert "different_action" in system
+    assert "action_recipient: the borrowing member" in user
+    assert "action_direction: output" in user
+    assert "Send the record to a storage provider" in user
+    assert "Show the record to the borrowing member" in user
+
+
+def test_loss_method_preserves_triggers_without_inventing_measurement() -> None:
+    from pathlib import Path
+
+    from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+    from asago_scenario_generator.stpa.system_model import control_structure
+
+    loader = TemplateLoader(Path(control_structure.__file__).parent / "prompts")
+    for template in ("stage1a_risk_system.j2", "stage1a_gap_system.j2"):
+        rendered = loader.render_prompt(template)
+        assert "Constraints are requirements, not observations of installed controls" in rendered
+        assert "identity-confidence score falls below 0.8" in rendered
+        assert "unless that score and threshold were supplied" in rendered
+
+
 def _stpa_inputs() -> tuple[ICAEnumeration, LossAnalysis, ControlStructure]:
     loss_analysis = LossAnalysis(
         risk_card_losses=[],
@@ -208,6 +299,59 @@ def _stpa_inputs() -> tuple[ICAEnumeration, LossAnalysis, ControlStructure]:
         ],
     )
     return ICAEnumeration(slots=[slot]), loss_analysis, control_structure
+
+
+def test_request_scopes_multi_hazard_constraint_to_ica_hazard() -> None:
+    enumeration, loss_analysis, control_structure = _stpa_inputs()
+    loss_analysis = loss_analysis.model_copy(
+        update={
+            "hazards": [
+                *loss_analysis.hazards,
+                Hazard(hazard_id="H-2", description="Other hazard", related_losses=["L-1"]),
+            ],
+            "security_constraints": [
+                SecurityConstraint(
+                    constraint_id="SC-1",
+                    description="Gate releases",
+                    related_hazards=["H-1", "H-2"],
+                )
+            ],
+        }
+    )
+
+    request = build_ica_hazard_verification_request(
+        enumeration.slots[0].icas[0],
+        enumeration.slots[0],
+        loss_analysis,
+        control_structure,
+    )
+
+    assert [item.hazard_id for item in request.hazards] == ["H-1"]
+    assert [item.related_hazard_ids for item in request.constraints] == [("H-1",)]
+
+
+def test_request_rejects_unknown_hazard_in_constraint_context() -> None:
+    enumeration, loss_analysis, control_structure = _stpa_inputs()
+    invalid_loss_analysis = LossAnalysis.model_construct(
+        risk_card_losses=loss_analysis.risk_card_losses,
+        use_case_losses=loss_analysis.use_case_losses,
+        hazards=loss_analysis.hazards,
+        security_constraints=[
+            SecurityConstraint(
+                constraint_id="SC-1",
+                description="Gate releases",
+                related_hazards=["H-1", "H-missing"],
+            )
+        ],
+    )
+
+    with pytest.raises(ValueError, match="unknown hazard.*H-missing"):
+        build_ica_hazard_verification_request(
+            enumeration.slots[0].icas[0],
+            enumeration.slots[0],
+            invalid_loss_analysis,
+            control_structure,
+        )
 
 
 def test_verification_batches_are_isolated_by_responsibility() -> None:
@@ -361,7 +505,8 @@ def test_exhausted_correction_excludes_only_affected_ica() -> None:
     assert batch.unsupported_count == 2
     assert batch.supported_count == 0
     assert adapter.calls == 1
-    assert filtered.slots[0].is_na is True
+    assert filtered.slots[0].is_na is False
+    assert filtered.slots[0].unresolved_reason
 
 
 def test_incomplete_lineage_excludes_only_unprojectable_ica() -> None:
@@ -482,7 +627,11 @@ def test_terminal_correction_is_not_reverified_and_retains_typed_outcome(
     assert record.correction.disposition == disposition
     assert len(record.attempts) == 1
     assert record.attempts[0].verdict is not None
-    assert filtered.slots[0].is_na is True
+    if disposition == "unresolved":
+        assert filtered.slots[0].is_na is False
+        assert filtered.slots[0].unresolved_reason
+    else:
+        assert filtered.slots[0].is_na is True
 
     pair = filter_ica_considerations(
         (_finding_pair(enumeration),), batch, enumeration=filtered
@@ -520,7 +669,7 @@ class _SecondVerificationFailureFake:
 
 
 @pytest.mark.parametrize("omit_verdict", (False, True))
-def test_second_verification_failure_is_provider_failure_without_final_verdict(
+def test_second_verification_failure_keeps_failure_but_not_rejected_ica(
     omit_verdict: bool,
 ) -> None:
     enumeration, loss_analysis, control_structure = _single_ica_inputs()
@@ -544,4 +693,41 @@ def test_second_verification_failure_is_provider_failure_without_final_verdict(
     assert record.attempts[0].verdict.verdict == "insufficient_evidence"
     assert record.attempts[1].verdict is None
     assert record.attempts[1].provider_status == "protocol_failure"
-    assert filtered.slots[0].icas[0].ica_id == enumeration.slots[0].icas[0].ica_id
+    assert filtered.slots[0].icas == []
+    assert filtered.slots[0].unresolved_reason
+    assert not filtered.slots[0].is_na
+
+
+@pytest.mark.parametrize("correction_fails", (False, True))
+def test_failed_or_unchanged_correction_cannot_admit_rejected_finding(
+    correction_fails: bool,
+) -> None:
+    enumeration, loss_analysis, control_structure = _single_ica_inputs()
+
+    class Adapter(_TerminalCorrectionFake):
+        def correct_ica(self, request, verdict):
+            if correction_fails:
+                raise RuntimeError("correction unavailable")
+            return IcaHazardVerificationCorrection(
+                ica_id=request.ica_id,
+                deviation=request.deviation,
+                rationale="Repeating the rejected deviation does not correct it.",
+            )
+
+    adapter = Adapter("unresolved")
+    filtered, batch = verify_final_ica_batch(
+        adapter,
+        enumeration,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    )
+    record = batch.records[0]
+    assert adapter.verification_calls == 1
+    assert record.disposition == "provider_failure"
+    assert record.final_verdict is None
+    assert record.attempts[0].verdict.verdict == "contradictory"
+    assert batch.provider_failure_count == 1
+    assert any(call.outcome == "technical_failure" for call in batch.call_evidence)
+    assert filtered.slots[0].icas == []
+    assert filtered.slots[0].unresolved_reason
+    assert not filtered.slots[0].is_na

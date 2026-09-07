@@ -106,7 +106,9 @@ class TestSanitizeCriticIDs:
             ("RC-0", "a new responsibility constraint"),
         ],
     )
-    def test_san_03b_specific_replacement_text(self, bad_id: str, expected_replacement: str):
+    def test_san_03b_specific_replacement_text(
+        self, bad_id: str, expected_replacement: str
+    ):
         """Each known prefix is replaced with its specific generic description.
 
         This also guards against the ``[0]`` → ``[1]`` index mutation in
@@ -196,9 +198,7 @@ def _make_control_structure() -> ControlStructure:
                 process_model_parts=[
                     ProcessModelPart(pm_id="PM-1-1", description="State 1")
                 ],
-                control_actions=[
-                    ControlAction(ca_id="CA-1-1", description="Action 1")
-                ],
+                control_actions=[ControlAction(ca_id="CA-1-1", description="Action 1")],
                 feedback_channels=[
                     FeedbackChannel(
                         fb_id="FB-1-1",
@@ -264,7 +264,8 @@ class TestSanitizationFlow:
         client.set_response_for(ControlElementSet, valid_control_element_set_dict())
         # Stage 2 Call 3: CoordinationAnalysis
         client.set_response_for(
-            CoordinationAnalysis, valid_empty_coordination_analysis_dict()
+            CoordinationAnalysis,
+            valid_empty_coordination_analysis_dict(constraint_ids=("SC-1", "SC-2")),
         )
 
         # Critic findings with an unjustified gap and a non-conforming ID
@@ -302,7 +303,11 @@ class TestSanitizationFlow:
             multi_agent=False,
             hitl=False,
             entry_points=[
-                {"name": "User chat", "direction": "input", "controllability": "direct"},
+                {
+                    "name": "User chat",
+                    "direction": "input",
+                    "controllability": "direct",
+                },
             ],
             confidence="medium",
             kc_subcodes=["KC1.1"],

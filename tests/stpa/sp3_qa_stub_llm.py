@@ -17,7 +17,8 @@ The stub inspects the request to determine which call it is:
 - System prompt mentions "gherkin" → Stage 6 Call C (raw text).
 
 Responses are crafted to pass all stage-local validators:
-- Defender vulnerabilities are non-empty for every PM-* in the prompt.
+- Causal factors carry the selected process-model evidence; public defender
+  annotations are derived deterministically by Stage 5.
 - Attack trees use at least 1 supported branch category and reference only
   valid PM/FB/CA/RESP IDs extracted from the prompt.
 - Gherkin text has ``Then ... should``, a ``But`` line, and a ``PM-*``
@@ -51,7 +52,6 @@ _SCENARIO_ID_RE = re.compile(r"scenario_id:\s*(SCN-\d+)")
 _TARGET_CONTROLLER_RE = re.compile(r"target_controller:\s*(RESP-\d+)")
 _TARGET_CA_RE = re.compile(r"target_control_action:\s*(CA-\d+-\d+)")
 _ICA_TYPE_RE = re.compile(r"ica_type:\s*(\w+)")
-_BELIEF_HANDLE_RE = re.compile(r"belief_handle:\s*(belief_\d+)")
 _CAUSE_HANDLE_RE = re.compile(r"source_handle:\s*(cause_\d+)")
 
 
@@ -94,15 +94,13 @@ def _extract_resp_ids(text: str) -> list[str]:
 def _build_bdi_response(user_prompt: str) -> dict:
     """Build a BDIGenerationResult payload for Stage 5.
 
-    Extracts PM-* IDs from the defender BDI YAML in the user prompt and
-    returns non-empty vulnerability annotations for each, plus a simple
-    attacker BDI.
+    Extracts structural IDs from the prompt and returns a simple causal story
+    plus attacker BDI.
     """
     pm_ids = _extract_pm_ids(user_prompt)
     resp_ids = _extract_resp_ids(user_prompt)
     ca_ids = _extract_ca_ids(user_prompt)
     fb_ids = _extract_fb_ids(user_prompt)
-    belief_handles = list(dict.fromkeys(_BELIEF_HANDLE_RE.findall(user_prompt)))
     cause_handles = list(dict.fromkeys(_CAUSE_HANDLE_RE.findall(user_prompt))) or [
         "cause_1"
     ]
@@ -112,13 +110,6 @@ def _build_bdi_response(user_prompt: str) -> dict:
     )
     ica_match = _ICA_TYPE_RE.search(user_prompt)
     ica_type = ica_match.group(1) if ica_match else "NOT_PROVIDED"
-
-    defender_vulnerabilities: dict[str, str] = {}
-    for pm_id in pm_ids:
-        defender_vulnerabilities[pm_id] = (
-            f"Process model part {pm_id} can be corrupted via manipulated "
-            f"feedback, leading to incorrect controller decisions."
-        )
 
     # Attacker BDI — reference at least one structural ID in intentions.
     beliefs = [
@@ -169,13 +160,6 @@ def _build_bdi_response(user_prompt: str) -> dict:
         }
 
     return {
-        "defender_vulnerabilities": [
-            {
-                "belief_handle": handle,
-                "vulnerability": "The selected belief may be stale.",
-            }
-            for handle in belief_handles
-        ],
         "attacker_bdi": {
             "beliefs": beliefs,
             "desires": desires,
@@ -193,6 +177,7 @@ def _build_bdi_response(user_prompt: str) -> dict:
                 "evidence": "The selected structural condition can remain stale.",
                 "temporal_condition": None,
                 "evidence_status": "structural_failure",
+                "selected_for_route": True,
                 "capability_refs": [],
                 "access_refs": [],
                 "bounded_assumption": None,
@@ -207,8 +192,6 @@ def _build_bdi_response(user_prompt: str) -> dict:
         },
         "execution_route": {
             "disposition": "executable_route",
-            "delivery_class": "direct_prompt",
-            "selected_factor_handle": cause_handles[0],
             "action_kind": "model_output",
             "resource_role_handles": [],
             "carrier_attacker_influence": "none",

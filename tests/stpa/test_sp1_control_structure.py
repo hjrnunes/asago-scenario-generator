@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
@@ -36,6 +37,56 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     derive_control_structure,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
+
+
+def test_collection_repair_preserves_the_valid_functional_record_in_context(tmp_path):
+    from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+    from asago_scenario_generator.stpa.system_model.control_structure import (
+        PROMPTS_DIR,
+        _call_2a_responsibilities,
+    )
+
+    valid = {
+        "responsibilities": [
+            {
+                "resp_id": "RESP-1",
+                "description": "Return book recommendations to the patron",
+                "security_constraint_refs": ["SC-1"],
+                "process_model_parts": [
+                    {"pm_id": "PM-1-1", "description": "Patron reading preferences"}
+                ],
+            }
+        ]
+    }
+    client = MockLLMClient()
+    client.set_response_queue([{**valid, "alternate_responsibilities": []}, valid])
+    requirements = RequirementSet(
+        requirements=[
+            {
+                "req_id": "REQ-1",
+                "description": "Do not disclose another patron's borrowing history",
+                "classification": "constraint",
+                "source_constraint": "SC-1",
+            }
+        ]
+    )
+    result = _call_2a_responsibilities(
+        llm_client=client,
+        use_case_text="Recommend books without exposing other patrons' borrowing records.",
+        requirement_set=requirements,
+        run_dir=tmp_path,
+        loader=TemplateLoader(PROMPTS_DIR),
+        temperature=0,
+    )
+    assert (
+        result.responsibilities[0].description
+        == valid["responsibilities"][0]["description"]
+    )
+    assert len(client.calls) == 2
+    repair = client.calls[1].user_prompt
+    assert "Return book recommendations to the patron" in repair
+    assert "without redesigning valid records" in repair
+    assert "replace a functional responsibility with only its safeguard" in repair
 
 
 def _make_loss_analysis() -> LossAnalysis:
@@ -171,6 +222,70 @@ def _valid_coordination_analysis_dict() -> dict:
             }
         ],
         "integrity_findings": [],
+        "semantic_review": {
+            "hazards": [
+                {
+                    "hazard_id": "H-1",
+                    "disposition": "preserve",
+                    "revised_description": None,
+                    "missing_fact": None,
+                    "source_evidence": [],
+                    "rationale": "Authorization hazard is retained.",
+                },
+                {
+                    "hazard_id": "H-2",
+                    "disposition": "preserve",
+                    "revised_description": None,
+                    "missing_fact": None,
+                    "source_evidence": [],
+                    "rationale": "Output hazard is retained.",
+                },
+            ],
+            "constraints": [
+                {
+                    "constraint_id": "SC-1",
+                    "disposition": "preserve",
+                    "revised_description": None,
+                    "missing_fact": None,
+                    "related_hazards": ["H-1"],
+                    "source_evidence": [],
+                    "rationale": "Authorization constraint applies to the payment hazard.",
+                },
+                {
+                    "constraint_id": "SC-2",
+                    "disposition": "preserve",
+                    "revised_description": None,
+                    "missing_fact": None,
+                    "related_hazards": ["H-2"],
+                    "source_evidence": [],
+                    "rationale": "Output constraint applies to the response hazard.",
+                },
+            ],
+            "responsibilities": [
+                {
+                    "responsibility_id": "RESP-1",
+                    "constraint_refs": ["SC-1"],
+                    "rationale": "Authorization constraint.",
+                },
+                {
+                    "responsibility_id": "RESP-2",
+                    "constraint_refs": ["SC-2"],
+                    "rationale": "Output constraint.",
+                },
+            ],
+            "actions": [
+                {
+                    "control_action_id": "CA-1-1",
+                    "effect_kind": "tool_call",
+                    "rationale": "Executes a transaction.",
+                },
+                {
+                    "control_action_id": "CA-2-1",
+                    "effect_kind": "agent_message",
+                    "rationale": "Targets a responsibility.",
+                },
+            ],
+        },
     }
 
 
@@ -256,6 +371,51 @@ def _setup_mock_client() -> MockLLMClient:
     client.set_response_for(ControlElementSet, _valid_control_element_set_dict())
     client.set_response_for(CoordinationAnalysis, _valid_coordination_analysis_dict())
     return client
+
+
+def test_control_element_wire_schema_prevents_target_effect_contradictions(tmp_path):
+    """The actual Call 2b schema must prevent the saved live-run mismatch."""
+    client = _setup_mock_client()
+    derive_control_structure(
+        llm_client=client,
+        use_case_text="A conversational assistant can submit payment transactions.",
+        loss_analysis=_make_loss_analysis(),
+        run_dir=tmp_path,
+    )
+    call = next(
+        call
+        for call in client.calls
+        if call.response_format and issubclass(call.response_format, ControlElementSet)
+    )
+    validator = Draft202012Validator(call.response_format.model_json_schema())
+    payload = {
+        "control_actions": [
+            {
+                "ca_id": "CA-1-1",
+                "description": "Return the answer to the caller",
+                "target": {"type": "controlled_process", "id": "CP-1"},
+                "effect_kind": "model_output",
+                "temporality": "discrete",
+            }
+        ],
+        "feedback": [],
+        "controlled_processes": [{"cp_id": "CP-1", "description": "Caller interface"}],
+    }
+    assert not list(validator.iter_errors(payload))
+    action = payload["control_actions"][0]
+    action["target"] = {"type": "responsibility", "id": "RESP-2"}
+    for effect in ("model_output", "tool_call", "state_change", "environment_action"):
+        action["effect_kind"] = effect
+        assert list(validator.iter_errors(payload)), effect
+    action["effect_kind"] = "agent_message"
+    assert not list(validator.iter_errors(payload))
+
+
+def test_responsibility_wire_schema_rejects_stray_root_responsibility_fields():
+    payload = _valid_responsibility_set_dict()
+    payload["resp_id"] = "RESP-3"
+    validator = Draft202012Validator(ResponsibilitySet.model_json_schema())
+    assert list(validator.iter_errors(payload))
 
 
 class TestRequirementSet:
@@ -387,24 +547,26 @@ class TestStage2Derivation:
     def test_s2_10_call_3_produces_valid_control_structure(self, tmp_path):
         """SP1-S2-10: Stage 2 produces a valid ControlStructure."""
         client = _setup_mock_client()
-        cs, _ = derive_control_structure(
+        result = derive_control_structure(
             llm_client=client,
             use_case_text="Test",
             loss_analysis=_make_loss_analysis(),
             run_dir=tmp_path,
         )
+        cs = result.control_structure
         assert isinstance(cs, ControlStructure)
         assert len(cs.responsibilities) == 2
 
     def test_s2_11_coordination_links_identified(self, tmp_path):
         """SP1-S2-11: coordination links are identified in Call 3."""
         client = _setup_mock_client()
-        cs, _ = derive_control_structure(
+        result = derive_control_structure(
             llm_client=client,
             use_case_text="Test",
             loss_analysis=_make_loss_analysis(),
             run_dir=tmp_path,
         )
+        cs = result.control_structure
         assert len(cs.coordination_links) == 1
         cl = cs.coordination_links[0]
         assert cl.link_id == "CL-1"

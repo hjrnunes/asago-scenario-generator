@@ -21,7 +21,10 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     ResponsibilitySet,
     derive_control_structure,
 )
-from asago_scenario_generator.stpa.system_model.critic import CriticFindings, run_completeness_critic
+from asago_scenario_generator.stpa.system_model.critic import (
+    CriticFindings,
+    run_completeness_critic,
+)
 from asago_scenario_generator.stpa.system_model.heuristics import run_heuristics
 from asago_scenario_generator.models.capability_profile import Stage1Profile
 from tests.stpa.sp1_helpers import (
@@ -156,16 +159,34 @@ class TestSP1FixtureIntegration:
         client.set_response_for(RequirementSet, _valid_req_set_dict())
         client.set_response_for(ResponsibilitySet, _valid_resp_set_dict())
         client.set_response_for(ControlElementSet, _valid_control_element_set_dict())
-        client.set_response_for(
-            CoordinationAnalysis, valid_empty_coordination_analysis_dict()
+        coordination = valid_empty_coordination_analysis_dict(
+            constraint_ids=tuple(
+                constraint.constraint_id
+                for constraint in loss_analysis.security_constraints
+            ),
+            hazard_ids=tuple(hazard.hazard_id for hazard in loss_analysis.hazards),
         )
+        coordination["semantic_review"]["constraints"] = [
+            {
+                "constraint_id": constraint.constraint_id,
+                "disposition": "preserve",
+                "revised_description": None,
+                "missing_fact": None,
+                "related_hazards": list(constraint.related_hazards),
+                "source_evidence": [],
+                "rationale": "The fixture retains the supplied systemic relation.",
+            }
+            for constraint in loss_analysis.security_constraints
+        ]
+        client.set_response_for(CoordinationAnalysis, coordination)
 
-        control_structure, _ = derive_control_structure(
+        result = derive_control_structure(
             llm_client=client,
             use_case_text="Klarna payment agent use case",
             loss_analysis=loss_analysis,
             run_dir=tmp_path,
         )
+        control_structure = result.control_structure
         assert isinstance(control_structure, ControlStructure)
 
         # Set security_constraint_refs so hazard tracing can link

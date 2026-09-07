@@ -76,12 +76,11 @@ def _make_loss_analysis() -> LossAnalysis:
 
 def _valid_loss_analysis_dict() -> dict:
     """Risk draft for the risk_derivation call."""
-    return {
-        "risk_card_losses": [],
-        "use_case_losses": [],
-        "hazards": [],
-        "security_constraints": [],
-    }
+    draft = _valid_gap_draft_dict()
+    loss = draft["use_case_losses"].pop()
+    loss.update(provenance="risk_card", source_risk_cards=["atlas-001"])
+    draft["risk_card_losses"] = [loss]
+    return draft
 
 
 def _valid_gap_draft_dict() -> dict:
@@ -174,9 +173,10 @@ def _fallback_responsibility_set_dict() -> dict:
     data.
     """
     response = _valid_responsibility_set_dict()
-    response["responsibilities"][0]["process_model_parts"][0][
-        "feedback_source"
-    ] = {"type": "controlled_process", "id": "CP-99"}
+    response["responsibilities"][0]["process_model_parts"][0]["feedback_source"] = {
+        "type": "controlled_process",
+        "id": "CP-99",
+    }
     return response
 
 
@@ -287,6 +287,62 @@ def _valid_coordination_analysis_dict() -> dict:
             }
         ],
         "integrity_findings": [],
+        "semantic_review": {
+            "hazards": [
+                {
+                    "hazard_id": "H-1",
+                    "disposition": "preserve",
+                    "revised_description": None,
+                    "missing_fact": None,
+                    "source_evidence": [],
+                    "rationale": "The supplied hazard is retained.",
+                }
+            ],
+            "constraints": [
+                {
+                    "constraint_id": "SC-1",
+                    "disposition": "preserve",
+                    "revised_description": None,
+                    "missing_fact": None,
+                    "related_hazards": ["H-1"],
+                    "source_evidence": [],
+                    "rationale": "The first supplied rule retains its hazard relation.",
+                },
+                {
+                    "constraint_id": "SC-2",
+                    "disposition": "preserve",
+                    "revised_description": None,
+                    "missing_fact": None,
+                    "related_hazards": ["H-1"],
+                    "source_evidence": [],
+                    "rationale": "The second supplied rule retains its hazard relation.",
+                },
+            ],
+            "responsibilities": [
+                {
+                    "responsibility_id": "RESP-1",
+                    "constraint_refs": ["SC-1", "SC-2"],
+                    "rationale": "Enforces both supplied rules.",
+                },
+                {
+                    "responsibility_id": "RESP-2",
+                    "constraint_refs": [],
+                    "rationale": "No additional governing rule is supplied.",
+                },
+            ],
+            "actions": [
+                {
+                    "control_action_id": "CA-1-1",
+                    "effect_kind": "agent_message",
+                    "rationale": "Internal responsibility target.",
+                },
+                {
+                    "control_action_id": "CA-2-1",
+                    "effect_kind": "agent_message",
+                    "rationale": "Internal responsibility target.",
+                },
+            ],
+        },
     }
 
 
@@ -306,16 +362,14 @@ def _setup_stage2_client(
             if control_element_set_dict is None
             else _valid_responsibility_set_dict()
         )
-    client.set_response_for(
-        ResponsibilitySet, responsibilities
-    )
+    client.set_response_for(ResponsibilitySet, responsibilities)
     client.set_response_for(
         ControlElementSet,
         control_element_set_dict or _valid_control_element_set_dict(),
     )
     client.set_response_for(
         CoordinationAnalysis,
-        coordination_analysis_dict or valid_empty_coordination_analysis_dict(),
+        _reviewed_coordination_fixture(coordination_analysis_dict),
     )
     return client
 
@@ -332,7 +386,15 @@ def _setup_full_run_client(
     client = MockLLMClient()
     client.set_response_for(
         LossAnalysisDraft,
-        [_valid_loss_analysis_dict(), _valid_gap_draft_dict()],
+        [
+            _valid_loss_analysis_dict(),
+            {
+                "risk_card_losses": [],
+                "use_case_losses": [],
+                "hazards": [],
+                "security_constraints": [],
+            },
+        ],
     )
     client.set_response_for(Stage1Profile, valid_stage1_profile_dict())
     client.set_response_for(RequirementSet, _valid_requirement_set_dict())
@@ -343,19 +405,25 @@ def _setup_full_run_client(
             if control_element_set_dict is None
             else _valid_responsibility_set_dict()
         )
-    client.set_response_for(
-        ResponsibilitySet, responsibilities
-    )
+    client.set_response_for(ResponsibilitySet, responsibilities)
     client.set_response_for(
         ControlElementSet,
         control_element_set_dict or _valid_control_element_set_dict(),
     )
     client.set_response_for(
         CoordinationAnalysis,
-        coordination_analysis_dict or valid_empty_coordination_analysis_dict(),
+        _reviewed_coordination_fixture(coordination_analysis_dict),
     )
     client.set_response_for(CriticFindings, valid_critic_findings_dict_no_gaps())
     return client
+
+
+def _reviewed_coordination_fixture(value):
+    selected = value or valid_empty_coordination_analysis_dict()
+    return {
+        **selected,
+        "semantic_review": _valid_coordination_analysis_dict()["semantic_review"],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -371,12 +439,13 @@ class TestMergeFallback01FallbackTriggered:
     ):
         """Invalid ControlElementSet produces a valid ControlStructure without crashing."""
         client = _setup_stage2_client()
-        cs, warnings = derive_control_structure(
+        result = derive_control_structure(
             llm_client=client,
             use_case_text="Test",
             loss_analysis=_make_loss_analysis(),
             run_dir=tmp_path,
         )
+        cs, warnings = result.control_structure, result.warnings
         assert isinstance(cs, ControlStructure)
         assert len(cs.responsibilities) == 2
         # The assembly produced warnings
@@ -394,12 +463,13 @@ class TestMergeFallback02EmptyCoordinationLinks:
 
     def test_merge_fallback_02_empty_coordination_links(self, tmp_path):
         client = _setup_stage2_client()
-        cs, _ = derive_control_structure(
+        result = derive_control_structure(
             llm_client=client,
             use_case_text="Test",
             loss_analysis=_make_loss_analysis(),
             run_dir=tmp_path,
         )
+        cs = result.control_structure
         assert cs.coordination_links == []
 
 
@@ -413,12 +483,13 @@ class TestMergeFallback03PreservesResponsibilities:
 
     def test_merge_fallback_03_preserves_responsibilities(self, tmp_path):
         client = _setup_stage2_client()
-        cs, _ = derive_control_structure(
+        result = derive_control_structure(
             llm_client=client,
             use_case_text="Test",
             loss_analysis=_make_loss_analysis(),
             run_dir=tmp_path,
         )
+        cs = result.control_structure
         resp_ids = {r.resp_id for r in cs.responsibilities}
         assert "RESP-1" in resp_ids
         assert "RESP-2" in resp_ids
@@ -439,12 +510,13 @@ class TestMergeFallback04PreservesControlledProcesses:
             resp_set_dict=_fallback_responsibility_set_dict(),
             control_element_set_dict=_valid_control_element_set_dict_with_cp(),
         )
-        cs, _ = derive_control_structure(
+        result = derive_control_structure(
             llm_client=client,
             use_case_text="Test",
             loss_analysis=_make_loss_analysis(),
             run_dir=tmp_path,
         )
+        cs = result.control_structure
         cp_ids = {cp.cp_id for cp in cs.controlled_processes}
         assert "CP-1" in cp_ids
 
@@ -605,12 +677,13 @@ class TestMergeFallback10SuccessfulAssembly:
             control_element_set_dict=_valid_control_element_set_dict(),
             coordination_analysis_dict=_valid_coordination_analysis_dict(),
         )
-        cs, warnings = derive_control_structure(
+        result = derive_control_structure(
             llm_client=client,
             use_case_text="Test",
             loss_analysis=_make_loss_analysis(),
             run_dir=tmp_path,
         )
+        cs, warnings = result.control_structure, result.warnings
         assert isinstance(cs, ControlStructure)
         # Coordination link CL-1 is present
         cl_ids = {cl.link_id for cl in cs.coordination_links}

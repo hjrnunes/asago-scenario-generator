@@ -13,10 +13,11 @@ import copy
 import json
 import re
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, create_model
 
 from asago_scenario_generator.models.capability_profile import (
     ZONE_DISPLAY_NAMES,
@@ -26,6 +27,7 @@ from asago_scenario_generator.models.capability_profile import (
 from asago_scenario_generator.stpa.infra.llm import LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     StageError,
+    _decode_llm_content,
     log_llm_call_failure,
     safe_llm_call,
 )
@@ -52,6 +54,15 @@ from asago_scenario_generator.stpa.system_model.id_normalization import (
     normalize_control_structure_payload,
     validate_normalized_control_structure,
 )
+from asago_scenario_generator.stpa.system_model.semantic_review import (
+    ActionEffectReview,
+    ConstraintHazardReview,
+    ControlStructureSemanticReview,
+    HazardSemanticReview,
+    ResponsibilityReview,
+    SourceEvidence,
+    apply_control_structure_semantic_review,
+)
 
 STAGE = "stage_2"
 STAGE_2_CALL_COUNT = 4
@@ -61,8 +72,21 @@ _INTERMEDIATE_VALIDATION_RETRY_FEEDBACK = (
     "\n\nThe prior response was semantically empty or invalid. Return a concise "
     "schema-matching response and populate every required collection. In "
     "particular, requirements and responsibilities must contain at least one "
-    "item when the requested schema includes them."
+    "item when the requested schema includes them. Repair the reported defect "
+    "without redesigning valid records: preserve established use-case functions, "
+    "descriptions, identities and governing constraint links unless that defect "
+    "requires changing them. A collection-name or extra-field repair must not "
+    "replace a functional responsibility with only its safeguard."
 )
+
+
+@dataclass(frozen=True)
+class ControlStructureDerivationResult:
+    """Named Stage 2 result carrying the reviewed upstream loss graph."""
+
+    loss_analysis: LossAnalysis
+    control_structure: ControlStructure
+    warnings: list[str] = field(default_factory=list)
 
 
 def _assembly_source_id_maps(
@@ -110,6 +134,8 @@ class ResponsibilitySet(BaseModel):
     those are derived in Call 2b.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     responsibilities: list[Responsibility] = Field(min_length=1)
 
 
@@ -131,11 +157,437 @@ class ControlElementSet(BaseModel):
     controlled_processes: list[ControlledProcess] = []
 
 
+class _ResponsibilityTarget(ElementRef):
+    type: Literal[ReferenceType.responsibility]
+
+
+class _ProcessTarget(ElementRef):
+    type: Literal[ReferenceType.controlled_process]
+
+
+class _ResponsibilityAction(ControlAction):
+    """Internal controller messages cannot claim external observable effects."""
+
+    target: _ResponsibilityTarget
+    effect_kind: Literal[ControlActionEffectKind.agent_message]
+    temporality: ControlActionTemporality
+
+
+class _ProcessAction(ControlAction):
+    """An external effect must name its controlled process, not a controller."""
+
+    target: _ProcessTarget
+    effect_kind: ControlActionEffectKind
+    temporality: ControlActionTemporality
+
+
+class _ControlElementProviderSet(ControlElementSet):
+    """Constrain provider choices without changing legacy domain readers.
+
+    The parser still owns identity and semantic validation. This union exposes
+    the existing target/effect invariant to constrained generation instead of
+    permitting combinations that can only fail after the model responds.
+    """
+
+    control_actions: list[_ResponsibilityAction | _ProcessAction]
+
+
 class CoordinationAnalysis(BaseModel):
     """Call 3 output: coordination links and integrity findings."""
 
     coordination_links: list[CoordinationLink] = []
     integrity_findings: list[str] = []
+    semantic_review: ControlStructureSemanticReview | None = None
+
+
+@dataclass(frozen=True)
+class _Call3SourceExcerpt:
+    """One exact source slice offered to the Call 3 provider."""
+
+    local_ref: str
+    canonical_ref: str
+    text: str
+    meaning: str
+
+
+class _ProviderSourceSelection(BaseModel):
+    """Call 3 wire evidence: select a displayed excerpt, do not transcribe it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    source_ref: StrictStr
+    meaning: StrictStr = Field(min_length=1)
+
+
+def _build_call3_source_excerpts(
+    use_case_text: str,
+    loss_analysis: LossAnalysis,
+) -> tuple[_Call3SourceExcerpt, ...]:
+    """Build stable local handles for exact use-case and loss source text."""
+    excerpts: list[_Call3SourceExcerpt] = []
+    next_ref = 1
+    for paragraph in re.split(r"\n\s*\n", use_case_text):
+        paragraph = paragraph.strip()
+        if not paragraph:
+            continue
+        excerpts.append(
+            _Call3SourceExcerpt(
+                local_ref=f"source_{next_ref}",
+                canonical_ref="USE_CASE",
+                text=paragraph,
+                meaning=(
+                    "Exact supplied USE_CASE text; use it to explain the decision "
+                    "without adding unstated facts."
+                ),
+            )
+        )
+        next_ref += 1
+    for loss in loss_analysis.risk_card_losses + loss_analysis.use_case_losses:
+        excerpts.append(
+            _Call3SourceExcerpt(
+                local_ref=f"source_{next_ref}",
+                canonical_ref=loss.loss_id,
+                text=loss.description,
+                meaning=(
+                    f"Exact supplied description for loss {loss.loss_id}; use it "
+                    "only for the supplied loss meaning."
+                ),
+            )
+        )
+        next_ref += 1
+    return tuple(excerpts)
+
+
+def _call3_source_ref_map(
+    excerpts: Sequence[_Call3SourceExcerpt],
+) -> dict[str, _Call3SourceExcerpt]:
+    """Index offered local source handles without normalizing their text."""
+    return {excerpt.local_ref: excerpt for excerpt in excerpts}
+
+
+def _validate_call3_review_collections(
+    review: dict[str, Any],
+    structure: ControlStructure,
+    loss_analysis: LossAnalysis,
+) -> set[str]:
+    """Validate raw review identities before applying unresolved closure."""
+    expected_collections = {
+        "hazards": (
+            "hazard_id",
+            {hazard.hazard_id for hazard in loss_analysis.hazards},
+        ),
+        "constraints": (
+            "constraint_id",
+            {
+                constraint.constraint_id
+                for constraint in loss_analysis.security_constraints
+            },
+        ),
+        "responsibilities": (
+            "responsibility_id",
+            {responsibility.resp_id for responsibility in structure.responsibilities},
+        ),
+        "actions": (
+            "control_action_id",
+            {
+                action.ca_id
+                for responsibility in structure.responsibilities
+                for action in responsibility.control_actions
+            },
+        ),
+    }
+    rows_by_collection: dict[str, list[dict[str, Any]]] = {}
+    for collection_name, (identity_field, expected_ids) in expected_collections.items():
+        rows = review.get(collection_name)
+        if not isinstance(rows, (list, tuple)):
+            raise ValueError(f"semantic_review.{collection_name} must be a collection")
+        normalized_rows: list[dict[str, Any]] = []
+        identities: list[Any] = []
+        for index, row in enumerate(rows):
+            if not isinstance(row, dict):
+                raise ValueError(
+                    f"semantic_review.{collection_name}[{index}] must be an object"
+                )
+            identity = row.get(identity_field)
+            if identity not in expected_ids:
+                raise ValueError(
+                    f"semantic_review.{collection_name} contains unknown "
+                    f"{identity_field} {identity!r}"
+                )
+            identities.append(identity)
+            normalized_rows.append(row)
+        if len(identities) != len(expected_ids) or set(identities) != expected_ids:
+            raise ValueError(
+                f"semantic_review must cover each {identity_field} exactly once"
+            )
+        review[collection_name] = normalized_rows
+        rows_by_collection[collection_name] = normalized_rows
+
+    constraint_ids = expected_collections["constraints"][1]
+    hazard_ids = expected_collections["hazards"][1]
+    for index, row in enumerate(rows_by_collection["constraints"]):
+        related_hazards = row.get("related_hazards")
+        if not isinstance(related_hazards, (list, tuple)):
+            raise ValueError(
+                "semantic_review.constraints[{}].related_hazards must be a "
+                "collection".format(index)
+            )
+        unknown_hazards = set(related_hazards) - hazard_ids
+        if unknown_hazards:
+            raise ValueError(
+                "semantic_review.constraints contains unknown hazard reference(s): "
+                + ", ".join(sorted(str(item) for item in unknown_hazards))
+            )
+    for index, row in enumerate(rows_by_collection["responsibilities"]):
+        constraint_refs = row.get("constraint_refs")
+        if not isinstance(constraint_refs, (list, tuple)):
+            raise ValueError(
+                "semantic_review.responsibilities[{}].constraint_refs must be a "
+                "collection".format(index)
+            )
+        unknown_constraints = set(constraint_refs) - constraint_ids
+        if unknown_constraints:
+            raise ValueError(
+                "semantic_review.responsibilities contains unknown constraint "
+                "reference(s): "
+                + ", ".join(sorted(str(item) for item in unknown_constraints))
+            )
+
+    return {
+        row["constraint_id"]
+        for row in rows_by_collection["constraints"]
+        if row.get("disposition") == "unresolved"
+    }
+
+
+def _exact_review_rows(record_type, identity_field, identities):
+    """Constrain provider choices/counts; semantic validation checks uniqueness."""
+    row_type = record_type
+    if identities:
+        row_type = create_model(
+            f"Provider{record_type.__name__}",
+            __base__=record_type,
+            **{identity_field: (Literal[tuple(identities)], ...)},
+        )
+    return (
+        tuple[row_type, ...],
+        Field(min_length=len(identities), max_length=len(identities)),
+    )
+
+
+def _coordination_provider_schema(
+    structure: ControlStructure,
+    loss_analysis: LossAnalysis | None = None,
+    *,
+    use_case_text: str = "",
+    source_excerpts: Sequence[_Call3SourceExcerpt] | None = None,
+):
+    """Require the same complete review that the Call 3 consumer validates."""
+    constraint_ids = (
+        [sc.constraint_id for sc in loss_analysis.security_constraints]
+        if loss_analysis is not None
+        else []
+    )
+    hazard_ids = (
+        [hazard.hazard_id for hazard in loss_analysis.hazards]
+        if loss_analysis is not None
+        else []
+    )
+    evidence_type = SourceEvidence
+    if loss_analysis is not None:
+        excerpts = tuple(
+            source_excerpts
+            if source_excerpts is not None
+            else _build_call3_source_excerpts(use_case_text, loss_analysis)
+        )
+        source_refs = tuple(excerpt.local_ref for excerpt in excerpts)
+        if not source_refs:
+            # Literal[()] is not a useful provider contract.  The parser still
+            # fails closed if evidence is selected without an actual excerpt.
+            source_refs = ("source_1",)
+        evidence_type = create_model(
+            "ProviderSourceEvidence",
+            __base__=_ProviderSourceSelection,
+            source_ref=(Literal[tuple(source_refs)], ...),
+        )
+
+    def evidence_field():
+        return (
+            tuple[evidence_type, ...],
+            Field(min_length=0),
+        )
+
+    constraint_rows = _exact_review_rows(
+        ConstraintHazardReview,
+        "constraint_id",
+        constraint_ids,
+    )
+    if loss_analysis is not None:
+        constraint_row_type = create_model(
+            "ProviderConstraintHazardReview",
+            __base__=ConstraintHazardReview,
+            constraint_id=(Literal[tuple(constraint_ids)], ...),
+            source_evidence=evidence_field(),
+            related_hazards=(
+                tuple[Literal[tuple(hazard_ids)], ...],
+                Field(
+                    min_length=0,
+                    max_length=len(hazard_ids),
+                ),
+            ),
+        )
+        constraint_rows = (
+            tuple[constraint_row_type, ...],
+            Field(
+                min_length=len(constraint_ids),
+                max_length=len(constraint_ids),
+            ),
+        )
+        hazard_row_type = create_model(
+            "ProviderHazardSemanticReview",
+            __base__=HazardSemanticReview,
+            hazard_id=(Literal[tuple(hazard_ids)], ...),
+            source_evidence=evidence_field(),
+        )
+        hazard_rows = (
+            tuple[hazard_row_type, ...],
+            Field(min_length=len(hazard_ids), max_length=len(hazard_ids)),
+        )
+    else:
+        hazard_rows = _exact_review_rows(HazardSemanticReview, "hazard_id", hazard_ids)
+    review_type = create_model(
+        "ProviderControlStructureSemanticReview",
+        __base__=ControlStructureSemanticReview,
+        hazards=hazard_rows,
+        constraints=constraint_rows,
+        responsibilities=_exact_review_rows(
+            ResponsibilityReview,
+            "responsibility_id",
+            [resp.resp_id for resp in structure.responsibilities],
+        ),
+        actions=_exact_review_rows(
+            ActionEffectReview,
+            "control_action_id",
+            [
+                action.ca_id
+                for resp in structure.responsibilities
+                for action in resp.control_actions
+            ],
+        ),
+    )
+    return create_model(
+        "ProviderCoordinationAnalysis",
+        __base__=CoordinationAnalysis,
+        semantic_review=(review_type, ...),
+    )
+
+
+def _parse_call3_source_selection(
+    result: Any,
+    source_excerpts: Sequence[_Call3SourceExcerpt],
+    *,
+    structure: ControlStructure | None = None,
+    loss_analysis: LossAnalysis | None = None,
+) -> CoordinationAnalysis:
+    """Map provider-local source selections to immutable final evidence."""
+    payload = _decode_llm_content(result)
+    if not isinstance(payload, dict):
+        raise ValueError("Call 3 response must be one JSON object")
+    payload = copy.deepcopy(payload)
+    review = payload.get("semantic_review")
+    if not isinstance(review, dict):
+        return CoordinationAnalysis.model_validate(payload)
+
+    unresolved_constraint_ids: set[str] = set()
+    if structure is not None or loss_analysis is not None:
+        if structure is None or loss_analysis is None:
+            raise ValueError(
+                "Call 3 parser requires both structure and loss_analysis authorities"
+            )
+        unresolved_constraint_ids = _validate_call3_review_collections(
+            review,
+            structure,
+            loss_analysis,
+        )
+        original_descriptions = {
+            "hazards": {
+                hazard.hazard_id: hazard.description for hazard in loss_analysis.hazards
+            },
+            "constraints": {
+                constraint.constraint_id: constraint.description
+                for constraint in loss_analysis.security_constraints
+            },
+        }
+        identity_fields = {
+            "hazards": "hazard_id",
+            "constraints": "constraint_id",
+        }
+        for collection_name, identity_field in identity_fields.items():
+            for row in review[collection_name]:
+                revised_description = row.get("revised_description")
+                original_description = original_descriptions[collection_name][
+                    row[identity_field]
+                ]
+                if (
+                    row.get("disposition") == "revise"
+                    and row.get("missing_fact") is None
+                    and isinstance(revised_description, str)
+                    and revised_description.strip() == original_description.strip()
+                ):
+                    row["disposition"] = "preserve"
+                    row["revised_description"] = None
+        for row in review["constraints"]:
+            if row["constraint_id"] in unresolved_constraint_ids:
+                row["related_hazards"] = []
+        for row in review["responsibilities"]:
+            row["constraint_refs"] = [
+                constraint_id
+                for constraint_id in row["constraint_refs"]
+                if constraint_id not in unresolved_constraint_ids
+            ]
+
+    excerpts = _call3_source_ref_map(source_excerpts)
+    for collection_name in ("hazards", "constraints"):
+        rows = review.get(collection_name)
+        if not isinstance(rows, (list, tuple)):
+            continue
+        rows = list(rows)
+        review[collection_name] = rows
+        for row_index, row in enumerate(rows):
+            if not isinstance(row, dict):
+                continue
+            evidence = row.get("source_evidence")
+            if not isinstance(evidence, (list, tuple)):
+                continue
+            normalized: list[dict[str, Any]] = []
+            for evidence_index, item in enumerate(evidence):
+                if not isinstance(item, dict):
+                    normalized.append(item)
+                    continue
+                unexpected = set(item) - {"source_ref", "meaning"}
+                if unexpected:
+                    names = ", ".join(sorted(str(name) for name in unexpected))
+                    raise ValueError(
+                        "Call 3 source_evidence must select source_ref and meaning "
+                        f"only at {collection_name}[{row_index}].source_evidence["
+                        f"{evidence_index}]; unexpected field(s): {names}"
+                    )
+                local_ref = item.get("source_ref")
+                excerpt = excerpts.get(local_ref)
+                if excerpt is None:
+                    raise ValueError(
+                        "Call 3 source_evidence source_ref must select one of the "
+                        f"displayed local excerpts; got {local_ref!r}"
+                    )
+                normalized.append(
+                    {
+                        "source_ref": excerpt.canonical_ref,
+                        "quote": excerpt.text,
+                        "meaning": item.get("meaning"),
+                    }
+                )
+            row["source_evidence"] = normalized
+    return CoordinationAnalysis.model_validate(payload)
 
 
 def _validate_stage2_intermediate(model: BaseModel) -> None:
@@ -1276,7 +1728,7 @@ def derive_control_structure(
     run_dir: Path,
     template_loader: TemplateLoader | None = None,
     temperature: float = DEFAULT_TEMPERATURE,
-) -> tuple[ControlStructure, list[str]]:
+) -> ControlStructureDerivationResult:
     """Run all four Stage 2 calls in sequence and assemble the ControlStructure.
 
     Call 1  — Requirements (from security constraints)
@@ -1299,8 +1751,9 @@ def derive_control_structure(
         temperature: LLM temperature (default 0.4).
 
     Returns:
-        A tuple of (validated ControlStructure, warnings). The
-        warning list is empty when the assembly succeeds.
+        A named result containing the reviewed ``LossAnalysis``, validated
+        ``ControlStructure``, and warnings.  The warning tuple is empty when
+        the assembly succeeds.
     """
     loader = template_loader or TemplateLoader(PROMPTS_DIR)
 
@@ -1350,15 +1803,32 @@ def derive_control_structure(
     # Repair orphan PMs — auto-generate stub FB channels before Call 3
     control_structure, repair_warnings = repair_orphan_pms(control_structure)
 
+    # Preserve the merged, pre-review loss graph for audit.  Stage 2 may make
+    # only the bounded semantic wording/edge decisions in Call 3; all source
+    # texts and identities stay available in this draft artifact.
+    write_yaml(loss_analysis, run_dir / "loss-analysis-draft.yaml")
+
     # Call 3 — Coordination + integrity (receives full assembled control structure)
+    write_yaml(control_structure, run_dir / "control-structure-draft.yaml")
     coordination_analysis = _call_3_coordination(
         llm_client=llm_client,
         use_case_text=use_case_text,
         control_structure=control_structure,
+        loss_analysis=loss_analysis,
         run_dir=run_dir,
         loader=loader,
         temperature=temperature,
     )
+
+    write_yaml(coordination_analysis, run_dir / "control-structure-review.yaml")
+    semantic_result = apply_control_structure_semantic_review(
+        control_structure,
+        loss_analysis,
+        coordination_analysis.semantic_review,
+        use_case_text=use_case_text,
+    )
+    reviewed_loss_analysis = semantic_result.loss_analysis
+    control_structure = semantic_result.control_structure
 
     # Add coordination links to the ControlStructure (with fallback)
     control_structure, coord_warnings = _add_coordination_links_with_fallback(
@@ -1369,8 +1839,13 @@ def derive_control_structure(
         assembly_source_id_maps,
     )
 
+    write_yaml(reviewed_loss_analysis, run_dir / "loss-analysis.yaml")
     write_yaml(control_structure, run_dir / "control-structure.yaml")
-    return control_structure, assembly_warnings + repair_warnings + coord_warnings
+    return ControlStructureDerivationResult(
+        loss_analysis=reviewed_loss_analysis,
+        control_structure=control_structure,
+        warnings=assembly_warnings + repair_warnings + coord_warnings,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1394,6 +1869,7 @@ def _run_stage2_llm_call(
     step: str,
     allow_unvalidated: bool = False,
     raw_result_validator: Callable[[Any], None] | None = None,
+    result_validator: Callable[[Any], None] | None = None,
     result_parser: Callable[[Any], _Stage2ModelT] | None = None,
 ) -> _Stage2ModelT:
     """Render prompts, call the LLM, validate, and raise StageError on failure.
@@ -1418,11 +1894,12 @@ def _run_stage2_llm_call(
         allow_unvalidated=allow_unvalidated,
         raw_result_validator=raw_result_validator,
         result_parser=result_parser,
-        result_validator=_validate_stage2_intermediate,
+        result_validator=result_validator or _validate_stage2_intermediate,
         json_decode_retries=JSON_DECODE_RETRIES,
         validation_retries=1,
         validation_retry_feedback=_INTERMEDIATE_VALIDATION_RETRY_FEEDBACK,
         validation_retry_include_schema=False,
+        validation_retry_include_response=True,
     )
     if error_msg is not None:
         raise StageError(stage=STAGE, step=step, message=error_msg)
@@ -1539,7 +2016,7 @@ def _call_2b_control_elements(
             "use_case_text": use_case_text,
             "responsibilities": responsibility_set.responsibilities,
         },
-        response_format=ControlElementSet,
+        response_format=_ControlElementProviderSet,
         step="call_2b_control_elements",
         # Call 2b is semantic output.  Its stage-local parser rejects unknown
         # carriers and missing meaning before canonical IDs are repaired; the
@@ -1564,6 +2041,7 @@ def _call_3_coordination(
     run_dir: Path,
     loader: TemplateLoader,
     temperature: float,
+    loss_analysis: LossAnalysis | None = None,
 ) -> CoordinationAnalysis:
     """Run Call 3: identify coordination links and verify connection integrity.
 
@@ -1574,6 +2052,24 @@ def _call_3_coordination(
     Raises:
         StageError: If the LLM call fails or the response fails validation.
     """
+    source_excerpts = (
+        _build_call3_source_excerpts(use_case_text, loss_analysis)
+        if loss_analysis is not None
+        else ()
+    )
+    source_ref_by_canonical = {
+        excerpt.canonical_ref: excerpt.local_ref for excerpt in source_excerpts
+    }
+    response_format = (
+        _coordination_provider_schema(
+            control_structure,
+            loss_analysis,
+            use_case_text=use_case_text,
+            source_excerpts=source_excerpts,
+        )
+        if loss_analysis is not None
+        else CoordinationAnalysis
+    )
     return _run_stage2_llm_call(
         llm_client=llm_client,
         run_dir=run_dir,
@@ -1584,8 +2080,61 @@ def _call_3_coordination(
         user_prompt_kwargs={
             "use_case_text": use_case_text,
             "control_structure": control_structure,
+            "loss_analysis": loss_analysis,
+            "source_excerpts": source_excerpts,
+            "source_ref_by_canonical": source_ref_by_canonical,
         },
-        response_format=CoordinationAnalysis,
+        response_format=response_format,
         step="call_3_coordination",
-        allow_unvalidated=True,
+        allow_unvalidated=loss_analysis is None,
+        result_validator=(
+            lambda value: _validate_semantic_review_response(
+                value,
+                control_structure,
+                loss_analysis,
+                use_case_text=use_case_text,
+            )
+        )
+        if loss_analysis is not None
+        else None,
+        result_parser=(
+            lambda result: _parse_call3_source_selection(
+                result,
+                source_excerpts,
+                structure=control_structure,
+                loss_analysis=loss_analysis,
+            )
+        )
+        if loss_analysis is not None
+        else None,
     )
+
+
+def _validate_semantic_review_response(
+    value,
+    structure,
+    loss_analysis,
+    *,
+    use_case_text: str = "",
+) -> None:
+    """Use the normal bounded retry for a missing/invalid complete review."""
+    if isinstance(value, BaseModel):
+        value = raw_model_data(value)
+    if not isinstance(value, dict) or value.get("semantic_review") is None:
+        raise ValueError(
+            "semantic_review is required: review every responsibility and action"
+        )
+    review = ControlStructureSemanticReview.model_validate(value["semantic_review"])
+    apply_control_structure_semantic_review(
+        structure,
+        loss_analysis,
+        review,
+        use_case_text=use_case_text,
+    )
+    from asago_scenario_generator.stpa.models.control_structure import (
+        coordination_process_model_owner,
+    )
+
+    analysis = CoordinationAnalysis.model_validate(value)
+    for link in analysis.coordination_links:
+        coordination_process_model_owner(structure, link)

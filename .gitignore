@@ -78,6 +78,7 @@ ai/findings/*
 !ai/findings/stpa-garak-readiness-corrections-spec.md
 !ai/findings/klarna-live-prompt-contract-recovery-fixes-spec-2026-09-04.md
 !ai/findings/stpa-execution-environment-basis-default-fix-spec-2026-09-04.md
+!ai/findings/stpa-semantic-outcome-lineage-and-obligation-attribution-spec-2026-09-04.md
 opencode.json
 
 # Preserve the organization-managed Claude project scaffold only

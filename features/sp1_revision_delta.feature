@@ -48,9 +48,11 @@ Feature: SP1 Stage 2 — RevisionDelta pattern for revision step
   # RevisionDelta-04
   Scenario: RevisionDelta-04 modified_responsibilities replace existing ones by resp_id
     Given an LLM that returns a RevisionDelta with modified_responsibilities containing RESP-1 with an updated description
+    And the pre-revision responsibility RESP-1 owns security constraint SC-1
     When the revision is run
     Then the final control structure contains RESP-1 with the updated description
     And the final control structure contains RESP-2 unchanged
+    And the revised responsibility RESP-1 still owns security constraint SC-1
 
   # RevisionDelta-05
   Scenario: RevisionDelta-05 new_controlled_processes are merged into ControlStructure

@@ -1,0 +1,18 @@
+Decide whether the control action below corresponds to exactly one observed
+operation. `supported` requires one selected exact resource/operation pair.
+When disposition is `supported`, candidate_operations must contain the exact
+selected_operation (and may contain other genuinely plausible operations).
+Use `ambiguous` when several operations remain plausible, `contradictory` when
+the evidence conflicts, and `unmapped` when none is supported. Candidate and
+selected identities must be copied exactly from the supplied operations.
+
+CONTROL_ACTION_BEGIN
+{{ action_yaml }}CONTROL_ACTION_END
+
+OBSERVED_OPERATIONS_BEGIN
+{{ operations_yaml }}OBSERVED_OPERATIONS_END
+
+Use the action description and any supplied target meaning to distinguish its
+immediate effect and recipient from the operation's outcome. Preserve an
+ambiguous or unmapped relationship when the operation is only a prerequisite,
+signal, acknowledgement, or incomplete handoff.

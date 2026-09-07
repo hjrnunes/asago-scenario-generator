@@ -410,7 +410,7 @@ def _coerce_response(raw: Any, request: SynthesisSlotRequest) -> SynthesisSlotRe
 
 
 def _fallback_slot(slot: SlotPlaceholder, detail: str) -> ICASlot:
-    """Fill a failed ordinary slot with explicit structural N/A evidence."""
+    """Retain a failed ordinary slot as unresolved, never as justified N/A."""
     return ICASlot(
         slot_id=slot.slot_id,
         responsibility=slot.responsibility,
@@ -418,8 +418,8 @@ def _fallback_slot(slot: SlotPlaceholder, detail: str) -> ICASlot:
         control_action=slot.control_action,
         action_temporality=slot.action_temporality,
         uca_type=slot.uca_type,
-        is_na=True,
-        na_justification=detail,
+        is_na=False,
+        unresolved_reason=detail,
     )
 
 
@@ -436,6 +436,27 @@ def _slot_matches(value: ICASlot, expected: SlotPlaceholder) -> bool:
         )
         and value.uca_type == expected.uca_type
     )
+
+
+def _validate_compiled_slot(
+    value: ICASlot,
+    *,
+    expected: SlotPlaceholder,
+    loss_analysis: LossAnalysis,
+    control_structure: ControlStructure,
+) -> None:
+    """Validate a canonical slot without rewriting provider-authored prose.
+
+    Provider responses have already crossed the strict draft compiler.  The
+    outer fill seam still owns a second, read-only integrity check: exact slot
+    identity and every canonical ICA hazard/constraint reference must remain
+    bound to the request's authoritative artifacts.  This deliberately does
+    not call the legacy compiler, whose job includes prefixing historical
+    prose and can therefore misclassify compiler-owned text as a safeguard.
+    """
+    if not _slot_matches(value, expected):
+        raise ValueError(f"slot {expected.slot_id} changed its authoritative identity")
+    ICAEnumeration(slots=[value]).validate_against(loss_analysis, control_structure)
 
 
 def _slot_authority(
@@ -566,6 +587,7 @@ def _compile_finding(
     return ICA(
         ica_id=f"provider-finding-{index}",
         ica_text=text,
+        deviation=finding.deviation.text,
         hazardous_context=finding.hazardous_context.strip(),
         loss_scenario=finding.loss_consequence.strip(),
         related_hazards=list(finding.related_hazard_ids),
@@ -1066,7 +1088,7 @@ def _record_unresolved_slot_fallbacks(
     all_filled: dict[str, ICASlot],
     successful_slots: set[str] | None,
 ) -> None:
-    """Materialize unresolved provider slots as explicit fallback N/A values."""
+    """Materialize unresolved provider slots as typed unresolved values."""
     for slot in request.slots:
         slot_id = slot.slot_id
         if not _requires_provider_slot_analysis(slot):
@@ -1356,8 +1378,17 @@ def _compile_response_entry(
     diagnostics: list[ConsiderationDiagnostic],
     loss_analysis: LossAnalysis,
     control_structure: ControlStructure,
+    provider_compiled: bool,
 ) -> tuple[str, ICASlot] | None:
-    """Compile one response entry or record its non-fatal identity issue."""
+    """Compile one response entry or record its non-fatal identity issue.
+
+    Named provider adapters return canonical ``ICASlot`` values after the
+    provider seam has compiled the strict draft.  Re-entering the historical
+    ``ICASlot`` compatibility compiler here changes compiler-owned prose (and
+    can classify that prose as a safeguard), so provider entries are only
+    checked for their exact binding and aligned once.  Fake/legacy adapters
+    retain the compatibility path.
+    """
     slot_id = getattr(value, "slot_id", None)
     expected_slot = expected.get(slot_id)
     if expected_slot is None:
@@ -1383,12 +1414,23 @@ def _compile_response_entry(
         return None
     if not _requires_provider_slot_analysis(expected_slot):
         return None
-    compiled = compile_slot_provider_entry(
-        value,
-        slot=expected_slot,
-        loss_analysis=loss_analysis,
-        control_structure=control_structure,
-    ).aligned()
+    if provider_compiled:
+        if not isinstance(value, ICASlot):
+            raise TypeError("provider response must contain compiled ICASlot values")
+        _validate_compiled_slot(
+            value,
+            expected=expected_slot,
+            loss_analysis=loss_analysis,
+            control_structure=control_structure,
+        )
+        compiled = value.aligned()
+    else:
+        compiled = compile_slot_provider_entry(
+            value,
+            slot=expected_slot,
+            loss_analysis=loss_analysis,
+            control_structure=control_structure,
+        ).aligned()
     return slot_id, compiled
 
 
@@ -1413,6 +1455,7 @@ def _compile_response_slots(
                 diagnostics=diagnostics,
                 loss_analysis=loss_analysis,
                 control_structure=control_structure,
+                provider_compiled=response.adapter_kind == "provider",
             )
         except (TypeError, ValueError) as exc:
             return by_id, exc

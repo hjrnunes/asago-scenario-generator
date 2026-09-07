@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import html
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+
+import yaml
 
 from runtime_shared import World
 
@@ -112,10 +115,12 @@ class _FakeSynthesis:
         *,
         route_disposition: str | None = None,
         provider_failure: bool = False,
+        baseline_warning: bool = False,
     ) -> None:
         self.revision_status = revision_status
         self.route_disposition = route_disposition
         self.provider_failure = provider_failure
+        self.baseline_warning = baseline_warning
         self.calls: list[str] = []
         self.recheck_sizes: list[int] = []
         self.considered_ids: tuple[str, ...] = ()
@@ -132,9 +137,12 @@ class _FakeSynthesis:
 
     def baseline(self, **_: Any) -> Any:
         self.calls.append("baseline")
-        return SimpleNamespace(
+        result = SimpleNamespace(
             loss_analysis="baseline-loss", control_structure="baseline-control"
         )
+        if self.baseline_warning:
+            result.stage_warnings = ("baseline warning remains unresolved",)
+        return result
 
     def consider(self, *, briefs: tuple[Any, ...], **_: Any) -> Any:
         self.calls.append("consider")
@@ -310,6 +318,12 @@ def _h_route_mode(world: World, text: str, examples: dict) -> tuple[bool, str]:
 def _h_provider_failure(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     _state(world)["fake"] = _FakeSynthesis("not_required", provider_failure=True)
+    return True, ""
+
+
+def _h_baseline_warning(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del text, examples
+    _state(world)["fake"] = _FakeSynthesis("not_required", baseline_warning=True)
     return True, ""
 
 
@@ -592,6 +606,51 @@ def _h_provider_unresolved(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
+def _h_baseline_warning_persisted(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text, examples
+    state = _state(world)
+    result = state.get("result")
+    if result is None:
+        return (
+            False,
+            "synthesis did not produce a result before diagnostics verification",
+        )
+    expected = "Baseline stage_warnings: baseline warning remains unresolved"
+    manifest_path = result.output_dir / MANIFEST_FILENAME
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    if expected not in (manifest or {}).get("stage_warnings", ()):
+        return False, "baseline warning was not persisted in the synthesis manifest"
+    report = result.report_path
+    if report is None:
+        return False, "synthesis report is missing"
+    rendered = report.read_text(encoding="utf-8")
+    if "Analysis diagnostics" not in rendered:
+        return False, "analysis diagnostics section is missing from the report"
+    if html.escape(expected) not in rendered:
+        return False, "baseline warning is missing from the escaped report"
+    return True, ""
+
+
+def _h_baseline_warning_yield(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text, examples
+    state = _state(world)
+    result = state.get("result")
+    if result is None:
+        return False, "synthesis did not produce a result before yield verification"
+    published = len(result.scenario_envelopes)
+    generated = (result.manifest or {}).get("scenario_counts", {}).get("generated")
+    if published != 1 or generated != published:
+        return (
+            False,
+            f"baseline diagnostics changed published yield: {published}/{generated}",
+        )
+    return True, ""
+
+
 def _h_scenario_failure(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     state = _state(world)
@@ -645,6 +704,10 @@ def register(api: Any) -> None:
     api.register(
         r"a deterministic synthesis provider fails during consideration",
         _h_provider_failure,
+    )
+    api.register(
+        r"a deterministic synthesis baseline has an unresolved warning",
+        _h_baseline_warning,
     )
     api.register(
         r'a deterministic synthesis candidate outcome set "(no_candidates|zero_yield|partial)"',
@@ -709,6 +772,14 @@ def register(api: Any) -> None:
     api.register(
         r"the provider failure is retained as local unresolved evidence",
         _h_provider_unresolved,
+    )
+    api.register(
+        r"the baseline warning survives the persisted manifest and report",
+        _h_baseline_warning_persisted,
+    )
+    api.register(
+        r"the published candidate count remains unchanged",
+        _h_baseline_warning_yield,
     )
     api.register(r"scenario generation fails after ICA", _h_scenario_failure)
     api.register(

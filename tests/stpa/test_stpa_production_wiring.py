@@ -627,9 +627,6 @@ class TestRunSp3ProductionWiring:
                         "category": "user_message",
                         "description": "One user message is the typed test stimulus.",
                     },
-                    "defender_vulnerabilities": [
-                        {"belief_handle": "belief_1", "vulnerability": "v"}
-                    ],
                     "attacker_bdi": {
                         "beliefs": ["b"],
                         "desires": ["d"],
@@ -656,6 +653,7 @@ class TestRunSp3ProductionWiring:
                             "evidence": declaration.evidence,
                             "temporal_condition": declaration.temporal_condition,
                             "evidence_status": declaration.evidence_status.value,
+                            "selected_for_route": index == 1,
                         }
                         for index, declaration in enumerate(declarations, start=1)
                     ],
@@ -668,11 +666,14 @@ class TestRunSp3ProductionWiring:
                                 "constraint_refs",
                             },
                         ),
+                        "condition": {
+                            "type": "ordering",
+                            "reference_handle": "cause_1",
+                            "relation": "after",
+                        },
                     },
                     "execution_route": {
                         "disposition": "executable_route",
-                        "delivery_class": "direct_prompt",
-                        "selected_factor_handle": "cause_1",
                         "action_kind": "model_output",
                         "reason": "The declared structural factor supports the direct route.",
                     },
@@ -725,6 +726,7 @@ class TestRunSp3ProductionWiring:
             control_structure=control_structure,
             loss_analysis=loss_analysis,
             run_dir=run_dir,
+            render_presentation=True,
         )
         return result, client, run_dir
 

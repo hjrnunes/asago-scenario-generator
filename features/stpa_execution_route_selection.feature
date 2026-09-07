@@ -1,14 +1,14 @@
 # STPA-EXEC-ROUTE-01 through STPA-EXEC-ROUTE-08
 Feature: STPA Stage 5 execution-route selection
-  Stage 5 describes the test stimulus and chooses a request-local route from the
-  supplied evidence. Deterministic assembly derives resource roles and attacker
-  influence and maps the choice to a semantic contract without inventing a target.
+  Stage 5 describes the test stimulus and binds it to one declared causal factor.
+  Deterministic assembly derives delivery, resource roles and attacker influence
+  without inventing a target or making a second causal-factor choice.
 
   Background:
     Given a corrected Stage 5 route context is available
 
   Scenario Outline: STPA-EXEC-ROUTE-01 executable route choices are materialized
-    Given the provider describes stimulus "<stimulus>" and selects "<delivery>" with action "<action>"
+    Given the provider describes stimulus "<stimulus>" with action "<action>" and binds its declared causal factor
     When corrected Stage 5 materializes the route
     Then the materialized execution contract is "executable_route"
     And the contract uses delivery "<delivery>" and action "<action>"
@@ -41,3 +41,13 @@ Feature: STPA Stage 5 execution-route selection
     When the corrected Stage 5 route prompt is rendered
     Then it requires a literal semantic proposition for model output
     And it explains the delivery and causal-factor compatibility table
+
+  Scenario Outline: STPA-EXEC-ROUTE-09 route binding is explicit and singular
+    Given the provider binds "<count>" declared factors to its executable stimulus
+    When corrected Stage 5 materializes the route
+    Then materialization requires exactly one declared causal factor binding
+
+    Examples:
+      | count |
+      | 0     |
+      | 2     |

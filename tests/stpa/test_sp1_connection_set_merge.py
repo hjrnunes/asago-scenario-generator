@@ -175,6 +175,62 @@ def _valid_coordination_analysis_dict() -> dict:
             }
         ],
         "integrity_findings": [],
+        "semantic_review": {
+            "hazards": [
+                {
+                    "hazard_id": "H-1",
+                    "disposition": "preserve",
+                    "revised_description": None,
+                    "missing_fact": None,
+                    "source_evidence": [],
+                    "rationale": "The supplied hazard is retained.",
+                }
+            ],
+            "constraints": [
+                {
+                    "constraint_id": "SC-1",
+                    "disposition": "preserve",
+                    "revised_description": None,
+                    "missing_fact": None,
+                    "related_hazards": ["H-1"],
+                    "source_evidence": [],
+                    "rationale": "Authorization rule applies to the supplied hazard.",
+                },
+                {
+                    "constraint_id": "SC-2",
+                    "disposition": "preserve",
+                    "revised_description": None,
+                    "missing_fact": None,
+                    "related_hazards": ["H-1"],
+                    "source_evidence": [],
+                    "rationale": "Output rule applies to the supplied hazard.",
+                },
+            ],
+            "responsibilities": [
+                {
+                    "responsibility_id": "RESP-1",
+                    "constraint_refs": ["SC-1"],
+                    "rationale": "Authorization rule.",
+                },
+                {
+                    "responsibility_id": "RESP-2",
+                    "constraint_refs": ["SC-2"],
+                    "rationale": "Output rule.",
+                },
+            ],
+            "actions": [
+                {
+                    "control_action_id": "CA-1-1",
+                    "effect_kind": "tool_call",
+                    "rationale": "Invokes the controlled process.",
+                },
+                {
+                    "control_action_id": "CA-2-1",
+                    "effect_kind": "agent_message",
+                    "rationale": "Targets a responsibility.",
+                },
+            ],
+        },
     }
 
 
@@ -207,7 +263,7 @@ class TestConnSet01Call3ProducesCoordinationAnalysis:
         )
         # Call 3 is the fourth call (index 3)
         call3 = client.calls[3]
-        assert call3.response_format is CoordinationAnalysis
+        assert issubclass(call3.response_format, CoordinationAnalysis)
 
 
 # ---------------------------------------------------------------------------
@@ -253,12 +309,13 @@ class TestConnSet03AssemblyProducesValidControlStructure:
     def test_connset_03_assembly_produces_valid_control_structure(self, tmp_path):
         """Full Stage 2 derivation produces a valid ControlStructure."""
         client = _setup_mock_client()
-        cs, _ = derive_control_structure(
+        result = derive_control_structure(
             llm_client=client,
             use_case_text="Test",
             loss_analysis=_make_loss_analysis(),
             run_dir=tmp_path,
         )
+        cs = result.control_structure
         assert isinstance(cs, ControlStructure)
         assert len(cs.responsibilities) == 2
 
@@ -274,12 +331,13 @@ class TestConnSet06CoordinationLinksInFinalCS:
     def test_connset_06_coordination_link_present(self, tmp_path):
         """Coordination link CL-1 from CoordinationAnalysis appears in final CS."""
         client = _setup_mock_client()
-        cs, _ = derive_control_structure(
+        result = derive_control_structure(
             llm_client=client,
             use_case_text="Test",
             loss_analysis=_make_loss_analysis(),
             run_dir=tmp_path,
         )
+        cs = result.control_structure
         assert len(cs.coordination_links) == 1
         cl = cs.coordination_links[0]
         assert cl.link_id == "CL-1"
@@ -298,12 +356,13 @@ class TestConnSet07ControlledProcessesInFinalCS:
     def test_connset_07_controlled_process_present(self, tmp_path):
         """Controlled process CP-1 from ControlElementSet appears in final CS."""
         client = _setup_mock_client()
-        cs, _ = derive_control_structure(
+        result = derive_control_structure(
             llm_client=client,
             use_case_text="Test",
             loss_analysis=_make_loss_analysis(),
             run_dir=tmp_path,
         )
+        cs = result.control_structure
         cp_ids = {cp.cp_id for cp in cs.controlled_processes}
         assert "CP-1" in cp_ids
 

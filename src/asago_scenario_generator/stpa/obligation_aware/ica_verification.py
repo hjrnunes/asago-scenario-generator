@@ -28,6 +28,7 @@ from asago_scenario_generator.models.obligation_consideration import (
     ObligationIcaConsideration,
 )
 from asago_scenario_generator.stpa.models.control_structure import (
+    ControlActionEffectKind,
     ControlActionTemporality,
     ControlStructure,
 )
@@ -152,6 +153,31 @@ class IcaHazardVerificationRequest(_VerificationDigestModel):
             "control_action_description", "action_description"
         ),
         min_length=1,
+    )
+    action_recipient: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("action_recipient", "control_action_recipient"),
+        min_length=1,
+        description=(
+            "Plain description of the authoritative control-action recipient; "
+            "this is compared with the recipient named by the source context."
+        ),
+    )
+    action_direction: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("action_direction", "control_action_direction"),
+        min_length=1,
+        description=(
+            "Plain semantic direction of the authoritative action (for example "
+            "input, output, internal, state, or external)."
+        ),
+    )
+    action_effect_kind: ControlActionEffectKind | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "action_effect_kind", "control_action_effect_kind"
+        ),
+        description="Typed observable effect of the authoritative control action.",
     )
     action_temporality: ControlActionTemporality | None = None
     uca_type: UCAType
@@ -555,12 +581,22 @@ def build_ica_hazard_verification_request(
     """Project one final ICA into the narrow STPA verification view."""
     if slot.is_na:
         raise ValueError("N/A ICA slots do not produce verification requests")
-    responsibility, action_description, action_temporality = _request_control_context(
-        slot, control_structure
-    )
+    (
+        responsibility,
+        action_description,
+        action_temporality,
+        action_recipient,
+        action_direction,
+        action_effect_kind,
+    ) = _request_control_context(slot, control_structure)
     hazard_by_id, security_by_id, loss_by_id = _loss_context_indexes(loss_analysis)
     hazards = _hazard_contexts(ica, hazard_by_id)
-    constraints = _constraint_contexts(ica, security_by_id)
+    constraints = _constraint_contexts(
+        ica,
+        security_by_id,
+        selected_hazard_ids={item.hazard_id for item in hazards},
+        known_hazard_ids=set(hazard_by_id),
+    )
     losses = _loss_contexts(hazards, loss_by_id)
     return IcaHazardVerificationRequest(
         slot_id=slot.slot_id,
@@ -571,10 +607,13 @@ def build_ica_hazard_verification_request(
         else None,
         control_action_id=slot.control_action,
         control_action_description=action_description or slot.control_action,
+        action_recipient=action_recipient,
+        action_direction=action_direction,
+        action_effect_kind=action_effect_kind,
         action_temporality=action_temporality,
         uca_type=slot.uca_type,
         uca_definition=_uca_definition(slot.uca_type),
-        deviation=ica.ica_text,
+        deviation=ica.deviation or ica.ica_text,
         hazardous_context=ica.hazardous_context,
         loss_consequence=ica.loss_scenario,
         hazards=tuple(hazards),
@@ -586,7 +625,14 @@ def build_ica_hazard_verification_request(
 def _request_control_context(
     slot: ICASlot,
     control_structure: ControlStructure,
-) -> tuple[Any, str, ControlActionTemporality | None]:
+) -> tuple[
+    Any,
+    str,
+    ControlActionTemporality | None,
+    str | None,
+    str | None,
+    ControlActionEffectKind | None,
+]:
     """Resolve the responsibility and action description for a slot."""
     if slot.responsibility is not None:
         return _direct_control_context(slot, control_structure)
@@ -596,35 +642,94 @@ def _request_control_context(
 def _direct_control_context(
     slot: ICASlot,
     control_structure: ControlStructure,
-) -> tuple[Any, str, ControlActionTemporality | None]:
+) -> tuple[
+    Any,
+    str,
+    ControlActionTemporality | None,
+    str | None,
+    str | None,
+    ControlActionEffectKind | None,
+]:
     responsibility = _responsibility_for_id(control_structure, slot.responsibility)
     if responsibility is None:
         raise ValueError(f"unknown responsibility {slot.responsibility}")
     action = _action_for_id(responsibility, slot.control_action)
     if action is None:
         raise ValueError(f"unknown control action {slot.control_action}")
+    effect_kind = action.effect_kind
     return (
         responsibility,
         action.description,
         action.temporality or slot.action_temporality,
+        _action_recipient(action.target, control_structure),
+        _action_direction(effect_kind),
+        effect_kind,
     )
 
 
 def _coordination_control_context(
     slot: ICASlot,
     control_structure: ControlStructure,
-) -> tuple[Any, str, ControlActionTemporality | None]:
+) -> tuple[
+    Any,
+    str,
+    ControlActionTemporality | None,
+    str | None,
+    str | None,
+    ControlActionEffectKind | None,
+]:
     link = _coordination_link_for_id(control_structure, slot.coordination_link)
     if link is None:
         raise ValueError(f"unknown coordination link {slot.coordination_link}")
     responsibility = _responsibility_for_id(control_structure, link.source)
     if responsibility is None:
         raise ValueError(f"unknown coordination source {link.source}")
+    recipient = _responsibility_for_id(control_structure, link.target)
     return (
         responsibility,
         link.coordination_mechanism.description,
         slot.action_temporality,
+        recipient.description if recipient is not None else link.target,
+        "internal",
+        ControlActionEffectKind.agent_message,
     )
+
+
+def _action_recipient(
+    target: Any | None,
+    control_structure: ControlStructure,
+) -> str | None:
+    """Resolve the action target to its plain source-established description."""
+    if target is None:
+        return None
+    target_type = getattr(target.type, "value", target.type)
+    if target_type == "controlled_process":
+        process = next(
+            (
+                item
+                for item in control_structure.controlled_processes
+                if item.cp_id == target.id
+            ),
+            None,
+        )
+        return process.description if process is not None else target.id
+    if target_type == "responsibility":
+        responsibility = _responsibility_for_id(control_structure, target.id)
+        return responsibility.description if responsibility is not None else target.id
+    return target.id
+
+
+def _action_direction(
+    effect_kind: ControlActionEffectKind | None,
+) -> str | None:
+    """Map the typed action effect to a plain semantic direction for review."""
+    return {
+        ControlActionEffectKind.model_output: "output",
+        ControlActionEffectKind.tool_call: "input",
+        ControlActionEffectKind.state_change: "state",
+        ControlActionEffectKind.agent_message: "internal",
+        ControlActionEffectKind.environment_action: "external",
+    }.get(effect_kind)
 
 
 def _responsibility_for_id(
@@ -699,6 +804,9 @@ def _hazard_contexts(
 def _constraint_contexts(
     ica: ICA,
     constraint_by_id: Mapping[str, Any],
+    *,
+    selected_hazard_ids: set[str],
+    known_hazard_ids: set[str],
 ) -> list[IcaConstraintContext]:
     contexts = []
     for constraint_id in ica.related_constraints:
@@ -707,11 +815,28 @@ def _constraint_contexts(
             raise ValueError(
                 f"ICA {ica.ica_id} constraint {constraint_id} is not a security constraint"
             )
+        constraint_hazard_ids = tuple(constraint.related_hazards)
+        unknown_hazard_ids = set(constraint_hazard_ids) - known_hazard_ids
+        if unknown_hazard_ids:
+            raise ValueError(
+                f"constraint {constraint_id} references unknown hazard(s): "
+                + ", ".join(sorted(unknown_hazard_ids))
+            )
+        scoped_hazard_ids = tuple(
+            hazard_id
+            for hazard_id in constraint_hazard_ids
+            if hazard_id in selected_hazard_ids
+        )
+        if not scoped_hazard_ids:
+            raise ValueError(
+                f"ICA {ica.ica_id} constraint {constraint_id} does not govern "
+                "a selected hazard"
+            )
         contexts.append(
             IcaConstraintContext(
                 constraint_id=constraint.constraint_id,
                 description=constraint.description,
-                related_hazard_ids=tuple(constraint.related_hazards),
+                related_hazard_ids=scoped_hazard_ids,
             )
         )
     return contexts
@@ -1300,6 +1425,7 @@ def verify_final_ica_batch(
     The adapter is called once for the initial batch and at most once more for
     the subset that received a non-supported verdict.  Provider/protocol
     failures remain typed records and do not erase ordinary STPA siblings.
+    A correction failure cannot rehabilitate a previously rejected finding.
     """
     requests, incomplete_ica_ids, diagnostics = _build_verification_requests(
         enumeration, loss_analysis, control_structure
@@ -1587,7 +1713,7 @@ def _correction_from_ica(
 ) -> IcaHazardVerificationCorrection:
     return IcaHazardVerificationCorrection(
         ica_id=request.ica_id,
-        deviation=value.ica_text,
+        deviation=value.deviation or value.ica_text,
         hazardous_context=value.hazardous_context,
         loss_consequence=value.loss_scenario,
         hazard_ids=tuple(value.related_hazards),
@@ -1644,6 +1770,9 @@ def _validate_immutable_request_fields(
         "controller_description",
         "control_action_id",
         "control_action_description",
+        "action_recipient",
+        "action_direction",
+        "action_effect_kind",
         "action_temporality",
         "uca_type",
         "uca_definition",
@@ -2100,7 +2229,7 @@ def _corrected_requests_by_id(
     return {
         record.ica_id: record.corrected_request
         for record in records.values()
-        if record.corrected_request is not None
+        if record.corrected_request is not None and record.disposition == "supported"
     }
 
 
@@ -2108,7 +2237,7 @@ def _apply_corrected_slot(
     slot: ICASlot,
     corrected_by_id: Mapping[str, IcaHazardVerificationRequest],
 ) -> ICASlot:
-    if slot.is_na:
+    if slot.is_na or slot.unresolved_reason is not None:
         return slot
     return slot.model_copy(
         update={
@@ -2127,6 +2256,7 @@ def _apply_corrected_ica(
     return ica.model_copy(
         update={
             "ica_text": corrected.deviation,
+            "deviation": corrected.deviation,
             "hazardous_context": corrected.hazardous_context,
             "loss_scenario": corrected.loss_consequence,
             "related_hazards": [item.hazard_id for item in corrected.hazards],
@@ -2145,16 +2275,26 @@ def _exclude_unsupported_icas(
     excluded = _final_excluded_ica_ids(batch)
     if not excluded:
         return enumeration
+    terminal_na_reasons = {
+        record.ica_id: record.correction.rationale
+        for record in batch.records
+        if record.disposition == "not_applicable" and record.correction is not None
+    }
     return ICAEnumeration(
-        slots=[_exclude_from_slot(slot, excluded) for slot in enumeration.slots]
+        slots=[
+            _exclude_from_slot(
+                slot,
+                excluded,
+                terminal_na_reasons=terminal_na_reasons,
+            )
+            for slot in enumeration.slots
+        ]
     )
 
 
 def _final_excluded_ica_ids(batch: IcaHazardVerificationBatch) -> set[str]:
     excluded = {
-        record.ica_id
-        for record in batch.records
-        if record.disposition in {"excluded", "not_applicable", "unresolved"}
+        record.ica_id for record in batch.records if _record_excludes_generation(record)
     }
     # A final ICA whose narrow request could not be constructed is still
     # retained in the batch diagnostics, but it cannot enter Stage 5 without
@@ -2163,22 +2303,67 @@ def _final_excluded_ica_ids(batch: IcaHazardVerificationBatch) -> set[str]:
     return excluded
 
 
-def _exclude_from_slot(slot: ICASlot, excluded: set[str]) -> ICASlot:
+def _record_excludes_generation(record: IcaHazardVerificationRecord) -> bool:
+    if record.disposition != "provider_failure":
+        return record.disposition != "supported"
+    # A failed first review has no semantic verdict. A failed repair does:
+    # keep that rejection effective without inventing a verdict on the repair.
+    return any(
+        attempt.verdict is not None and attempt.verdict.verdict != "supported"
+        for attempt in record.attempts
+    )
+
+
+def _exclude_from_slot(
+    slot: ICASlot,
+    excluded: set[str],
+    *,
+    terminal_na_reasons: Mapping[str, str] | None = None,
+) -> ICASlot:
     if slot.is_na:
         return slot
     kept = [ica for ica in slot.icas if ica.ica_id not in excluded]
     if kept:
         return slot.model_copy(update={"icas": kept})
-    return _excluded_slot_as_na(slot)
+    excluded_ids = {ica.ica_id for ica in slot.icas}
+    terminal_na_reasons = terminal_na_reasons or {}
+    if excluded_ids and excluded_ids <= terminal_na_reasons.keys():
+        reasons = tuple(
+            sorted(
+                {
+                    reason.strip()
+                    for ica_id, reason in terminal_na_reasons.items()
+                    if ica_id in excluded_ids and reason.strip()
+                }
+            )
+        )
+        if reasons:
+            return _excluded_slot_as_na(slot, "; ".join(reasons))
+    return _excluded_slot_as_unresolved(slot)
 
 
-def _excluded_slot_as_na(slot: ICASlot) -> ICASlot:
+def _excluded_slot_as_na(slot: ICASlot, reason: str) -> ICASlot:
+    """Materialize a slot whose every ICA was explicitly judged N/A."""
     return ICASlot.model_validate(
         {
             **slot.model_dump(mode="python"),
             "is_na": True,
             "icas": [],
-            "na_justification": (
+            "na_justification": reason,
+            "unresolved_reason": None,
+        }
+    )
+
+
+def _excluded_slot_as_unresolved(slot: ICASlot) -> ICASlot:
+    """Retain a fully excluded slot as unresolved, never justified N/A."""
+    return ICASlot.model_validate(
+        {
+            **slot.model_dump(mode="python"),
+            "is_na": False,
+            "icas": [],
+            "na_justification": None,
+            "unresolved_reason": (
                 "All final ICAs in this slot failed independent semantic "
                 "hazard/loss verification."
             ),

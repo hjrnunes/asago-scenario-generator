@@ -7,6 +7,11 @@ Feature: STPA execution projection v2 and bundle producer
   Background:
     Given the v2 execution projection and bundle seams are available
 
+  Scenario: Executable publication does not require model-authored presentation
+    When the default scenario pipeline runs with a valid Stage 5 response
+    Then its execution bundle is valid without presentation model calls
+    And its scenario summary describes a hypothesis rather than an execution result
+
   # STPA-BUNDLE-01
   Scenario: STPA-BUNDLE-01 typed placeholders derive binding state
     Given a validated placeholder INCORRECT action_value projection

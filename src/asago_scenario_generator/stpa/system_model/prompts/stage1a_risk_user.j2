@@ -7,6 +7,13 @@
 ## Organizational Risks
 
 {% if risk_cards %}
+{% if risk_card_evidence is defined and risk_card_evidence %}
+The following is a compact evidence view. Risk IDs are exact and must be
+copied into `source_risk_cards`; omitted prose is not additional evidence.
+{% for evidence in risk_card_evidence %}
+- {{ evidence }}
+{% endfor %}
+{% else %}
 {% for card in risk_cards %}
 ### {{ card.risk_id }} — {{ card.risk_name }}
 - **Description:** {{ card.risk_description }}
@@ -15,6 +22,7 @@
 - **Consequence:** {{ card.consequence or "N/A" }}
 - **Impact:** {{ card.impact or "N/A" }}
 {% endfor %}
+{% endif %}
 {% else %}
 No organizational risks provided. This call should produce an empty result — gap analysis is performed in a separate step.
 {% endif %}
@@ -25,11 +33,20 @@ No organizational risks provided. This call should produce an empty result — g
 
 Derive losses, hazards, and security constraints from the organizational risks above, grounded in this specific system's architecture and domain.
 
+Return the collections in dependency order: first grounded `risk_card_losses`,
+then hazards whose `related_losses` use only declared loss IDs, then security
+constraints whose `related_hazards` use only declared hazard IDs.  Do not emit
+a dependent record for an undeclared ID.
+
 For each risk:
 1. Derive one or more system-specific losses, citing the source risk IDs. Deduplicate where multiple risks converge on the same loss.
 2. Derive system-level hazards that enable each loss. Each hazard must name a concrete component, data flow, or integration point from the use-case description.
 3. Derive security constraints that prevent each hazard.
 
-Deprioritize risks that have no adversarial vector in this system's context.
+Include materially grounded losses and hazards even when a risk card supplies
+no adversarial vector. Do not require an adversary, entry point, or concrete
+attack path for inclusion; treat adversarial relevance and reachability as a
+later causal-feasibility question. Do not invent losses merely to cover every
+capability or fill a quota.
 
 Ensure all cross-references are valid and no IDs are duplicated.

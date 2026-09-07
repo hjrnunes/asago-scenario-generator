@@ -660,8 +660,77 @@ def _h_minimal_bundle_fixture(
     return (result.valid, "minimal bundle fixture did not verify")
 
 
+def _h_enable_presentation(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del text, examples
+    world.render_presentation = True
+    return True, ""
+
+
+def _h_default_publication(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del text, examples
+    from runtime_shared import (
+        _make_sp3_cs,
+        _make_sp3_ets,
+        _make_sp3_loss_analysis,
+        _setup_sp3_mock_client,
+    )
+    from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
+
+    state = _state(world)
+    with tempfile.TemporaryDirectory() as directory:
+        client = _setup_sp3_mock_client(1)
+        result = run_sp3(
+            llm_client=client,
+            enriched_threat_set=_make_sp3_ets(),
+            control_structure=_make_sp3_cs(),
+            loss_analysis=_make_sp3_loss_analysis(),
+            run_dir=Path(directory),
+        )
+        state["default_result"] = result
+        state["default_call_count"] = client.call_count
+        state["default_bundle_valid"] = verify_execution_bundle(Path(directory)).valid
+    return True, ""
+
+
+def _h_default_bundle(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del text, examples
+    state = _state(world)
+    valid = (
+        state["default_bundle_valid"]
+        and len(state["default_result"].scenario_envelopes) == 1
+        and state["default_call_count"] == 1
+    )
+    return valid, "Expected one Stage 5 call and one valid published scenario"
+
+
+def _h_default_hypothesis(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    del text, examples
+    envelope = _state(world)["default_result"].scenario_envelopes[0]
+    valid = (
+        "Test hypothesis — not an observed execution result." in envelope.narrative
+        and envelope.scenario_spec.loss_scenario in envelope.narrative
+    )
+    return valid, "Summary must preserve the potential loss without claiming execution"
+
+
 def register(api: object) -> None:
     """Register the producer/bundle acceptance steps."""
+    api.register(
+        r"optional model-authored scenario presentation is enabled",
+        _h_enable_presentation,
+    )
+    api.register(
+        r"the default scenario pipeline runs with a valid Stage 5 response",
+        _h_default_publication,
+    )
+    api.register(
+        r"its execution bundle is valid without presentation model calls",
+        _h_default_bundle,
+    )
+    api.register(
+        r"its scenario summary describes a hypothesis rather than an execution result",
+        _h_default_hypothesis,
+    )
     api.register(
         r"the v2 execution projection and bundle seams are available",
         _h_seams_available,

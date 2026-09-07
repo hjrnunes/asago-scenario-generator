@@ -101,6 +101,45 @@ class TestICAEnumerationValidation:
             )
         assert "na_justification" in str(exc_info.value)
 
+    def test_ica_06b_unresolved_slot_is_not_justified_na(self):
+        """A provider failure has an explicit third disposition."""
+        slot = ICASlot(
+            slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
+            responsibility="RESP-1",
+            control_action="CA-1-1",
+            uca_type=UCAType.not_provided,
+            is_na=False,
+            icas=[],
+            unresolved_reason="The bounded provider response failed validation.",
+        )
+        assert slot.is_na is False
+        assert slot.icas == []
+        assert slot.na_justification is None
+        assert slot.unresolved_reason
+
+    @pytest.mark.parametrize(
+        "overrides",
+        (
+            {"is_na": True},
+            {"icas": [make_ica()]},
+            {"na_justification": "not a justified N/A"},
+        ),
+    )
+    def test_ica_06c_unresolved_slot_rejects_conflicting_fields(self, overrides):
+        """Unresolved slots cannot masquerade as N/A or retain findings."""
+        payload = {
+            "slot_id": "RESP-1:CA-1-1:NOT_PROVIDED",
+            "responsibility": "RESP-1",
+            "control_action": "CA-1-1",
+            "uca_type": UCAType.not_provided,
+            "is_na": False,
+            "icas": [],
+            "unresolved_reason": "The bounded provider response failed validation.",
+        }
+        payload.update(overrides)
+        with pytest.raises(ValidationError, match="unresolved"):
+            ICASlot(**payload)
+
     def test_ica_07_ica_referencing_nonexistent_hazard_fails(self):
         """ICA-07: ICA referencing non-existent hazard fails."""
         la = make_minimal_loss_analysis()

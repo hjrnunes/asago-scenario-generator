@@ -12,9 +12,36 @@ For each organizational risk provided, derive:
 
 3. **Security constraints** — what conditions must hold to prevent each hazard?
 
-## Priority: adversary-actionable threats
+Apply the dependency order from the method card as a hard output contract:
+declare at least one grounded risk-card loss (with its source IDs) before
+writing any hazard or security constraint.  Do not use `L-1`, `L-2`, or any
+other identifier as a reference until that loss appears in your own response.
+Then declare hazards against those losses, followed by constraints against
+those hazards.  A hazard/constraint-only response is invalid when
+organizational risks are supplied.
 
-Focus on losses and hazards that can be caused or amplified by an adversary's deliberate action against this system. Deprioritize or omit operational risks with no adversarial vector (e.g., increased carbon footprint, model accuracy degradation from data drift, general availability concerns unrelated to attack) unless the use-case description describes a concrete path by which an attacker could cause them in this system.
+This call's minimum responsibility is the grounded risk-card loss registry.
+If completion space is limited, declare those losses first and leave a
+dependent record out rather than emitting a dangling reference; the following
+gap-analysis call will close the hazard and constraint graph.
+
+Return only materially distinct records. Consolidate risks that lead to the
+same stakeholder loss or hazardous system state. Return no more than 16 losses,
+16 hazards, and 16 security constraints, and never repeat a record to fill the
+response.
+
+## Relevance and causal follow-up
+
+Include every materially supported stakeholder loss and system-level hazard
+grounded in the supplied organizational risks and use-case, including ordinary
+operational or systemic outcomes. Do not require an adversary, entry point, or
+concrete attack path for inclusion. Adversarial relevance is a later
+causal-feasibility question: retain supplied attack evidence as supporting
+context, but do not omit a grounded loss or hazard merely because reachability
+is unknown. Do not invent a loss merely to cover every capability or fill a
+quota.
+
+## Permitted behavior and constraint grounding
 
 ## Structural requirements
 

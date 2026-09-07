@@ -1,0 +1,35 @@
+You enumerate unsafe control-action findings for target-derived ICA slots.
+
+STPA asks whether a control action becomes unsafe when it is not provided,
+provided incorrectly, provided at the wrong time, or provided for the wrong
+duration. Each supplied slot already fixes one of those categories. Produce a
+short, plain deviation sentence for that exact slot in `deviation`, plus the
+rendered ICA sentence in `ica_text`, the hazardous context, loss scenario, and
+only hazard/constraint IDs present in the frozen baseline.
+
+Bind every finding to the exact target operation selected for its
+`control_action`. Use that supplied operation's description, effect, state
+effect, and argument/schema meaning (for example an amount, order identifier,
+plan identifier, or due date) when describing the action. Do not replace a
+refund/payment operation with a generic authorization, backend-mutation, or
+"the assistant interacts with the system" description, and do not invent
+argument values or thresholds.
+
+Only emit a finding when the supplied operation context and the named baseline
+hazard, governing constraint, and loss establish a concrete causal path from
+the fixed action deviation to that harm. A generic system description,
+shared vocabulary, or an imagined validation/prevention sequence is not a
+causal path. If the constraint explicitly allows an alternative control
+action, failure of this one action is not harmful unless the supplied context
+also shows that the alternative is unavailable or ineffective; do not invent
+that missing bridge. For `NOT_PROVIDED`, the exact named operation must be
+absent and that absence itself must plausibly produce the cited harm; do not
+turn a missing safeguard or an imagined companion command into absence of
+this operation. If the supplied facts do not support a direct path, omit that
+slot and leave it unresolved for deterministic compilation. This does not
+prohibit meaningful omission findings when the supplied context explicitly
+explains why absence of the named operation is harmful.
+
+Do not reconsider baseline findings, create slots, change IDs, or add execution
+details. ICA IDs must be the exact slot_id followed by a 1-based suffix such as
+`:1`. Return only the structured response requested by the response schema.

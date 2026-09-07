@@ -23,7 +23,9 @@ def _make_loss(
     source_risk_cards: list[str] | None = None,
 ) -> Loss:
     if source_risk_cards is None:
-        source_risk_cards = [] if provenance != LossProvenance.risk_card else ["atlas-001"]
+        source_risk_cards = (
+            [] if provenance != LossProvenance.risk_card else ["atlas-001"]
+        )
     return Loss(
         loss_id=loss_id,
         description="A loss",
@@ -84,6 +86,14 @@ class TestLossAnalysisValidation:
         )
         assert la is not None
 
+    def test_source_risk_cards_are_canonicalized_as_set_like_provenance(self):
+        loss = _make_loss(
+            provenance=LossProvenance.risk_card,
+            source_risk_cards=["risk-b", "risk-a", "risk-b"],
+        )
+
+        assert loss.source_risk_cards == ["risk-a", "risk-b"]
+
     @pytest.mark.parametrize("bad_ref", ["L-99", "NONEXIST"])
     def test_la_02_hazard_referencing_nonexistent_loss_fails(self, bad_ref):
         """LossAnalysis-02: hazard referencing non-existent loss fails."""
@@ -92,7 +102,9 @@ class TestLossAnalysisValidation:
                 risk_card_losses=[],
                 use_case_losses=[_make_loss("L-1")],
                 hazards=[_make_hazard("H-1", related_losses=[bad_ref])],
-                security_constraints=[_make_constraint("SC-1", related_hazards=["H-1"])],
+                security_constraints=[
+                    _make_constraint("SC-1", related_hazards=["H-1"])
+                ],
             )
         assert "related_losses" in str(exc_info.value)
 
@@ -126,9 +138,7 @@ class TestLossAnalysisValidation:
         """LossAnalysis-05: risk card loss with empty source_risk_cards fails."""
         with pytest.raises(ValidationError) as exc_info:
             LossAnalysis(
-                risk_card_losses=[
-                    _make_loss("L-1", LossProvenance.risk_card, [])
-                ],
+                risk_card_losses=[_make_loss("L-1", LossProvenance.risk_card, [])],
                 use_case_losses=[],
                 hazards=[_make_hazard("H-1")],
                 security_constraints=[_make_constraint("SC-1")],
@@ -152,9 +162,7 @@ class TestLossAnalysisValidation:
         """LossAnalysis-07: use case loss with empty source_risk_cards passes."""
         la = LossAnalysis(
             risk_card_losses=[],
-            use_case_losses=[
-                _make_loss("L-1", LossProvenance.use_case, [])
-            ],
+            use_case_losses=[_make_loss("L-1", LossProvenance.use_case, [])],
             hazards=[_make_hazard("H-1")],
             security_constraints=[_make_constraint("SC-1")],
         )
@@ -177,9 +185,7 @@ class TestLossAnalysisValidation:
         """LossAnalysis-09: critic derived loss with empty source_risk_cards passes."""
         la = LossAnalysis(
             risk_card_losses=[],
-            use_case_losses=[
-                _make_loss("L-1", LossProvenance.critic_derived, [])
-            ],
+            use_case_losses=[_make_loss("L-1", LossProvenance.critic_derived, [])],
             hazards=[_make_hazard("H-1")],
             security_constraints=[_make_constraint("SC-1")],
         )

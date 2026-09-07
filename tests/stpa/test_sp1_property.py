@@ -176,7 +176,7 @@ class TestCriticFindingsYamlRoundTrip:
             )
         findings = CriticFindings(
             gaps=gaps,
-            checklist_results={"input_validation": "present_justified"},
+            checklist_results={"input_validation": "present"},
             taxonomy_probe_results={"rag": "present"},
         )
         result = _yaml_round_trip(findings, tmp_path)

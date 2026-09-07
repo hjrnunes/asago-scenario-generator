@@ -54,9 +54,7 @@ def _replace(value: Any, replacements: dict[str, str]) -> Any:
     if isinstance(value, tuple):
         return tuple(_replace(item, replacements) for item in value)
     if isinstance(value, dict):
-        return {
-            key: _replace(item, replacements) for key, item in value.items()
-        }
+        return {key: _replace(item, replacements) for key, item in value.items()}
     return value
 
 
@@ -119,9 +117,7 @@ def _scenario_for_phase2(plan, slot_id: str, ica_id: str) -> ScenarioSpec:
             finding_ica_id=ica_id,
         ).model_dump(mode="json")
     ]
-    payload["scenario_context"] = ScenarioGenerationContext.create(
-        **context_payload
-    )
+    payload["scenario_context"] = ScenarioGenerationContext.create(**context_payload)
     payload["unsafe_outcome_hazard_refs"] = ["H-1"]
     payload["unsafe_outcome_constraint_refs"] = ["SC-1"]
     return ScenarioSpec.model_validate(payload)
@@ -156,9 +152,7 @@ def _accounting_from_verified_consideration(
         constraint_ids=pair.constraint_ids,
         evidence=("canary:verified-route",),
     )
-    briefs = build_neutral_obligation_briefs(
-        plan, inputs.attack_pattern_catalog
-    )
+    briefs = build_neutral_obligation_briefs(plan, inputs.attack_pattern_catalog)
     consideration = build_consideration_artifact(
         plan=plan,
         briefs=briefs,
@@ -282,7 +276,11 @@ def test_mismatched_ica_remains_accounted_but_cannot_realize_or_propose(
     accounting = _accounting_from_verified_consideration(
         inputs, plan, pair, filtered_pairs, verification, filtered
     )
-    assert filtered.slots[0].is_na is True
+    # A failed semantic verification is not a reviewed N/A decision.  Keep
+    # the slot unresolved so the failed path remains visible to accounting
+    # while the supported sibling/realization paths receive no credit.
+    assert filtered.slots[0].is_na is False
+    assert filtered.slots[0].unresolved_reason
     assert filtered_pairs[0].disposition == "unresolved"
     assert any(
         item.code == "ica_hazard_correction_exhausted"

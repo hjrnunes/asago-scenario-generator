@@ -480,6 +480,31 @@ def test_real_ica_enumeration_adapter_preserves_complete_slot_denominator() -> N
     assert adapted.slots[0].source_artifact.semantic_digest != "0" * 64
 
 
+def test_real_ica_enumeration_adapter_preserves_unresolved_slot_disposition() -> None:
+    """A failed ICA analysis reaches the structural matrix as unresolved."""
+    enumeration = ICAEnumeration(
+        slots=[
+            ICASlot(
+                slot_id=UNRESOLVED_SLOT,
+                responsibility="RESP-1",
+                control_action="CA-1-1",
+                uca_type=UCAType.not_provided,
+                is_na=False,
+                icas=[],
+                unresolved_reason="The provider response failed validation.",
+            )
+        ]
+    )
+
+    adapted = StpaCoverageInput.from_ica_enumeration(enumeration)
+
+    assert adapted.slots[0].disposition == "unresolved"
+    assert adapted.slots[0].ica_ids == ()
+    assert adapted.slots[0].evidence == (
+        "The provider response failed validation.",
+    )
+
+
 def test_real_taxonomy_envelopes_join_through_candidate_and_obligation_identity() -> (
     None
 ):

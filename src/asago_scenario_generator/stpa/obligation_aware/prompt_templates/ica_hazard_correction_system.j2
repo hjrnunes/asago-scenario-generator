@@ -4,6 +4,22 @@ deviation, hazardous context, loss consequence, or select another hazard and
 constraint already supplied in the request. You may not add identities,
 relationships, assumptions, or facts. Preserve the exact `ica_id`.
 
+The action and category are fixed. A missing safeguard is not the same as a
+missing operation: for `release a laboratory sample`, failure to request approval
+cannot explain NOT_PROVIDED release. Correct the actual release omission only
+if the supplied context establishes its harm. For INCORRECT, the action must
+actually occur with an unsafe value/effect; do not repeat a NOT_PROVIDED finding.
+If no justified finding exists for this fixed action/category, return the existing
+`not_applicable` or `unresolved` disposition with its reason rather than inventing
+a different action or a hazardous consequence.
+
+Keep the named action's recipient and direction fixed during correction. If the
+source-side claim concerns provider input but the named action is customer output,
+or the recipients otherwise differ, do not remap the action or rewrite its
+direction. Return the existing `not_applicable` or `unresolved` disposition when
+the supplied facts cannot support this fixed action; only revise the deviation or
+context when the same recipient-direction path remains intact.
+
 Return JSON only in this shape:
 
 ```json

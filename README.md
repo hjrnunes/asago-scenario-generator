@@ -1,5 +1,31 @@
 # Asago Scenario Generator
 
+### Constraint and observation review
+
+The existing final Stage 2 call reviews hazard/constraint scope, every
+responsibility's governing constraints and every action's observation type
+before ICA enumeration and target realization. Evidence-backed wording
+corrections preserve legitimate use-case functions and communication direction;
+they cannot change losses, identities or hazard-to-loss links. A genuinely
+unknown relationship remains explicit rather than becoming an invented rule.
+`loss-analysis-draft.yaml`, `control-structure-draft.yaml` and
+`control-structure-review.yaml` retain the drafts and explicit decisions;
+the normal loss-analysis and control-structure files contain reviewed results.
+No extra model call or target inventory is added to this baseline.
+
+Stage 5 scalar comparisons cite supplied constraint/action text through
+`comparison_evidence`. When no citation is supplied, exact typed JSON values
+and keys in the supplied target observations can establish literal presence
+deterministically, without another model call. An invalid explicit citation
+does not use this fallback. A compatible argument type alone is not a reference
+value: unsourced literals become typed parameters, keeping the scenario's
+property, operator and criterion. Grounding records under
+`outcome-grounding/<context-digest>.yaml` retain proposed/compiled conditions
+and source evidence, including every matching observation reference and JSON
+path. These checks establish source presence, not independent
+verification of the model's interpretation. The fixed model-answer Boolean
+predicate remains distinct from a tool argument's literal value.
+
 Asago Scenario Generator creates structured adversarial scenarios for AI and
 agentic systems through one STPA-led product workflow. Taxonomy supplies
 systematic, reviewed obligations; STPA alone produces scenarios; Phase 2
@@ -122,6 +148,18 @@ feedback delay, and indirect content may exercise a process-model flaw or
 sensor anomaly. This prevents a direct prompt from being used as a default for
 an unrelated internal timing or actuator failure.
 
+On the provider wire, the stimulus category is the sole delivery input and an
+executable response marks exactly one declared
+`causal_factors[].selected_for_route` factor; an analytical-only response marks
+none. The compiler derives delivery and maps that marker to the existing final
+factor identity without adding evidence or retagging factors. The published
+execution route and contract are unchanged.
+Input delivery is independent of the downstream action: a user message can
+exercise a tool call without changing the tool's returned content. An indirect
+stimulus requires exact reachable-capability evidence or an explicit bounded
+carrier/access hypothesis; a structural failure alone does not establish
+attacker-controlled retrieval. Accurate empty reads remain background facts.
+
 The producer then classifies the result. `concrete` means no domain resource is
 needed or every required resource is already resolved. `parameterized` means
 the route and oracle are complete but a resource still needs to be selected.
@@ -130,12 +168,57 @@ compiled honestly. These classifications are separate from the environment
 basis: `target_agnostic`, `target_profile`, `simulation_profile`, or `none`.
 
 An optional `--execution-target-profile` (also available as `--target-profile`)
-supplies a reviewed target or explicit simulation profile. Select its meaning
+supplies an observed/inferred target or explicit simulation profile. Select its meaning
 with `--requested-environment-basis` (or `--basis`). A simulation profile must
 be explicit and complete; missing target information never creates a mock.
 Profiles contain semantic resource facts, not URLs, credentials, or secrets.
 That path is classified as a concrete simulated case, not as a real target
 integration.
+
+Metadata-free MCP targets are discovered independently with the optional
+`asago-target-scan mcp` command. It performs `tools/list` only by default and
+writes a self-contained `execution-target-profile.json` alongside its sanitized
+inventory, manifest, and call log. Before publication, secret-like values in
+descriptions, schema examples/defaults, and annotations are redacted; each
+sanitized tool observation retains the SHA-256 of its original normalized row.
+MCP profiles retain separate observed
+inventory and inferred semantic authority; each resource and operation keeps
+the exact MCP tool name. Product `run` strictly loads that profile file and
+does not rescan or import the MCP transport.
+
+```bash
+uv sync --locked --extra target-discovery
+uv run asago-target-scan mcp \
+  --server-url http://localhost:8888/sse \
+  --target-id my-agent \
+  --authorization-scope local-test \
+  --profile gemma4-oc \
+  --output-dir build/target-discovery/my-agent
+
+uv run asago-scenario-generator run \
+  ... \
+  --execution-target-profile \
+  build/target-discovery/my-agent/execution-target-profile.json \
+  --requested-environment-basis target_profile
+```
+
+The ordinary STPA baseline is completed without the profile. The profile is
+used only afterward by a separately attested target-realization step, which
+may select exact observed operations and add narrowly verified target-specific
+actions or ICAs without changing any baseline record. Those exact choices and
+both target digests are then pinned into the execution projection.
+
+`run --target-observations PATH` optionally accepts normalized runtime-context
+JSON from the standalone [capture workflow](scripts/qualification/README.md).
+It requires the exact matching target profile. Stage 5 receives bounded quoted
+state/read evidence separately from its systemic context; baseline loss/control
+analysis, obligation routing and ICA enumeration remain target-blind. Observed
+values can support literal comparison quotations, while their interpretation is
+still a model-authored claim. Missing evidence remains a typed parameter, not
+an invented limit. The retained snapshot is saved as `target-observations.yaml`
+and its digest accompanies outcome-grounding records. Use the same capture as
+the artifact generator's `--runtime-context` input for subsequent authoring.
+
 No profile is a valid mode. Omission remains omission: a resource-free route
 can be `target_agnostic`, while a resource-bearing route remains
 `parameterized` with environment basis `none` and a `needs_binding` profile
@@ -167,11 +250,12 @@ At model boundaries, code retains control of structural identity. The ICA
 provider returns one short deviation clause and code applies the supplied slot's
 exact unsafe-control category. Scenario reasoning selects explained local
 causal handles; code maps those handles to valid process-model, feedback, or
-control-action sources. It also returns exactly one vulnerability for each
-supplied local defender-belief handle, which code maps back to the selected
-process-model identity. The model cannot omit a selected defender belief,
-publish a coordination/controller ID as a causal source, or invent its own
-factor kind. Stage 5 receives a purpose-built semantic view rather than the
+control-action sources. Code derives each defender-belief annotation from the
+same exact process-model causal declaration, rather than asking the model for
+a second potentially contradictory description. An undeclared belief is marked
+as not selected in this scenario, not as free of vulnerabilities. The model
+cannot publish a coordination/controller ID as a causal source or invent its
+own factor kind. Stage 5 receives a purpose-built semantic view rather than the
 serialized context artifact: integrity hashes, source pins, catalog labels,
 and bookkeeping identities stay in deterministic code, while every remaining
 reference is defined and tied to an output field. Placeholder presence, and
@@ -207,10 +291,16 @@ STPA route and scenario remain available while accounting records
 
 After final ICA filling, a separate STPA-only check compares every non-N/A ICA
 with its exact control action, UCA category, hazard, governing constraint, and
-reachable loss. An unsupported ICA receives one bounded correction by the ICA
+reachable loss. The reviewer describes what happened to the action without
+seeing the proposed category; code compares that description with the fixed
+slot. This prevents a plausible harm from automatically validating the wrong
+action or category. An unsupported ICA receives one bounded correction by the ICA
 author and one independent recheck; it cannot reach Stage 5 unless the recheck
 supports the corrected meaning. Sibling ICAs continue, and failures remain
-explicit in obligation accounting. Risk-to-pattern mapping strength is derived
+explicit in obligation accounting. A failed correction or recheck keeps the
+earlier rejection effective; it cannot restore eligibility. A first-review
+outage without a semantic verdict remains a distinct technical failure.
+Risk-to-pattern mapping strength is derived
 from the pinned mapping path in code and is never accepted from model output.
 
 The unsafe outcome published for an executable scenario carries both its
@@ -635,6 +725,11 @@ and skipped candidates independent from diagnostic-message count. The product
 before returning a non-zero result for the attempted zero-yield `failed` case;
 no-candidate analysis and partial yield remain successful command outcomes.
 
+The product manifest and report retain baseline analysis and post-revision
+warnings even after later stages finish. The report's Analysis diagnostics
+section is separate from candidate yield: publication is not proof that known
+analysis gaps were resolved.
+
 STPA result and manifest diagnostics retain `stage_errors` for fatal stage
 failures and add `stage_warnings` for recoverable normalization, stitching, and
 repair diagnostics. This is an additive schema change. Existing consumers may
@@ -668,6 +763,15 @@ than accepted as caller-controlled metadata. Literal single-controller
 action-value scenarios remain executable without state observation, a
 multi-agent adapter, or a real-clock adapter unless their typed conditions
 require one.
+
+Scenario publication uses deterministic summaries by default: it needs no
+Stage 6 model calls for narrative, attack-tree, or Gherkin presentation.
+These summaries describe test hypotheses, not observed outcomes. Python callers
+may explicitly request the optional generative presentation with
+`run_sp3(..., render_presentation=True)`; execution qualification does not need it.
+Stage 5 derives tool predicates from observed argument schemas and timing
+relationships from explained event handles. Missing quantitative facts stay
+unknown rather than receiving illustrative values.
 
 Each projection also publishes at least one platform-neutral adversarial
 stimulus requirement and the exact causal-factor IDs through which that content

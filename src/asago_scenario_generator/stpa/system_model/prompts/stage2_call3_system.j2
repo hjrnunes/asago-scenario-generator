@@ -4,6 +4,101 @@ You have been given a complete control structure with responsibilities, process 
 
 {% include "_control_loop_method.j2" %}
 
+## Final semantic review
+
+Review the supplied descriptions as proposed statements, not authoritative
+defaults. `preserve` is not the default decision. First compare two sources:
+
+- Supplied losses define the unacceptable outcomes this analysis must consider.
+  They are normative analysis inputs, not deployment observations. A risk-derived
+  loss does not need a duplicate requirement in USE_CASE. Use the linked loss
+  to identify the unsafe boundary, including qualifiers such as unauthorized.
+- USE_CASE establishes permitted functions, actors, recipients, authorization,
+  and communication direction. Revise wording that forbids a permitted function
+  instead of expressing its unsafe boundary.
+
+For each decision ask: What permitted behavior remains? What recipient,
+boundary, or direction makes it unsafe? Compare the actual words, not a narrower
+meaning supplied only in your rationale. Missing implementation, controller,
+enforcement mechanism, or numeric threshold does not make a qualitative hazard
+or constraint unresolved. Retain the requirement with quantities unspecified.
+Use `unresolved` only when a missing semantic fact prevents stating the
+safe/unsafe boundary.
+
+Before ICA enumeration, review every supplied hazard, security constraint,
+responsibility and control action exactly once using the explicit use-case and
+loss-analysis context. This is the target-blind systemic analysis: do not
+invent tools, APIs or deployment facts. Keep the review source-grounded: a
+security constraint describes an obligation, not evidence of an installed
+controller, filter, monitor, score, threshold, approval stage, tool, or process.
+A hazardous state is not evidence that attacker access, unauthorized use, or
+a particular attack actually occurred. Preserve source-stated authorization
+and conditional exceptions; hypothesizing the unsafe boundary of a supplied
+loss does not claim that the event has occurred.
+
+- For each supplied hazard, return exactly one decision with its exact
+  `hazard_id`, `disposition` (`preserve`, `revise`, or `unresolved`), required
+  nullable `revised_description` and `missing_fact`, `source_evidence`, and
+  `rationale`. `revise` requires a changed nonblank replacement, nonempty exact
+  source evidence, and null `missing_fact`; `preserve` requires null
+  replacement and `missing_fact: null` (its evidence may be empty); `unresolved`
+  requires a nonblank `missing_fact` and no replacement. A revised description
+  must correct scope using supplied source meaning, not invent a policy.
+
+- For each supplied security constraint, return exactly one decision with its
+  exact `constraint_id`, the same disposition/replacement/missing-fact/evidence
+  fields, a `related_hazards` list containing only supplied hazard IDs, and a
+  short `rationale`. `revise` must correct a wrong scope where the source
+  authorizes a function, rather than merely excluding that function. An
+  `unresolved` constraint must have a nonblank `missing_fact` and no replacement.
+  Code derives its empty hazard-edge list and removes that constraint from
+  responsibility ownership. Do not attach a non-unresolved constraint to an unresolved
+  hazard. Do not add, rename or reorder losses, hazards or constraints, or
+  change any hazard's `related_losses`.
+
+- Every `source_evidence` item must select one exact local `source_ref` from the
+  source excerpt index in the user prompt and provide a nonblank `meaning`.
+  Return only `source_ref` and `meaning` on this provider wire; do not
+  transcribe or add a `quote`. Deterministic code copies the selected excerpt
+  verbatim into the final `quote` and maps its local handle to `USE_CASE` or
+  the supplied loss ID. Do not cite action prose, inferred domain roles, or
+  unstated facts as evidence.
+
+- For each responsibility, return its exact `responsibility_id`, all governing
+  `constraint_refs`, and a short `rationale`. Consider its actual actions, not
+  just whether another safeguard controller already owns the constraint.
+  A rule governing an operation may belong to both the validating controller
+  and the controller that applies the operation. Keep their distinct jobs and
+  explain any coordination needed; do not merge or rename them here.
+  Keep distinct source-named functions distinct even when one responsibility
+  performs them; a safeguard requirement does not replace the function it
+  governs.
+  An empty list means no supplied constraint governs this responsibility;
+  explain the gap rather than inventing a rule or copying every global SC.
+- For each action, return its exact `control_action_id`, `effect_kind`, and
+  a short `rationale` identifying where its effect can be observed.
+  `model_output` is only the answer returned to the tested invocation's caller.
+  Preparing or sending an internal request/payload is not that answer.
+  `agent_message` is an internal message; `tool_call` invokes an operation;
+  `state_change` changes stored state; `environment_action` affects an external
+  process. Use null when the supplied evidence cannot establish the effect.
+  A responsibility target requires `agent_message`. Do not reinterpret an
+  internal action as a final answer merely because the latter is easier to test.
+
+These decisions may preserve or revise supplied wording, reconcile ownership
+and effect labels, and retain explicit uncertainty. They do not prove that a
+hazard occurs for every UCA category: later ICA analysis must establish each
+category's own hazard path, including omissions separately from bad writes.
+
+Preserve legitimate source-authorized behavior and communication direction.
+Review each supplied description literally; do not preserve blanket wording by
+inventing a narrower meaning only in the rationale. For example, a library
+member may retrieve their own loan records, while disclosure to another
+member is unauthorized. If a blanket prohibition conflicts with that supplied
+function, revise it to the narrower unauthorized or wrong-account disclosure
+scope only when the source context supports that correction. Do not turn a
+provider-input action into customer-output behavior, or vice versa.
+
 ## Coordination links
 
 Each coordination link represents an explicit lateral control or information
@@ -47,3 +142,7 @@ Report integrity issues as a list of findings. Do NOT fix them — flag them for
 Produce a CoordinationAnalysis with:
 - coordination_links: list of CoordinationLink objects
 - integrity_findings: list of strings describing any connection issues found (empty if all valid)
+- semantic_review: {hazards: [...], constraints: [...], responsibilities: [...],
+  actions: [...]} with the complete decisions above, including explicit
+  unresolved/missing-fact, empty-hazard-edge, empty-constraint-ownership and
+  unknown-effect cases.

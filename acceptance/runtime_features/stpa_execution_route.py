@@ -38,23 +38,29 @@ def _context():
     )
 
 
-def _route_payload(route: dict, *, stimulus: str = "user_message") -> dict:
+def _route_payload(
+    route: dict,
+    *,
+    stimulus: str = "user_message",
+    bounded_assumption: str | None = None,
+) -> dict:
     """Build the smallest valid corrected Stage 5 response."""
+    factor = {
+        "source_handle": "cause_1",
+        "selected_for_route": route.get("disposition") == "executable_route",
+        "evidence": "The selected structural condition can remain stale.",
+        "temporal_condition": None,
+        "evidence_status": (
+            "bounded_assumption" if bounded_assumption else "structural_failure"
+        ),
+    }
+    if bounded_assumption:
+        factor["bounded_assumption"] = bounded_assumption
     return {
         "stimulus": {
             "category": stimulus,
             "description": "The supplied test stimulus exercises the selected factor.",
         },
-        "defender_vulnerabilities": [
-            {
-                "belief_handle": "belief_1",
-                "vulnerability": "The selected belief can be stale.",
-            },
-            {
-                "belief_handle": "belief_2",
-                "vulnerability": "The selected schema belief can be stale.",
-            },
-        ],
         "attacker_bdi": {
             "beliefs": ["The controller can act on stale state."],
             "desires": ["Induce the selected unsafe action."],
@@ -65,14 +71,7 @@ def _route_payload(route: dict, *, stimulus: str = "user_message") -> dict:
                 }
             ],
         },
-        "causal_factors": [
-            {
-                "source_handle": "cause_1",
-                "evidence": "The selected structural condition can remain stale.",
-                "temporal_condition": None,
-                "evidence_status": "structural_failure",
-            }
-        ],
+        "causal_factors": [factor],
         "unsafe_outcome": {
             "condition": {
                 "type": "action_presence",
@@ -98,22 +97,26 @@ def _h_context(world: World, text: str, examples: dict) -> tuple[bool, str]:
 def _h_route(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Capture a provider stimulus and request-local executable route choice."""
     match = re.search(
-        r'^the provider describes stimulus "([^"]+)" and selects "([^"]+)" '
-        r'with action "([^"]+)"$',
+        r'^the provider describes stimulus "([^"]+)" with action "([^"]+)" '
+        r"and binds its declared causal factor$",
         text,
     )
     if match is None:
         return False, f"Could not parse route choice: {text}"
-    stimulus, delivery, action = match.groups()
+    stimulus, action = match.groups()
+    carrier_assumption = (
+        "Assume attacker-influenced content reaches the model through the selected carrier."
+        if stimulus in {"retrieved_content", "tool_content"}
+        else None
+    )
     world.route_payload = _route_payload(
         {
             "disposition": "executable_route",
-            "delivery_class": delivery,
-            "selected_factor_handle": "cause_1",
             "action_kind": action,
             "reason": "The supplied structural evidence supports this route.",
         },
         stimulus=stimulus,
+        bounded_assumption=carrier_assumption,
     )
     return True, ""
 
@@ -145,8 +148,6 @@ def _h_direct_feedback(world: World, text: str, examples: dict) -> tuple[bool, s
     payload = _route_payload(
         {
             "disposition": "executable_route",
-            "delivery_class": "direct_prompt",
-            "selected_factor_handle": handle,
             "action_kind": "model_output",
             "reason": "The provider incorrectly treats feedback as direct input.",
         }
@@ -155,6 +156,38 @@ def _h_direct_feedback(world: World, text: str, examples: dict) -> tuple[bool, s
     payload["attacker_bdi"]["intentions"][0]["source_handles"] = [handle]
     world.route_payload = payload
     return True, ""
+
+
+def _h_factor_binding_count(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Select zero or two real declared factors, never invent a route handle."""
+    count = int(re.search(r'"(\d+)"', text).group(1))
+    payload = _route_payload(
+        {
+            "disposition": "executable_route",
+            "action_kind": "model_output",
+            "reason": "Exercise explicit factor-owned route binding.",
+        }
+    )
+    factor = payload["causal_factors"][0]
+    factor["selected_for_route"] = count > 0
+    if count == 2:
+        payload["causal_factors"].append(dict(factor, source_handle="cause_2"))
+    world.route_payload = payload
+    return True, ""
+
+
+def _h_factor_binding_failure(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Check explicit cardinality rejection rather than an accidental schema error."""
+    error = getattr(world, "route_error", "") or ""
+    return (
+        getattr(world, "route_result", None) is None
+        and "exactly one declared causal factor" in error,
+        f"expected explicit binding-cardinality failure, got {error!r}",
+    )
 
 
 def _h_render_prompt(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -266,9 +299,19 @@ def _h_failure(world: World, text: str, examples: dict) -> tuple[bool, str]:
 def _h_fidelity_failure(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     error = getattr(world, "route_error", "") or ""
+    schema_rejection = all(
+        marker in error
+        for marker in (
+            "execution_route.executable_route.",
+            ".delivery_class",
+            "literal_error",
+            "direct_prompt",
+            "conversation_context",
+        )
+    )
     return (
         getattr(world, "route_result", None) is None
-        and "cannot exercise selected factor kind" in error,
+        and (schema_rejection or "cannot exercise selected factor kind" in error),
         f"expected delivery/factor failure, got {error!r}",
     )
 
@@ -277,7 +320,8 @@ def register(api: object) -> None:
     """Register route-selection acceptance steps."""
     api.register(r"^a corrected Stage 5 route context is available$", _h_context)
     api.register(
-        r'^the provider describes stimulus "[^"]+" and selects "[^"]+" with action "[^"]+"$',
+        r'^the provider describes stimulus "[^"]+" with action "[^"]+" '
+        r"and binds its declared causal factor$",
         _h_route,
     )
     api.register(
@@ -286,6 +330,14 @@ def register(api: object) -> None:
     api.register(
         r'^the provider selects direct prompt for feedback factor "[^"]+"$',
         _h_direct_feedback,
+    )
+    api.register(
+        r'^the provider binds "[02]" declared factors to its executable stimulus$',
+        _h_factor_binding_count,
+    )
+    api.register(
+        r"^materialization requires exactly one declared causal factor binding$",
+        _h_factor_binding_failure,
     )
     api.register(r"^corrected Stage 5 materializes the route$", _h_materialize)
     api.register(

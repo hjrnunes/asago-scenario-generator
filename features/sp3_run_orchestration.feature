@@ -13,6 +13,7 @@ Feature: SP3 — Run orchestration
   Background:
     Given the SP3 run module is importable
     And a strict SP3 orchestration fixture is available
+    And optional model-authored scenario presentation is enabled
 
   # SP3-RUN-01
   Scenario: SP3-RUN-01 full run produces scenario envelopes and eval scorecard

@@ -8,6 +8,7 @@ Your task is to address gaps identified by the completeness critic. This is a si
 ### Responsibilities
 {% for resp in control_structure.responsibilities %}
 - **{{ resp.resp_id }}**: {{ resp.description }}
+  Existing governing security-constraint links: {{ resp.security_constraint_refs | join(', ') if resp.security_constraint_refs else 'none supplied' }}
   Responsibility constraints:
   {% for rc in resp.responsibility_constraints %}
     - {{ rc.rc_id }}: {{ rc.description }}
@@ -35,11 +36,42 @@ Your task is to address gaps identified by the completeness critic. This is a si
 {% endfor %}
 
 ## Rules
-- Add missing responsibilities, feedback channels, or process model parts identified by the critic.
-- You may DISMISS a finding if you judge it to be a false positive — add it to dismissed_gaps with a one-sentence justification.
+- Add missing responsibilities, feedback channels, or process model parts only
+  when the use-case or typed factual context explicitly establishes the
+  separate function, operation, information, or feedback source they represent.
+  Keep a requirement-backed safeguard that is not such a source-established
+  function as a design recommendation in `dismissed_gaps`; do not emit it in
+  the current-state delta.
+- You may DISMISS a finding if you judge it to be a false positive — add it to dismissed_gaps with a one-sentence justification. A finding that is a
+  requirement-backed design recommendation, rather than an omitted
+  source-established function, may likewise be retained in that rationale;
+  label it as proposed rather than present.
 - Ensure new elements connect properly (sources, targets, feedback).
 - Maintain solution-neutrality: no implementation-specific terms (LLM, proxy, orchestrator, guardrail, prompt, API).
 - Do not lose existing responsibilities or their elements.
+- Preserve `security_constraint_refs`: these exact links bind each responsibility
+  to the earlier loss-analysis constraints. They are copy-through provenance,
+  not new constraints to infer. This completeness revision cannot revoke them.
+- Ground revisions in supplied behavior. A hazard or security constraint is a
+  state or obligation, not evidence of an installed controller, filter, monitor,
+  score, threshold, approval stage, tool, or controlled process. An explicit
+  requirement may justify a proposed safeguard recommendation; it does not
+  establish a separate installed function. Emit a new or modified element only
+  when the use-case or typed factual context establishes the distinct function,
+  operation, information, or feedback source currently omitted. Keep a
+  requirement-backed recommendation in `dismissed_gaps` when that evidence is
+  absent.
+- Preserve source-stated authorized or conditional operations and distinct
+  named functions. Do not turn an "only when" condition into an unconditional
+  denial, merge separate functions into a generic responsibility/action, or
+  treat a recommendation as an existing element or attackable controller. Keep
+  a critic's proposed safeguard in the dismissed-gaps rationale unless the
+  source establishes the omitted function; do not add one solely because of an
+  unsupported attack path.
+- Treat the Existing Control Structure section as current-state evidence. Do not
+  copy a critic's recommendation into that diagram as if it were observed;
+  address a justified recommendation only in a dismissed-gaps rationale. Use
+  the new/modified delta only for a source-established omitted function.
 - All ElementRef references must be valid.
 - All feedback channel updates must reference a PM in the same responsibility.
 - Existing PM/CA/FB/CP/CL/CM IDs shown with their descriptions are
@@ -52,6 +84,26 @@ Your task is to address gaps identified by the completeness critic. This is a si
 {# Keep the reference attributes explicit for source-contract auditing; rendered
    output below uses their enum .value so it contains canonical values. #}
 {# {{ pm.feedback_source.type }} {{ ca.target.type }} {{ fb.source.type }} #}
+
+## Closed typed action fields
+For every new or modified control action, `effect_kind` is a closed enum. Use
+exactly one of these values; do not invent synonyms such as
+`internal_state_update`, `message`, or `operation`:
+
+- `model_output`: text or structured output returned to the caller.
+- `tool_call`: a structured operation invocation emitted by the agent.
+- `state_change`: a session or persistent state update.
+- `agent_message`: an internal message to another responsibility or controller.
+- `environment_action`: an external side effect beyond output, invocation, or
+  state mutation.
+
+The target and effect must agree. A control action targeting a `responsibility`
+is an internal controller message and MUST use `effect_kind: "agent_message"`.
+Do not use `state_change` for that target merely because the action updates a
+process model. Preserve the exact typed value shown for an existing action.
+
+`temporality` is also closed: use exactly `instantaneous`, `discrete`,
+`continuous`, `bounded_duration`, or `unknown`; do not infer it from wording.
 
 ## ID format rules
 - New responsibilities: RESP-{next_resp_num} (next available: RESP-{{ next_resp_num }})

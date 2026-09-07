@@ -18,7 +18,6 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionResourceRequirement,
     ExecutionTargetProfile,
     InventoryCompleteness,
-    ProfileAuthority,
     ProfileBasis,
     RequestedEnvironmentBasis,
     ResolvedExecutionBinding,
@@ -62,7 +61,7 @@ def classify_scenario_execution(
     if not isinstance(contract, SemanticExecutionContract):
         raise TypeError("contract must be a SemanticExecutionContract")
     if contract.disposition is ExecutionContractDisposition.analytical_only:
-        return _classify_analytical_contract(contract)
+        return _classify_analytical_contract(contract, profile)
     return _classify_executable_contract(contract, unsafe_outcome, profile)
 
 
@@ -73,11 +72,11 @@ def _classify_executable_contract(
 ) -> ExecutionClassification:
     """Classify an executable route after the analytical branch is removed."""
     if unsafe_outcome is None:
-        return _classify_missing_outcome()
+        return _classify_missing_outcome(profile)
     if not isinstance(unsafe_outcome, UnsafeOutcome):
         raise TypeError("unsafe_outcome must be an UnsafeOutcome")
     if not _outcome_matches_contract(contract, unsafe_outcome):
-        return _classify_outcome_mismatch()
+        return _classify_outcome_mismatch(profile)
     return _classify_validated_executable(contract, profile)
 
 
@@ -89,7 +88,7 @@ def _classify_validated_executable(
 
     requirements = contract.resource_requirements
     if not requirements:
-        return _classify_resource_free_contract()
+        return _classify_resource_free_contract(profile)
 
     if profile is None:
         return _classify_without_profile(contract, requirements)
@@ -117,6 +116,7 @@ def _classify_profile_bound_contract(
 
 def _classify_analytical_contract(
     contract: SemanticExecutionContract,
+    profile: ExecutionTargetProfile | None,
 ) -> ExecutionClassification:
     """Classify an explicit analytical-only contract without execution claims."""
     return _classification(
@@ -124,6 +124,7 @@ def _classify_analytical_contract(
         EnvironmentBasis.none,
         ExecutionProfileFit.invalid,
         ExecutionClaimScope.no_execution_claim,
+        profile_digest=profile.semantic_digest if profile is not None else None,
         diagnostics=tuple(
             _diagnostic(ExecutionDiagnosticCode.execution_route_missing, gap.detail)
             for gap in contract.gaps
@@ -131,13 +132,16 @@ def _classify_analytical_contract(
     )
 
 
-def _classify_missing_outcome() -> ExecutionClassification:
+def _classify_missing_outcome(
+    profile: ExecutionTargetProfile | None,
+) -> ExecutionClassification:
     """Classify a route that has no semantic unsafe-outcome oracle."""
     return _classification(
         BindingCompleteness.analytical_only,
         EnvironmentBasis.none,
         ExecutionProfileFit.invalid,
         ExecutionClaimScope.no_execution_claim,
+        profile_digest=profile.semantic_digest if profile is not None else None,
         diagnostics=(
             _diagnostic(
                 ExecutionDiagnosticCode.oracle_missing,
@@ -147,13 +151,16 @@ def _classify_missing_outcome() -> ExecutionClassification:
     )
 
 
-def _classify_outcome_mismatch() -> ExecutionClassification:
+def _classify_outcome_mismatch(
+    profile: ExecutionTargetProfile | None,
+) -> ExecutionClassification:
     """Classify a route whose action does not match its unsafe outcome."""
     return _classification(
         BindingCompleteness.analytical_only,
         EnvironmentBasis.none,
         ExecutionProfileFit.invalid,
         ExecutionClaimScope.no_execution_claim,
+        profile_digest=profile.semantic_digest if profile is not None else None,
         diagnostics=(
             _diagnostic(
                 ExecutionDiagnosticCode.execution_route_missing,
@@ -163,13 +170,16 @@ def _classify_outcome_mismatch() -> ExecutionClassification:
     )
 
 
-def _classify_resource_free_contract() -> ExecutionClassification:
+def _classify_resource_free_contract(
+    profile: ExecutionTargetProfile | None,
+) -> ExecutionClassification:
     """Classify a model-only route that needs no environment resources."""
     return _classification(
         BindingCompleteness.concrete,
         EnvironmentBasis.target_agnostic,
         ExecutionProfileFit.not_required,
         ExecutionClaimScope.model_behavior_only,
+        profile_digest=profile.semantic_digest if profile is not None else None,
     )
 
 
@@ -210,6 +220,7 @@ def _classify_invalid_profile(
         ExecutionProfileFit.invalid,
         ExecutionClaimScope.no_execution_claim,
         profile_digest=profile.semantic_digest,
+        profile=profile,
         diagnostics=(
             _diagnostic(
                 ExecutionDiagnosticCode.target_profile_digest_mismatch,
@@ -229,6 +240,7 @@ def _classify_basis_mismatch(
         ExecutionProfileFit.invalid,
         ExecutionClaimScope.no_execution_claim,
         profile_digest=profile.semantic_digest,
+        profile=profile,
         diagnostics=(
             _diagnostic(
                 ExecutionDiagnosticCode.execution_route_missing,
@@ -264,7 +276,6 @@ def _target_action_matches_outcome(
     return any(
         requirement.purpose is ExecutionResourcePurpose.target_action
         and requirement.owner_ref == outcome.control_action_id
-        and requirement.operation == outcome.control_action_id
         for requirement in contract.resource_requirements
     )
 
@@ -430,6 +441,7 @@ def _classification_for_invalid_matches(
         resolved=resolved,
         diagnostics=diagnostics,
         profile_digest=profile.semantic_digest,
+        profile=profile,
     )
 
 
@@ -447,6 +459,7 @@ def _classification_for_complete_matches(
             ExecutionClaimScope.agent_behavior_with_simulated_tools,
             resolved=resolved,
             profile_digest=profile.semantic_digest,
+            profile=profile,
             diagnostics=diagnostics,
         )
     return _classification(
@@ -456,6 +469,7 @@ def _classification_for_complete_matches(
         ExecutionClaimScope.target_specific_intent,
         resolved=resolved,
         profile_digest=profile.semantic_digest,
+        profile=profile,
         diagnostics=diagnostics,
     )
 
@@ -484,6 +498,7 @@ def _classification_for_incomplete_matches(
         ambiguous=ambiguous,
         unsupported_ids=unsupported,
         profile_digest=profile.semantic_digest,
+        profile=profile,
         diagnostics=diagnostics,
     )
 
@@ -504,39 +519,45 @@ def _matching_resources(requirement, resources):
 
 
 def _matching_operations(requirement, resource):
-    """Return operations with the exact semantic name and observable properties."""
+    """Return exact selected operations or simulation-semantic operations."""
     required_properties = set(requirement.required_properties)
     return tuple(
         operation
         for operation in resource.operations
-        if operation.semantic_operation == requirement.operation
+        if (
+            operation.operation_id == requirement.operation
+            if requirement.exact_resource_id is not None
+            else operation.semantic_operation == requirement.operation
+        )
         and required_properties.issubset(operation.observable_properties)
     )
 
 
 def _resource_matches(requirement, resource) -> bool:
-    """Match role, kind, owner and required surfaces exactly."""
-    return (
+    """Match exact resources without reinterpreting their semantic role."""
+    interface_matches = (
         resource.resource_kind in requirement.acceptable_resource_kinds
-        and requirement.role_id in resource.role_ids
-        and requirement.owner_ref in resource.structural_refs
         and set(requirement.required_surfaces).issubset(resource.surfaces)
         and (
             requirement.required_attacker_influence is None
             or resource.attacker_influence is requirement.required_attacker_influence
         )
     )
+    if not interface_matches:
+        return False
+    if requirement.exact_resource_id is not None:
+        return resource.resource_id == requirement.exact_resource_id
+    return (
+        requirement.role_id in resource.role_ids
+        and requirement.owner_ref in resource.structural_refs
+    )
 
 
 def _role_match_is_authoritative(resource, profile) -> bool:
-    """Require reviewed facts and a complete inventory for role searches."""
+    """Permit semantic role searches only for explicit simulations."""
     return (
-        resource.authority is ProfileAuthority.reviewed
-        and profile.inventory_completeness is InventoryCompleteness.reviewed_complete
-        and (
-            profile.authority is ProfileAuthority.reviewed
-            or profile.basis is ProfileBasis.simulation
-        )
+        profile.basis is ProfileBasis.simulation
+        and resource.simulation_behavior is not None
     )
 
 
@@ -565,30 +586,12 @@ def _classify_exact_requirement(
         )
         return
     resource, operation = candidates[0]
-    if not _exact_resource_is_authoritative(resource, profile):
-        unresolved.append(requirement.requirement_id)
-        diagnostics.append(
-            _diagnostic(
-                ExecutionDiagnosticCode.profile_inferred_only,
-                "explicit resource is not backed by reviewed evidence",
-                requirement,
-            )
-        )
-        return
     resolved.append(
         ResolvedExecutionBinding(
             requirement_id=requirement.requirement_id,
             resource_id=resource.resource_id,
             operation_id=operation.operation_id,
         )
-    )
-
-
-def _exact_resource_is_authoritative(resource, profile) -> bool:
-    """Allow reviewed resources in complete targets or explicit simulations."""
-    return resource.authority is ProfileAuthority.reviewed and (
-        profile.authority is ProfileAuthority.reviewed
-        or profile.basis is ProfileBasis.simulation
     )
 
 
@@ -602,19 +605,19 @@ def _classify_unresolved_role(
 ) -> None:
     """Retain zero/one weak matches without claiming target execution."""
     unresolved.append(requirement.requirement_id)
-    if profile.authority is not ProfileAuthority.reviewed:
+    if profile.basis is ProfileBasis.target:
         diagnostics.append(
             _diagnostic(
                 ExecutionDiagnosticCode.profile_inferred_only,
-                "profile facts are inferred and cannot establish a target claim",
+                "target profiles require an exact operation selected by target realization",
                 requirement,
             )
         )
-    elif profile.inventory_completeness is not InventoryCompleteness.reviewed_complete:
+    elif profile.inventory_completeness is not InventoryCompleteness.observed_complete:
         diagnostics.append(
             _diagnostic(
                 ExecutionDiagnosticCode.profile_inventory_unknown,
-                "role search requires a reviewed-complete inventory",
+                "simulation role search requires a complete profile inventory",
                 requirement,
                 candidate_ids=tuple(item[0].resource_id for item in matches),
             )
@@ -672,6 +675,7 @@ def _classification(
     unsupported_ids=None,
     diagnostics=(),
     profile_digest=None,
+    profile: ExecutionTargetProfile | None = None,
 ) -> ExecutionClassification:
     """Construct a canonical classification from local match results."""
     unresolved_values = (
@@ -689,6 +693,12 @@ def _classification(
         environment_basis=environment,
         profile_fit=fit,
         claim_scope=claim,
+        inventory_authority=(
+            profile.inventory_authority if profile is not None else None
+        ),
+        semantic_authority=(
+            profile.semantic_authority if profile is not None else None
+        ),
         resolved_bindings=tuple(resolved),
         unresolved_requirement_ids=unresolved_values,
         ambiguous_matches=tuple(ambiguous),

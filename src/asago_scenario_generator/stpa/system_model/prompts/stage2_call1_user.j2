@@ -18,4 +18,9 @@ Related hazards: {{ sc.related_hazards | join(", ") }}
 
 For each security constraint, derive solution-neutral requirements. Classify each as "control" (a decision/function) or "constraint" (a restriction on how decisions are made). Each requirement must reference its source constraint.
 
+A restriction-only requirement is a valid result. Preserve the permission,
+recipient and triggering condition supplied by the constraint. Do not invent
+a corresponding detector, validator or approval decision. A `control` label
+describes a required decision, not proof of an installed function.
+
 Solution-neutral means: describe what function must be performed, not what technology or component performs it.

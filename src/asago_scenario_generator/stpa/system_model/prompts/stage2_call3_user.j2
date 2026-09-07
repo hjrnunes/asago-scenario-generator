@@ -1,6 +1,16 @@
-## Use-Case Description
+## Exact USE_CASE source context
 
+The paragraphs below are exact excerpts of the supplied USE_CASE. Select their
+local handles for `source_evidence`; do not copy their text into the response.
+Each `source_N` means one exact supplied USE_CASE paragraph, not an inferred fact.
+{% if source_excerpts %}
+{% for source in source_excerpts if source.canonical_ref == "USE_CASE" %}
+[{{ source.local_ref }}]
+{{ source.text }}
+{% endfor %}
+{% else %}
 {{ use_case_text }}
+{% endif %}
 
 ---
 
@@ -9,8 +19,12 @@
 ### Responsibilities
 {% for resp in control_structure.responsibilities %}
 - **{{ resp.resp_id }}**: {{ resp.description }}
+  Current governing constraints: {{ resp.security_constraint_refs | join(', ') }}
   PM parts: {% for pm in resp.process_model_parts %}{{ pm.pm_id }} ({{ pm.description }}){% if not loop.last %}, {% endif %}{% endfor %}
-  Control actions: {% for ca in resp.control_actions %}{{ ca.ca_id }}{% if ca.target %} → {{ ca.target.type }} {{ ca.target.id }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
+  Control actions:
+{% for ca in resp.control_actions %}
+  - {{ ca.ca_id }}: {{ ca.description }}; current effect: {{ ca.effect_kind }}{% if ca.target %}; target: {{ ca.target.type }} {{ ca.target.id }}{% endif %}
+{% endfor %}
   Feedback channels: {% for fb in resp.feedback_channels %}{{ fb.fb_id }} (updates {{ fb.updates }}{% if fb.source %}, source: {{ fb.source.type }} {{ fb.source.id }}{% endif %}){% if not loop.last %}, {% endif %}{% endfor %}
 {% endfor %}
 
@@ -22,6 +36,62 @@
 ---
 
 ## Your Task
+
+{% if loss_analysis is defined and loss_analysis %}
+### Supplied systemic loss analysis
+
+Review the complete descriptions below. IDs are stable references, while the
+descriptions are the semantic evidence for deciding wording, ownership and
+edges. Select only the local source handles displayed beside the exact source
+text; return each handle and your meaning, never a transcribed quote. The
+adapter copies the selected exact excerpt into the final evidence and maps it
+to `USE_CASE` or the loss ID. The review must preserve every loss, hazard and
+constraint ID and ordering, and every hazard's `related_losses`.
+
+#### Losses
+{% for loss in loss_analysis.risk_card_losses + loss_analysis.use_case_losses %}
+- **{{ loss.loss_id }}** ({{ source_ref_by_canonical[loss.loss_id] }}): {{ loss.description }}
+  Meaning: Exact supplied description for loss {{ loss.loss_id }}; use it only for the supplied loss meaning.
+{% endfor %}
+
+#### Hazard and constraint review units
+
+For every unit: What permitted behavior remains? What recipient, boundary, or
+direction makes it unsafe? The linked loss defines the unacceptable outcome;
+compare proposed hazard and constraint wording against that loss and USE_CASE.
+Each constraint is displayed once under its first current hazard. Its complete
+hazard-edge list still applies, including other hazard units below.
+{% for hazard in loss_analysis.hazards %}
+- **{{ hazard.hazard_id }}** proposed wording: {{ hazard.description }}
+{% for loss_ref in hazard.related_losses %}{% for loss in loss_analysis.risk_card_losses + loss_analysis.use_case_losses if loss.loss_id == loss_ref %}  Linked loss {{ loss.loss_id }} ({{ source_ref_by_canonical[loss.loss_id] }}): {{ loss.description }}
+{% endfor %}{% endfor %}{% for sc in loss_analysis.security_constraints if sc.related_hazards and sc.related_hazards[0] == hazard.hazard_id %}  - **{{ sc.constraint_id }}** proposed wording: {{ sc.description }}
+    All current hazard edges: {{ sc.related_hazards | join(', ') }}
+{% endfor %}
+{% endfor %}
+{% for sc in loss_analysis.security_constraints if not sc.related_hazards %}
+- **{{ sc.constraint_id }}** proposed wording: {{ sc.description }}
+  No current hazard edges; review the missing relationship explicitly.
+{% endfor %}
+Return `semantic_review` covering every responsibility and action above. Preserve
+the exact IDs. It must also contain one hazard decision and one constraint
+decision for every supplied record. Each decision must include its disposition,
+nullable `revised_description` and `missing_fact`, `source_evidence`, and
+`rationale`; constraint decisions additionally include `related_hazards`.
+Use `preserve` with null replacement/missing fact when the supplied wording is
+sound. Use `revise` only for a changed, nonblank, source-supported correction
+with nonempty exact evidence. Use `unresolved` only with a nonblank missing
+fact and no replacement; code clears that constraint's hazard edges and
+responsibility ownership from the explicit unresolved decision. Do not attach a non-unresolved constraint to an
+unresolved hazard. Correct wrong scope rather than excluding legitimate
+source-authorized behavior: provider-input restrictions concern what is sent
+to a third-party model, while customer-output responsibilities concern what is
+returned to the requesting customer. Do not infer new hazards, roles or target
+capabilities. Review the supplied descriptions literally: do not preserve a
+blanket prohibition by adding a narrower exception only in the rationale. For
+example, a library member may retrieve their own loan records, while disclosure
+to another member is unauthorized; revise a blanket wording when this source
+meaning supports the narrower scope.
+{% endif %}
 
 1. Identify coordination links: check for overlapping responsibilities, shared
    state or controlled processes, conflicting or order-dependent actions, and

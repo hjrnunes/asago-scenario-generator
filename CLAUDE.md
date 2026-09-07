@@ -18,6 +18,11 @@ untracked. Live-model acceptance requires the explicit opt-in
 `ASAGO_SCENARIO_GENERATOR_QA_PIPELINE=1`; deterministic tests must not contact
 an LLM endpoint.
 
+Before private Gemma OC discovery, generation, artifact authoring, or qualification,
+read `docs/development/private-live-model-approval.md` and carry forward its
+standing approval. An owner-supplied replacement endpoint does not require
+re-approving the same scoped data use.
+
 ## Architecture
 
 - `src/asago_scenario_generator/` contains shared domain models, the
@@ -33,6 +38,11 @@ an LLM endpoint.
 The Stage 6 execution interface is deliberately closed and typed. Normal
 product execution crosses `prepare_execution_projection(...)` before any
 Stage 6 call and publishes only through `publish_execution_bundle(...)`.
+Normal publication renders hypothesis summaries deterministically. Generative
+presentation is an explicit `run_sp3(render_presentation=True)` option, not an
+execution prerequisite. Stage 5 condition values must come from the supplied
+behavior and observed argument schema; quantitative unknowns remain typed
+placeholders, while event ordering uses explained local reference handles.
 Both seams require the explicit run identity and intact source pins; unknown
 semantic values are typed binding placeholders, and their presence derives
 `semantic_binding_required`. The v2 projection and v1 bundle contract kit in
@@ -46,8 +56,20 @@ The artifact generator later binds parameterized requirements to an explicitly
 supplied target or simulation profile; it may add runtime details but cannot
 change the route's meaning. `run` accepts optional
 `--execution-target-profile` and `--requested-environment-basis` inputs.
+Optional `--target-observations` supplies a profile-paired, content-pinned Stage 5
+companion, not systemic baseline input. Keep observed values separate from
+interpreted rules; see the capture workflow in `scripts/qualification/README.md`.
 Profiles contain semantic resource facts only: no URLs, credentials, or
-secrets. Omission remains omission: resource-free model output may be
+secrets. Metadata-free MCP targets are scanned independently through the
+optional `asago-target-scan mcp` entry point; the product run consumes only
+the resulting closed profile and never imports MCP transport or performs a
+scan. The systemic STPA baseline is always target-blind. After ICA completion,
+an observed target profile may drive one separately attested additive target
+realization: exact operation matches may specialize baseline actions, and one
+bounded verified extension may add target-derived actions/ICAs without
+rewriting baseline records. Exact target choices and both target authority
+digests are retained through Stage 5 and the v2 execution projection.
+Omission remains omission: resource-free model output may be
 `target_agnostic`, while a resource-bearing contract retains a null request,
 `parameterized` completeness, and `none` environment basis until its caller
 selects a target or simulation profile. `agent_message` remains an internal
@@ -62,6 +84,15 @@ Read `docs/development/swarmforge.md` when planning or executing feature work,
 changing acceptance behavior, or running the quality sequence.
 
 ## Development
+
+- Final Stage 2 semantic review stays target-blind and reuses Call 3. Preserve
+  draft/review evidence and complete hazard/constraint/responsibility/action
+  decisions. Permit source-quoted H/SC wording corrections while preserving
+  losses, identities and hazard-to-loss links; retain legitimate use-case
+  functions and communication direction. Keep genuine missing facts and unknown
+  effects explicit. Stage 5 comparison grounding verifies literal source presence
+  through quotations or exact observation JSON; retain unsourced values
+  as typed parameters and never promote source presence into semantic proof.
 
 - Track durable work and specification approval in GitHub Issues and PRs.
 - Keep `run` as the sole normal scenario-generation command. Taxonomy supplies
@@ -157,8 +188,10 @@ changing acceptance behavior, or running the quality sequence.
   action temporality used to decide duration eligibility and a complete,
   explained reference slice. Stage 5 providers select only
   explained request-local causal handles, which the compiler binds to fixed
-  PM/FB/CA sources and kinds, and return exactly one vulnerability for every
-  compiler-owned local defender-belief handle. They describe one typed test
+  PM/FB/CA sources and kinds. Derive defender-belief annotations from those same
+  exact PM declarations; do not ask for a second provider-authored version.
+  Mark undeclared beliefs as not selected in this scenario, not as vulnerability
+  absence. Providers describe one typed test
   stimulus and select one compatible causal path; deterministic assembly owns
   the action kind, resource roles, carrier influence, contract, and
   classification. File-upload, load-generation, or otherwise unsupported

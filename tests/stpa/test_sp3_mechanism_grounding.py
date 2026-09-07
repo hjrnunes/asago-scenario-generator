@@ -233,6 +233,29 @@ def test_stage5_prompt_separates_delivery_from_internal_causal_proof() -> None:
     assert "make a known route parameterized, not analytical" in prompt
 
 
+def test_stage5_prompt_keeps_unproved_carriers_out_of_pm_direct_routes() -> None:
+    """Grounded PM flaws may use direct input without inventing retrieval access."""
+    system_prompt, _user_prompt = build_context_bdi_prompts(
+        _empty_reachability_context(), TemplateLoader(PROMPTS_DIR)
+    )
+    prompt = " ".join(system_prompt.split()).lower()
+
+    assert "separate causal-source selection from delivery selection" in prompt
+    assert (
+        "when that process-model flaw is the evidence-backed explanation and no "
+        "exact attacker-influenced retrieval or tool delivery is supplied"
+    ) in prompt
+    assert "use a `user_message` (which code maps to `direct_prompt`)" in prompt
+    assert (
+        "a rag/retrieval label, tool-inventory name, or adversarial wording alone"
+        in prompt
+    )
+    assert (
+        "if only a feedback sensor anomaly is supported, keep its indirect route"
+        in prompt
+    )
+
+
 def test_stage5_prompt_contains_only_actionable_context_and_defines_references() -> (
     None
 ):
@@ -255,7 +278,8 @@ def test_stage5_prompt_contains_only_actionable_context_and_defines_references()
     assert "Use the selected target action in action conditions" in normalized_prompt
     assert "Select only when timing, lateness, staleness" in normalized_prompt
     assert (
-        "Select only when the observed feedback value is incorrect" in normalized_prompt
+        "The feedback itself misreports a known fact through an explained"
+        in normalized_prompt
     )
 
 

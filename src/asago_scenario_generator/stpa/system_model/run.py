@@ -35,6 +35,7 @@ from asago_scenario_generator.stpa.models.control_structure import ControlStruct
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.control_structure import (
+    ControlStructureDerivationResult,
     STAGE_2_CALL_COUNT,
     derive_control_structure,
 )
@@ -186,7 +187,11 @@ def run_sp1(
     )
 
     return SP1RunResult(
-        loss_analysis=loss_analysis,
+        loss_analysis=(
+            stage2_result.loss_analysis
+            if stage2_result.loss_analysis is not None
+            else loss_analysis
+        ),
         capability_profile=capability_profile,
         control_structure=stage2_result.control_structure,
         critic_findings=stage2_result.critic_findings,
@@ -204,6 +209,7 @@ def run_sp1(
 class _Stage2Result:
     """Internal result container for the Stage 2 block."""
 
+    loss_analysis: LossAnalysis | None = None
     control_structure: ControlStructure | None = None
     critic_findings: CriticFindings | None = None
     heuristic_errors: list[str] = field(default_factory=list)
@@ -298,7 +304,7 @@ def _derive_stage2_control_structure(
     loader: TemplateLoader,
     temperature: float,
     stage_errors: list[str],
-) -> tuple[ControlStructure | None, list[str]]:
+) -> ControlStructureDerivationResult | None:
     """Derive Stage 2's structure while retaining a graceful failure result."""
     try:
         return derive_control_structure(
@@ -312,7 +318,7 @@ def _derive_stage2_control_structure(
         )
     except StageError as exc:
         stage_errors.append(str(exc))
-        return None, []
+        return None
 
 
 def _maybe_apply_revision(
@@ -373,7 +379,7 @@ def _run_stage_2_block(
 
     stage_warnings = [] if stage_warnings is None else stage_warnings
 
-    control_structure, merge_warnings = _derive_stage2_control_structure(
+    derivation = _derive_stage2_control_structure(
         llm_client,
         use_case_text,
         loss_analysis,
@@ -383,8 +389,11 @@ def _run_stage_2_block(
         temperature,
         stage_errors,
     )
-    if control_structure is None:
+    if derivation is None:
         return _Stage2Result()
+    loss_analysis = derivation.loss_analysis
+    control_structure = derivation.control_structure
+    merge_warnings = list(derivation.warnings)
     stage_warnings.extend(merge_warnings)
 
     # Structural heuristics (always run after Call 3)
@@ -420,6 +429,7 @@ def _run_stage_2_block(
     )
 
     return _Stage2Result(
+        loss_analysis=loss_analysis,
         control_structure=control_structure,
         critic_findings=critic_findings,
         heuristic_errors=list(heuristic_result.errors),

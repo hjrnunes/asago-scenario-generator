@@ -37,7 +37,7 @@ Feature: STPA prompt, response, and execution-quality audit corrections
 
   Scenario: PQA-05 and PQA-06 Stage 5 derives the agent channel from the chosen stimulus and action
     Given a corrected inter-responsibility Stage 5 route context is available
-    And the provider describes stimulus "conversation" and selects "conversation_context" with action "agent_message"
+    And the provider describes stimulus "conversation" with action "agent_message" and binds its declared causal factor
     When corrected Stage 5 materializes the route
     Then the materialized execution contract is "executable_route"
     And the contract uses delivery "conversation_context" and action "agent_message"

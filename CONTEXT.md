@@ -106,12 +106,29 @@ selected explicitly.
 _Avoid_: binding completeness, deployment readiness
 
 **Execution target profile**:
-A reviewed, content-addressed description of the semantic resources and
-interfaces available in one real or deliberately simulated environment.
+A content-addressed description of the semantic resources and interfaces
+available in one real or deliberately simulated environment. Its observed
+inventory authority remains distinct from inferred or reviewed semantic
+authority, so automatic discovery does not pretend to be human review.
 Supplying one is the consumer's explicit choice for a pending parameterized
 contract; it does not rewrite the producer's route or turn an omitted request
 into a default target.
 _Avoid_: capability inference, credential file, runtime receipt
+
+**Target discovery**:
+An independent, read-only observation of a target interface followed by a
+separately identified semantic interpretation. For MCP, discovery lists tool
+schemas without calling the tools and publishes an execution target profile;
+connection details and credentials never enter the artifact.
+_Avoid_: product-run introspection, active probing, trusted semantic truth
+
+**Target realization**:
+The additive post-baseline step that relates exact observed target operations
+to the completed systemic STPA model. It may select one exact operation for a
+baseline control action or add a narrowly verified target-derived action and
+ICA, but it never rewrites or removes baseline losses, hazards, constraints,
+control actions, or ICAs.
+_Avoid_: target-aware baseline, generic resource binding, scenario generation
 
 **Bound execution case**:
 One immutable pairing of a verified scenario with one exact target or
@@ -126,6 +143,12 @@ The externally returned text or structured value from the tested model or
 agent invocation. It uses neutral runtime surfaces and does not imply a
 domain-specific environment resource.
 _Avoid_: internal coordination message, target operation
+
+**Comparison value grounding**:
+The distinction between a literal present in supplied rule/action evidence and
+a reference value that is still unknown. Source presence does not independently
+verify that the proposed comparison correctly interprets the rule.
+_Avoid_: JSON type compatibility, inferred business policy, confirmed violation
 
 **Agent message**:
 An internal message sent between responsibilities, controllers, or separately
@@ -270,6 +293,9 @@ The immutable, target-scoped authority behind Stage 5 and every Stage 6
 renderer: the selected loss, hazard, governing constraint, unsafe action,
 obligation concern, and causal evidence. Stage 5 receives only its actionable
 semantic projection; Stage 6 retains the complete content-addressed artifact.
+Contextual Stage 5 declares each causal statement once. Its exact PM source
+also supplies the defender-belief annotation; an undeclared belief is simply
+not selected in this scenario, not proven safe.
 _Avoid_: global STPA dump, unrelated constraints
 
 **Test stimulus**:

@@ -50,7 +50,10 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossProvenance,
     SecurityConstraint,
 )
-from asago_scenario_generator.stpa.models.scenario_envelope import GherkinSpec, ScenarioEnvelope
+from asago_scenario_generator.stpa.models.scenario_envelope import (
+    GherkinSpec,
+    ScenarioEnvelope,
+)
 from asago_scenario_generator.stpa.models.scenario_spec import (
     AttackerBDI,
     DefenderBDI,
@@ -110,9 +113,7 @@ def _make_cs(
                 resp_id=f"RESP-{i}",
                 description=f"R{i}",
                 process_model_parts=[
-                    ProcessModelPart(
-                        pm_id=f"PM-{i}-{j}", description=f"PM {i}-{j}"
-                    )
+                    ProcessModelPart(pm_id=f"PM-{i}-{j}", description=f"PM {i}-{j}")
                     for j in range(1, n_pms + 1)
                 ],
                 control_actions=[
@@ -187,7 +188,10 @@ def _make_ets(threats: list[StructuralThreat] | None = None) -> EnrichedThreatSe
         structural_threats=threats or [_make_threat()],
         coverage_analysis=CoverageAnalysis(
             structural_coverage={
-                "total_slots": 1, "non_na": 1, "na": 0, "coverage_rate": 1.0
+                "total_slots": 1,
+                "non_na": 1,
+                "na": 0,
+                "coverage_rate": 1.0,
             },
         ),
     )
@@ -245,7 +249,9 @@ def _make_scenario_spec(
         target_control_action=ca_id,
         ica_type=ica_type,
         defender_bdi=DefenderBDI(
-            beliefs=[DefenderBelief(pm_id=pm_id, content="State", vulnerability="vuln")],
+            beliefs=[
+                DefenderBelief(pm_id=pm_id, content="State", vulnerability="vuln")
+            ],
             desires=[DefenderDesire(resp_id=target_resp, content="R")],
             intentions=[DefenderIntention(ca_id=ca_id, content="A")],
         ),
@@ -285,9 +291,7 @@ class TestBDIGroundingProperty:
 
         # Every belief pm_id must exist in the control structure
         valid_pms = {
-            pm.pm_id
-            for r in cs.responsibilities
-            for pm in r.process_model_parts
+            pm.pm_id for r in cs.responsibilities for pm in r.process_model_parts
         }
         for belief in bdi.beliefs:
             assert belief.pm_id in valid_pms
@@ -317,9 +321,7 @@ class TestBDIGroundingProperty:
         deadline=None,
         suppress_health_check=[HealthCheck.function_scoped_fixture],
     )
-    def test_bdi_grounding_metric_is_one_for_valid_specs(
-        self, n_resps, n_pms, n_cas
-    ):
+    def test_bdi_grounding_metric_is_one_for_valid_specs(self, n_resps, n_pms, n_cas):
         """metric_bdi_grounding returns 1.0 for specs from populate_defender_bdi."""
         cs = _make_cs(n_resps=n_resps, n_pms=n_pms, n_cas=n_cas)
         envelopes = []
@@ -375,8 +377,7 @@ class TestTreeBranchCoverageProperty:
         tree = {
             "root": "r",
             "branches": [
-                {"category": cat, "label": "l", "children": []}
-                for cat in categories
+                {"category": cat, "label": "l", "children": []} for cat in categories
             ],
             "leaves": [],
         }
@@ -396,8 +397,7 @@ class TestTreeBranchCoverageProperty:
         tree = {
             "root": "r",
             "branches": [
-                {"category": cat, "label": "l", "children": []}
-                for cat in categories
+                {"category": cat, "label": "l", "children": []} for cat in categories
             ],
             "leaves": [],
         }
@@ -418,8 +418,7 @@ class TestTreeBranchCoverageProperty:
         tree = {
             "root": "r",
             "branches": [
-                {"category": cat, "label": "l", "children": []}
-                for cat in categories
+                {"category": cat, "label": "l", "children": []} for cat in categories
             ],
             "leaves": [],
         }
@@ -457,7 +456,11 @@ class TestTreeBranchCoverageProperty:
                     attack_tree={
                         "root": "r",
                         "branches": [
-                            {"category": "controller_side", "label": "l", "children": []},
+                            {
+                                "category": "controller_side",
+                                "label": "l",
+                                "children": [],
+                            },
                             {"category": "path_side", "label": "l", "children": []},
                         ],
                         "leaves": [],
@@ -471,7 +474,11 @@ class TestTreeBranchCoverageProperty:
                     attack_tree={
                         "root": "r",
                         "branches": [
-                            {"category": "controller_side", "label": "l", "children": []},
+                            {
+                                "category": "controller_side",
+                                "label": "l",
+                                "children": [],
+                            },
                         ],
                         "leaves": [],
                     },
@@ -522,9 +529,7 @@ class TestTraceabilityChainProperty:
 
         hazards = ["H-99"] if break_hazard else ["H-1"]
         constraints = ["SC-99"] if break_constraint else ["SC-1"]
-        threat = _make_threat(
-            related_hazards=hazards, related_constraints=constraints
-        )
+        threat = _make_threat(related_hazards=hazards, related_constraints=constraints)
         ets = _make_ets(threats=[threat])
 
         spec = _make_scenario_spec(
@@ -569,9 +574,7 @@ class TestTraceabilityChainProperty:
         """Multiple valid scenarios produce zero traceability errors."""
         cs = _make_cs()
         la = _make_loss_analysis()
-        threats = [
-            _make_threat(ica_id_suffix=i + 1) for i in range(n_scenarios)
-        ]
+        threats = [_make_threat(ica_id_suffix=i + 1) for i in range(n_scenarios)]
         ets = _make_ets(threats=threats)
         envelopes = [
             _make_envelope(
@@ -715,14 +718,23 @@ class TestParseICASlotIdProperty:
     @given(
         controller=st.text(
             alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-",
-            min_size=1, max_size=10,
+            min_size=1,
+            max_size=10,
         ),
         control_action=st.text(
             alphabet="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-",
-            min_size=1, max_size=10,
+            min_size=1,
+            max_size=10,
         ),
         ica_type=st.sampled_from(
-            ["NOT_PROVIDED", "INCORRECT", "TOO_LATE", "TOO_EARLY", "STOPPED_TOO_SOON", "STOPPED_TOO_LATE"]
+            [
+                "NOT_PROVIDED",
+                "INCORRECT",
+                "TOO_LATE",
+                "TOO_EARLY",
+                "STOPPED_TOO_SOON",
+                "STOPPED_TOO_LATE",
+            ]
         ),
     )
     @settings(max_examples=50, deadline=None)
@@ -739,8 +751,8 @@ class TestParseICASlotIdProperty:
     )
     @settings(max_examples=20, deadline=None)
     def test_invalid_format_raises(self, n_parts):
-        """Slot IDs without exactly 3 colon-separated parts raise ValueError."""
-        if n_parts == 3:
+        """A slot has three parts, or four with explicit action temporality."""
+        if n_parts in {3, 4}:
             # Valid — should not raise
             parts = ":".join(f"x{i}" for i in range(n_parts))
             result = parse_ica_slot_id(parts)

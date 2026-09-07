@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any, Literal, Mapping, Sequence
+from typing import Annotated, Any, Literal, Mapping, Sequence, Union
 
 from pydantic import Field, conlist, create_model, field_validator, model_validator
 
@@ -33,7 +33,10 @@ from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptAudit,
     audit_prompt_contract as preflight_prompt_contract,
 )
-from asago_scenario_generator.stpa.models.ica_enumeration import ICASlot
+from asago_scenario_generator.stpa.models.ica_enumeration import (
+    ICASlot,
+    classify_ica_semantics,
+)
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     AnalysisControls,
     DraftControlAction,
@@ -81,6 +84,8 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
 )
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     _draft_considerations,
+    _slot_authority,
+    _validate_finding_semantics,
     compile_slot_provider_entry,
 )
 from asago_scenario_generator.stpa.threat_enum.slot_creation import SlotPlaceholder
@@ -375,7 +380,9 @@ _RoutingProviderPayload.model_rebuild()
 
 
 @lru_cache(maxsize=16)
-def _routing_provider_payload_type(route_count: int) -> type[_Model]:
+def _routing_provider_payload_type(
+    route_count: int, *, obligation_ids: tuple[str, ...] = ()
+) -> type[_Model]:
     """Build a strict provider payload for exactly one route per brief.
 
     ``ObligationRoute`` owns the derived route/gap IDs and its conditional
@@ -388,7 +395,7 @@ def _routing_provider_payload_type(route_count: int) -> type[_Model]:
     if type(route_count) is not int or route_count <= 0:
         raise ValueError("route_count must be a positive integer")
     routes = conlist(
-        _RoutingProviderRouteUnion,
+        _routing_exact_identity_union(obligation_ids),
         min_length=route_count,
         max_length=route_count,
     )
@@ -397,6 +404,26 @@ def _routing_provider_payload_type(route_count: int) -> type[_Model]:
         __base__=_RoutingProviderPayload,
         routes=(routes, ...),
     )
+
+
+def _routing_exact_identity_union(obligation_ids: tuple[str, ...]) -> object:
+    """Give guided decoding the exact supplied IDs, never digest-shaped guesses."""
+    if not obligation_ids:
+        return _RoutingProviderRouteUnion
+    variants = tuple(
+        create_model(
+            base.__name__,
+            __base__=base,
+            obligation_id=(Literal.__getitem__(obligation_ids), ...),
+        )
+        for base in (
+            _RoutingProviderRoute,
+            _RoutingProviderNotApplicableRoute,
+            _RoutingProviderUpstreamGapRoute,
+            _RoutingProviderUnresolvedRoute,
+        )
+    )
+    return Annotated[Union.__getitem__(variants), Field(discriminator="disposition")]
 
 
 def _materialize_routing_route(
@@ -433,17 +460,71 @@ class _MechanismVerdictPayload(_Model):
 
 
 class _IcaHazardProviderVerdict(_Model):
-    """Provider-only ICA judgement; request binding is attached locally."""
+    """Separate semantic judgements; the aggregate and binding belong to code."""
 
-    ica_id: str = Field(min_length=1)
-    verdict: Literal["supported", "contradictory", "insufficient_evidence"]
+    review_ref: str = Field(min_length=1)
     rationale: str = Field(min_length=1, max_length=2000)
+    action_state: Literal[
+        "absent",
+        "performed_unsafe",
+        "wrong_timing",
+        "wrong_duration",
+        "different_action",
+        "undetermined",
+    ]
+    hazard_path: Literal["supported", "contradictory", "insufficient_evidence"]
+
+    def verdict_for(self, uca_type: str) -> str:
+        """Compare independently described behaviour to the compiler-owned slot."""
+        return classify_ica_semantics(
+            uca_type, action_state=self.action_state, hazard_path=self.hazard_path
+        )
 
 
 class _IcaHazardProviderPayload(_Model):
     """Provider payload with one semantic judgement per supplied ICA."""
 
     verdicts: tuple[_IcaHazardProviderVerdict, ...] = Field(min_length=1)
+
+
+def _ica_review_requests(
+    requests: Sequence[IcaHazardVerificationRequest],
+) -> dict[str, IcaHazardVerificationRequest]:
+    """Bind blind review references without allowing duplicate source identities."""
+    if len({item.ica_id for item in requests}) != len(requests):
+        raise ValueError("ICA hazard verification requests must have unique ICA IDs")
+    return {f"review-{index}": request for index, request in enumerate(requests, 1)}
+
+
+def _compile_ica_review_payload(
+    payload: _IcaHazardProviderPayload,
+    requests: Mapping[str, IcaHazardVerificationRequest],
+) -> tuple[IcaHazardVerificationVerdict, ...]:
+    """Require exact review accounting and restore only compiler-owned identities."""
+    refs = tuple(item.review_ref for item in payload.verdicts)
+    if set(refs) != set(requests) or len(refs) != len(requests):
+        raise ValueError(
+            "ICA hazard verification must account for every supplied ICA exactly once"
+        )
+    ordered = sorted(
+        payload.verdicts, key=lambda item: requests[item.review_ref].ica_id
+    )
+    return tuple(_bound_ica_review(item, requests[item.review_ref]) for item in ordered)
+
+
+def _bound_ica_review(
+    item: _IcaHazardProviderVerdict, request: IcaHazardVerificationRequest
+) -> IcaHazardVerificationVerdict:
+    """Retain the observed state as actionable bounded-correction feedback."""
+    return IcaHazardVerificationVerdict(
+        ica_id=request.ica_id,
+        request_digest=request.semantic_digest,
+        verdict=item.verdict_for(request.uca_type),
+        rationale=(
+            f"Observed action state: {item.action_state}; proposed category: "
+            f"{request.uca_type.value}. {item.rationale}"
+        ),
+    )
 
 
 class _IcaHazardCorrectionPayload(_Model):
@@ -846,12 +927,14 @@ _SlotProviderPayload.model_rebuild()
 def _slot_provider_payload_type(
     slot_count: int,
     required_pair_count: int,
+    *,
+    constraint_ids: tuple[str, ...] = (),
 ) -> type[_Model]:
     """Build a provider payload constrained to one request's exact counts."""
     _require_positive_count(slot_count, "slot_count")
     _require_non_negative_count(required_pair_count, "required_pair_count")
     filled_slots = conlist(
-        _SlotProviderDraft,
+        _slot_exact_constraint_type(constraint_ids),
         min_length=slot_count,
         max_length=slot_count,
     )
@@ -859,6 +942,28 @@ def _slot_provider_payload_type(
         f"_SlotProviderPayload{slot_count}Pairs{required_pair_count}",
         __base__=_SlotProviderPayload,
         filled_slots=(filled_slots, ...),
+    )
+
+
+def _slot_exact_constraint_type(constraint_ids: tuple[str, ...]) -> type[_Model]:
+    """Constrain one governing-constraint choice to actual supplied identities."""
+    if not constraint_ids:
+        return _SlotProviderDraft
+    finding = create_model(
+        _SlotProviderFindingDraft.__name__,
+        __base__=_SlotProviderFindingDraft,
+        related_constraint_ids=(
+            Annotated[
+                tuple[Literal.__getitem__(constraint_ids), ...],
+                Field(min_length=1, max_length=1),
+            ],
+            ...,
+        ),
+    )
+    return create_model(
+        _SlotProviderDraft.__name__,
+        __base__=_SlotProviderDraft,
+        findings=(tuple[finding, ...], ()),
     )
 
 
@@ -893,7 +998,15 @@ def _validate_slot_provider_payload(
     expected_pair_keys: frozenset[tuple[str, str, str]],
     request: SynthesisSlotRequest,
 ) -> None:
-    """Require exact identities and compile-safe slot/pair semantics."""
+    """Require exact identities and compile-safe slot/pair semantics.
+
+    This is deliberately a validation-only pass.  The provider boundary used
+    to call ``_compile_slot_payload`` here and then call it again after the
+    bounded retry returned.  Besides doing unnecessary work, that meant a
+    compiler-owned prefix could be mistaken for model-authored safeguard
+    prose on a later legacy pass.  Validate the model's fields and references
+    here; the successful response is compiled exactly once below.
+    """
     actual_slot_ids = frozenset(slot.slot_id for slot in payload.filled_slots)
     _require_exact_id_set(
         actual_slot_ids,
@@ -906,7 +1019,68 @@ def _validate_slot_provider_payload(
         expected_pair_keys,
         "slot response must contain exactly the required routed pair keys",
     )
-    _compile_slot_payload(payload, request)
+    _validate_slot_payload_semantics(payload, request)
+
+
+def _validate_slot_payload_semantics(
+    payload: _Model,
+    request: SynthesisSlotRequest,
+) -> None:
+    """Validate provider findings without constructing canonical ICAs.
+
+    The strict provider schema already owns the closed slot shape.  This
+    additional pass checks the semantic rules that are normally enforced by
+    ``compile_ica_slot_draft`` while leaving canonical text/IDs to the one
+    compilation performed after the provider call succeeds.
+    """
+    expected_by_id = {slot.slot_id: slot for slot in request.slots}
+    route_by_pair = {
+        (route.obligation_id, slot_id): route
+        for route in request.routed_routes
+        for slot_id in route.slot_ids
+    }
+    for value in payload.filled_slots:
+        expected = expected_by_id.get(value.slot_id)
+        if expected is None:
+            raise ValueError(f"slot response references unknown slot {value.slot_id}")
+        draft = _materialize_slot_draft(value, expected)
+        # Resolve owner/action authority before validating findings.  This is
+        # the same deterministic source used by the compiler, but does not
+        # create an ICA or alter the model's prose.
+        _owner, action, _target_process, process_models, feedback = _slot_authority(
+            expected, request.control_structure
+        )
+        for finding in draft.findings:
+            _validate_finding_semantics(
+                finding,
+                slot=expected,
+                action_description=action,
+                valid_process_models=process_models,
+                valid_feedback=feedback,
+                loss_analysis=request.loss_analysis,
+            )
+        for result in draft.consideration_results:
+            route = route_by_pair.get((result.obligation_handle, draft.slot_id))
+            if route is None:
+                raise ValueError(
+                    "structured consideration references an obligation/slot "
+                    "that is not routed to this target"
+                )
+            if result.disposition == "finding":
+                if draft.is_na:
+                    raise ValueError(
+                        "finding consideration requires a non-N/A slot draft"
+                    )
+                if any(
+                    index >= len(draft.findings) for index in result.finding_indexes
+                ):
+                    raise ValueError(
+                        "structured consideration finding index is outside its slot"
+                    )
+            elif result.disposition == "proposed_not_applicable" and not draft.is_na:
+                raise ValueError(
+                    "proposed non-applicability requires an N/A slot draft"
+                )
 
 
 def _provider_pair_keys(
@@ -1080,7 +1254,10 @@ class ObligationAwareLLMAdapter:
             call_stage=f"{self.stage_prefix}_routing",
             step=request.batch_id,
         )
-        response_format = _routing_provider_payload_type(len(request.briefs))
+        response_format = _routing_provider_payload_type(
+            len(request.briefs),
+            obligation_ids=tuple(brief.obligation_id for brief in request.briefs),
+        )
         payload, _result, error = safe_llm_call(
             llm_client=self.llm_client,
             system_prompt=system_prompt,
@@ -1171,15 +1348,12 @@ class ObligationAwareLLMAdapter:
         requests = tuple(requests)
         if not requests:
             return ()
-        expected_ids = tuple(item.ica_id for item in requests)
-        if len(set(expected_ids)) != len(expected_ids):
-            raise ValueError(
-                "ICA hazard verification requests must have unique ICA IDs"
-            )
+        request_by_ref = _ica_review_requests(requests)
         system_prompt, user_prompt = build_ica_hazard_verification_prompts(
             requests,
             correction_feedback=correction_feedback,
         )
+        step = "correction" if correction_feedback else "initial"
         payload, _result, error = safe_llm_call(
             llm_client=self.llm_client,
             system_prompt=system_prompt,
@@ -1187,12 +1361,15 @@ class ObligationAwareLLMAdapter:
             response_format=_ica_hazard_provider_payload_type(len(requests)),
             run_dir=self.run_dir,
             stage=f"{self.stage_prefix}_ica_hazard_verification",
-            step="correction" if correction_feedback else "initial",
+            step=step,
             temperature=self.controls.temperature,
-            max_completion_tokens=_MECHANISM_VERIFICATION_MAX_COMPLETION_TOKENS,
+            max_completion_tokens=min(
+                _SYNTHESIS_MAX_COMPLETION_TOKENS,
+                max(_MECHANISM_VERIFICATION_MAX_COMPLETION_TOKENS, 256 * len(requests)),
+            ),
             validation_retries=0,
             validation_retry_feedback=(
-                " Return one verdict for every exact supplied ica_id and no other IDs."
+                " Return one verdict for every exact supplied review_ref and no other references."
             ),
             prompt_template_hashes=obligation_prompt_template_hashes(),
         )
@@ -1200,25 +1377,11 @@ class ObligationAwareLLMAdapter:
             raise ValueError(
                 error or "ICA hazard verification provider returned no payload"
             )
-        actual_ids = tuple(item.ica_id for item in payload.verdicts)
-        if set(actual_ids) != set(expected_ids) or len(actual_ids) != len(expected_ids):
-            raise ValueError(
-                "ICA hazard verification must account for every supplied ICA exactly once"
-            )
-        request_by_id = {item.ica_id: item for item in requests}
-        result = tuple(
-            IcaHazardVerificationVerdict(
-                ica_id=item.ica_id,
-                request_digest=request_by_id[item.ica_id].semantic_digest,
-                verdict=item.verdict,
-                rationale=item.rationale,
-            )
-            for item in sorted(payload.verdicts, key=lambda value: value.ica_id)
-        )
+        result = _compile_ica_review_payload(payload, request_by_ref)
         mark_call_published(
             self.run_dir,
             f"{self.stage_prefix}_ica_hazard_verification",
-            "correction" if correction_feedback else "initial",
+            step,
         )
         return result
 
@@ -1398,7 +1561,12 @@ class ObligationAwareLLMAdapter:
             step=request.target_id,
         )
         response_format = _slot_provider_payload_type(
-            len(request.slots), len(expected_pair_keys)
+            len(request.slots),
+            len(expected_pair_keys),
+            constraint_ids=tuple(
+                item.constraint_id
+                for item in request.loss_analysis.security_constraints
+            ),
         )
         payload, _result, error = safe_llm_call(
             llm_client=self.llm_client,

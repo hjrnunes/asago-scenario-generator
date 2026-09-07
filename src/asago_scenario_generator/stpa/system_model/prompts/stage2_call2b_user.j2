@@ -9,6 +9,7 @@
 {% for resp in responsibilities %}
 ### {{ resp.resp_id }}
 {{ resp.description }}
+Governing security constraints: {{ resp.security_constraint_refs | join(", ") }}
 
 Responsibility Constraints:
 {% for rc in resp.responsibility_constraints %}
@@ -25,7 +26,10 @@ Process Model Parts:
 
 ## Your Task
 
-For the responsibilities above, derive:
+For the responsibilities above, preserve their primary functional outputs first,
+then derive actions and feedback for source-established functions and any
+separate safeguard operation explicitly established by the use-case or typed
+factual context:
 
 1. **Control actions** for each responsibility — discrete outputs the controller produces. Assign a target (RESP-* or CP-*) for each. Include typed `effect_kind` (`model_output`, `tool_call`, `state_change`, `agent_message`, or `environment_action`) and typed `temporality` (`instantaneous`, `discrete`, `continuous`, `bounded_duration`, or `unknown`). A responsibility target requires `effect_kind: "agent_message"`.
    Use these exact action meanings: `model_output` is text or structured output
@@ -42,6 +46,28 @@ For the responsibilities above, derive:
    description verbs.
 2. **Feedback channels** for each responsibility — how each PM part stays current. Assign a source (RESP-* or CP-*) for each. **Every PM-X-Y must appear in at least one FB's updates field.**
 3. **Controlled processes** — external entities referenced by CA targets or FB sources that are not responsibilities.
+
+Security safeguards do not exhaust control actions. Preserve the discrete
+functional outputs for the explicitly established operations represented by the
+responsibilities above, keeping each operation separate from its validation,
+filtering, authorization, escalation, logging, or other safeguard. Derive only
+what the supplied use-case and typed context establish; do not invent APIs,
+tools, parameters, targets, authorization rules, or operations. A target may be
+an existing responsibility or a controlled process declared in this same
+response, and every reference must resolve after both collections are built.
+A security requirement alone does not establish an installed safeguard action,
+feedback channel, or controlled process; retain that requirement as a design
+recommendation on the established function rather than inventing an element.
+
+For a responsibility returning a conversational answer to the caller, include
+that primary `model_output` action. A filtering, redaction or logging action is
+not a substitute for delivering the answer. Likewise retain an established
+backend invocation itself, not only its authorization decision.
+
+Use `model_output` only for a text or structured result returned to the tested
+model or agent invocation's caller. Preparing, serializing, or sending an
+internal request/prompt payload is not `model_output`; choose the typed effect
+that matches its actual state, message, or external-action semantics.
 
 Verify before returning: every PM-X-Y listed above has at least one corresponding FB.
 

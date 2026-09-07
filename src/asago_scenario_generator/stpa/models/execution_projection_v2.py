@@ -262,6 +262,22 @@ class ExecutionSourcePins(_ClosedFrozenModel):
     loss_analysis: StrictStr = Field(pattern=SHA256_PATTERN)
     ica_enumeration: StrictStr = Field(pattern=SHA256_PATTERN)
     scenario_context: StrictStr = Field(pattern=SHA256_PATTERN)
+    execution_target_profile: StrictStr | None = Field(
+        default=None, pattern=SHA256_PATTERN, exclude_if=lambda value: value is None
+    )
+    target_realization: StrictStr | None = Field(
+        default=None, pattern=SHA256_PATTERN, exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def validate_target_lineage_pair(self) -> "ExecutionSourcePins":
+        if (self.execution_target_profile is None) is not (
+            self.target_realization is None
+        ):
+            raise ValueError(
+                "execution_target_profile and target_realization pins must be paired"
+            )
+        return self
 
 
 class ExecutionTraceRefs(_ClosedFrozenModel):
@@ -654,8 +670,16 @@ def _validate_unique_outcome_refs(values: Sequence[str], field_name: str) -> Non
 
 def _validate_projection_conditions(projection: ExecutionProjectionV2) -> None:
     exported_refs = _exported_projection_refs(projection)
+    outcome_condition = projection.unsafe_outcome.condition
+    if (
+        isinstance(outcome_condition, OrderingCondition)
+        and outcome_condition.reference_step_id == projection.steps[-1].step_id
+    ):
+        raise ValueError(
+            "unsafe outcome ordering cannot compare the action with itself"
+        )
     _validate_condition_references(
-        projection.unsafe_outcome.condition,
+        outcome_condition,
         projection.steps,
         exported_refs,
     )
@@ -811,7 +835,11 @@ def _validate_analytical_classification(
         raise ValueError(
             "analytical_only execution contracts require the analytical classification tuple"
         )
-    _reject_classification_bindings(classification, "analytical_only")
+    _reject_classification_bindings(
+        classification,
+        "analytical_only",
+        allow_profile_lineage=True,
+    )
 
 
 def _validate_target_agnostic_classification(
@@ -834,20 +862,29 @@ def _validate_target_agnostic_classification(
         raise ValueError(
             "resource-free executable contracts require the target-agnostic classification tuple"
         )
-    _reject_classification_bindings(classification, "resource-free")
+    _reject_classification_bindings(
+        classification,
+        "resource-free",
+        allow_profile_lineage=True,
+    )
 
 
 def _reject_classification_bindings(
     classification: ExecutionClassification,
     label: str,
+    *,
+    allow_profile_lineage: bool = False,
 ) -> None:
-    """Reject profile or resource identities where no binding is allowed."""
+    """Reject runtime bindings, while optionally retaining source lineage."""
     if (
         classification.resolved_bindings
         or classification.unresolved_requirement_ids
         or classification.ambiguous_matches
         or classification.unsupported_requirement_ids
-        or classification.target_profile_digest is not None
+        or (
+            classification.target_profile_digest is not None
+            and not allow_profile_lineage
+        )
     ):
         raise ValueError(
             f"{label} classifications cannot contain bindings or profile pins"

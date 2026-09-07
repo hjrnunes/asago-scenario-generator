@@ -1952,7 +1952,7 @@ def test_pair_hazard_and_constraint_refs_must_match_referenced_ica() -> None:
 
 
 def test_slot_adapter_failure_becomes_request_local_unresolved_evidence() -> None:
-    """A target timeout fills its slots with unresolved/N-A evidence."""
+    """A target timeout fills its slots with explicit unresolved evidence."""
     pattern = AttackPattern.model_validate(get_test_raw_pattern())
     plan = make_plan()
     briefs = build_neutral_briefs(plan, (pattern,))
@@ -1980,7 +1980,12 @@ def test_slot_adapter_failure_becomes_request_local_unresolved_evidence() -> Non
     )
 
     assert len(result.ica_enumeration.slots) == 4
-    assert all(slot.is_na for slot in result.ica_enumeration.slots)
+    provider_slots = [
+        slot
+        for slot in result.ica_enumeration.slots
+        if slot.uca_type.value != "WRONG_DURATION"
+    ]
+    assert all(not slot.is_na and slot.unresolved_reason for slot in provider_slots)
     assert [pair.disposition for pair in result.considerations] == ["unresolved"]
     assert result.considerations[0].model_call_refs == ("stpa-slot:RESP-1:part-2",)
     assert any(

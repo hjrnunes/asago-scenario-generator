@@ -13,26 +13,35 @@ duplicates; cross-references stay valid after merge.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from pydantic import Field
+
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     build_kc_subcodes_display,
 )
 from asago_scenario_generator.models.risk_card import RiskCard
-from asago_scenario_generator.stpa.infra.llm import LLMClient
-from asago_scenario_generator.stpa.infra.llm_helpers import StageError, safe_llm_call
+from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    StageError,
+    parse_llm_result,
+    safe_llm_call,
+)
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.loss_analysis import (
+    Hazard,
     LossAnalysis,
     LossAnalysisDraft,
     Loss,
     LossProvenance,
+    SecurityConstraint,
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 
@@ -43,6 +52,40 @@ STEP_MERGE = "merge"
 JSON_DECODE_RETRIES = 1
 STAGE1A_MAX_COMPLETION_TOKENS = 8192
 DEFAULT_TEMPERATURE = 0.4
+
+
+class _Stage1aProviderDraft(LossAnalysisDraft):
+    """Required provider wire for the four Stage 1a collections.
+
+    The internal draft remains partial so the two calls can exchange a loss
+    registry before closing the dependent graph.  The provider contract,
+    however, must make all four collection keys explicit on every response.
+    """
+
+    risk_card_losses: list[Loss] = Field(max_length=16)
+    use_case_losses: list[Loss] = Field(max_length=16)
+    hazards: list[Hazard] = Field(max_length=16)
+    security_constraints: list[SecurityConstraint] = Field(max_length=16)
+
+
+def _compact_risk_card_evidence(risk_cards: Iterable[RiskCard]) -> list[str]:
+    """Select complete semantic fields for the provider-facing risk view.
+
+    The risk extraction can contain bookkeeping, scores, evidence spans, and
+    mitigation prose that duplicate the core assessment.  Keep each card's
+    exact ID, name, full risk description, and full consequence; the typed
+    cards remain authoritative and are never mutated or truncated.
+    """
+    evidence: list[str] = []
+    for card in risk_cards:
+        fragments = [
+            f"{card.risk_id} — {card.risk_name}",
+            f"description: {card.risk_description}",
+        ]
+        if card.consequence:
+            fragments.append(f"consequence: {card.consequence}")
+        evidence.append("; ".join(fragments))
+    return evidence
 
 
 class _DraftReferenceValidationError(ValueError):
@@ -74,11 +117,11 @@ class LossAnalysisDiagnostic:
 
 
 # These patterns describe generic STPA concepts, not any product or domain.
-# They deliberately identify a component-failure *claim* only when the hazard
-# is phrased as that failure, leaving system conditions such as “temperature
-# remains above the limit” to the normal hazard path.
+# The component-failure error is anchored to the hazard's primary subject so a
+# later dependency phrase such as “service failure due to an upstream issue”
+# does not override an otherwise system-level hazardous state.
 _COMPONENT_FAILURE_RE = re.compile(
-    r"\b(?:sensor|component|module|database|service|api|model|tool|server|"
+    r"^\s*(?:(?:the|a|an)\s+)?(?:sensor|component|module|database|service|api|model|tool|server|"
     r"channel|interface|controller)\s+(?:fails?|failure|crashes?|is\s+"
     r"(?:broken|compromised|corrupted))\b",
     re.IGNORECASE,
@@ -259,7 +302,7 @@ def derive_loss_analysis(
 
     Call 1 (risk_derivation) derives losses/hazards/constraints from
     organizational risk cards.  Call 2 (gap_analysis) reviews the use-case
-    for missing adversary-actionable losses, receiving Call 1's output and
+    for missing source-grounded systemic losses, receiving Call 1's output and
     the capability profile as context.
 
     The two drafts are merged with sequential ID renumbering so that
@@ -283,6 +326,16 @@ def derive_loss_analysis(
             validation.
     """
     loader = template_loader or TemplateLoader(PROMPTS_DIR)
+    # Keep the provider context small enough to leave completion room for a
+    # complete graph.  The original typed inputs remain authoritative for
+    # validation and persistence; these are prompt-only projections.
+    compact_risk_evidence = _compact_risk_card_evidence(risk_cards)
+    risk_prompt_vars: dict[str, object] = {
+        "use_case_text": use_case_text,
+        "risk_cards": risk_cards,
+    }
+    if compact_risk_evidence:
+        risk_prompt_vars["risk_card_evidence"] = compact_risk_evidence
 
     # --- Call 1: risk_derivation ---
     risk_draft = _run_stage1a_call(
@@ -293,10 +346,14 @@ def derive_loss_analysis(
         run_dir=run_dir,
         step=STEP_RISK,
         temperature=temperature,
-        use_case_text=use_case_text,
-        risk_cards=risk_cards,
+        **risk_prompt_vars,
         allowed_loss_ids=set(),
         allowed_hazard_ids=set(),
+        # Keep the first call's provider responsibility narrow: establish
+        # grounded risk-card losses.  The second call closes the dependent
+        # hazard/constraint graph against that declared loss registry.
+        require_losses=bool(risk_cards),
+        require_complete_chain=False,
     )
     # The gap prompt is a review of the first draft, so its context must be
     # the canonical source-separated view.  Models occasionally put a
@@ -348,6 +405,11 @@ def derive_loss_analysis(
             for loss in risk_draft.risk_card_losses + risk_draft.use_case_losses
         },
         allowed_hazard_ids={hazard.hazard_id for hazard in risk_draft.hazards},
+        require_losses=False,
+        require_complete_chain=not (
+            existing_losses and risk_draft.hazards and risk_draft.security_constraints
+        ),
+        authoritative_draft=risk_draft,
     )
 
     # --- Merge and validate ---
@@ -362,6 +424,10 @@ def derive_loss_analysis(
             step=STEP_MERGE,
             message=f"{type(exc).__name__}: {exc}",
         ) from exc
+    # Stage 2 may apply evidence-backed H/SC wording and edge reviews. Retain this
+    # merged Stage 1a graph as an explicit draft for audit; the canonical
+    # loss-analysis.yaml is replaced by the reviewed graph after Call 3.
+    write_yaml(merged, run_dir / "loss-analysis-draft.yaml")
     write_yaml(merged, run_dir / "loss-analysis.yaml")
     return merged
 
@@ -377,6 +443,9 @@ def _run_stage1a_call(
     temperature: float,
     allowed_loss_ids: set[str],
     allowed_hazard_ids: set[str],
+    require_losses: bool,
+    require_complete_chain: bool,
+    authoritative_draft: LossAnalysisDraft | None = None,
     **template_vars: object,
 ) -> LossAnalysisDraft:
     """Render prompts, call the LLM, and return a validated draft.
@@ -399,6 +468,18 @@ def _run_stage1a_call(
                 allowed_hazard_ids=allowed_hazard_ids,
             )
             _validate_draft_semantics(draft, context=step)
+            if require_losses:
+                _validate_loss_presence(
+                    draft,
+                    context=step,
+                )
+            if require_complete_chain:
+                _validate_complete_chain(
+                    draft,
+                    context=step,
+                    allowed_loss_ids=allowed_loss_ids,
+                    allowed_hazard_ids=allowed_hazard_ids,
+                )
         except _DraftReferenceValidationError as exc:
             validation_feedback = exc.feedback
             raise
@@ -406,17 +487,30 @@ def _run_stage1a_call(
             validation_feedback = exc.feedback
             raise
 
-    draft, _, error_msg = safe_llm_call(
+    first_result_parser = None
+    if authoritative_draft is not None:
+
+        def parse_first_gap_result(result: LLMResult) -> LossAnalysisDraft:
+            return _merge_loss_analysis_correction(
+                LossAnalysisDraft(),
+                parse_llm_result(result, _Stage1aProviderDraft),
+                authoritative_draft=authoritative_draft,
+            )
+
+        first_result_parser = parse_first_gap_result
+
+    draft, first_result, error_msg = safe_llm_call(
         llm_client=llm_client,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        response_format=LossAnalysisDraft,
+        response_format=_Stage1aProviderDraft,
         run_dir=run_dir,
         stage=STAGE,
         step=step,
         temperature=temperature,
         max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
         json_decode_retries=JSON_DECODE_RETRIES,
+        result_parser=first_result_parser,
         result_validator=validate_references,
     )
     if error_msg is None:
@@ -428,10 +522,15 @@ def _run_stage1a_call(
     if validation_feedback is None:
         raise StageError(stage=STAGE, step=step, message=error_msg)
 
-    retry_prompt = (
-        f"{user_prompt}\n\n{validation_feedback}\n"
-        "Return only the corrected structured object."
+    retry_prompt = _loss_analysis_retry_prompt(
+        user_prompt=user_prompt,
+        validation_feedback=validation_feedback,
+        first_result=first_result,
+        require_losses=require_losses,
+        require_complete_chain=require_complete_chain,
+        section_patch=step == STEP_GAP,
     )
+    prior_draft = parse_llm_result(first_result, _Stage1aProviderDraft)
 
     def validate_retry_references(draft: LossAnalysisDraft) -> None:
         _validate_draft_references(
@@ -441,17 +540,34 @@ def _run_stage1a_call(
             allowed_hazard_ids=allowed_hazard_ids,
         )
         _validate_draft_semantics(draft, context=step)
+        if require_losses:
+            _validate_loss_presence(
+                draft,
+                context=step,
+            )
+        if require_complete_chain:
+            _validate_complete_chain(
+                draft,
+                context=step,
+                allowed_loss_ids=allowed_loss_ids,
+                allowed_hazard_ids=allowed_hazard_ids,
+            )
 
     draft, _, retry_error_msg = safe_llm_call(
         llm_client=llm_client,
         system_prompt=system_prompt,
         user_prompt=retry_prompt,
-        response_format=LossAnalysisDraft,
+        response_format=_Stage1aProviderDraft,
         run_dir=run_dir,
         stage=STAGE,
         step=step,
         temperature=temperature,
         max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
+        result_parser=lambda result: _merge_loss_analysis_correction(
+            prior_draft,
+            parse_llm_result(result, _Stage1aProviderDraft),
+            authoritative_draft=authoritative_draft,
+        ),
         result_validator=validate_retry_references,
     )
     if retry_error_msg is not None:
@@ -463,6 +579,277 @@ def _run_stage1a_call(
 
     assert draft is not None  # safe_llm_call guarantees this on success
     return draft
+
+
+def _loss_analysis_retry_prompt(
+    *,
+    user_prompt: str,
+    validation_feedback: str,
+    first_result: LLMResult | None,
+    require_losses: bool,
+    require_complete_chain: bool,
+    section_patch: bool,
+) -> str:
+    prior_object = _prior_structured_object(first_result)
+    collection_patch_rule = (
+        "Apply collection patch semantics to every collection: an empty "
+        "correction collection retains the prior collection, while a non-empty "
+        "correction collection replaces that prior collection in full. Do not "
+        "carry obsolete records from a replaced collection into the corrected "
+        "object."
+    )
+    if require_losses:
+        repair_order = (
+            "This is the risk-derivation repair. First declare grounded "
+            "risk-card losses with exact source risk IDs. Do not spend the "
+            "bounded repair on rewriting valid hazards or constraints; their "
+            "records will be retained after the missing loss declarations "
+            "are restored. Every dangling L-* reference must resolve to one "
+            "of the loss records you add."
+        )
+    elif require_complete_chain:
+        repair_order = (
+            "This is the dependency-chain repair. Declare grounded losses "
+            "before any hazards, then declare hazards before constraints. "
+            "Use the supplied prior loss and hazard IDs exactly; do not add "
+            "a record merely to fill a quota."
+        )
+    elif section_patch:
+        repair_order = (
+            "This is a collection-aware gap repair. Keep every explicit loss "
+            "provenance and use only exact declared IDs in the repaired links."
+        )
+    else:
+        repair_order = (
+            "Repair only the named defect and preserve every valid record; "
+            "never introduce an unsupported loss or dependency."
+        )
+    return (
+        f"{user_prompt}\n\n"
+        "## Prior structured object to correct\n\n"
+        f"```json\n{prior_object}\n```\n\n"
+        f"{validation_feedback}\n"
+        f"{repair_order}\n"
+        f"{collection_patch_rule}\n"
+        "Correct the prior object according to the repair rule above. Return "
+        "only the corrected structured object."
+    )
+
+
+def _prior_structured_object(result: LLMResult | None) -> str:
+    if result is None:
+        return "{}"
+    content = result.content
+    if isinstance(content, str):
+        return content
+    if hasattr(content, "model_dump"):
+        content = content.model_dump(mode="json")
+    return json.dumps(content, ensure_ascii=False, sort_keys=True)
+
+
+def _merge_loss_analysis_correction(
+    prior: LossAnalysisDraft,
+    correction: LossAnalysisDraft,
+    *,
+    authoritative_draft: LossAnalysisDraft | None = None,
+) -> LossAnalysisDraft:
+    """Apply a collection patch and reject changed authoritative duplicates.
+
+    A correction is intentionally collection-aware: an empty section means
+    "no update" and retains the prior section, while a non-empty section is
+    the complete replacement for that section.  The risk derivation is the
+    authority for already-known records; exact repeated records are removed,
+    but a reused identity with changed semantics fails closed.
+    """
+    # Provenance is the semantic section key.  Normalize both sides before
+    # deciding whether a correction section is empty; otherwise a loss emitted
+    # in the wrong wire container can survive alongside its corrected record
+    # and be reported as a false conflicting duplicate.
+    canonical_prior = _canonicalize_draft_losses(prior)
+    canonical_correction = _canonicalize_draft_losses(correction)
+    patched_risk_losses = _patch_collection(
+        canonical_prior.risk_card_losses,
+        canonical_correction.risk_card_losses,
+    )
+    patched_use_case_losses = _patch_collection(
+        canonical_prior.use_case_losses,
+        canonical_correction.use_case_losses,
+    )
+    patched_hazards = _patch_collection(
+        canonical_prior.hazards,
+        canonical_correction.hazards,
+    )
+    patched_constraints = _patch_collection(
+        canonical_prior.security_constraints,
+        canonical_correction.security_constraints,
+    )
+
+    patched = LossAnalysisDraft.model_validate(
+        {
+            "risk_card_losses": patched_risk_losses,
+            "use_case_losses": patched_use_case_losses,
+            "hazards": patched_hazards,
+            "security_constraints": patched_constraints,
+        }
+    )
+    risk_losses, use_case_losses = _normalize_losses(patched, LossAnalysisDraft())
+
+    if authoritative_draft is not None:
+        risk_losses = _remove_authoritative_duplicates(
+            risk_losses,
+            (
+                *authoritative_draft.risk_card_losses,
+                *authoritative_draft.use_case_losses,
+            ),
+            "loss_id",
+            "loss",
+        )
+        use_case_losses = _remove_authoritative_duplicates(
+            use_case_losses,
+            (
+                *authoritative_draft.risk_card_losses,
+                *authoritative_draft.use_case_losses,
+            ),
+            "loss_id",
+            "loss",
+        )
+        patched_hazards = _remove_authoritative_duplicates(
+            patched_hazards,
+            authoritative_draft.hazards,
+            "hazard_id",
+            "hazard",
+        )
+        patched_constraints = _remove_authoritative_duplicates(
+            patched_constraints,
+            authoritative_draft.security_constraints,
+            "constraint_id",
+            "security constraint",
+        )
+
+    return LossAnalysisDraft.model_validate(
+        {
+            "risk_card_losses": risk_losses,
+            "use_case_losses": use_case_losses,
+            "hazards": patched_hazards,
+            "security_constraints": patched_constraints,
+        }
+    )
+
+
+def _patch_collection(
+    prior: Iterable[object],
+    correction: Iterable[object],
+) -> list[object]:
+    """Retain an empty correction or replace the prior collection."""
+    source = list(correction) or list(prior)
+    return [item.model_copy(deep=True) for item in source]
+
+
+def _remove_authoritative_duplicates(
+    items: Iterable[object],
+    authoritative: Iterable[object],
+    identity_field: str,
+    record_label: str,
+) -> list[object]:
+    """Drop exact authority repeats and reject changed reused identities."""
+    authoritative_by_id = {
+        getattr(item, identity_field): item for item in authoritative
+    }
+    result: list[object] = []
+    for item in items:
+        identity = getattr(item, identity_field)
+        baseline = authoritative_by_id.get(identity)
+        if baseline is None:
+            result.append(item)
+            continue
+        if baseline.model_dump(mode="json") == item.model_dump(mode="json"):
+            continue
+        raise ValueError(
+            f"conflicting duplicate {record_label} ID '{identity}' "
+            "between gap correction and risk derivation"
+        )
+    return result
+
+
+def _validate_complete_chain(
+    draft: LossAnalysisDraft,
+    *,
+    context: str,
+    allowed_loss_ids: set[str] = set(),
+    allowed_hazard_ids: set[str] = set(),
+) -> None:
+    """Require a dependency-ordered, non-empty loss-analysis chain.
+
+    A gap response may legitimately add a hazard that points to an existing
+    loss, so availability includes the prior call's IDs.  The local response
+    still has to declare each new relationship explicitly; an empty collection
+    is never treated as an implicit declaration or as proof of
+    non-applicability.
+    """
+    losses = (*draft.risk_card_losses, *draft.use_case_losses)
+    loss_ids = allowed_loss_ids | {loss.loss_id for loss in losses}
+    hazard_ids = allowed_hazard_ids | {hazard.hazard_id for hazard in draft.hazards}
+    problems: list[str] = []
+    if not loss_ids:
+        problems.append("no grounded losses were declared or supplied")
+    if not hazard_ids:
+        problems.append("no hazards were declared or supplied")
+    if not draft.security_constraints:
+        problems.append("no security constraints were declared")
+    if any(not hazard.related_losses for hazard in draft.hazards):
+        problems.append("every hazard must reference at least one loss")
+    if any(not constraint.related_hazards for constraint in draft.security_constraints):
+        problems.append("every security constraint must reference at least one hazard")
+    if not problems:
+        return
+    message = (
+        f"{context} must return a complete loss -> hazard -> security constraint chain: "
+        + "; ".join(problems)
+    )
+    raise _DraftSemanticValidationError(
+        message,
+        feedback=(
+            f"Validation feedback: {message}. An empty response is not valid "
+            "for this call. Declare grounded losses before referencing them in "
+            "hazards, then declare constraints against those hazards. Preserve "
+            "the supplied risks and return linked IDs for every record."
+        ),
+    )
+
+
+def _validate_loss_presence(
+    draft: LossAnalysisDraft,
+    *,
+    context: str,
+) -> None:
+    """Require the loss-producing call to declare at least one loss.
+
+    The first Stage 1a call owns grounded risk-card loss declarations.  It is
+    intentionally not required to derive the dependent graph in the same
+    response; the gap call receives this closed loss registry and derives any
+    missing hazards and constraints.
+    """
+    declared_losses = [
+        loss
+        for loss in (*draft.risk_card_losses, *draft.use_case_losses)
+        if loss.provenance == LossProvenance.risk_card
+    ]
+    if declared_losses:
+        return
+    message = (
+        f"{context} must return a complete loss -> hazard -> security constraint "
+        "chain anchor: no grounded losses were declared"
+    )
+    raise _DraftSemanticValidationError(
+        message,
+        feedback=(
+            f"Validation feedback: {message}. Declare at least one grounded "
+            "risk-card loss with non-empty source_risk_cards before writing "
+            "hazards or security constraints. An empty response is not valid "
+            "when organizational risks are supplied. Do not invent a loss or "
+            "use an undeclared L-* placeholder."
+        ),
+    )
 
 
 def _validate_draft_references(
@@ -484,6 +871,13 @@ def _validate_draft_references(
     local_hazard_ids = {hazard.hazard_id for hazard in draft.hazards}
     valid_loss_ids = allowed_loss_ids | local_loss_ids
     valid_hazard_ids = allowed_hazard_ids | local_hazard_ids
+
+    # A gap response may be legitimately empty when the first call already
+    # provides a complete graph.  When it does supply hazards or constraints,
+    # however, each supplied relationship must be explicit even though the
+    # complete-chain gate is intentionally skipped for that case.
+    if context == STEP_GAP:
+        _validate_gap_relationships(draft, context=context)
 
     unknown_loss_ids = sorted(
         {
@@ -519,11 +913,90 @@ def _validate_draft_references(
         scope = "IDs declared in the risk_derivation draft"
     else:
         scope = "IDs declared in the risk_derivation or gap_analysis draft"
+    missing_declarations = []
+    if unknown_loss_ids:
+        missing_declarations.append(
+            "Missing loss declarations: "
+            + ", ".join(unknown_loss_ids)
+            + ". Known loss IDs: "
+            + (", ".join(sorted(valid_loss_ids)) or "none")
+            + ". Declare each genuinely new stakeholder loss in the appropriate "
+            "loss collection before referencing it. If this was only an ID mistake, "
+            "correct the hazard to the exact known loss with that meaning instead. "
+            "Do not invent a loss merely to satisfy an ID."
+        )
+        if context == STEP_GAP:
+            missing_declarations.append(
+                "For a genuinely new source-grounded use-case loss, declare "
+                + ", ".join(unknown_loss_ids)
+                + " in use_case_losses with provenance: use_case and "
+                "source_risk_cards: []; otherwise correct only a mistaken "
+                "reference to the exact existing loss with that meaning."
+            )
+    if unknown_hazard_ids:
+        missing_declarations.append(
+            "Missing hazard declarations: "
+            + ", ".join(unknown_hazard_ids)
+            + ". Known hazard IDs: "
+            + (", ".join(sorted(valid_hazard_ids)) or "none")
+            + ". Declare each grounded hazardous state against declared losses, "
+            "or correct the constraint to the exact known hazard it prevents."
+        )
+    repair = (
+        " ".join(missing_declarations)
+        or "Add each missing declaration or change the reference to an existing ID."
+    )
     feedback = (
-        f"Validation feedback: {message}. Use only {scope}; preserve every "
-        "loss, hazard, and security constraint."
+        f"Validation feedback: {message}. {repair} Use only {scope}; preserve every "
+        "valid loss, hazard, and security constraint. Repair these dependencies "
+        "before adding further constraints; expanding the constraint list while "
+        "leaving the named declarations missing does not repair the result."
     )
     raise _DraftReferenceValidationError(message, feedback=feedback)
+
+
+def _validate_gap_relationships(
+    draft: LossAnalysisDraft,
+    *,
+    context: str,
+) -> None:
+    """Require explicit links on supplied gap hazards and constraints.
+
+    An empty gap draft is valid: it declares no new records.  A declared hazard
+    or security constraint is different; its relationship cannot be treated as
+    implicit merely because the prior risk draft already had a complete graph.
+    The risk-derivation call intentionally does not use this check because it
+    may establish the loss registry before closing the dependent graph.
+    """
+    empty_hazards = [
+        hazard.hazard_id for hazard in draft.hazards if not hazard.related_losses
+    ]
+    empty_constraints = [
+        constraint.constraint_id
+        for constraint in draft.security_constraints
+        if not constraint.related_hazards
+    ]
+    if not empty_hazards and not empty_constraints:
+        return
+
+    problems: list[str] = []
+    if empty_hazards:
+        problems.append("hazards.related_losses empty for " + ", ".join(empty_hazards))
+    if empty_constraints:
+        problems.append(
+            "security_constraints.related_hazards empty for "
+            + ", ".join(empty_constraints)
+        )
+    message = f"{context} draft has empty cross-references: " + "; ".join(problems)
+    raise _DraftReferenceValidationError(
+        message,
+        feedback=(
+            f"Validation feedback: {message}. Every supplied hazard must list "
+            "at least one related loss and every supplied security constraint "
+            "must list at least one related hazard. An empty gap response is "
+            "valid only when both collections are empty."
+        ),
+    )
 
 
 def _max_id_num(ids: list[str], prefix: str) -> int:

@@ -1,0 +1,186 @@
+"""Atomic persistence for the standalone target-discovery artifacts."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from asago_scenario_generator.manifest import atomic_write_text
+from asago_scenario_generator.models.canonical import canonical_json_bytes
+from asago_scenario_generator.stpa.models.execution_classification import (
+    ExecutionTargetProfile,
+)
+
+from .contracts import TargetDiscoveryResult
+
+
+TARGET_DISCOVERY_MANIFEST_SCHEMA_VERSION = "target-discovery-manifest-v1"
+INVENTORY_FILENAME = "mcp-inventory.json"
+PROFILE_FILENAME = "execution-target-profile.json"
+MANIFEST_FILENAME = "target-discovery-manifest.json"
+CALLS_FILENAME = "calls.jsonl"
+
+
+def write_target_discovery(
+    output_dir: Path,
+    result: TargetDiscoveryResult,
+) -> dict[str, Path]:
+    """Publish scanner artifacts with canonical bytes and atomic replacement.
+
+    A failed inventory still publishes its diagnostic manifest and call log;
+    inventory/profile files are emitted only when their verified models exist.
+    The returned mapping contains exactly the files written.
+    """
+    if not isinstance(result, TargetDiscoveryResult):
+        raise TypeError("result must be a TargetDiscoveryResult")
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    written: dict[str, Path] = {}
+    if result.inventory is not None:
+        result.inventory.assert_integrity()
+        inventory_path = output_dir / INVENTORY_FILENAME
+        atomic_write_text(
+            inventory_path, _json_text(result.inventory.model_dump(mode="json"))
+        )
+        written[INVENTORY_FILENAME] = inventory_path
+    if result.profile is not None:
+        result.profile.assert_integrity()
+        profile_path = output_dir / PROFILE_FILENAME
+        atomic_write_text(
+            profile_path, _json_text(result.profile.model_dump(mode="json"))
+        )
+        written[PROFILE_FILENAME] = profile_path
+
+    calls_path = output_dir / CALLS_FILENAME
+    calls_text = "".join(
+        json.dumps(call, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        + "\n"
+        for call in result.calls
+    )
+    atomic_write_text(calls_path, calls_text)
+    written[CALLS_FILENAME] = calls_path
+
+    manifest = _manifest_payload(result, written)
+    manifest_path = output_dir / MANIFEST_FILENAME
+    atomic_write_text(manifest_path, _json_text(manifest))
+    written[MANIFEST_FILENAME] = manifest_path
+    return written
+
+
+def persist_target_discovery(
+    output_dir: Path,
+    result: TargetDiscoveryResult,
+) -> dict[str, Path]:
+    """Descriptive alias for :func:`write_target_discovery`."""
+    return write_target_discovery(output_dir, result)
+
+
+def read_execution_target_profile(path: Path) -> ExecutionTargetProfile:
+    """Load and verify one self-contained target profile without sidecars."""
+    path = Path(path)
+    payload = _load_payload(path)
+    profile = ExecutionTargetProfile.model_validate(payload)
+    profile.assert_integrity()
+    return profile
+
+
+def load_execution_target_profile(path: Path) -> ExecutionTargetProfile:
+    """Alias for :func:`read_execution_target_profile`."""
+    return read_execution_target_profile(path)
+
+
+def _manifest_payload(
+    result: TargetDiscoveryResult,
+    written: dict[str, Path],
+) -> dict[str, Any]:
+    """Build a non-secret manifest from verified result identities."""
+    profile = result.profile
+    inventory = result.inventory
+    files = {
+        name: {
+            "sha256": _file_sha256(path),
+            "size": path.stat().st_size,
+        }
+        for name, path in sorted(written.items())
+        if name != MANIFEST_FILENAME
+    }
+    payload: dict[str, Any] = {
+        "schema_version": TARGET_DISCOVERY_MANIFEST_SCHEMA_VERSION,
+        "target_id": profile.target_id if profile is not None else None,
+        "authorization_scope_id": (
+            profile.authorization_scope_id if profile is not None else None
+        ),
+        "mode": result.mode.value if result.mode is not None else None,
+        "controls": dict(result.controls),
+        "inventory_digest": inventory.semantic_digest
+        if inventory is not None
+        else None,
+        "profile_digest": profile.semantic_digest if profile is not None else None,
+        "diagnostic_count": len(result.diagnostics),
+        "diagnostics": [item.model_dump(mode="json") for item in result.diagnostics],
+        "call_count": len(result.calls),
+        "calls_digest": _digest_json(list(result.calls)),
+        "files": files,
+    }
+    if profile is not None:
+        payload.update(
+            {
+                "inventory_authority": (
+                    profile.inventory_authority.value
+                    if profile.inventory_authority is not None
+                    else None
+                ),
+                "semantic_authority": profile.semantic_authority.value,
+                "inventory_completeness": profile.inventory_completeness.value,
+                "source_protocol": profile.source_protocol.value,
+            }
+        )
+    return payload
+
+
+def _load_payload(path: Path) -> Any:
+    """Read a JSON profile, with YAML accepted only for local convenience."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"cannot read target profile: {path}") from exc
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        payload = yaml.safe_load(text)
+    if not isinstance(payload, dict):
+        raise ValueError("target profile must serialize an object")
+    return payload
+
+
+def _json_text(value: Any) -> str:
+    """Encode readable canonical JSON while preserving semantic bytes."""
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+
+
+def _file_sha256(path: Path) -> str:
+    """Hash exact published file bytes."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _digest_json(value: Any) -> str:
+    """Hash canonical JSON accounting values."""
+    return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+
+
+__all__ = [
+    "CALLS_FILENAME",
+    "INVENTORY_FILENAME",
+    "MANIFEST_FILENAME",
+    "PROFILE_FILENAME",
+    "TARGET_DISCOVERY_MANIFEST_SCHEMA_VERSION",
+    "load_execution_target_profile",
+    "persist_target_discovery",
+    "read_execution_target_profile",
+    "write_target_discovery",
+]

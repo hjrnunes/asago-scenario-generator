@@ -1,6 +1,8 @@
 """Acceptance runtime feature modules."""
 
 __all__ = (
+    "stpa_target_observations",
+    "stpa_semantic_review",
     "foundation",
     "infrastructure",
     "models",
@@ -39,4 +41,6 @@ __all__ = (
     "synthesis_prompt_contracts",
     "prompt_audit_corrections",
     "prompt_contract_recovery",
+    "mcp_target_discovery_primitive_input",
+    "stage1a_section_correction",
 )

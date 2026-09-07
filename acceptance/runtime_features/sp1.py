@@ -671,7 +671,7 @@ def _h_sp1_la_use_case_loss(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: an LLM that returns loss L-3 with provenance use_case."""
-    world.sp1_llm_content = {
+    use_case_loss = {
         "risk_card_losses": [],
         "use_case_losses": [
             {
@@ -682,16 +682,23 @@ def _h_sp1_la_use_case_loss(
             },
         ],
         "hazards": [
-            {"hazard_id": "H-1", "description": "Hazard", "related_losses": ["L-3"]}
+            {"hazard_id": "H-3", "description": "Hazard", "related_losses": ["L-3"]}
         ],
         "security_constraints": [
             {
-                "constraint_id": "SC-1",
+                "constraint_id": "SC-3",
                 "description": "Constraint",
-                "related_hazards": ["H-1"],
+                "related_hazards": ["H-3"],
             }
         ],
     }
+    # Stage 1a now establishes a grounded risk-loss registry before the gap
+    # call. Keep the first response risk-only so the gap response can add its
+    # use-case L-3 without being mistaken for a conflicting duplicate.
+    risk_draft = _sp1_valid_la_dict()
+    risk_draft["use_case_losses"] = []
+    risk_draft["hazards"][0]["related_losses"] = ["L-1"]
+    world.sp1_llm_content = [risk_draft, use_case_loss]
     return True, ""
 
 
@@ -727,7 +734,7 @@ def _h_sp1_la_use_case_with_source(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     """Handle: an LLM that returns a use-case loss L-3 with source_risk_cards."""
-    world.sp1_llm_content = {
+    invalid_use_case_loss = {
         "risk_card_losses": [],
         "use_case_losses": [
             {
@@ -738,16 +745,24 @@ def _h_sp1_la_use_case_with_source(
             },
         ],
         "hazards": [
-            {"hazard_id": "H-1", "description": "Hazard", "related_losses": ["L-3"]}
+            {"hazard_id": "H-3", "description": "Hazard", "related_losses": ["L-3"]}
         ],
         "security_constraints": [
             {
-                "constraint_id": "SC-1",
+                "constraint_id": "SC-3",
                 "description": "Constraint",
-                "related_hazards": ["H-1"],
+                "related_hazards": ["H-3"],
             }
         ],
     }
+    # The invalid source citation belongs to the gap response; the first
+    # response still establishes the loss registry for a non-empty risk input
+    # before the final merge reports the provenance error. Keep it risk-only
+    # so the gap's L-3 is not rejected first as a duplicate.
+    risk_draft = _sp1_valid_la_dict()
+    risk_draft["use_case_losses"] = []
+    risk_draft["hazards"][0]["related_losses"] = ["L-1"]
+    world.sp1_llm_content = [risk_draft, invalid_use_case_loss]
     return True, ""
 
 

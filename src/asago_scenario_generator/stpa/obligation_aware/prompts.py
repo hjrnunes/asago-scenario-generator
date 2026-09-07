@@ -1380,19 +1380,29 @@ def build_ica_hazard_verification_prompts(
     """Render the narrow independent verifier prompt for final ICAs.
 
     Only the request's STPA view is serialized.  Content-addressing and
-    provenance fields are intentionally removed before rendering, and the
-    optional correction feedback is request-local typed review text.
+    provenance fields and the proposed category are removed before rendering.
+    Previous verdicts remain call bookkeeping, not evidence for this independent
+    reading of the current finding.
     """
+    del correction_feedback
     if not requests:
         raise ValueError("ICA hazard verification requires at least one request")
     payloads: list[dict[str, Any]] = []
-    for request in requests:
+    for index, request in enumerate(requests, 1):
         if not hasattr(request, "model_dump"):
             raise TypeError("ICA hazard verification requests must be typed models")
-        payload = request.model_dump(mode="json", exclude={"semantic_digest"})
-        payload.pop("schema_version", None)
-        if correction_feedback and request.ica_id in correction_feedback:
-            payload["bounded_correction_feedback"] = correction_feedback[request.ica_id]
+        payload = request.model_dump(
+            mode="json",
+            exclude={
+                "schema_version",
+                "semantic_digest",
+                "ica_id",
+                "slot_id",
+                "uca_type",
+                "uca_definition",
+            },
+        )
+        payload["review_ref"] = f"review-{index}"
         payloads.append(payload)
     system = _TEMPLATE_LOADER.render_prompt("ica_hazard_verification_system.j2")
     user = _TEMPLATE_LOADER.render_prompt(

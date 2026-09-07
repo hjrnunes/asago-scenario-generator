@@ -73,8 +73,10 @@ def test_pqf_04_stage1a_risk_acronym_expansion() -> None:
 
 def test_pqf_05_stage1a_risk_adversary_actionable() -> None:
     text = _text(_STAGE1A_RISK_SYSTEM)
-    assert "adversary-actionable" in text
-    assert "Deprioritize or omit operational risks with no adversarial vector" in text
+    assert "## Relevance and causal follow-up" in text
+    assert "not require an adversary" in text
+    assert "concrete attack path for inclusion" in text
+    assert "Adversarial relevance is a later" in text
 
 
 def test_pqf_06_stage1a_risk_user_renders_with_use_case_and_risk_cards() -> None:
@@ -130,8 +132,10 @@ def test_pqf_09_stage1a_gap_system_has_gap_analysis_method() -> None:
 
 def test_pqf_10_stage1a_gap_system_adversary_actionable() -> None:
     text = _text(_STAGE1A_GAP_SYSTEM)
-    assert "adversary-actionable" in text
-    assert "no adversarial vector" in text
+    assert "## Relevance and causal follow-up" in text
+    assert "not require an adversary" in text
+    assert "concrete attack path for inclusion" in text
+    assert "missing attack evidence does not exclude an otherwise grounded gap" in text
 
 
 def test_pqf_11_stage1a_gap_user_renders_with_existing_analysis() -> None:

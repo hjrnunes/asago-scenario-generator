@@ -223,6 +223,7 @@ Feature: Meaning survives obligation-aware STPA model calls
     And one final ICA has provider-failure disposition
     And the supported sibling remains eligible
     And the final ICA provider failure is recorded separately
+    And the rejected ICA with a failed repair is not eligible
 
   Scenario: An N/A ICA does not invoke the independent verifier
     Given deterministic final ICA verification fixtures are available

@@ -40,6 +40,12 @@ from asago_scenario_generator.stpa.infra.templates import (
     hash_prompt_templates,
 )
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
+from asago_scenario_generator.models.target_realization import (
+    TargetOperationObservation,
+    TargetRealizationDisposition,
+    TargetRealizationRow,
+    TargetRealizationResult,
+)
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.enriched_threat_set import EnrichedThreatSet
@@ -111,6 +117,11 @@ from .projection import (
     project_execution,
 )
 from .prompt_alignment import render_projection_alignment_table
+from .presentation import render_scenario_summary
+from .target_observations import (
+    TARGET_OBSERVATIONS_FILENAME,
+    TargetObservationSnapshot,
+)
 from .validators import (
     TraceabilityError,
     ValidationResult,
@@ -252,6 +263,9 @@ def run_sp3(
     scenario_contexts: Mapping[str, ScenarioGenerationContext] | None = None,
     execution_target_profile: ExecutionTargetProfile | None = None,
     requested_environment_basis: RequestedEnvironmentBasis | None = None,
+    target_realization: TargetRealizationResult | None = None,
+    target_observations: TargetObservationSnapshot | None = None,
+    render_presentation: bool = False,
 ) -> SP3RunResult:
     """Run the full SP3 pipeline: Stage 5 → Stage 6 → Stage 7.
 
@@ -279,6 +293,14 @@ def run_sp3(
             basis for Stage 5 route materialization. When a profile is
             supplied, its basis is authoritative and must agree with this
             selection.
+        render_presentation: Opt in to three additional model-authored renderings.
+            Default summaries are deterministic and do not call a provider.
+        target_realization: Optional intact additive realization artifact. It
+            supplies only the exact operation already selected for each
+            baseline control action; Stage 5 cannot remap it.
+        target_observations: Optional target-only state/read observations
+            paired with ``execution_target_profile``. They supplement Stage 5
+            comparison grounding without changing the systemic context.
 
     Returns:
         An :class:`SP3RunResult` with artifacts and diagnostics.
@@ -297,45 +319,90 @@ def run_sp3(
     candidate_builders = _candidate_outcome_builders(
         enriched_threat_set.structural_threats
     )
+    if execution_target_profile is not None:
+        if not isinstance(execution_target_profile, ExecutionTargetProfile):
+            raise TypeError(
+                "execution_target_profile must be an ExecutionTargetProfile"
+            )
+        execution_target_profile.assert_integrity()
+    if target_observations is not None:
+        if not isinstance(target_observations, TargetObservationSnapshot):
+            raise TypeError("target_observations must be a TargetObservationSnapshot")
+        target_observations.assert_integrity()
+        if execution_target_profile is None:
+            raise ValueError("target_observations requires execution_target_profile")
+        if (
+            target_observations.target_profile_digest
+            != execution_target_profile.semantic_digest
+        ):
+            raise ValueError(
+                "target_observations profile pin does not match target profile"
+            )
+        write_yaml(
+            target_observations,
+            run_dir / TARGET_OBSERVATIONS_FILENAME,
+        )
     requested_basis = _resolve_requested_environment_basis(
         execution_target_profile, requested_environment_basis
     )
-    scenario_specs = _collect_stage5_specs(
-        llm_client,
-        enriched_threat_set,
-        control_structure,
-        loss_analysis,
-        run_dir,
-        loader,
-        temperature,
-        stage_errors,
-        capability_profile=capability_profile,
-        scenario_contexts=scenario_contexts,
-        requested_environment_basis=requested_basis,
-        candidate_builders=candidate_builders,
-    )
-    scenario_envelopes, validated_projections = _collect_stage6_artifacts(
-        llm_client,
-        scenario_specs,
-        control_structure,
-        loss_analysis,
-        run_dir,
-        scenarios_dir,
-        loader,
-        temperature,
-        max_workers,
-        stage_errors,
-        capability_profile=capability_profile,
-        run_identity=run_identity,
-        execution_target_profile=execution_target_profile,
-        candidate_builders=candidate_builders,
-    )
-    successful_candidate_ids = {
-        envelope.scenario_id for envelope, _projection in validated_projections
-    }
+    if target_realization is not None:
+        if not isinstance(target_realization, TargetRealizationResult):
+            raise TypeError("target_realization must be a TargetRealizationResult")
+        target_realization.assert_integrity()
+        if execution_target_profile is None:
+            raise ValueError("target_realization requires execution_target_profile")
+        if (
+            target_realization.profile_digest
+            != execution_target_profile.semantic_digest
+        ):
+            raise ValueError(
+                "target_realization profile pin does not match target profile"
+            )
     profile_published = _publish_execution_target_profile(
         run_dir, execution_target_profile, stage_errors
     )
+    if profile_published:
+        scenario_specs = _collect_stage5_specs(
+            llm_client,
+            enriched_threat_set,
+            control_structure,
+            loss_analysis,
+            run_dir,
+            loader,
+            temperature,
+            stage_errors,
+            capability_profile=capability_profile,
+            scenario_contexts=scenario_contexts,
+            requested_environment_basis=requested_basis,
+            target_realization=target_realization,
+            target_observations=target_observations,
+            candidate_builders=candidate_builders,
+        )
+        scenario_envelopes, validated_projections = _collect_stage6_artifacts(
+            llm_client,
+            scenario_specs,
+            control_structure,
+            loss_analysis,
+            run_dir,
+            scenarios_dir,
+            loader,
+            temperature,
+            max_workers,
+            stage_errors,
+            capability_profile=capability_profile,
+            run_identity=run_identity,
+            execution_target_profile=execution_target_profile,
+            target_realization=target_realization,
+            render_presentation=render_presentation,
+            candidate_builders=candidate_builders,
+        )
+    else:
+        scenario_specs = []
+        scenario_envelopes = []
+        validated_projections = []
+    successful_candidate_ids = {
+        envelope.scenario_id for envelope, _projection in validated_projections
+    }
     if profile_published:
         publication_error = _publish_validated_projections(
             run_dir, run_identity, validated_projections, stage_errors
@@ -480,7 +547,9 @@ def _run_stage5_candidate(
     capability_profile: CapabilityProfile | None,
     scenario_contexts: Mapping[str, ScenarioGenerationContext] | None,
     requested_environment_basis: RequestedEnvironmentBasis | None,
-    candidate_builders: list[_CandidateOutcomeBuilder] | None,
+    target_realization: TargetRealizationResult | None = None,
+    target_observations: TargetObservationSnapshot | None = None,
+    candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
 ) -> _Stage5ThreatResult:
     """Run one isolated Stage 5 candidate and record its outcome evidence."""
     prior_error_count = len(stage_errors)
@@ -498,6 +567,8 @@ def _run_stage5_candidate(
             capability_profile=capability_profile,
             scenario_contexts=scenario_contexts,
             requested_environment_basis=requested_environment_basis,
+            target_realization=target_realization,
+            target_observations=target_observations,
         )
     except Exception as exc:  # noqa: BLE001 - isolate one candidate
         stage_errors.append(f"Stage 5 candidate failed for SCN-{index + 1:03d}: {exc}")
@@ -524,6 +595,8 @@ def _collect_stage5_specs(
     capability_profile: CapabilityProfile | None,
     scenario_contexts: Mapping[str, ScenarioGenerationContext] | None,
     requested_environment_basis: RequestedEnvironmentBasis | None,
+    target_realization: TargetRealizationResult | None = None,
+    target_observations: TargetObservationSnapshot | None = None,
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
 ) -> list[ScenarioSpec]:
     """Generate and retain the valid Stage 5 specs in threat order."""
@@ -543,6 +616,8 @@ def _collect_stage5_specs(
             capability_profile=capability_profile,
             scenario_contexts=scenario_contexts,
             requested_environment_basis=requested_environment_basis,
+            target_realization=target_realization,
+            target_observations=target_observations,
             candidate_builders=candidate_builders,
         )
         if result.scenario_spec is not None:
@@ -617,7 +692,9 @@ def _render_stage6_candidate(
     capability_profile: CapabilityProfile | None,
     run_identity: ExecutionRunIdentity,
     execution_target_profile: ExecutionTargetProfile | None,
-    candidate_builders: list[_CandidateOutcomeBuilder] | None,
+    target_realization: TargetRealizationResult | None = None,
+    render_presentation: bool = False,
+    candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
 ) -> tuple[ScenarioEnvelope, ValidatedExecutionProjection | dict | None] | None:
     """Render and persist one Stage 6 candidate, isolating all failure kinds."""
     prior_error_count = len(stage_errors)
@@ -635,6 +712,8 @@ def _render_stage6_candidate(
             capability_profile=capability_profile,
             run_identity=run_identity,
             execution_target_profile=execution_target_profile,
+            target_realization=target_realization,
+            render_presentation=render_presentation,
         )
     except Exception as exc:  # noqa: BLE001 - isolate one candidate
         diagnostic = f"Stage 6 rendering failed for {spec.scenario_id}: {exc}"
@@ -700,6 +779,8 @@ def _collect_stage6_artifacts(
     capability_profile: CapabilityProfile | None,
     run_identity: ExecutionRunIdentity,
     execution_target_profile: ExecutionTargetProfile | None,
+    target_realization: TargetRealizationResult | None = None,
+    render_presentation: bool = False,
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
 ) -> tuple[
     list[ScenarioEnvelope],
@@ -723,6 +804,8 @@ def _collect_stage6_artifacts(
             capability_profile=capability_profile,
             run_identity=run_identity,
             execution_target_profile=execution_target_profile,
+            target_realization=target_realization,
+            render_presentation=render_presentation,
             candidate_builders=candidate_builders,
         )
         if artifact is None:
@@ -877,6 +960,8 @@ def _run_stage5_for_threat(
     capability_profile: CapabilityProfile | None = None,
     scenario_contexts: Mapping[str, ScenarioGenerationContext] | None = None,
     requested_environment_basis: RequestedEnvironmentBasis | None = None,
+    target_realization: TargetRealizationResult | None = None,
+    target_observations: TargetObservationSnapshot | None = None,
 ) -> _Stage5ThreatResult:
     """Run Stage 5 BDI generation for a single threat."""
     slot_parts = parse_ica_slot_id(threat.ica_slot_id)
@@ -894,6 +979,7 @@ def _run_stage5_for_threat(
     )
     if context is None:
         return _Stage5ThreatResult(None)
+    target_operation = _target_operation_for_context(target_realization, context)
 
     llm_result, failure = _stage5_bdi(
         llm_client,
@@ -903,6 +989,8 @@ def _run_stage5_for_threat(
         temperature,
         stage_errors,
         requested_environment_basis=requested_environment_basis,
+        target_operation=target_operation,
+        target_observations=target_observations,
     )
     if failure is not None:
         return failure
@@ -935,6 +1023,8 @@ def _stage5_bdi(
     stage_errors: list[str],
     *,
     requested_environment_basis: RequestedEnvironmentBasis | None,
+    target_operation: TargetOperationObservation | None,
+    target_observations: TargetObservationSnapshot | None,
 ) -> tuple[BDIGenerationResult | None, _Stage5ThreatResult | None]:
     """Generate one closed BDI result or one typed local failure."""
     llm_result, error = generate_bdi_for_context(
@@ -944,6 +1034,8 @@ def _stage5_bdi(
         loader=loader,
         temperature=temperature,
         requested_environment_basis=requested_environment_basis,
+        target_operation=target_operation,
+        target_observations=target_observations,
     )
     if error is None and llm_result is not None:
         return llm_result, None
@@ -987,6 +1079,77 @@ def _stage5_context(
     except ValueError as exc:
         stage_errors.append(f"Stage 5 context: {exc}")
         return None
+
+
+def _target_operation_for_context(
+    realization: TargetRealizationResult | None,
+    context: ScenarioGenerationContext,
+) -> TargetOperationObservation | None:
+    """Resolve the one exact operation already selected for this action."""
+    if realization is None:
+        return None
+    action_id = context.target_control_path.control_action.action_id
+    row = _supported_target_row(realization, action_id)
+    if row is None:
+        return _target_derived_operation(realization, action_id)
+    return _operation_for_supported_row(realization, row)
+
+
+def _supported_target_row(
+    realization: TargetRealizationResult,
+    action_id: str,
+) -> TargetRealizationRow | None:
+    """Return the sole supported baseline row for one control action."""
+    rows = tuple(
+        row
+        for row in realization.rows
+        if row.control_action_id == action_id
+        and row.disposition is TargetRealizationDisposition.supported
+    )
+    if not rows:
+        return None
+    if len(rows) != 1 or rows[0].selected_operation is None:
+        raise ValueError("target realization has conflicting supported action rows")
+    return rows[0]
+
+
+def _target_derived_operation(
+    realization: TargetRealizationResult,
+    action_id: str,
+) -> TargetOperationObservation | None:
+    """Resolve one exact operation for a target-derived control action."""
+    derived = tuple(
+        record.operation
+        for record in realization.operation_records
+        if record.target_derived_control_action_id == action_id
+        and record.disposition is TargetRealizationDisposition.supported
+    )
+    if len(derived) > 1:
+        raise ValueError("target-derived action has conflicting exact operations")
+    if not derived:
+        return None
+    return derived[0]
+
+
+def _operation_for_supported_row(
+    realization: TargetRealizationResult,
+    row: TargetRealizationRow,
+) -> TargetOperationObservation:
+    """Resolve the operation record named by a supported baseline row."""
+    selected = row.selected_operation
+    if selected is None:  # pragma: no cover - guarded by _supported_target_row
+        raise ValueError("target realization has no selected supported operation")
+    identity = selected.identity
+    operations = tuple(
+        record.operation
+        for record in realization.operation_records
+        if record.operation_ref.identity == identity
+    )
+    if len(operations) != 1:
+        raise ValueError(
+            "target realization selected operation is not uniquely recorded"
+        )
+    return operations[0]
 
 
 def _stage5_spec(
@@ -1126,6 +1289,7 @@ def _stage6_projection(
     stage_errors: list[str],
     run_identity: ExecutionRunIdentity | None,
     execution_target_profile: ExecutionTargetProfile | None,
+    target_realization: TargetRealizationResult | None = None,
 ) -> tuple[ValidatedExecutionProjection | dict | None, str | None]:
     """Prepare one Stage 6 projection and its shared prompt alignment."""
     if run_identity is not None:
@@ -1135,6 +1299,7 @@ def _stage6_projection(
                 control_structure,
                 run_identity,
                 target_profile=execution_target_profile,
+                target_realization=target_realization,
             )
         except ExecutionProjectionPreparationError as exc:
             stage_errors.append(
@@ -1194,6 +1359,8 @@ def _run_stage6_for_spec(
     capability_profile: CapabilityProfile | None = None,
     run_identity: ExecutionRunIdentity | None = None,
     execution_target_profile: ExecutionTargetProfile | None = None,
+    target_realization: TargetRealizationResult | None = None,
+    render_presentation: bool = False,
 ) -> tuple[ScenarioEnvelope | None, ValidatedExecutionProjection | dict | None]:
     """Run Stage 6 concretization for a single scenario spec.
 
@@ -1215,9 +1382,27 @@ def _run_stage6_for_spec(
         stage_errors,
         run_identity,
         execution_target_profile,
+        target_realization,
     )
     if projection_doc is None:
         return None, None
+    if not render_presentation:
+        narrative, tree, gherkin = render_scenario_summary(spec)
+        return assemble_envelope(
+            scenario_id=spec.scenario_id,
+            scenario_spec=spec,
+            narrative=narrative,
+            attack_tree=tree,
+            gherkin_spec=gherkin,
+            gherkin_raw=gherkin.to_feature_text(),
+            capability_profile=capability_profile,
+            control_structure=control_structure,
+            execution_projection=(
+                projection_doc.projection
+                if isinstance(projection_doc, ValidatedExecutionProjection)
+                else None
+            ),
+        ), projection_doc
     prompts = _stage6_prompts_or_none(
         spec,
         control_structure,

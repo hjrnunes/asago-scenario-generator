@@ -636,9 +636,17 @@ def _validation_retry_prompt(
     error: Exception,
     response_format: type[BaseModel],
     include_schema: bool,
+    prior_result: LLMResult | None = None,
+    include_prior_response: bool = False,
 ) -> str:
     """Build a bounded correction prompt with field-specific validation errors."""
     suffix = feedback or ""
+    if include_prior_response and prior_result is not None:
+        prior_response = _stringify_response_content(prior_result.content)
+        suffix += (
+            "\n\nPrior structured response to correct in place:\n"
+            f"```json\n{prior_response}\n```"
+        )
     suffix += (
         "\n\nExact validation error from the prior response:\n"
         f"{_compact_validation_error(error)}"
@@ -830,6 +838,7 @@ def safe_llm_call(
     validation_retries: int = 0,
     validation_retry_feedback: str | None = None,
     validation_retry_include_schema: bool = True,
+    validation_retry_include_response: bool = False,
     result_parser: Callable[[LLMResult], _T] | None = None,
     prompt_template_hashes: Mapping[str, str] | None = None,
 ) -> tuple[_T | None, LLMResult | None, str | None]:
@@ -874,6 +883,8 @@ def safe_llm_call(
         validation_retry_include_schema: Whether to repeat the complete JSON
             schema in a retry prompt. Stages using transport-level structured
             output may disable this to keep correction prompts compact.
+        validation_retry_include_response: Whether to show the failed structured
+            response to a validation retry so it can be corrected in place.
         result_parser: Optional stage-local parser for semantic responses. The
             parser receives the raw ``LLMResult`` and must return a validated
             response model. It is useful when a stage needs stricter wire
@@ -941,6 +952,8 @@ def safe_llm_call(
                     error=exc,
                     response_format=response_format,
                     include_schema=validation_retry_include_schema,
+                    prior_result=state.result,
+                    include_prior_response=validation_retry_include_response,
                 )
                 continue
             return None, state.result, error_msg

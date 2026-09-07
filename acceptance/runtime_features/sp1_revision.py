@@ -87,6 +87,7 @@ from runtime_shared import (
     _sp1_run_critic,
     _sp1_run_revision,
     _sp1_run_sp1,
+    _sp1_semantic_review_fixture,
     _sp1_valid_connection_set_ca_assignment_dict,
     _sp1_valid_connection_set_cp_only_dict,
     _sp1_valid_connection_set_dict,
@@ -3242,6 +3243,21 @@ def _h_rev_llm_delta(world: World, text: str, examples: dict) -> tuple[bool, str
     return True, ""
 
 
+def _h_rev_constraint_owner(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    if world.control_structure is None:
+        world.control_structure = ControlStructure.model_validate(_sp1_valid_cs_dict())
+    resp = next(
+        r for r in world.control_structure.responsibilities if r.resp_id == "RESP-1"
+    )
+    if text.startswith("the pre-revision"):
+        resp.security_constraint_refs = ["SC-1"]
+    else:
+        assert resp.security_constraint_refs == ["SC-1"]
+    return True, ""
+
+
 def _h_rev_uses_delta_format(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
@@ -5208,9 +5224,13 @@ def _h_b3_stage2_runs(world: World, text: str, examples: dict) -> tuple[bool, st
     client.set_response_for(RequirementSet, valid_requirement_set_dict())
     client.set_response_for(_RS, valid_responsibility_set_dict())
     client.set_response_for(ControlElementSet, valid_control_element_set_dict())
-    client.set_response_for(
-        CoordinationAnalysis, valid_empty_coordination_analysis_dict()
-    )
+    coordination = valid_empty_coordination_analysis_dict()
+    review = _sp1_semantic_review_fixture()
+    review["responsibilities"] = review["responsibilities"][:1]
+    review["actions"] = review["actions"][:1]
+    review["actions"][0]["effect_kind"] = "agent_message"
+    coordination["semantic_review"] = review
+    client.set_response_for(CoordinationAnalysis, coordination)
     critic_dict = {
         "gaps": [
             {
@@ -5577,6 +5597,17 @@ def _h_b3_derive_runs(world: World, text: str, examples: dict) -> tuple[bool, st
     # schema-complete; orphan repair itself remains covered by the in-memory
     # seam scenarios above.
     control_elements = valid_control_element_set_dict()
+    control_elements["control_actions"] = [
+        action
+        for action in control_elements["control_actions"]
+        if action["ca_id"].startswith("CA-1-")
+    ]
+    control_elements["feedback_channels"] = [
+        feedback
+        for feedback in control_elements["feedback_channels"]
+        if feedback["fb_id"].startswith("FB-1-")
+    ]
+    control_elements["control_actions"][0]["effect_kind"] = "agent_message"
     control_elements["feedback_channels"].append(
         {
             "fb_id": "FB-1-2",
@@ -5586,9 +5617,13 @@ def _h_b3_derive_runs(world: World, text: str, examples: dict) -> tuple[bool, st
         }
     )
     client.set_response_for(ControlElementSet, control_elements)
-    client.set_response_for(
-        CoordinationAnalysis, valid_empty_coordination_analysis_dict()
-    )
+    coordination = valid_empty_coordination_analysis_dict()
+    review = _sp1_semantic_review_fixture()
+    review["responsibilities"] = review["responsibilities"][:1]
+    review["actions"] = review["actions"][:1]
+    review["actions"][0]["effect_kind"] = "agent_message"
+    coordination["semantic_review"] = review
+    client.set_response_for(CoordinationAnalysis, coordination)
 
     world.sp1_run_dir = Path(tempfile.mkdtemp())
     from unittest.mock import patch as _patch
@@ -7797,6 +7832,11 @@ def register(api: object) -> None:
         source_order=13864,
     )
     api.register_first("the revision is run", _h_revnorm_run, source_order=13865)
+    api.register_first(
+        "the (?:pre-revision responsibility RESP-1 owns|revised responsibility RESP-1 still owns) security constraint SC-1$",
+        _h_rev_constraint_owner,
+        source_order=13866,
+    )
     api.register_first(
         "an LLM that returns a RevisionDelta with new_responsibilities containing RESP-\\d+$",
         _h_bf2_llm_returns_delta_with_existing_resp,

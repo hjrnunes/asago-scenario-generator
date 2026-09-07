@@ -1,0 +1,172 @@
+risk_card_losses:
+- loss_id: L-1
+  description: Unauthorized disclosure of customer Personally Identifiable Information
+    (PII) or Non-Public Information (NPI) via the LLM (Large Language Model) provider's
+    training data or service breach.
+  provenance: risk_card
+  source_risk_cards:
+  - ai-risk-taxonomy-unauthorized-disclosure---pii-(personal-identifiable-information)
+  - atlas-exposing-personal-information
+  - atlas-personal-information-in-data
+  - atlas-personal-information-in-prompt
+  - credo-risk-036
+  - mit-ai-risk-subdomain-2.1
+use_case_losses:
+- loss_id: L-2
+  description: Financial loss to customers due to unauthorized or erroneous modification
+    of payment schedules or refunds.
+  provenance: use_case
+  source_risk_cards: []
+- loss_id: L-3
+  description: Regulatory non-compliance and legal penalties resulting from inaccurate
+    financial advice or policy misrepresentation.
+  provenance: use_case
+  source_risk_cards: []
+- loss_id: L-4
+  description: Unauthorized access to a customer's financial history or transaction
+    details by an attacker using prompt injection or session manipulation.
+  provenance: use_case
+  source_risk_cards: []
+- loss_id: L-5
+  description: Reputational damage to Klarna and its merchants due to systematic dissemination
+    of false or hallucinated product/policy information.
+  provenance: use_case
+  source_risk_cards: []
+- loss_id: L-6
+  description: Loss of merchant trust and revenue due to incorrect processing of refunds
+    or disputes via the AI agent.
+  provenance: use_case
+  source_risk_cards: []
+hazards:
+- hazard_id: H-1
+  description: The conversational interface transmits unmasked PII or NPI within the
+    user session context or prompt to the OpenAI GPT-4-class model.
+  related_losses:
+  - L-1
+- hazard_id: H-2
+  description: The AI Assistant executes unauthorized or erroneous financial mutations
+    (refunds, payment scheduling) on Klarna Backend Systems due to prompt injection
+    or logic manipulation.
+  related_losses:
+  - L-2
+- hazard_id: H-3
+  description: The AI Assistant provides inaccurate, hallucinated, or outdated information
+    regarding fees, interest, or policies via the RAG-style knowledge-grounding system
+    or LLM reasoning.
+  related_losses:
+  - L-3
+  - L-5
+- hazard_id: H-4
+  description: The authenticated user context or order-specific data is leaked to
+    unauthorized users or external entities through session hijacking or prompt-based
+    data exfiltration.
+  related_losses:
+  - L-4
+- hazard_id: H-5
+  description: The AI Assistant provides false information to customers that misrepresents
+    merchant policies or transaction statuses, causing merchant-specific disputes.
+  related_losses:
+  - L-6
+security_constraints:
+- constraint_id: SC-1
+  description: The Klarna application layer must implement automated PII/NPI scrubbing
+    or redaction on all data flows between the authenticated user context and the
+    external Foundation Model.
+  related_hazards:
+  - H-1
+- constraint_id: SC-2
+  description: The system must validate all requested financial mutations (refunds,
+    payment changes) against a strict set of business rules and user authorization
+    tokens before executing via the Klarna Backend Systems API.
+  related_hazards:
+  - H-2
+- constraint_id: SC-3
+  description: The RAG-style (Retrieval-Augmented Generation) system must ensure that
+    retrieved policy information is verified for accuracy and currentness before being
+    incorporated into the LLM response.
+  related_hazards:
+  - H-3
+- constraint_id: SC-4
+  description: The application layer must enforce strict multi-tenant isolation, ensuring
+    the LLM prompt context only contains data strictly belonging to the currently
+    authenticated user session.
+  related_hazards:
+  - H-4
+- constraint_id: SC-5
+  description: The system must include a deterministic verification layer that cross-references
+    AI-generated financial terms (fees, interest, dates) against the authoritative
+    backend database before outputting to the user.
+  related_hazards:
+  - H-3
+- constraint_id: SC-6
+  description: The system must implement rate limiting and anomaly detection on the
+    conversational interface to prevent automated probing of the backend API via the
+    LLM.
+  related_hazards:
+  - H-2
+  - H-4
+- constraint_id: SC-7
+  description: The escalation trigger logic must be protected against manipulation
+    to ensure regulated topics or ambiguous financial queries are successfully routed
+    to human agents.
+  related_hazards:
+  - H-3
+- constraint_id: SC-8
+  description: The API integration with Klarna Backend Systems must require explicit,
+    non-bypassable authorization checks that are independent of the LLM's reasoning
+    process.
+  related_hazards:
+  - H-2
+- constraint_id: SC-9
+  description: System responses regarding legal or regulatory compliance must be gated
+    by a secondary verification mechanism when flagged as regulated topics.
+  related_hazards:
+  - H-3
+- constraint_id: SC-10
+  description: All writes to transaction history or payment status performed by the
+    AI agent must be logged with a clear audit trail that distinguishes AI-initiated
+    actions from user-initiated actions.
+  related_hazards:
+  - H-2
+- constraint_id: SC-11
+  description: The system must implement input filtering to prevent prompt injection
+    attacks from attempting to override the whitelist-based knowledge grounding.
+  related_hazards:
+  - H-2
+  - H-3
+  - H-4
+- constraint_id: SC-12
+  description: The conversational context injection mechanism must ensure that order-specific
+    context is cleared immediately upon session termination or user logout.
+  related_hazards:
+  - H-4
+- constraint_id: SC-13
+  description: The system must maintain a real-time accuracy monitoring dashboard
+    for policy-related queries to detect emerging patterns of confident-but-wrong
+    answers.
+  related_hazards:
+  - H-3
+- constraint_id: SC-14
+  description: API endpoints used for refund processing must implement transactional
+    atomicity and secondary confirmation logic to prevent partial or corrupted state
+    changes.
+  related_hazards:
+  - H-2
+- constraint_id: SC-15
+  description: The system must validate that the merchant information referenced in
+    the AI response matches the merchant associated with the authenticated user's
+    transaction history.
+  related_hazards:
+  - H-5
+- constraint_id: SC-16
+  description: The system must implement strict session binding between the authenticated
+    Klarna app user and the specific conversation thread to prevent cross-user data
+    leakage.
+  related_hazards:
+  - H-4
+- constraint_id: SC-17
+  description: The system must provide a mechanism to detect and block high-frequency,
+    automated inquiries designed to harvest merchant-specific or product-specific
+    data patterns.
+  related_hazards:
+  - H-5

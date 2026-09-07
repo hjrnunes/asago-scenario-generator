@@ -1,6 +1,7 @@
 """Shared state, imports, fixtures, and non-registered runtime helpers."""
 
 from __future__ import annotations
+import copy
 import json
 import os
 import re
@@ -617,6 +618,7 @@ class _SP1MockLLM:
         max_completion_tokens: int | None = None,
         temperature: float | None = None,
     ) -> Any:
+        wire_response_format = response_format
         self.calls.append(
             {
                 "system_prompt": system_prompt,
@@ -626,6 +628,19 @@ class _SP1MockLLM:
                 "temperature": temperature,
             }
         )
+        # Provider-only subclasses keep the same stage contract. Retain the
+        # actual wire type in the call record, and reuse base-class fixtures.
+        configured = (
+            set(self._response_map)
+            | self._invalid_types
+            | set(self._exception_types)
+            | set(self._invalid_after_n)
+        )
+        if response_format is not None and response_format not in configured:
+            response_format = next(
+                (base for base in response_format.__mro__[1:] if base in configured),
+                response_format,
+            )
         # Raise exception if configured
         if response_format is not None and response_format in self._exception_types:
             raise self._exception_types[response_format]
@@ -656,6 +671,7 @@ class _SP1MockLLM:
             content = self._response_map[response_format]
         else:
             content = None
+        content = _sp1_complete_semantic_review_fixture(content, wire_response_format)
         return LLMResult(
             content=content,
             prompt_tokens=100,
@@ -664,6 +680,130 @@ class _SP1MockLLM:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
         )
+
+
+def _sp1_complete_semantic_review_fixture(content: Any, response_format: type | None):
+    """Complete the static Call 3 fixture for the current provider schema.
+
+    Stage 1 can merge multiple authoritative loss-analysis drafts and therefore
+    renumber the resulting SC/H identities.  Acceptance uses one compact
+    semantic-review fixture, while the real Call 3 provider schema carries the
+    exact current identities and row count.  Expand only the fixture's review
+    rows to that closed schema; all other response fields remain unchanged.
+
+    The provider contract requires an explicit row for every hazard and
+    constraint.  Missing rows are therefore completed as ``preserve`` rows
+    with no newly selected edges.  In particular, this helper does not derive
+    a hazard ID from a constraint suffix: the fixture may only retain the
+    exact IDs and relationships it already names.
+    """
+    if not isinstance(content, dict) or not isinstance(
+        content.get("semantic_review"), dict
+    ):
+        return content
+    if response_format is None:
+        return content
+    try:
+        schema = response_format.model_json_schema()
+        review_property = schema.get("properties", {}).get("semantic_review", {})
+        review_ref = review_property.get("$ref")
+        if not review_ref:
+            return content
+        review_schema = schema["$defs"][review_ref.rsplit("/", 1)[-1]]
+    except (KeyError, TypeError, AttributeError):
+        return content
+
+    def _item_schema(collection_property: dict) -> dict:
+        item = collection_property.get("items", {})
+        item_ref = item.get("$ref")
+        if item_ref:
+            return schema["$defs"][item_ref.rsplit("/", 1)[-1]]
+        return item
+
+    def _identity_values(collection: str, identity_field: str) -> list[str]:
+        collection_property = review_schema.get("properties", {}).get(collection)
+        if not isinstance(collection_property, dict):
+            return []
+        if collection_property.get("maxItems") == 0:
+            return []
+        item = _item_schema(collection_property)
+        identity = item.get("properties", {}).get(identity_field, {})
+        if "enum" in identity:
+            return list(identity["enum"])
+        if "const" in identity:
+            return [identity["const"]]
+        # Schemas without a closed identity enum are legacy compatibility
+        # cases; retain only identities explicitly present in the fixture.
+        return [
+            row.get(identity_field)
+            for row in content["semantic_review"].get(collection, [])
+            if isinstance(row, dict) and row.get(identity_field) is not None
+        ]
+
+    review = copy.deepcopy(content["semantic_review"])
+    hazard_ids = set(_identity_values("hazards", "hazard_id"))
+
+    collection_specs = {
+        "hazards": ("hazard_id", "Acceptance fixture preserves the supplied hazard."),
+        "constraints": (
+            "constraint_id",
+            "Acceptance fixture preserves the supplied constraint decision.",
+        ),
+        "responsibilities": (
+            "responsibility_id",
+            "Acceptance fixture preserves the supplied responsibility decision.",
+        ),
+        "actions": (
+            "control_action_id",
+            "Acceptance fixture preserves the supplied action decision.",
+        ),
+    }
+
+    for collection, (identity_field, rationale) in collection_specs.items():
+        collection_property = review_schema.get("properties", {}).get(collection)
+        if (
+            isinstance(collection_property, dict)
+            and collection_property.get("maxItems") == 0
+        ):
+            review[collection] = []
+            continue
+        expected_ids = _identity_values(collection, identity_field)
+        if not expected_ids:
+            continue
+        existing_rows = {
+            row.get(identity_field): row
+            for row in review.get(collection, [])
+            if isinstance(row, dict) and row.get(identity_field) is not None
+        }
+        rows = []
+        for identity in expected_ids:
+            row = copy.deepcopy(existing_rows.get(identity, {}))
+            row[identity_field] = identity
+            if collection == "hazards":
+                row.setdefault("disposition", "preserve")
+                row.setdefault("revised_description", None)
+                row.setdefault("missing_fact", None)
+                row.setdefault("source_evidence", [])
+            elif collection == "constraints":
+                row.setdefault("disposition", "preserve")
+                row.setdefault("revised_description", None)
+                row.setdefault("missing_fact", None)
+                row["related_hazards"] = [
+                    hazard
+                    for hazard in row.get("related_hazards", [])
+                    if hazard in hazard_ids
+                ]
+                row.setdefault("source_evidence", [])
+            elif collection == "responsibilities":
+                row.setdefault("constraint_refs", [])
+            elif collection == "actions":
+                row.setdefault("effect_kind", None)
+            row.setdefault("rationale", rationale)
+            rows.append(row)
+        review[collection] = rows
+    result = copy.deepcopy(content)
+    result["semantic_review"] = review
+    return result
 
 
 class _ParallelDummyModel(BaseModel):
@@ -972,6 +1112,7 @@ def _sp1_valid_connection_set_dict() -> dict:
             },
         ],
         "integrity_findings": [],
+        "semantic_review": _sp1_semantic_review_fixture(),
     }
 
 
@@ -1015,6 +1156,73 @@ def _sp1_valid_coordination_analysis_dict() -> dict:
     return _sp1_valid_connection_set_dict()
 
 
+def _sp1_semantic_review_fixture() -> dict:
+    return {
+        "hazards": [
+            {
+                "hazard_id": "H-1",
+                "disposition": "preserve",
+                "revised_description": None,
+                "missing_fact": None,
+                "source_evidence": [],
+                "rationale": "The supplied first hazard is retained unchanged.",
+            },
+            {
+                "hazard_id": "H-2",
+                "disposition": "preserve",
+                "revised_description": None,
+                "missing_fact": None,
+                "source_evidence": [],
+                "rationale": "The supplied second hazard is retained unchanged.",
+            },
+        ],
+        "constraints": [
+            {
+                "constraint_id": "SC-1",
+                "disposition": "preserve",
+                "revised_description": None,
+                "missing_fact": None,
+                "related_hazards": ["H-1"],
+                "source_evidence": [],
+                "rationale": "Authorization rule applies to the first reviewed hazard.",
+            },
+            {
+                "constraint_id": "SC-2",
+                "disposition": "preserve",
+                "revised_description": None,
+                "missing_fact": None,
+                "related_hazards": ["H-2"],
+                "source_evidence": [],
+                "rationale": "Data protection rule applies to the second reviewed hazard.",
+            },
+        ],
+        "responsibilities": [
+            {
+                "responsibility_id": "RESP-1",
+                "constraint_refs": ["SC-1"],
+                "rationale": "Authorization rule.",
+            },
+            {
+                "responsibility_id": "RESP-2",
+                "constraint_refs": ["SC-2"],
+                "rationale": "Data protection rule.",
+            },
+        ],
+        "actions": [
+            {
+                "control_action_id": "CA-1-1",
+                "effect_kind": "tool_call",
+                "rationale": "Controlled process operation.",
+            },
+            {
+                "control_action_id": "CA-2-1",
+                "effect_kind": "agent_message",
+                "rationale": "Internal responsibility target.",
+            },
+        ],
+    }
+
+
 def _sp1_valid_connection_set_no_assignments_dict() -> dict:
     """CoordinationAnalysis with only coordination links, no CPs or assignments."""
     return {
@@ -1033,6 +1241,7 @@ def _sp1_valid_connection_set_no_assignments_dict() -> dict:
             },
         ],
         "integrity_findings": [],
+        "semantic_review": _sp1_semantic_review_fixture(),
     }
 
 
@@ -1041,6 +1250,7 @@ def _sp1_valid_connection_set_cp_only_dict() -> dict:
     return {
         "coordination_links": [],
         "integrity_findings": [],
+        "semantic_review": _sp1_semantic_review_fixture(),
     }
 
 
@@ -1049,6 +1259,7 @@ def _sp1_valid_connection_set_fb_assignment_dict() -> dict:
     return {
         "coordination_links": [],
         "integrity_findings": [],
+        "semantic_review": _sp1_semantic_review_fixture(),
     }
 
 
@@ -1057,6 +1268,7 @@ def _sp1_valid_connection_set_ca_assignment_dict() -> dict:
     return {
         "coordination_links": [],
         "integrity_findings": [],
+        "semantic_review": _sp1_semantic_review_fixture(),
     }
 
 
@@ -1297,13 +1509,18 @@ def _h_sp1_s2_full_run(world: World, text: str, examples: dict) -> tuple[bool, s
         client.set_response_for(ControlStructure, _sp1_valid_cs_dict())
     la = world.loss_analysis or _sp1_make_loss_analysis_with_constraints()
     try:
-        world.control_structure, _merge_warnings = _sp1_derive_control_structure(
+        derivation = _sp1_derive_control_structure(
             llm_client=client,
             use_case_text=world.sp1_use_case_text,
             loss_analysis=la,
             run_dir=run_dir,
         )
-        world.heuristic_result = _sp1_run_heuristics(world.control_structure, la)
+        world.loss_analysis = derivation.loss_analysis
+        world.control_structure = derivation.control_structure
+        world.sp1_warnings = derivation.warnings
+        world.heuristic_result = _sp1_run_heuristics(
+            world.control_structure, derivation.loss_analysis
+        )
     except (ValidationError, ValueError, _GDStageError) as e:
         world.validation_error = e
     return True, ""
@@ -2356,16 +2573,6 @@ def _setup_sp3_mock_client(num_threats: int = 2):
                     "category": "user_message",
                     "description": "One user message is the typed test stimulus.",
                 },
-                "defender_vulnerabilities": [
-                    {
-                        "belief_handle": "belief_1",
-                        "vulnerability": f"vulnerability {i + 1}",
-                    },
-                    {
-                        "belief_handle": "belief_2",
-                        "vulnerability": f"vuln {i + 1}",
-                    },
-                ],
                 "attacker_bdi": {
                     "beliefs": [f"attacker belief {i + 1}"],
                     "desires": ["induce ICA"],
@@ -2379,6 +2586,7 @@ def _setup_sp3_mock_client(num_threats: int = 2):
                 "causal_factors": [
                     {
                         "source_handle": "cause_1",
+                        "selected_for_route": True,
                         "evidence": "The selected structural state can remain stale.",
                         "temporal_condition": None,
                         "evidence_status": "structural_failure",
@@ -2396,8 +2604,6 @@ def _setup_sp3_mock_client(num_threats: int = 2):
                 },
                 "execution_route": {
                     "disposition": "executable_route",
-                    "delivery_class": "direct_prompt",
-                    "selected_factor_handle": "cause_1",
                     "action_kind": "model_output",
                     "reason": "The selected structural factor supports the direct route.",
                 },
