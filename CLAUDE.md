@@ -290,6 +290,10 @@ changing acceptance behavior, or running the quality sequence.
   Bookkeeping, copied, relabelled, shared-resource-only, or fake evidence must
   never make a semantic pilot ready. Reporting, CLI, model calls, network
   access, generation, and scenario finalization remain outside Phase 4.
+- Target-grounded scenario evaluation uses the hand-authored reference gold sets
+  in `data/gold/` and the deterministic scoring and review tools in
+  `scripts/gold/` (`score_run.py`, `review_run.py`). See `scripts/gold/README.md`
+  and `ai/findings/target-grounded-scenario-generation-spec-2026-09-07.md`.
 - Keep harness installations and runtime state local; the repository owns only
   portable methodology, configuration, and scripts.
 - Update `README.md`, this file, and linked documentation when an interface or

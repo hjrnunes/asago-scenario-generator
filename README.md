@@ -791,6 +791,16 @@ fixtures, expected violations, canonical digests, and lock are under
 [`data/contracts/stpa-execution`](data/contracts/stpa-execution/); the consumer
 must vendor those files byte-for-byte before compiling the bundle.
 
+## Target-Grounded Gold Set Evaluation (Phase 0)
+
+Target-grounded scenario evaluation uses fixed, hand-authored gold sets to
+measure pipeline recall deterministically against concrete targets. The
+MiniKlarna reference set is in [`data/gold/miniklarna/gold-cases.yaml`](data/gold/miniklarna/gold-cases.yaml).
+Runs are scored with `uv run python -m scripts.gold.score_run --run <run_dir>`
+and reviewed with `uv run python -m scripts.gold.review_run`. See
+[`scripts/gold/README.md`](scripts/gold/README.md) and
+[`ai/findings/target-grounded-scenario-generation-spec-2026-09-07.md`](ai/findings/target-grounded-scenario-generation-spec-2026-09-07.md).
+
 ## Development
 
 ```bash
