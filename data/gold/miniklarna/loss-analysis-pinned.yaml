@@ -1,0 +1,449 @@
+risk_card_losses:
+- loss_id: L-1
+  description: Unauthorized exposure of customer Personally Identifiable Information
+    (PII) or sensitive personal data through AI model outputs or service provider
+    breaches.
+  provenance: risk_card
+  source_risk_cards:
+  - ai-risk-taxonomy-unauthorized-disclosure---pii-(personal-identifiable-information)
+  - ai-risk-taxonomy-unauthorized-distribution---pii-(personal-identifiable-information)
+  - ai-risk-taxonomy-unauthorized-processing---pii-(personal-identifiable-information)
+  - atlas-data-privacy-rights
+  - atlas-exposing-personal-information
+  - atlas-personal-information-in-data
+  - atlas-personal-information-in-prompt
+  - atlas-prompt-priming
+  - credo-risk-029
+  - credo-risk-036
+  - credo-risk-037
+  - mit-ai-risk-subdomain-2.1
+  - mit-ai-risk-subdomain-2.2
+- loss_id: L-2
+  description: Unauthorized exposure of sensitive financial records, including transaction
+    histories and payment schedules, via the AI assistant's output or backend integrations.
+  provenance: risk_card
+  source_risk_cards:
+  - ai-risk-taxonomy-unauthorized-disclosure---financial-records
+  - ai-risk-taxonomy-unauthorized-processing---financial-records
+- loss_id: L-3
+  description: Financial, legal, or regulatory penalties resulting from the AI assistant
+    providing incorrect, non-compliant, or misleading information regarding fees,
+    policies, or payment terms.
+  provenance: risk_card
+  source_risk_cards:
+  - atlas-hallucination
+  - atlas-over-or-under-reliance
+  - credo-risk-016
+  - credo-risk-021
+  - credo-risk-023
+  - mit-ai-risk-subdomain-3.1
+  - mit-ai-risk-subdomain-5.1
+  - mit-ai-risk-subdomain-7.3
+- loss_id: L-4
+  description: Loss of intellectual property (IP) or proprietary company strategy
+    due to the transmission of confidential data to third-party model providers via
+    prompts.
+  provenance: risk_card
+  source_risk_cards:
+  - atlas-confidential-data-in-prompt
+  - atlas-ip-information-in-prompt
+  - atlas-personal-information-in-prompt
+  - atlas-revealing-confidential-information
+  - credo-risk-025
+  - credo-risk-038
+  - mit-ai-risk-subdomain-2.1
+- loss_id: L-5
+  description: Legal liability or invalidation of work due to copyright infringement
+    or unauthorized use of protected intellectual property in AI-generated content.
+  provenance: risk_card
+  source_risk_cards:
+  - atlas-copyright-infringement
+  - atlas-data-usage-rights
+  - atlas-generated-content-ownership
+  - atlas-model-usage-rights
+  - credo-risk-024
+  - credo-risk-039
+  - mit-ai-risk-subdomain-6.3
+- loss_id: L-6
+  description: Execution of fraudulent transactions or social engineering attacks
+    facilitated by the AI assistant's conversational interface.
+  provenance: risk_card
+  source_risk_cards:
+  - atlas-dangerous-use
+  - atlas-nonconsensual-use
+  - atlas-spreading-disinformation
+  - credo-risk-026
+  - credo-risk-027
+  - mit-ai-risk-subdomain-4.3
+- loss_id: L-7
+  description: Operational disruption or loss of flexibility due to dependency on
+    third-party model availability and service terms.
+  provenance: risk_card
+  source_risk_cards:
+  - credo-risk-048
+use_case_losses:
+- loss_id: L-8
+  description: Financial loss or customer harm resulting from the AI assistant executing
+    incorrect or unauthorized write operations (e.g., unintended refunds or incorrect
+    payment scheduling) via backend API integrations.
+  provenance: use_case
+  source_risk_cards: []
+- loss_id: L-9
+  description: Reputational damage or loss of customer trust due to the AI assistant
+    providing generic, unhelpful, or non-nuanced responses to complex customer service
+    inquiries.
+  provenance: use_case
+  source_risk_cards: []
+hazards:
+- hazard_id: H-1
+  description: The AI assistant's response generation includes PII or sensitive data
+    not intended for the current authenticated user session.
+  related_losses:
+  - L-1
+- hazard_id: H-2
+  description: The integration between the AI assistant and Klarna backend services
+    leaks sensitive financial records in the conversational output.
+  related_losses:
+  - L-2
+- hazard_id: H-3
+  description: The RAG-style knowledge-grounding system or foundation model produces
+    factually incorrect or non-compliant financial policy information.
+  related_losses:
+  - L-3
+- hazard_id: H-4
+  description: Confidential organizational data or proprietary strategy is included
+    in the prompt sent to the OpenAI foundation model.
+  related_losses:
+  - L-4
+- hazard_id: H-5
+  description: The AI assistant generates content that replicates protected copyrighted
+    works during customer interactions.
+  related_losses:
+  - L-5
+- hazard_id: H-6
+  description: The conversational interface is used to generate deceptive content
+    or manipulate users into performing unauthorized financial actions.
+  related_losses:
+  - L-6
+- hazard_id: H-7
+  description: The AI assistant's core functionality is unavailable due to the failure
+    or term changes of the upstream OpenAI service.
+  related_losses:
+  - L-7
+- hazard_id: H-8
+  description: The AI assistant issues incorrect or unauthorized write commands (such
+    as processing a refund or modifying a payment plan) to the Klarna backend services
+    via API integrations.
+  related_losses:
+  - L-8
+- hazard_id: H-9
+  description: The AI assistant provides low-quality, generic, or contextually inappropriate
+    responses that fail to address complex or nuanced customer service needs.
+  related_losses:
+  - L-9
+security_constraints:
+- constraint_id: SC-1
+  rule: The system must ensure that the conversational output contains only the data
+    authorized for the specific authenticated user session.
+  related_hazards:
+  - H-1
+  applies_when:
+  - a user is interacting with the assistant
+  - the session is authenticated
+  description: 'The system must ensure that the conversational output contains only
+    the data authorized for the specific authenticated user session. Applies when:
+    a user is interacting with the assistant; the session is authenticated.'
+- constraint_id: SC-2
+  rule: The API integration between the assistant and backend services must restrict
+    data retrieval to the specific customer's authenticated context.
+  related_hazards:
+  - H-2
+  applies_when:
+  - the assistant requests account or transaction details
+  description: 'The API integration between the assistant and backend services must
+    restrict data retrieval to the specific customer''s authenticated context. Applies
+    when: the assistant requests account or transaction details.'
+- constraint_id: SC-3
+  rule: The assistant must provide responses that are strictly grounded in the approved
+    knowledge-grounding whitelist for all policy and fee inquiries.
+  related_hazards:
+  - H-3
+  applies_when:
+  - the user asks about fees, the user asks about refund policies, or the user asks
+    about payment terms
+  description: 'The assistant must provide responses that are strictly grounded in
+    the approved knowledge-grounding whitelist for all policy and fee inquiries. Applies
+    when: the user asks about fees, the user asks about refund policies, or the user
+    asks about payment terms.'
+- constraint_id: SC-4
+  rule: The system must prevent the transmission of sensitive company intellectual
+    property or internal strategy within the prompts sent to the third-party model.
+  related_hazards:
+  - H-4
+  applies_when:
+  - a prompt is being prepared for the foundation model
+  description: 'The system must prevent the transmission of sensitive company intellectual
+    property or internal strategy within the prompts sent to the third-party model.
+    Applies when: a prompt is being prepared for the foundation model.'
+- constraint_id: SC-5
+  rule: The AI assistant must not generate content that replicates protected copyrighted
+    works.
+  related_hazards:
+  - H-5
+  applies_when:
+  - the assistant generates long-form content or complex explanations
+  description: 'The AI assistant must not generate content that replicates protected
+    copyrighted works. Applies when: the assistant generates long-form content or
+    complex explanations.'
+- constraint_id: SC-6
+  rule: The conversational interface must not facilitate the generation of deceptive
+    content or the execution of unauthorized financial transactions.
+  related_hazards:
+  - H-6
+  applies_when:
+  - the user requests a refund or the user requests a payment modification
+  description: 'The conversational interface must not facilitate the generation of
+    deceptive content or the execution of unauthorized financial transactions. Applies
+    when: the user requests a refund or the user requests a payment modification.'
+- constraint_id: SC-7
+  rule: The system must maintain operational continuity through defined fallback procedures
+    when the upstream model provider is unavailable.
+  related_hazards:
+  - H-7
+  applies_when:
+  - the OpenAI service is unreachable or the service terms change unexpectedly
+  description: 'The system must maintain operational continuity through defined fallback
+    procedures when the upstream model provider is unavailable. Applies when: the
+    OpenAI service is unreachable or the service terms change unexpectedly.'
+- constraint_id: SC-8
+  rule: The system must validate that any requested write operation (refund, payment
+    modification, etc.) matches the specific transaction and intent authorized by
+    the authenticated user's session and business logic.
+  related_hazards:
+  - H-8
+  applies_when:
+  - the assistant initiates a write operation via API, a refund is requested, or a
+    payment schedule is modified
+  description: 'The system must validate that any requested write operation (refund,
+    payment modification, etc.) matches the specific transaction and intent authorized
+    by the authenticated user''s session and business logic. Applies when: the assistant
+    initiates a write operation via API, a refund is requested, or a payment schedule
+    is modified.'
+- constraint_id: SC-9
+  rule: The system must trigger an escalation to a human agent when the AI assistant
+    provides low-quality, generic, or contextually inappropriate responses.
+  related_hazards:
+  - H-9
+  applies_when:
+  - the AI flags ambiguity, the topic is identified as a regulated or complex matter,
+    or the user's intent cannot be confidently mapped to a standard intent
+  description: 'The system must trigger an escalation to a human agent when the AI
+    assistant provides low-quality, generic, or contextually inappropriate responses.
+    Applies when: the AI flags ambiguity, the topic is identified as a regulated or
+    complex matter, or the user''s intent cannot be confidently mapped to a standard
+    intent.'
+risk_dispositions:
+- risk_ref: atlas-generated-content-ownership
+  disposition: cited
+  loss_ids:
+  - L-5
+- risk_ref: credo-risk-026
+  disposition: cited
+  loss_ids:
+  - L-6
+- risk_ref: atlas-hallucination
+  disposition: cited
+  loss_ids:
+  - L-3
+- risk_ref: credo-risk-036
+  disposition: cited
+  loss_ids:
+  - L-1
+- risk_ref: credo-risk-037
+  disposition: cited
+  loss_ids:
+  - L-1
+- risk_ref: credo-risk-010
+  disposition: not_applicable
+  loss_ids: []
+  reason: While bias is a risk, the provided consequences focus on employee appraisals
+    rather than the customer service context.
+- risk_ref: ai-risk-taxonomy-unauthorized-disclosure---pii-(personal-identifiable-information)
+  disposition: cited
+  loss_ids:
+  - L-1
+- risk_ref: ai-risk-taxonomy-unauthorized-disclosure---financial-records
+  disposition: cited
+  loss_ids:
+  - L-2
+- risk_ref: atlas-personal-information-in-data
+  disposition: cited
+  loss_ids:
+  - L-1
+- risk_ref: credo-risk-021
+  disposition: cited
+  loss_ids:
+  - L-3
+- risk_ref: credo-risk-016
+  disposition: cited
+  loss_ids:
+  - L-3
+- risk_ref: atlas-exposing-personal-information
+  disposition: cited
+  loss_ids:
+  - L-1
+- risk_ref: mit-ai-risk-subdomain-2.1
+  disposition: cited
+  loss_ids:
+  - L-1
+  - L-4
+- risk_ref: credo-risk-025
+  disposition: cited
+  loss_ids:
+  - L-4
+- risk_ref: atlas-prompt-priming
+  disposition: cited
+  loss_ids:
+  - L-1
+- risk_ref: atlas-nonconsensual-use
+  disposition: cited
+  loss_ids:
+  - L-6
+- risk_ref: ai-risk-taxonomy-unauthorized-processing---pii-(personal-identifiable-information)
+  disposition: cited
+  loss_ids:
+  - L-1
+- risk_ref: ai-risk-taxonomy-unauthorized-processing---financial-records
+  disposition: cited
+  loss_ids:
+  - L-2
+- risk_ref: ai-risk-taxonomy-unauthorized-distribution---pii-(personal-identifiable-information)
+  disposition: cited
+  loss_ids:
+  - L-1
+- risk_ref: mit-ai-risk-subdomain-5.1
+  disposition: cited
+  loss_ids:
+  - L-3
+- risk_ref: atlas-personal-information-in-prompt
+  disposition: cited
+  loss_ids:
+  - L-1
+  - L-4
+- risk_ref: atlas-copyright-infringement
+  disposition: cited
+  loss_ids:
+  - L-5
+- risk_ref: atlas-revealing-confidential-information
+  disposition: cited
+  loss_ids:
+  - L-4
+- risk_ref: credo-risk-024
+  disposition: cited
+  loss_ids:
+  - L-5
+- risk_ref: atlas-ip-information-in-prompt
+  disposition: cited
+  loss_ids:
+  - L-4
+- risk_ref: mit-ai-risk-subdomain-3.1
+  disposition: cited
+  loss_ids:
+  - L-3
+- risk_ref: mit-ai-risk-subdomain-4.3
+  disposition: cited
+  loss_ids:
+  - L-6
+- risk_ref: credo-risk-023
+  disposition: cited
+  loss_ids:
+  - L-3
+- risk_ref: atlas-non-disclosure
+  disposition: not_applicable
+  loss_ids: []
+  reason: The risk of failing to disclose AI generation is not linked to a specific
+    loss in the provided context.
+- risk_ref: mit-ai-risk-subdomain-2.2
+  disposition: cited
+  loss_ids:
+  - L-1
+- risk_ref: atlas-dangerous-use
+  disposition: cited
+  loss_ids:
+  - L-6
+- risk_ref: atlas-data-usage
+  disposition: not_applicable
+  loss_ids: []
+  reason: The risk of using prohibited data is not explicitly linked to a specific
+    consequence in the provided text.
+- risk_ref: credo-risk-038
+  disposition: cited
+  loss_ids:
+  - L-4
+- risk_ref: credo-risk-048
+  disposition: cited
+  loss_ids:
+  - L-7
+- risk_ref: atlas-output-bias
+  disposition: not_applicable
+  loss_ids: []
+  reason: The risk of bias is not linked to a specific loss in the provided context.
+- risk_ref: mit-ai-risk-subdomain-1.1
+  disposition: not_applicable
+  loss_ids: []
+  reason: The risk of unfair discrimination is not linked to a specific loss in the
+    provided context.
+- risk_ref: credo-risk-034
+  disposition: not_applicable
+  loss_ids: []
+  reason: The risk of oversight challenges is not linked to a specific loss in the
+    provided context.
+- risk_ref: mit-ai-risk-subdomain-7.3
+  disposition: cited
+  loss_ids:
+  - L-3
+- risk_ref: atlas-model-usage-rights
+  disposition: cited
+  loss_ids:
+  - L-5
+- risk_ref: credo-risk-039
+  disposition: cited
+  loss_ids:
+  - L-5
+- risk_ref: credo-risk-029
+  disposition: cited
+  loss_ids:
+  - L-1
+- risk_ref: credo-risk-027
+  disposition: cited
+  loss_ids:
+  - L-6
+- risk_ref: atlas-spreading-disinformation
+  disposition: cited
+  loss_ids:
+  - L-6
+- risk_ref: atlas-data-privacy-rights
+  disposition: cited
+  loss_ids:
+  - L-1
+- risk_ref: mit-ai-risk-subdomain-6.3
+  disposition: cited
+  loss_ids:
+  - L-5
+- risk_ref: atlas-over-or-under-reliance
+  disposition: cited
+  loss_ids:
+  - L-3
+- risk_ref: credo-risk-017
+  disposition: not_applicable
+  loss_ids: []
+  reason: The risk of inadequate literacy is not linked to a specific loss in the
+    provided context.
+- risk_ref: atlas-confidential-data-in-prompt
+  disposition: cited
+  loss_ids:
+  - L-4
+- risk_ref: atlas-data-usage-rights
+  disposition: cited
+  loss_ids:
+  - L-5

@@ -9,6 +9,7 @@ Establishes a hand-written reference gold set of 12 MiniKlarna security test cas
 ```
 data/gold/miniklarna/
   gold-cases.yaml       # 12 hand-written MiniKlarna gold cases
+  loss-analysis-pinned.yaml  # owner-accepted Stage 1a input for measurement runs (--loss-analysis)
 
 scripts/gold/
   gold_cases.py         # Pydantic schemas, YAML loader, SHA-256 digest, observation fact checker
