@@ -461,6 +461,34 @@ class TestSafeCallKwargsAndFailureUsage:
         assert entry["published"] is False
         assert entry["terminal_error_codes"] == ["provider_contract_failure"]
 
+    def test_semantic_validation_failure_is_not_a_call_failure(
+        self, tmp_path: Path
+    ) -> None:
+        """A parsed response that fails a stage rule is a semantic failure."""
+
+        def reject(model: _OptionalDumpModel) -> None:
+            raise ValueError("stage rule rejected the row")
+
+        parsed, result, error = safe_llm_call(
+            llm_client=_KwargsClient(),
+            system_prompt="system",
+            user_prompt="user",
+            response_format=_OptionalDumpModel,
+            run_dir=tmp_path,
+            stage="stage_test",
+            step="step_test",
+            result_validator=reject,
+        )
+
+        assert parsed is None
+        assert result is not None
+        assert error is not None
+        entry = json.loads((tmp_path / "calls.jsonl").read_text().splitlines()[0])
+        assert entry["provider_response_received"] is True
+        assert entry["draft_parsed"] is True
+        assert entry["semantic_validation_passed"] is False
+        assert entry["terminal_error_codes"] == ["provider_semantic_validation_failure"]
+
     def test_failed_response_and_request_identity_are_preserved(
         self, tmp_path: Path
     ) -> None:

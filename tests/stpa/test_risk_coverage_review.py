@@ -284,7 +284,7 @@ class TestValidReview:
         assert outcome.call_count == 1
         assert outcome.failure_reason is None
         artifact = yaml.safe_load((tmp_path / ARTIFACT_FILENAME).read_text())
-        assert artifact["schema_version"] == "loss-analysis-risk-coverage-review-v1"
+        assert artifact["schema_version"] == "loss-analysis-risk-coverage-review-v2"
         assert artifact["status"] == "completed"
         assert artifact["call_count"] == 1
         assert artifact["failure_reason"] is None
@@ -294,12 +294,17 @@ class TestValidReview:
             "risk-c",
             "risk-d",
         ]
+        assert artifact["rows_invalid"] == []
+        assert artifact["rows_missing"] == []
         summary = artifact["summary"]
         assert summary["full"] == 1
         assert summary["partial"] == 1
         assert summary["none"] == 1
         assert summary["not_applicable_confirmed"] == 1
         assert summary["not_applicable_disputed"] == 0
+        assert summary["rows_valid"] == 4
+        assert summary["rows_invalid"] == 0
+        assert summary["rows_missing"] == 0
         reading = summary["reading_list"]
         assert [item["risk_id"] for item in reading] == ["risk-b", "risk-c"]
         assert reading[0]["missing_protection"]
@@ -333,29 +338,43 @@ class TestValidReview:
 
 
 class TestDeterministicValidation:
-    def test_non_substring_quote_is_unavailable(self, tmp_path):
+    """Amended 2026-09-08: validation is per row, so a bad row is recorded.
+
+    Each case keeps the valid rows of the same batch, records the failing row
+    under ``rows_invalid`` with its typed reason, and reports ``partial``.
+    """
+
+    def _single_invalid(self, tmp_path, rows: dict, risk_id: str, reason: str):
+        outcome = _run_review(tmp_path, rows=rows)
+        assert outcome.status == "partial"
+        assert outcome.call_count == 1
+        artifact = yaml.safe_load((tmp_path / ARTIFACT_FILENAME).read_text())
+        assert artifact["status"] == "partial"
+        assert [row["risk_id"] for row in artifact["rows"]] == [
+            card.risk_id for card in _cards() if card.risk_id != risk_id
+        ]
+        assert artifact["rows_invalid"] == [{"risk_id": risk_id, "reason": reason}]
+        assert artifact["rows_missing"] == []
+        assert artifact["summary"]["rows_valid"] == 3
+        assert artifact["summary"]["rows_invalid"] == 1
+        assert artifact["summary"]["rows_missing"] == 0
+        return artifact
+
+    def test_non_substring_quote_is_recorded_as_an_invalid_row(self, tmp_path):
         rows = _valid_rows()
         rows["rows"][0]["evidence"][1]["quote"] = "a paraphrase, not a quotation"
-        outcome = _run_review(tmp_path, rows=rows)
-
-        assert outcome.status == "unavailable"
-        assert outcome.call_count == 1
-        assert outcome.failure_reason is not None
-        assert "not an exact substring" in outcome.failure_reason
-        artifact = yaml.safe_load((tmp_path / ARTIFACT_FILENAME).read_text())
-        assert artifact["status"] == "unavailable"
-        assert artifact["failure_reason"] == outcome.failure_reason
-        assert artifact["rows"] == []
+        self._single_invalid(
+            tmp_path, rows, "risk-a", "quote_not_a_substring"
+        )
 
     def test_cited_card_cannot_be_not_applicable(self, tmp_path):
         rows = _valid_rows()
         rows["rows"][0]["coverage"] = "not_applicable_confirmed"
         rows["rows"][0]["missing_protection"] = None
         rows["rows"][0]["covering_constraints"] = []
-        outcome = _run_review(tmp_path, rows=rows)
-
-        assert outcome.status == "unavailable"
-        assert "cited in the analysis" in (outcome.failure_reason or "")
+        self._single_invalid(
+            tmp_path, rows, "risk-a", "cited_card_reports_not_applicable"
+        )
 
     def test_not_applicable_card_cannot_be_full(self, tmp_path):
         rows = _valid_rows()
@@ -368,54 +387,58 @@ class TestDeterministicValidation:
                 "meaning": "The rule.",
             }
         )
-        outcome = _run_review(tmp_path, rows=rows)
+        self._single_invalid(
+            tmp_path, rows, "risk-d", "not_applicable_card_reports_coverage"
+        )
 
-        assert outcome.status == "unavailable"
-        assert "not_applicable in the analysis" in (outcome.failure_reason or "")
-
-    def test_full_without_a_covering_constraint_fails(self, tmp_path):
+    def test_full_without_a_covering_constraint_is_invalid(self, tmp_path):
         rows = _valid_rows()
         rows["rows"][0]["covering_constraints"] = []
-        outcome = _run_review(tmp_path, rows=rows)
+        self._single_invalid(
+            tmp_path, rows, "risk-a", "full_without_covering_constraint"
+        )
 
-        assert outcome.status == "unavailable"
-        assert "coverage full requires at least one" in (outcome.failure_reason or "")
-
-    def test_partial_without_missing_protection_fails(self, tmp_path):
+    def test_partial_without_missing_protection_is_invalid(self, tmp_path):
         rows = _valid_rows()
         rows["rows"][2]["missing_protection"] = None
-        outcome = _run_review(tmp_path, rows=rows)
-
-        assert outcome.status == "unavailable"
-        assert "requires a nonblank missing_protection" in (
-            outcome.failure_reason or ""
+        self._single_invalid(
+            tmp_path, rows, "risk-c", "missing_protection_required"
         )
 
     def test_disputed_requires_missing_protection(self, tmp_path):
         rows = _valid_rows()
         rows["rows"][3]["coverage"] = "not_applicable_disputed"
         rows["rows"][3]["missing_protection"] = None
-        outcome = _run_review(tmp_path, rows=rows)
-
-        assert outcome.status == "unavailable"
-        assert "requires a nonblank missing_protection" in (
-            outcome.failure_reason or ""
+        self._single_invalid(
+            tmp_path, rows, "risk-d", "missing_protection_required"
         )
 
-    def test_missing_card_row_fails_by_schema(self, tmp_path):
+    def test_missing_card_row_is_recorded_under_rows_missing(self, tmp_path):
         rows = _valid_rows()
         rows["rows"] = rows["rows"][:3]
         outcome = _run_review(tmp_path, rows=rows)
 
-        assert outcome.status == "unavailable"
-        assert "at least 4 items" in (outcome.failure_reason or "")
+        assert outcome.status == "partial"
+        artifact = yaml.safe_load((tmp_path / ARTIFACT_FILENAME).read_text())
+        assert artifact["rows_missing"] == ["risk-d"]
+        assert artifact["rows_invalid"] == []
+        assert artifact["summary"]["rows_missing"] == 1
+        assert [row["risk_id"] for row in artifact["rows"]] == [
+            "risk-a",
+            "risk-b",
+            "risk-c",
+        ]
+        # The omitting batch is a batch failure with its typed reason.
+        assert artifact["failure_reason"] == "batch_omitted_cards: risk-d"
 
-    def test_unknown_constraint_id_fails_by_schema(self, tmp_path):
+    def test_unknown_constraint_id_fails_by_wire_schema(self, tmp_path):
         rows = _valid_rows()
         rows["rows"][0]["covering_constraints"] = ["SC-9"]
         rows["rows"][0]["evidence"][1]["source_ref"] = "SC-9"
         outcome = _run_review(tmp_path, rows=rows)
 
+        # The closed literal id set rejects the whole response, so no row
+        # from that batch survives.
         assert outcome.status == "unavailable"
         assert outcome.failure_reason is not None
 
@@ -428,17 +451,92 @@ class TestDeterministicValidation:
                 "meaning": "The loss.",
             }
         ]
+        self._single_invalid(tmp_path, rows, "risk-b", "no_own_card_quote")
+
+    def test_every_batch_is_issued_when_an_earlier_batch_has_invalid_rows(
+        self, tmp_path
+    ):
+        """A one-token budget forces two batches; both are called."""
+        first = _valid_rows()
+        first["rows"] = [first["rows"][0], first["rows"][1]]
+        first["rows"][0]["evidence"][1]["quote"] = "not a quotation"
+        second = _valid_rows()
+        second["rows"] = [second["rows"][2], second["rows"][3]]
+        analysis = _analysis()
+        from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
+
+        write_yaml(analysis, tmp_path / "loss-analysis.yaml")
+        digest = hashlib.sha256(
+            (tmp_path / "loss-analysis.yaml").read_bytes()
+        ).hexdigest()
+        client = MockLLMClient()
+        client.set_response_for(RiskCoverageReview, [first, second])
+
+        outcome = run_risk_coverage_review(
+            llm_client=client,
+            loss_analysis=analysis,
+            risk_cards=_cards(),
+            use_case_text="Test use case",
+            run_dir=tmp_path,
+            template_loader=TemplateLoader(PROMPTS_DIR),
+            temperature=0.4,
+            reviewed_loss_analysis_digest=digest,
+            max_completion_tokens=1,
+        )
+
+        assert client.call_count == 2
+        assert outcome.call_count == 2
+        assert outcome.status == "partial"
+        artifact = yaml.safe_load((tmp_path / ARTIFACT_FILENAME).read_text())
+        assert [row["risk_id"] for row in artifact["rows"]] == [
+            "risk-b",
+            "risk-c",
+            "risk-d",
+        ]
+        assert artifact["rows_invalid"] == [
+            {"risk_id": "risk-a", "reason": "quote_not_a_substring"}
+        ]
+
+    def test_all_invalid_rows_report_unavailable(self, tmp_path):
+        rows = _valid_rows()
+        for row in rows["rows"]:
+            row["evidence"][0]["quote"] = "not a quotation"
         outcome = _run_review(tmp_path, rows=rows)
 
         assert outcome.status == "unavailable"
-        assert "its own risk_id" in (outcome.failure_reason or "")
+        artifact = yaml.safe_load((tmp_path / ARTIFACT_FILENAME).read_text())
+        assert artifact["rows"] == []
+        assert len(artifact["rows_invalid"]) == 4
+        assert artifact["summary"]["rows_invalid"] == 4
+        assert artifact["failure_reason"]
 
 
 class TestReviewNeverBlocks:
     def test_run_continues_to_stage_2_after_an_unavailable_review(self, tmp_path):
         client = setup_sp1_mock_client()
-        bad = _valid_rows()
-        bad["rows"][0]["evidence"][1]["quote"] = "not a quotation"
+        # The run supplies one card (atlas-001).  The wire accepts this row;
+        # the deterministic quote rule rejects it, and because it is the only
+        # row the review is unavailable without blocking the run.
+        bad = {
+            "rows": [
+                {
+                    "risk_id": "atlas-001",
+                    "protects": "the prompt boundary",
+                    "against": None,
+                    "covering_constraints": [],
+                    "coverage": "none",
+                    "missing_protection": "No rule protects the boundary.",
+                    "evidence": [
+                        {
+                            "source_ref": "atlas-001",
+                            "quote": "not a quotation from the card",
+                            "meaning": "The card.",
+                        }
+                    ],
+                    "rationale": "No supplied rule covers the card.",
+                }
+            ]
+        }
         client.set_response_for(RiskCoverageReview, bad)
 
         result = run_sp1(
@@ -453,6 +551,9 @@ class TestReviewNeverBlocks:
         assert result.control_structure is not None
         artifact = yaml.safe_load((tmp_path / ARTIFACT_FILENAME).read_text())
         assert artifact["status"] == "unavailable"
+        assert artifact["rows_invalid"] == [
+            {"risk_id": "atlas-001", "reason": "quote_not_a_substring"}
+        ]
         assert any(
             "risk_coverage_review unavailable" in warning
             for warning in result.stage_warnings
@@ -461,7 +562,72 @@ class TestReviewNeverBlocks:
         review = manifest["stage_summary"]["stage_1a"]["risk_coverage_review"]
         assert review["status"] == "unavailable"
         assert review["call_count"] == 1
+        assert review["rows_valid"] == 0
+        assert review["rows_invalid"] == 1
+        assert review["rows_missing"] == 0
         assert review["failure_reason"]
+
+    def test_partial_review_is_recorded_in_the_manifest(self, tmp_path):
+        """A partial review keeps its valid rows and still warns."""
+        client = setup_sp1_mock_client()
+        bad = {
+            "rows": [
+                {
+                    "risk_id": "atlas-001",
+                    "protects": "the prompt boundary",
+                    "against": None,
+                    "covering_constraints": [],
+                    "coverage": "none",
+                    "missing_protection": "No rule protects the boundary.",
+                    "evidence": [
+                        {
+                            "source_ref": "atlas-001",
+                            "quote": "Risk of prompt injection",
+                            "meaning": "The card.",
+                        }
+                    ],
+                    "rationale": "No supplied rule covers the card.",
+                },
+                {
+                    "risk_id": "atlas-001",
+                    "protects": "the prompt boundary",
+                    "against": None,
+                    "covering_constraints": [],
+                    "coverage": "none",
+                    "missing_protection": "No rule protects the boundary.",
+                    "evidence": [
+                        {
+                            "source_ref": "atlas-001",
+                            "quote": "Risk of prompt injection",
+                            "meaning": "The card.",
+                        }
+                    ],
+                    "rationale": "No supplied rule covers the card.",
+                },
+            ]
+        }
+        client.set_response_for(RiskCoverageReview, bad)
+
+        result = run_sp1(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=make_risk_cards(),
+            run_dir=tmp_path,
+        )
+
+        artifact = yaml.safe_load((tmp_path / ARTIFACT_FILENAME).read_text())
+        assert artifact["status"] == "partial"
+        assert [row["risk_id"] for row in artifact["rows"]] == ["atlas-001"]
+        assert artifact["rows_invalid"] == [
+            {"risk_id": "atlas-001", "reason": "repeated_risk_id"}
+        ]
+        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        review = manifest["stage_summary"]["stage_1a"]["risk_coverage_review"]
+        assert review["status"] == "partial"
+        assert review["rows_valid"] == 1
+        assert review["rows_invalid"] == 1
+        assert review["rows_missing"] == 0
+        assert result.stage_errors == []
 
     def test_provider_error_is_recorded_as_unavailable(self, tmp_path):
         client = MockLLMClient()

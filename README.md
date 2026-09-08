@@ -30,7 +30,10 @@ coverage is full, partial, or none, and the specific missing protection, with
 exact quotations from the cited records. The review writes
 `loss-analysis-risk-coverage-review.yaml`; it never changes the graph, never
 blocks a run, and is not a gate. Runs that pin a graph with `--loss-analysis`
-skip it.
+skip it. Validation is per row: a row that fails a rule is recorded with its
+typed reason and the valid rows beside it are kept, every planned batch is
+issued, and the artifact reports `completed`, `partial`, or `unavailable`
+together with valid, invalid, and missing row counts.
 
 Stage 5 scalar comparisons cite supplied constraint/action text through
 `comparison_evidence`. When no citation is supplied, exact typed JSON values

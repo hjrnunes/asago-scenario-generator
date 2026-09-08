@@ -522,7 +522,12 @@ def _log_structured_failure(
         response_content=evidence.response_content,
         slot_id=slot_id,
         scenario_id=scenario_id,
-        terminal_error_codes=(_terminal_error_code(error),),
+        terminal_error_codes=(
+            _terminal_error_code(
+                error,
+                provider_response_received=evidence.provider_response_received,
+            ),
+        ),
         prompt_template_hashes=prompt_template_hashes,
     )
     return error_msg
@@ -959,14 +964,26 @@ def safe_llm_call(
             return None, state.result, error_msg
 
 
-def _terminal_error_code(error: BaseException) -> str:
-    """Map provider-stage failures to stable lifecycle diagnostics."""
+def _terminal_error_code(
+    error: BaseException,
+    *,
+    provider_response_received: bool = False,
+) -> str:
+    """Map provider-stage failures to stable lifecycle diagnostics.
+
+    A provider that answered but whose answer failed stage-local semantic
+    validation is not a call failure: the record already shows
+    ``provider_response_received``, so the code names the semantic failure
+    instead (fourth checkpoint 4 finding 6).
+    """
     if isinstance(error, PromptBudgetExceeded):
         return "prompt_budget_exceeded"
     if isinstance(error, (ValidationError, json.JSONDecodeError)):
         return "provider_contract_failure"
     if isinstance(error, PromptContractError):
         return "provider_contract_failure"
+    if provider_response_received:
+        return "provider_semantic_validation_failure"
     return "provider_call_failure"
 
 

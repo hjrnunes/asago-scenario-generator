@@ -76,6 +76,7 @@ from asago_scenario_generator.stpa.system_model.profile import (
     load_capability_profile,
 )
 from asago_scenario_generator.stpa.system_model.risk_coverage_review import (
+    STATUS_PARTIAL,
     STATUS_SKIPPED_PINNED,
     STATUS_UNAVAILABLE,
     RiskCoverageReviewOutcome,
@@ -518,10 +519,10 @@ def _try_run_risk_coverage_review(
         temperature=temperature,
         reviewed_loss_analysis_digest=digest,
     )
-    if outcome.status == STATUS_UNAVAILABLE:
+    if outcome.status in (STATUS_UNAVAILABLE, STATUS_PARTIAL):
         stage_warnings.append(
-            "stage_1a/risk_coverage_review unavailable: "
-            f"{outcome.failure_reason or 'unknown failure'}"
+            f"stage_1a/risk_coverage_review {outcome.status}: "
+            f"{outcome.failure_reason or 'invalid or missing rows'}"
         )
     return outcome
 
@@ -870,7 +871,7 @@ def _write_manifest(
             "graph_revision_call_count", 0
         )
     if risk_coverage_review is not None:
-        stage_1a_summary["risk_coverage_review"] = {
+        review_summary: dict[str, object] = {
             "status": risk_coverage_review.status,
             "call_count": risk_coverage_review.call_count,
             "failure_reason": risk_coverage_review.failure_reason,
@@ -878,6 +879,12 @@ def _write_manifest(
                 risk_coverage_review.reviewed_loss_analysis_digest
             ),
         }
+        artifact = risk_coverage_review.artifact
+        if artifact is not None:
+            review_summary["rows_valid"] = artifact.summary.rows_valid
+            review_summary["rows_invalid"] = artifact.summary.rows_invalid
+            review_summary["rows_missing"] = artifact.summary.rows_missing
+        stage_1a_summary["risk_coverage_review"] = review_summary
         stage_1a_summary["call_count"] = (
             int(stage_1a_summary["call_count"]) + risk_coverage_review.call_count
         )

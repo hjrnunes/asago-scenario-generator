@@ -9,13 +9,15 @@ Stage 2, so a later production policy can let its verdicts inform the
 bounded revision.  Pinned runs (``--loss-analysis``) skip it entirely,
 because the supplied graph was already reviewed.
 
-Deterministic code owns the wire.  Every row is a closed typed record; the
-``risk_id`` is a literal of the supplied card ids and the covering
-constraints are literals of the supplied constraint ids, so the provider
-cannot invent, drop, or duplicate a card.  Every quotation must be an exact
-substring of the record it cites.  Nothing is inferred or repaired: a wire
-or validation failure marks the review ``unavailable`` with a typed reason
-and the run continues.
+Deterministic code owns the wire.  The ``risk_id`` is a literal of the
+supplied card ids and the covering constraints are literals of the supplied
+constraint ids, so the provider cannot invent a record.  Every quotation
+must be an exact substring of the record it cites.  Validation is per row:
+a row that breaks a rule is recorded under ``rows_invalid`` with its typed
+reason and the valid rows of the same batch are kept.  The status is
+``completed`` when every card has a valid row, ``partial`` when any row is
+invalid or missing, and ``unavailable`` only when no batch returned a valid
+row.  Nothing is inferred or repaired, and the review never blocks a run.
 
 Split rule (decided up front, never from a failed attempt).  A response
 with one row of quotations per card can approach the profile's
@@ -24,8 +26,9 @@ completion as the rendered prompt length in tokens plus
 ``_ESTIMATED_TOKENS_PER_ROW`` per card and splits the cards into two calls
 when the estimate exceeds the caller's ``max_completion_tokens`` (8,192 for
 the gemma4-oc profile).  Both calls carry identical instructions and the
-full graph, and the merged rows keep the supplied card order.  The module
-never splits more than twice and never retries a failed call.
+full graph, and the merged rows keep the supplied card order.  Every
+planned batch is issued regardless of earlier batches.  The module never
+splits more than twice and never retries a failed call.
 """
 
 from __future__ import annotations
@@ -45,7 +48,6 @@ from pydantic import (
     StrictStr,
     create_model,
     field_validator,
-    model_validator,
 )
 
 from asago_scenario_generator.models.risk_card import RiskCard
@@ -67,12 +69,13 @@ from asago_scenario_generator.stpa.system_model.semantic_review import (
 
 STEP_RISK_COVERAGE_REVIEW = "risk_coverage_review"
 ARTIFACT_FILENAME = "loss-analysis-risk-coverage-review.yaml"
-SCHEMA_VERSION = "loss-analysis-risk-coverage-review-v1"
+SCHEMA_VERSION = "loss-analysis-risk-coverage-review-v2"
 
 SYSTEM_TEMPLATE = "stage1a_coverage_review_system.j2"
 USER_TEMPLATE = "stage1a_coverage_review_user.j2"
 
 STATUS_COMPLETED = "completed"
+STATUS_PARTIAL = "partial"
 STATUS_UNAVAILABLE = "unavailable"
 STATUS_SKIPPED_PINNED = "skipped_pinned"
 
@@ -116,100 +119,80 @@ class RiskCoverageEvidence(SourceEvidence):
 
 
 class RiskCoverageRow(BaseModel):
-    """One card's coverage verdict, with exact quotations."""
+    """One card's coverage verdict, with exact quotations.
+
+    Every semantic rule is enforced by :func:`_row_invalid_reason` before a
+    row is built, so this model stays a closed typed record: an invalid row
+    is recorded under ``rows_invalid`` rather than raised.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     risk_id: StrictStr
-    protects: StrictStr = Field(
-        min_length=1,
-        description="What the risk says is at stake, in the reviewer's words.",
-    )
-    against: StrictStr | None = Field(
-        default=None,
-        description="The actor or path the card names, or null when it names none.",
-    )
-    covering_constraints: tuple[StrictStr, ...] = Field(
-        default=(),
-        description="Supplied SC-* ids whose rules protect this card's stake.",
-    )
+    protects: StrictStr
+    against: StrictStr | None = None
+    covering_constraints: tuple[StrictStr, ...] = ()
     coverage: CoverageVerdict
-    missing_protection: StrictStr | None = Field(
-        default=None,
-        description="The specific protection no listed constraint provides.",
-    )
-    evidence: tuple[RiskCoverageEvidence, ...] = Field(default=())
-    rationale: StrictStr = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def validate_verdict_shape(self) -> RiskCoverageRow:
-        if len(set(self.covering_constraints)) != len(self.covering_constraints):
-            raise ValueError(
-                f"risk coverage row {self.risk_id} repeats a covering constraint"
-            )
-        if not self.protects.strip():
-            raise ValueError(
-                f"risk coverage row {self.risk_id} requires nonblank protects"
-            )
-        if not self.rationale.strip():
-            raise ValueError(
-                f"risk coverage row {self.risk_id} requires nonblank rationale"
-            )
-        if self.against is not None and not self.against.strip():
-            raise ValueError(
-                f"risk coverage row {self.risk_id} against must be null or nonblank"
-            )
-        needs_missing = self.coverage in _MISSING_PROTECTION_VERDICTS
-        if needs_missing:
-            if self.missing_protection is None or not self.missing_protection.strip():
-                raise ValueError(
-                    f"risk coverage row {self.risk_id} coverage {self.coverage} "
-                    "requires a nonblank missing_protection"
-                )
-        elif self.missing_protection is not None:
-            raise ValueError(
-                f"risk coverage row {self.risk_id} coverage {self.coverage} "
-                "must leave missing_protection null"
-            )
-        if self.coverage == "full" and not self.covering_constraints:
-            raise ValueError(
-                f"risk coverage row {self.risk_id} coverage full requires at "
-                "least one covering constraint"
-            )
-        if self.coverage == "none" and self.covering_constraints:
-            raise ValueError(
-                f"risk coverage row {self.risk_id} coverage none requires no "
-                "covering constraint"
-            )
-        if not self.evidence:
-            raise ValueError(
-                f"risk coverage row {self.risk_id} requires at least one "
-                "quotation from its own risk card"
-            )
-        own_quotes = [item for item in self.evidence if item.source_ref == self.risk_id]
-        if not own_quotes:
-            raise ValueError(
-                f"risk coverage row {self.risk_id} requires at least one "
-                "quotation whose source_ref is its own risk_id"
-            )
-        if self.coverage in _EVIDENCE_PER_CONSTRAINT_VERDICTS:
-            quoted_refs = {item.source_ref for item in self.evidence}
-            for constraint_id in self.covering_constraints:
-                if constraint_id not in quoted_refs:
-                    raise ValueError(
-                        f"risk coverage row {self.risk_id} coverage "
-                        f"{self.coverage} requires a quotation from covering "
-                        f"constraint {constraint_id}"
-                    )
-        return self
+    missing_protection: StrictStr | None = None
+    evidence: tuple[RiskCoverageEvidence, ...] = ()
+    rationale: StrictStr
 
 
-class RiskCoverageReview(BaseModel):
-    """One row per supplied risk card."""
+# ---------------------------------------------------------------------------
+# Provider wire shape
+#
+# The wire row carries types and the closed literal id sets only.  Every
+# semantic rule lives in :func:`_row_invalid_reason`, which records an
+# invalid row instead of failing the batch, so one bad row cannot discard
+# the valid rows beside it (amended 2026-09-08, owner ruling at the fourth
+# checkpoint 4 review).
+# ---------------------------------------------------------------------------
+
+
+class RiskCoverageWireEvidence(BaseModel):
+    """Lenient provider evidence: ids are closed, the text rules are code's."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    rows: tuple[RiskCoverageRow, ...]
+    source_ref: StrictStr
+    quote: StrictStr = ""
+    meaning: StrictStr = ""
+
+
+class RiskCoverageWireRow(BaseModel):
+    """Lenient provider row: the closed ids and the verdict vocabulary.
+
+    Every semantic rule lives in :func:`_row_invalid_reason`, so a row that
+    breaks one is recorded as invalid instead of failing the whole batch.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    risk_id: StrictStr
+    protects: StrictStr = ""
+    against: StrictStr | None = None
+    covering_constraints: tuple[StrictStr, ...] = ()
+    coverage: CoverageVerdict
+    missing_protection: StrictStr | None = None
+    evidence: tuple[RiskCoverageWireEvidence, ...] = ()
+    rationale: StrictStr = ""
+
+
+class RiskCoverageReview(BaseModel):
+    """The provider response: zero or more rows for the supplied cards."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    rows: tuple[RiskCoverageWireRow, ...] = ()
+
+
+class RiskCoverageInvalidRow(BaseModel):
+    """One row that failed a deterministic rule, with its typed reason."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    risk_id: StrictStr
+    reason: StrictStr
 
 
 class RiskCoverageReading(BaseModel):
@@ -235,6 +218,9 @@ class RiskCoverageSummary(BaseModel):
     none: int = 0
     not_applicable_confirmed: int = 0
     not_applicable_disputed: int = 0
+    rows_valid: int = 0
+    rows_invalid: int = 0
+    rows_missing: int = 0
     reading_list: tuple[RiskCoverageReading, ...] = ()
 
 
@@ -243,14 +229,16 @@ class RiskCoverageArtifact(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal["loss-analysis-risk-coverage-review-v1"] = SCHEMA_VERSION
+    schema_version: Literal["loss-analysis-risk-coverage-review-v2"] = SCHEMA_VERSION
     reviewed_loss_analysis_digest: StrictStr
     risk_set_digest: StrictStr
-    status: Literal["completed", "unavailable"]
+    status: Literal["completed", "partial", "unavailable"]
     call_count: int
     failure_reason: StrictStr | None = None
     prompt_template_hashes: dict[StrictStr, StrictStr] = Field(default_factory=dict)
     rows: tuple[RiskCoverageRow, ...] = ()
+    rows_invalid: tuple[RiskCoverageInvalidRow, ...] = ()
+    rows_missing: tuple[StrictStr, ...] = ()
     summary: RiskCoverageSummary = Field(default_factory=RiskCoverageSummary)
 
 
@@ -281,12 +269,15 @@ def _provider_review_model(
     ``risk_id`` is a literal of the supplied card ids, ``covering_constraints``
     holds literals of the supplied constraint ids, and ``source_ref`` is a
     literal of every citable record, so the provider cannot invent a record.
+    The row count is deliberately unbounded: a response that omits a card is
+    a batch result with missing rows, not a schema failure that discards the
+    rows it did return.
     """
-    row_type: type[RiskCoverageRow] = RiskCoverageRow
+    row_type: type[RiskCoverageWireRow] = RiskCoverageWireRow
     if evidence_refs:
         evidence_type = create_model(
             "ProviderRiskCoverageEvidence",
-            __base__=RiskCoverageEvidence,
+            __base__=RiskCoverageWireEvidence,
             source_ref=(Literal[tuple(evidence_refs)], ...),
         )
         row_type = create_model(
@@ -317,7 +308,7 @@ def _provider_review_model(
         __base__=RiskCoverageReview,
         rows=(
             tuple[row_type, ...],  # type: ignore[valid-type]
-            Field(min_length=len(risk_ids), max_length=len(risk_ids)),
+            Field(default=()),
         ),
     )
 
@@ -358,79 +349,156 @@ def _record_texts(
     return texts
 
 
-def _validate_quotes(
-    review: RiskCoverageReview,
+def _row_invalid_reason(
+    row: RiskCoverageWireRow,
     *,
+    supplied: set[str],
     texts: dict[str, tuple[str, ...]],
-) -> None:
-    """Fail closed on an unknown source_ref or a non-substring quote."""
-    for row in review.rows:
-        for item in row.evidence:
-            sources = texts.get(item.source_ref)
-            if sources is None:
-                raise ValueError(
-                    f"risk coverage row {row.risk_id} cites unknown source_ref "
-                    f"{item.source_ref}"
-                )
-            if not quote_is_substring(item.quote, sources):
-                raise ValueError(
-                    f"risk coverage row {row.risk_id} quote is not an exact "
-                    f"substring of {item.source_ref}"
-                )
+    constraint_ids: set[str],
+    not_applicable: bool,
+) -> str | None:
+    """Return the typed reason a wire row is invalid, or ``None``.
+
+    Code infers nothing: a ``none`` verdict on a ``not_applicable`` card is an
+    invalid row with the reason ``not_applicable_card_reports_coverage``, not
+    a disputed verdict.  The order of the checks fixes the recorded reason.
+    """
+    if row.risk_id not in supplied:
+        return "unknown_risk_id"
+    if not row.protects.strip():
+        return "blank_protects"
+    if not row.rationale.strip():
+        return "blank_rationale"
+    if row.against is not None and not row.against.strip():
+        return "blank_against"
+    if len(set(row.covering_constraints)) != len(row.covering_constraints):
+        return "repeated_covering_constraint"
+    unknown_constraints = sorted(set(row.covering_constraints) - constraint_ids)
+    if unknown_constraints:
+        return "unknown_covering_constraint"
+    if not_applicable and row.coverage not in _NOT_APPLICABLE_VERDICTS:
+        return "not_applicable_card_reports_coverage"
+    if not not_applicable and row.coverage in _NOT_APPLICABLE_VERDICTS:
+        return "cited_card_reports_not_applicable"
+    if row.coverage in _MISSING_PROTECTION_VERDICTS:
+        if row.missing_protection is None or not row.missing_protection.strip():
+            return "missing_protection_required"
+    elif row.missing_protection is not None:
+        return "missing_protection_forbidden"
+    if row.coverage == "full" and not row.covering_constraints:
+        return "full_without_covering_constraint"
+    if row.coverage == "none" and row.covering_constraints:
+        return "none_with_covering_constraint"
+    if not row.evidence:
+        return "no_evidence"
+    if not any(item.source_ref == row.risk_id for item in row.evidence):
+        return "no_own_card_quote"
+    if row.coverage in _EVIDENCE_PER_CONSTRAINT_VERDICTS:
+        quoted_refs = {item.source_ref for item in row.evidence}
+        for constraint_id in row.covering_constraints:
+            if constraint_id not in quoted_refs:
+                return "no_covering_constraint_quote"
+    for item in row.evidence:
+        sources = texts.get(item.source_ref)
+        if sources is None:
+            return "unknown_evidence_source_ref"
+        if not item.quote.strip() or not quote_is_substring(item.quote, sources):
+            return "quote_not_a_substring"
+    return None
 
 
-def _validate_rows_against_cards(
-    review: RiskCoverageReview,
-    *,
+def _to_row(row: RiskCoverageWireRow) -> RiskCoverageRow:
+    """Convert a validated wire row into the artifact row."""
+    return RiskCoverageRow(
+        risk_id=row.risk_id,
+        protects=row.protects,
+        against=row.against,
+        covering_constraints=row.covering_constraints,
+        coverage=row.coverage,
+        missing_protection=row.missing_protection,
+        evidence=tuple(
+            RiskCoverageEvidence(
+                source_ref=item.source_ref,
+                quote=item.quote,
+                meaning=item.meaning or item.source_ref,
+            )
+            for item in row.evidence
+        ),
+        rationale=row.rationale,
+    )
+
+
+def _not_applicable_cards(
     loss_analysis: LossAnalysis,
     risk_cards: list[RiskCard],
-) -> None:
-    """Validate exact coverage of the supplied cards and verdict consistency."""
-    supplied = [card.risk_id for card in risk_cards]
-    rows_by_id = {row.risk_id: row for row in review.rows}
-    if len(rows_by_id) != len(review.rows):
-        raise ValueError("risk coverage review repeats a risk card row")
-    if set(rows_by_id) != set(supplied):
-        missing = sorted(set(supplied) - set(rows_by_id))
-        unknown = sorted(set(rows_by_id) - set(supplied))
-        raise ValueError(
-            "risk coverage review must cover each supplied risk card exactly "
-            f"once (missing {missing}, unknown {unknown})"
-        )
-
+) -> set[str]:
+    """Return the supplied cards the analysis records as not applicable."""
     dispositions = {d.risk_ref: d for d in loss_analysis.risk_dispositions}
     cited_via_losses = {
         risk_ref
         for loss in loss_analysis.risk_card_losses + loss_analysis.use_case_losses
         for risk_ref in loss.source_risk_cards
     }
+    return {
+        card.risk_id
+        for card in risk_cards
+        if (
+            dispositions.get(card.risk_id) is not None
+            and dispositions[card.risk_id].disposition == "not_applicable"
+        )
+        or (
+            dispositions.get(card.risk_id) is None
+            and card.risk_id not in cited_via_losses
+        )
+    }
+
+
+def _partition_rows(
+    rows: tuple[RiskCoverageWireRow, ...],
+    *,
+    loss_analysis: LossAnalysis,
+    risk_cards: list[RiskCard],
+) -> tuple[
+    tuple[RiskCoverageRow, ...], tuple[RiskCoverageInvalidRow, ...], tuple[str, ...]
+]:
+    """Split merged wire rows into valid rows, invalid rows, and missing cards.
+
+    A card whose row failed a rule is invalid, not missing: ``rows_missing``
+    lists only the cards no batch returned a row for.  Duplicate rows for one
+    card keep the first and record the rest as invalid.
+    """
+    supplied = {card.risk_id for card in risk_cards}
+    texts = _record_texts(loss_analysis, risk_cards)
     constraint_ids = {sc.constraint_id for sc in loss_analysis.security_constraints}
-    for card_id in supplied:
-        row = rows_by_id[card_id]
-        disposition = dispositions.get(card_id)
-        not_applicable = (
-            disposition is not None and disposition.disposition == "not_applicable"
-        ) or (disposition is None and card_id not in cited_via_losses)
-        if not_applicable and row.coverage not in _NOT_APPLICABLE_VERDICTS:
-            raise ValueError(
-                f"risk coverage row {card_id} is not_applicable in the analysis "
-                f"but reports coverage {row.coverage}"
+    not_applicable = _not_applicable_cards(loss_analysis, risk_cards)
+    valid: list[RiskCoverageRow] = []
+    invalid: list[RiskCoverageInvalidRow] = []
+    returned: set[str] = set()
+    seen: set[str] = set()
+    for row in rows:
+        returned.add(row.risk_id)
+        if row.risk_id in seen:
+            invalid.append(
+                RiskCoverageInvalidRow(risk_id=row.risk_id, reason="repeated_risk_id")
             )
-        if not not_applicable and row.coverage in _NOT_APPLICABLE_VERDICTS:
-            raise ValueError(
-                f"risk coverage row {card_id} is cited in the analysis but "
-                f"reports coverage {row.coverage}"
-            )
-        unknown_constraints = sorted(set(row.covering_constraints) - constraint_ids)
-        if unknown_constraints:
-            raise ValueError(
-                f"risk coverage row {card_id} names unknown covering "
-                "constraint(s): " + ", ".join(unknown_constraints)
-            )
-    _validate_quotes(
-        review,
-        texts=_record_texts(loss_analysis, risk_cards),
-    )
+            continue
+        reason = _row_invalid_reason(
+            row,
+            supplied=supplied,
+            texts=texts,
+            constraint_ids=constraint_ids,
+            not_applicable=row.risk_id in not_applicable,
+        )
+        if reason is not None:
+            invalid.append(RiskCoverageInvalidRow(risk_id=row.risk_id, reason=reason))
+            continue
+        seen.add(row.risk_id)
+        valid.append(_to_row(row))
+    order = {card.risk_id: index for index, card in enumerate(risk_cards)}
+    valid.sort(key=lambda item: order.get(item.risk_id, len(order)))
+    invalid.sort(key=lambda item: (order.get(item.risk_id, len(order)), item.reason))
+    missing = tuple(card.risk_id for card in risk_cards if card.risk_id not in returned)
+    return tuple(valid), tuple(invalid), missing
 
 
 # ---------------------------------------------------------------------------
@@ -473,6 +541,8 @@ def _summarize(
     rows: tuple[RiskCoverageRow, ...],
     *,
     risk_cards: list[RiskCard],
+    invalid_count: int = 0,
+    missing_count: int = 0,
 ) -> RiskCoverageSummary:
     """Count verdicts and build the reading list in supplied card order."""
     names = {card.risk_id: card.risk_name for card in risk_cards}
@@ -503,6 +573,9 @@ def _summarize(
         none=counts["none"],
         not_applicable_confirmed=counts["not_applicable_confirmed"],
         not_applicable_disputed=counts["not_applicable_disputed"],
+        rows_valid=len(rows),
+        rows_invalid=invalid_count,
+        rows_missing=missing_count,
         reading_list=tuple(reading),
     )
 
@@ -547,17 +620,25 @@ def _write_artifact(
     failure_reason: str | None,
     prompt_template_hashes: dict[str, str],
     rows: tuple[RiskCoverageRow, ...] = (),
+    rows_invalid: tuple[RiskCoverageInvalidRow, ...] = (),
+    rows_missing: tuple[str, ...] = (),
     summary: RiskCoverageSummary | None = None,
 ) -> RiskCoverageArtifact:
     """Persist the review artifact and return it."""
     artifact = RiskCoverageArtifact(
         reviewed_loss_analysis_digest=reviewed_loss_analysis_digest,
         risk_set_digest=risk_set_digest,
-        status="completed" if status == STATUS_COMPLETED else STATUS_UNAVAILABLE,
+        status=(
+            status
+            if status in (STATUS_COMPLETED, STATUS_PARTIAL)
+            else STATUS_UNAVAILABLE
+        ),
         call_count=call_count,
         failure_reason=failure_reason,
         prompt_template_hashes=prompt_template_hashes,
         rows=rows,
+        rows_invalid=rows_invalid,
+        rows_missing=rows_missing,
         summary=summary or RiskCoverageSummary(),
     )
     _atomic_write_yaml(artifact, run_dir / ARTIFACT_FILENAME)
@@ -651,8 +732,13 @@ def _run_one_review_call(
     loader: TemplateLoader,
     temperature: float,
     max_completion_tokens: int,
-) -> tuple[RiskCoverageReview | None, str | None]:
-    """Make one review call and return its validated rows or a typed reason."""
+) -> tuple[tuple[RiskCoverageWireRow, ...] | None, str | None]:
+    """Make one review call and return its wire rows or a typed failure reason.
+
+    The call validates only the closed wire shape (ids and vocabulary).  Every
+    semantic rule is applied per row afterwards, so an invalid row cannot
+    discard the valid rows beside it.
+    """
     system_prompt = loader.render_prompt(SYSTEM_TEMPLATE)
     user_prompt = loader.render_prompt(
         USER_TEMPLATE,
@@ -680,13 +766,6 @@ def _run_one_review_call(
     def parse_review(result: LLMResult) -> RiskCoverageReview:
         return parse_llm_result(result, response_model)
 
-    def validate_review(review: RiskCoverageReview) -> None:
-        _validate_rows_against_cards(
-            review,
-            loss_analysis=loss_analysis,
-            risk_cards=cards,
-        )
-
     review, _, error_msg = safe_llm_call(
         llm_client=llm_client,
         system_prompt=system_prompt,
@@ -698,12 +777,11 @@ def _run_one_review_call(
         temperature=temperature,
         max_completion_tokens=max_completion_tokens,
         result_parser=parse_review,
-        result_validator=validate_review,
         prompt_template_hashes=_review_prompt_hashes(loader),
     )
     if error_msg is not None or review is None:
         return None, error_msg or "risk coverage review returned no result"
-    return review, None
+    return tuple(review.rows), None
 
 
 def run_risk_coverage_review(
@@ -721,9 +799,13 @@ def run_risk_coverage_review(
     """Run the advisory review and always persist its artifact.
 
     The review makes one bounded call (two when the conservative estimate
-    exceeds ``max_completion_tokens``), with zero retries.  Any failure
-    marks the review ``unavailable`` with the typed reason; it never raises
-    and never blocks the run.
+    exceeds ``max_completion_tokens``), with zero retries.  Every planned
+    batch is issued regardless of earlier batches.  Validation is per row: an
+    invalid row is recorded under ``rows_invalid`` with its typed reason and
+    the valid rows of the same batch are kept.  The status is ``completed``
+    when every card has a valid row, ``partial`` when any row is invalid or
+    missing, and ``unavailable`` only when no batch returned a valid row.  The
+    review never raises and never blocks the run.
     """
     budget = (
         max_completion_tokens
@@ -771,11 +853,12 @@ def run_risk_coverage_review(
         else [risk_cards]
     )
 
-    merged: list[RiskCoverageRow] = []
+    merged: list[RiskCoverageWireRow] = []
+    failures: list[str] = []
     call_count = 0
     for group in groups:
         call_count += 1
-        review, failure_reason = _run_one_review_call(
+        rows, failure_reason = _run_one_review_call(
             llm_client=llm_client,
             loss_analysis=loss_analysis,
             cards=group,
@@ -785,68 +868,55 @@ def run_risk_coverage_review(
             temperature=temperature,
             max_completion_tokens=budget,
         )
-        if review is None:
-            artifact = _write_artifact(
-                run_dir,
-                reviewed_loss_analysis_digest=reviewed_loss_analysis_digest,
-                risk_set_digest=digest,
-                status=STATUS_UNAVAILABLE,
-                call_count=call_count,
-                failure_reason=failure_reason,
-                prompt_template_hashes=prompt_hashes,
-            )
-            return RiskCoverageReviewOutcome(
-                status=STATUS_UNAVAILABLE,
-                call_count=call_count,
-                failure_reason=failure_reason,
-                reviewed_loss_analysis_digest=reviewed_loss_analysis_digest,
-                artifact=artifact,
-            )
-        merged.extend(review.rows)
+        if rows is None:
+            failures.append(failure_reason or "risk coverage review returned no result")
+            continue
+        merged.extend(rows)
+        # A batch that omits one of its cards is a batch failure with a typed
+        # reason, even though its other rows survive per-row validation.
+        returned = {row.risk_id for row in rows}
+        omitted = [card.risk_id for card in group if card.risk_id not in returned]
+        if omitted:
+            failures.append("batch_omitted_cards: " + ", ".join(sorted(omitted)))
 
-    order = {card.risk_id: index for index, card in enumerate(risk_cards)}
-    rows = tuple(sorted(merged, key=lambda row: order.get(row.risk_id, len(order))))
-    merged_review = RiskCoverageReview(rows=rows)
-    try:
-        _validate_rows_against_cards(
-            merged_review,
-            loss_analysis=loss_analysis,
-            risk_cards=risk_cards,
-        )
-    except ValueError as exc:
-        failure_reason = f"ValueError: {exc}"
-        artifact = _write_artifact(
-            run_dir,
-            reviewed_loss_analysis_digest=reviewed_loss_analysis_digest,
-            risk_set_digest=digest,
-            status=STATUS_UNAVAILABLE,
-            call_count=call_count,
-            failure_reason=failure_reason,
-            prompt_template_hashes=prompt_hashes,
-        )
-        return RiskCoverageReviewOutcome(
-            status=STATUS_UNAVAILABLE,
-            call_count=call_count,
-            failure_reason=failure_reason,
-            reviewed_loss_analysis_digest=reviewed_loss_analysis_digest,
-            artifact=artifact,
-        )
+    valid, invalid, missing = _partition_rows(
+        tuple(merged),
+        loss_analysis=loss_analysis,
+        risk_cards=risk_cards,
+    )
+    summary = _summarize(
+        valid,
+        risk_cards=risk_cards,
+        invalid_count=len(invalid),
+        missing_count=len(missing),
+    )
+    if valid and not invalid and not missing and not failures:
+        status = STATUS_COMPLETED
+        failure_reason = None
+    elif valid:
+        status = STATUS_PARTIAL
+        failure_reason = "; ".join(failures) if failures else None
+    else:
+        status = STATUS_UNAVAILABLE
+        failure_reason = "; ".join(failures) or "no risk coverage row passed validation"
 
-    summary = _summarize(rows, risk_cards=risk_cards)
     artifact = _write_artifact(
         run_dir,
         reviewed_loss_analysis_digest=reviewed_loss_analysis_digest,
         risk_set_digest=digest,
-        status=STATUS_COMPLETED,
+        status=status,
         call_count=call_count,
-        failure_reason=None,
+        failure_reason=failure_reason,
         prompt_template_hashes=prompt_hashes,
-        rows=rows,
+        rows=valid,
+        rows_invalid=invalid,
+        rows_missing=missing,
         summary=summary,
     )
     return RiskCoverageReviewOutcome(
-        status=STATUS_COMPLETED,
+        status=status,
         call_count=call_count,
+        failure_reason=failure_reason,
         reviewed_loss_analysis_digest=reviewed_loss_analysis_digest,
         artifact=artifact,
     )

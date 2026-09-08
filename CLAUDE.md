@@ -135,6 +135,12 @@ changing acceptance behavior, or running the quality sequence.
   quotation-validated verdicts written to
   `loss-analysis-risk-coverage-review.yaml`; the review is advisory (it never
   changes the graph, blocks a run, or acts as a gate), and pinned runs skip it.
+  Validation is per row, not per response: an invalid row is recorded with its
+  typed reason and the valid rows beside it are kept, every planned batch is
+  issued, and the artifact records `completed`, `partial`, or `unavailable`
+  with valid, invalid, and missing row counts. A provider that answered but
+  whose answer failed stage-local validation is a semantic validation failure,
+  not a call failure.
 
 - Track durable work and specification approval in GitHub Issues and PRs.
 - Keep `run` as the sole normal scenario-generation command. Taxonomy supplies
