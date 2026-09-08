@@ -1064,6 +1064,34 @@ def test_user_prompt_renders_records_without_a_query_label():
     assert "produced by query" not in prompt
 
 
+def test_user_prompt_renders_the_query_label_once():
+    """Round 48 ruling 1: the query label renders without a doubled prefix.
+
+    ``prompt_records`` already prefixes each argument with its key, so the
+    template must not add a second "query:" in front of it.
+    """
+    from asago_scenario_generator.stpa.scenario_prod.authoring import (
+        build_authoring_user_prompt,
+    )
+
+    prompt = build_authoring_user_prompt(
+        _candidate(),
+        state=STATE,
+        observation_records=(
+            {
+                "observation_ref": "TARGET-READ-001",
+                "kind": "read",
+                "content_format": "json",
+                "content": _READ_CONTENT,
+                "query_label": "query: refund eligibility",
+            },
+        ),
+        session_identity=SESSION,
+    )
+    assert "TARGET-READ-001 (query: refund eligibility)" in prompt
+    assert "query: query:" not in prompt
+
+
 def test_user_prompt_renders_every_adversary_kind_definition():
     """Spec 4.1 item 6: the model sees all four kinds and definitions."""
     from asago_scenario_generator.stpa.scenario_prod.authoring import (
