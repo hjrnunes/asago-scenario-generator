@@ -896,6 +896,24 @@ def test_user_prompt_renders_records_without_a_query_label():
     assert "produced by query" not in prompt
 
 
+def test_user_prompt_renders_every_adversary_kind_definition():
+    """Spec 4.1 item 6: the model sees all four kinds and definitions."""
+    from asago_scenario_generator.stpa.scenario_prod.authoring import (
+        _ADVERSARY_DEFINITIONS,
+        build_authoring_user_prompt,
+    )
+
+    prompt = build_authoring_user_prompt(
+        _candidate(),
+        state=STATE,
+        observation_records=(),
+        session_identity=SESSION,
+    )
+    for kind, definition in _ADVERSARY_DEFINITIONS:
+        assert f"- {kind}: {definition}" in prompt
+    assert "- kind: definition" not in prompt
+
+
 def test_candidates_are_built_per_relevant_pair_in_stable_order():
     relevance = ConstraintActionRelevance(
         loss_analysis_digest="0" * 64,

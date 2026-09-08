@@ -1105,10 +1105,9 @@ def build_authoring_user_prompt(
         "target_state": _state_block(state),
         "observations": list(observation_records),
         "session_identity": session_identity,
-        "adversary_definitions": [
-            {"kind": kind, "definition": definition}
-            for kind, definition in _ADVERSARY_DEFINITIONS
-        ],
+        # Plain (kind, definition) tuples: the template unpacks each entry
+        # as ``kind, definition`` (spec 4.1 item 6).
+        "adversary_definitions": list(_ADVERSARY_DEFINITIONS),
     }
     return TemplateLoader(PROMPTS_DIR).render_prompt(
         _AUTHORING_USER_TEMPLATE, view=view
