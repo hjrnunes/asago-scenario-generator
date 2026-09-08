@@ -2148,6 +2148,60 @@ def _stage_2_mode(run_dir: Path) -> str:
     return "target_blind"
 
 
+@dataclass(frozen=True)
+class _PreservedStageKeys:
+    """SP1-owned manifest keys this final manifest write must keep."""
+
+    stage_1a: dict[str, Any] = field(default_factory=dict)
+    post_review_loss_analysis_digest: str | None = None
+    loss_analysis_input_hash: str | None = None
+
+
+def _preserved_stage_keys(run_dir: Path) -> _PreservedStageKeys:
+    """Read the SP1 manifest keys that ``count_calls_by_stage`` cannot rebuild.
+
+    ``scenario_prod`` writes the last ``run-manifest.yaml`` of a product run
+    and rebuilds ``stage_summary`` from ``calls.jsonl``.  That rebuild drops
+    the keys SP1 owns: the Stage 1a ``source`` and call count, the advisory
+    coverage-review record, and the Stage 2 post-review digest.  A pinned run
+    also owns ``input_hashes.loss_analysis``, which must stay the digest of
+    the supplied file rather than the canonical model hash.
+    """
+    manifest_path = run_dir / "run-manifest.yaml"
+    if not manifest_path.is_file():
+        return _PreservedStageKeys()
+    try:
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return _PreservedStageKeys()
+    if not isinstance(manifest, dict):
+        return _PreservedStageKeys()
+    stage_summary = manifest.get("stage_summary")
+    if not isinstance(stage_summary, dict):
+        return _PreservedStageKeys()
+    stage_1a = stage_summary.get("stage_1a")
+    stage_1a = dict(stage_1a) if isinstance(stage_1a, dict) else {}
+    stage_2 = stage_summary.get("stage_2")
+    stage_2 = stage_2 if isinstance(stage_2, dict) else {}
+    post_review = stage_2.get("post_review_loss_analysis_digest")
+    input_hashes = manifest.get("input_hashes")
+    input_hashes = input_hashes if isinstance(input_hashes, dict) else {}
+    pinned_hash = (
+        input_hashes.get("loss_analysis")
+        if stage_1a.get("source") == "pinned"
+        else None
+    )
+    return _PreservedStageKeys(
+        stage_1a=stage_1a,
+        post_review_loss_analysis_digest=(
+            post_review if isinstance(post_review, str) else None
+        ),
+        loss_analysis_input_hash=(
+            pinned_hash if isinstance(pinned_hash, str) else None
+        ),
+    )
+
+
 def _write_manifest(
     run_dir: Path,
     llm_client: LLMClient,
@@ -2164,25 +2218,43 @@ def _write_manifest(
     authored_scenarios: Mapping[str, Any] | None = None,
 ) -> None:
     """Write the run manifest YAML."""
+    preserved = _preserved_stage_keys(run_dir)
     input_hashes = {
         "enriched_threat_set": hash_model(enriched_threat_set),
         "control_structure": hash_model(control_structure),
         "loss_analysis": hash_model(loss_analysis),
     }
+    if preserved.loss_analysis_input_hash is not None:
+        # A pinned run's manifest input hash is the digest of the supplied
+        # file, not the canonical model hash (spec Phase 5, qualification
+        # rule 1: a qualifying run's manifest shows the pinned digest).
+        input_hashes["loss_analysis"] = preserved.loss_analysis_input_hash
     prompt_hashes = hash_prompt_templates(PROMPTS_DIR)
     stage_summary = count_calls_by_stage(run_dir)
     stage_summary["stage_2"] = dict(stage_summary.get("stage_2") or {})
     stage_summary["stage_2"]["mode"] = _stage_2_mode(run_dir)
+    if preserved.post_review_loss_analysis_digest is not None:
+        stage_summary["stage_2"]["post_review_loss_analysis_digest"] = (
+            preserved.post_review_loss_analysis_digest
+        )
     if authored_scenarios:
         stage_summary[AUTHORED_STAGE_SUMMARY_KEY] = {
             "mode": "authored",
             "authored_scenario_count": len(authored_scenarios),
         }
         stage_summary[AUTHORING_STAGE] = dict(stage_summary.get(AUTHORING_STAGE) or {})
+    stage_1a_summary = dict(stage_summary.get("stage_1a") or {})
+    # ``count_calls_by_stage`` owns the call and token totals; the SP1 block
+    # supplies every key it cannot rebuild (``source``, the review record,
+    # the pinned zero count) without overriding a counted total.
+    for key, value in preserved.stage_1a.items():
+        if key in ("call_count", "total_tokens") and key in stage_1a_summary:
+            continue
+        stage_1a_summary[key] = value
     gate_statuses = _stage_1a_gate_statuses(run_dir)
     if gate_statuses:
-        stage_1a_summary = dict(stage_summary.get("stage_1a") or {})
         stage_1a_summary.update(gate_statuses)
+    if stage_1a_summary:
         stage_summary["stage_1a"] = stage_1a_summary
 
     manifest = {
