@@ -101,9 +101,10 @@ or `use_case_losses`. Do not invent a loss merely to be able to cite a risk.
 Each security constraint has two parts: `rule`, the obligation in one
 sentence without its limiting conditions, and `applies_when`, the plain
 sentence fragments, written in your own words, under which the rule is in
-force. The `applies_when` key is required on every constraint — return it
-even when empty — with at most four conditions, and no condition may simply
-restate the rule.
+force; all must hold, and a disjunction goes inside one condition. The
+`applies_when` key is required on every constraint — return it even when
+empty — with at most four conditions, and no condition may simply restate
+the rule.
 
 ## Quality requirements
 
