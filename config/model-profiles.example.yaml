@@ -5,7 +5,7 @@ gemma4-openrouter:
   model: google/gemma-4-26b-a4b-it
   api_key: YOUR-API-KEY-HERE
   context_window: 262144
-  max_completion_tokens: 16384
+  max_completion_tokens: 8192
   timeout: 300
   temperature: 0.4
 gemma4-local:
@@ -13,7 +13,7 @@ gemma4-local:
   model: gemma-4-26b-a4b-it
   api_key: unused
   context_window: 32768
-  max_completion_tokens: 16384
+  max_completion_tokens: 8192
   timeout: 300
   temperature: 1.0
   top_p: 0.95
@@ -24,7 +24,7 @@ qwen-local:
   model: qwen3.5-27b
   api_key: unused
   context_window: 32768
-  max_completion_tokens: 16384
+  max_completion_tokens: 8192
   timeout: 300
   temperature: 1.0
   top_p: 1.0
@@ -35,7 +35,7 @@ gemma4-oc-taxonomy:
   model: gemma-4-26b-a4b-it
   api_key: unused
   context_window: 32768
-  max_completion_tokens: 16384
+  max_completion_tokens: 8192
   timeout: 300
   temperature: 0.4
 sonnet-4:
@@ -43,6 +43,6 @@ sonnet-4:
   model: anthropic/claude-sonnet-4
   api_key: YOUR-API-KEY-HERE
   context_window: 200000
-  max_completion_tokens: 16384
+  max_completion_tokens: 8192
   timeout: 300
   temperature: 0.3

@@ -533,6 +533,22 @@ Product `run` and diagnostic `stpa-run` remain unaware of both checks.
 
 ## STPA execution
 
+Stage 2 has two modes. With no execution target profile, or with a
+multi-agent capability profile, it runs the target-blind coordination call
+described below. When an execution target profile is supplied and
+`multi_agent` is false, `run` instead derives the Stage 2 control structure
+deterministically from the observed target
+(`system_model.target_derived_structure`): one ASSISTANT controller, one
+tool action per observed operation, a `respond` action, capability-driven
+conditional actions, and a deterministic process model. Two bounded model
+calls remain — controller-purpose beliefs and constraint-action relevance —
+each validated offline, with one bounded revision for a failing relevance
+check. The exact resource/operation binding for every tool action is
+published in a content-pinned `target-derived-structure.yaml` sidecar, and
+target realization replays those bindings through a zero-call identity
+interpreter instead of a realization model call. The target-blind path and
+diagnostic `stpa-run` are unchanged.
+
 Stage 2 derives use-case functions and their primary outputs before attaching
 security safeguards. Its prompts keep functional duties separate from rules
 governing them: filtering a response does not replace returning a response.

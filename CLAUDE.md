@@ -63,7 +63,19 @@ Profiles contain semantic resource facts only: no URLs, credentials, or
 secrets. Metadata-free MCP targets are scanned independently through the
 optional `asago-target-scan mcp` entry point; the product run consumes only
 the resulting closed profile and never imports MCP transport or performs a
-scan. The systemic STPA baseline is always target-blind. After ICA completion,
+scan. The systemic STPA baseline is always target-blind. When `run` receives
+an observed (non-simulation) execution target profile with
+`multi_agent: false`, Stage 2 switches to
+the deterministic target-derived structure
+(`system_model.target_derived_structure`): one ASSISTANT controller, one
+tool action per observed operation, a `respond` action, and
+capability-driven conditionals, with at most two bounded model calls
+(grounded controller-purpose beliefs and constraint-action relevance, each
+offline-validated) and a content-pinned `target-derived-structure.yaml`
+sidecar recording the exact resource/operation binding per tool action;
+target realization then replays those bindings through the zero-call
+identity interpreter. Without a profile, or for multi-agent targets, the
+target-blind Stage 2 and diagnostic `stpa-run` are unchanged. After ICA completion,
 an observed target profile may drive one separately attested additive target
 realization: exact operation matches may specialize baseline actions, and one
 bounded verified extension may add target-derived actions/ICAs without
@@ -93,6 +105,18 @@ changing acceptance behavior, or running the quality sequence.
   effects explicit. Stage 5 comparison grounding verifies literal source presence
   through quotations or exact observation JSON; retain unsourced values
   as typed parameters and never promote source presence into semantic proof.
+
+- Gate the Stage 1a loss analysis deterministically. Every supplied risk card
+  needs exactly one `risk_dispositions` entry (or a loss citing it), the
+  provider wire must carry explicit `rule`/`applies_when` and
+  `risk_dispositions` collections, and the merged hazard graph must pass the five offline density
+  checks in `loss_analysis_gates.py` (every loss has a hazard, every
+  constraint has a hazard, every hazard has a constraint,
+  constraint/hazard share a fixed-rule subject noun
+  phrase, every behavior class owns a hazard). A failing graph receives one
+  bounded revision call with the exact failing checks; a second failure is a
+  fatal stage error recorded in the run manifest and
+  `loss-analysis-gates.yaml`. The gates are offline and never soften a check.
 
 - Track durable work and specification approval in GitHub Issues and PRs.
 - Keep `run` as the sole normal scenario-generation command. Taxonomy supplies

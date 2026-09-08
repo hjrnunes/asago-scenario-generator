@@ -13,6 +13,16 @@ unknown relationship remains explicit rather than becoming an invented rule.
 the normal loss-analysis and control-structure files contain reviewed results.
 No extra model call or target inventory is added to this baseline.
 
+After Stage 1a, deterministic offline gates verify the loss analysis before
+Stage 2 runs: every supplied risk card is accounted for exactly once, and the
+merged hazard graph is dense enough to distinguish scenarios (every loss has
+a hazard, every constraint has a hazard, every hazard has a constraint, each
+constraint/hazard pair shares a subject noun phrase, and every behavior class
+owns a hazard). A failing graph
+gets exactly one bounded revision call with the exact failing checks; a
+second failure stops the run and is recorded in the manifest.
+`loss-analysis-gates.yaml` carries the recorded evidence.
+
 Stage 5 scalar comparisons cite supplied constraint/action text through
 `comparison_evidence`. When no citation is supplied, exact typed JSON values
 and keys in the supplied target observations can establish literal presence
@@ -207,6 +217,16 @@ used only afterward by a separately attested target-realization step, which
 may select exact observed operations and add narrowly verified target-specific
 actions or ICAs without changing any baseline record. Those exact choices and
 both target digests are then pinned into the execution projection.
+
+For single-agent targets, supplying a target profile also switches Stage 2:
+instead of the model-authored control structure, `run` derives it
+deterministically from the observed target (one assistant controller, one
+action per observed tool operation, a reply action, and capability-driven
+conditionals), spends at most two bounded model calls on grounded
+controller-purpose beliefs and constraint-action relevance, and records the
+exact tool binding per action in a pinned sidecar that target realization
+replays with zero model calls. Multi-agent targets and runs without a
+profile keep the ordinary target-blind Stage 2.
 
 `run --target-observations PATH` optionally accepts normalized runtime-context
 JSON from the standalone [capture workflow](scripts/qualification/README.md).
