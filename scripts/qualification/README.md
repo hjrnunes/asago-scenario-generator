@@ -192,3 +192,34 @@ Run the offline controls without Garak, a target, or an LLM:
   scripts/qualification/test_calibration.py \
   scripts/qualification/test_evaluation.py -q
 ```
+
+## Standalone Stage 1a coverage review
+
+`review_loss_analysis_coverage.py` runs the advisory risk-coverage review
+against an already-saved `loss-analysis.yaml` instead of a freshly derived
+graph. Use it to measure the reviewer against a graph the review never saw,
+for example an older candidate the owner rejected.
+
+The tool is read-only with respect to the product pipeline: it writes only the
+review artifact and `calls.jsonl` under `--out`, changes no graph, and gates
+nothing. It reuses the product seam unchanged, so a verdict read here means
+the same thing it means inside a run.
+
+```bash
+uv run python -m scripts.qualification.review_loss_analysis_coverage \
+  --loss-analysis output/runs/<run>/loss-analysis.yaml \
+  --risk-set tmp/risk-extraction-fs-isac.json \
+  --use-case tmp/use-case-klarna-fs-isac-v36.txt \
+  --out build/qualification/offline-coverage-review \
+  --profile gemma4-oc --temperature 0.4
+```
+
+The tool loads the complete reviewed risk set (it does not filter by
+taxonomy), so the review sees the same cards the obligation planner sees. It
+prints the status and the valid, invalid, and missing row counts.
+
+Run the deterministic check without a model endpoint:
+
+```bash
+.venv/bin/pytest scripts/qualification/test_review_loss_analysis_coverage.py -q
+```
