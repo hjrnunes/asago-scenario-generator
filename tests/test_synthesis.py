@@ -142,6 +142,10 @@ class _FakeAdapters:
         )
         return SimpleNamespace(final_routes=(route,))
 
+    def author_scenarios(self, *, baseline, **_) -> tuple[object, dict[str, object]]:
+        self.calls.append(("authoring", baseline))
+        return "authored-ica", {}
+
     def fill_icas(self, *, routes, loss_analysis, control_structure, **_) -> object:
         self.calls.append(
             ("fill_icas", (tuple(routes), loss_analysis, control_structure))

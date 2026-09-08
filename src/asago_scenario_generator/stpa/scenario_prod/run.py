@@ -74,6 +74,11 @@ from asago_scenario_generator.stpa.models.scenario_context import (
 )
 
 from ._constants import PROMPTS_DIR
+from .authoring import (
+    AUTHORING_STAGE,
+    AUTHORED_STAGE_SUMMARY_KEY,
+    assemble_authored_scenario_spec,
+)
 from .assembly import assemble_envelope
 from .attack_tree import (
     ATTACK_TREE_MAX_COMPLETION_TOKENS,
@@ -277,6 +282,7 @@ def run_sp3(
     target_realization: TargetRealizationResult | None = None,
     target_observations: TargetObservationSnapshot | None = None,
     render_presentation: bool = False,
+    authored_scenarios: Mapping[str, Any] | None = None,
 ) -> SP3RunResult:
     """Run the full SP3 pipeline: Stage 5 → Stage 6 → Stage 7.
 
@@ -312,6 +318,11 @@ def run_sp3(
         target_observations: Optional target-only state/read observations
             paired with ``execution_target_profile``. They supplement Stage 5
             comparison grounding without changing the systemic context.
+        authored_scenarios: Optional Phase 4 authored bundles keyed by exact
+            ICA ID (target-derived mode).  When a threat's ICA ID is present,
+            Stage 5 assembles its spec deterministically from the validated
+            authoring record instead of calling the BDI provider; other
+            threats produce no scenario.
 
     Returns:
         An :class:`SP3RunResult` with artifacts and diagnostics.
@@ -390,6 +401,7 @@ def run_sp3(
             target_observations=target_observations,
             candidate_builders=candidate_builders,
             content_surface=content_surface_facts(capability_profile),
+            authored_scenarios=authored_scenarios,
         )
         functional_test_specs = [
             spec for spec in scenario_specs if spec.is_functional_test
@@ -465,6 +477,7 @@ def run_sp3(
         stage_errors=stage_errors,
         run_identity=run_identity,
         run_started=run_started,
+        authored_scenarios=authored_scenarios,
     )
 
     return SP3RunResult(
@@ -579,6 +592,7 @@ def _run_stage5_candidate(
     target_observations: TargetObservationSnapshot | None = None,
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
     content_surface: ContentSurfaceFacts | None = None,
+    authored_scenarios: Mapping[str, Any] | None = None,
 ) -> _Stage5ThreatResult:
     """Run one isolated Stage 5 candidate and record its outcome evidence."""
     prior_error_count = len(stage_errors)
@@ -599,6 +613,7 @@ def _run_stage5_candidate(
             target_realization=target_realization,
             target_observations=target_observations,
             content_surface=content_surface,
+            authored_scenarios=authored_scenarios,
         )
     except Exception as exc:  # noqa: BLE001 - isolate one candidate
         stage_errors.append(f"Stage 5 candidate failed for SCN-{index + 1:03d}: {exc}")
@@ -629,6 +644,7 @@ def _collect_stage5_specs(
     target_observations: TargetObservationSnapshot | None = None,
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
     content_surface: ContentSurfaceFacts | None = None,
+    authored_scenarios: Mapping[str, Any] | None = None,
 ) -> list[ScenarioSpec]:
     """Generate and retain the valid Stage 5 specs in threat order."""
     specs: list[ScenarioSpec] = []
@@ -651,6 +667,7 @@ def _collect_stage5_specs(
             target_observations=target_observations,
             candidate_builders=candidate_builders,
             content_surface=content_surface,
+            authored_scenarios=authored_scenarios,
         )
         if result.scenario_spec is not None:
             specs.append(result.scenario_spec)
@@ -1042,6 +1059,7 @@ def _run_stage5_for_threat(
     target_realization: TargetRealizationResult | None = None,
     target_observations: TargetObservationSnapshot | None = None,
     content_surface: ContentSurfaceFacts | None = None,
+    authored_scenarios: Mapping[str, Any] | None = None,
 ) -> _Stage5ThreatResult:
     """Run Stage 5 BDI generation for a single threat."""
     slot_parts = parse_ica_slot_id(threat.ica_slot_id)
@@ -1059,6 +1077,27 @@ def _run_stage5_for_threat(
     )
     if context is None:
         return _Stage5ThreatResult(None)
+
+    authored = authored_scenarios.get(threat.ica_id) if authored_scenarios else None
+    if authored is not None:
+        return _stage5_authored_spec(
+            authored,
+            threat,
+            control_structure,
+            scenario_index,
+            context,
+            requested_environment_basis,
+            stage_errors,
+        )
+    if authored_scenarios is not None:
+        # Authored mode replaces Stage 5 for every threat (spec 4.6): a
+        # threat without an authored bundle produces no scenario and never
+        # falls through to the target-blind BDI call.
+        stage_errors.append(
+            f"{threat.ica_id}: no authored scenario bundle in target-derived mode"
+        )
+        return _Stage5ThreatResult(None)
+
     target_operation = _target_operation_for_context(target_realization, context)
 
     llm_result, failure = _stage5_bdi(
@@ -1127,6 +1166,37 @@ def _stage5_bdi(
         None,
         abort_remaining=is_bdi_length_retry_exhausted(error),
     )
+
+
+def _stage5_authored_spec(
+    bundle: Any,
+    threat: Any,
+    control_structure: ControlStructure,
+    scenario_index: int,
+    context: ScenarioGenerationContext,
+    requested_environment_basis: RequestedEnvironmentBasis | None,
+    stage_errors: list[str],
+) -> _Stage5ThreatResult:
+    """Assemble one deterministic spec from a validated authored scenario."""
+    try:
+        spec = assemble_authored_scenario_spec(
+            bundle,
+            threat,
+            control_structure,
+            context,
+            scenario_index,
+            requested_environment_basis=requested_environment_basis,
+        )
+        prior_error_count = len(stage_errors)
+        _validate_stage5_spec(spec, control_structure, stage_errors)
+        if len(stage_errors) != prior_error_count:
+            return _Stage5ThreatResult(None)
+    except Exception as exc:  # noqa: BLE001 - one candidate, typed local failure
+        stage_errors.append(
+            f"Stage 5 authored assembly failed for threat {threat.ica_id}: {exc}"
+        )
+        return _Stage5ThreatResult(None)
+    return _Stage5ThreatResult(spec)
 
 
 def _stage5_defender_bdi(
@@ -2091,6 +2161,7 @@ def _write_manifest(
     stage_errors: list[str],
     run_identity: ExecutionRunIdentity,
     run_started: datetime,
+    authored_scenarios: Mapping[str, Any] | None = None,
 ) -> None:
     """Write the run manifest YAML."""
     input_hashes = {
@@ -2102,6 +2173,12 @@ def _write_manifest(
     stage_summary = count_calls_by_stage(run_dir)
     stage_summary["stage_2"] = dict(stage_summary.get("stage_2") or {})
     stage_summary["stage_2"]["mode"] = _stage_2_mode(run_dir)
+    if authored_scenarios:
+        stage_summary[AUTHORED_STAGE_SUMMARY_KEY] = {
+            "mode": "authored",
+            "authored_scenario_count": len(authored_scenarios),
+        }
+        stage_summary[AUTHORING_STAGE] = dict(stage_summary.get(AUTHORING_STAGE) or {})
     gate_statuses = _stage_1a_gate_statuses(run_dir)
     if gate_statuses:
         stage_1a_summary = dict(stage_summary.get("stage_1a") or {})

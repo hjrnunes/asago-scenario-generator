@@ -226,7 +226,16 @@ conditionals), spends at most two bounded model calls on grounded
 controller-purpose beliefs and constraint-action relevance, and records the
 exact tool binding per action in a pinned sidecar that target realization
 replays with zero model calls. Multi-agent targets and runs without a
-profile keep the ordinary target-blind Stage 2.
+profile keep the ordinary target-blind Stage 2. In target-derived mode,
+scenario synthesis also changes: one grounded authoring call per
+(constraint, action) candidate replaces the ICA enumeration, ICA
+verification and correction, and Stage 5 BDI generation. The call drafts
+scenarios against the observed target state and policy observations;
+deterministic code validates every fact, tool, argument, and condition
+account against typed rejection reasons, owns the deviation category,
+identifiers, lineage, and the closed oracle templates in
+`data/oracles/templates.yaml`, and assembles the contract with no repair
+call. The target-blind path is unchanged.
 
 `run --target-observations PATH` optionally accepts normalized runtime-context
 JSON from the standalone [capture workflow](scripts/qualification/README.md).

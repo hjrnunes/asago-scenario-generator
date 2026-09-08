@@ -549,6 +549,23 @@ target realization replays those bindings through a zero-call identity
 interpreter instead of a realization model call. The target-blind path and
 diagnostic `stpa-run` are unchanged.
 
+In target-derived mode, scenario synthesis replaces the ICA enumeration,
+ICA verification and correction, and Stage 5 BDI generation with one
+grounded authoring model call per (constraint, action) candidate
+(`scenario_prod.authoring`). The call sees the concrete target state, the
+policy observations, and the session identity, and drafts up to three
+scenarios per candidate. Deterministic code owns everything else: it
+validates every state-fact path, tool, argument, owner comparison, and
+per-condition account against typed rejection reasons; derives the
+deviation category, identifiers, and hazard/constraint/loss lineage; renders
+the judge text from the closed oracle templates in
+`data/oracles/templates.yaml`; synthesizes the ordinary ICA enumeration so
+downstream accounting and realization run unchanged; and assembles the
+contextual scenario spec and execution contract without a Stage 5 call.
+Rejected scenarios are recorded with their typed reason and never repaired
+with a second call. The target-blind path keeps the existing Stage 5
+pipeline; the two modes are never maintained for the same run.
+
 Stage 2 derives use-case functions and their primary outputs before attaching
 security safeguards. Its prompts keep functional duties separate from rules
 governing them: filtering a response does not replace returning a response.

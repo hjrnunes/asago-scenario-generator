@@ -38,6 +38,7 @@ from asago_scenario_generator.stpa.models.execution_classification import (
 )
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.models.target_derived_structure import (
+    ConstraintActionRelevance,
     TargetDerivedStructure,
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
@@ -99,6 +100,7 @@ class SP1RunResult:
     capability_profile: CapabilityProfile | None = None
     control_structure: ControlStructure | None = None
     target_derived_structure: TargetDerivedStructure | None = None
+    constraint_action_relevance: ConstraintActionRelevance | None = None
     critic_findings: CriticFindings | None = None
     heuristic_errors: list[str] = field(default_factory=list)
     heuristic_warnings: list[str] = field(default_factory=list)
@@ -256,6 +258,7 @@ def run_sp1(
         capability_profile=capability_profile,
         control_structure=stage2_result.control_structure,
         target_derived_structure=stage2_result.target_derived,
+        constraint_action_relevance=stage2_result.relevance,
         critic_findings=stage2_result.critic_findings,
         heuristic_errors=stage2_result.heuristic_errors,
         heuristic_warnings=stage2_result.heuristic_warnings,
@@ -274,6 +277,7 @@ class _Stage2Result:
     loss_analysis: LossAnalysis | None = None
     control_structure: ControlStructure | None = None
     target_derived: TargetDerivedStructure | None = None
+    relevance: ConstraintActionRelevance | None = None
     critic_findings: CriticFindings | None = None
     heuristic_errors: list[str] = field(default_factory=list)
     heuristic_warnings: list[str] = field(default_factory=list)
@@ -649,6 +653,7 @@ def _run_target_derived_stage_2(
         loss_analysis=derived_result.loss_analysis,
         control_structure=derived_result.control_structure,
         target_derived=derived_result.derived,
+        relevance=derived_result.relevance,
         heuristic_errors=list(heuristic_result.errors),
         heuristic_warnings=list(heuristic_result.warnings),
         solution_neutrality_warnings=solution_neutrality_warnings,

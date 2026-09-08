@@ -75,7 +75,16 @@ offline-validated) and a content-pinned `target-derived-structure.yaml`
 sidecar recording the exact resource/operation binding per tool action;
 target realization then replays those bindings through the zero-call
 identity interpreter. Without a profile, or for multi-agent targets, the
-target-blind Stage 2 and diagnostic `stpa-run` are unchanged. After ICA completion,
+target-blind Stage 2 and diagnostic `stpa-run` are unchanged. In
+target-derived mode only, scenario synthesis replaces the ICA enumeration,
+ICA verification and correction, and Stage 5 BDI generation with one
+grounded authoring call per (constraint, action) candidate
+(`scenario_prod.authoring`): the model drafts scenarios against the
+observed target state and policy observations, and deterministic code owns
+validation with typed rejection reasons, the deviation category,
+identifiers, lineage, the closed oracle templates in
+`data/oracles/templates.yaml`, synthesized enumeration slots, and contract
+assembly, with no repair call. The target-blind Stage 5 path is unchanged. After ICA completion,
 an observed target profile may drive one separately attested additive target
 realization: exact operation matches may specialize baseline actions, and one
 bounded verified extension may add target-derived actions/ICAs without

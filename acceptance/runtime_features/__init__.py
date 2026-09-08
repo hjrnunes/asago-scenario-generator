@@ -46,4 +46,5 @@ __all__ = (
     "stage1a_section_correction",
     "loss_analysis_gates",
     "stage2_target_derived",
+    "stpa_grounded_authoring",
 )

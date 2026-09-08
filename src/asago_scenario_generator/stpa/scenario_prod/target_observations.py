@@ -40,6 +40,10 @@ class TargetObservation(ClosedCanonicalModel):
     kind: Literal["state", "read"]
     source_name: StrictStr | None = Field(default=None, max_length=256)
     source_description: StrictStr | None = Field(default=None, max_length=4096)
+    # Exact captured read-operation arguments (the query that produced this
+    # observation).  Spec 4.1(4) labels every policy observation with the
+    # query that produced it; the capture boundary supplies the mapping.
+    source_arguments: dict[str, StrictStr] | None = None
     content_format: Literal["json", "text"]
     content: StrictStr = Field(min_length=1, max_length=MAX_CONTENT_CHARS)
 
@@ -195,12 +199,23 @@ class TargetObservationSnapshot(ClosedCanonicalModel):
                 raise ValueError(
                     "target read observation tool_description must be text"
                 )
+            source_arguments = raw.get("arguments")
+            if source_arguments is not None:
+                if not isinstance(source_arguments, Mapping) or not all(
+                    isinstance(key, str) and isinstance(value, str)
+                    for key, value in source_arguments.items()
+                ):
+                    raise ValueError(
+                        "target read observation arguments must be a string mapping"
+                    )
+                source_arguments = dict(source_arguments)
             observations.append(
                 TargetObservation(
                     observation_ref=f"TARGET-READ-{index:03d}",
                     kind="read",
                     source_name=source_name,
                     source_description=source_description,
+                    source_arguments=source_arguments,
                     content_format=content_format,
                     content=content,
                 )
@@ -244,6 +259,11 @@ class TargetObservationSnapshot(ClosedCanonicalModel):
                 record["source_name"] = item.source_name
             if item.source_description is not None:
                 record["source_description"] = item.source_description
+            if item.source_arguments:
+                record["query_label"] = ", ".join(
+                    f"{key}: {value}"
+                    for key, value in sorted(item.source_arguments.items())
+                )
             records.append(record)
         return tuple(records)
 

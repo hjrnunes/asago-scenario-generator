@@ -1432,7 +1432,7 @@ _ADVERSARY_REACH_BY_STIMULUS = {
 FUNCTIONAL_TEST_GAIN = "Functional test: no adversary gains from this unsafe outcome."
 
 
-def _normalize_gain_text(value: str) -> str:
+def normalize_gain_text(value: str) -> str:
     """Collapse a gain or constraint sentence for substring comparison."""
     collapsed = re.sub(r"\s+", " ", value.strip().casefold())
     return collapsed.strip(" \t.,;:!\"'()")
@@ -1467,9 +1467,9 @@ def _validate_adversary_response(
             )
     if adversary.kind is AdversaryKind.none:
         return
-    normalized_gain = _normalize_gain_text(adversary.gain)
+    normalized_gain = normalize_gain_text(adversary.gain)
     for constraint in context.constraints:
-        if normalized_gain in _normalize_gain_text(constraint.description):
+        if normalized_gain in normalize_gain_text(constraint.description):
             raise ValueError(
                 f"adversary gain restates constraint {constraint.constraint_id}: "
                 "say what the adversary gets, not what the constraint forbids"

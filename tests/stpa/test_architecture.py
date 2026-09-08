@@ -944,6 +944,9 @@ _SCENARIO_PROD_LAYERS: dict[str, int] = {
     "execution_bundle": 2,
     "eval_metrics": 2,
     "coverage": 2,
+    # Phase 4 grounded authoring: deterministic validation and assembly over
+    # the layer-1 generators; product run consumes it from layer 3.
+    "authoring": 2,
     "run": 3,
 }
 

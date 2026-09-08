@@ -237,6 +237,7 @@ class SynthesisAdapters:
     revise: Callable[..., Any] | None = None
     recheck: Callable[..., Any] | None = None
     fill_icas: Callable[..., Any] | None = None
+    author_scenarios: Callable[..., Any] | None = None
     verify_icas: Callable[..., Any] | None = None
     correct_icas: Callable[..., Any] | None = None
     target_realize: Callable[..., Any] | None = None
@@ -308,6 +309,12 @@ class SynthesisAdapters:
                 "fill_obligation_aware_icas",
                 "run_ica_analysis",
                 "final_ica",
+            ),
+            "author_scenarios": (
+                "author_scenarios",
+                "author",
+                "run_authoring",
+                "grounded_authoring",
             ),
             "verify_icas": (
                 "verify_icas",
@@ -644,18 +651,34 @@ def run_synthesis(
         final_control=final_control,
     )
 
-    ica_enumeration = _run_ica(
-        final_routes,
-        briefs,
-        plan,
-        final_loss,
-        final_control,
-        capability_profile,
-        inputs,
-        capability_snapshot,
-        resolved,
-        calls,
-    )
+    # Phase 4: when Stage 2 was derived from the observed target, the grounded
+    # authoring call replaces ICA enumeration, ICA verification/correction, and
+    # Stage 5 BDI generation (spec 4.6).  The target-blind path below is
+    # unchanged; the two modes are never maintained for the same run.
+    authored_scenarios: dict[str, Any] | None = None
+    if target_derived_stage2:
+        ica_enumeration, authored_scenarios = _run_authoring(
+            baseline,
+            final_loss,
+            final_control,
+            capability_profile,
+            inputs,
+            resolved,
+            calls,
+        )
+    else:
+        ica_enumeration = _run_ica(
+            final_routes,
+            briefs,
+            plan,
+            final_loss,
+            final_control,
+            capability_profile,
+            inputs,
+            capability_snapshot,
+            resolved,
+            calls,
+        )
     target_realization = _run_target_realization(
         ica_enumeration=ica_enumeration,
         loss_analysis=final_loss,
@@ -686,6 +709,7 @@ def run_synthesis(
         calls,
         stage_errors,
         target_realization=target_realization,
+        authored_scenarios=authored_scenarios,
     )
     accounting = _run_accounting(
         plan,
@@ -905,6 +929,7 @@ def _production_defaults() -> SynthesisAdapters:
         revise=_default_revision,
         recheck=_default_recheck,
         fill_icas=_default_fill_icas,
+        author_scenarios=_default_author_scenarios,
         target_realize=_default_target_realize,
         scenarios=_default_scenarios,
         account=_default_account,
@@ -1691,6 +1716,40 @@ def _target_realized_stpa_inputs(
     return projection.control_structure, projection.ica_enumeration
 
 
+def _run_authoring(
+    baseline: Any,
+    loss_analysis: Any,
+    control_structure: Any,
+    capability_profile: Any,
+    inputs: SynthesisInputs,
+    adapters: SynthesisAdapters,
+    calls: list[str],
+) -> tuple[Any, dict[str, Any]]:
+    """Run Phase 4 grounded authoring over every relevant candidate.
+
+    Returns the closed slot-fill result carrying the synthesized ICA
+    enumeration plus the authored bundles keyed by final ICA ID.
+    """
+    author = adapters.author_scenarios or _default_author_scenarios
+    result = _invoke(
+        author,
+        baseline=baseline,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+        capability_profile=capability_profile,
+        inputs=inputs,
+        output_dir=inputs.output_dir,
+        temperature=inputs.temperature,
+    )
+    calls.append("authoring")
+    if not isinstance(result, tuple) or len(result) != 2:
+        raise ValueError("authoring adapter returned no enumeration/bundle pair")
+    enumeration, bundles = result
+    if enumeration is None:
+        raise ValueError("authoring adapter returned no enumeration")
+    return enumeration, bundles or {}
+
+
 def _run_scenarios(
     ica_enumeration: Any,
     briefs: tuple[Any, ...],
@@ -1706,6 +1765,7 @@ def _run_scenarios(
     stage_errors: list[str],
     *,
     target_realization: Any | None = None,
+    authored_scenarios: Any | None = None,
 ) -> Any:
     """Run ordinary STPA SP3 from final ICAs and structure."""
     if adapters.scenarios is None:
@@ -1728,6 +1788,7 @@ def _run_scenarios(
             requested_environment_basis=inputs.requested_environment_basis,
             target_realization=target_realization,
             target_observations=inputs.target_observations,
+            authored_scenarios=authored_scenarios,
             inputs=inputs,
             output_dir=inputs.output_dir,
             max_workers=inputs.max_workers,
@@ -2248,6 +2309,7 @@ def _build_manifest(
         "stage_call_counts": {name: calls.count(name) for name in sorted(set(calls))},
         "provider_evidence": _manifest_provider_evidence(provider_stages or {}, inputs),
         "prompt_call_evidence": _manifest_prompt_call_evidence(inputs.output_dir),
+        "total_prompt_tokens": _total_prompt_tokens(inputs.output_dir),
         "obligation_disposition_counts": counts,
         "obligation_stop_reason_counts": _obligation_stop_reason_counts(
             accounting, realization
@@ -2323,6 +2385,20 @@ def _manifest_phase2_verification(value: Any) -> dict[str, Any]:
         "model_calls": _first_attr(assessment, "model_calls") or 0,
     }
     return artifacts
+
+
+def _total_prompt_tokens(output_dir: Path) -> int | None:
+    """Sum recorded prompt tokens from calls.jsonl for the budget check."""
+    path = Path(output_dir) / "calls.jsonl"
+    if not path.exists():
+        return None
+    total = 0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        entry = json.loads(line)
+        total += int(entry.get("prompt_tokens") or 0)
+    return total
 
 
 def _manifest_prompt_call_evidence(output_dir: Path) -> list[dict[str, Any]]:
@@ -2934,6 +3010,79 @@ def _default_fill_icas(**kwargs: Any) -> Any:
     )
 
 
+def _default_author_scenarios(
+    *,
+    baseline: Any,
+    loss_analysis: Any,
+    control_structure: Any,
+    capability_profile: Any,
+    inputs: SynthesisInputs,
+    output_dir: Path,
+    **_: Any,
+) -> tuple[Any, dict[str, Any]]:
+    """Run Phase 4 grounded authoring in target-derived mode (spec 4.1-4.3)."""
+    from asago_scenario_generator.stpa.infra.llm import effective_temperature
+    from asago_scenario_generator.stpa.obligation_aware.contracts import (
+        SynthesisSlotFillResult,
+    )
+    from asago_scenario_generator.stpa.pipeline.llm_config import resolve_llm_client
+    from asago_scenario_generator.stpa.scenario_prod.authoring import (
+        author_candidate_scenarios,
+        build_authoring_candidates,
+        synthesize_authored_enumeration,
+        write_authored_scenarios_record,
+    )
+    from asago_scenario_generator.stpa.scenario_prod.content_surface import (
+        content_surface_facts as derive_content_surface,
+    )
+
+    structure = _first_attr(baseline, "target_derived_structure")
+    relevance = _first_attr(baseline, "constraint_action_relevance")
+    if structure is None or relevance is None:
+        raise ValueError(
+            "target-derived authoring requires the target-derived structure "
+            "and its constraint-action relevance table"
+        )
+    if inputs.execution_target_profile is None or inputs.target_observations is None:
+        raise ValueError(
+            "target-derived authoring requires the observed execution target "
+            "profile and paired target observations"
+        )
+    client, _profile_name = resolve_llm_client(
+        inputs.profile,
+        inputs.sp3_profile,
+        str(inputs.profiles_file),
+    )
+    candidates = build_authoring_candidates(
+        relevance,
+        loss_analysis,
+        structure,
+        control_structure,
+    )
+    temperature = effective_temperature(client, inputs.temperature)
+    surface = derive_content_surface(capability_profile)
+    outcomes = tuple(
+        author_candidate_scenarios(
+            client,
+            candidate,
+            profile=inputs.execution_target_profile,
+            observations=inputs.target_observations,
+            structure=structure,
+            control_structure=control_structure,
+            capability_profile=capability_profile,
+            run_dir=Path(output_dir),
+            temperature=temperature,
+            has_content_surface=surface.has_content_surface,
+        )
+        for candidate in candidates
+    )
+    write_authored_scenarios_record(Path(output_dir), outcomes)
+    enumeration, bundles = synthesize_authored_enumeration(
+        outcomes, structure, control_structure
+    )
+    return SynthesisSlotFillResult(ica_enumeration=enumeration), bundles
+
+
 def _default_target_realize(
     *,
     loss_analysis: Any,
@@ -3102,6 +3251,7 @@ def _default_scenarios(
     requested_environment_basis: RequestedEnvironmentBasis | None = None,
     target_realization: Any | None = None,
     target_observations: TargetObservationSnapshot | None = None,
+    authored_scenarios: Any | None = None,
     briefs: tuple[Any, ...] = (),
     ica_considerations: tuple[Any, ...] = (),
     **_: Any,
@@ -3146,6 +3296,7 @@ def _default_scenarios(
         requested_environment_basis=requested_environment_basis,
         target_realization=target_realization,
         target_observations=target_observations,
+        authored_scenarios=authored_scenarios,
     )
 
 
