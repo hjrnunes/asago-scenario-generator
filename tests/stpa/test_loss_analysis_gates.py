@@ -31,7 +31,11 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
     check_risk_accounting,
     classify_constraint,
     extract_subject_phrases,
+    gate_pinned_loss_analysis,
     load_behavior_classes,
+)
+from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
+    LossAnalysisGateError,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _Stage1aRevisionPatch,
@@ -45,6 +49,10 @@ from tests.stpa.sp1_helpers import (
 )
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "iteration20-loss-analysis.yaml"
+V4_LOSS_ANALYSIS_PATH = (
+    Path(__file__).parent / "fixtures" / "v4-loss-analysis.yaml"
+)
+V4_RISK_CARDS_PATH = Path(__file__).parent / "fixtures" / "v4-risk-cards.yaml"
 
 # The exact 49 risk card IDs supplied to the iteration-20 run, extracted from
 # the run's own stage_1a/risk_derivation call evidence.
@@ -136,7 +144,7 @@ class TestIteration20Replay:
         self, iteration20_analysis: LossAnalysis
     ) -> None:
         report = check_hazard_graph_density(
-            iteration20_analysis, load_behavior_classes()
+            iteration20_analysis, load_behavior_classes(), _risk_cards()
         )
 
         checks = "\n".join(report.failing_checks)
@@ -292,7 +300,9 @@ class TestHazardGraphDensityChecks:
             }
         )
         report = check_hazard_graph_density(
-            self._analysis(payload), load_behavior_classes()
+            self._analysis(payload),
+            load_behavior_classes(),
+            _risk_cards(("atlas-001",)),
         )
         assert "loss L-2 has no hazard" in report.failing_checks
 
@@ -307,13 +317,17 @@ class TestHazardGraphDensityChecks:
             }
         )
         report = check_hazard_graph_density(
-            self._analysis(payload), load_behavior_classes()
+            self._analysis(payload),
+            load_behavior_classes(),
+            _risk_cards(("atlas-001",)),
         )
         assert "constraint SC-2 has no hazard" in report.failing_checks
 
     def test_check3_shared_subject_is_recorded_on_passing_edge(self) -> None:
         report = check_hazard_graph_density(
-            self._analysis(self._base_payload()), load_behavior_classes()
+            self._analysis(self._base_payload()),
+            load_behavior_classes(),
+            _risk_cards(("atlas-001",)),
         )
         assert report.passed
         assert report.subject_checks[0].shared_phrases == ("payment record",)
@@ -368,6 +382,7 @@ class TestHazardGraphDensityChecks:
         report = check_hazard_graph_density(
             self._analysis(self._two_class_payload(shared_hazard=True)),
             load_behavior_classes(),
+            _risk_cards(("atlas-001",)),
         )
         checks = "\n".join(report.failing_checks)
         assert "behavior class wrong_information has no hazard of its own" in checks
@@ -377,12 +392,15 @@ class TestHazardGraphDensityChecks:
         report = check_hazard_graph_density(
             self._analysis(self._two_class_payload(shared_hazard=False)),
             load_behavior_classes(),
+            _risk_cards(("atlas-001",)),
         )
         assert report.passed
 
     def test_check5_every_hazard_covered_passes(self) -> None:
         report = check_hazard_graph_density(
-            self._analysis(self._base_payload()), load_behavior_classes()
+            self._analysis(self._base_payload()),
+            load_behavior_classes(),
+            _risk_cards(("atlas-001",)),
         )
         assert report.hazards_without_constraint == ()
         assert report.passed
@@ -397,11 +415,206 @@ class TestHazardGraphDensityChecks:
             }
         )
         report = check_hazard_graph_density(
-            self._analysis(payload), load_behavior_classes()
+            self._analysis(payload),
+            load_behavior_classes(),
+            _risk_cards(("atlas-001",)),
         )
         assert report.hazards_without_constraint == ("H-2",)
         assert "hazard H-2 has no constraint" in report.failing_checks
         assert not report.passed
+
+
+class TestCitedRiskClassCoverage:
+    """Check 6: every behavior class hit by a cited risk card has a constraint."""
+
+    @staticmethod
+    def _v4_cards() -> list[RiskCard]:
+        raw = yaml.safe_load(V4_RISK_CARDS_PATH.read_text())
+        return [
+            RiskCard(
+                risk_id=row["risk_id"],
+                risk_name=row["risk_name"],
+                risk_description=row["risk_description"],
+                taxonomy="test",
+                confidence=0.9,
+                grounding_confidence="high",
+                consequence=row["consequence"],
+            )
+            for row in raw
+        ]
+
+    @staticmethod
+    def _v4_payload() -> dict:
+        return yaml.safe_load(V4_LOSS_ANALYSIS_PATH.read_text())
+
+    def test_v4_run_graph_fails_on_exactly_disclosure_and_manipulation(self) -> None:
+        """The v4 run cited the disclosure and manipulation cards but wrote
+        no constraint of either class; the fixture replay reproduces that."""
+        analysis = LossAnalysis.model_validate(self._v4_payload())
+        report = check_hazard_graph_density(
+            analysis,
+            load_behavior_classes(),
+            self._v4_cards(),
+        )
+        missing = [
+            check.behavior_class
+            for check in report.risk_class_coverage_checks
+            if not check.passed
+        ]
+        assert missing == ["disclosure", "manipulation"]
+        assert len(report.failing_checks) == 2
+        assert report.failing_checks[0].startswith(
+            "behavior class disclosure is required by cited risk card(s) "
+        )
+        assert report.failing_checks[0].endswith(
+            "but no security constraint classifies as disclosure"
+        )
+        assert report.failing_checks[1].startswith(
+            "behavior class manipulation is required by cited risk card(s) "
+        )
+        assert report.failing_checks[1].endswith(
+            "but no security constraint classifies as manipulation"
+        )
+        assert not report.passed
+
+    def test_added_disclosure_constraint_satisfies_the_disclosure_check(self) -> None:
+        """One constraint of the missing class covers its citing cards."""
+        payload = self._v4_payload()
+        hazard_id = payload["security_constraints"][0]["related_hazards"][0]
+        payload["security_constraints"].append(
+            {
+                "constraint_id": "SC-DISC",
+                "rule": (
+                    "The assistant must prevent unauthorized disclosure of "
+                    "another customer's records."
+                ),
+                "applies_when": [],
+                "related_hazards": [hazard_id],
+            }
+        )
+        report = check_hazard_graph_density(
+            LossAnalysis.model_validate(payload),
+            load_behavior_classes(),
+            self._v4_cards(),
+        )
+        coverage = {
+            check.behavior_class: check for check in report.risk_class_coverage_checks
+        }
+        assert coverage["disclosure"].passed is True
+        assert coverage["manipulation"].passed is False
+
+    def _single_constraint_payload(self) -> dict:
+        return {
+            "risk_card_losses": [],
+            "use_case_losses": [
+                {
+                    "loss_id": "L-1",
+                    "description": "Payment record is exposed.",
+                    "provenance": "use_case",
+                    "source_risk_cards": [],
+                }
+            ],
+            "hazards": [
+                {
+                    "hazard_id": "H-1",
+                    "description": "The payment record is exposed without authorization.",
+                    "related_losses": ["L-1"],
+                }
+            ],
+            "security_constraints": [
+                {
+                    "constraint_id": "SC-1",
+                    "rule": "The payment record must stay protected.",
+                    "applies_when": [],
+                    "related_hazards": ["H-1"],
+                }
+            ],
+        }
+
+    def test_not_applicable_card_imposes_nothing(self) -> None:
+        """A not_applicable disposition never requires a constraint class."""
+        payload = self._single_constraint_payload()
+        payload["risk_dispositions"] = [
+            {
+                "risk_ref": "card-disclosure",
+                "disposition": "not_applicable",
+                "loss_ids": [],
+                "reason": "out of scope for this run",
+            }
+        ]
+        cards = [
+            RiskCard(
+                risk_id="card-disclosure",
+                risk_name="Unauthorized disclosure of customer records",
+                risk_description="The system discloses personal information.",
+                taxonomy="test",
+                confidence=0.9,
+                grounding_confidence="high",
+            )
+        ]
+        report = check_hazard_graph_density(
+            LossAnalysis.model_validate(payload), load_behavior_classes(), cards
+        )
+        assert report.risk_class_coverage_checks == ()
+        assert report.passed
+
+    def test_unclassified_card_imposes_nothing(self) -> None:
+        """A cited card whose text hits no class never requires a constraint."""
+        payload = self._single_constraint_payload()
+        payload["use_case_losses"] = []
+        payload["risk_card_losses"] = [
+            {
+                "loss_id": "L-1",
+                "description": "Payment record is exposed.",
+                "provenance": "risk_card",
+                "source_risk_cards": ["card-unclassified"],
+            }
+        ]
+        payload["risk_dispositions"] = [
+            {
+                "risk_ref": "card-unclassified",
+                "disposition": "cited",
+                "loss_ids": ["L-1"],
+                "reason": None,
+            }
+        ]
+        cards = [
+            RiskCard(
+                risk_id="card-unclassified",
+                risk_name="Widget usage drift",
+                risk_description="The dashboard widget drifts.",
+                taxonomy="test",
+                confidence=0.9,
+                grounding_confidence="high",
+            )
+        ]
+        report = check_hazard_graph_density(
+            LossAnalysis.model_validate(payload), load_behavior_classes(), cards
+        )
+        assert report.risk_class_coverage_checks == ()
+        assert report.passed
+
+    def test_pinned_path_raises_with_check6_string_and_no_revision(
+        self, tmp_path: Path
+    ) -> None:
+        """The pinned gate fails closed on check 6 without a revision call."""
+        with pytest.raises(LossAnalysisGateError) as excinfo:
+            gate_pinned_loss_analysis(
+                loss_analysis=LossAnalysis.model_validate(self._v4_payload()),
+                risk_cards=self._v4_cards(),
+                run_dir=tmp_path,
+            )
+        assert excinfo.value.gate == "hazard_graph_density"
+        assert any(
+            "is required by cited risk card(s)" in check
+            for check in excinfo.value.failing_checks
+        )
+        assert not getattr(excinfo.value, "revision_attempted", False)
+        artifact = yaml.safe_load(
+            (tmp_path / "loss-analysis-gates.yaml").read_text()
+        )
+        assert artifact["revision_attempted"] is False
+        assert artifact["passed"] is False
 
 
 class TestDeriveLossAnalysisAccounting:

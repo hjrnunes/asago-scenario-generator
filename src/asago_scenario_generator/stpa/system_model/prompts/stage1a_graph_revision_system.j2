@@ -29,6 +29,10 @@ Your response is a patch over the graph, and only over the graph:
    soften a check. The checks are structural requirements of this
    analysis; a response that renames, deletes, or empties records to pass
    them is invalid.
+7. A check that requires a behavior class for cited risk cards is satisfied
+   only by adding a security constraint that classifies into that class:
+   risk dispositions are owned by the prior analysis and this call cannot
+   change them.
 
 ## Response format
 
