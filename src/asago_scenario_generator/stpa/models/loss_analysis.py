@@ -6,7 +6,7 @@ SP1 output, consumed by SP1 Stage 2, SP2 Stage 3, and SP3 Stage 7.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 
@@ -19,6 +19,55 @@ class LossProvenance(str, Enum):
     risk_card = "risk_card"
     use_case = "use_case"
     critic_derived = "critic_derived"
+
+
+RiskDispositionKind = Literal["cited", "not_applicable"]
+
+
+class RiskDisposition(BaseModel):
+    """One supplied risk card's accounting entry in the loss analysis.
+
+    Every supplied risk card must appear exactly once: either cited by at
+    least one loss, or explicitly excluded with a non-empty reason.
+    """
+
+    risk_ref: str
+    disposition: RiskDispositionKind
+    loss_ids: list[str] = Field(default_factory=list)
+    reason: str | None = None
+
+    @model_validator(mode="after")
+    def validate_disposition(self) -> RiskDisposition:
+        if self.disposition == "cited":
+            if not self.loss_ids:
+                raise ValueError(
+                    f"risk_dispositions entry '{self.risk_ref}' is cited but "
+                    "names no loss_ids."
+                )
+            # Providers habitually echo an empty reason field on cited
+            # entries; normalize that harmless artifact away.  A non-empty
+            # reason is contradictory evidence and stays a wire violation
+            # so the bounded retry can correct it.
+            if self.reason is not None and not self.reason.strip():
+                self.reason = None
+            elif self.reason is not None:
+                raise ValueError(
+                    f"risk_dispositions entry '{self.risk_ref}' is cited but "
+                    "also carries a reason; omit the reason field for cited "
+                    "entries."
+                )
+            return self
+        if self.loss_ids:
+            raise ValueError(
+                f"risk_dispositions entry '{self.risk_ref}' is not_applicable "
+                "but names loss_ids; only cited entries name losses."
+            )
+        if self.reason is None or not self.reason.strip():
+            raise ValueError(
+                f"risk_dispositions entry '{self.risk_ref}' is not_applicable "
+                "and requires a non-empty reason."
+            )
+        return self
 
 
 class Loss(BaseModel):
@@ -47,12 +96,73 @@ class Hazard(BaseModel):
     related_losses: list[str]  # loss_id refs
 
 
+def compose_constraint_description(rule: str, applies_when: list[str]) -> str:
+    """Compose the persisted constraint description (Phase 1.3 as amended).
+
+    The fixed rendering every consumer sees: ``rule`` alone when the
+    constraint applies unconditionally, otherwise ``"<rule> Applies when:
+    <condition 1>; <condition 2>."``  The single source of the rendering,
+    shared by the model validator and the Stage 2 semantic review.
+    """
+    if applies_when:
+        return f"{rule} Applies when: " + "; ".join(applies_when) + "."
+    return rule
+
+
 class SecurityConstraint(BaseModel):
-    """A security constraint (a condition that prevents a hazard)."""
+    """A security constraint (a condition that prevents a hazard).
+
+    Phase 1.3 as amended (2026-09-07): the model authors ``rule`` (the
+    obligation without its limiting conditions) and ``applies_when`` (the
+    conditions under which the rule is in force, in the model's own words);
+    deterministic code composes the persisted ``description``.  Nothing is
+    matched against the constraint text.
+    """
 
     constraint_id: str = Field(validation_alias=AliasChoices("constraint_id", "id"))
-    description: str
+    rule: str = Field(min_length=1)
     related_hazards: list[str]  # hazard_id refs
+    # Conditions under which the rule is in force; all must hold.  Empty
+    # when the rule applies unconditionally; at most four.  The provider
+    # wire requires the key so the model always decides.
+    applies_when: list[str] = Field(default_factory=list, max_length=4)
+    # Composed deterministically from rule + applies_when; never authored.
+    # Composition also runs on load, so a tampered persisted description is
+    # silently recomposed (not detected as corruption); the authored fields
+    # are the integrity anchor.
+    description: str = ""
+
+    @field_validator("applies_when")
+    @classmethod
+    def validate_applies_when(cls, value: list[str]) -> list[str]:
+        """Wire-shape validation only; no condition is matched against text."""
+        seen: set[str] = set()
+        for entry in value:
+            if not isinstance(entry, str) or not entry.strip():
+                raise ValueError(
+                    "applies_when entries must be non-empty condition sentences."
+                )
+            key = entry.casefold()
+            if key in seen:
+                raise ValueError(
+                    "applies_when entries must be distinct: " + repr(entry)
+                )
+            seen.add(key)
+        return value
+
+    @model_validator(mode="after")
+    def compose_description(self) -> SecurityConstraint:
+        self.description = compose_constraint_description(self.rule, self.applies_when)
+        if self.description.strip() == "" or any(
+            entry.strip().casefold() == self.rule.strip().casefold()
+            for entry in self.applies_when
+        ):
+            raise ValueError(
+                "SecurityConstraint carries an invalid rule/applies_when pair: "
+                "an applies_when entry must not repeat the rule, and the rule "
+                "must not be empty."
+            )
+        return self
 
 
 class LossAnalysisDraft(BaseModel):
@@ -70,6 +180,9 @@ class LossAnalysisDraft(BaseModel):
     security_constraints: list[SecurityConstraint] = Field(
         default_factory=list, max_length=16
     )
+    # Only populated by the risk-derivation call; the gap call leaves this
+    # empty because it reviews an existing graph and supplies no risk cards.
+    risk_dispositions: list[RiskDisposition] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -103,6 +216,7 @@ class LossAnalysis(BaseModel):
     use_case_losses: list[Loss]
     hazards: list[Hazard] = Field(min_length=1)
     security_constraints: list[SecurityConstraint] = Field(min_length=1)
+    risk_dispositions: list[RiskDisposition] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_references_and_provenance(self) -> LossAnalysis:
@@ -114,10 +228,12 @@ class LossAnalysis(BaseModel):
         check_duplicate_ids(
             [sc.constraint_id for sc in self.security_constraints], "constraint_id"
         )
+        check_duplicate_ids([d.risk_ref for d in self.risk_dispositions], "risk_ref")
 
         _validate_risk_card_provenance(self.risk_card_losses)
         _validate_use_case_provenance(self.use_case_losses)
         _validate_hazard_references(self.hazards, loss_ids)
+        _validate_disposition_loss_references(self.risk_dispositions, loss_ids)
 
         hazard_ids = {h.hazard_id for h in self.hazards}
         _validate_constraint_references(self.security_constraints, hazard_ids)
@@ -157,6 +273,19 @@ def _validate_use_case_provenance(losses: list[Loss]) -> None:
                 f"Loss {loss.loss_id} has provenance '{loss.provenance.value}' "
                 f"but source_risk_cards is non-empty: {loss.source_risk_cards}."
             )
+
+
+def _validate_disposition_loss_references(
+    dispositions: list[RiskDisposition], loss_ids: set[str]
+) -> None:
+    """Ensure every cited disposition's loss IDs reference existing losses."""
+    for disposition in dispositions:
+        for ref in disposition.loss_ids:
+            if ref not in loss_ids:
+                raise ValueError(
+                    f"risk_dispositions entry '{disposition.risk_ref}' "
+                    f"references non-existent loss '{ref}' in loss_ids."
+                )
 
 
 def _validate_hazard_references(hazards: list[Hazard], loss_ids: set[str]) -> None:

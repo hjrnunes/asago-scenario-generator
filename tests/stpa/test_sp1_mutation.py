@@ -306,7 +306,7 @@ def _make_risk_cards() -> list[RiskCard]:
 
 
 def _valid_loss_analysis_dict() -> dict:
-    """Risk draft for the risk_derivation call."""
+    """Risk draft for the risk_derivation call (density-safe wording)."""
     return {
         "risk_card_losses": [
             {
@@ -320,22 +320,33 @@ def _valid_loss_analysis_dict() -> dict:
         "hazards": [
             {
                 "hazard_id": "H-1",
-                "description": "Agent executes unintended action",
+                "description": "The agent executes an unintended payment.",
                 "related_losses": ["L-1"],
             }
         ],
         "security_constraints": [
             {
                 "constraint_id": "SC-1",
-                "description": "Must confirm before action",
+                "rule": (
+                    "The agent must confirm every unintended payment before execution."
+                ),
                 "related_hazards": ["H-1"],
+                "applies_when": [],
+            }
+        ],
+        "risk_dispositions": [
+            {
+                "risk_ref": "atlas-001",
+                "disposition": "cited",
+                "loss_ids": ["L-1"],
+                "reason": None,
             }
         ],
     }
 
 
 def _valid_gap_draft_dict() -> dict:
-    """Gap draft for the gap_analysis call."""
+    """Gap draft for the gap_analysis call (density-safe wording)."""
     return {
         "risk_card_losses": [],
         "use_case_losses": [
@@ -349,15 +360,16 @@ def _valid_gap_draft_dict() -> dict:
         "hazards": [
             {
                 "hazard_id": "H-2",
-                "description": "Agent erodes user trust",
+                "description": "The agent erodes user trust.",
                 "related_losses": ["L-2"],
             }
         ],
         "security_constraints": [
             {
                 "constraint_id": "SC-2",
-                "description": "Must maintain transparency",
+                "rule": ("The agent must preserve user trust through transparency."),
                 "related_hazards": ["H-2"],
+                "applies_when": [],
             }
         ],
     }
@@ -556,7 +568,7 @@ class TestSP1RunResultDefault:
                 security_constraints=[
                     SecurityConstraint(
                         constraint_id="SC-1",
-                        description="A constraint",
+                        rule="A constraint",
                         related_hazards=["H-1"],
                     ),
                 ],

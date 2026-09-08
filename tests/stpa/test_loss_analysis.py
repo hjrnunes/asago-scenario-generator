@@ -51,7 +51,7 @@ def _make_constraint(
 ) -> SecurityConstraint:
     return SecurityConstraint(
         constraint_id=constraint_id,
-        description="A constraint",
+        rule="A constraint",
         related_hazards=related_hazards or ["H-1"],
     )
 

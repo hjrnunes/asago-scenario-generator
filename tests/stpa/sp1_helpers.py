@@ -291,7 +291,12 @@ def valid_stage1_profile_dict() -> dict:
 
 
 def valid_risk_draft_dict() -> dict:
-    """Return a valid LossAnalysisDraft dict for the risk_derivation call."""
+    """Return a valid LossAnalysisDraft dict for the risk_derivation call.
+
+    The hazard/constraint wording shares an explicit subject phrase so the
+    merged graph passes the deterministic hazard-graph density gate without
+    needing the bounded revision call.
+    """
     return {
         "risk_card_losses": [
             {
@@ -305,22 +310,35 @@ def valid_risk_draft_dict() -> dict:
         "hazards": [
             {
                 "hazard_id": "H-1",
-                "description": "Agent executes unintended action",
+                "description": "The agent executes an unintended payment.",
                 "related_losses": ["L-1"],
             }
         ],
         "security_constraints": [
             {
                 "constraint_id": "SC-1",
-                "description": "Must confirm before action",
+                "rule": "The agent must confirm every unintended payment.",
+                "applies_when": ["before execution"],
                 "related_hazards": ["H-1"],
+            }
+        ],
+        "risk_dispositions": [
+            {
+                "risk_ref": "atlas-001",
+                "disposition": "cited",
+                "loss_ids": ["L-1"],
+                "reason": None,
             }
         ],
     }
 
 
 def valid_gap_draft_dict() -> dict:
-    """Return a valid LossAnalysisDraft dict for the gap_analysis call."""
+    """Return a valid LossAnalysisDraft dict for the gap_analysis call.
+
+    Like the risk draft, the wording shares an explicit subject phrase so
+    the merged graph passes the density gate.
+    """
     return {
         "risk_card_losses": [],
         "use_case_losses": [
@@ -334,14 +352,15 @@ def valid_gap_draft_dict() -> dict:
         "hazards": [
             {
                 "hazard_id": "H-2",
-                "description": "Agent erodes user trust",
+                "description": "The agent erodes user trust.",
                 "related_losses": ["L-2"],
             }
         ],
         "security_constraints": [
             {
                 "constraint_id": "SC-2",
-                "description": "Must maintain transparency",
+                "rule": "The agent must preserve user trust.",
+                "applies_when": ["through transparency"],
                 "related_hazards": ["H-2"],
             }
         ],
@@ -376,24 +395,26 @@ def valid_loss_analysis_dict() -> dict:
         "hazards": [
             {
                 "hazard_id": "H-1",
-                "description": "Agent executes unintended action",
+                "description": "The agent executes an unintended payment.",
                 "related_losses": ["L-1"],
             },
             {
                 "hazard_id": "H-2",
-                "description": "Agent erodes user trust",
+                "description": "The agent erodes user trust.",
                 "related_losses": ["L-2"],
             },
         ],
         "security_constraints": [
             {
                 "constraint_id": "SC-1",
-                "description": "Must confirm before action",
+                "rule": "The agent must confirm every unintended payment.",
+                "applies_when": ["before execution"],
                 "related_hazards": ["H-1"],
             },
             {
                 "constraint_id": "SC-2",
-                "description": "Must maintain transparency",
+                "rule": "The agent must preserve user trust.",
+                "applies_when": ["through transparency"],
                 "related_hazards": ["H-2"],
             },
         ],

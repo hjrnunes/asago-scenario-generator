@@ -48,12 +48,13 @@ def _run14_invalid_gap_response() -> dict:
         "security_constraints": [
             {
                 "constraint_id": "SC-7",
-                "description": (
+                "rule": (
                     "The system must identify complex or nuanced queries that "
                     "fall outside the scope of standard, structured intents "
                     "and trigger an immediate escalation to a human agent."
                 ),
                 "related_hazards": ["H-7"],
+                "applies_when": [],
             }
         ],
     }
@@ -62,6 +63,14 @@ def _run14_invalid_gap_response() -> dict:
 def _run15_risk_response() -> dict:
     """Return the authoritative risk response from the run-15 capture."""
     return {
+        "risk_dispositions": [
+            {
+                "risk_ref": "atlas-001",
+                "disposition": "cited",
+                "loss_ids": ["L-1"],
+                "reason": None,
+            }
+        ],
         "risk_card_losses": [
             {
                 "loss_id": "L-1",
@@ -100,13 +109,14 @@ def _run15_risk_response() -> dict:
         "security_constraints": [
             {
                 "constraint_id": "SC-1",
-                "description": (
+                "rule": (
                     "The conversational interface must restrict the inclusion of "
                     "customer PII or sensitive personal data in model outputs to "
                     "only those users with an established, authenticated session "
                     "matching the data owner's identity."
                 ),
                 "related_hazards": ["H-1"],
+                "applies_when": [],
             }
         ],
     }
@@ -160,8 +170,9 @@ def _run15_invalid_gap_response() -> dict:
         "security_constraints": [
             {
                 "constraint_id": f"SC-{index}",
-                "description": f"Run-15 constraint {index}.",
+                "rule": f"Run-15 constraint {index}.",
                 "related_hazards": [f"H-{index}"],
+                "applies_when": [],
             }
             for index in range(2, 18)
         ],
@@ -206,18 +217,19 @@ def _run15_correction_response() -> dict:
         "security_constraints": [
             {
                 "constraint_id": "SC-1",
-                "description": (
+                "rule": (
                     "The conversational interface must restrict the inclusion of "
                     "customer PII or sensitive personal data in model outputs to "
                     "only those users with an established, authenticated session "
                     "matching the data owner's identity."
                 ),
                 "related_hazards": ["H-1"],
+                "applies_when": [],
             },
             *[
                 {
                     "constraint_id": f"SC-{index}",
-                    "description": f"Run-15 corrected constraint {index}.",
+                    "rule": f"Run-15 corrected constraint {index}.",
                     "related_hazards": {
                         2: ["H-2"],
                         3: ["H-3", "H-5"],
@@ -235,6 +247,7 @@ def _run15_correction_response() -> dict:
                         15: ["H-2"],
                         16: ["H-2", "H-3"],
                     }[index],
+                    "applies_when": [],
                 }
                 for index in range(2, 17)
             ],
@@ -245,6 +258,14 @@ def _run15_correction_response() -> dict:
 def _run16_initial_risk_response() -> dict:
     """Return a neutralized run-16 response with L-2 in the wrong section."""
     return {
+        "risk_dispositions": [
+            {
+                "risk_ref": "atlas-001",
+                "disposition": "cited",
+                "loss_ids": ["L-1"],
+                "reason": None,
+            }
+        ],
         "risk_card_losses": [
             {
                 "loss_id": "L-1",
@@ -271,14 +292,16 @@ def _run16_initial_risk_response() -> dict:
         "security_constraints": [
             {
                 "constraint_id": "SC-1",
-                "description": "Run-16 authoritative constraint one.",
+                "rule": "Run-16 authoritative constraint one.",
                 "related_hazards": ["H-1"],
+                "applies_when": [],
             },
             *[
                 {
                     "constraint_id": f"SC-{index}",
-                    "description": f"Run-16 invalid constraint {index}.",
+                    "rule": f"Run-16 invalid constraint {index}.",
                     "related_hazards": [f"H-{index}"],
+                    "applies_when": [],
                 }
                 for index in range(2, 17)
             ],
@@ -289,6 +312,14 @@ def _run16_initial_risk_response() -> dict:
 def _run16_correction_response() -> dict:
     """Return the closed run-16 correction with L-2 canonically placed."""
     return {
+        "risk_dispositions": [
+            {
+                "risk_ref": "atlas-001",
+                "disposition": "cited",
+                "loss_ids": ["L-1"],
+                "reason": None,
+            }
+        ],
         "risk_card_losses": [
             {
                 "loss_id": "L-1",
@@ -330,8 +361,9 @@ def _run16_correction_response() -> dict:
         "security_constraints": [
             {
                 "constraint_id": f"SC-{index}",
-                "description": f"Run-16 corrected constraint {index}.",
+                "rule": f"Run-16 corrected constraint {index}.",
                 "related_hazards": [f"H-{index}"],
+                "applies_when": [],
             }
             for index in range(1, 7)
         ],
@@ -385,7 +417,7 @@ def test_run15_section_patch_retains_losses_and_drops_obsolete_records(tmp_path)
     )
     assert (
         result.security_constraints[0].description
-        == _run15_risk_response()["security_constraints"][0]["description"]
+        == _run15_risk_response()["security_constraints"][0]["rule"]
     )
 
     entries = [
@@ -409,8 +441,14 @@ def test_run15_section_patch_retains_losses_and_drops_obsolete_records(tmp_path)
         "use_case_losses",
         "hazards",
         "security_constraints",
+        "risk_dispositions",
     }
-    for field in wire_schema["required"]:
+    for field in (
+        "risk_card_losses",
+        "use_case_losses",
+        "hazards",
+        "security_constraints",
+    ):
         assert wire_schema["properties"][field]["maxItems"] == 16
 
 

@@ -108,8 +108,9 @@ def _observed_invalid_risk_draft() -> dict:
     draft["security_constraints"] = [
         {
             "constraint_id": f"SC-{index}",
-            "description": f"Constraint {index}",
+            "rule": f"Constraint {index}",
             "related_hazards": [f"H-{index + 1}"],
+            "applies_when": [],
         }
         for index in range(1, 7)
     ]
@@ -295,6 +296,7 @@ class TestStage1aLossAnalysis:
         risk["hazards"][0]["hazard_id"] = "H-7"
         risk["security_constraints"][0]["related_hazards"] = ["H-7"]
         risk["security_constraints"][0]["constraint_id"] = "SC-3"
+        risk["risk_dispositions"][0]["loss_ids"] = ["L-5"]
         # Gap draft uses L-3, H-2 (also non-sequential)
         gap = valid_gap_draft_dict()
         gap["use_case_losses"][0]["loss_id"] = "L-3"
@@ -491,6 +493,7 @@ class TestStage1aLossAnalysis:
             "use_case_losses": [],
             "hazards": [],
             "security_constraints": [],
+            "risk_dispositions": [],
         }
         client = MockLLMClient()
         client.set_response_for(
@@ -513,6 +516,7 @@ class TestStage1aLossAnalysis:
             "use_case_losses": [],
             "hazards": [],
             "security_constraints": [],
+            "risk_dispositions": [],
         }
         client = MockLLMClient()
         client.set_response_for(
@@ -620,8 +624,17 @@ class TestStage1aLossAnalysis:
             "security_constraints": [
                 {
                     "constraint_id": "SC-1",
-                    "description": "Risk constraint",
+                    "rule": "Risk constraint",
                     "related_hazards": ["H-1"],
+                    "applies_when": [],
+                }
+            ],
+            "risk_dispositions": [
+                {
+                    "risk_ref": "atlas-001",
+                    "disposition": "cited",
+                    "loss_ids": ["L-1"],
+                    "reason": None,
                 }
             ],
         }
@@ -638,8 +651,9 @@ class TestStage1aLossAnalysis:
             "security_constraints": [
                 {
                     "constraint_id": "SC-2",
-                    "description": "Gap constraint",
+                    "rule": "Gap constraint",
                     "related_hazards": ["H-2"],
+                    "applies_when": [],
                 }
             ],
         }
@@ -749,8 +763,10 @@ class TestStage1aLossAnalysis:
 
     def test_la_21_sp1_merge_failure_is_partial_and_manifested(self, tmp_path):
         """SP1 contains merge failures and persists the existing diagnostic schema."""
-        bad_risk = valid_risk_draft_dict()
-        bad_risk["risk_card_losses"][0]["source_risk_cards"] = []
+        # A use-case loss that cites a risk card passes both call validators
+        # and fails only when the merged analysis validates provenance.
+        bad_gap = valid_gap_draft_dict()
+        bad_gap["use_case_losses"][0]["source_risk_cards"] = ["atlas-001"]
         client = MockLLMClient()
         client.set_response_for(
             Stage1Profile,
@@ -758,7 +774,7 @@ class TestStage1aLossAnalysis:
         )
         client.set_response_for(
             LossAnalysisDraft,
-            [bad_risk, valid_gap_draft_dict()],
+            [valid_risk_draft_dict(), bad_gap],
         )
 
         # No ValidationError escapes the public SP1 seam.
@@ -983,7 +999,13 @@ class TestStage1aLossAnalysis:
             "_DraftReferenceValidationError: gap_analysis draft has empty "
             "cross-references: "
             "hazards.related_losses empty for H-2; "
-            "security_constraints.related_hazards empty for SC-2"
+            "security_constraints.related_hazards empty for SC-2. "
+            "Validation feedback: gap_analysis draft has empty cross-references: "
+            "hazards.related_losses empty for H-2; "
+            "security_constraints.related_hazards empty for SC-2. Every supplied "
+            "hazard must list at least one related loss and every supplied "
+            "security constraint must list at least one related hazard. An empty "
+            "gap response is valid only when both collections are empty."
         )
         assert str(exc_info.value) == expected
         assert len(client.calls) == 3

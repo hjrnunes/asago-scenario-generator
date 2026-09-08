@@ -678,7 +678,12 @@ def _h_minitems_model_with_empty_field(
         }
         if field == "hazards":
             kwargs["security_constraints"] = [
-                {"constraint_id": "SC-1", "description": "C", "related_hazards": []},
+                {
+                    "constraint_id": "SC-1",
+                    "rule": "C",
+                    "applies_when": [],
+                    "related_hazards": [],
+                },
             ]
         elif field == "security_constraints":
             kwargs["hazards"] = [
@@ -716,7 +721,12 @@ def _h_minitems_la_empty_optional_field(
             {"hazard_id": "H-1", "description": "H", "related_losses": ["L-1"]}
         ],
         "security_constraints": [
-            {"constraint_id": "SC-1", "description": "C", "related_hazards": ["H-1"]},
+            {
+                "constraint_id": "SC-1",
+                "rule": "C",
+                "applies_when": [],
+                "related_hazards": ["H-1"],
+            },
         ],
     }
     if field == "risk_card_losses":
@@ -751,8 +761,9 @@ def _h_minitems_la_with_hazard_constraint(
             security_constraints=[
                 {
                     "constraint_id": "SC-1",
-                    "description": "C",
+                    "rule": "C",
                     "related_hazards": ["H-1"],
+                    "applies_when": [],
                 },
             ],
         )

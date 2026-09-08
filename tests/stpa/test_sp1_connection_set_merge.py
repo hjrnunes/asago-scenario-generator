@@ -65,11 +65,9 @@ def _make_loss_analysis() -> LossAnalysis:
             Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"]),
         ],
         security_constraints=[
+            SecurityConstraint(constraint_id="SC-1", rule="C", related_hazards=["H-1"]),
             SecurityConstraint(
-                constraint_id="SC-1", description="C", related_hazards=["H-1"]
-            ),
-            SecurityConstraint(
-                constraint_id="SC-2", description="C2", related_hazards=["H-1"]
+                constraint_id="SC-2", rule="C2", related_hazards=["H-1"]
             ),
         ],
     )

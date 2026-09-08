@@ -16,7 +16,6 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ProcessModelPart,
     ReferenceType,
     Responsibility,
-
 )
 from asago_scenario_generator.stpa.models.loss_analysis import (
     Hazard,
@@ -47,15 +46,15 @@ def _make_responsibility(
     num = resp_id[-1]
     pms = [
         ProcessModelPart(
-            pm_id=f"PM-{num}-{i+1}",
-            description=f"PM part {i+1}",
+            pm_id=f"PM-{num}-{i + 1}",
+            description=f"PM part {i + 1}",
         )
         for i in range(pm_count)
     ]
     cas = [
         ControlAction(
-            ca_id=f"CA-{num}-{i+1}",
-            description=f"CA {i+1}",
+            ca_id=f"CA-{num}-{i + 1}",
+            description=f"CA {i + 1}",
         )
         for i in range(ca_count)
     ]
@@ -63,11 +62,11 @@ def _make_responsibility(
     actual_fb_count = min(fb_count, pm_count) if pm_count > 0 else 0
     fbs = []
     for i in range(actual_fb_count):
-        pm_id = f"PM-{num}-{i+1}"
+        pm_id = f"PM-{num}-{i + 1}"
         fbs.append(
             FeedbackChannel(
-                fb_id=f"FB-{num}-{i+1}",
-                description=f"FB {i+1}",
+                fb_id=f"FB-{num}-{i + 1}",
+                description=f"FB {i + 1}",
                 updates=pm_id,
                 source=ElementRef(type=ReferenceType.responsibility, id=resp_id),
             )
@@ -113,7 +112,7 @@ def _make_loss_analysis_for_hazard(
         security_constraints=[
             SecurityConstraint(
                 constraint_id=constraint_id,
-                description="Constraint",
+                rule="Constraint",
                 related_hazards=["H-1"],
             ),
         ],

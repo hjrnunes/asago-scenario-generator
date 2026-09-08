@@ -103,6 +103,7 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     RequirementSet as _SP1RequirementSet,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
+    _Stage1aRevisionPatch as _SP1Stage1aRevisionPatch,
     derive_loss_analysis as _sp1_derive_loss_analysis,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import (
@@ -263,7 +264,10 @@ def _make_minimal_loss_analysis() -> LossAnalysis:
         hazards=[Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"])],
         security_constraints=[
             SecurityConstraint(
-                constraint_id="SC-1", description="Constraint", related_hazards=["H-1"]
+                constraint_id="SC-1",
+                rule="Constraint",
+                applies_when=[],
+                related_hazards=["H-1"],
             )
         ],
     )
@@ -488,10 +492,16 @@ def _sp1_make_loss_analysis_with_constraints() -> LossAnalysis:
         ],
         security_constraints=[
             SecurityConstraint(
-                constraint_id="SC-1", description="C1", related_hazards=["H-1"]
+                constraint_id="SC-1",
+                rule="C1",
+                applies_when=[],
+                related_hazards=["H-1"],
             ),
             SecurityConstraint(
-                constraint_id="SC-2", description="C2", related_hazards=["H-2"]
+                constraint_id="SC-2",
+                rule="C2",
+                applies_when=[],
+                related_hazards=["H-2"],
             ),
         ],
     )
@@ -947,13 +957,25 @@ def _sp1_valid_la_dict() -> dict:
         "security_constraints": [
             {
                 "constraint_id": "SC-1",
-                "description": "Must confirm before action",
+                "rule": (
+                    "The agent must confirm every unintended action before execution."
+                ),
                 "related_hazards": ["H-1"],
+                "applies_when": [],
             },
             {
                 "constraint_id": "SC-2",
-                "description": "Must not expose data",
+                "rule": "Must not expose data",
                 "related_hazards": ["H-2"],
+                "applies_when": [],
+            },
+        ],
+        "risk_dispositions": [
+            {
+                "risk_ref": "atlas-001",
+                "disposition": "cited",
+                "loss_ids": ["L-1"],
+                "reason": None,
             },
         ],
     }
@@ -1352,6 +1374,44 @@ def _sp1_make_risk_cards() -> list:
     ]
 
 
+def _sp1_valid_revision_patch_dict() -> dict:
+    """A graph-revision patch that restates the shared fixture's graph.
+
+    The patch wire carries only hazards and constraints; losses and
+    qualifiers are owned by the prior analysis and deterministic code.
+    """
+    return {
+        "hazards": [
+            {
+                "hazard_id": "H-1",
+                "description": "Agent executes unintended action",
+                "related_losses": ["L-1", "L-3"],
+            },
+            {
+                "hazard_id": "H-2",
+                "description": "Agent exposes data",
+                "related_losses": ["L-2"],
+            },
+        ],
+        "security_constraints": [
+            {
+                "constraint_id": "SC-1",
+                "rule": (
+                    "The agent must confirm every unintended action before execution."
+                ),
+                "related_hazards": ["H-1"],
+                "applies_when": [],
+            },
+            {
+                "constraint_id": "SC-2",
+                "rule": "Must not expose data",
+                "related_hazards": ["H-2"],
+                "applies_when": [],
+            },
+        ],
+    }
+
+
 def _sp1_setup_full_mock_client(
     critic_findings: dict | None = None,
     revised_cs: dict | None = None,
@@ -1359,6 +1419,7 @@ def _sp1_setup_full_mock_client(
     """Set up a mock LLM client with valid responses for all stages."""
     client = _SP1MockLLM()
     client.set_response_for(_SP1LossAnalysisDraft, _sp1_valid_la_dict())
+    client.set_response_for(_SP1Stage1aRevisionPatch, _sp1_valid_revision_patch_dict())
     client.set_response_for(_SP1Stage1Profile, _sp1_valid_stage1_profile_dict())
     client.set_response_for(_SP1RequirementSet, _sp1_valid_req_set_dict())
     client.set_response_for(_SP1ResponsibilitySet, _sp1_valid_resp_set_2a_dict())
@@ -2383,7 +2444,8 @@ def _make_sp3_loss_analysis() -> LossAnalysis:
         security_constraints=[
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="The system must validate before action",
+                rule="The system must validate before action",
+                applies_when=[],
                 related_hazards=["H-1"],
             ),
         ],

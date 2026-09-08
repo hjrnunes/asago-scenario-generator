@@ -48,7 +48,10 @@ class TestCall2aPromptPMFBCorrespondence:
         """SP1-PMFB-01: system prompt requires PM-FB correspondence."""
         loader = TemplateLoader(PROMPTS_DIR)
         text = loader.render_prompt("stage2_call2b_system.j2")
-        assert "Every process model part (PM-X-Y) MUST have at least one feedback channel" in text
+        assert (
+            "Every process model part (PM-X-Y) MUST have at least one feedback channel"
+            in text
+        )
         assert "updates` field references that PM" in text
         assert "No orphan PMs" in text
 
@@ -56,7 +59,10 @@ class TestCall2aPromptPMFBCorrespondence:
         """SP1-PMFB-02: system prompt requires N FBs for N PMs."""
         loader = TemplateLoader(PROMPTS_DIR)
         text = loader.render_prompt("stage2_call2b_system.j2")
-        assert "If a responsibility has N process model parts, it must have at least N feedback channels" in text
+        assert (
+            "If a responsibility has N process model parts, it must have at least N feedback channels"
+            in text
+        )
 
     def test_pmfb_03_user_prompt_strengthens_step_5(self):
         """SP1-PMFB-03: user prompt strengthens step 5 with one FB per PM."""
@@ -91,11 +97,7 @@ def _make_resp(
     """
     num = resp_id.split("-")[-1]
     pms = [ProcessModelPart(pm_id=pid, description=f"State {pid}") for pid in pm_ids]
-    cas = (
-        [ControlAction(ca_id=f"CA-{num}-1", description="Action")]
-        if with_ca
-        else []
-    )
+    cas = [ControlAction(ca_id=f"CA-{num}-1", description="Action")] if with_ca else []
     fbs = []
     if fb_specs:
         for fb_id, updates in fb_specs:
@@ -160,7 +162,9 @@ class TestRepairOrphanPMs:
 
     def test_pmfb_06_description_indicates_auto_generation(self):
         """SP1-PMFB-06: stub FB description contains 'Auto-generated feedback for orphan PM'."""
-        resp = _make_resp("RESP-1", ["PM-1-1", "PM-1-3"], fb_specs=[("FB-1-1", "PM-1-1")])
+        resp = _make_resp(
+            "RESP-1", ["PM-1-1", "PM-1-3"], fb_specs=[("FB-1-1", "PM-1-1")]
+        )
         cs = _make_cs([resp])
         repaired, _ = repair_orphan_pms(cs)
         r0 = repaired.responsibilities[0]
@@ -169,7 +173,9 @@ class TestRepairOrphanPMs:
 
     def test_pmfb_07_updates_references_orphan_pm(self):
         """SP1-PMFB-07: stub FB updates field equals the orphan PM id."""
-        resp = _make_resp("RESP-1", ["PM-1-1", "PM-1-2"], fb_specs=[("FB-1-1", "PM-1-1")])
+        resp = _make_resp(
+            "RESP-1", ["PM-1-1", "PM-1-2"], fb_specs=[("FB-1-1", "PM-1-1")]
+        )
         cs = _make_cs([resp])
         repaired, _ = repair_orphan_pms(cs)
         r0 = repaired.responsibilities[0]
@@ -214,7 +220,9 @@ class TestRepairOrphanPMs:
 
     def test_pmfb_11_orphans_across_multiple_resps_all_repaired(self):
         """SP1-PMFB-11: orphans across multiple responsibilities are all repaired."""
-        resp1 = _make_resp("RESP-1", ["PM-1-1", "PM-1-2"], fb_specs=[("FB-1-1", "PM-1-1")])
+        resp1 = _make_resp(
+            "RESP-1", ["PM-1-1", "PM-1-2"], fb_specs=[("FB-1-1", "PM-1-1")]
+        )
         resp2 = _make_resp("RESP-2", ["PM-2-1"], fb_specs=None)
         cs = _make_cs([resp1, resp2])
         repaired, _ = repair_orphan_pms(cs)
@@ -227,8 +235,12 @@ class TestRepairOrphanPMs:
 
     def test_pmfb_12_repaired_set_has_no_orphan_pms(self):
         """SP1-PMFB-12: after repair, every PM is referenced by at least one FB."""
-        resp1 = _make_resp("RESP-1", ["PM-1-1", "PM-1-2"], fb_specs=[("FB-1-1", "PM-1-1")])
-        resp2 = _make_resp("RESP-2", ["PM-2-1", "PM-2-2"], fb_specs=[("FB-2-1", "PM-2-1")])
+        resp1 = _make_resp(
+            "RESP-1", ["PM-1-1", "PM-1-2"], fb_specs=[("FB-1-1", "PM-1-1")]
+        )
+        resp2 = _make_resp(
+            "RESP-2", ["PM-2-1", "PM-2-2"], fb_specs=[("FB-2-1", "PM-2-1")]
+        )
         cs = _make_cs([resp1, resp2])
         repaired, _ = repair_orphan_pms(cs)
         for resp in repaired.responsibilities:
@@ -242,9 +254,7 @@ class TestRepairOrphanPMs:
         Guards against the ``fb.source is not None`` → ``fb.source is None``
         mutation in ``_create_stub_fb``.
         """
-        existing_source = ElementRef(
-            type=ReferenceType.responsibility, id="RESP-1"
-        )
+        existing_source = ElementRef(type=ReferenceType.responsibility, id="RESP-1")
         resp = Responsibility(
             resp_id="RESP-1",
             description="Controller 1",
@@ -252,9 +262,7 @@ class TestRepairOrphanPMs:
                 ProcessModelPart(pm_id="PM-1-1", description="State 1"),
                 ProcessModelPart(pm_id="PM-1-2", description="Orphan"),
             ],
-            control_actions=[
-                ControlAction(ca_id="CA-1-1", description="Action")
-            ],
+            control_actions=[ControlAction(ca_id="CA-1-1", description="Action")],
             feedback_channels=[
                 FeedbackChannel(
                     fb_id="FB-1-1",
@@ -391,7 +399,7 @@ class TestRepairCalledInDeriveControlStructure:
             ],
             security_constraints=[
                 SecurityConstraint(
-                    constraint_id="SC-1", description="C", related_hazards=["H-1"]
+                    constraint_id="SC-1", rule="C", related_hazards=["H-1"]
                 ),
             ],
         )

@@ -45,7 +45,7 @@ def make_minimal_loss_analysis() -> LossAnalysis:
         security_constraints=[
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="Constraint",
+                rule="Constraint",
                 related_hazards=["H-1"],
             )
         ],

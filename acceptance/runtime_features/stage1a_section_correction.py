@@ -56,8 +56,17 @@ def _risk_response(
         "security_constraints": [
             {
                 "constraint_id": "risk-base-constraint",
-                "description": "The request must remain authorized.",
+                "rule": "The request must remain authorized.",
                 "related_hazards": ["risk-base-hazard"],
+                "applies_when": [],
+            }
+        ],
+        "risk_dispositions": [
+            {
+                "risk_ref": "neutral-risk",
+                "disposition": "cited",
+                "loss_ids": ["risk-base-loss"],
+                "reason": None,
             }
         ],
     }
@@ -86,8 +95,9 @@ def _invalid_gap_response() -> dict[str, Any]:
         "security_constraints": [
             {
                 "constraint_id": "obsolete-constraint",
-                "description": "The obsolete gap condition must be prevented.",
+                "rule": "The obsolete gap condition must be prevented.",
                 "related_hazards": ["gap-hazard"],
+                "applies_when": [],
             }
         ],
     }
@@ -108,8 +118,9 @@ def _section_patch_response() -> dict[str, Any]:
         "security_constraints": [
             {
                 "constraint_id": "current-constraint",
-                "description": "The corrected request condition must be prevented.",
+                "rule": "The corrected request condition must be prevented.",
                 "related_hazards": ["gap-hazard"],
+                "applies_when": [],
             }
         ],
     }
@@ -128,8 +139,9 @@ def _conflicting_correction_response() -> dict[str, Any]:
     response["security_constraints"] = [
         {
             "constraint_id": "current-constraint",
-            "description": "The current request condition must be prevented.",
+            "rule": "The current request condition must be prevented.",
             "related_hazards": ["risk-base-hazard"],
+            "applies_when": [],
         }
     ]
     return response
@@ -230,8 +242,9 @@ def _h_wire(world: World, text: str, examples: dict[str, str]) -> tuple[bool, st
         "use_case_losses",
         "hazards",
         "security_constraints",
+        "risk_dispositions",
     }
-    return required == expected, f"expected four required collections, got {required}"
+    return required == expected, f"expected five required collections, got {required}"
 
 
 def _h_prior_risk_loss(
@@ -416,7 +429,7 @@ def register(api: object) -> None:
     api.register(r'^a neutral Stage 1a correction fixture "[^"]+"$', _h_fixture)
     api.register(r"^the public Stage 1a loss-analysis seam is called$", _h_run)
     api.register(
-        r"^the Stage 1a wire contract requires exactly four collections$", _h_wire
+        r"^the Stage 1a wire contract requires exactly five collections$", _h_wire
     )
     api.register(
         r"^the corrected analysis retains the prior risk-derived loss$",

@@ -55,8 +55,9 @@ def _loss_response() -> dict[str, Any]:
         "security_constraints": [
             {
                 "constraint_id": "SC-1",
-                "description": "The system must reject unauthorized actions",
+                "rule": "The system must reject unauthorized actions",
                 "related_hazards": ["H-1"],
+                "applies_when": [],
             }
         ],
     }
@@ -525,9 +526,13 @@ def _case_05(result: subprocess.CompletedProcess[str], output_dir: Path) -> None
     assert structure["controlled_processes"] == []
     entries = [
         json.loads(line)
-        for line in (output_dir / "calls.jsonl").read_text(encoding="utf-8").splitlines()
+        for line in (output_dir / "calls.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
     ]
-    call_2b = next(entry for entry in entries if entry.get("step") == "call_2b_control_elements")
+    call_2b = next(
+        entry for entry in entries if entry.get("step") == "call_2b_control_elements"
+    )
     response = json.loads(call_2b["response_content"])
     assert response == {"control_actions": [{"description": "Defaulted action"}]}
 

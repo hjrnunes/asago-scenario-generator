@@ -20,7 +20,7 @@ grounded by the use-case evidence.
 
 ### Losses
 {% for loss in existing_losses %}
-- **{{ loss.loss_id }}** ({{ loss.provenance }}): {{ loss.description }}
+- **{{ loss.loss_id }}** ({{ loss.provenance.value }}): {{ loss.description }}
   {% if loss.source_risk_cards %}Source risks: {{ loss.source_risk_cards | join(", ") }}{% endif %}
 {% endfor %}
 

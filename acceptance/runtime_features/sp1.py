@@ -182,8 +182,17 @@ def _h_sp1_la_invalid_ref(world: World, text: str, examples: dict) -> tuple[bool
             "security_constraints": [
                 {
                     "constraint_id": "SC-1",
-                    "description": "Constraint 1",
+                    "rule": "Constraint 1",
                     "related_hazards": ["H-1"],
+                    "applies_when": [],
+                },
+            ],
+            "risk_dispositions": [
+                {
+                    "risk_ref": "atlas-001",
+                    "disposition": "cited",
+                    "loss_ids": ["L-1"],
+                    "reason": None,
                 },
             ],
         }
@@ -208,8 +217,17 @@ def _h_sp1_la_invalid_ref(world: World, text: str, examples: dict) -> tuple[bool
             "security_constraints": [
                 {
                     "constraint_id": "SC-1",
-                    "description": "C1",
+                    "rule": "C1",
                     "related_hazards": ["H-99"],
+                    "applies_when": [],
+                },
+            ],
+            "risk_dispositions": [
+                {
+                    "risk_ref": "atlas-001",
+                    "disposition": "cited",
+                    "loss_ids": ["L-1"],
+                    "reason": None,
                 },
             ],
         }
@@ -219,6 +237,14 @@ def _h_sp1_la_invalid_ref(world: World, text: str, examples: dict) -> tuple[bool
             "use_case_losses": [],
             "hazards": [],
             "security_constraints": [],
+            "risk_dispositions": [
+                {
+                    "risk_ref": "atlas-001",
+                    "disposition": "not_applicable",
+                    "loss_ids": [],
+                    "reason": "No loss applies to this risk card.",
+                },
+            ],
         }
     return True, ""
 
@@ -687,8 +713,9 @@ def _h_sp1_la_use_case_loss(
         "security_constraints": [
             {
                 "constraint_id": "SC-3",
-                "description": "Constraint",
+                "rule": "Constraint",
                 "related_hazards": ["H-3"],
+                "applies_when": [],
             }
         ],
     }
@@ -722,9 +749,18 @@ def _h_sp1_la_risk_card_missing_source(
         "security_constraints": [
             {
                 "constraint_id": "SC-1",
-                "description": "Constraint",
+                "rule": "Constraint",
                 "related_hazards": ["H-1"],
+                "applies_when": [],
             }
+        ],
+        "risk_dispositions": [
+            {
+                "risk_ref": "atlas-001",
+                "disposition": "cited",
+                "loss_ids": ["L-1"],
+                "reason": None,
+            },
         ],
     }
     return True, ""
@@ -750,8 +786,9 @@ def _h_sp1_la_use_case_with_source(
         "security_constraints": [
             {
                 "constraint_id": "SC-3",
-                "description": "Constraint",
+                "rule": "Constraint",
                 "related_hazards": ["H-3"],
+                "applies_when": [],
             }
         ],
     }
@@ -2639,7 +2676,10 @@ def _h_sp1_heur_la_hazard(world: World, text: str, examples: dict) -> tuple[bool
         hazards=[Hazard(hazard_id="H-1", description="H1", related_losses=["L-1"])],
         security_constraints=[
             SecurityConstraint(
-                constraint_id="SC-1", description="C1", related_hazards=["H-1"]
+                constraint_id="SC-1",
+                rule="C1",
+                applies_when=[],
+                related_hazards=["H-1"],
             )
         ],
     )

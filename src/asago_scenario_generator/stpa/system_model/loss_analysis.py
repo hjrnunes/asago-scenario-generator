@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import BaseModel, Field, ValidationError
 
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
@@ -41,6 +41,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysisDraft,
     Loss,
     LossProvenance,
+    RiskDisposition,
     SecurityConstraint,
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
@@ -54,8 +55,20 @@ STAGE1A_MAX_COMPLETION_TOKENS = 8192
 DEFAULT_TEMPERATURE = 0.4
 
 
-class _Stage1aProviderDraft(LossAnalysisDraft):
-    """Required provider wire for the four Stage 1a collections.
+class _ProviderSecurityConstraint(SecurityConstraint):
+    """Provider wire constraint: authored rule and conditions are required.
+
+    Phase 1.3 as amended: the model writes ``rule`` and ``applies_when``;
+    code composes ``description``.  Both keys stay required (``applies_when``
+    may be empty) so the model always decides rather than silently omitting
+    the fields.
+    """
+
+    applies_when: list[str]
+
+
+class _Stage1aGapProviderDraft(LossAnalysisDraft):
+    """Required provider wire for the gap-analysis and graph-revision calls.
 
     The internal draft remains partial so the two calls can exchange a loss
     registry before closing the dependent graph.  The provider contract,
@@ -65,7 +78,46 @@ class _Stage1aProviderDraft(LossAnalysisDraft):
     risk_card_losses: list[Loss] = Field(max_length=16)
     use_case_losses: list[Loss] = Field(max_length=16)
     hazards: list[Hazard] = Field(max_length=16)
-    security_constraints: list[SecurityConstraint] = Field(max_length=16)
+    security_constraints: list[_ProviderSecurityConstraint] = Field(max_length=16)
+
+
+class _Stage1aRiskProviderDraft(_Stage1aGapProviderDraft):
+    """Provider wire for the risk-derivation call: adds risk accounting.
+
+    Every supplied risk card must be accounted for exactly once in the
+    response, so the disposition list is a required collection.
+    """
+
+    risk_dispositions: list[RiskDisposition]
+
+
+class _ProviderRevisionConstraint(BaseModel):
+    """One constraint in the graph-revision patch: identity and graph only.
+
+    Phase 1.3 as amended: the patch carries the same authored
+    ``rule`` + ``applies_when`` shape as Calls 1 and 2; code composes the
+    description.
+    """
+
+    constraint_id: str
+    rule: str = Field(min_length=1)
+    applies_when: list[str] = Field(min_length=0, max_length=4)
+    related_hazards: list[str]
+
+
+class _Stage1aRevisionPatch(BaseModel):
+    """Patch wire for the graph-revision call.
+
+    The model may edit only the hazard/constraint graph, in the same
+    authored ``rule`` + ``applies_when`` shape as the other Stage 1a calls.
+    Losses and risk dispositions are owned by the prior analysis and are
+    never on the wire, so the model cannot damage immutable records by
+    echoing them (live runs v2–v7 lost complete graphs to qualifier
+    flattening and loss-registry echoes).
+    """
+
+    hazards: list[Hazard] = Field(max_length=16)
+    security_constraints: list[_ProviderRevisionConstraint] = Field(max_length=16)
 
 
 def _compact_risk_card_evidence(risk_cards: Iterable[RiskCard]) -> list[str]:
@@ -297,6 +349,7 @@ def derive_loss_analysis(
     template_loader: TemplateLoader | None = None,
     temperature: float = DEFAULT_TEMPERATURE,
     capability_profile: CapabilityProfile | None = None,
+    normalization_warnings: list[str] | None = None,
 ) -> LossAnalysis:
     """Run Stage 1a: derive loss analysis via two sequential LLM calls.
 
@@ -346,6 +399,9 @@ def derive_loss_analysis(
         run_dir=run_dir,
         step=STEP_RISK,
         temperature=temperature,
+        response_format=_Stage1aRiskProviderDraft,
+        accounting_cards=risk_cards,
+        require_risk_accounting=bool(risk_cards),
         **risk_prompt_vars,
         allowed_loss_ids=set(),
         allowed_hazard_ids=set(),
@@ -354,6 +410,7 @@ def derive_loss_analysis(
         # hazard/constraint graph against that declared loss registry.
         require_losses=bool(risk_cards),
         require_complete_chain=False,
+        normalization_warnings=normalization_warnings,
     )
     # The gap prompt is a review of the first draft, so its context must be
     # the canonical source-separated view.  Models occasionally put a
@@ -391,6 +448,8 @@ def derive_loss_analysis(
         run_dir=run_dir,
         step=STEP_GAP,
         temperature=temperature,
+        response_format=_Stage1aGapProviderDraft,
+        require_risk_accounting=False,
         use_case_text=use_case_text,
         existing_losses=existing_losses,
         existing_hazards=risk_draft.hazards,
@@ -432,6 +491,85 @@ def derive_loss_analysis(
     return merged
 
 
+def _wire_error_summary(exc: ValidationError) -> str:
+    """Summarize a pydantic wire violation without dumping the full error."""
+    errors = exc.errors()
+
+    def _format(item: dict[str, object]) -> str:
+        loc = ".".join(str(part) for part in item.get("loc", ()))
+        return f"{loc}: {item.get('msg', '')}"[:120]
+
+    summary = "; ".join(_format(item) for item in errors[:5])
+    if len(errors) > 5:
+        summary += f" (+{len(errors) - 5} more schema errors)"
+    return summary
+
+
+# A citing loss that accounts for more than this many risk cards weakens
+# the "the citation is direct evidence" argument (one bulk loss can sweep
+# in cards the model explicitly excluded), so those flips are flagged for
+# reviewer attention in the gates artifact.
+BULK_CITATION_FLAG_THRESHOLD = 8
+
+
+def normalize_disposition_citations(
+    analysis: LossAnalysisDraft | LossAnalysis,
+) -> list[str]:
+    """Resolve disposition/citation contradictions from the response's own evidence.
+
+    A ``not_applicable`` disposition for a risk card that a loss explicitly
+    cites in ``source_risk_cards`` is self-contradictory wire data (spec rule
+    1.1(4)).  The citation is direct evidence that the model derived that
+    loss from the risk, so deterministic code flips the disposition to
+    ``cited`` with exactly the citing losses and returns a warning for
+    reviewer visibility in the gates artifact.  The warning retains the
+    model's dropped reason and flags flips whose only citing loss is a bulk
+    citation (more than :data:`BULK_CITATION_FLAG_THRESHOLD` cards), where
+    the dropped reason deserves human attention.  Mutates the analysis in
+    place.
+    """
+    warnings: list[str] = []
+    citing: dict[str, list[str]] = {}
+    loss_citation_counts: dict[str, int] = {}
+    for loss in analysis.risk_card_losses + analysis.use_case_losses:
+        loss_citation_counts[loss.loss_id] = len(set(loss.source_risk_cards))
+        for risk_ref in loss.source_risk_cards:
+            citing.setdefault(risk_ref, []).append(loss.loss_id)
+    for disposition in analysis.risk_dispositions:
+        if disposition.disposition != "not_applicable":
+            continue
+        loss_ids = sorted(set(citing.get(disposition.risk_ref, ())))
+        if not loss_ids:
+            continue
+        dropped_reason = (disposition.reason or "").strip()
+        disposition.disposition = "cited"
+        disposition.loss_ids = loss_ids
+        disposition.reason = None
+        bulk_losses = [
+            loss_id
+            for loss_id in loss_ids
+            if loss_citation_counts.get(loss_id, 0) > BULK_CITATION_FLAG_THRESHOLD
+        ]
+        bulk_note = (
+            f"; bulk citation: {', '.join(bulk_losses)} cite more than "
+            f"{BULK_CITATION_FLAG_THRESHOLD} cards, review the dropped reason"
+            if bulk_losses
+            else ""
+        )
+        reason_note = (
+            f"; the model's dropped reason was: {dropped_reason}"
+            if dropped_reason
+            else "; the model gave no reason"
+        )
+        warnings.append(
+            f"risk accounting normalized: '{disposition.risk_ref}' was "
+            f"not_applicable but is cited by {', '.join(loss_ids)}"
+            f"{reason_note}; flipped to cited from the response's own "
+            f"citation evidence{bulk_note}"
+        )
+    return warnings
+
+
 def _run_stage1a_call(
     *,
     llm_client: LLMClient,
@@ -441,11 +579,15 @@ def _run_stage1a_call(
     run_dir: Path,
     step: str,
     temperature: float,
+    response_format: type[LossAnalysisDraft],
     allowed_loss_ids: set[str],
     allowed_hazard_ids: set[str],
     require_losses: bool,
     require_complete_chain: bool,
+    require_risk_accounting: bool = False,
+    accounting_cards: Iterable[RiskCard] = (),
     authoritative_draft: LossAnalysisDraft | None = None,
+    normalization_warnings: list[str] | None = None,
     **template_vars: object,
 ) -> LossAnalysisDraft:
     """Render prompts, call the LLM, and return a validated draft.
@@ -457,9 +599,47 @@ def _run_stage1a_call(
     user_prompt = loader.render_prompt(user_template, **template_vars)
 
     validation_feedback: str | None = None
+    accounting_failure = False
+    first_parse_failed = False
 
-    def validate_references(draft: LossAnalysisDraft) -> None:
-        nonlocal validation_feedback
+    def parse_first_response(result: LLMResult) -> LossAnalysisDraft:
+        """Parse the first response, routing wire-schema errors into the retry.
+
+        A pydantic wire violation (for example a malformed or semantically
+        invalid ``risk_dispositions`` entry) is deterministic and actionable,
+        so it joins the reference validators in the one bounded retry instead
+        of crashing the run with an uncorrected parse failure.
+        """
+        nonlocal first_parse_failed, validation_feedback
+        try:
+            draft = parse_llm_result(result, response_format)
+        except ValidationError as exc:
+            first_parse_failed = True
+            validation_feedback = (
+                "Validation feedback: the prior response violated the "
+                f"required response schema: {_wire_error_summary(exc)} "
+                "Return the complete corrected structured object that "
+                "matches the response schema exactly."
+            )
+            raise
+        if authoritative_draft is not None:
+            merged = _merge_loss_analysis_correction(
+                LossAnalysisDraft(),
+                draft,
+                authoritative_draft=authoritative_draft,
+            )
+        else:
+            merged = draft
+        for warning in normalize_disposition_citations(merged):
+            if (
+                normalization_warnings is not None
+                and warning not in normalization_warnings
+            ):
+                normalization_warnings.append(warning)
+        return merged
+
+    def run_validators(draft: LossAnalysisDraft) -> None:
+        nonlocal accounting_failure
         try:
             _validate_draft_references(
                 draft,
@@ -480,6 +660,23 @@ def _run_stage1a_call(
                     allowed_loss_ids=allowed_loss_ids,
                     allowed_hazard_ids=allowed_hazard_ids,
                 )
+            if require_risk_accounting:
+                _validate_risk_accounting(
+                    draft,
+                    risk_cards=list(accounting_cards),
+                    context=step,
+                )
+        except _DraftReferenceValidationError as exc:
+            # Key the retry preamble on the failure kind, not the call type:
+            # a Call 1 failure that is not about accounting must not be
+            # presented to the model as the risk-accounting repair.
+            accounting_failure = "risk accounting is incomplete" in exc.feedback
+            raise
+
+    def validate_references(draft: LossAnalysisDraft) -> None:
+        nonlocal validation_feedback
+        try:
+            run_validators(draft)
         except _DraftReferenceValidationError as exc:
             validation_feedback = exc.feedback
             raise
@@ -487,38 +684,27 @@ def _run_stage1a_call(
             validation_feedback = exc.feedback
             raise
 
-    first_result_parser = None
-    if authoritative_draft is not None:
-
-        def parse_first_gap_result(result: LLMResult) -> LossAnalysisDraft:
-            return _merge_loss_analysis_correction(
-                LossAnalysisDraft(),
-                parse_llm_result(result, _Stage1aProviderDraft),
-                authoritative_draft=authoritative_draft,
-            )
-
-        first_result_parser = parse_first_gap_result
-
     draft, first_result, error_msg = safe_llm_call(
         llm_client=llm_client,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        response_format=_Stage1aProviderDraft,
+        response_format=response_format,
         run_dir=run_dir,
         stage=STAGE,
         step=step,
         temperature=temperature,
         max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
         json_decode_retries=JSON_DECODE_RETRIES,
-        result_parser=first_result_parser,
+        result_parser=parse_first_response,
         result_validator=validate_references,
     )
     if error_msg is None:
         assert draft is not None  # safe_llm_call guarantees this on success
         return draft
 
-    # Reference validation is deterministic and actionable, so give the model
-    # one bounded retry.  Parse/network failures do not get a duplicate call.
+    # Reference validation and wire-schema violations are deterministic and
+    # actionable, so give the model one bounded retry.  Network and provider
+    # failures do not get a duplicate call.
     if validation_feedback is None:
         raise StageError(stage=STAGE, step=step, message=error_msg)
 
@@ -528,53 +714,53 @@ def _run_stage1a_call(
         first_result=first_result,
         require_losses=require_losses,
         require_complete_chain=require_complete_chain,
+        accounting_failure=accounting_failure,
         section_patch=step == STEP_GAP,
     )
-    prior_draft = parse_llm_result(first_result, _Stage1aProviderDraft)
+    if first_parse_failed:
+        # The prior response never parsed, so there is no valid prior draft
+        # to patch against; the retry must return the complete object.
+        prior_draft = LossAnalysisDraft()
+    else:
+        prior_draft = parse_llm_result(first_result, response_format)
 
     def validate_retry_references(draft: LossAnalysisDraft) -> None:
-        _validate_draft_references(
-            draft,
-            context=step,
-            allowed_loss_ids=allowed_loss_ids,
-            allowed_hazard_ids=allowed_hazard_ids,
+        run_validators(draft)
+
+    def parse_retry_response(result: LLMResult) -> LossAnalysisDraft:
+        corrected = _merge_loss_analysis_correction(
+            prior_draft,
+            parse_llm_result(result, response_format),
+            authoritative_draft=authoritative_draft,
         )
-        _validate_draft_semantics(draft, context=step)
-        if require_losses:
-            _validate_loss_presence(
-                draft,
-                context=step,
-            )
-        if require_complete_chain:
-            _validate_complete_chain(
-                draft,
-                context=step,
-                allowed_loss_ids=allowed_loss_ids,
-                allowed_hazard_ids=allowed_hazard_ids,
-            )
+        for warning in normalize_disposition_citations(corrected):
+            if (
+                normalization_warnings is not None
+                and warning not in normalization_warnings
+            ):
+                normalization_warnings.append(warning)
+        return corrected
 
     draft, _, retry_error_msg = safe_llm_call(
         llm_client=llm_client,
         system_prompt=system_prompt,
         user_prompt=retry_prompt,
-        response_format=_Stage1aProviderDraft,
+        response_format=response_format,
         run_dir=run_dir,
         stage=STAGE,
         step=step,
         temperature=temperature,
         max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
-        result_parser=lambda result: _merge_loss_analysis_correction(
-            prior_draft,
-            parse_llm_result(result, _Stage1aProviderDraft),
-            authoritative_draft=authoritative_draft,
-        ),
+        result_parser=parse_retry_response,
         result_validator=validate_retry_references,
     )
     if retry_error_msg is not None:
         raise StageError(
             stage=STAGE,
             step=step,
-            message=f"{error_msg}; retry failed: {retry_error_msg}",
+            message=(
+                f"{error_msg}; retry failed: {retry_error_msg}. {validation_feedback}"
+            ),
         )
 
     assert draft is not None  # safe_llm_call guarantees this on success
@@ -588,6 +774,7 @@ def _loss_analysis_retry_prompt(
     first_result: LLMResult | None,
     require_losses: bool,
     require_complete_chain: bool,
+    accounting_failure: bool = False,
     section_patch: bool,
 ) -> str:
     prior_object = _prior_structured_object(first_result)
@@ -598,7 +785,17 @@ def _loss_analysis_retry_prompt(
         "carry obsolete records from a replaced collection into the corrected "
         "object."
     )
-    if require_losses:
+    if accounting_failure:
+        repair_order = (
+            "This is the risk-accounting repair. Return exactly one "
+            "risk_dispositions entry for every supplied risk card: 'cited' "
+            "with the declared loss IDs that account for it, or "
+            "'not_applicable' with a one-sentence reason. The feedback below "
+            "names each missing, duplicated, or malformed entry; fix exactly "
+            "those entries and preserve every valid loss, hazard, and "
+            "constraint record."
+        )
+    elif require_losses:
         repair_order = (
             "This is the risk-derivation repair. First declare grounded "
             "risk-card losses with exact source risk IDs. Do not spend the "
@@ -683,6 +880,10 @@ def _merge_loss_analysis_correction(
         canonical_prior.security_constraints,
         canonical_correction.security_constraints,
     )
+    patched_dispositions = _patch_collection(
+        prior.risk_dispositions,
+        correction.risk_dispositions,
+    )
 
     patched = LossAnalysisDraft.model_validate(
         {
@@ -690,6 +891,7 @@ def _merge_loss_analysis_correction(
             "use_case_losses": patched_use_case_losses,
             "hazards": patched_hazards,
             "security_constraints": patched_constraints,
+            "risk_dispositions": patched_dispositions,
         }
     )
     risk_losses, use_case_losses = _normalize_losses(patched, LossAnalysisDraft())
@@ -732,6 +934,7 @@ def _merge_loss_analysis_correction(
             "use_case_losses": use_case_losses,
             "hazards": patched_hazards,
             "security_constraints": patched_constraints,
+            "risk_dispositions": patched_dispositions,
         }
     )
 
@@ -769,6 +972,114 @@ def _remove_authoritative_duplicates(
             "between gap correction and risk derivation"
         )
     return result
+
+
+def _disposition_loss_contradictions(
+    losses: list[Loss],
+    dispositions: list[RiskDisposition],
+) -> list[str]:
+    """Detect citations that contradict a not_applicable disposition.
+
+    Spec rule 1.1(4): every loss is cited by at least one risk card or is
+    marked ``use_case``.  A card marked not_applicable therefore never cites
+    a loss, so no loss may list it in ``source_risk_cards``.  A cited
+    disposition's loss registry is authoritative for which loss accounts for
+    the card; the loss's own source list may name additional cards.
+    """
+    problems: list[str] = []
+    for disposition in dispositions:
+        if disposition.disposition != "not_applicable":
+            continue
+        citing = [
+            loss.loss_id
+            for loss in losses
+            if disposition.risk_ref in loss.source_risk_cards
+        ]
+        if citing:
+            problems.append(
+                f"'{disposition.risk_ref}' is marked not_applicable but is "
+                "cited by loss " + ", ".join(sorted(citing))
+            )
+    return problems
+
+
+def _validate_risk_accounting(
+    draft: LossAnalysisDraft,
+    *,
+    risk_cards: list[RiskCard],
+    context: str,
+) -> None:
+    """Require exactly one disposition for every supplied risk card.
+
+    The deterministic 1.1 gate on the provider response: a cited entry must
+    name at least one loss declared in this response, a not_applicable entry
+    must carry a non-empty reason, no supplied card may be missing or
+    double-counted, and a not_applicable card is never cited by a loss
+    (spec rule 1.1(4)).  The failure feedback lists the exact missing or
+    malformed entries and never suggests hazards or losses to invent.
+    """
+    supplied_ids = [card.risk_id for card in risk_cards]
+    if not supplied_ids:
+        return
+    supplied = set(supplied_ids)
+    declared_loss_ids = {
+        loss.loss_id for loss in draft.risk_card_losses + draft.use_case_losses
+    }
+    problems: list[str] = []
+    seen: dict[str, int] = {}
+    for disposition in draft.risk_dispositions:
+        seen[disposition.risk_ref] = seen.get(disposition.risk_ref, 0) + 1
+        if disposition.risk_ref not in supplied:
+            problems.append(f"'{disposition.risk_ref}' is not a supplied risk card ID")
+            continue
+        if disposition.disposition == "cited":
+            missing = [
+                loss_id
+                for loss_id in disposition.loss_ids
+                if loss_id not in declared_loss_ids
+            ]
+            if missing:
+                problems.append(
+                    f"cited '{disposition.risk_ref}' names undeclared losses: "
+                    + ", ".join(missing)
+                )
+        elif not disposition.reason or not disposition.reason.strip():
+            problems.append(
+                f"not_applicable '{disposition.risk_ref}' has an empty reason"
+            )
+    problems.extend(
+        _disposition_loss_contradictions(
+            [*draft.risk_card_losses, *draft.use_case_losses],
+            draft.risk_dispositions,
+        )
+    )
+    missing_cards = [card_id for card_id in supplied_ids if seen.get(card_id, 0) == 0]
+    duplicate_cards = sorted(card_id for card_id, count in seen.items() if count > 1)
+    if missing_cards:
+        problems.append(
+            "missing risk_dispositions entries for: " + ", ".join(missing_cards)
+        )
+    if duplicate_cards:
+        problems.append(
+            "duplicate risk_dispositions entries for: " + ", ".join(duplicate_cards)
+        )
+    if not problems:
+        return
+    message = f"{context} risk accounting is incomplete: " + "; ".join(problems)
+    raise _DraftReferenceValidationError(
+        message,
+        feedback=(
+            f"Validation feedback: {message}. Return exactly one "
+            "risk_dispositions entry per supplied risk card: disposition "
+            "'cited' with the loss_ids that account for it, or disposition "
+            "'not_applicable' with a one-sentence reason and no loss_ids. "
+            "Every cited loss_ids value must name a loss declared in this "
+            "same response, and a not_applicable card must not be cited by "
+            "any loss in source_risk_cards. Do not invent losses merely to "
+            "cite a risk; a risk that produces no grounded loss stays "
+            "not_applicable with its reason."
+        ),
+    )
 
 
 def _validate_complete_chain(
@@ -1053,11 +1364,26 @@ def _merge_drafts(
     _remap_references(all_hazards, "related_losses", loss_id_map)
     _remap_references(all_constraints, "related_hazards", hazard_id_map)
 
+    # Risk accounting comes from the risk-derivation draft only; remap its
+    # cited loss IDs to the renumbered identities before persistence.
+    remapped_dispositions = [
+        disposition.model_copy(
+            update={
+                "loss_ids": [
+                    loss_id_map.get(loss_id, loss_id)
+                    for loss_id in disposition.loss_ids
+                ]
+            }
+        )
+        for disposition in risk_draft.risk_dispositions
+    ]
+
     return LossAnalysis(
         risk_card_losses=all_risk_losses,
         use_case_losses=all_uc_losses,
         hazards=all_hazards,
         security_constraints=all_constraints,
+        risk_dispositions=remapped_dispositions,
     )
 
 

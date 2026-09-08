@@ -106,28 +106,33 @@ hazards:
   - L-7
 security_constraints:
 - constraint_id: SC-1
-  description: The chatbot's medical explanations must be validated against approved
-    clinical guidelines before being presented to the patient or uploaded to the EHR.
   related_hazards:
   - H-1
+  rule: The chatbot's medical explanations must be validated against approved clinical
+    guidelines before being presented to the patient or uploaded to the EHR.
+  applies_when: []
 - constraint_id: SC-2
-  description: The system must implement strict input sanitization and instruction-guardrails
-    on the chatbot interface to prevent the execution of unauthorized commands via
-    prompt injection.
   related_hazards:
   - H-2
+  rule: The system must implement strict input sanitization and instruction-guardrails
+    on the chatbot interface to prevent the execution of unauthorized commands via
+    prompt injection.
+  applies_when: []
 - constraint_id: SC-3
-  description: The video generation pipeline must undergo multi-lingual and cultural
-    bias testing against diverse NHS patient demographics before deployment.
   related_hazards:
   - H-3
+  rule: The video generation pipeline must undergo multi-lingual and cultural bias
+    testing against diverse NHS patient demographics before deployment.
+  applies_when: []
 - constraint_id: SC-4
-  description: All data flows between the OcciAI platform and the NHS App must be
-    protected by mutual authentication and end-to-end encryption.
   related_hazards:
   - H-4
+  rule: All data flows between the OcciAI platform and the NHS App must be protected
+    by mutual authentication and end-to-end encryption.
+  applies_when: []
 - constraint_id: SC-5
-  description: The questionnaire summarisation logic must include a verification step
-    to ensure data integrity and specialty-specific accuracy before EHR integration.
   related_hazards:
   - H-5
+  rule: The questionnaire summarisation logic must include a verification step to
+    ensure data integrity and specialty-specific accuracy before EHR integration.
+  applies_when: []

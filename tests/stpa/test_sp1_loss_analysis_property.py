@@ -79,11 +79,13 @@ def _make_hazard(hazard_id: str, related_losses: list[str]) -> Hazard:
     )
 
 
-def _make_constraint(constraint_id: str, related_hazards: list[str]) -> SecurityConstraint:
+def _make_constraint(
+    constraint_id: str, related_hazards: list[str]
+) -> SecurityConstraint:
     """Build a security constraint referencing the given hazard IDs."""
     return SecurityConstraint(
         constraint_id=constraint_id,
-        description=f"Constraint {constraint_id}",
+        rule=f"Constraint {constraint_id}",
         related_hazards=list(related_hazards),
     )
 
@@ -101,8 +103,7 @@ def _build_risk_draft(
     reference the first hazard.
     """
     risk_losses = [
-        _make_risk_loss(f"L-{id_offset + i * 3 + 1}")
-        for i in range(n_risk_losses)
+        _make_risk_loss(f"L-{id_offset + i * 3 + 1}") for i in range(n_risk_losses)
     ]
     loss_ids = [loss.loss_id for loss in risk_losses]
     hazards = []
@@ -137,8 +138,7 @@ def _build_gap_draft(
     ``cross_ref_loss_ids`` to test cross-draft reference remapping.
     """
     uc_losses = [
-        _make_uc_loss(f"L-{id_offset + i * 3 + 1}")
-        for i in range(n_uc_losses)
+        _make_uc_loss(f"L-{id_offset + i * 3 + 1}") for i in range(n_uc_losses)
     ]
     own_loss_ids = [loss.loss_id for loss in uc_losses]
     all_loss_ids = list(cross_ref_loss_ids or []) + own_loss_ids
@@ -258,9 +258,7 @@ class TestRenumberItemsProperties:
         items = [_StubItem(item_id=f"OLD-{i * 50}") for i in range(n)]
         id_map = _renumber_items(items, "item_id", prefix)
         new_ids = list(id_map.values())
-        assert len(new_ids) == len(set(new_ids)), (
-            f"Duplicate new IDs in map: {new_ids}"
-        )
+        assert len(new_ids) == len(set(new_ids)), f"Duplicate new IDs in map: {new_ids}"
         # Map keys are the original IDs
         assert len(id_map) == n
 
@@ -368,19 +366,23 @@ class TestMergeDraftsProperties:
     ):
         """After merge, all L-/H-/SC- IDs are sequential from 1."""
         risk = _build_risk_draft(
-            n_risk_losses, n_risk_hazards, n_risk_constraints, id_offset=0,
+            n_risk_losses,
+            n_risk_hazards,
+            n_risk_constraints,
+            id_offset=0,
         )
         gap = _build_gap_draft(
-            n_uc_losses, n_gap_hazards, n_gap_constraints, id_offset=100,
+            n_uc_losses,
+            n_gap_hazards,
+            n_gap_constraints,
+            id_offset=100,
         )
         merged = _merge_drafts(risk, gap)
 
         all_losses = merged.risk_card_losses + merged.use_case_losses
         loss_ids = [loss.loss_id for loss in all_losses]
         expected_loss_ids = [f"L-{i}" for i in range(1, len(all_losses) + 1)]
-        assert loss_ids == expected_loss_ids, (
-            f"Loss IDs not sequential: {loss_ids}"
-        )
+        assert loss_ids == expected_loss_ids, f"Loss IDs not sequential: {loss_ids}"
 
         hazard_ids = [h.hazard_id for h in merged.hazards]
         expected_hazard_ids = [f"H-{i}" for i in range(1, len(hazard_ids) + 1)]
@@ -390,9 +392,7 @@ class TestMergeDraftsProperties:
 
         sc_ids = [sc.constraint_id for sc in merged.security_constraints]
         expected_sc_ids = [f"SC-{i}" for i in range(1, len(sc_ids) + 1)]
-        assert sc_ids == expected_sc_ids, (
-            f"SC IDs not sequential: {sc_ids}"
-        )
+        assert sc_ids == expected_sc_ids, f"SC IDs not sequential: {sc_ids}"
 
     @given(
         n_risk_losses=st.integers(min_value=1, max_value=4),
@@ -414,10 +414,16 @@ class TestMergeDraftsProperties:
     ):
         """After merge, all cross-references point to valid IDs."""
         risk = _build_risk_draft(
-            n_risk_losses, n_risk_hazards, n_risk_constraints, id_offset=0,
+            n_risk_losses,
+            n_risk_hazards,
+            n_risk_constraints,
+            id_offset=0,
         )
         gap = _build_gap_draft(
-            n_uc_losses, n_gap_hazards, n_gap_constraints, id_offset=100,
+            n_uc_losses,
+            n_gap_hazards,
+            n_gap_constraints,
+            id_offset=100,
         )
         merged = _merge_drafts(risk, gap)
 
@@ -458,17 +464,25 @@ class TestMergeDraftsProperties:
     ):
         """The merged result has exactly as many items as the sum of both drafts."""
         risk = _build_risk_draft(
-            n_risk_losses, n_risk_hazards, n_risk_constraints, id_offset=0,
+            n_risk_losses,
+            n_risk_hazards,
+            n_risk_constraints,
+            id_offset=0,
         )
         gap = _build_gap_draft(
-            n_uc_losses, n_gap_hazards, n_gap_constraints, id_offset=100,
+            n_uc_losses,
+            n_gap_hazards,
+            n_gap_constraints,
+            id_offset=100,
         )
         merged = _merge_drafts(risk, gap)
 
         assert len(merged.risk_card_losses) == n_risk_losses
         assert len(merged.use_case_losses) == n_uc_losses
         assert len(merged.hazards) == n_risk_hazards + n_gap_hazards
-        assert len(merged.security_constraints) == n_risk_constraints + n_gap_constraints
+        assert (
+            len(merged.security_constraints) == n_risk_constraints + n_gap_constraints
+        )
 
     @given(
         n_risk_losses=st.integers(min_value=1, max_value=3),
@@ -490,14 +504,22 @@ class TestMergeDraftsProperties:
     ):
         """After merge, no duplicate IDs exist in any category."""
         risk = _build_risk_draft(
-            n_risk_losses, n_risk_hazards, n_risk_constraints, id_offset=0,
+            n_risk_losses,
+            n_risk_hazards,
+            n_risk_constraints,
+            id_offset=0,
         )
         gap = _build_gap_draft(
-            n_uc_losses, n_gap_hazards, n_gap_constraints, id_offset=100,
+            n_uc_losses,
+            n_gap_hazards,
+            n_gap_constraints,
+            id_offset=100,
         )
         merged = _merge_drafts(risk, gap)
 
-        all_loss_ids = [loss.loss_id for loss in merged.risk_card_losses + merged.use_case_losses]
+        all_loss_ids = [
+            loss.loss_id for loss in merged.risk_card_losses + merged.use_case_losses
+        ]
         assert len(all_loss_ids) == len(set(all_loss_ids)), (
             f"Duplicate loss IDs: {all_loss_ids}"
         )
@@ -508,9 +530,7 @@ class TestMergeDraftsProperties:
         )
 
         sc_ids = [sc.constraint_id for sc in merged.security_constraints]
-        assert len(sc_ids) == len(set(sc_ids)), (
-            f"Duplicate SC IDs: {sc_ids}"
-        )
+        assert len(sc_ids) == len(set(sc_ids)), f"Duplicate SC IDs: {sc_ids}"
 
     @given(
         n_risk_losses=st.integers(min_value=1, max_value=3),
@@ -524,10 +544,16 @@ class TestMergeDraftsProperties:
     ):
         """Provenance is preserved: risk_card losses stay risk_card, UC stay use_case."""
         risk = _build_risk_draft(
-            n_risk_losses, 1, 1, id_offset=0,
+            n_risk_losses,
+            1,
+            1,
+            id_offset=0,
         )
         gap = _build_gap_draft(
-            n_uc_losses, 1, 1, id_offset=100,
+            n_uc_losses,
+            1,
+            1,
+            id_offset=100,
         )
         merged = _merge_drafts(risk, gap)
 
@@ -563,15 +589,22 @@ class TestMergeDraftsProperties:
         valid LossAnalysis that the Pydantic validator accepts.
         """
         risk = _build_risk_draft(
-            n_risk_losses, n_risk_hazards, n_risk_constraints, id_offset=0,
+            n_risk_losses,
+            n_risk_hazards,
+            n_risk_constraints,
+            id_offset=0,
         )
         gap = _build_gap_draft(
-            n_uc_losses, n_gap_hazards, n_gap_constraints, id_offset=100,
+            n_uc_losses,
+            n_gap_hazards,
+            n_gap_constraints,
+            id_offset=100,
         )
         merged = _merge_drafts(risk, gap)
         # If _merge_drafts returns a LossAnalysis, validation has already
         # passed during construction. Re-verify by checking the type.
         from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+
         assert isinstance(merged, LossAnalysis)
         assert len(merged.hazards) >= 1
         assert len(merged.security_constraints) >= 1
@@ -603,7 +636,10 @@ class TestCrossDraftReferenceRemapping:
     ):
         """A gap hazard referencing a risk loss is remapped to the new ID."""
         risk = _build_risk_draft(
-            n_risk_losses, n_hazards=1, n_constraints=1, id_offset=0,
+            n_risk_losses,
+            n_hazards=1,
+            n_constraints=1,
+            id_offset=0,
         )
         risk_loss_ids = [loss.loss_id for loss in risk.risk_card_losses]
         # Pick a risk loss ID for cross-referencing
@@ -639,7 +675,10 @@ class TestCrossDraftReferenceRemapping:
     ):
         """Multiple cross-references from gap to risk are all remapped correctly."""
         risk = _build_risk_draft(
-            n_risk_losses, n_hazards=1, n_constraints=1, id_offset=0,
+            n_risk_losses,
+            n_hazards=1,
+            n_constraints=1,
+            id_offset=0,
         )
         risk_loss_ids = [loss.loss_id for loss in risk.risk_card_losses]
         gap = _build_gap_draft(
@@ -677,7 +716,10 @@ class TestMergeDraftsEmptyEdgeCases:
         """An empty risk draft with a valid gap draft produces a valid merge."""
         risk = LossAnalysisDraft()
         gap = _build_gap_draft(
-            n_uc_losses, n_gap_hazards, n_gap_constraints, id_offset=1,
+            n_uc_losses,
+            n_gap_hazards,
+            n_gap_constraints,
+            id_offset=1,
         )
         merged = _merge_drafts(risk, gap)
         assert len(merged.risk_card_losses) == 0
@@ -698,7 +740,10 @@ class TestMergeDraftsEmptyEdgeCases:
     def test_empty_gap_draft(self, n_risk_losses, n_risk_hazards, n_risk_constraints):
         """An empty gap draft with a valid risk draft produces a valid merge."""
         risk = _build_risk_draft(
-            n_risk_losses, n_risk_hazards, n_risk_constraints, id_offset=1,
+            n_risk_losses,
+            n_risk_hazards,
+            n_risk_constraints,
+            id_offset=1,
         )
         gap = LossAnalysisDraft()
         merged = _merge_drafts(risk, gap)
@@ -740,7 +785,9 @@ class TestCallLogOrderingAndProfileSkip:
         deadline=None,
         suppress_health_check=[HealthCheck.function_scoped_fixture],
     )
-    def test_call_log_ordering_risk_before_gap(self, tmp_path, n_risk_losses, n_uc_losses):
+    def test_call_log_ordering_risk_before_gap(
+        self, tmp_path, n_risk_losses, n_uc_losses
+    ):
         """risk_derivation is always logged before gap_analysis."""
         import json
 
@@ -770,10 +817,12 @@ class TestCallLogOrderingAndProfileSkip:
         risk["security_constraints"] = [
             {
                 "constraint_id": "SC-1",
-                "description": "Constraint 1",
+                "rule": "Constraint 1",
                 "related_hazards": ["H-1"],
+                "applies_when": [],
             }
         ]
+        risk["risk_dispositions"] = []
 
         gap = valid_gap_draft_dict()
         gap["use_case_losses"] = [
@@ -795,8 +844,9 @@ class TestCallLogOrderingAndProfileSkip:
         gap["security_constraints"] = [
             {
                 "constraint_id": "SC-2",
-                "description": "Constraint 2",
+                "rule": "Constraint 2",
                 "related_hazards": ["H-2"],
+                "applies_when": [],
             }
         ]
 
@@ -866,7 +916,8 @@ class TestCallLogOrderingAndProfileSkip:
 
         client = MockLLMClient()
         client.set_response_for(
-            LossAnalysisDraft, [valid_risk_draft_dict(), valid_gap_draft_dict()],
+            LossAnalysisDraft,
+            [valid_risk_draft_dict(), valid_gap_draft_dict()],
         )
 
         derive_loss_analysis(
@@ -918,10 +969,12 @@ class TestCallLogOrderingAndProfileSkip:
             "security_constraints": [
                 {
                     "constraint_id": "SC-9",
-                    "description": "Risk constraint",
+                    "rule": "Risk constraint",
                     "related_hazards": ["H-7"],
+                    "applies_when": [],
                 }
             ],
+            "risk_dispositions": [],
         }
         client = MockLLMClient()
         client.set_response_for(

@@ -55,6 +55,8 @@ MODULES = (
     "prompt_contract_recovery",
     "mcp_target_discovery_primitive_input",
     "stage1a_section_correction",
+    "loss_analysis_gates",
+    "stage2_target_derived",
 )
 
 

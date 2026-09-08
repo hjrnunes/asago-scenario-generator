@@ -10,7 +10,7 @@ For each organizational risk provided, derive:
 
 2. **Hazards** — what system states or conditions enable each loss?
 
-3. **Security constraints** — what conditions must hold to prevent each hazard?
+3. **Security constraints** — what conditions must hold to prevent each hazard? Every hazard you return in this response needs at least one security constraint in this response.
 
 Apply the dependency order from the method card as a hard output contract:
 declare at least one grounded risk-card loss (with its source IDs) before
@@ -23,12 +23,41 @@ organizational risks are supplied.
 This call's minimum responsibility is the grounded risk-card loss registry.
 If completion space is limited, declare those losses first and leave a
 dependent record out rather than emitting a dangling reference; the following
-gap-analysis call will close the hazard and constraint graph.
+gap-analysis call adds only what is genuinely missing and does not excuse a
+hazard you returned without a constraint in this response.
 
 Return only materially distinct records. Consolidate risks that lead to the
 same stakeholder loss or hazardous system state. Return no more than 16 losses,
 16 hazards, and 16 security constraints, and never repeat a record to fill the
 response.
+
+## Response format
+
+Return exactly one JSON object with these five keys. Do not add, rename, or
+omit keys.
+
+```json
+{
+  "risk_card_losses": [
+    {"loss_id": "L-1", "description": "...", "provenance": "risk_card",
+     "source_risk_cards": ["<risk-id>", "..."]}
+  ],
+  "use_case_losses": [],
+  "hazards": [
+    {"hazard_id": "H-1", "description": "...", "related_losses": ["L-1"]}
+  ],
+  "security_constraints": [
+    {"constraint_id": "SC-1", "rule": "...", "applies_when": [],
+     "related_hazards": ["H-1"]}
+  ],
+  "risk_dispositions": [
+    {"risk_ref": "<risk-id>", "disposition": "cited", "loss_ids": ["L-1"]}
+  ]
+}
+```
+
+In this call every loss goes in `risk_card_losses`; `use_case_losses` stays
+empty (it belongs to the later gap-analysis call).
 
 ## Relevance and causal follow-up
 
@@ -41,15 +70,46 @@ context, but do not omit a grounded loss or hazard merely because reachability
 is unknown. Do not invent a loss merely to cover every capability or fill a
 quota.
 
-## Permitted behavior and constraint grounding
-
 ## Structural requirements
 
 - Every loss must cite its source risk IDs in `source_risk_cards`.
 - Every hazard references at least one valid loss_id in `related_losses`.
 - Every security constraint references at least one valid hazard_id in `related_hazards`.
+- Every supplied organizational risk appears exactly once in `risk_dispositions`.
 - No duplicate IDs.
 - All losses have `provenance: risk_card`.
+
+## Risk accounting
+
+Account for every supplied organizational risk. `risk_dispositions` must
+contain exactly one entry per supplied risk ID, using one of two dispositions:
+
+- `cited` — the risk contributed to at least one loss you declared; list the
+  exact loss IDs in `loss_ids` and omit the `reason` field entirely.
+- `not_applicable` — the risk produces no grounded loss for this specific
+  system; leave `loss_ids` empty and write a one-sentence `reason` stating
+  why it does not apply here.
+
+Never omit a supplied risk and never cite an undeclared loss ID. Every
+`loss_ids` value must be a loss ID declared in this same response. Before
+returning, verify each disposition against your final loss registry: a
+disposition may only cite losses that actually appear in `risk_card_losses`
+or `use_case_losses`. Do not invent a loss merely to be able to cite a risk.
+
+## Constraint rule and conditions
+
+Each security constraint has two authored parts: `rule` and `applies_when`.
+`rule` is the obligation in one sentence, without its limiting conditions.
+`applies_when` lists the conditions under which the rule is in force, each
+written in your own words as a plain sentence fragment (for example, "the
+recipient is not authorized to receive that information"). All listed
+conditions must hold for the rule to apply; if the rule applies under a
+disjunction, put the whole disjunction inside one condition ("the query is
+complex or nuanced"). A constraint that applies unconditionally has an
+empty `applies_when` list. The `applies_when` key is required on every
+constraint — return it even when empty — with at most four conditions, and
+no condition may simply restate the rule. Do not copy text from anywhere;
+write the conditions as you would state them to an analyst.
 
 ## Quality requirements
 

@@ -148,7 +148,10 @@ def test_risk_prompt_keeps_complete_semantic_fields_in_compact_view(tmp_path) ->
         impact="A hidden impact field should stay out of the compact view.",
     )
     client = MockLLMClient()
-    client.set_response_for(LossAnalysisDraft, [valid_risk_draft_dict(), valid_gap_draft_dict()])
+    draft = valid_risk_draft_dict()
+    draft["risk_dispositions"][0]["risk_ref"] = "atlas-compact-1"
+    draft["risk_card_losses"][0]["source_risk_cards"] = ["atlas-compact-1"]
+    client.set_response_for(LossAnalysisDraft, [draft, valid_gap_draft_dict()])
 
     derive_loss_analysis(
         llm_client=client,
@@ -259,7 +262,7 @@ def test_component_failure_hazard_gets_one_bounded_semantic_retry(tmp_path) -> N
         run_dir=tmp_path,
     )
 
-    assert result.hazards[0].description == "Agent executes unintended action"
+    assert result.hazards[0].description == "The agent executes an unintended payment."
     assert len(client.calls) == 3
     assert "system-level state" in client.calls[1].user_prompt
 

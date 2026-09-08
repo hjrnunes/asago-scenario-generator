@@ -64,11 +64,9 @@ def _make_loss_analysis() -> LossAnalysis:
             Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"]),
         ],
         security_constraints=[
+            SecurityConstraint(constraint_id="SC-1", rule="C", related_hazards=["H-1"]),
             SecurityConstraint(
-                constraint_id="SC-1", description="C", related_hazards=["H-1"]
-            ),
-            SecurityConstraint(
-                constraint_id="SC-2", description="C2", related_hazards=["H-1"]
+                constraint_id="SC-2", rule="C2", related_hazards=["H-1"]
             ),
         ],
     )
@@ -80,11 +78,23 @@ def _valid_loss_analysis_dict() -> dict:
     loss = draft["use_case_losses"].pop()
     loss.update(provenance="risk_card", source_risk_cards=["atlas-001"])
     draft["risk_card_losses"] = [loss]
+    draft["risk_dispositions"] = [
+        {
+            "risk_ref": "atlas-001",
+            "disposition": "cited",
+            "loss_ids": ["L-1"],
+            "reason": None,
+        }
+    ]
     return draft
 
 
 def _valid_gap_draft_dict() -> dict:
-    """Gap draft for the gap_analysis call."""
+    """Gap draft for the gap_analysis call.
+
+    Hazard and constraint wording shares the "payment record" subject phrase
+    so the merged graph passes the deterministic density gate.
+    """
     return {
         "risk_card_losses": [],
         "use_case_losses": [
@@ -98,20 +108,25 @@ def _valid_gap_draft_dict() -> dict:
         "hazards": [
             {
                 "hazard_id": "H-1",
-                "description": "Hazard",
+                "description": ("The payment record is exposed without authorization."),
                 "related_losses": ["L-1"],
             }
         ],
         "security_constraints": [
             {
                 "constraint_id": "SC-1",
-                "description": "C",
+                "rule": (
+                    "The payment record must stay protected for the "
+                    "authorized customer."
+                ),
                 "related_hazards": ["H-1"],
+                "applies_when": [],
             },
             {
                 "constraint_id": "SC-2",
-                "description": "C2",
+                "rule": ("The payment record must never reach an outside party."),
                 "related_hazards": ["H-1"],
+                "applies_when": [],
             },
         ],
     }

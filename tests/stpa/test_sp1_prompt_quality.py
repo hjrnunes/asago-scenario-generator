@@ -159,7 +159,7 @@ def test_pqf_11_stage1a_gap_user_renders_with_existing_analysis() -> None:
     ]
     constraints = [
         SecurityConstraint(
-            constraint_id="SC-1", description="Test SC", related_hazards=["H-1"]
+            constraint_id="SC-1", rule="Test SC", related_hazards=["H-1"]
         ),
     ]
     rendered = _render(

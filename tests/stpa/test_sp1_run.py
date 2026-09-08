@@ -83,8 +83,9 @@ def _run3_invalid_risk_draft_dict() -> dict:
     draft["security_constraints"] = [
         {
             "constraint_id": f"SC-{index}",
-            "description": f"Constraint {index}",
+            "rule": (f"The customer payment condition {index + 1} must be prevented."),
             "related_hazards": [f"H-{index + 1}"],
+            "applies_when": [],
         }
         for index in range(1, 7)
     ]
@@ -97,7 +98,7 @@ def _run3_corrected_risk_draft_dict() -> dict:
     draft["hazards"] = [
         {
             "hazard_id": f"H-{index}",
-            "description": f"Hazard {index}",
+            "description": f"The customer payment condition {index} is unsafe.",
             "related_losses": ["L-1"],
         }
         for index in range(1, 8)
@@ -115,7 +116,15 @@ def _run3_gap_draft_dict() -> dict:
         }
     )
     draft["security_constraints"][0].update(
-        {"constraint_id": "SC-7", "related_hazards": ["H-8", "H-1"]}
+        {
+            "constraint_id": "SC-7",
+            "related_hazards": ["H-8", "H-1"],
+            "rule": (
+                "The agent must preserve user trust and prevent every "
+                "customer payment condition."
+            ),
+            "applies_when": [],
+        }
     )
     return draft
 
@@ -132,9 +141,44 @@ def _coordination_with_constraints(
 
 
 def _reviewed_coordination_for_run() -> dict:
+    """A review that rewords both constraints and swaps their hazard edges.
+
+    The reviewed graph must still pass the offline density re-check: each
+    reworded constraint shares a subject phrase with its new hazard, backed
+    by exact source quotations from the supplied losses.
+    """
     payload = _coordination_with_constraints(2)
-    payload["semantic_review"]["constraints"][0]["related_hazards"] = ["H-2"]
-    payload["semantic_review"]["constraints"][1]["related_hazards"] = []
+    constraints = payload["semantic_review"]["constraints"]
+    constraints[0].update(
+        {
+            "disposition": "revise",
+            "revised_description": (
+                "The agent must preserve user trust through transparency."
+            ),
+            "source_evidence": [
+                {
+                    "source_ref": "source_3",
+                    "meaning": "The loss of trust motivates the constraint.",
+                },
+            ],
+            "related_hazards": ["H-2"],
+        }
+    )
+    constraints[1].update(
+        {
+            "disposition": "revise",
+            "revised_description": (
+                "The agent must confirm every unintended payment before execution."
+            ),
+            "source_evidence": [
+                {
+                    "source_ref": "source_2",
+                    "meaning": "The unauthorized transaction is the loss.",
+                },
+            ],
+            "related_hazards": ["H-1"],
+        }
+    )
     return payload
 
 
@@ -250,10 +294,20 @@ class TestRunOrchestration:
                 _run3_gap_draft_dict(),
             ],
         )
-        client.set_response_for(
-            CoordinationAnalysis,
-            _coordination_with_constraints(7, hazard_count=8),
-        )
+        # The review preserves every constraint's original hazard edges; the
+        # generic helper re-maps SC-n to H-n, which would leave hazards
+        # without any constraint and fail the post-review density re-check.
+        coordination = _coordination_with_constraints(7, hazard_count=8)
+        original_edges = {
+            constraint["constraint_id"]: list(constraint["related_hazards"])
+            for constraint in (
+                _run3_corrected_risk_draft_dict()["security_constraints"]
+                + _run3_gap_draft_dict()["security_constraints"]
+            )
+        }
+        for row in coordination["semantic_review"]["constraints"]:
+            row["related_hazards"] = original_edges[row["constraint_id"]]
+        client.set_response_for(CoordinationAnalysis, coordination)
 
         result = run_sp1(
             llm_client=client,
@@ -302,7 +356,7 @@ class TestRunOrchestration:
         )
         assert result.loss_analysis is not None
         assert result.loss_analysis.security_constraints[0].related_hazards == ["H-2"]
-        assert result.loss_analysis.security_constraints[1].related_hazards == []
+        assert result.loss_analysis.security_constraints[1].related_hazards == ["H-1"]
         draft = LossAnalysis.model_validate(
             yaml.safe_load((tmp_path / "loss-analysis-draft.yaml").read_text())
         )

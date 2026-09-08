@@ -73,20 +73,23 @@ hazards:
   - L-2
 security_constraints:
 - constraint_id: SC-1
-  description: The Klarna AI Assistant must only provide policy and fee information
-    that is strictly verified against the approved knowledge-grounding whitelist.
   related_hazards:
   - H-1
   - H-4
+  rule: The Klarna AI Assistant must only provide policy and fee information that
+    is strictly verified against the approved knowledge-grounding whitelist.
+  applies_when: []
 - constraint_id: SC-2
-  description: The Klarna Backend System API integration must validate that any refund
-    or payment modification command issued by the AI Assistant matches the authenticated
-    user's session context and transaction history.
   related_hazards:
   - H-2
+  rule: The Klarna Backend System API integration must validate that any refund or
+    payment modification command issued by the AI Assistant matches the authenticated
+    user's session context and transaction history.
+  applies_when: []
 - constraint_id: SC-3
-  description: The system must ensure that the injected authenticated user context
-    (purchase history, merchant info) is strictly scoped to the current authenticated
-    session and cannot be accessed or echoed by the model for other users.
   related_hazards:
   - H-3
+  rule: The system must ensure that the injected authenticated user context (purchase
+    history, merchant info) is strictly scoped to the current authenticated session
+    and cannot be accessed or echoed by the model for other users.
+  applies_when: []

@@ -42,6 +42,7 @@ For each risk:
 1. Derive one or more system-specific losses, citing the source risk IDs. Deduplicate where multiple risks converge on the same loss.
 2. Derive system-level hazards that enable each loss. Each hazard must name a concrete component, data flow, or integration point from the use-case description.
 3. Derive security constraints that prevent each hazard.
+4. Account for every risk above in `risk_dispositions`: `cited` with the loss IDs that account for it, or `not_applicable` with a one-sentence reason.
 
 Include materially grounded losses and hazards even when a risk card supplies
 no adversarial vector. Do not require an adversary, entry point, or concrete

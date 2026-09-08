@@ -5,7 +5,7 @@ Feature: Stage 1a section-aware correction
   Scenario: empty sections retain prior records and populated sections replace them
     Given a neutral Stage 1a correction fixture "section_patch"
     When the public Stage 1a loss-analysis seam is called
-    Then the Stage 1a wire contract requires exactly four collections
+    Then the Stage 1a wire contract requires exactly five collections
     And the corrected analysis retains the prior risk-derived loss
     And the corrected analysis retains the prior use-case loss
     And the corrected analysis contains the replacement hazard

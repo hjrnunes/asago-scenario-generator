@@ -71,7 +71,10 @@ def _h_loss_analysis_with_losses(
         hazards=[Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"])],
         security_constraints=[
             SecurityConstraint(
-                constraint_id="SC-1", description="Constraint", related_hazards=["H-1"]
+                constraint_id="SC-1",
+                rule="Constraint",
+                applies_when=[],
+                related_hazards=["H-1"],
             )
         ],
     )
@@ -93,7 +96,10 @@ def _h_loss_analysis_hazard_bad_ref(
         ],
         security_constraints=[
             SecurityConstraint(
-                constraint_id="SC-1", description="Constraint", related_hazards=["H-1"]
+                constraint_id="SC-1",
+                rule="Constraint",
+                applies_when=[],
+                related_hazards=["H-1"],
             )
         ],
     )
@@ -114,7 +120,8 @@ def _h_loss_analysis_constraint_bad_ref(
         security_constraints=[
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="Constraint",
+                rule="Constraint",
+                applies_when=[],
                 related_hazards=[bad_ref],
             )
         ],
@@ -155,7 +162,8 @@ def _h_loss_analysis_duplicate(
             security_constraints=[
                 SecurityConstraint(
                     constraint_id="SC-1",
-                    description="Constraint",
+                    rule="Constraint",
+                    applies_when=[],
                     related_hazards=["H-1"],
                 )
             ],
@@ -175,7 +183,8 @@ def _h_loss_analysis_duplicate(
             security_constraints=[
                 SecurityConstraint(
                     constraint_id="SC-1",
-                    description="Constraint",
+                    rule="Constraint",
+                    applies_when=[],
                     related_hazards=["H-1"],
                 )
             ],
@@ -191,10 +200,16 @@ def _h_loss_analysis_duplicate(
             hazards=[Hazard(hazard_id="H-1", description="H", related_losses=["L-1"])],
             security_constraints=[
                 SecurityConstraint(
-                    constraint_id=dup_value, description="A", related_hazards=["H-1"]
+                    constraint_id=dup_value,
+                    rule="A",
+                    applies_when=[],
+                    related_hazards=["H-1"],
                 ),
                 SecurityConstraint(
-                    constraint_id=dup_value, description="B", related_hazards=["H-1"]
+                    constraint_id=dup_value,
+                    rule="B",
+                    applies_when=[],
+                    related_hazards=["H-1"],
                 ),
             ],
         )
@@ -223,7 +238,8 @@ def _h_loss_analysis_risk_card(
             security_constraints=[
                 SecurityConstraint(
                     constraint_id="SC-1",
-                    description="Constraint",
+                    rule="Constraint",
+                    applies_when=[],
                     related_hazards=["H-1"],
                 )
             ],
@@ -245,7 +261,8 @@ def _h_loss_analysis_risk_card(
             security_constraints=[
                 SecurityConstraint(
                     constraint_id="SC-1",
-                    description="Constraint",
+                    rule="Constraint",
+                    applies_when=[],
                     related_hazards=["H-1"],
                 )
             ],
@@ -267,7 +284,8 @@ def _h_loss_analysis_risk_card(
             security_constraints=[
                 SecurityConstraint(
                     constraint_id="SC-1",
-                    description="Constraint",
+                    rule="Constraint",
+                    applies_when=[],
                     related_hazards=["H-1"],
                 )
             ],
@@ -290,7 +308,8 @@ def _h_loss_analysis_risk_card(
             security_constraints=[
                 SecurityConstraint(
                     constraint_id="SC-1",
-                    description="Constraint",
+                    rule="Constraint",
+                    applies_when=[],
                     related_hazards=["H-1"],
                 )
             ],

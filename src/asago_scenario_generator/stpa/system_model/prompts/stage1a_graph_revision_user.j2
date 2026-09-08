@@ -1,0 +1,47 @@
+## Use-Case Description
+
+{{ use_case_text }}
+
+---
+
+## Current Hazard Graph
+
+### Losses (immutable, shown for context — do not return them)
+{% for loss in losses %}
+- **{{ loss.loss_id }}** ({{ loss.provenance.value }}): {{ loss.description }}
+  {% if loss.source_risk_cards %}Source risks: {{ loss.source_risk_cards | join(", ") }}{% endif %}
+{% endfor %}
+
+### Hazards
+{% for hazard in hazards %}
+- **{{ hazard.hazard_id }}**: {{ hazard.description }} (related losses: {{ hazard.related_losses | join(", ") }})
+{% endfor %}
+
+### Security Constraints
+{% for constraint in security_constraints %}
+- **{{ constraint.constraint_id }}** (related hazards: {{ constraint.related_hazards | join(", ") }})
+  Rule: {{ constraint.rule }}
+  Applies when ({{ constraint.applies_when | length }} conditions; return the full list for every constraint):
+  {% for condition in constraint.applies_when %}  {{ loop.index }}. {{ condition }}
+  {% endfor %}
+{% endfor %}
+
+---
+
+## Failed Checks
+
+The current analysis failed these deterministic structural checks:
+
+{% for check in failing_checks %}
+- {{ check }}
+{% endfor %}
+
+---
+
+## Your Task
+
+Return the complete corrected hazard graph that satisfies every failed
+check: the full `hazards` and `security_constraints` collections and nothing
+else. Preserve every existing hazard and constraint identity. For every
+constraint, return its `rule` and its complete `applies_when` list. Do not
+return losses or risk dispositions.

@@ -836,7 +836,8 @@ def _qa_loss_analysis():
         security_constraints=[
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="Retrieval must be scoped to the active session",
+                rule="Retrieval must be scoped to the active session",
+                applies_when=[],
                 related_hazards=["H-1"],
             )
         ],

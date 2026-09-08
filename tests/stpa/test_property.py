@@ -156,7 +156,7 @@ class TestYamlRoundTrip:
         constraints = [
             SecurityConstraint(
                 constraint_id=cid,
-                description=f"Constraint {cid}",
+                rule=f"Constraint {cid}",
                 related_hazards=hazard_ids[:1],
             )
             for cid in constraint_ids
@@ -180,9 +180,7 @@ class TestYamlRoundTrip:
         deadline=None,
         suppress_health_check=[HealthCheck.function_scoped_fixture],
     )
-    def test_control_structure_yaml_round_trip(
-        self, tmp_path, n_resps, n_pms, n_cas
-    ):
+    def test_control_structure_yaml_round_trip(self, tmp_path, n_resps, n_pms, n_cas):
         """ControlStructure round-trips through YAML."""
         responsibilities = []
         for i in range(1, n_resps + 1):
@@ -282,7 +280,7 @@ class TestDuplicateIdRejection:
                 ],
                 security_constraints=[
                     SecurityConstraint(
-                        constraint_id="SC-1", description="C", related_hazards=["H-1"]
+                        constraint_id="SC-1", rule="C", related_hazards=["H-1"]
                     )
                 ],
             )
@@ -307,7 +305,7 @@ class TestDuplicateIdRejection:
                 ],
                 security_constraints=[
                     SecurityConstraint(
-                        constraint_id="SC-1", description="C", related_hazards=[dup_id]
+                        constraint_id="SC-1", rule="C", related_hazards=[dup_id]
                     )
                 ],
             )
@@ -331,10 +329,10 @@ class TestDuplicateIdRejection:
                 ],
                 security_constraints=[
                     SecurityConstraint(
-                        constraint_id=dup_id, description="A", related_hazards=["H-1"]
+                        constraint_id=dup_id, rule="A", related_hazards=["H-1"]
                     ),
                     SecurityConstraint(
-                        constraint_id=dup_id, description="B", related_hazards=["H-1"]
+                        constraint_id=dup_id, rule="B", related_hazards=["H-1"]
                     ),
                 ],
             )
@@ -441,13 +439,11 @@ class TestInvalidReferenceRejection:
                     )
                 ],
                 hazards=[
-                    Hazard(
-                        hazard_id="H-1", description="H", related_losses=[bad_ref]
-                    ),
+                    Hazard(hazard_id="H-1", description="H", related_losses=[bad_ref]),
                 ],
                 security_constraints=[
                     SecurityConstraint(
-                        constraint_id="SC-1", description="C", related_hazards=["H-1"]
+                        constraint_id="SC-1", rule="C", related_hazards=["H-1"]
                     )
                 ],
             )
@@ -472,7 +468,7 @@ class TestInvalidReferenceRejection:
                 security_constraints=[
                     SecurityConstraint(
                         constraint_id="SC-1",
-                        description="C",
+                        rule="C",
                         related_hazards=[bad_ref],
                     ),
                 ],
@@ -518,9 +514,7 @@ class TestValidateAgainst:
                     DefenderIntention(ca_id="CA-1-1", content="Intention"),
                 ],
             ),
-            attacker_bdi=AttackerBDI(
-                beliefs=["b"], desires=["d"], intentions=["i"]
-            ),
+            attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
             loss_scenario="Scenario",
         )
         with pytest.raises(ValueError, match="pm_id"):
@@ -575,9 +569,7 @@ class TestStructuralHeuristics:
         deadline=None,
         suppress_health_check=[HealthCheck.too_slow],
     )
-    def test_missing_children_produce_errors(
-        self, remove_pms, remove_cas, remove_fbs
-    ):
+    def test_missing_children_produce_errors(self, remove_pms, remove_cas, remove_fbs):
         """Removing any required child from a responsibility produces errors."""
         cs = make_minimal_control_structure()
         resp = cs.responsibilities[0]
@@ -628,9 +620,7 @@ st_cl_ids = st.from_regex(r"CL-[1-9][0-9]*", fullmatch=True)
 
 # Wrong-prefix strategies: valid two-segment structure but a different prefix.
 st_wrong_prefix_two_seg = st.sampled_from(["PM", "CA", "FB", "RC"]).flatmap(
-    lambda prefix: st.from_regex(
-        rf"{prefix}-[1-9][0-9]*-[1-9][0-9]*", fullmatch=True
-    )
+    lambda prefix: st.from_regex(rf"{prefix}-[1-9][0-9]*-[1-9][0-9]*", fullmatch=True)
 )
 
 # Wrong-structure strategies: correct prefix but wrong number of segments.
@@ -897,10 +887,12 @@ class TestCrossNamespaceCollisionProperty:
             rc_id=colliding_id, description="C"
         )
         pm = ProcessModelPart.model_construct(
-            pm_id="PM-1-1", description="P",
+            pm_id="PM-1-1",
+            description="P",
         )
         ca = ControlAction.model_construct(
-            ca_id="CA-1-1", description="A",
+            ca_id="CA-1-1",
+            description="A",
         )
         fb = FeedbackChannel.model_construct(
             fb_id="FB-1-1",
@@ -916,9 +908,7 @@ class TestCrossNamespaceCollisionProperty:
             control_actions=[ca],
             feedback_channels=[fb],
         )
-        cp = ControlledProcess.model_construct(
-            cp_id=colliding_id, description="CP"
-        )
+        cp = ControlledProcess.model_construct(cp_id=colliding_id, description="CP")
         cs = ControlStructure.model_construct(
             responsibilities=[resp],
             controlled_processes=[cp],
@@ -938,14 +928,14 @@ class TestCrossNamespaceCollisionProperty:
 
         Uses model_construct to bypass field validators.
         """
-        rc = ResponsibilityConstraint.model_construct(
-            rc_id="RC-1-1", description="C"
-        )
+        rc = ResponsibilityConstraint.model_construct(rc_id="RC-1-1", description="C")
         pm = ProcessModelPart.model_construct(
-            pm_id="PM-1-1", description="P",
+            pm_id="PM-1-1",
+            description="P",
         )
         ca = ControlAction.model_construct(
-            ca_id="CA-1-1", description="A",
+            ca_id="CA-1-1",
+            description="A",
         )
         fb = FeedbackChannel.model_construct(
             fb_id="FB-1-1",
@@ -961,9 +951,7 @@ class TestCrossNamespaceCollisionProperty:
             control_actions=[ca],
             feedback_channels=[fb],
         )
-        cp = ControlledProcess.model_construct(
-            cp_id=colliding_id, description="CP"
-        )
+        cp = ControlledProcess.model_construct(cp_id=colliding_id, description="CP")
         cs = ControlStructure.model_construct(
             responsibilities=[resp],
             controlled_processes=[cp],
@@ -990,10 +978,12 @@ class TestCrossNamespaceCollisionProperty:
                 rc_id=f"RC-{i}-1", description="C"
             )
             pm = ProcessModelPart.model_construct(
-                pm_id=f"PM-{i}-1", description="P",
+                pm_id=f"PM-{i}-1",
+                description="P",
             )
             ca = ControlAction.model_construct(
-                ca_id=f"CA-{i}-1", description="A",
+                ca_id=f"CA-{i}-1",
+                description="A",
             )
             fb = FeedbackChannel.model_construct(
                 fb_id=f"FB-{i}-1",
@@ -1041,7 +1031,9 @@ class TestKcSubcodesDisplayProperty:
     @settings(max_examples=30, deadline=None)
     def test_display_keys_match_input_codes(self, codes):
         """Conservation: display dict keys exactly match input codes."""
-        from asago_scenario_generator.models.capability_profile import build_kc_subcodes_display
+        from asago_scenario_generator.models.capability_profile import (
+            build_kc_subcodes_display,
+        )
 
         result = build_kc_subcodes_display(codes)
         assert set(result.keys()) == set(codes)
@@ -1057,7 +1049,9 @@ class TestKcSubcodesDisplayProperty:
     @settings(max_examples=30, deadline=None)
     def test_display_values_are_nonempty_strings(self, codes):
         """Type invariant: all display values are non-empty strings."""
-        from asago_scenario_generator.models.capability_profile import build_kc_subcodes_display
+        from asago_scenario_generator.models.capability_profile import (
+            build_kc_subcodes_display,
+        )
 
         result = build_kc_subcodes_display(codes)
         for val in result.values():
@@ -1097,7 +1091,9 @@ class TestKcSubcodesDisplayProperty:
     @settings(max_examples=20, deadline=None)
     def test_inject_preserves_kc_subcodes_field(self, codes):
         """Non-mutation: inject_kc_subcodes_display does not alter kc_subcodes."""
-        from asago_scenario_generator.models.capability_profile import inject_kc_subcodes_display
+        from asago_scenario_generator.models.capability_profile import (
+            inject_kc_subcodes_display,
+        )
 
         data = {"kc_subcodes": codes}
         result = inject_kc_subcodes_display(data)
@@ -1135,7 +1131,9 @@ class TestKcSubcodesDisplayProperty:
     @settings(max_examples=20, deadline=None)
     def test_inject_without_kc_subcodes_is_noop(self, data):
         """Safety: inject on a dict without kc_subcodes leaves it unchanged."""
-        from asago_scenario_generator.models.capability_profile import inject_kc_subcodes_display
+        from asago_scenario_generator.models.capability_profile import (
+            inject_kc_subcodes_display,
+        )
 
         original = dict(data)
         result = inject_kc_subcodes_display(data)

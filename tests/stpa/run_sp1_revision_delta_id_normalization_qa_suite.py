@@ -195,9 +195,7 @@ def _base_control_elements() -> dict[str, Any]:
                 "source": {"type": "controlled_process", "id": "CP-1"},
             },
         ],
-        "controlled_processes": [
-            {"cp_id": "CP-1", "description": "Original process"}
-        ],
+        "controlled_processes": [{"cp_id": "CP-1", "description": "Original process"}],
     }
 
 
@@ -535,8 +533,9 @@ def _sp1_response(model: str, system_prompt: str) -> dict[str, Any]:
             "security_constraints": [
                 {
                     "constraint_id": "SC-1",
-                    "description": "The system must reject unauthorized actions",
+                    "rule": "The system must reject unauthorized actions",
                     "related_hazards": ["H-1"],
+                    "applies_when": [],
                 }
             ],
         }
@@ -682,7 +681,11 @@ def _write_inputs(
         "report",
         *(f"unresolved-{field}" for field, _missing in UNRESOLVED_FIELDS),
     ]
-    profile_names = [*(f"rev-{variant}" for variant in variants), "sp2-qa-stub", "sp3-qa-stub"]
+    profile_names = [
+        *(f"rev-{variant}" for variant in variants),
+        "sp2-qa-stub",
+        "sp3-qa-stub",
+    ]
     profiles.write_text(
         yaml.safe_dump(
             {
@@ -750,7 +753,9 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 def _load_calls(output_dir: Path) -> list[dict[str, Any]]:
     return [
         json.loads(line)
-        for line in (output_dir / "calls.jsonl").read_text(encoding="utf-8").splitlines()
+        for line in (output_dir / "calls.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
         if line.strip()
     ]
 
@@ -765,8 +770,7 @@ def _assert_revision_manifest(
     calls = _load_calls(output_dir)
     assert manifest.get("revised") is True, "manifest does not mark revision attempted"
     assert any(
-        call.get("step") == "revision" and call.get("success") is True
-        for call in calls
+        call.get("step") == "revision" and call.get("success") is True for call in calls
     ), "successful revision call is not logged"
     warnings = manifest.get("post_revision_warnings", [])
     warning_text = " ".join(str(warning) for warning in warnings).lower()
@@ -774,7 +778,9 @@ def _assert_revision_manifest(
         assert "revision delta merge degraded" in warning_text, warning_text
         assert missing_id is not None and missing_id in warning_text, warning_text
     else:
-        assert not any(term in warning_text for term in SUCCESS_WARNING_TERMS), warning_text
+        assert not any(term in warning_text for term in SUCCESS_WARNING_TERMS), (
+            warning_text
+        )
         assert not manifest.get("stage_errors"), manifest.get("stage_errors")
 
 
@@ -863,9 +869,10 @@ def main() -> int:
                 "CL-1",
                 "CL-2",
             ]
-            assert malformed["coordination_links"][1]["coordination_mechanism"][
-                "cm_id"
-            ] == "CM-2"
+            assert (
+                malformed["coordination_links"][1]["coordination_mechanism"]["cm_id"]
+                == "CM-2"
+            )
             assert "Revision addition" in json.dumps(added)
             print("PASS QA-SP1-REV-ID-01")
             passed += 1
@@ -890,7 +897,9 @@ def main() -> int:
             result, output_dir = _run_cli(work_dir, "references", inputs)
             references = _assert_success(result, output_dir)
             modified = _responsibility_by_id(references, "RESP-2")
-            assert modified["process_model_parts"][0]["feedback_source"]["id"] == "RESP-3"
+            assert (
+                modified["process_model_parts"][0]["feedback_source"]["id"] == "RESP-3"
+            )
             assert modified["control_actions"][0]["target"]["id"] == "CP-2"
             assert modified["feedback_channels"][0]["source"]["id"] == "CP-2"
             assert modified["feedback_channels"][0]["updates"] == "PM-2-1"
@@ -920,12 +929,14 @@ def main() -> int:
             assert positioned["responsibilities"][2]["description"] == (
                 "Added position responsibility"
             )
-            assert [
-                item["cp_id"] for item in positioned["controlled_processes"]
-            ] == ["CP-1", "CP-2"]
-            assert [
-                item["link_id"] for item in positioned["coordination_links"]
-            ] == ["CL-1", "CL-2"]
+            assert [item["cp_id"] for item in positioned["controlled_processes"]] == [
+                "CP-1",
+                "CP-2",
+            ]
+            assert [item["link_id"] for item in positioned["coordination_links"]] == [
+                "CL-1",
+                "CL-2",
+            ]
             assert [
                 item["coordination_mechanism"]["cm_id"]
                 for item in positioned["coordination_links"]
@@ -990,12 +1001,18 @@ def main() -> int:
 
             result, output_dir = _run_cli(work_dir, "report", inputs)
             report_structure = _assert_success(result, output_dir)
-            assert _nested_ids(
-                _responsibility_by_id(report_structure, "RESP-2")
-            ) == ("RC-2-1", "PM-2-1", "CA-2-1", "FB-2-1")
-            assert _nested_ids(
-                _responsibility_by_id(report_structure, "RESP-3")
-            ) == ("RC-3-1", "PM-3-1", "CA-3-1", "FB-3-1")
+            assert _nested_ids(_responsibility_by_id(report_structure, "RESP-2")) == (
+                "RC-2-1",
+                "PM-2-1",
+                "CA-2-1",
+                "FB-2-1",
+            )
+            assert _nested_ids(_responsibility_by_id(report_structure, "RESP-3")) == (
+                "RC-3-1",
+                "PM-3-1",
+                "CA-3-1",
+                "FB-3-1",
+            )
             _run_report(output_dir)
             print("PASS QA-SP1-REV-ID-08")
             passed += 1

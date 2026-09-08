@@ -27,10 +27,12 @@ any new, grounded use-case loss; then add a hazard that references only an
 existing or newly declared loss; then add a constraint that references only an
 existing or newly declared hazard.  Never return a hazard or constraint with a
 dangling ID.  If the existing analysis already covers the supplied system and
-there is no grounded gap, return all four collections empty only when that
+there is no grounded gap, return the `risk_card_losses`, `use_case_losses`,
+`hazards`, and `security_constraints` collections empty only when that
 prior analysis already contains a complete hazard/constraint graph.  If losses
 are present but their dependent graph is incomplete, complete that graph in
-this call even when no new use-case loss is needed.
+this call even when no new use-case loss is needed, including a constraint
+for every existing hazard that has none.
 
 Return only materially distinct gaps. Return no more than 16 new losses, 16 new
 hazards, and 16 new security constraints, and never repeat a record to fill the
@@ -46,13 +48,45 @@ evidence is present, retain it as supporting context rather than making it a
 prerequisite. Do not invent gaps merely to cover every capability or fill a
 quota.
 
-## Permitted behavior and constraint grounding
+## Response format
+
+Return exactly one JSON object with these four keys. Do not add, rename, or
+omit keys.
+
+```json
+{
+  "risk_card_losses": [],
+  "use_case_losses": [
+    {"loss_id": "L-4", "description": "...", "provenance": "use_case",
+     "source_risk_cards": []}
+  ],
+  "hazards": [
+    {"hazard_id": "H-4", "description": "...", "related_losses": ["L-4"]}
+  ],
+  "security_constraints": [
+    {"constraint_id": "SC-4", "rule": "...", "applies_when": [],
+     "related_hazards": ["H-4"]}
+  ]
+}
+```
+
+In this call every new loss goes in `use_case_losses`; `risk_card_losses`
+stays empty (it holds the losses from the previous analysis, which you must
+not repeat). Do not return a `risk_dispositions` key at all: risk accounting
+is owned by the risk-derivation call and is retained automatically.
 
 ## Structural requirements
 
-- New losses have `provenance: use_case` and empty `source_risk_cards`.
+- New losses have `provenance: use_case` and empty `source_risk_cards`, and
+  go only in `use_case_losses` — never in `risk_card_losses`.
 - New hazards may reference BOTH existing loss IDs (from the previous analysis) and new loss IDs. Every loss_id in `related_losses` must be valid.
 - New security constraints may reference BOTH existing hazard IDs and new hazard IDs. Every hazard_id in `related_hazards` must be valid.
+- Every security constraint has two authored parts: `rule` (the obligation
+  in one sentence, without its limiting conditions) and `applies_when` (the
+  conditions under which the rule is in force, each in your own words; all
+  must hold; a disjunction goes inside one condition). The `applies_when`
+  key is required on every constraint — return it even when empty — with at
+  most four conditions, and no condition may simply restate the rule.
 - No duplicate IDs. Continue numbering from where the previous analysis left off.
 - Do NOT duplicate losses, hazards, or constraints already present in the previous analysis. If an existing loss already covers a gap, do not re-derive it.
 

@@ -59,6 +59,8 @@ from tests.stpa.sp1_helpers import (
     valid_critic_findings_dict_no_gaps,
     valid_control_element_set_dict,
     valid_empty_coordination_analysis_dict,
+    valid_gap_draft_dict,
+    valid_risk_draft_dict,
     valid_stage1_profile_dict,
 )
 
@@ -91,9 +93,7 @@ def _make_loss_analysis() -> LossAnalysis:
             ),
         ],
         security_constraints=[
-            SecurityConstraint(
-                constraint_id="SC-1", description="C", related_hazards=["H-1"]
-            ),
+            SecurityConstraint(constraint_id="SC-1", rule="C", related_hazards=["H-1"]),
         ],
     )
 
@@ -135,61 +135,13 @@ def _make_control_structure() -> ControlStructure:
 
 
 def _valid_loss_analysis_dict() -> dict:
-    """Risk draft for the risk_derivation call."""
-    return {
-        "risk_card_losses": [
-            {
-                "loss_id": "L-1",
-                "description": "Unauthorized transaction",
-                "provenance": "risk_card",
-                "source_risk_cards": ["atlas-001"],
-            }
-        ],
-        "use_case_losses": [],
-        "hazards": [
-            {
-                "hazard_id": "H-1",
-                "description": "Agent executes unintended action",
-                "related_losses": ["L-1"],
-            }
-        ],
-        "security_constraints": [
-            {
-                "constraint_id": "SC-1",
-                "description": "Must confirm before action",
-                "related_hazards": ["H-1"],
-            }
-        ],
-    }
+    """Risk draft for the risk_derivation call (shared density-safe fixture)."""
+    return valid_risk_draft_dict()
 
 
 def _valid_gap_draft_dict() -> dict:
-    """Gap draft for the gap_analysis call."""
-    return {
-        "risk_card_losses": [],
-        "use_case_losses": [
-            {
-                "loss_id": "L-2",
-                "description": "Loss of trust",
-                "provenance": "use_case",
-                "source_risk_cards": [],
-            }
-        ],
-        "hazards": [
-            {
-                "hazard_id": "H-2",
-                "description": "Agent erodes user trust",
-                "related_losses": ["L-2"],
-            }
-        ],
-        "security_constraints": [
-            {
-                "constraint_id": "SC-2",
-                "description": "Must maintain transparency",
-                "related_hazards": ["H-2"],
-            }
-        ],
-    }
+    """Gap draft for the gap_analysis call (shared density-safe fixture)."""
+    return valid_gap_draft_dict()
 
 
 def _valid_requirement_set_dict() -> dict:

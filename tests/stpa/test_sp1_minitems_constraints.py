@@ -50,7 +50,7 @@ def _make_hazard(hazard_id: str = "H-1") -> Hazard:
 def _make_constraint(constraint_id: str = "SC-1") -> SecurityConstraint:
     return SecurityConstraint(
         constraint_id=constraint_id,
-        description="A constraint",
+        rule="A constraint",
         related_hazards=["H-1"],
     )
 
@@ -99,7 +99,7 @@ class TestMinItemsEmptyCriticalArrayFails:
                 security_constraints=[
                     SecurityConstraint(
                         constraint_id="SC-1",
-                        description="No refs",
+                        rule="No refs",
                         related_hazards=[],
                     )
                 ],

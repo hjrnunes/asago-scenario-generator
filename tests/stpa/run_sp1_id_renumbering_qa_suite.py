@@ -77,7 +77,10 @@ def _source_ids(variant: str) -> dict[str, Any]:
         return {
             "resp": ["RESP-8", "RESP-4"],
             "rc": [["other-rc-a", "other-rc-b"], ["other-rc-c", "other-rc-d"]],
-            "pm": [["other-state-a", "local-shared"], ["local-shared", "other-state-d"]],
+            "pm": [
+                ["other-state-a", "local-shared"],
+                ["local-shared", "other-state-d"],
+            ],
             "ca": [["CA-8-71", "CA-8-71"], ["CA-4-63", "CA-4-63"]],
             "fb": [["FB-8-71", "FB-8-71"], ["FB-4-63", "FB-4-63"]],
             "cp": ["other-process-a", "other-process-b"],
@@ -301,8 +304,9 @@ def _sp1_response(model: str, system_prompt: str) -> dict[str, Any]:
             "security_constraints": [
                 {
                     "constraint_id": "SC-1",
-                    "description": "The system must reject unauthorized actions",
+                    "rule": "The system must reject unauthorized actions",
                     "related_hazards": ["H-1"],
+                    "applies_when": [],
                 }
             ],
         }
@@ -583,9 +587,9 @@ def _assert_canonical_structure(structure: dict[str, Any]) -> None:
 def _assert_ids_valid_and_unique(ids: dict[str, list[str]]) -> None:
     for key, values in ids.items():
         assert len(values) == len(set(values)), f"duplicate {key}: {values}"
-        assert all(
-            ID_PATTERNS[key].fullmatch(value) for value in values
-        ), f"malformed {key}: {values}"
+        assert all(ID_PATTERNS[key].fullmatch(value) for value in values), (
+            f"malformed {key}: {values}"
+        )
     flattened = [value for values in ids.values() for value in values]
     assert len(flattened) == len(set(flattened)), "cross-namespace ID collision"
 
@@ -710,12 +714,16 @@ def main() -> int:
     thread.start()
     passed = 0
     try:
-        with tempfile.TemporaryDirectory(prefix="sp1-id-qa-", dir=PROJECT_ROOT / "tmp") as raw:
+        with tempfile.TemporaryDirectory(
+            prefix="sp1-id-qa-", dir=PROJECT_ROOT / "tmp"
+        ) as raw:
             work_dir = Path(raw)
             inputs = _write_inputs(work_dir, server.server_address[1])
 
             mixed_result, mixed_dir = _run_cli(work_dir, "sp1-mixed-a", inputs)
-            assert mixed_result.returncode == 0, mixed_result.stdout + mixed_result.stderr
+            assert mixed_result.returncode == 0, (
+                mixed_result.stdout + mixed_result.stderr
+            )
             mixed = _load_yaml(mixed_dir / "control-structure.yaml")
             _assert_canonical_structure(mixed)
             _assert_references(mixed)
@@ -725,9 +733,13 @@ def main() -> int:
             passed += 5
 
             variant_result, variant_dir = _run_cli(work_dir, "sp1-mixed-b", inputs)
-            assert variant_result.returncode == 0, variant_result.stdout + variant_result.stderr
+            assert variant_result.returncode == 0, (
+                variant_result.stdout + variant_result.stderr
+            )
             variant = _load_yaml(variant_dir / "control-structure.yaml")
-            assert variant == mixed, "source IDs changed canonical output or non-ID content"
+            assert variant == mixed, (
+                "source IDs changed canonical output or non-ID content"
+            )
             print("PASS QA-SP1-ID-04")
             passed += 1
 

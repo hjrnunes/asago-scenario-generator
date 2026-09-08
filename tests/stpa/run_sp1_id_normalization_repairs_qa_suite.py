@@ -280,9 +280,7 @@ def _revision() -> dict[str, Any]:
                 ],
             }
         ],
-        "new_controlled_processes": [
-            {"id": "CP-8", "description": "Revised process"}
-        ],
+        "new_controlled_processes": [{"id": "CP-8", "description": "Revised process"}],
         "modified_responsibilities": [],
     }
 
@@ -327,8 +325,9 @@ def _sp1_response(model: str, system_prompt: str) -> dict[str, Any]:
             "security_constraints": [
                 {
                     "constraint_id": "SC-1",
-                    "description": "The system must reject unauthorized actions",
+                    "rule": "The system must reject unauthorized actions",
                     "related_hazards": ["H-1"],
+                    "applies_when": [],
                 }
             ],
         }
@@ -502,7 +501,9 @@ def _assert_clean(result: subprocess.CompletedProcess[str], output_dir: Path) ->
     assert result.returncode == 0, result.stdout + result.stderr
     calls = [
         json.loads(line)
-        for line in (output_dir / "calls.jsonl").read_text(encoding="utf-8").splitlines()
+        for line in (output_dir / "calls.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
     ]
     failed = [call for call in calls if call.get("success") is False]
     assert not failed, failed
@@ -572,7 +573,9 @@ def _run_report(output_dir: Path) -> None:
     assert report.exists() and report.stat().st_size > 0
 
 
-def _check(case: str, result: subprocess.CompletedProcess[str], output_dir: Path) -> None:
+def _check(
+    case: str, result: subprocess.CompletedProcess[str], output_dir: Path
+) -> None:
     if case in {"invalid", "bare-unknown"}:
         text = _diag(result, output_dir)
         assert "process-alpha" in text, text
@@ -613,9 +616,10 @@ def _check(case: str, result: subprocess.CompletedProcess[str], output_dir: Path
         assert structure["coordination_links"][0]["description"] == (
             "Coordination link CL-1"
         )
-        assert structure["coordination_links"][0]["coordination_mechanism"][
-            "description"
-        ] == "Coordination mechanism CM-1"
+        assert (
+            structure["coordination_links"][0]["coordination_mechanism"]["description"]
+            == "Coordination mechanism CM-1"
+        )
         _run_report(output_dir)
     elif case == "kept":
         assert all(value.startswith("Kept ") for value in _all_desc(structure))
