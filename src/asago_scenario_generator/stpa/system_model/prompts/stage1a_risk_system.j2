@@ -98,18 +98,12 @@ or `use_case_losses`. Do not invent a loss merely to be able to cite a risk.
 
 ## Constraint rule and conditions
 
-Each security constraint has two authored parts: `rule` and `applies_when`.
-`rule` is the obligation in one sentence, without its limiting conditions.
-`applies_when` lists the conditions under which the rule is in force, each
-written in your own words as a plain sentence fragment (for example, "the
-recipient is not authorized to receive that information"). All listed
-conditions must hold for the rule to apply; if the rule applies under a
-disjunction, put the whole disjunction inside one condition ("the query is
-complex or nuanced"). A constraint that applies unconditionally has an
-empty `applies_when` list. The `applies_when` key is required on every
-constraint — return it even when empty — with at most four conditions, and
-no condition may simply restate the rule. Do not copy text from anywhere;
-write the conditions as you would state them to an analyst.
+Each security constraint has two parts: `rule`, the obligation in one
+sentence without its limiting conditions, and `applies_when`, the plain
+sentence fragments, written in your own words, under which the rule is in
+force. The `applies_when` key is required on every constraint — return it
+even when empty — with at most four conditions, and no condition may simply
+restate the rule.
 
 ## Quality requirements
 
