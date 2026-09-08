@@ -123,6 +123,13 @@ def _gapped_graph_dict() -> dict:
                 "description": "The agent improvises fee amounts.",
                 "related_losses": ["L-1"],
             },
+            {
+                "hazard_id": "H-3",
+                "description": (
+                    "The agent discloses another customer's order history."
+                ),
+                "related_losses": ["L-1"],
+            },
         ],
         "security_constraints": [
             {
@@ -239,12 +246,7 @@ def _h_hazard_without_constraint(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     del text, examples
-    report = world.loss_gates_density
-    return (
-        report.hazards_without_constraint == (),
-        f"expected no hazards without a constraint, got "
-        f"{report.hazards_without_constraint}",
-    )
+    return _h_density_failing(world, "hazard H-3 has no constraint")
 
 
 def _h_subject_mismatch(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -345,6 +347,13 @@ def _revision_response(**overrides) -> dict:
             {
                 "hazard_id": "H-2",
                 "description": "The agent improvises fee amounts.",
+                "related_losses": ["L-1"],
+            },
+            {
+                "hazard_id": "H-3",
+                "description": (
+                    "The agent discloses another customer's order history."
+                ),
                 "related_losses": ["L-1"],
             },
         ],
@@ -513,6 +522,14 @@ def _h_run_failing_gate(world: World, text: str, examples: dict) -> tuple[bool, 
     if "drops a prior hazard" in text:
         revision = _revision_response()
         revision["hazards"] = revision["hazards"][1:]
+    elif "rewrites that rule" in text:
+        # The patch rewrites SC-2's rule and re-points it to a hazard the
+        # prior graph never assigned to it.
+        revision = _revision_response()
+        revision["security_constraints"][1]["rule"] = (
+            "The agent must never improvise fee amounts."
+        )
+        revision["security_constraints"][1]["related_hazards"] = ["H-1"]
     elif "changes those conditions" in text:
         # The patch keeps SC-2's rule and drops its condition.
         revision = _revision_response()
@@ -603,6 +620,38 @@ def _h_revision_call_named_check(
     return (
         any(expected in prompt for prompt in prompts),
         f"no revision call received the failing check {expected!r}",
+    )
+
+
+def _h_gate_stops_with_rewritten_rule(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text, examples
+    error = world.loss_gates_gate_error
+    return (
+        error is not None
+        and "hazard graph density gate failed" in str(error)
+        and "revision still failing" in str(error),
+        f"expected the still-failing gate stop, got {error}",
+    )
+
+
+def _h_artifact_records_rule_reassignment(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text, examples
+    artifact_path = world.loss_gates_run_dir / GATES_ARTIFACT
+    if not artifact_path.is_file():
+        return False, f"{GATES_ARTIFACT} was not written"
+    artifact = _gd_yaml.safe_load(artifact_path.read_text(encoding="utf-8"))
+    warnings = artifact.get("normalization_warnings", [])
+    return (
+        any(
+            "changed the rule of constraint SC-2 and re-pointed it to hazards "
+            "['H-1'] sharing none of its prior hazards []" in warning
+            for warning in warnings
+        ),
+        f"artifact does not record the rewritten rule: {warnings}",
     )
 
 
@@ -777,7 +826,7 @@ def register(api: object) -> None:
     api.register(r"^the loss-analysis gate runs against a mock provider$", _h_run_gate)
     api.register(
         r"^the loss-analysis gate runs against a mock provider that "
-        r"(?:drops a prior hazard|changes those conditions|covers that hazard|changes nothing)$",
+        r"(?:drops a prior hazard|rewrites that rule|changes those conditions|covers that hazard|changes nothing)$",
         _h_run_failing_gate,
     )
     api.register(
@@ -795,6 +844,14 @@ def register(api: object) -> None:
     api.register(
         r"^the gates artifact records the changed conditions as a normalization warning$",
         _h_artifact_records_changed_conditions,
+    )
+    api.register(
+        r"^the gates artifact records the rewritten rule as a normalization warning$",
+        _h_artifact_records_rule_reassignment,
+    )
+    api.register(
+        r"^the gate stops with the rewritten rule recorded as a stage error$",
+        _h_gate_stops_with_rewritten_rule,
     )
     api.register(
         r"^the gate stops with the still-failing checks recorded as a stage error$",

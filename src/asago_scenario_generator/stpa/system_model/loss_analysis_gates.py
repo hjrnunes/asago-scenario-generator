@@ -684,6 +684,21 @@ def _revision_patch_to_draft(
                 f"constraint {constraint.constraint_id} without changing its "
                 f"rule: {prior_constraint.applies_when} -> {constraint.applies_when}"
             )
+        if (
+            prior_constraint is not None
+            and prior_constraint.rule != constraint.rule
+            and set(prior_constraint.related_hazards) & set(constraint.related_hazards)
+            == set()
+        ):
+            # A rewritten rule on disjoint hazards is a rename in effect: the
+            # constraint now governs different hazards than the reviewed graph
+            # authorized, so record it rather than merge silently.
+            warnings_out.append(
+                f"graph revision changed the rule of constraint "
+                f"{constraint.constraint_id} and re-pointed it to hazards "
+                f"{sorted(constraint.related_hazards)} sharing none of its prior "
+                f"hazards {sorted(prior_constraint.related_hazards)}"
+            )
         constraints.append(
             SecurityConstraint(
                 constraint_id=constraint.constraint_id,

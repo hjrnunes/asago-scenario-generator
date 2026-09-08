@@ -51,6 +51,13 @@ Feature: Phase 1 loss-analysis gates
     And the gates artifact records the changed conditions as a normalization warning
     And the gates artifact records the attempted revision as not applied
 
+  Scenario: a revision that rewrites a constraint's rule onto new hazards records a warning
+    Given a persisted loss analysis with conditional SC-2 that fails the density gate
+    When the loss-analysis gate runs against a mock provider that rewrites that rule
+    Then the gate stops with the rewritten rule recorded as a stage error
+    And the gates artifact records the rewritten rule as a normalization warning
+    And the gates artifact records the attempted revision as not applied
+
   Scenario: a revision that still fails the checks stops with the exact checks
     Given a persisted loss analysis that fails the density gate
     When the loss-analysis gate runs against a mock provider that changes nothing

@@ -1672,6 +1672,133 @@ class TestConstraintRuleAndConditions:
             for warning in warnings
         )
 
+    def test_revision_rule_changed_onto_disjoint_hazards_records_warning(
+        self,
+    ) -> None:
+        prior = LossAnalysis.model_validate(valid_loss_analysis_dict())
+        patch = _Stage1aRevisionPatch.model_validate(
+            {
+                "hazards": [
+                    {
+                        "hazard_id": "H-1",
+                        "description": "The agent executes an unintended payment.",
+                        "related_losses": ["L-1"],
+                    },
+                    {
+                        "hazard_id": "H-2",
+                        "description": "The agent erodes user trust.",
+                        "related_losses": ["L-2"],
+                    },
+                ],
+                "security_constraints": [
+                    {
+                        "constraint_id": "SC-1",
+                        "rule": "The agent must confirm every unintended payment.",
+                        "applies_when": ["before execution"],
+                        "related_hazards": ["H-1"],
+                    },
+                    {
+                        "constraint_id": "SC-2",
+                        "rule": "The agent must never improvise fee amounts.",
+                        "applies_when": ["through transparency"],
+                        "related_hazards": ["H-1"],
+                    },
+                ],
+            }
+        )
+        warnings: list[str] = []
+        _revision_patch_to_draft(prior, patch, warnings)
+        assert any(
+            "changed the rule of constraint SC-2 and re-pointed it to hazards "
+            "['H-1'] sharing none of its prior hazards ['H-2']"
+            in warning
+            for warning in warnings
+        )
+
+    def test_revision_rule_changed_with_empty_prior_hazards_records_warning(
+        self,
+    ) -> None:
+        prior_dict = valid_loss_analysis_dict()
+        prior_dict["security_constraints"][1]["related_hazards"] = []
+        prior = LossAnalysis.model_validate(prior_dict)
+        patch = _Stage1aRevisionPatch.model_validate(
+            {
+                "hazards": [
+                    {
+                        "hazard_id": "H-1",
+                        "description": "The agent executes an unintended payment.",
+                        "related_losses": ["L-1"],
+                    },
+                    {
+                        "hazard_id": "H-2",
+                        "description": "The agent erodes user trust.",
+                        "related_losses": ["L-2"],
+                    },
+                ],
+                "security_constraints": [
+                    {
+                        "constraint_id": "SC-1",
+                        "rule": "The agent must confirm every unintended payment.",
+                        "applies_when": ["before execution"],
+                        "related_hazards": ["H-1"],
+                    },
+                    {
+                        "constraint_id": "SC-2",
+                        "rule": "The agent must never improvise fee amounts.",
+                        "applies_when": [],
+                        "related_hazards": ["H-2"],
+                    },
+                ],
+            }
+        )
+        warnings: list[str] = []
+        _revision_patch_to_draft(prior, patch, warnings)
+        assert any(
+            "changed the rule of constraint SC-2 and re-pointed it to hazards "
+            "['H-2'] sharing none of its prior hazards []"
+            in warning
+            for warning in warnings
+        )
+
+    def test_revision_rule_changed_with_retained_hazard_records_no_warning(
+        self,
+    ) -> None:
+        prior = LossAnalysis.model_validate(valid_loss_analysis_dict())
+        patch = _Stage1aRevisionPatch.model_validate(
+            {
+                "hazards": [
+                    {
+                        "hazard_id": "H-1",
+                        "description": "The agent executes an unintended payment.",
+                        "related_losses": ["L-1"],
+                    },
+                    {
+                        "hazard_id": "H-2",
+                        "description": "The agent erodes user trust.",
+                        "related_losses": ["L-2"],
+                    },
+                ],
+                "security_constraints": [
+                    {
+                        "constraint_id": "SC-1",
+                        "rule": "The agent must confirm every unintended payment.",
+                        "applies_when": ["before execution"],
+                        "related_hazards": ["H-1"],
+                    },
+                    {
+                        "constraint_id": "SC-2",
+                        "rule": "The agent must preserve user trust explicitly.",
+                        "applies_when": ["through transparency"],
+                        "related_hazards": ["H-2"],
+                    },
+                ],
+            }
+        )
+        warnings: list[str] = []
+        _revision_patch_to_draft(prior, patch, warnings)
+        assert not any("re-pointed" in warning for warning in warnings)
+        assert warnings == []
+
 
 class TestProductManifestGateStatuses:
     """The product run's manifest carries the Stage 1a gate evidence."""
