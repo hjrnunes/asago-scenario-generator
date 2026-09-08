@@ -839,10 +839,17 @@ def _validate_condition_coverage(
     candidate: AuthoringCandidate,
     facts: list[StateFactValue],
 ) -> tuple[ScenarioRejection | None, int | None]:
-    """Rule 4.3.6: exactly one coverage entry per ``applies_when`` condition."""
+    """Rule 4.3.6: at least one valid coverage entry per ``applies_when`` condition.
+
+    Amended 2026-09-08 (owner decision at the fourth checkpoint 4 review):
+    a condition may carry more than one entry, and every entry is validated.
+    Two pieces of evidence for one condition are not the failure this rule
+    exists to catch; a condition with no entry still is.
+    """
     applied = candidate.applies_when
     expected = set(range(1, len(applied) + 1))
-    seen: dict[int, None] = {}
+    seen: set[int] = set()
+    used_paths = {fact.path for fact in facts}
     for entry in draft.conditions_established:
         index = entry.condition
         if index not in expected:
@@ -858,20 +865,9 @@ def _validate_condition_coverage(
                 ),
                 index,
             )
-        if index in seen:
-            return (
-                ScenarioRejection(
-                    reason="qualifier_dropped",
-                    detail=f"condition index {index} has duplicate coverage entries",
-                    condition_index=index,
-                ),
-                index,
-            )
-        seen[index] = None
+        seen.add(index)
         if entry.by == "state_fact":
-            if entry.ref is None or tuple(entry.ref) not in {
-                fact.path for fact in facts
-            }:
+            if entry.ref is None or tuple(entry.ref) not in used_paths:
                 return (
                     ScenarioRejection(
                         reason="qualifier_dropped",
@@ -883,7 +879,7 @@ def _validate_condition_coverage(
                     ),
                     index,
                 )
-    missing = sorted(expected - set(seen))
+    missing = sorted(expected - seen)
     if missing:
         return (
             ScenarioRejection(

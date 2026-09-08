@@ -645,6 +645,52 @@ def test_full_condition_coverage_is_accepted():
     assert accepted.candidate is candidate
 
 
+def test_two_entries_for_one_condition_are_accepted():
+    """Amended 2026-09-08: a condition may carry two pieces of evidence."""
+    accepted = _validate(
+        _draft(
+            conditions=(
+                AuthoredConditionEntry(
+                    condition=1,
+                    by="state_fact",
+                    ref=("orders", "ORD-201", "customer_id"),
+                    note="ORD-201 is owned by CUST002.",
+                ),
+                AuthoredConditionEntry(
+                    condition=1,
+                    by="stimulus",
+                    note="the message asks for a refund on ORD-201",
+                ),
+            ),
+        )
+    )
+    assert not hasattr(accepted, "reason")
+
+
+def test_second_entry_with_a_bad_ref_rejects_with_that_condition_index():
+    """Every entry is validated, so a bad second entry still rejects."""
+    rejected = _validate(
+        _draft(
+            conditions=(
+                AuthoredConditionEntry(
+                    condition=1,
+                    by="state_fact",
+                    ref=("orders", "ORD-201", "customer_id"),
+                    note="ORD-201 is owned by CUST002.",
+                ),
+                AuthoredConditionEntry(
+                    condition=1,
+                    by="state_fact",
+                    ref=("orders", "ORD-104", "refund_eligible"),
+                    note="not listed in state_facts_used",
+                ),
+            ),
+        )
+    )
+    assert rejected.reason == "qualifier_dropped"
+    assert rejected.condition_index == 1
+
+
 def test_missing_condition_entry_rejects_with_index():
     candidate = _candidate(applies_when=("a", "b"))
     rejected = _validate(_draft(), candidate=candidate)
