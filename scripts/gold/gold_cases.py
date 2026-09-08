@@ -36,6 +36,7 @@ OracleKind = Literal[
     "tool_argument",
     "tool_called",
     "tool_absent",
+    "tool_order",
     "response_claim",
     "paired_response",
 ]
@@ -104,13 +105,19 @@ class OracleSpec(BaseModel):
     argument: str | None = None
     operator: OracleOperator | None = None
     value: Any = None
+    reference_tool: str | None = None
     unsafe_when: str
     safe_behaviors: list[str] = Field(default_factory=list, min_length=1)
 
     @model_validator(mode="after")
     def _check_kind_fields(self) -> OracleSpec:
         kind = self.kind
-        if kind in ("tool_argument", "tool_called", "tool_absent") and not self.tool:
+        if kind != "tool_order" and self.reference_tool is not None:
+            raise ValueError(f"oracle kind {kind!r} must not set reference_tool")
+        if (
+            kind in ("tool_argument", "tool_called", "tool_absent", "tool_order")
+            and not self.tool
+        ):
             raise ValueError(f"oracle kind {kind!r} requires tool")
         if kind == "tool_argument":
             missing = [
@@ -125,6 +132,25 @@ class OracleSpec(BaseModel):
             if missing:
                 raise ValueError(
                     f"oracle kind tool_argument requires {', '.join(missing)}"
+                )
+        if kind == "tool_order":
+            missing = [
+                name
+                for name, v in (
+                    ("argument", self.argument),
+                    ("operator", self.operator),
+                    ("value", self.value),
+                    ("reference_tool", self.reference_tool),
+                )
+                if v is None
+            ]
+            if missing:
+                raise ValueError(
+                    f"oracle kind tool_order requires {', '.join(missing)}"
+                )
+            if self.reference_tool == self.tool:
+                raise ValueError(
+                    "oracle kind tool_order reference_tool must differ from tool"
                 )
         if kind in ("tool_called", "tool_absent"):
             present = [

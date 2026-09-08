@@ -341,6 +341,10 @@ def evaluate_match_rules(
         ):
             r1_pass = True
             r1_ev = f"absent tool matches: {art.tool_name}"
+    elif g_kind == "tool_order":
+        if art.oracle_kind == "event_order" and art.tool_name == g_tool:
+            r1_pass = True
+            r1_ev = f"ordering tool matches: {art.tool_name}"
     elif g_kind in ("response_claim", "paired_response"):
         if art.oracle_kind in ("output_text", "response_claim") and not art.tool_name:
             r1_pass = True
@@ -401,6 +405,10 @@ def evaluate_match_rules(
         ):
             r3_pass = True
             r3_ev = f"direction matches tool absence ({art.condition_type} = {art.expected})"
+    elif g_kind == "tool_order":
+        if art.oracle_kind == "event_order":
+            r3_pass = True
+            r3_ev = f"direction matches tool call ordering ({art.oracle_kind})"
     elif g_kind in ("response_claim", "paired_response"):
         if art.oracle_kind in ("output_text", "response_claim"):
             r3_pass = True
