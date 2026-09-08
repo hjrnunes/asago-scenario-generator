@@ -974,6 +974,77 @@ def gate_loss_analysis(
     )
 
 
+def gate_pinned_loss_analysis(
+    *,
+    loss_analysis: LossAnalysis,
+    risk_cards: list[RiskCard],
+    run_dir: Path,
+) -> None:
+    """Run the offline Stage 1a gates on a caller-pinned analysis.
+
+    A pinned loss analysis is accepted verbatim: the accounting and five
+    density checks run exactly as they do for a derived graph, but a failing
+    check is immediately fatal and no bounded revision call exists.  The
+    evidence artifact is written before any failure is raised.
+    """
+    class_table = load_behavior_classes()
+    accounting = check_risk_accounting(loss_analysis, risk_cards)
+    density = check_hazard_graph_density(loss_analysis, class_table)
+    if not accounting.passed:
+        _write_gates_artifact(
+            run_dir,
+            accounting=accounting,
+            density=density,
+            failing_checks=[],
+            revision_attempted=False,
+            revision_applied=False,
+        )
+        raise LossAnalysisGateError(
+            stage=STAGE,
+            step=STEP_GAP,
+            message="risk accounting gate failed: "
+            + "; ".join(
+                dict.fromkeys(
+                    [
+                        *accounting.missing_dispositions,
+                        *accounting.unaccounted_risk_refs,
+                    ]
+                )
+            ),
+            gate="risk_accounting",
+            failing_checks=(
+                *accounting.missing_dispositions,
+                *accounting.unaccounted_risk_refs,
+                *accounting.contradictions,
+            ),
+        )
+    if not density.passed:
+        _write_gates_artifact(
+            run_dir,
+            accounting=accounting,
+            density=density,
+            failing_checks=list(density.failing_checks),
+            revision_attempted=False,
+            revision_applied=False,
+        )
+        raise LossAnalysisGateError(
+            stage=STAGE,
+            step=STEP_GRAPH_REVISION,
+            message="hazard graph density gate failed: "
+            + "; ".join(density.failing_checks),
+            gate="hazard_graph_density",
+            failing_checks=density.failing_checks,
+        )
+    _write_gates_artifact(
+        run_dir,
+        accounting=accounting,
+        density=density,
+        failing_checks=[],
+        revision_attempted=False,
+        revision_applied=False,
+    )
+
+
 def _run_graph_revision_call(
     *,
     llm_client: LLMClient,

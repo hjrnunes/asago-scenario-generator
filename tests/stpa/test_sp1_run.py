@@ -6,6 +6,7 @@ Covers SP1-RUN-01 through SP1-RUN-14 from the Gherkin feature file.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import yaml
 
@@ -29,6 +30,7 @@ from asago_scenario_generator.stpa.system_model.run import run_sp1
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
     make_risk_cards,
+    read_calls_jsonl,
     valid_control_element_set_dict,
     valid_empty_coordination_analysis_dict,
     valid_gap_draft_dict,
@@ -803,3 +805,138 @@ class TestRunOrchestration:
         assert "risk_extraction" in manifest["input_hashes"]
         # Empty risk cards still produce a hash (of empty string)
         assert manifest["input_hashes"]["risk_extraction"]
+
+
+class TestPinnedLossAnalysis:
+    """A caller-pinned loss analysis replaces the Stage 1a model calls."""
+
+    @staticmethod
+    def _pinned_dict() -> dict:
+        from tests.stpa.sp1_helpers import valid_loss_analysis_dict
+
+        payload = valid_loss_analysis_dict()
+        payload["risk_dispositions"] = [
+            {
+                "risk_ref": "atlas-001",
+                "disposition": "cited",
+                "loss_ids": ["L-1"],
+                "reason": None,
+            }
+        ]
+        return payload
+
+    def _write_pinned(self, tmp_path: Path) -> Path:
+        pinned = tmp_path / "pinned-loss-analysis.yaml"
+        yaml.safe_dump(self._pinned_dict(), pinned.open("w"))
+        return pinned
+
+    def test_pinned_analysis_makes_zero_stage1a_calls(self, tmp_path):
+        """The pinned path validates, gates, and publishes without a model call."""
+        pinned = self._write_pinned(tmp_path)
+        client = _setup_mock_client()
+
+        result = run_sp1(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=make_risk_cards(),
+            run_dir=tmp_path,
+            loss_analysis_path=pinned,
+        )
+
+        assert result.stage_errors == []
+        assert result.loss_analysis is not None
+        assert result.control_structure is not None
+        stages = [entry["stage"] for entry in read_calls_jsonl(tmp_path)]
+        assert "stage_1a" not in stages
+        assert "stage_1b" in stages
+        assert "stage_2" in stages
+
+    def test_pinned_analysis_is_published_byte_identically(self, tmp_path):
+        """The canonical artifact matches the target-derived write of the graph."""
+        pinned = self._write_pinned(tmp_path)
+        run_sp1(
+            llm_client=_setup_mock_client(),
+            use_case_text="Test use case",
+            risk_cards=make_risk_cards(),
+            run_dir=tmp_path,
+            loss_analysis_path=pinned,
+        )
+        published = LossAnalysis.model_validate(
+            yaml.safe_load((tmp_path / "loss-analysis.yaml").read_text())
+        )
+        expected = LossAnalysis.model_validate(
+            yaml.safe_load(pinned.read_text())
+        )
+        assert published.model_dump() == expected.model_dump()
+        gates = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
+        assert gates["passed"] is True
+        assert gates["revision_attempted"] is False
+
+    def test_pinned_analysis_records_input_digest_and_zero_calls(self, tmp_path):
+        """The manifest pins the supplied bytes and reports a zero-call stage."""
+        import hashlib
+
+        pinned = self._write_pinned(tmp_path)
+        run_sp1(
+            llm_client=_setup_mock_client(),
+            use_case_text="Test use case",
+            risk_cards=make_risk_cards(),
+            run_dir=tmp_path,
+            loss_analysis_path=pinned,
+        )
+        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        assert manifest["input_hashes"]["loss_analysis"] == hashlib.sha256(
+            pinned.read_bytes()
+        ).hexdigest()
+        stage_1a = manifest["stage_summary"]["stage_1a"]
+        assert stage_1a["call_count"] == 0
+        assert stage_1a["source"] == "pinned"
+        assert stage_1a["risk_accounting"] == "passed"
+        assert stage_1a["hazard_graph_density"] == "passed"
+
+    def test_derived_stage_reports_source_derived(self, tmp_path):
+        """The unpinned manifest keeps its call count and gains source: derived."""
+        run_sp1(
+            llm_client=_setup_mock_client(),
+            use_case_text="Test use case",
+            risk_cards=make_risk_cards(),
+            run_dir=tmp_path,
+        )
+        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        stage_1a = manifest["stage_summary"]["stage_1a"]
+        assert stage_1a["source"] == "derived"
+        assert stage_1a["call_count"] >= 2
+
+    def test_pinned_density_failure_is_fatal_without_revision(self, tmp_path):
+        """A failing pinned graph is a fatal stage error with zero model calls."""
+        broken = self._pinned_dict()
+        broken["security_constraints"][0]["related_hazards"] = []
+        pinned = tmp_path / "pinned-loss-analysis.yaml"
+        yaml.safe_dump(broken, pinned.open("w"))
+        client = _setup_mock_client()
+
+        result = run_sp1(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=make_risk_cards(),
+            run_dir=tmp_path,
+            loss_analysis_path=pinned,
+        )
+
+        assert result.loss_analysis is None
+        assert result.control_structure is None
+        assert any(
+            "hazard graph density gate failed" in error
+            for error in result.stage_errors
+        )
+        assert "stage_1a" not in [
+            entry["stage"] for entry in read_calls_jsonl(tmp_path)
+        ]
+        gates = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
+        assert gates["passed"] is False
+        assert gates["revision_attempted"] is False
+        assert gates["failing_checks"]
+        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        stage_1a = manifest["stage_summary"]["stage_1a"]
+        assert stage_1a["hazard_graph_density"] == "failed"
+        assert stage_1a["call_count"] == 0

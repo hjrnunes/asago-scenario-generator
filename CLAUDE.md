@@ -57,7 +57,11 @@ supplied target or simulation profile; it may add runtime details but cannot
 change the route's meaning. `run` accepts optional
 `--execution-target-profile` and `--requested-environment-basis` inputs.
 Optional `--target-observations` supplies a profile-paired, content-pinned Stage 5
-companion, not systemic baseline input. Keep observed values separate from
+companion, not systemic baseline input. Optional `--loss-analysis` pins the
+Stage 1a output: the supplied graph is validated, gated offline with zero
+model calls and no revision, re-published as `loss-analysis.yaml`, and hashed
+into the run manifest (`stage_1a.source: pinned`; the derived path records
+`source: derived`). Keep observed values separate from
 interpreted rules; see the capture workflow in `scripts/qualification/README.md`.
 Profiles contain semantic resource facts only: no URLs, credentials, or
 secrets. Metadata-free MCP targets are scanned independently through the

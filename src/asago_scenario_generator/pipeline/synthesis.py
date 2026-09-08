@@ -124,6 +124,7 @@ class SynthesisInputs:
     risk_extraction_path: Path | None = None
     qualification_facts_path: Path | None = None
     capability_profile_path: Path | None = None
+    loss_analysis_path: Path | None = None
     profiles_file: Path | str = "config/model-profiles.yaml"
 
     # Named model controls, resolved by the outer adapter.
@@ -2826,6 +2827,7 @@ def _default_baseline(
     inputs: SynthesisInputs,
     capability_profile: Any,
     capability_profile_path: Path | None = None,
+    loss_analysis_path: Path | None = None,
     output_dir: Path,
     execution_target_profile: ExecutionTargetProfile | None = None,
     target_observations: TargetObservationSnapshot | None = None,
@@ -2834,7 +2836,8 @@ def _default_baseline(
     """Run ordinary SP1 using one resolved provider client.
 
     The observed execution target reaches only Stage 2's deterministic
-    target-derived derivation; the loss analysis remains target-blind.
+    target-derived derivation; the loss analysis remains target-blind.  A
+    pinned loss analysis skips Stage 1a's model calls entirely.
     """
     from asago_scenario_generator.data.loaders import load_reviewed_risk_extraction
     from asago_scenario_generator.stpa.pipeline.llm_config import resolve_llm_client
@@ -2859,6 +2862,7 @@ def _default_baseline(
         temperature=inputs.temperature,
         execution_target_profile=execution_target_profile,
         target_observations=target_observations,
+        loss_analysis_path=loss_analysis_path or inputs.loss_analysis_path,
     )
     return result
 

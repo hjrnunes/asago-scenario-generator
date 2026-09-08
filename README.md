@@ -248,6 +248,13 @@ an invented limit. The retained snapshot is saved as `target-observations.yaml`
 and its digest accompanies outcome-grounding records. Use the same capture as
 the artifact generator's `--runtime-context` input for subsequent authoring.
 
+`run --loss-analysis PATH` optionally pins the Stage 1a output instead of
+deriving it. The supplied graph is validated, run through the same offline
+risk-accounting and hazard-graph density gates with zero model calls and no
+revision call, re-published as the canonical `loss-analysis.yaml`, and hashed
+into the run manifest (`stage_1a.source: pinned`; the derived path records
+`source: derived`). A failing gate is fatal.
+
 No profile is a valid mode. Omission remains omission: a resource-free route
 can be `target_agnostic`, while a resource-bearing route remains
 `parameterized` with environment basis `none` and a `needs_binding` profile

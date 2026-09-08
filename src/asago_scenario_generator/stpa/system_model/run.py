@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import yaml
+
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     inject_kc_subcodes_display,
@@ -66,6 +68,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
 from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
     LossAnalysisGateError,
     gate_loss_analysis,
+    gate_pinned_loss_analysis,
     verify_reviewed_density,
 )
 from asago_scenario_generator.stpa.system_model.profile import (
@@ -123,6 +126,7 @@ def run_sp1(
     max_workers: int = 1,
     execution_target_profile: ExecutionTargetProfile | None = None,
     target_observations: TargetObservationSnapshot | None = None,
+    loss_analysis_path: Path | None = None,
 ) -> SP1RunResult:
     """Run the full SP1 pipeline: Stages 1b → 1a → 2.
 
@@ -158,6 +162,11 @@ def run_sp1(
         target_observations: Optional target-only observations paired with
             ``execution_target_profile``; they ground the session identity
             process-model entry.
+        loss_analysis_path: Optional pinned loss-analysis.yaml. When
+            provided, Stage 1a makes zero model calls: the pinned graph is
+            validated, gated offline (accounting + five density checks, no
+            bounded revision), and re-published as the canonical
+            ``loss-analysis.yaml``. A failing gate is a fatal stage error.
 
     Returns:
         SP1RunResult with all artifacts and diagnostic info. On partial
@@ -182,35 +191,47 @@ def run_sp1(
         stage_errors,
     )
 
-    # --- Stage 1a: Loss Analysis (two calls, receives capability profile) ---
-    loss_analysis, accounting_normalization_warnings = _try_derive_loss_analysis(
-        llm_client,
-        use_case_text,
-        risk_cards,
-        run_dir,
-        loader,
-        temperature,
-        stage_errors,
-        capability_profile,
-        stage_warnings,
-    )
-
-    # --- Stage 1a gates: deterministic risk accounting + hazard graph density.
-    # A failing graph gets one bounded revision call; a second failure is a
-    # fatal stage error recorded with the exact failing checks.
+    # --- Stage 1a: Loss Analysis ---
+    # Either a caller-pinned graph (zero model calls, offline gates only) or
+    # the derived two-call analysis, followed by the deterministic gates.
+    loss_analysis: LossAnalysis | None = None
     loss_analysis_gates: dict | None = None
-    if loss_analysis is not None:
-        loss_analysis, loss_analysis_gates = _try_gate_loss_analysis(
+    if loss_analysis_path is not None:
+        loss_analysis, loss_analysis_gates = _try_load_pinned_loss_analysis(
+            loss_analysis_path,
+            risk_cards,
+            run_dir,
+            stage_errors,
+        )
+    else:
+        # --- Stage 1a: Loss Analysis (two calls, receives capability profile) ---
+        loss_analysis, accounting_normalization_warnings = _try_derive_loss_analysis(
             llm_client,
-            loss_analysis,
             use_case_text,
             risk_cards,
             run_dir,
             loader,
             temperature,
             stage_errors,
-            accounting_normalization_warnings,
+            capability_profile,
+            stage_warnings,
         )
+
+        # --- Stage 1a gates: deterministic risk accounting + hazard graph density.
+        # A failing graph gets one bounded revision call; a second failure is a
+        # fatal stage error recorded with the exact failing checks.
+        if loss_analysis is not None:
+            loss_analysis, loss_analysis_gates = _try_gate_loss_analysis(
+                llm_client,
+                loss_analysis,
+                use_case_text,
+                risk_cards,
+                run_dir,
+                loader,
+                temperature,
+                stage_errors,
+                accounting_normalization_warnings,
+            )
 
     # --- Stage 2: Control Structure + heuristics + critic + revision ---
     stage2_result = _run_stage_2_block(
@@ -245,6 +266,8 @@ def run_sp1(
         profile_name=profile_name,
         max_workers=max_workers,
         stage_1a_gates=loss_analysis_gates,
+        stage_1a_pinned=loss_analysis_path is not None,
+        loss_analysis_path=loss_analysis_path,
         stage_2_mode=stage2_result.mode,
         stage_2_call_count=stage2_result.model_call_count,
     )
@@ -386,6 +409,53 @@ def _try_gate_loss_analysis(
         "graph_revision_call_count": 1 if outcome.revision_attempted else 0,
     }
     return outcome.loss_analysis, gates
+
+
+def _try_load_pinned_loss_analysis(
+    loss_analysis_path: Path,
+    risk_cards: list[RiskCard],
+    run_dir: Path,
+    stage_errors: list[str],
+) -> tuple[LossAnalysis | None, dict]:
+    """Accept a caller-pinned loss analysis with zero Stage 1a model calls.
+
+    The pinned bytes are validated, gated offline (no bounded revision), and
+    re-published as the canonical ``loss-analysis.yaml`` exactly as the
+    derived paths write it.  A malformed file or a failing gate is a fatal
+    stage error recorded with the exact failing checks; Stage 2 then sees no
+    loss analysis, mirroring the derived gate-failure behavior.
+    """
+    try:
+        payload = yaml.safe_load(loss_analysis_path.read_text(encoding="utf-8"))
+        loss_analysis = LossAnalysis.model_validate(payload)
+    except Exception as exc:  # noqa: BLE001 - recorded as a stage error
+        stage_errors.append(f"stage_1a/pinned: {exc}")
+        return None, {
+            "risk_accounting": "passed",
+            "hazard_graph_density": "passed",
+            "graph_revision_call_count": 0,
+        }
+    try:
+        gate_pinned_loss_analysis(
+            loss_analysis=loss_analysis,
+            risk_cards=risk_cards,
+            run_dir=run_dir,
+        )
+    except LossAnalysisGateError as exc:
+        stage_errors.append(str(exc))
+        accounting = "failed" if exc.gate == "risk_accounting" else "passed"
+        density = "failed" if exc.gate == "hazard_graph_density" else "passed"
+        return None, {
+            "risk_accounting": accounting,
+            "hazard_graph_density": density,
+            "graph_revision_call_count": 0,
+        }
+    write_yaml(loss_analysis, run_dir / "loss-analysis.yaml")
+    return loss_analysis, {
+        "risk_accounting": "passed",
+        "hazard_graph_density": "passed",
+        "graph_revision_call_count": 0,
+    }
 
 
 def _try_derive_capability_profile(
@@ -663,7 +733,9 @@ def _run_target_derived_stage_2(
 
 
 def _compute_input_hashes(
-    use_case_text: str, risk_cards: list[RiskCard]
+    use_case_text: str,
+    risk_cards: list[RiskCard],
+    loss_analysis_path: Path | None = None,
 ) -> dict[str, str]:
     """Compute SHA-256 hashes of input artifacts for the manifest."""
     hashes = {
@@ -674,6 +746,10 @@ def _compute_input_hashes(
         hashes["risk_extraction"] = hashlib.sha256(risk_ids.encode("utf-8")).hexdigest()
     else:
         hashes["risk_extraction"] = hashlib.sha256(b"").hexdigest()
+    if loss_analysis_path is not None:
+        hashes["loss_analysis"] = hashlib.sha256(
+            loss_analysis_path.read_bytes()
+        ).hexdigest()
     return hashes
 
 
@@ -701,18 +777,23 @@ def _write_manifest(
     profile_name: str | None = None,
     max_workers: int = 1,
     stage_1a_gates: dict | None = None,
+    stage_1a_pinned: bool = False,
+    loss_analysis_path: Path | None = None,
     stage_2_mode: str = "target_blind",
     stage_2_call_count: int = STAGE_2_CALL_COUNT,
 ) -> None:
     """Write the run manifest with stage summary, input hashes, and prompt hashes."""
-    input_hashes = _compute_input_hashes(use_case_text, risk_cards)
+    input_hashes = _compute_input_hashes(use_case_text, risk_cards, loss_analysis_path)
     prompt_hashes = loader.hash_prompt_templates()
     critic_summary = _summarize_critic_findings(critic_findings)
     stage_1b_calls = 0 if profile_skipped else 1
-    _stage_1a_call_count = 2
+    _stage_1a_call_count = 0 if stage_1a_pinned else 2
     _stage_2_call_count = stage_2_call_count
 
-    stage_1a_summary: dict[str, object] = {"call_count": _stage_1a_call_count}
+    stage_1a_summary: dict[str, object] = {
+        "call_count": _stage_1a_call_count,
+        "source": "pinned" if stage_1a_pinned else "derived",
+    }
     if stage_1a_gates is not None:
         stage_1a_summary.update(stage_1a_gates)
         # The bounded graph-revision call is a third Stage 1a model call.

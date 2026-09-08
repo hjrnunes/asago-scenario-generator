@@ -66,6 +66,15 @@ def run_cmd(
             "state/read observations paired with --target-profile."
         ),
     ),
+    loss_analysis: Path | None = typer.Option(
+        None,
+        "--loss-analysis",
+        help=(
+            "Optional pinned loss-analysis.yaml. Stage 1a runs its offline "
+            "gates on the supplied graph with zero model calls and no "
+            "revision; a failing gate is fatal."
+        ),
+    ),
     requested_environment_basis: str | None = typer.Option(
         None,
         "--basis",
@@ -118,6 +127,8 @@ def run_cmd(
         _validate_file(execution_target_profile, "execution target profile file")
     if target_observations is not None:
         _validate_file(target_observations, "target observations file")
+    if loss_analysis is not None:
+        _validate_file(loss_analysis, "loss analysis file")
     if cross_taxonomy is not None:
         _validate_file(cross_taxonomy, "cross-taxonomy file")
     if max_workers < 1:
@@ -196,6 +207,11 @@ def run_cmd(
                     "target observations profile pin does not match target profile"
                 )
         requested_basis = None
+        if loss_analysis is not None:
+            from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+
+            # Fail fast on a malformed pinned graph before any run work.
+            LossAnalysis.model_validate(_load_payload(loss_analysis, "loss analysis"))
         if requested_environment_basis is not None:
             try:
                 requested_basis = RequestedEnvironmentBasis(requested_environment_basis)
@@ -242,6 +258,7 @@ def run_cmd(
             taxonomy_inputs=typed_inputs,
             risk_extraction_path=risk_extraction,
             qualification_facts_path=qualification_facts,
+            loss_analysis_path=loss_analysis,
             profiles_file=profiles_file,
             profile=profile,
             sp1_profile=sp1_profile,
