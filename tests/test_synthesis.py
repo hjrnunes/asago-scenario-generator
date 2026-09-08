@@ -546,6 +546,7 @@ def test_synthesis_manifest_retains_plain_scenario_failures(tmp_path: Path) -> N
         "requested": None,
         "attempted": None,
         "skipped": None,
+        "functional_test": None,
         "diagnostic_count": 1,
     }
     assert result.manifest["scenario_errors"] == [
@@ -587,6 +588,7 @@ def test_synthesis_counts_candidates_separately_from_diagnostics(
         "requested": 4,
         "attempted": 3,
         "skipped": 1,
+        "functional_test": 0,
         "diagnostic_count": 4,
     }
     assert [item["status"] for item in result.manifest["candidate_outcomes"]] == [
@@ -622,6 +624,7 @@ def test_synthesis_no_eligible_candidates_has_distinct_valid_status(
         "requested": 0,
         "attempted": 0,
         "skipped": 0,
+        "functional_test": 0,
         "diagnostic_count": 0,
     }
     assert result.status == "no_candidates"
@@ -663,6 +666,7 @@ def test_synthesis_attempted_zero_yield_is_failed_after_artifacts_publish(
         "requested": 2,
         "attempted": 2,
         "skipped": 0,
+        "functional_test": 0,
         "diagnostic_count": 0,
     }
     assert result.status == "failed"
@@ -724,6 +728,7 @@ def test_synthesis_partial_yield_is_degraded_with_separate_candidate_counts(
         "requested": 3,
         "attempted": 2,
         "skipped": 1,
+        "functional_test": 0,
         "diagnostic_count": 0,
     }
     assert [item["status"] for item in result.manifest["candidate_outcomes"]] == [
@@ -755,7 +760,15 @@ def test_synthesis_status_helper_covers_each_terminal_count_shape() -> None:
         ),
         (
             {"requested": 2, "attempted": 2, "generated": 2},
-            (SynthesisRunStatus.COMPLETED, "all_requested_candidates_published"),
+            (SynthesisRunStatus.COMPLETED, "all_requested_candidates_resolved"),
+        ),
+        (
+            {"requested": 2, "attempted": 2, "generated": 0, "functional_test": 2},
+            (SynthesisRunStatus.COMPLETED, "all_requested_candidates_resolved"),
+        ),
+        (
+            {"requested": 2, "attempted": 2, "generated": 0, "functional_test": 1},
+            (SynthesisRunStatus.DEGRADED, "requested_candidates_not_attempted"),
         ),
         (
             {"requested": 3, "attempted": 2, "generated": 1},

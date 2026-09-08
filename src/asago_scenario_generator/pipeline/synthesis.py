@@ -76,8 +76,9 @@ class SynthesisRunStatus(str, Enum):
     ``no_candidates`` is a valid analysis result: there was no eligible
     scenario candidate to request.  ``failed`` is reserved for the important
     zero-yield case in which candidates were requested and at least one was
-    attempted, but none was published.  A mixture of published, failed, or
-    skipped candidates is ``degraded``.
+    attempted, but none was published or resolved as a functional test.
+    A mixture of published, failed, functional-test, or skipped candidates is
+    ``degraded``.
     """
 
     COMPLETED = "completed"
@@ -3747,23 +3748,29 @@ def _manifest_scenario_counts(result: Any, generated: int) -> dict[str, int | No
         "requested": None,
         "attempted": None,
         "skipped": None,
+        "functional_test": None,
         "diagnostic_count": len(_first_attr(result, "stage_errors") or ()),
     }
     if outcomes is None:
         return counts
     failures = {"generation_failed", "rendering_failed", "publication_failed"}
     published = sum(item["status"] == "published" for item in outcomes)
+    functional_test = sum(item["status"] == "functional_test" for item in outcomes)
     skipped = sum(item["status"] == "skipped" for item in outcomes)
     counts.update(
         # Once explicit terminal outcomes exist, ``published`` is the
-        # authoritative yield.  An envelope can exist briefly before the
-        # bundle/index publication fails, so counting envelopes here would
-        # incorrectly turn a zero-publication run into a successful one.
+        # authoritative adversarial yield.  An envelope can exist briefly
+        # before the bundle/index publication fails, so counting envelopes
+        # here would incorrectly turn a zero-publication run into a
+        # successful one.  ``functional_test`` candidates are resolved
+        # outcomes for the owner's information; they are neither failures
+        # nor published adversarial yield.
         generated=published,
         failed=sum(item["status"] in failures for item in outcomes),
         requested=len(outcomes),
         attempted=len(outcomes) - skipped,
         skipped=skipped,
+        functional_test=functional_test,
     )
     return counts
 
@@ -3775,29 +3782,31 @@ def _scenario_generation_status(
     requested = counts.get("requested")
     attempted = counts.get("attempted")
     generated = counts.get("generated")
+    functional_test = counts.get("functional_test") or 0
     if None in (requested, attempted, generated):
         return (
             SynthesisRunStatus.UNKNOWN,
             "candidate_outcomes_unavailable",
         )
+    resolved = (generated or 0) + functional_test
     choices = (
         (
             requested == 0,
             (SynthesisRunStatus.NO_CANDIDATES, "no_eligible_candidates"),
         ),
         (
-            attempted > 0 and generated == 0,
+            attempted > 0 and generated == 0 and functional_test == 0,
             (SynthesisRunStatus.FAILED, "zero_yield_after_attempts"),
         ),
         (
-            generated == requested and attempted == requested,
+            resolved == requested and attempted == requested,
             (
                 SynthesisRunStatus.COMPLETED,
-                "all_requested_candidates_published",
+                "all_requested_candidates_resolved",
             ),
         ),
         (
-            generated > 0,
+            (generated or 0) > 0,
             (SynthesisRunStatus.DEGRADED, "partial_candidate_yield"),
         ),
     )

@@ -231,7 +231,14 @@ changing acceptance behavior, or running the quality sequence.
   semantic facts and only references that a named response field copies;
   retain digests, source pins, catalog labels, and bookkeeping identities in
   deterministic code. Derive `semantic_binding_required` from typed
-  placeholder presence after the provider response.
+  placeholder presence after the provider response. Require the closed
+  adversary record (`kind`/`gain`; deterministic code derives
+  `reaches_target_via` from the stimulus delivery) on the corrected
+  contextual Stage 5 wire: `kind: none` resolves the candidate as a
+  functional test that is persisted under `scenarios/` but never prepared
+  for execution, bundled, or credited as realization; `third_party_via_content`
+  requires typed capability-profile content-surface facts (`no_content_surface`
+  otherwise); a gain that restates a governing constraint is rejected.
   Controller, controlled-process, and local-handle identities must never be published as
   causal sources, and every intention handle must have an explicit
   causal-factor declaration. Validate capability and access-path claims from

@@ -104,6 +104,9 @@ from asago_scenario_generator.stpa.models.scenario_context import (
 )
 from asago_scenario_generator.stpa.threat_enum.technology_context import context_for
 from asago_scenario_generator.stpa.models.scenario_spec import (
+    Adversary,
+    AdversaryKind,
+    AdversaryReach,
     AttackerBDI,
     DefenderBDI,
     DefenderBelief,
@@ -114,6 +117,7 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
 )
 
 from ._constants import PROMPTS_DIR
+from .content_surface import ContentSurfaceFacts
 from .context import execution_implementation_kind
 from .target_observations import TargetObservationSnapshot
 
@@ -626,6 +630,9 @@ class BDIGenerationResult(BaseModel):
     # deterministic semantic contract below.
     execution_route: ExecutionRouteSelectionValue | None = None
     execution_contract: SemanticExecutionContract | None = None
+    # Phase 3.1 adversary record.  Optional only for historical direct
+    # callers; corrected contextual requests require it on the wire.
+    adversary: Adversary | None = None
 
 
 class _ContextCausalFactorDraft(BaseModel):
@@ -702,12 +709,27 @@ class _ContextAttackerBDIDraft(BaseModel):
     intentions: list[_ContextAttackerIntentionDraft] = Field(min_length=1)
 
 
+class _ContextAdversaryDraft(BaseModel):
+    """Provider-authored adversary who and why, never the delivery channel.
+
+    ``reaches_target_via`` is compiler-owned: deterministic code derives it
+    from the stimulus category (Phase 3 deviation 7), so the provider wire
+    does not carry it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: AdversaryKind
+    gain: _ContextNonBlankText
+
+
 class _ContextBDIProviderPayload(BaseModel):
     """Base response body for one exact scenario-context request."""
 
     model_config = ConfigDict(extra="forbid")
 
     stimulus: _ContextStimulusDraft
+    adversary: _ContextAdversaryDraft
     attacker_bdi: _ContextAttackerBDIDraft
     causal_factors: list[_ContextCausalFactorDraft]
     unsafe_outcome: _ContextUnsafeOutcomeDraft
@@ -1040,6 +1062,7 @@ def generate_bdi_for_context(
     requested_environment_basis: RequestedEnvironmentBasis | None = None,
     target_operation: TargetOperationObservation | None = None,
     target_observations: TargetObservationSnapshot | None = None,
+    content_surface: ContentSurfaceFacts | None = None,
 ) -> tuple[BDIGenerationResult | None, str | None]:
     """Execute corrected Stage 5 with one caller-selected environment basis."""
     if loader is None:
@@ -1098,6 +1121,7 @@ def generate_bdi_for_context(
             value,
             scenario_context,
             target_operation,
+            content_surface,
         ),
     )
     result, error, grounding = _finish_context_bdi(
@@ -1310,9 +1334,11 @@ def _validate_context_provider_payload(
     value: BaseModel,
     context: ScenarioGenerationContext,
     target_operation: TargetOperationObservation | None = None,
+    content_surface: ContentSurfaceFacts | None = None,
 ) -> None:
     """Validate request-local unsafe semantics before Stage 5 succeeds."""
-    stimulus, unsafe_outcome, route = _context_provider_required_parts(value)
+    stimulus, adversary, unsafe_outcome, route = _context_provider_required_parts(value)
+    _validate_adversary_response(adversary, stimulus, context, content_surface)
     _normalize_provider_semantic_proposition(unsafe_outcome, context)
     _validate_observed_argument(unsafe_outcome, target_operation)
     choices = _causal_source_choices(context)
@@ -1371,18 +1397,99 @@ def _validate_context_provider_payload(
 
 def _context_provider_required_parts(
     value: BaseModel,
-) -> tuple[_ContextStimulusDraft, _ContextUnsafeOutcomeDraft, BaseModel]:
+) -> tuple[
+    _ContextStimulusDraft,
+    _ContextAdversaryDraft,
+    _ContextUnsafeOutcomeDraft,
+    BaseModel,
+]:
     """Return the provider-owned fields required by corrected Stage 5."""
     stimulus = getattr(value, "stimulus", None)
     if not isinstance(stimulus, _ContextStimulusDraft):
         raise ValueError("stimulus is required in corrected Stage 5 output")
+    adversary = getattr(value, "adversary", None)
+    if not isinstance(adversary, _ContextAdversaryDraft):
+        raise ValueError("adversary is required in corrected Stage 5 output")
     unsafe_outcome = getattr(value, "unsafe_outcome", None)
     if not isinstance(unsafe_outcome, _ContextUnsafeOutcomeDraft):
         raise ValueError("unsafe_outcome is required in corrected Stage 5 output")
     route = getattr(value, "execution_route", None)
     if route is None:
         raise ValueError("execution_route is required in corrected Stage 5 output")
-    return stimulus, unsafe_outcome, route
+    return stimulus, adversary, unsafe_outcome, route
+
+
+_ADVERSARY_REACH_BY_STIMULUS = {
+    StimulusCategory.user_message: AdversaryReach.user_message,
+    StimulusCategory.conversation: AdversaryReach.conversation,
+    StimulusCategory.conversation_context: AdversaryReach.conversation,
+    StimulusCategory.retrieved_content: AdversaryReach.retrieved_content,
+    StimulusCategory.tool_content: AdversaryReach.retrieved_content,
+}
+
+# Phase 3 deviation 8: a ``kind: none`` record is a functional test whose
+# gain is compiler-owned bookkeeping, never provider text.
+FUNCTIONAL_TEST_GAIN = "Functional test: no adversary gains from this unsafe outcome."
+
+
+def _normalize_gain_text(value: str) -> str:
+    """Collapse a gain or constraint sentence for substring comparison."""
+    collapsed = re.sub(r"\s+", " ", value.strip().casefold())
+    return collapsed.strip(" \t.,;:!\"'()")
+
+
+def _validate_adversary_response(
+    adversary: _ContextAdversaryDraft,
+    stimulus: _ContextStimulusDraft,
+    context: ScenarioGenerationContext,
+    content_surface: ContentSurfaceFacts | None,
+) -> None:
+    """Apply the Phase 3.2 deterministic disposition checks.
+
+    The delivery channel is derived from the stimulus category (deviation 7),
+    so no provider-stated reach exists to reject. A third-party adversary
+    needs a retrieved-content delivery and a typed capability-profile content
+    surface. Gain checks apply only when an adversary actually gains
+    (deviation 8): a ``kind: none`` record is a functional test whose gain
+    the compiler owns.
+    """
+    reach = _ADVERSARY_REACH_BY_STIMULUS.get(stimulus.category)
+    if adversary.kind is AdversaryKind.third_party_via_content:
+        if reach is not AdversaryReach.retrieved_content:
+            raise ValueError(
+                "third_party_via_content requires a retrieved-content or "
+                f"tool-content stimulus, not {stimulus.category.value!r}"
+            )
+        if content_surface is None or not content_surface.has_content_surface:
+            raise ValueError(
+                "no_content_surface: the capability profile records no retrieval "
+                "or tool-content surface a third party could reach"
+            )
+    if adversary.kind is AdversaryKind.none:
+        return
+    normalized_gain = _normalize_gain_text(adversary.gain)
+    for constraint in context.constraints:
+        if normalized_gain in _normalize_gain_text(constraint.description):
+            raise ValueError(
+                f"adversary gain restates constraint {constraint.constraint_id}: "
+                "say what the adversary gets, not what the constraint forbids"
+            )
+
+
+def _materialize_adversary(
+    draft: _ContextAdversaryDraft, stimulus: _ContextStimulusDraft
+) -> Adversary:
+    """Derive the compiler-owned adversary fields (Phase 3 deviations 7-8).
+
+    ``reaches_target_via`` is a function of the stimulus category; an
+    analytical-only delivery (`file_upload`, `traffic_load`, `unknown`) has
+    none of the three primitives, so the persisted reach is null. A
+    ``kind: none`` record ignores the provider's gain text and carries the
+    fixed functional-test marker.
+    """
+    reach = _ADVERSARY_REACH_BY_STIMULUS.get(stimulus.category)
+    gain = FUNCTIONAL_TEST_GAIN if draft.kind is AdversaryKind.none else draft.gain
+    return Adversary(kind=draft.kind, gain=gain, reaches_target_via=reach)
 
 
 def _validate_context_condition_reference_closure(
@@ -3716,6 +3823,12 @@ def _materialize_context_bdi(
         stimulus=draft.stimulus,
         target_operation=target_operation,
     )
+    adversary_draft = getattr(draft, "adversary", None)
+    adversary = (
+        _materialize_adversary(adversary_draft, draft.stimulus)
+        if isinstance(adversary_draft, _ContextAdversaryDraft)
+        else None
+    )
     return (
         BDIGenerationResult(
             defender_vulnerabilities=_materialize_context_vulnerabilities(
@@ -3726,6 +3839,7 @@ def _materialize_context_bdi(
             causal_factors=factors,
             unsafe_outcome=unsafe_outcome,
             execution_contract=execution_contract,
+            adversary=adversary,
         ),
         grounding,
     )
@@ -4147,6 +4261,7 @@ def assemble_scenario_spec(
         unsafe_outcome_constraint_refs=constraint_refs,
         scenario_context=scenario_context,
         execution_contract=llm_result.execution_contract,
+        adversary=llm_result.adversary,
     )
 
 

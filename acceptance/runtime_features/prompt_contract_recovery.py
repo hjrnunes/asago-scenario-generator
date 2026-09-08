@@ -395,6 +395,7 @@ def _counts_check(world: World, text: str, examples: dict) -> tuple[bool, str]:
                 "requested",
                 "attempted",
                 "skipped",
+                "functional_test",
                 "diagnostic_count",
             ),
             map(int, re.findall(r"\d+", text)),
@@ -447,7 +448,8 @@ def register(api: Any) -> None:
             _counts_run,
         ),
         (
-            r"^recovery synthesis reports generated \d+, failed \d+, requested \d+, attempted \d+, skipped \d+ and diagnostics \d+$",
+            r"^recovery synthesis reports generated \d+, failed \d+, requested \d+, "
+            r"attempted \d+, skipped \d+, functional_test \d+ and diagnostics \d+$",
             _counts_check,
         ),
     )

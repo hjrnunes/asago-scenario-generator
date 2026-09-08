@@ -926,6 +926,8 @@ _SCENARIO_PROD_LAYERS: dict[str, int] = {
     "context": 0,
     # Purpose-specific prompt projections are a pure leaf over inward models.
     "prompt_views": 0,
+    # Phase 3 content-surface facts: a pure leaf over the IO capability model.
+    "content_surface": 0,
     "assembly": 1,
     "bdi_generation": 1,
     "narrative": 1,
@@ -1022,6 +1024,7 @@ class TestScenarioProdNoImportCycles:
             "asago_scenario_generator.stpa.scenario_prod._constants",
             "asago_scenario_generator.stpa.scenario_prod.enrichment",
             "asago_scenario_generator.stpa.scenario_prod.context",
+            "asago_scenario_generator.stpa.scenario_prod.content_surface",
             "asago_scenario_generator.stpa.scenario_prod.assembly",
             "asago_scenario_generator.stpa.scenario_prod.bdi_generation",
             "asago_scenario_generator.stpa.scenario_prod.narrative",

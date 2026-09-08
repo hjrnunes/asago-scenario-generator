@@ -61,6 +61,10 @@ def _route_payload(
             "category": stimulus,
             "description": "The supplied test stimulus exercises the selected factor.",
         },
+        "adversary": {
+            "kind": "malicious_customer",
+            "gain": "Learns another customer's order details.",
+        },
         "attacker_bdi": {
             "beliefs": ["The controller can act on stale state."],
             "desires": ["Induce the selected unsafe action."],

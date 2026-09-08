@@ -47,4 +47,4 @@ Feature: Recover actionable STPA prompts and truthful candidate outcomes
 
   Scenario: Candidate failures are not diagnostic-message counts
     When recovery synthesis has one published, two failed and one skipped candidates with four diagnostics
-    Then recovery synthesis reports generated 1, failed 2, requested 4, attempted 3, skipped 1 and diagnostics 4
+    Then recovery synthesis reports generated 1, failed 2, requested 4, attempted 3, skipped 1, functional_test 0 and diagnostics 4

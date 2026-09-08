@@ -9,9 +9,17 @@ handled by the ``validate_against`` method.
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, Field, StrictStr, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictStr,
+    field_validator,
+    model_validator,
+)
 
 from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactor,
@@ -73,6 +81,45 @@ class AttackerBDI(BaseModel):
     intentions: list[str]
 
 
+class AdversaryKind(str, Enum):
+    """Phase 3.1 adversary kinds (spec-defined, closed)."""
+
+    external_attacker = "external_attacker"
+    malicious_customer = "malicious_customer"
+    third_party_via_content = "third_party_via_content"
+    none = "none"
+
+
+class AdversaryReach(str, Enum):
+    """How the adversary's stimulus reaches the target."""
+
+    user_message = "user_message"
+    conversation = "conversation"
+    retrieved_content = "retrieved_content"
+
+
+class Adversary(BaseModel):
+    """Phase 3.1 adversary record: who attempts the unsafe behavior and why.
+
+    The adversary is who and why, never how: no attack mechanism is
+    required or permitted here.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: AdversaryKind
+    gain: StrictStr = Field(min_length=1)
+    reaches_target_via: AdversaryReach | None
+
+    @field_validator("gain")
+    @classmethod
+    def _strip_gain(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("gain must be a non-blank sentence")
+        return stripped
+
+
 class ThreatSource(BaseModel):
     """The source threat for a scenario."""
 
@@ -110,6 +157,14 @@ class ScenarioSpec(BaseModel):
     # value is retained for historical/non-contextual values but cannot be
     # published through the v2 execution projection seam.
     execution_contract: SemanticExecutionContract | None = None
+    # Phase 3.1 adversary record.  Optional only for historical/non-contextual
+    # values; the corrected contextual Stage 5 wire requires it.
+    adversary: Adversary | None = None
+
+    @property
+    def is_functional_test(self) -> bool:
+        """Phase 3.2: ``kind: none`` means nobody gains; a functional test."""
+        return self.adversary is not None and self.adversary.kind is AdversaryKind.none
 
     @model_validator(mode="after")
     def preserve_scenario_context_authority(self) -> "ScenarioSpec":

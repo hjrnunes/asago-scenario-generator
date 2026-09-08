@@ -627,6 +627,10 @@ class TestRunSp3ProductionWiring:
                         "category": "user_message",
                         "description": "One user message is the typed test stimulus.",
                     },
+                    "adversary": {
+                        "kind": "malicious_customer",
+                        "gain": "Learns another customer's order details.",
+                    },
                     "attacker_bdi": {
                         "beliefs": ["b"],
                         "desires": ["d"],

@@ -224,6 +224,10 @@ def _setup_mock_client(num_threats: int = 2) -> MockLLMClient:
                     "category": "user_message",
                     "description": "One user message is the typed test stimulus.",
                 },
+                "adversary": {
+                    "kind": "malicious_customer",
+                    "gain": "Learns another customer's order details.",
+                },
                 "attacker_bdi": {
                     "beliefs": [f"attacker belief {i + 1}"],
                     "desires": ["induce ICA"],
@@ -889,6 +893,10 @@ class TestErrorPaths:
                 "category": "user_message",
                 "description": "One user message is the typed test stimulus.",
             },
+            "adversary": {
+                "kind": "malicious_customer",
+                "gain": "Learns another customer's order details.",
+            },
             "attacker_bdi": {
                 "beliefs": ["b"],
                 "desires": ["d"],
@@ -984,6 +992,10 @@ class TestErrorPaths:
                         "category": "user_message",
                         "description": "One user message is the typed test stimulus.",
                     },
+                    "adversary": {
+                        "kind": "malicious_customer",
+                        "gain": "Learns another customer's order details.",
+                    },
                     "attacker_bdi": {
                         "beliefs": ["b"],
                         "desires": ["d"],
@@ -1049,6 +1061,10 @@ class TestErrorPaths:
                     "stimulus": {
                         "category": "user_message",
                         "description": "One user message is the typed test stimulus.",
+                    },
+                    "adversary": {
+                        "kind": "malicious_customer",
+                        "gain": "Learns another customer's order details.",
                     },
                     "attacker_bdi": {
                         "beliefs": ["b"],

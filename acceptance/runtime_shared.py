@@ -2635,6 +2635,10 @@ def _setup_sp3_mock_client(num_threats: int = 2):
                     "category": "user_message",
                     "description": "One user message is the typed test stimulus.",
                 },
+                "adversary": {
+                    "kind": "malicious_customer",
+                    "gain": "Learns another customer's order details.",
+                },
                 "attacker_bdi": {
                     "beliefs": [f"attacker belief {i + 1}"],
                     "desires": ["induce ICA"],

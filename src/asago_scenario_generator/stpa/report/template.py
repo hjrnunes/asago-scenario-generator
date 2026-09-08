@@ -1195,10 +1195,19 @@ def _build_defender_bdi_block(defender: Any) -> str:
     return "\n".join(parts)
 
 
-def _build_attacker_bdi_block(attacker: Any) -> str:
+def _build_attacker_bdi_block(attacker: Any, adversary: Any = None) -> str:
     """Build the attacker BDI block HTML."""
     parts: list[str] = ['          <div class="bdi-block">']
     parts.append("            <h4>Attacker BDI</h4>")
+    if adversary is not None:
+        kind = _esc(getattr(adversary, "kind", ""))
+        reach = getattr(adversary, "reaches_target_via", None)
+        gain = _esc(getattr(adversary, "gain", ""))
+        delivery = f" via {_esc(reach)}" if reach is not None else ""
+        parts.append(
+            f'            <div class="bdi-item"><strong>Adversary</strong>: '
+            f"{kind}{delivery}, gain: {gain}</div>"
+        )
     for b in _attr_list(attacker, "beliefs"):
         parts.append(
             f'            <div class="bdi-item"><strong>Belief</strong>: {_esc(b)}</div>'
@@ -1231,7 +1240,12 @@ def _build_bdi_section(scenario_spec: Any) -> str:
 
     attacker = getattr(scenario_spec, "attacker_bdi", None)
     if attacker:
-        parts.append(_build_attacker_bdi_block(attacker))
+        parts.append(
+            _build_attacker_bdi_block(
+                attacker,
+                getattr(scenario_spec, "adversary", None),
+            )
+        )
     else:
         parts.append(
             '          <div class="bdi-block"><h4>Attacker BDI</h4><p class="bdi-item">No data</p></div>'

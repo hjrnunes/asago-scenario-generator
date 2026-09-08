@@ -462,6 +462,10 @@ def test_context_stage5_compiles_local_handles_to_exact_structural_sources(
                     "category": "user_message",
                     "description": "One user message is the typed test stimulus.",
                 },
+                "adversary": {
+                    "kind": "malicious_customer",
+                    "gain": "Learns another customer's order details.",
+                },
                 "attacker_bdi": {
                     "beliefs": ["The controller can act on a stale batch count."],
                     "desires": ["Induce the selected unsafe action."],
@@ -535,6 +539,10 @@ def test_context_stage5_materializes_executable_route_from_local_handles(
                 "stimulus": {
                     "category": "user_message",
                     "description": "One user message is the typed test stimulus.",
+                },
+                "adversary": {
+                    "kind": "malicious_customer",
+                    "gain": "Learns another customer's order details.",
                 },
                 "causal_factors": [
                     {
@@ -721,6 +729,10 @@ def test_context_stage5_retains_analytical_only_route_with_typed_gap(tmp_path) -
                     "category": "file_upload",
                     "description": "The unsupported upload path cannot be replayed.",
                 },
+                "adversary": {
+                    "kind": "external_attacker",
+                    "gain": "Learns another customer's order details.",
+                },
                 "attacker_bdi": {
                     "beliefs": ["The controller can act on stale state."],
                     "desires": ["Induce the selected unsafe action."],
@@ -820,6 +832,10 @@ def test_context_stage5_materializes_indirect_carrier_role(tmp_path) -> None:
                     "category": "retrieved_content",
                     "description": "Retrieved content carries the selected state.",
                 },
+                "adversary": {
+                    "kind": "malicious_customer",
+                    "gain": "Learns another customer's order details.",
+                },
                 "causal_factors": [
                     {
                         "source_handle": "cause_1",
@@ -875,6 +891,10 @@ def test_context_stage5_carrier_influence_is_request_local(tmp_path) -> None:
         "stimulus": {
             "category": "retrieved_content",
             "description": "Retrieved content carries the selected state.",
+        },
+        "adversary": {
+            "kind": "malicious_customer",
+            "gain": "Learns another customer's order details.",
         },
         "attacker_bdi": {
             "beliefs": ["The state is stale."],
@@ -938,6 +958,10 @@ def test_context_stage5_model_output_uses_semantic_proposition_without_state_rol
             "category": "user_message",
             "description": "One user message is the typed test stimulus.",
         },
+        "adversary": {
+            "kind": "malicious_customer",
+            "gain": "Learns another customer's order details.",
+        },
         "causal_factors": [
             {
                 "source_handle": "cause_1",
@@ -995,6 +1019,10 @@ def test_context_stage5_preserves_explicit_assumption_when_status_is_mislabeled(
                 "stimulus": {
                     "category": "user_message",
                     "description": "One user message is the typed test stimulus.",
+                },
+                "adversary": {
+                    "kind": "malicious_customer",
+                    "gain": "Learns another customer's order details.",
                 },
                 "attacker_bdi": {
                     "beliefs": ["The controller may act on a stale batch count."],
@@ -1065,6 +1093,10 @@ def test_context_stage5_intentions_must_reference_a_declared_factor(tmp_path) ->
                     "category": "user_message",
                     "description": "One user message is the typed test stimulus.",
                 },
+                "adversary": {
+                    "kind": "malicious_customer",
+                    "gain": "Learns another customer's order details.",
+                },
                 "causal_factors": [
                     {
                         "source_handle": "cause_1",
@@ -1094,6 +1126,10 @@ def test_context_stage5_intentions_must_reference_a_declared_factor(tmp_path) ->
                 "stimulus": {
                     "category": "user_message",
                     "description": "One user message is the typed test stimulus.",
+                },
+                "adversary": {
+                    "kind": "malicious_customer",
+                    "gain": "Learns another customer's order details.",
                 },
                 "attacker_bdi": {
                     "beliefs": ["The controller can act on stale state."],
@@ -1155,6 +1191,10 @@ def test_context_stage5_derives_public_pm_annotations_from_causal_factors(
         "stimulus": {
             "category": "conversation",
             "description": "Earlier coordination turns carry the selected state.",
+        },
+        "adversary": {
+            "kind": "malicious_customer",
+            "gain": "Learns another customer's order details.",
         },
         "attacker_bdi": {
             "beliefs": ["The selected state may remain stale."],
@@ -1374,6 +1414,10 @@ def test_run_sp3_realizes_coordination_slot_without_relabeled_identity(
                     "category": "conversation",
                     "description": "Earlier coordination turns carry the selected state.",
                 },
+                "adversary": {
+                    "kind": "malicious_customer",
+                    "gain": "Learns another customer's order details.",
+                        },
                 "causal_factors": [
                     {
                         "source_handle": "cause_1",

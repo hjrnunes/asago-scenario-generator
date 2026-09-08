@@ -3,6 +3,7 @@
 __all__ = (
     "stpa_target_observations",
     "stpa_semantic_review",
+    "stpa_adversary_record",
     "foundation",
     "infrastructure",
     "models",

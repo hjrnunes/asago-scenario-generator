@@ -15,6 +15,7 @@ if RUNTIME_ROOT not in sys.path:
 MODULES = (
     "stpa_semantic_review",
     "stpa_target_observations",
+    "stpa_adversary_record",
     "foundation",
     "infrastructure",
     "models",

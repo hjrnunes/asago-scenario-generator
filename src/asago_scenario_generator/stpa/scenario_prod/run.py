@@ -80,6 +80,7 @@ from .attack_tree import (
     build_attack_tree_prompts,
     parse_attack_tree,
 )
+from .content_surface import ContentSurfaceFacts, content_surface_facts
 from .bdi_generation import (
     BDIGenerationResult,
     assemble_scenario_spec,
@@ -172,6 +173,9 @@ class SP3CandidateStatus(str, Enum):
     """One terminal lifecycle status for a requested SP3 candidate."""
 
     published = "published"
+    # Phase 3.2: ``kind: none`` marks a functional test.  It is persisted for
+    # the owner's information but never enters the execution bundle.
+    functional_test = "functional_test"
     generation_failed = "generation_failed"
     rendering_failed = "rendering_failed"
     publication_failed = "publication_failed"
@@ -199,6 +203,10 @@ class SP3RunResult:
     coverage_gaps: dict = field(default_factory=dict)
     stage_errors: list[str] = field(default_factory=list)
     validation_errors: list[str] = field(default_factory=list)
+    # Phase 3.2 functional-test specs (``kind: none``).  They are persisted
+    # under scenarios/ but never enter scenario_specs, the bundle, or the
+    # obligation accounting above.
+    functional_test_specs: list[ScenarioSpec] = field(default_factory=list)
     # A real SP3 run always returns a tuple, including ``()`` when no
     # candidates were requested.  Legacy adapters that predate this field may
     # leave it absent/None; synthesis accounting treats that as unknown.
@@ -364,6 +372,7 @@ def run_sp3(
     profile_published = _publish_execution_target_profile(
         run_dir, execution_target_profile, stage_errors
     )
+    functional_test_specs: list[ScenarioSpec] = []
     if profile_published:
         scenario_specs = _collect_stage5_specs(
             llm_client,
@@ -380,7 +389,22 @@ def run_sp3(
             target_realization=target_realization,
             target_observations=target_observations,
             candidate_builders=candidate_builders,
+            content_surface=content_surface_facts(capability_profile),
         )
+        functional_test_specs = [
+            spec for spec in scenario_specs if spec.is_functional_test
+        ]
+        _persist_functional_test_candidates(
+            functional_test_specs,
+            scenarios_dir,
+            capability_profile,
+            control_structure,
+            stage_errors,
+            candidate_builders,
+        )
+        scenario_specs = [
+            spec for spec in scenario_specs if not spec.is_functional_test
+        ]
         scenario_envelopes, validated_projections = _collect_stage6_artifacts(
             llm_client,
             scenario_specs,
@@ -451,6 +475,7 @@ def run_sp3(
         stage_errors=stage_errors,
         validation_errors=all_validation_errors,
         candidate_outcomes=tuple(builder.terminal() for builder in candidate_builders),
+        functional_test_specs=functional_test_specs,
     )
 
 
@@ -553,6 +578,7 @@ def _run_stage5_candidate(
     target_realization: TargetRealizationResult | None = None,
     target_observations: TargetObservationSnapshot | None = None,
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
+    content_surface: ContentSurfaceFacts | None = None,
 ) -> _Stage5ThreatResult:
     """Run one isolated Stage 5 candidate and record its outcome evidence."""
     prior_error_count = len(stage_errors)
@@ -572,6 +598,7 @@ def _run_stage5_candidate(
             requested_environment_basis=requested_environment_basis,
             target_realization=target_realization,
             target_observations=target_observations,
+            content_surface=content_surface,
         )
     except Exception as exc:  # noqa: BLE001 - isolate one candidate
         stage_errors.append(f"Stage 5 candidate failed for SCN-{index + 1:03d}: {exc}")
@@ -601,6 +628,7 @@ def _collect_stage5_specs(
     target_realization: TargetRealizationResult | None = None,
     target_observations: TargetObservationSnapshot | None = None,
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
+    content_surface: ContentSurfaceFacts | None = None,
 ) -> list[ScenarioSpec]:
     """Generate and retain the valid Stage 5 specs in threat order."""
     specs: list[ScenarioSpec] = []
@@ -622,6 +650,7 @@ def _collect_stage5_specs(
             target_realization=target_realization,
             target_observations=target_observations,
             candidate_builders=candidate_builders,
+            content_surface=content_surface,
         )
         if result.scenario_spec is not None:
             specs.append(result.scenario_spec)
@@ -678,6 +707,53 @@ def _publish_stage6_artifacts(
     if builder is not None:
         builder.status = SP3CandidateStatus.published
         builder.diagnostics.extend(stage_errors[prior_error_count:])
+
+
+def _persist_functional_test_candidates(
+    specs: list[ScenarioSpec],
+    scenarios_dir: Path,
+    capability_profile: CapabilityProfile | None,
+    control_structure: ControlStructure,
+    stage_errors: list[str],
+    candidate_builders: list[_CandidateOutcomeBuilder] | None,
+) -> None:
+    """Persist ``kind: none`` candidates without any execution projection.
+
+    Phase 3.2: a functional test is retained in the run for the owner's
+    information.  It renders deterministically (no provider calls), never
+    prepares an execution projection, and never enters the bundle index.
+    """
+    for spec in specs:
+        prior_error_count = len(stage_errors)
+        try:
+            narrative, tree, gherkin = render_scenario_summary(spec)
+            envelope = assemble_envelope(
+                scenario_id=spec.scenario_id,
+                scenario_spec=spec,
+                narrative=narrative,
+                attack_tree=tree,
+                gherkin_spec=gherkin,
+                gherkin_raw=gherkin.to_feature_text(),
+                capability_profile=capability_profile,
+                control_structure=control_structure,
+            )
+            _write_scenario_artifacts(envelope, scenarios_dir, None)
+        except Exception as exc:  # noqa: BLE001 - isolate publication failure
+            diagnostic = (
+                f"Functional-test publication failed for {spec.scenario_id}: {exc}"
+            )
+            stage_errors.append(diagnostic)
+            _mark_candidate_failure(
+                candidate_builders,
+                spec.scenario_id,
+                SP3CandidateStatus.publication_failed,
+                tuple(stage_errors[prior_error_count:]),
+            )
+            continue
+        builder = _candidate_builder_for(candidate_builders, spec.scenario_id)
+        if builder is not None:
+            builder.status = SP3CandidateStatus.functional_test
+            builder.diagnostics.append(f"adversary kind none: {spec.adversary.gain}")
 
 
 def _render_stage6_candidate(
@@ -965,6 +1041,7 @@ def _run_stage5_for_threat(
     requested_environment_basis: RequestedEnvironmentBasis | None = None,
     target_realization: TargetRealizationResult | None = None,
     target_observations: TargetObservationSnapshot | None = None,
+    content_surface: ContentSurfaceFacts | None = None,
 ) -> _Stage5ThreatResult:
     """Run Stage 5 BDI generation for a single threat."""
     slot_parts = parse_ica_slot_id(threat.ica_slot_id)
@@ -994,6 +1071,7 @@ def _run_stage5_for_threat(
         requested_environment_basis=requested_environment_basis,
         target_operation=target_operation,
         target_observations=target_observations,
+        content_surface=content_surface,
     )
     if failure is not None:
         return failure
@@ -1028,6 +1106,7 @@ def _stage5_bdi(
     requested_environment_basis: RequestedEnvironmentBasis | None,
     target_operation: TargetOperationObservation | None,
     target_observations: TargetObservationSnapshot | None,
+    content_surface: ContentSurfaceFacts | None = None,
 ) -> tuple[BDIGenerationResult | None, _Stage5ThreatResult | None]:
     """Generate one closed BDI result or one typed local failure."""
     llm_result, error = generate_bdi_for_context(
@@ -1039,6 +1118,7 @@ def _stage5_bdi(
         requested_environment_basis=requested_environment_basis,
         target_operation=target_operation,
         target_observations=target_observations,
+        content_surface=content_surface,
     )
     if error is None and llm_result is not None:
         return llm_result, None

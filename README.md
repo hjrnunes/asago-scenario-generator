@@ -735,14 +735,27 @@ single direct prompt. The synthesis manifest reports candidate outcomes once
 per exact scenario/slot/ICA identity and reports diagnostic-message count
 separately.
 
+Stage 5 also requires a closed adversary record on every candidate: who
+attempts the unsafe behavior (`external_attacker`, `malicious_customer`,
+`third_party_via_content`, or `none`) and what they gain; deterministic code
+derives the delivery channel (`reaches_target_via`) from the stimulus, and
+an analytical-only stimulus persists a null reach. A `kind: none`
+candidate is a functional test: it is persisted under `scenarios/` for the
+owner's information but never prepared for execution and never enters the
+execution bundle. A `third_party_via_content` adversary additionally requires
+typed capability-profile content-surface facts and is otherwise rejected as
+`no_content_surface`. A gain that merely restates a governing constraint is
+rejected.
+
 The synthesis manifest also publishes a stable `run_status`: `completed` when
-all requested candidates are published, `no_candidates` when no eligible
-candidate was available, `failed` when candidates were attempted but none was
-published, and `degraded` for partial or not-yet-attempted yield. Its
-`scenario_counts` keeps requested, attempted, published (`generated`), failed,
-and skipped candidates independent from diagnostic-message count. The product
-`run` command writes and reports all diagnostics and accounting artifacts
-before returning a non-zero result for the attempted zero-yield `failed` case;
+all requested candidates are published or resolved as functional tests,
+`no_candidates` when no eligible candidate was available, `failed` when
+candidates were attempted but none was published or resolved, and `degraded`
+for partial or not-yet-attempted yield. Its `scenario_counts` keeps requested,
+attempted, published (`generated`), failed, skipped, and functional-test
+candidates independent from diagnostic-message count. The product `run`
+command writes and reports all diagnostics and accounting artifacts before
+returning a non-zero result for the attempted zero-yield `failed` case;
 no-candidate analysis and partial yield remain successful command outcomes.
 
 The product manifest and report retain baseline analysis and post-revision
