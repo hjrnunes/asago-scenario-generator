@@ -157,6 +157,16 @@ def _source_contexts(
     return contexts
 
 
+def quote_is_substring(quote: str, sources: tuple[str, ...]) -> bool:
+    """Return whether *quote* appears verbatim in any supplied source text.
+
+    Shared containment check for evidence-bearing reviews.  A quote matches
+    when it is a substring of at least one source record, so a card quote
+    may come from its name, description, or consequence.
+    """
+    return any(quote in source for source in sources)
+
+
 def _validate_source_evidence(
     evidence: tuple[SourceEvidence, ...],
     contexts: dict[str, str],
@@ -168,7 +178,7 @@ def _validate_source_evidence(
             raise ValueError(
                 "semantic review source_ref must be USE_CASE or a supplied loss ID"
             )
-        if item.quote not in source:
+        if not quote_is_substring(item.quote, (source,)):
             raise ValueError(
                 f"semantic review quote is not an exact substring of {item.source_ref}"
             )

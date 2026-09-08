@@ -685,8 +685,9 @@ class TestRunSp1Mutation:
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
         assert manifest["stage_summary"]["stage_1b"]["call_count"] == 1
 
-    def test_manifest_stage_1a_call_count_two(self, tmp_path):
-        """Manifest stage_1a.call_count is 2 (risk_derivation + gap_analysis).
+    def test_manifest_stage_1a_call_count_derivation_plus_review(self, tmp_path):
+        """Manifest stage_1a.call_count is 3: the two derivation calls plus the
+        advisory risk-coverage review call (spec deviation 10).
 
         Covers the constant 2 in stage_summary and kills the 2→0/1 mutants.
         """
@@ -698,4 +699,6 @@ class TestRunSp1Mutation:
             run_dir=tmp_path,
         )
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
-        assert manifest["stage_summary"]["stage_1a"]["call_count"] == 2
+        stage_1a = manifest["stage_summary"]["stage_1a"]
+        assert stage_1a["call_count"] == 3
+        assert stage_1a["risk_coverage_review"]["call_count"] == 1

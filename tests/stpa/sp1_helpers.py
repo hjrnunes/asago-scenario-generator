@@ -100,6 +100,127 @@ class MockCall:
     max_completion_tokens: int | None
 
 
+def coverage_review_response_from_prompt(
+    response_format: type,
+    user_prompt: str,
+) -> dict | None:
+    """Synthesize a valid risk-coverage review response from the rendered prompt.
+
+    The review wire is a closed schema whose ids are literals of the supplied
+    cards and constraints, so a canned dict cannot serve every test.  This
+    helper reads the ids from the schema and the quotable text from the
+    prompt, then builds one valid row per card: a cited card reports ``full``
+    against the first supplied constraint, and a ``not_applicable`` card
+    reports ``not_applicable_confirmed``.
+    """
+    import re
+    from typing import get_args
+
+    from asago_scenario_generator.stpa.system_model.risk_coverage_review import (
+        RiskCoverageReview,
+    )
+
+    if not (
+        isinstance(response_format, type)
+        and issubclass(response_format, RiskCoverageReview)
+    ):
+        return None
+    rows_field = response_format.model_fields.get("rows")
+    if rows_field is None:
+        return None
+    row_args = get_args(rows_field.annotation)
+    if not row_args:
+        return None
+    row_type = row_args[0]
+    risk_ids = tuple(get_args(row_type.model_fields["risk_id"].annotation))
+    constraint_ids: tuple[str, ...] = ()
+    constraints_field = row_type.model_fields.get("covering_constraints")
+    if constraints_field is not None:
+        inner = get_args(constraints_field.annotation)
+        if inner:
+            constraint_ids = tuple(get_args(inner[0]))
+
+    descriptions: dict[str, str] = {}
+    dispositions: dict[str, str] = {}
+    current: str | None = None
+    for line in user_prompt.splitlines():
+        heading = re.match(r"^### (\S+) — ", line)
+        if heading:
+            current = heading.group(1)
+            continue
+        if current is None:
+            continue
+        description = re.match(r"^- \*\*Description:\*\* (.*)$", line)
+        if description:
+            descriptions[current] = description.group(1)
+            continue
+        disposition = re.match(r"^- \*\*Disposition:\*\* (\S+)", line)
+        if disposition:
+            dispositions[current] = disposition.group(1)
+
+    constraint_rules: dict[str, str] = {}
+    constraint: str | None = None
+    for line in user_prompt.splitlines():
+        heading = re.match(r"^- \*\*(SC-[^*]+)\*\* \(related hazards:", line)
+        if heading:
+            constraint = heading.group(1)
+            continue
+        if constraint is None:
+            continue
+        rule = re.match(r"^  Rule: (.*)$", line)
+        if rule:
+            constraint_rules[constraint] = rule.group(1)
+
+    rows = []
+    for risk_id in risk_ids:
+        quote = descriptions.get(risk_id) or risk_id
+        evidence = [{"source_ref": risk_id, "quote": quote, "meaning": "The card."}]
+        cited = dispositions.get(risk_id, "cited") != "not_applicable"
+        if cited and constraint_ids and constraint_rules:
+            covering = [constraint_ids[0]]
+            evidence.append(
+                {
+                    "source_ref": covering[0],
+                    "quote": constraint_rules[covering[0]],
+                    "meaning": "The governing rule.",
+                }
+            )
+            row = {
+                "risk_id": risk_id,
+                "protects": "the protected interest",
+                "against": None,
+                "covering_constraints": covering,
+                "coverage": "full",
+                "missing_protection": None,
+                "evidence": evidence,
+                "rationale": "The rule protects the same interest.",
+            }
+        elif cited:
+            row = {
+                "risk_id": risk_id,
+                "protects": "the protected interest",
+                "against": None,
+                "covering_constraints": [],
+                "coverage": "none",
+                "missing_protection": "No constraint protects this interest.",
+                "evidence": evidence,
+                "rationale": "No supplied rule covers the card.",
+            }
+        else:
+            row = {
+                "risk_id": risk_id,
+                "protects": "the protected interest",
+                "against": None,
+                "covering_constraints": [],
+                "coverage": "not_applicable_confirmed",
+                "missing_protection": None,
+                "evidence": evidence,
+                "rationale": "The card cannot materialize here.",
+            }
+        rows.append(row)
+    return {"rows": rows}
+
+
 class MockLLMClient:
     """A mock LLM client for SP1 tests.
 
@@ -196,6 +317,15 @@ class MockLLMClient:
                     content = None
             else:
                 content = mapped
+        elif (
+            synthesized := coverage_review_response_from_prompt(
+                response_format, user_prompt
+            )
+        ) is not None:
+            # The advisory risk-coverage review wire closes its ids to the
+            # supplied cards, so tests synthesize a valid response instead of
+            # registering one canned dict per fixture.
+            content = synthesized
         elif response_format is None and None in self._response_map:
             content = self._response_map[None]
         else:

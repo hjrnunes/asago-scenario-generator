@@ -23,6 +23,15 @@ gets exactly one bounded revision call with the exact failing checks; a
 second failure stops the run and is recorded in the manifest.
 `loss-analysis-gates.yaml` carries the recorded evidence.
 
+After the gates pass on a derived analysis, one bounded advisory call reviews
+the whole graph against the risk cards. For every card it records what the
+graph protects, against whom or what, which constraints cover it, whether
+coverage is full, partial, or none, and the specific missing protection, with
+exact quotations from the cited records. The review writes
+`loss-analysis-risk-coverage-review.yaml`; it never changes the graph, never
+blocks a run, and is not a gate. Runs that pin a graph with `--loss-analysis`
+skip it.
+
 Stage 5 scalar comparisons cite supplied constraint/action text through
 `comparison_evidence`. When no citation is supplied, exact typed JSON values
 and keys in the supplied target observations can establish literal presence

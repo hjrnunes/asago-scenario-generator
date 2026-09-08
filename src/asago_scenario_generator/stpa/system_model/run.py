@@ -75,6 +75,14 @@ from asago_scenario_generator.stpa.system_model.profile import (
     derive_capability_profile,
     load_capability_profile,
 )
+from asago_scenario_generator.stpa.system_model.risk_coverage_review import (
+    STATUS_SKIPPED_PINNED,
+    STATUS_UNAVAILABLE,
+    RiskCoverageReviewOutcome,
+    canonical_graph_digest,
+    graph_digest,
+    run_risk_coverage_review,
+)
 from asago_scenario_generator.stpa.system_model.target_derived_structure import (
     derive_target_structure,
     target_derived_stage2_mode,
@@ -233,6 +241,29 @@ def run_sp1(
                 accounting_normalization_warnings,
             )
 
+    # --- Stage 1a advisory risk-coverage review (spec deviation 10) ---
+    # One bounded call reviews the gated graph against the risk cards.  It is
+    # advisory: it never changes the graph and never blocks the run.  Pinned
+    # runs skip it because the supplied graph was already reviewed.
+    if loss_analysis_path is not None:
+        risk_coverage_review = RiskCoverageReviewOutcome(
+            status=STATUS_SKIPPED_PINNED,
+            call_count=0,
+        )
+    elif loss_analysis is not None:
+        risk_coverage_review = _try_run_risk_coverage_review(
+            llm_client,
+            loss_analysis,
+            risk_cards,
+            use_case_text,
+            run_dir,
+            loader,
+            temperature,
+            stage_warnings,
+        )
+    else:
+        risk_coverage_review = None
+
     # --- Stage 2: Control Structure + heuristics + critic + revision ---
     stage2_result = _run_stage_2_block(
         llm_client,
@@ -268,6 +299,7 @@ def run_sp1(
         stage_1a_gates=loss_analysis_gates,
         stage_1a_pinned=loss_analysis_path is not None,
         loss_analysis_path=loss_analysis_path,
+        risk_coverage_review=risk_coverage_review,
         stage_2_mode=stage2_result.mode,
         stage_2_call_count=stage2_result.model_call_count,
     )
@@ -456,6 +488,42 @@ def _try_load_pinned_loss_analysis(
         "hazard_graph_density": "passed",
         "graph_revision_call_count": 0,
     }
+
+
+def _try_run_risk_coverage_review(
+    llm_client: LLMClient,
+    loss_analysis: LossAnalysis,
+    risk_cards: list[RiskCard],
+    use_case_text: str,
+    run_dir: Path,
+    loader: TemplateLoader,
+    temperature: float,
+    stage_warnings: list[str],
+) -> RiskCoverageReviewOutcome:
+    """Run the advisory Stage 1a risk-coverage review without blocking the run.
+
+    The review is advisory (spec deviation 10): it never changes the graph,
+    never raises, and records an ``unavailable`` verdict with the typed
+    reason when its single bounded call fails.  The digest pins the review
+    to the exact gated graph bytes.
+    """
+    digest = graph_digest(loss_analysis)
+    outcome = run_risk_coverage_review(
+        llm_client=llm_client,
+        loss_analysis=loss_analysis,
+        risk_cards=risk_cards,
+        use_case_text=use_case_text,
+        run_dir=run_dir,
+        template_loader=loader,
+        temperature=temperature,
+        reviewed_loss_analysis_digest=digest,
+    )
+    if outcome.status == STATUS_UNAVAILABLE:
+        stage_warnings.append(
+            "stage_1a/risk_coverage_review unavailable: "
+            f"{outcome.failure_reason or 'unknown failure'}"
+        )
+    return outcome
 
 
 def _try_derive_capability_profile(
@@ -779,6 +847,7 @@ def _write_manifest(
     stage_1a_gates: dict | None = None,
     stage_1a_pinned: bool = False,
     loss_analysis_path: Path | None = None,
+    risk_coverage_review: RiskCoverageReviewOutcome | None = None,
     stage_2_mode: str = "target_blind",
     stage_2_call_count: int = STAGE_2_CALL_COUNT,
 ) -> None:
@@ -800,6 +869,34 @@ def _write_manifest(
         stage_1a_summary["call_count"] = _stage_1a_call_count + stage_1a_gates.get(
             "graph_revision_call_count", 0
         )
+    if risk_coverage_review is not None:
+        stage_1a_summary["risk_coverage_review"] = {
+            "status": risk_coverage_review.status,
+            "call_count": risk_coverage_review.call_count,
+            "failure_reason": risk_coverage_review.failure_reason,
+            "reviewed_loss_analysis_digest": (
+                risk_coverage_review.reviewed_loss_analysis_digest
+            ),
+        }
+        stage_1a_summary["call_count"] = (
+            int(stage_1a_summary["call_count"]) + risk_coverage_review.call_count
+        )
+
+    stage_2_summary: dict[str, object] = {
+        "call_count": _stage_2_call_count,
+        "mode": stage_2_mode,
+    }
+    # Target-blind Call 3 may reword the graph after the review.  Record the
+    # final published digest whenever it differs from the reviewed one, so a
+    # reviewer can see that the review covered a different graph.
+    if (
+        risk_coverage_review is not None
+        and risk_coverage_review.reviewed_loss_analysis_digest
+        and not stage_1a_pinned
+    ):
+        published_digest = canonical_graph_digest(run_dir)
+        if published_digest != risk_coverage_review.reviewed_loss_analysis_digest:
+            stage_2_summary["post_review_loss_analysis_digest"] = published_digest
 
     model_config_dict = effective_model_config(llm_client, temperature=temperature)
     model_config_dict["max_workers"] = max_workers
@@ -818,10 +915,7 @@ def _write_manifest(
         stage_summary={
             "stage_1a": stage_1a_summary,
             "stage_1b": {"call_count": stage_1b_calls},
-            "stage_2": {
-                "call_count": _stage_2_call_count,
-                "mode": stage_2_mode,
-            },
+            "stage_2": stage_2_summary,
         },
         critic_findings=critic_summary,
         revised=revised,

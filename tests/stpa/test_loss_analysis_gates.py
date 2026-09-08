@@ -616,6 +616,7 @@ class TestRunSp1Gates:
         assert [e["step"] for e in stage1a] == [
             "risk_derivation",
             "gap_analysis",
+            "risk_coverage_review",
         ]
         manifest = yaml_lib.safe_load((tmp_path / "run-manifest.yaml").read_text())
         gates = manifest["stage_summary"]["stage_1a"]
@@ -705,6 +706,7 @@ class TestRunSp1Gates:
             "risk_derivation",
             "gap_analysis",
             "hazard_graph_revision",
+            "risk_coverage_review",
         ]
         assert all(e["success"] for e in stage1a)
         revision_prompt = stage1a[2]["user_prompt_text"]
@@ -752,6 +754,7 @@ class TestRunSp1Gates:
             "risk_derivation",
             "gap_analysis",
             "hazard_graph_revision",
+            "risk_coverage_review",
         ]
         revision_prompt = stage1a[2]["user_prompt_text"]
         assert "hazard H-2 has no constraint" in revision_prompt

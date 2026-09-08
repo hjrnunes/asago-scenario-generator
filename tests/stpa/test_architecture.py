@@ -365,6 +365,7 @@ _SYSTEM_MODEL_LAYERS: dict[str, int] = {
     "heuristics": 1,
     "loss_analysis": 1,
     "loss_analysis_gates": 2,
+    "risk_coverage_review": 2,
     "target_derived_structure": 2,
     "profile": 1,
     "control_structure": 1,

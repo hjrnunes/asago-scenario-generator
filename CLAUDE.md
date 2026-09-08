@@ -130,6 +130,11 @@ changing acceptance behavior, or running the quality sequence.
   bounded revision call with the exact failing checks; a second failure is a
   fatal stage error recorded in the run manifest and
   `loss-analysis-gates.yaml`. The gates are offline and never soften a check.
+  After the gates pass on a derived analysis, one bounded advisory call
+  reviews every newly generated graph for per-risk coverage, with
+  quotation-validated verdicts written to
+  `loss-analysis-risk-coverage-review.yaml`; the review is advisory (it never
+  changes the graph, blocks a run, or acts as a gate), and pinned runs skip it.
 
 - Track durable work and specification approval in GitHub Issues and PRs.
 - Keep `run` as the sole normal scenario-generation command. Taxonomy supplies

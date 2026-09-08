@@ -328,8 +328,16 @@ class TestRunOrchestration:
             for line in (tmp_path / "calls.jsonl").read_text().splitlines()
         ]
         stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
-        assert [entry["success"] for entry in stage1a_entries] == [False, True, True]
+        # Two derivation attempts (the first fails validation), then the
+        # advisory risk-coverage review call.
+        assert [entry["success"] for entry in stage1a_entries] == [
+            False,
+            True,
+            True,
+            True,
+        ]
         assert stage1a_entries[0]["step"] == "risk_derivation"
+        assert stage1a_entries[-1]["step"] == "risk_coverage_review"
         assert "validation feedback" in stage1a_entries[1]["user_prompt_text"].lower()
 
     def test_run_01_full_run_produces_all_artifacts(self, tmp_path):
@@ -906,6 +914,58 @@ class TestPinnedLossAnalysis:
         stage_1a = manifest["stage_summary"]["stage_1a"]
         assert stage_1a["source"] == "derived"
         assert stage_1a["call_count"] >= 2
+
+    def test_derived_run_records_the_advisory_risk_coverage_review(self, tmp_path):
+        """The derived path runs the review, records it, and writes its artifact."""
+        run_sp1(
+            llm_client=_setup_mock_client(),
+            use_case_text="Test use case",
+            risk_cards=make_risk_cards(),
+            run_dir=tmp_path,
+        )
+        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        stage_1a = manifest["stage_summary"]["stage_1a"]
+        review = stage_1a["risk_coverage_review"]
+        assert review["status"] == "completed"
+        assert review["call_count"] == 1
+        assert review["failure_reason"] is None
+        assert review["reviewed_loss_analysis_digest"]
+        # The review call is counted in Stage 1a alongside the two derivations.
+        assert stage_1a["call_count"] == 3
+        assert (
+            tmp_path / "loss-analysis-risk-coverage-review.yaml"
+        ).is_file()
+        steps = [entry["step"] for entry in read_calls_jsonl(tmp_path)]
+        assert "risk_coverage_review" in steps
+
+    def test_manifest_records_the_post_review_graph_digest(self, tmp_path):
+        """Target-blind Call 3 may reword the graph after the review.
+
+        The manifest keeps the reviewed digest in Stage 1a and records the
+        final published digest in Stage 2 when the two differ.
+        """
+        import hashlib
+
+        client = _setup_mock_client()
+        client.set_response_for(CoordinationAnalysis, _reviewed_coordination_for_run())
+        run_sp1(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=make_risk_cards(),
+            run_dir=tmp_path,
+        )
+        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        reviewed = manifest["stage_summary"]["stage_1a"]["risk_coverage_review"][
+            "reviewed_loss_analysis_digest"
+        ]
+        published = hashlib.sha256(
+            (tmp_path / "loss-analysis.yaml").read_bytes()
+        ).hexdigest()
+        assert reviewed != published
+        assert (
+            manifest["stage_summary"]["stage_2"]["post_review_loss_analysis_digest"]
+            == published
+        )
 
     def test_pinned_density_failure_is_fatal_without_revision(self, tmp_path):
         """A failing pinned graph is a fatal stage error with zero model calls."""

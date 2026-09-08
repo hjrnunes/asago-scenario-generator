@@ -1,0 +1,53 @@
+## Use-Case Description
+
+{{ use_case_text }}
+
+---
+
+## Supplied Risk Cards
+
+Review every card below. `disposition` is what the analysis recorded.
+
+{% for card in risk_cards %}
+### {{ card.risk_id }} — {{ card.risk_name }}
+- **Description:** {{ card.risk_description }}
+- **Consequence:** {{ card.consequence or "N/A" }}
+- **Disposition:** {{ card.disposition }}{% if card.disposition_reason %} — {{ card.disposition_reason }}{% endif %}
+{% if card.citing_loss_ids %}- **Cited by losses:** {{ card.citing_loss_ids | join(", ") }}{% endif %}
+{% endfor %}
+
+---
+
+## Losses
+
+{% for loss in losses %}
+- **{{ loss.loss_id }}** ({{ loss.provenance.value }}): {{ loss.description }}
+  {% if loss.source_risk_cards %}Source risks: {{ loss.source_risk_cards | join(", ") }}{% endif %}
+{% endfor %}
+
+---
+
+## Hazards
+
+{% for hazard in hazards %}
+- **{{ hazard.hazard_id }}**: {{ hazard.description }} (related losses: {{ hazard.related_losses | join(", ") }})
+{% endfor %}
+
+---
+
+## Security Constraints
+
+{% for constraint in security_constraints %}
+- **{{ constraint.constraint_id }}** (related hazards: {{ constraint.related_hazards | join(", ") }})
+  Rule: {{ constraint.rule }}
+  Applies when ({{ constraint.applies_when | length }} conditions):
+  {% for condition in constraint.applies_when %}  {{ loop.index }}. {{ condition }}
+  {% endfor %}
+{% endfor %}
+
+---
+
+## Your Task
+
+Return the `rows` object described in the system prompt: exactly one row per
+supplied risk card, in the order the cards appear above.
