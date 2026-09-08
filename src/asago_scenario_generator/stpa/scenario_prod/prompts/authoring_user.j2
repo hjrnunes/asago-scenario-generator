@@ -82,5 +82,5 @@ Field rules:
   - `tool_order` requires `tool`, `argument`, `operator`, `value`, and `reference_tool` (the call that must precede `tool` for the same argument value).
   - `response_claim` requires `proposition` (one plain sentence about the response text).
 - `state_facts_used` lists exact paths in the target state, each path as a list of keys.
-- `conditions_established` has exactly one entry per numbered condition under "Applies when"; `condition` is that 1-based number; `by` is `state_fact`, `stimulus`, or `observation`; for `state_fact`, `ref` is a path listed in `state_facts_used`.
+- `conditions_established` has at least one entry per numbered condition under "Applies when"; `condition` is that 1-based number; `by` is `state_fact`, `stimulus`, or `observation`; for `state_fact`, `ref` is a path listed in `state_facts_used`.
 - Do not return hazard, constraint, loss, or scenario identifiers.
