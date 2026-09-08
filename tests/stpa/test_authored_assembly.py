@@ -181,6 +181,34 @@ def test_tool_argument_scenario_assembles_and_projects():
     assert "ORD-201" in projection.stimulus_requirements[0].intent
 
 
+def test_owner_field_scenario_compiles_to_not_equals_the_session():
+    """Rule 4.3.3 amendment: the G02-exact oracle compiles as not_equals."""
+    control_structure = _minimal_control_structure()
+    accepted = _accepted(
+        candidate=_candidate(action="get_account_details"),
+        oracle=AuthoredUnsafeObservation(
+            kind="tool_argument",
+            tool="get_account_details",
+            argument="customer_id",
+            operator="owner_differs_from_session",
+            value="CUST002",
+        ),
+    )
+    spec, enumeration = _spec_for(accepted, control_structure)
+    condition = spec.unsafe_outcome_condition
+    assert isinstance(condition, ActionValueCondition)
+    assert condition.control_action_id == "CA-1-4"
+    assert condition.property == "customer_id"
+    assert condition.operator == "not_equals"
+    assert condition.expected == SESSION
+    projection = _project(spec, control_structure, enumeration)
+    outcome = projection.unsafe_outcome
+    assert outcome.condition.type == "action_value"
+    assert outcome.condition.operator == "not_equals"
+    assert outcome.condition.expected == SESSION
+    assert outcome.condition.property == "customer_id"
+
+
 def test_tool_absent_scenario_is_a_functional_test_with_presence_condition():
     control_structure = _minimal_control_structure()
     accepted = _accepted(
