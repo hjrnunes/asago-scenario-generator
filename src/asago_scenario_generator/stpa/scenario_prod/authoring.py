@@ -528,6 +528,20 @@ def _validate_adversary(
             detail="the gain restates the governing constraint text",
         )
     if adversary.kind is AdversaryKind.third_party_via_content:
+        # Reach rule before content-surface facts: every authored stimulus is
+        # a user message (AUTHORED_STIMULUS_KIND) and every accepted scenario
+        # records reaches_target_via user_message, so this kind contradicts
+        # the delivery record it sits in no matter what the profile says.
+        return ScenarioRejection(
+            reason="adversary_reach_mismatch",
+            detail=(
+                "third_party_via_content requires a stimulus delivered "
+                "through content the target retrieves; authored stimuli "
+                "reach the target as a user message"
+            ),
+        )
+        # The content-surface rule is retained unchanged below; the reach
+        # rule above fires first for every authored draft.
         if not has_content_surface:
             return ScenarioRejection(
                 reason="no_content_surface",

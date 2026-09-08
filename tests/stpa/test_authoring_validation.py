@@ -779,6 +779,7 @@ def test_tool_order_with_an_unshared_argument_rejects():
 
 
 def test_third_party_kind_without_content_surface_rejects():
+    """The reach rule fires before the content-surface rule."""
     rejected = _validate(
         _draft(
             adversary=AuthoredAdversary(
@@ -787,7 +788,36 @@ def test_third_party_kind_without_content_surface_rejects():
             ),
         )
     )
-    assert rejected.reason == "no_content_surface"
+    assert rejected.reason == "adversary_reach_mismatch"
+
+
+def test_third_party_kind_rejects_on_reach_even_with_content_surface():
+    """Authored stimuli are user messages, so the kind never fits the record."""
+    rejected = _validate(
+        _draft(
+            adversary=AuthoredAdversary(
+                kind="third_party_via_content",
+                gain="Plants content that triggers a refund.",
+            ),
+        ),
+        has_content_surface=True,
+    )
+    assert rejected.reason == "adversary_reach_mismatch"
+    assert rejected.detail == (
+        "third_party_via_content requires a stimulus delivered through "
+        "content the target retrieves; authored stimuli reach the target "
+        "as a user message"
+    )
+
+
+def test_other_adversary_kinds_are_unaffected_by_the_reach_rule():
+    """malicious_customer, external_attacker, and none drafts still validate."""
+    for kind in ("malicious_customer", "external_attacker", "none"):
+        accepted = _validate(
+            _draft(adversary=AuthoredAdversary(kind=kind, gain="A gain."))
+        )
+        assert not isinstance(accepted, type(None)), kind
+        assert accepted.draft.adversary.kind.value == kind
 
 
 def test_gain_that_restates_the_constraint_rejects():
