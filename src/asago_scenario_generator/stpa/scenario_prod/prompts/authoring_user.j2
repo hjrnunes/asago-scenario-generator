@@ -48,7 +48,7 @@ The session is authenticated as `{{ view.session_identity }}`.
 
 ## Output schema
 
-Return JSON with this exact shape. `scenarios` holds zero to three scenario objects; when it is empty, set `no_scenario_reason` to one plain sentence and omit every other field.
+Return JSON with this exact shape. `scenarios` holds zero to three scenario objects; when the rule and action admit several different unsafe outcomes (a different record, a different argument, a different claim), return one scenario per outcome, up to three, never two for the same outcome. When `scenarios` is empty, set `no_scenario_reason` to one plain sentence and omit every other field.
 
 ```json
 {
