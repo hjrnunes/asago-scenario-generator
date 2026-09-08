@@ -132,7 +132,7 @@ def _make_test_loss_analysis() -> LossAnalysis:
         ],
         security_constraints=[
             SecurityConstraint(
-                constraint_id="SC-1", description="Constraint", related_hazards=["H-1"]
+                constraint_id="SC-1", rule="Constraint", related_hazards=["H-1"]
             ),
         ],
     )

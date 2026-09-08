@@ -64,13 +64,17 @@ hazard-edge list still applies, including other hazard units below.
 {% for hazard in loss_analysis.hazards %}
 - **{{ hazard.hazard_id }}** proposed wording: {{ hazard.description }}
 {% for loss_ref in hazard.related_losses %}{% for loss in loss_analysis.risk_card_losses + loss_analysis.use_case_losses if loss.loss_id == loss_ref %}  Linked loss {{ loss.loss_id }} ({{ source_ref_by_canonical[loss.loss_id] }}): {{ loss.description }}
-{% endfor %}{% endfor %}{% for sc in loss_analysis.security_constraints if sc.related_hazards and sc.related_hazards[0] == hazard.hazard_id %}  - **{{ sc.constraint_id }}** proposed wording: {{ sc.description }}
-    All current hazard edges: {{ sc.related_hazards | join(', ') }}
+{% endfor %}{% endfor %}{% for sc in loss_analysis.security_constraints if sc.related_hazards and sc.related_hazards[0] == hazard.hazard_id %}  - **{{ sc.constraint_id }}** proposed wording: {{ sc.rule }}
+    Applies when ({{ sc.applies_when | length }} authored conditions; fixed context, not under review):
+    {% for condition in sc.applies_when %}  {{ loop.index }}. {{ condition }}
+    {% endfor %}    All current hazard edges: {{ sc.related_hazards | join(', ') }}
 {% endfor %}
 {% endfor %}
 {% for sc in loss_analysis.security_constraints if not sc.related_hazards %}
-- **{{ sc.constraint_id }}** proposed wording: {{ sc.description }}
-  No current hazard edges; review the missing relationship explicitly.
+- **{{ sc.constraint_id }}** proposed wording: {{ sc.rule }}
+  Applies when ({{ sc.applies_when | length }} authored conditions; fixed context, not under review):
+  {% for condition in sc.applies_when %}  {{ loop.index }}. {{ condition }}
+  {% endfor %}  No current hazard edges; review the missing relationship explicitly.
 {% endfor %}
 Return `semantic_review` covering every responsibility and action above. Preserve
 the exact IDs. It must also contain one hazard decision and one constraint
@@ -79,7 +83,9 @@ nullable `revised_description` and `missing_fact`, `source_evidence`, and
 `rationale`; constraint decisions additionally include `related_hazards`.
 Use `preserve` with null replacement/missing fact when the supplied wording is
 sound. Use `revise` only for a changed, nonblank, source-supported correction
-with nonempty exact evidence. Use `unresolved` only with a nonblank missing
+with nonempty exact evidence. A constraint correction rewords its rule only:
+the listed applies-when conditions are authored and fixed, so never restate
+them inside `revised_description`. Use `unresolved` only with a nonblank missing
 fact and no replacement; code clears that constraint's hazard edges and
 responsibility ownership from the explicit unresolved decision. Do not attach a non-unresolved constraint to an
 unresolved hazard. Correct wrong scope rather than excluding legitimate

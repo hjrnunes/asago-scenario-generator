@@ -282,6 +282,111 @@ def test_review_preserves_drafts_and_applies_hazard_then_constraint_changes():
     assert draft.model_dump() == before_structure
 
 
+def test_conditional_constraint_revision_rewords_the_rule_once():
+    """A reviewed rule correction keeps the authored conditions exactly once.
+
+    Call 3 renders the authored rule with the applies-when conditions shown
+    separately as fixed context, so the model's revised_description is the
+    corrected rule.  The composed description must carry the conditions
+    exactly once (Phase 1.3 as amended).
+    """
+    losses, draft = authorities()
+    constraint = losses.security_constraints[0]
+    constraint.applies_when = ["the chamber is loaded"]
+    constraint.description = (
+        f"{constraint.rule} Applies when: the chamber is loaded."
+    )
+    payload = review_payload(losses, draft)
+    payload["constraints"][0].update(
+        disposition="revise",
+        revised_description=(
+            "Validate every chamber setting against the loaded profile."
+        ),
+        source_evidence=[
+            {
+                "source_ref": "USE_CASE",
+                "quote": "validated before applying them",
+                "meaning": "The use case authorizes validation before application.",
+            }
+        ],
+    )
+    result = apply_control_structure_semantic_review(
+        draft,
+        losses,
+        ControlStructureSemanticReview.model_validate(payload),
+        use_case_text=USE_CASE,
+    )
+    reviewed = result.loss_analysis.security_constraints[0]
+    assert reviewed.rule == (
+        "Validate every chamber setting against the loaded profile."
+    )
+    assert reviewed.applies_when == ["the chamber is loaded"]
+    assert reviewed.description == (
+        "Validate every chamber setting against the loaded profile. "
+        "Applies when: the chamber is loaded."
+    )
+    assert reviewed.description.count("Applies when:") == 1
+
+
+def test_conditional_constraint_echoing_the_composed_text_is_preserved():
+    """An unchanged echo of the rendered view must not reword the rule.
+
+    The Call 3 parser compares the returned replacement against the
+    authored rule; a row that echoes the composed display text unchanged
+    is downgraded to preserve instead of composing the conditions twice.
+    """
+    losses, draft = authorities()
+    constraint = losses.security_constraints[0]
+    constraint.applies_when = ["the chamber is loaded"]
+    constraint.description = (
+        f"{constraint.rule} Applies when: the chamber is loaded."
+    )
+    payload = review_payload(losses, draft)
+    payload["constraints"][0].update(
+        disposition="revise",
+        revised_description=constraint.description,
+        source_evidence=[
+            {
+                "source_ref": "USE_CASE",
+                "meaning": "The use case authorizes validation before application.",
+            }
+        ],
+    )
+    from asago_scenario_generator.stpa.infra.llm import LLMResult
+    from asago_scenario_generator.stpa.system_model.control_structure import (
+        _Call3SourceExcerpt,
+        _parse_call3_source_selection,
+    )
+
+    parsed = _parse_call3_source_selection(
+        LLMResult(
+            content=response_payload(payload),
+            prompt_tokens=1,
+            completion_tokens=1,
+            duration_ms=1,
+            system_prompt="",
+            user_prompt="",
+        ),
+        (
+            _Call3SourceExcerpt(
+                local_ref="USE_CASE",
+                canonical_ref="USE_CASE",
+                text="validated before applying them",
+                meaning="The use case authorizes validation before application.",
+            ),
+        ),
+        structure=draft,
+        loss_analysis=losses,
+    )
+    row = next(
+        item
+        for item in parsed.semantic_review.constraints
+        if item.constraint_id == "SC-1"
+    )
+    assert row.disposition == "preserve"
+    assert row.revised_description is None
+
+
 def test_review_repairs_ownership_and_internal_observation_without_mutating_draft():
     losses, draft = authorities()
     before = draft.model_dump()
@@ -713,8 +818,9 @@ def authorities():
             "security_constraints": [
                 {
                     "constraint_id": "SC-1",
-                    "description": "Validate settings before applying them.",
+                    "rule": "Validate settings before applying them.",
                     "related_hazards": ["H-1"],
+                    "applies_when": [],
                 }
             ],
         }
@@ -782,13 +888,15 @@ def run17_authorities():
             "security_constraints": [
                 {
                     "constraint_id": "SC-2",
-                    "description": "Backend financial data must never appear in responses.",
+                    "rule": "Backend financial data must never appear in responses.",
                     "related_hazards": ["H-2"],
+                    "applies_when": [],
                 },
                 {
                     "constraint_id": "SC-5",
-                    "description": "Third-party-model prompts must never be used.",
+                    "rule": "Third-party-model prompts must never be used.",
                     "related_hazards": ["H-5"],
+                    "applies_when": [],
                 },
             ],
         }

@@ -1,0 +1,24 @@
+You are a safety analyst deciding which actions of an AI system can violate each security constraint.
+
+The system has one controller (the assistant) with the listed actions. For every constraint, name every action that could violate it if the assistant performed it incorrectly, at the wrong time, or under attacker influence. An action that no constraint can violate must be listed as unconstrained with an explicit reason.
+
+## Rules
+
+- Cover every constraint exactly once.
+- Every constraint must either name at least one action from the supplied
+  list that could violate it, or — only when no supplied action could
+  violate it, such as a constraint about third-party service availability —
+  return an empty `actions` list with a `no_relevant_action_reason`
+  explaining why no action applies. Do not invent a violating action.
+- Only name actions from the supplied action list.
+- Give one specific reason per action naming what the assistant could do wrong.
+- Consider the reply action carefully: any constraint about what the system tells the user, or fails to tell the user, can be violated by the reply itself.
+- A constraint about performing operations on records usually names the tool that performs the operation.
+- Every action must either be relevant to at least one constraint or appear in `unconstrained_actions` with a reason.
+
+Return one JSON object with exactly these fields:
+
+- `relevance`: list of objects with `constraint_id` and `actions` (list of
+  objects with `action` and `reason`); a constraint with no violating action
+  carries an empty `actions` list plus `no_relevant_action_reason`.
+- `unconstrained_actions`: list of objects with `action` and `reason`.

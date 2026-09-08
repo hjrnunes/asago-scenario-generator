@@ -540,7 +540,22 @@ def run_synthesis(
     final_routes = initial_routes
     consideration = initial_consideration
 
-    if gaps:
+    # Phase 2: when Stage 2 was derived from the observed target, the
+    # obligation-gap structural revision is suppressed.  The revision is a
+    # model call that invents structural elements; a target-derived structure
+    # must carry only the actions the target actually exposes.  The gaps stay
+    # as typed upstream-gap routes with an explicit run warning.
+    target_derived_stage2 = (
+        getattr(baseline, "target_derived_structure", None) is not None
+    )
+    if gaps and target_derived_stage2:
+        stage_warnings.append(
+            "Obligation-gap structural revision skipped: the Stage 2 control "
+            "structure was derived from the observed target, so no model may "
+            "add structural elements; "
+            f"{len(gaps)} obligation route(s) remain typed upstream gaps."
+        )
+    elif gaps:
         revision_result = _run_revision(
             gaps,
             plan,
@@ -1271,6 +1286,11 @@ def _run_baseline(
         max_workers=inputs.max_workers,
         resume=inputs.resume,
         temperature=inputs.temperature,
+        # Stage 2's mode decision and structure derivation may see the
+        # observed target; Stage 1a stays target-blind.  Adapters without
+        # these parameters simply filter them out.
+        execution_target_profile=inputs.execution_target_profile,
+        target_observations=inputs.target_observations,
     )
     calls.append("baseline")
     return result
@@ -2730,9 +2750,15 @@ def _default_baseline(
     capability_profile: Any,
     capability_profile_path: Path | None = None,
     output_dir: Path,
+    execution_target_profile: ExecutionTargetProfile | None = None,
+    target_observations: TargetObservationSnapshot | None = None,
     **_: Any,
 ) -> Any:
-    """Run ordinary SP1 using one resolved provider client."""
+    """Run ordinary SP1 using one resolved provider client.
+
+    The observed execution target reaches only Stage 2's deterministic
+    target-derived derivation; the loss analysis remains target-blind.
+    """
     from asago_scenario_generator.data.loaders import load_reviewed_risk_extraction
     from asago_scenario_generator.stpa.pipeline.llm_config import resolve_llm_client
     from asago_scenario_generator.stpa.system_model.run import run_sp1
@@ -2754,6 +2780,8 @@ def _default_baseline(
         profile_name=profile_name,
         max_workers=inputs.max_workers,
         temperature=inputs.temperature,
+        execution_target_profile=execution_target_profile,
+        target_observations=target_observations,
     )
     return result
 
@@ -2937,6 +2965,29 @@ def _default_target_realize(
         ica_enumeration=ica_enumeration,
         declared_capabilities=_declared_capability_labels(capability_profile),
     )
+    derived_sidecar = _load_target_derived_sidecar(output_dir)
+    if derived_sidecar is not None:
+        # The control structure was derived deterministically from the
+        # observed target (Phase 2).  Replay the sidecar's exact bindings
+        # through the ordinary realization seam with zero model calls; no
+        # additive extension or target-derived ICA finder runs because the
+        # derivation already carries every observed operation.
+        _verify_target_derived_sidecar(
+            derived_sidecar,
+            control_structure=control_structure,
+            execution_target_profile=execution_target_profile,
+        )
+        from asago_scenario_generator.stpa.target_realization.identity import (
+            TargetDerivedIdentityInterpreter,
+        )
+
+        # The seam constructs its interpreter through a zero-argument
+        # factory; the identity interpreter is already configured.
+        return realize_target_operations(
+            baseline,
+            execution_target_profile,
+            lambda: TargetDerivedIdentityInterpreter(derived_sidecar),
+        )
     client, _profile_name = resolve_llm_client(
         inputs.profile,
         inputs.sp2_profile,
@@ -2973,6 +3024,69 @@ def _declared_capability_labels(profile: Any) -> tuple[str, ...]:
         if getattr(item, "name", None)
     }
     return tuple(sorted(labels))
+
+
+def _load_target_derived_sidecar(output_dir: Path) -> Any | None:
+    """Load the pinned target-derived structure sidecar when one was written.
+
+    A missing sidecar keeps the model-assisted realization path; a present
+    but defective one fails closed.
+    """
+    from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
+    from asago_scenario_generator.stpa.models.target_derived_structure import (
+        TARGET_DERIVED_STRUCTURE_FILENAME,
+        TargetDerivedStructure,
+    )
+
+    path = Path(output_dir) / TARGET_DERIVED_STRUCTURE_FILENAME
+    if not path.is_file():
+        return None
+    sidecar = read_yaml(path, TargetDerivedStructure)
+    sidecar.assert_integrity()
+    return sidecar
+
+
+def _verify_target_derived_sidecar(
+    sidecar: Any,
+    *,
+    control_structure: Any,
+    execution_target_profile: ExecutionTargetProfile,
+) -> None:
+    """Fail closed when the sidecar does not pin the live authorities."""
+    from asago_scenario_generator.stpa.infra.llm_helpers import StageError
+    from asago_scenario_generator.stpa.models.target_derived_structure import (
+        control_structure_content_digest,
+    )
+
+    if sidecar.profile_digest != execution_target_profile.semantic_digest:
+        raise StageError(
+            stage="target_realization",
+            step="target_derived_sidecar",
+            message=(
+                "target-derived structure sidecar does not match the execution "
+                "target profile; a stale sidecar from an earlier run in a "
+                "reused output directory cannot be verified against the "
+                "supplied profile, and the target-derived realization path "
+                "fails closed instead of falling back to model-assisted "
+                "realization. Re-run with the profile that produced the "
+                "sidecar or clear the stale sidecar."
+            ),
+        )
+    if sidecar.control_structure_digest != control_structure_content_digest(
+        control_structure
+    ):
+        raise StageError(
+            stage="target_realization",
+            step="target_derived_sidecar",
+            message=(
+                "target-derived structure sidecar does not match the live "
+                "control structure; a stale sidecar from an earlier run in a "
+                "reused output directory cannot be verified, and the "
+                "target-derived realization path fails closed instead of "
+                "falling back to model-assisted realization. Re-run the "
+                "target-derived derivation or clear the stale sidecar."
+            ),
+        )
 
 
 def _default_scenarios(

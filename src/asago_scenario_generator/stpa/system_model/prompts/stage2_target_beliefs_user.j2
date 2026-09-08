@@ -1,0 +1,21 @@
+## Use-Case Description
+
+{{ use_case_text }}
+
+---
+
+## Observed Tools
+
+{% for tool in tools %}
+- **{{ tool.name }}**: {{ tool.description }} (arguments: {{ tool.argument_names | join(', ') if tool.argument_names else 'none' }})
+{% endfor %}
+
+---
+
+## Your Task
+
+Name the assistant's domain beliefs about the current situation:
+
+1. `controller_purpose`: one sentence describing the assistant's purpose, grounded in the use-case description above.
+2. `beliefs`: at most {{ max_beliefs }} short sentences, each naming one fact the assistant holds about the current situation (for example, which records belong to the current customer). Ground every belief in the use-case description or the observed tools. Do not include identifiers, amounts, dates, or thresholds.
+3. `belief_feedback`: for each belief, the observed tool whose result updates it, or null when the user conversation updates it.

@@ -39,6 +39,9 @@ from asago_scenario_generator.stpa.infra.templates import (
     TemplateLoader,
     hash_prompt_templates,
 )
+from asago_scenario_generator.stpa.models.target_derived_structure import (
+    TARGET_DERIVED_STRUCTURE_FILENAME,
+)
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.models.target_realization import (
     TargetOperationObservation,
@@ -1952,6 +1955,49 @@ def _write_scenario_artifacts(
         )
 
 
+def _stage_1a_gate_statuses(run_dir: Path) -> dict[str, object]:
+    """Carry the Stage 1a gate evidence into the product manifest.
+
+    The SP1 manifest that first records the gate statuses is replaced by
+    this one, so read them back from the persisted gates artifact rather
+    than losing them (re-review should-fix item).
+    """
+    gates_path = run_dir / "loss-analysis-gates.yaml"
+    if not gates_path.is_file():
+        return {}
+    try:
+        gates = yaml.safe_load(gates_path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return {}
+    if not isinstance(gates, dict):
+        return {}
+    statuses: dict[str, object] = {
+        "risk_accounting": "passed"
+        if gates.get("risk_accounting", {}).get("passed")
+        else "failed",
+        "hazard_graph_density": "passed" if gates.get("passed") else "failed",
+    }
+    if gates.get("revision_attempted"):
+        statuses["graph_revision_call_count"] = 1
+        if gates.get("revision_applied"):
+            statuses["hazard_graph_density"] = "passed_after_revision"
+    if gates.get("normalization_warnings"):
+        statuses["accounting_normalizations"] = len(gates["normalization_warnings"])
+    return statuses
+
+
+def _stage_2_mode(run_dir: Path) -> str:
+    """Report the Stage 2 mode recorded in this run directory.
+
+    The target-derived derivation is the only writer of the pinned sidecar,
+    so its presence marks a target-derived Stage 2; the target-blind
+    coordination path leaves no sidecar.
+    """
+    if (run_dir / TARGET_DERIVED_STRUCTURE_FILENAME).is_file():
+        return "target_derived"
+    return "target_blind"
+
+
 def _write_manifest(
     run_dir: Path,
     llm_client: LLMClient,
@@ -1974,6 +2020,13 @@ def _write_manifest(
     }
     prompt_hashes = hash_prompt_templates(PROMPTS_DIR)
     stage_summary = count_calls_by_stage(run_dir)
+    stage_summary["stage_2"] = dict(stage_summary.get("stage_2") or {})
+    stage_summary["stage_2"]["mode"] = _stage_2_mode(run_dir)
+    gate_statuses = _stage_1a_gate_statuses(run_dir)
+    if gate_statuses:
+        stage_1a_summary = dict(stage_summary.get("stage_1a") or {})
+        stage_1a_summary.update(gate_statuses)
+        stage_summary["stage_1a"] = stage_1a_summary
 
     manifest = {
         "run_id": run_identity.run_id,

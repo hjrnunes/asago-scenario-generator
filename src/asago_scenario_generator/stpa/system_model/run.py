@@ -12,6 +12,7 @@ import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
@@ -32,7 +33,13 @@ from asago_scenario_generator.stpa.infra.parallel_llm import (  # noqa: F401 —
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
+from asago_scenario_generator.stpa.models.execution_classification import (
+    ExecutionTargetProfile,
+)
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.models.target_derived_structure import (
+    TargetDerivedStructure,
+)
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ControlStructureDerivationResult,
@@ -55,10 +62,26 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     diagnose_loss_analysis_semantics,
     derive_loss_analysis,
 )
+from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
+    LossAnalysisGateError,
+    gate_loss_analysis,
+    verify_reviewed_density,
+)
 from asago_scenario_generator.stpa.system_model.profile import (
     derive_capability_profile,
     load_capability_profile,
 )
+from asago_scenario_generator.stpa.system_model.target_derived_structure import (
+    derive_target_structure,
+    target_derived_stage2_mode,
+)
+
+if TYPE_CHECKING:
+    # The observation snapshot is an already-validated scenario_prod value;
+    # system_model receives it through this seam without a runtime dependency.
+    from asago_scenario_generator.stpa.scenario_prod.target_observations import (
+        TargetObservationSnapshot,
+    )
 
 DEFAULT_TEMPERATURE = LLM_DEFAULT_TEMPERATURE
 
@@ -75,6 +98,7 @@ class SP1RunResult:
     loss_analysis: LossAnalysis | None = None
     capability_profile: CapabilityProfile | None = None
     control_structure: ControlStructure | None = None
+    target_derived_structure: TargetDerivedStructure | None = None
     critic_findings: CriticFindings | None = None
     heuristic_errors: list[str] = field(default_factory=list)
     heuristic_warnings: list[str] = field(default_factory=list)
@@ -95,6 +119,8 @@ def run_sp1(
     temperature: float | None = None,
     profile_name: str | None = None,
     max_workers: int = 1,
+    execution_target_profile: ExecutionTargetProfile | None = None,
+    target_observations: TargetObservationSnapshot | None = None,
 ) -> SP1RunResult:
     """Run the full SP1 pipeline: Stages 1b → 1a → 2.
 
@@ -102,6 +128,13 @@ def run_sp1(
     Stage 1a (loss analysis, two calls: risk_derivation + gap_analysis).
     Stage 1a-2 (gap analysis) receives the capability profile as input.
     Stage 2 runs after both 1a and 1b complete.
+
+    Stage 2 runs in one of two modes.  With no execution target profile, a
+    simulation basis, or a multi-agent capability profile, the target-blind
+    four-call derivation runs unchanged.  When an observed target profile is
+    supplied and the capability profile says ``multi_agent: false``, Stage 2
+    is derived deterministically from the target (Phase 2 of the
+    target-grounded scenario generation spec) with two bounded model calls.
 
     Args:
         llm_client: LLM client for making completion calls.
@@ -117,6 +150,12 @@ def run_sp1(
             sequential, backwards compatible). SP1's sequential stages do
             not use parallel execution yet; this parameter is recorded in
             the manifest and available for future use.
+        execution_target_profile: Optional observed target profile. It never
+            enters Stage 1a; only the Stage 2 mode decision and structure
+            derivation see it.
+        target_observations: Optional target-only observations paired with
+            ``execution_target_profile``; they ground the session identity
+            process-model entry.
 
     Returns:
         SP1RunResult with all artifacts and diagnostic info. On partial
@@ -142,7 +181,7 @@ def run_sp1(
     )
 
     # --- Stage 1a: Loss Analysis (two calls, receives capability profile) ---
-    loss_analysis = _try_derive_loss_analysis(
+    loss_analysis, accounting_normalization_warnings = _try_derive_loss_analysis(
         llm_client,
         use_case_text,
         risk_cards,
@@ -153,6 +192,23 @@ def run_sp1(
         capability_profile,
         stage_warnings,
     )
+
+    # --- Stage 1a gates: deterministic risk accounting + hazard graph density.
+    # A failing graph gets one bounded revision call; a second failure is a
+    # fatal stage error recorded with the exact failing checks.
+    loss_analysis_gates: dict | None = None
+    if loss_analysis is not None:
+        loss_analysis, loss_analysis_gates = _try_gate_loss_analysis(
+            llm_client,
+            loss_analysis,
+            use_case_text,
+            risk_cards,
+            run_dir,
+            loader,
+            temperature,
+            stage_errors,
+            accounting_normalization_warnings,
+        )
 
     # --- Stage 2: Control Structure + heuristics + critic + revision ---
     stage2_result = _run_stage_2_block(
@@ -165,6 +221,8 @@ def run_sp1(
         temperature,
         stage_errors,
         stage_warnings,
+        execution_target_profile=execution_target_profile,
+        target_observations=target_observations,
     )
 
     # Write run manifest (always, even on partial failure)
@@ -184,6 +242,9 @@ def run_sp1(
         stage_warnings=stage_warnings,
         profile_name=profile_name,
         max_workers=max_workers,
+        stage_1a_gates=loss_analysis_gates,
+        stage_2_mode=stage2_result.mode,
+        stage_2_call_count=stage2_result.model_call_count,
     )
 
     return SP1RunResult(
@@ -194,6 +255,7 @@ def run_sp1(
         ),
         capability_profile=capability_profile,
         control_structure=stage2_result.control_structure,
+        target_derived_structure=stage2_result.target_derived,
         critic_findings=stage2_result.critic_findings,
         heuristic_errors=stage2_result.heuristic_errors,
         heuristic_warnings=stage2_result.heuristic_warnings,
@@ -211,12 +273,15 @@ class _Stage2Result:
 
     loss_analysis: LossAnalysis | None = None
     control_structure: ControlStructure | None = None
+    target_derived: TargetDerivedStructure | None = None
     critic_findings: CriticFindings | None = None
     heuristic_errors: list[str] = field(default_factory=list)
     heuristic_warnings: list[str] = field(default_factory=list)
     solution_neutrality_warnings: list[str] = field(default_factory=list)
     post_revision_warnings: list[str] = field(default_factory=list)
     revised: bool = False
+    mode: str = "target_blind"
+    model_call_count: int = STAGE_2_CALL_COUNT
 
 
 def _try_derive_loss_analysis(
@@ -229,8 +294,13 @@ def _try_derive_loss_analysis(
     stage_errors: list[str],
     capability_profile: CapabilityProfile | None = None,
     stage_warnings: list[str] | None = None,
-) -> LossAnalysis | None:
-    """Run Stage 1a (two calls), recording errors on failure."""
+) -> tuple[LossAnalysis | None, list[str]]:
+    """Run Stage 1a (two calls), recording errors on failure.
+
+    Returns the analysis (or ``None``) and any accounting-normalization
+    warnings produced while parsing the provider responses.
+    """
+    normalization_warnings: list[str] = []
     try:
         analysis = derive_loss_analysis(
             llm_client=llm_client,
@@ -240,8 +310,10 @@ def _try_derive_loss_analysis(
             template_loader=loader,
             temperature=temperature,
             capability_profile=capability_profile,
+            normalization_warnings=normalization_warnings,
         )
         if stage_warnings is not None:
+            stage_warnings.extend(normalization_warnings)
             stage_warnings.extend(
                 str(item)
                 for item in diagnose_loss_analysis_semantics(
@@ -250,10 +322,66 @@ def _try_derive_loss_analysis(
                     risk_cards=risk_cards,
                 )
             )
-        return analysis
+        return analysis, normalization_warnings
     except StageError as exc:
         stage_errors.append(str(exc))
-        return None
+        return None, normalization_warnings
+
+
+def _try_gate_loss_analysis(
+    llm_client: LLMClient,
+    loss_analysis: LossAnalysis,
+    use_case_text: str,
+    risk_cards: list[RiskCard],
+    run_dir: Path,
+    loader: TemplateLoader,
+    temperature: float,
+    stage_errors: list[str],
+    accounting_normalization_warnings: list[str] | None = None,
+) -> tuple[LossAnalysis | None, dict]:
+    """Run the deterministic Stage 1a gates, recording failures as stage errors.
+
+    On a gate failure the loss analysis is dropped so Stage 2 never runs on a
+    graph that cannot tell scenarios apart; the exact failing checks stay in
+    the stage errors and in ``loss-analysis-gates.yaml``.
+    """
+    try:
+        outcome = gate_loss_analysis(
+            llm_client=llm_client,
+            loss_analysis=loss_analysis,
+            use_case_text=use_case_text,
+            risk_cards=risk_cards,
+            run_dir=run_dir,
+            template_loader=loader,
+            temperature=temperature,
+            accounting_normalization_warnings=accounting_normalization_warnings,
+        )
+    except StageError as exc:
+        # Includes LossAnalysisGateError and a revision call that itself
+        # failed; the gates artifact is always persisted before this raise.
+        stage_errors.append(str(exc))
+        if isinstance(exc, LossAnalysisGateError):
+            accounting = "failed" if exc.gate == "risk_accounting" else "passed"
+            density = "failed" if exc.gate == "hazard_graph_density" else "passed"
+        else:
+            accounting = "passed"
+            density = "failed"
+        revision_count = 1 if getattr(exc, "revision_attempted", False) else 0
+        return None, {
+            "risk_accounting": accounting,
+            "hazard_graph_density": density,
+            "graph_revision_call_count": revision_count,
+        }
+    gates = {
+        "risk_accounting": ("passed" if outcome.accounting.passed else "failed"),
+        "hazard_graph_density": (
+            "passed_after_revision"
+            if outcome.revision_applied
+            else ("failed" if not outcome.density.passed else "passed")
+        ),
+        "graph_revision_call_count": 1 if outcome.revision_attempted else 0,
+    }
+    return outcome.loss_analysis, gates
 
 
 def _try_derive_capability_profile(
@@ -315,6 +443,9 @@ def _derive_stage2_control_structure(
             run_dir=run_dir,
             template_loader=loader,
             temperature=temperature,
+            post_review_density_check=lambda reviewed: verify_reviewed_density(
+                reviewed, run_dir=run_dir
+            ),
         )
     except StageError as exc:
         stage_errors.append(str(exc))
@@ -369,15 +500,37 @@ def _run_stage_2_block(
     temperature: float,
     stage_errors: list[str],
     stage_warnings: list[str] | None = None,
+    *,
+    execution_target_profile: ExecutionTargetProfile | None = None,
+    target_observations: TargetObservationSnapshot | None = None,
 ) -> _Stage2Result:
     """Run Stage 2: control structure derivation, heuristics, critic, and revision.
 
     Returns an empty result when prerequisites are missing or derivation fails.
+    In target-derived mode (observed single-controller target), the structure
+    is derived deterministically from the target with two bounded model calls,
+    and the completeness critic and revision are skipped: nothing was
+    invented that needs reviewing, and the Phase 1 gates already ran.
     """
     if _stage2_prerequisites_missing(loss_analysis, capability_profile):
         return _Stage2Result()
 
     stage_warnings = [] if stage_warnings is None else stage_warnings
+    mode = target_derived_stage2_mode(capability_profile, execution_target_profile)
+    if mode == "target_derived":
+        return _run_target_derived_stage_2(
+            llm_client,
+            use_case_text,
+            loss_analysis,
+            capability_profile,
+            run_dir,
+            loader,
+            temperature,
+            stage_errors,
+            stage_warnings,
+            execution_target_profile=execution_target_profile,
+            target_observations=target_observations,
+        )
 
     derivation = _derive_stage2_control_structure(
         llm_client,
@@ -437,6 +590,70 @@ def _run_stage_2_block(
         solution_neutrality_warnings=solution_neutrality_warnings,
         post_revision_warnings=post_revision_warnings,
         revised=revised,
+        mode="target_blind",
+        model_call_count=STAGE_2_CALL_COUNT,
+    )
+
+
+def _run_target_derived_stage_2(
+    llm_client: LLMClient,
+    use_case_text: str,
+    loss_analysis: LossAnalysis | None,
+    capability_profile: CapabilityProfile | None,
+    run_dir: Path,
+    loader: TemplateLoader,
+    temperature: float,
+    stage_errors: list[str],
+    stage_warnings: list[str],
+    *,
+    execution_target_profile: ExecutionTargetProfile,
+    target_observations: TargetObservationSnapshot | None,
+) -> _Stage2Result:
+    """Run the deterministic target-derived Stage 2 derivation path."""
+    if loss_analysis is None or capability_profile is None:
+        return _Stage2Result()
+    try:
+        derived_result = derive_target_structure(
+            llm_client=llm_client,
+            use_case_text=use_case_text,
+            loss_analysis=loss_analysis,
+            capability_profile=capability_profile,
+            execution_target_profile=execution_target_profile,
+            target_observations=target_observations,
+            run_dir=run_dir,
+            template_loader=loader,
+            temperature=temperature if temperature is not None else 0.4,
+        )
+    except StageError as exc:
+        stage_errors.append(str(exc))
+        return _Stage2Result(
+            mode="target_derived",
+            # Logical calls are 0 (the stage failed); the manifest's
+            # count_calls_by_stage still records every provider attempt.
+            model_call_count=0,
+        )
+    except ValueError as exc:
+        # A malformed profile (for example one with no observed operations)
+        # fails deterministically before any model call; record it as a
+        # stage error instead of crashing the run after ICA spend.
+        stage_errors.append(f"stage_2/target_derived: {exc}")
+        return _Stage2Result(mode="target_derived", model_call_count=0)
+    heuristic_result = run_heuristics(
+        derived_result.control_structure, derived_result.loss_analysis
+    )
+    solution_neutrality_warnings = check_solution_neutrality(
+        derived_result.control_structure
+    )
+    stage_warnings.extend(derived_result.warnings)
+    return _Stage2Result(
+        loss_analysis=derived_result.loss_analysis,
+        control_structure=derived_result.control_structure,
+        target_derived=derived_result.derived,
+        heuristic_errors=list(heuristic_result.errors),
+        heuristic_warnings=list(heuristic_result.warnings),
+        solution_neutrality_warnings=solution_neutrality_warnings,
+        mode="target_derived",
+        model_call_count=derived_result.derived.model_call_count,
     )
 
 
@@ -478,6 +695,9 @@ def _write_manifest(
     stage_warnings: list[str] | None = None,
     profile_name: str | None = None,
     max_workers: int = 1,
+    stage_1a_gates: dict | None = None,
+    stage_2_mode: str = "target_blind",
+    stage_2_call_count: int = STAGE_2_CALL_COUNT,
 ) -> None:
     """Write the run manifest with stage summary, input hashes, and prompt hashes."""
     input_hashes = _compute_input_hashes(use_case_text, risk_cards)
@@ -485,7 +705,15 @@ def _write_manifest(
     critic_summary = _summarize_critic_findings(critic_findings)
     stage_1b_calls = 0 if profile_skipped else 1
     _stage_1a_call_count = 2
-    _stage_2_call_count = STAGE_2_CALL_COUNT
+    _stage_2_call_count = stage_2_call_count
+
+    stage_1a_summary: dict[str, object] = {"call_count": _stage_1a_call_count}
+    if stage_1a_gates is not None:
+        stage_1a_summary.update(stage_1a_gates)
+        # The bounded graph-revision call is a third Stage 1a model call.
+        stage_1a_summary["call_count"] = _stage_1a_call_count + stage_1a_gates.get(
+            "graph_revision_call_count", 0
+        )
 
     model_config_dict = effective_model_config(llm_client, temperature=temperature)
     model_config_dict["max_workers"] = max_workers
@@ -502,9 +730,12 @@ def _write_manifest(
         input_hashes=input_hashes,
         prompt_hashes=prompt_hashes,
         stage_summary={
-            "stage_1a": {"call_count": _stage_1a_call_count},
+            "stage_1a": stage_1a_summary,
             "stage_1b": {"call_count": stage_1b_calls},
-            "stage_2": {"call_count": _stage_2_call_count},
+            "stage_2": {
+                "call_count": _stage_2_call_count,
+                "mode": stage_2_mode,
+            },
         },
         critic_findings=critic_summary,
         revised=revised,

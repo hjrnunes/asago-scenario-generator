@@ -195,7 +195,7 @@ def _baseline_with_actions(
         security_constraints=[
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="payments are authorized",
+                rule="payments are authorized",
                 related_hazards=["H-1"],
             )
         ],
@@ -1085,7 +1085,7 @@ def test_target_derived_both_operations_reach_stage5_with_exact_constraints():
         security_constraints=[
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="payments are authorized",
+                rule="payments are authorized",
                 related_hazards=["H-1"],
             )
         ],
@@ -1268,7 +1268,7 @@ def test_target_derived_effective_view_keeps_baseline_findings_in_union():
         security_constraints=[
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="payments are authorized",
+                rule="payments are authorized",
                 related_hazards=["H-1"],
             )
         ],
@@ -1556,7 +1556,7 @@ def test_stpa_projection_returns_valid_additive_models_without_mutating_authorit
         security_constraints=[
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="payments are authorized",
+                rule="payments are authorized",
                 related_hazards=["H-1"],
             )
         ],

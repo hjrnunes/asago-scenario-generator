@@ -118,9 +118,7 @@ class TestControlStructureValidation:
                     "process_model_parts": [
                         {"pm_id": "source-state", "description": "State"}
                     ],
-                    "control_actions": [
-                        {"ca_id": "source-action", "description": ""}
-                    ],
+                    "control_actions": [{"ca_id": "source-action", "description": ""}],
                     "feedback_channels": [],
                 }
             ],
@@ -148,7 +146,11 @@ class TestControlStructureValidation:
             _make_cs(
                 responsibilities=[
                     _make_resp(
-                        pms=[_make_pm(feedback_source=_make_element_ref(ref_type, bad_ref))],
+                        pms=[
+                            _make_pm(
+                                feedback_source=_make_element_ref(ref_type, bad_ref)
+                            )
+                        ],
                     )
                 ]
             )
@@ -176,11 +178,7 @@ class TestControlStructureValidation:
     def test_cs_04_fb_updates_nonexistent_pm_fails(self):
         """CS-04: feedback channel updates referencing non-existent PM fails."""
         with pytest.raises(ValidationError) as exc_info:
-            _make_cs(
-                responsibilities=[
-                    _make_resp(fbs=[_make_fb(updates="PM-99-1")])
-                ]
-            )
+            _make_cs(responsibilities=[_make_resp(fbs=[_make_fb(updates="PM-99-1")])])
         assert "updates" in str(exc_info.value)
 
     def test_cs_05_fb_updates_pm_in_different_resp_fails(self):
@@ -368,9 +366,7 @@ class TestControlStructureValidation:
                     ),
                     description="Link",
                 )
-                _make_cs(
-                    responsibilities=[resp1], coordination_links=[link1, link2]
-                )
+                _make_cs(responsibilities=[resp1], coordination_links=[link1, link2])
         assert "duplicate" in str(exc_info.value).lower()
 
 
@@ -479,7 +475,13 @@ class TestControlStructureHeuristics:
         cs = _make_cs(
             responsibilities=[
                 _make_resp(
-                    cas=[_make_ca(target=_make_element_ref(ReferenceType.controlled_process, "CP-1"))],
+                    cas=[
+                        _make_ca(
+                            target=_make_element_ref(
+                                ReferenceType.controlled_process, "CP-1"
+                            )
+                        )
+                    ],
                 )
             ],
             controlled_processes=[
@@ -494,7 +496,13 @@ class TestControlStructureHeuristics:
         cs = _make_cs(
             responsibilities=[
                 _make_resp(
-                    fbs=[_make_fb(source=_make_element_ref(ReferenceType.controlled_process, "CP-1"))],
+                    fbs=[
+                        _make_fb(
+                            source=_make_element_ref(
+                                ReferenceType.controlled_process, "CP-1"
+                            )
+                        )
+                    ],
                 )
             ],
             controlled_processes=[
@@ -515,11 +523,13 @@ class TestControlStructureHeuristics:
                     provenance=LossProvenance.use_case,
                 )
             ],
-            hazards=[Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"])],
+            hazards=[
+                Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"])
+            ],
             security_constraints=[
                 SecurityConstraint(
                     constraint_id="SC-1",
-                    description="Constraint",
+                    rule="Constraint",
                     related_hazards=["H-1"],
                 )
             ],
@@ -540,11 +550,13 @@ class TestControlStructureHeuristics:
                     provenance=LossProvenance.use_case,
                 )
             ],
-            hazards=[Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"])],
+            hazards=[
+                Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"])
+            ],
             security_constraints=[
                 SecurityConstraint(
                     constraint_id="SC-1",
-                    description="Constraint",
+                    rule="Constraint",
                     related_hazards=["H-1"],
                 )
             ],

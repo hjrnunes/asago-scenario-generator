@@ -48,7 +48,10 @@ from asago_scenario_generator.stpa.models.control_structure import (
     _is_valid_element_ref,
     normalize_control_action_effect_kind,
 )
-from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.models.loss_analysis import (
+    LossAnalysis,
+    compose_constraint_description,
+)
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.id_normalization import (
     normalize_control_structure_payload,
@@ -509,12 +512,21 @@ def _parse_call3_source_selection(
             structure,
             loss_analysis,
         )
+        # Phase 1.3 as amended: Call 3 displays the authored rule with the
+        # composed conditions shown separately, so an unchanged echo of
+        # either the rule or the full composed statement means "preserve".
         original_descriptions = {
             "hazards": {
                 hazard.hazard_id: hazard.description for hazard in loss_analysis.hazards
             },
             "constraints": {
-                constraint.constraint_id: constraint.description
+                constraint.constraint_id: compose_constraint_description(
+                    constraint.rule, constraint.applies_when
+                )
+                for constraint in loss_analysis.security_constraints
+            },
+            "constraint_rules": {
+                constraint.constraint_id: constraint.rule
                 for constraint in loss_analysis.security_constraints
             },
         }
@@ -528,11 +540,18 @@ def _parse_call3_source_selection(
                 original_description = original_descriptions[collection_name][
                     row[identity_field]
                 ]
+                unchanged_values = {original_description.strip()}
+                if collection_name == "constraints":
+                    unchanged_values.add(
+                        original_descriptions["constraint_rules"][
+                            row[identity_field]
+                        ].strip()
+                    )
                 if (
                     row.get("disposition") == "revise"
                     and row.get("missing_fact") is None
                     and isinstance(revised_description, str)
-                    and revised_description.strip() == original_description.strip()
+                    and revised_description.strip() in unchanged_values
                 ):
                     row["disposition"] = "preserve"
                     row["revised_description"] = None
@@ -1728,6 +1747,7 @@ def derive_control_structure(
     run_dir: Path,
     template_loader: TemplateLoader | None = None,
     temperature: float = DEFAULT_TEMPERATURE,
+    post_review_density_check: Callable[[LossAnalysis], None] | None = None,
 ) -> ControlStructureDerivationResult:
     """Run all four Stage 2 calls in sequence and assemble the ControlStructure.
 
@@ -1749,6 +1769,10 @@ def derive_control_structure(
         run_dir: Directory for output artifacts.
         template_loader: Optional template loader (defaults to SP1 prompts dir).
         temperature: LLM temperature (default 0.4).
+        post_review_density_check: Optional offline gate re-applied to the
+            reviewed loss graph after Call 3 and before it replaces the
+            canonical artifact.  Raising here fails the derivation closed
+            instead of persisting a regressed graph.
 
     Returns:
         A named result containing the reviewed ``LossAnalysis``, validated
@@ -1829,6 +1853,14 @@ def derive_control_structure(
     )
     reviewed_loss_analysis = semantic_result.loss_analysis
     control_structure = semantic_result.control_structure
+
+    # Fail closed before persisting: the semantic review may reword hazards
+    # or constraints, or replace constraint hazard edges, and could silently
+    # undo the Phase 1 density gates that the Stage 1a artifact recorded as
+    # passed.  The offline re-check records its second report in the gates
+    # artifact and raises when the reviewed graph regresses.
+    if post_review_density_check is not None:
+        post_review_density_check(reviewed_loss_analysis)
 
     # Add coordination links to the ControlStructure (with fallback)
     control_structure, coord_warnings = _add_coordination_links_with_fallback(

@@ -163,8 +163,9 @@ def _given_review(world, step, match):
             "security_constraints": [
                 {
                     "constraint_id": "SC-1",
-                    "description": "Validate settings before applying them.",
+                    "rule": "Validate settings before applying them.",
                     "related_hazards": ["H-1"],
+                    "applies_when": [],
                 }
             ],
         }
@@ -440,13 +441,15 @@ def _prepare_disclosure_fixture(world, quoted_function):
             "security_constraints": [
                 {
                     "constraint_id": "SC-1",
-                    "description": "Do not expose response data.",
+                    "rule": "Do not expose response data.",
                     "related_hazards": ["H-1"],
+                    "applies_when": [],
                 },
                 {
                     "constraint_id": "SC-2",
-                    "description": "Authenticate the member before retrieving details.",
+                    "rule": "Authenticate the member before retrieving details.",
                     "related_hazards": ["H-1"],
+                    "applies_when": [],
                 },
             ],
         }

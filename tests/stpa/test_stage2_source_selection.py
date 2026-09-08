@@ -49,8 +49,9 @@ def _authorities() -> tuple[LossAnalysis, ControlStructure]:
             "security_constraints": [
                 {
                     "constraint_id": "SC-1",
-                    "description": "Return records only to the requesting member.",
+                    "rule": "Return records only to the requesting member.",
                     "related_hazards": ["H-1"],
+                    "applies_when": [],
                 }
             ],
         }

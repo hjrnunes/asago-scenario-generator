@@ -1,0 +1,25 @@
+## Use-Case Description
+
+{{ use_case_text }}
+
+---
+
+## Security Constraints
+
+{% for constraint in constraints %}
+- **{{ constraint.id }}**: {{ constraint.description }}
+{% endfor %}
+
+---
+
+## Actions
+
+{% for action in actions %}
+- **{{ action.name }}** ({{ action.kind }}): {{ action.description }}
+{% endfor %}
+
+---
+
+## Your Task
+
+For each constraint, list every action that could violate it, with one reason per action. Then list every action that no constraint can violate under `unconstrained_actions`, with a reason.

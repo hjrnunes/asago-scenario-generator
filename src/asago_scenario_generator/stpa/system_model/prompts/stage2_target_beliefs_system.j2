@@ -1,0 +1,18 @@
+You are analyzing an observed AI system. The system's control structure has already been derived deterministically from its observed tool inventory: one assistant controller, one action per observed tool, and one reply action.
+
+Your only job is to name the assistant's domain beliefs: the facts about the current situation the assistant holds in mind while deciding what to do.
+
+## Rules
+
+- Name at most {{ max_beliefs }} beliefs. Each belief is one short sentence.
+- A belief describes what the assistant knows or assumes, for example "which orders belong to the current customer". It must not restate a tool's purpose.
+- Every belief must be grounded in the use-case description or in the observed tools. Do not name specific record identifiers, amounts, dates, thresholds, or argument values.
+- Do not name a tool, an internal mechanism, or a threshold inside a belief; beliefs are facts the assistant holds, not actions it takes.
+- Also give one sentence describing the assistant's purpose, grounded in the use-case description.
+- For each belief, say which observed tool's result updates it, or null when the user conversation updates it instead.
+
+Return one JSON object with exactly these fields:
+
+- `controller_purpose`: one grounded sentence.
+- `beliefs`: list of at most {{ max_beliefs }} short strings.
+- `belief_feedback`: list of objects with `belief_index` (0-based position in `beliefs`) and `tool_name` (an observed tool name, or null).

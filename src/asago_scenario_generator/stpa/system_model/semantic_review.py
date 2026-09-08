@@ -27,7 +27,10 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ControlActionEffectKind,
     ControlStructure,
 )
-from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.models.loss_analysis import (
+    LossAnalysis,
+    compose_constraint_description,
+)
 
 
 ReviewDisposition = Literal["preserve", "revise", "unresolved"]
@@ -278,7 +281,11 @@ def apply_control_structure_semantic_review(
         constraint = constraints_by_id[constraint_id]
         _validate_disposition(
             identity=constraint_id,
-            original_description=constraint.description,
+            # Phase 1.3 as amended: the review corrects the authored rule;
+            # an unchanged echo of the composed statement is not a change.
+            original_description=compose_constraint_description(
+                constraint.rule, constraint.applies_when
+            ),
             disposition=row.disposition,
             revised_description=row.revised_description,
             missing_fact=row.missing_fact,
@@ -298,7 +305,13 @@ def apply_control_structure_semantic_review(
                 f"constraint {constraint_id} references an unresolved hazard"
             )
         if row.disposition == "revise":
-            constraint.description = row.revised_description  # type: ignore[assignment]
+            # Phase 1.3 as amended: a reviewed wording correction rewrites
+            # the authored rule; the composed description follows it with
+            # the authored conditions intact.
+            constraint.rule = row.revised_description  # type: ignore[assignment]
+            constraint.description = compose_constraint_description(
+                constraint.rule, constraint.applies_when
+            )
         constraint.related_hazards = _reviewed_hazards(
             row,
             set(hazards_by_id),
