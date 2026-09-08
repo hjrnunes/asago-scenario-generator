@@ -873,6 +873,29 @@ def test_session_identity_reads_the_observed_path():
     assert resolve_session_identity(_structure(), STATE) == SESSION
 
 
+def test_user_prompt_renders_records_without_a_query_label():
+    """Captures without ``source_arguments`` carry no query label."""
+    from asago_scenario_generator.stpa.scenario_prod.authoring import (
+        build_authoring_user_prompt,
+    )
+
+    prompt = build_authoring_user_prompt(
+        _candidate(),
+        state=STATE,
+        observation_records=(
+            {
+                "observation_ref": "TARGET-READ-004",
+                "kind": "read",
+                "content_format": "json",
+                "content": '{"documents": []}',
+            },
+        ),
+        session_identity=SESSION,
+    )
+    assert "TARGET-READ-004" in prompt
+    assert "produced by query" not in prompt
+
+
 def test_candidates_are_built_per_relevant_pair_in_stable_order():
     relevance = ConstraintActionRelevance(
         loss_analysis_digest="0" * 64,
