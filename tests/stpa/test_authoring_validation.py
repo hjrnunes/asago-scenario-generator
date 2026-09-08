@@ -914,6 +914,27 @@ def test_user_prompt_renders_every_adversary_kind_definition():
     assert "- kind: definition" not in prompt
 
 
+def test_user_prompt_schema_example_carries_no_gold_answer():
+    """Finding 3: the worked example uses placeholders, not gold records."""
+    from asago_scenario_generator.stpa.scenario_prod.authoring import (
+        build_authoring_user_prompt,
+    )
+
+    prompt = build_authoring_user_prompt(
+        _candidate(),
+        state={"orders": {}},
+        observation_records=(),
+        session_identity=SESSION,
+    )
+    assert "ORD-201" not in prompt
+    assert "lookup_order" not in prompt
+    # The only legal mention is the closed operator set in the field rules.
+    assert prompt.count("owner_differs_from_session") == 1
+    assert '"<tool>"' in prompt
+    assert '["<table>", "<record-id>", "<field>"]' in prompt
+    assert '"<adversary kind>"' in prompt
+
+
 def test_candidates_are_built_per_relevant_pair_in_stable_order():
     relevance = ConstraintActionRelevance(
         loss_analysis_digest="0" * 64,
