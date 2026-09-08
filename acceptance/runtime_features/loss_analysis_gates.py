@@ -217,7 +217,7 @@ def _h_density_fixture(world: World, text: str, examples: dict) -> tuple[bool, s
 def _h_run_density(world: World, text: str, examples: dict) -> tuple[bool, str]:
     del text, examples
     world.loss_gates_density = check_hazard_graph_density(
-        world.loss_gates_density_analysis, load_behavior_classes(), []
+        world.loss_gates_density_analysis, load_behavior_classes()
     )
     return True, ""
 

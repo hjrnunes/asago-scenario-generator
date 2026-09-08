@@ -327,6 +327,5 @@ class TestSanitizationFlow:
                 loader=TemplateLoader(PROMPTS_DIR),
                 temperature=0.4,
                 stage_errors=[],
-                risk_cards=[],
             )
             mock_sanitize.assert_called_once()

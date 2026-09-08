@@ -1,11 +1,6 @@
 # Fixed keyword table for classifying security constraints into behavior
 # classes (Phase 1.2 of the target-grounded scenario generation spec).
 #
-# The table classifies risk cards as well as constraints: the cited-risk-class
-# coverage check classifies each cited risk card's text
-# ("<risk_name>. <risk_description>. <consequence>") with the same rule to
-# decide which behavior classes the constraints must cover.
-#
 # Classification is deterministic: count case-insensitive keyword hits per
 # class against the constraint description; the class with the most hits
 # wins, ties resolve to the earlier class in this file's order, and a

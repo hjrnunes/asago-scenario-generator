@@ -5286,7 +5286,6 @@ def _h_b3_stage2_runs(world: World, text: str, examples: dict) -> tuple[bool, st
         loader=TemplateLoader(_PQF_PROMPTS_DIR),
         temperature=0.4,
         stage_errors=[],
-        risk_cards=[],
     )
     world.sp1_sanitize_called = True
     return True, ""

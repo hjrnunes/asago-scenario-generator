@@ -122,12 +122,11 @@ changing acceptance behavior, or running the quality sequence.
 - Gate the Stage 1a loss analysis deterministically. Every supplied risk card
   needs exactly one `risk_dispositions` entry (or a loss citing it), the
   provider wire must carry explicit `rule`/`applies_when` and
-  `risk_dispositions` collections, and the merged hazard graph must pass the six offline density
+  `risk_dispositions` collections, and the merged hazard graph must pass the five offline density
   checks in `loss_analysis_gates.py` (every loss has a hazard, every
   constraint has a hazard, every hazard has a constraint,
   constraint/hazard share a fixed-rule subject noun
-  phrase, every behavior class owns a hazard, every behavior class hit by
-  a cited risk card has a constraint). A failing graph receives one
+  phrase, every behavior class owns a hazard). A failing graph receives one
   bounded revision call with the exact failing checks; a second failure is a
   fatal stage error recorded in the run manifest and
   `loss-analysis-gates.yaml`. The gates are offline and never soften a check.

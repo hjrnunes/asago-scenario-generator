@@ -243,7 +243,6 @@ def run_sp1(
         loader,
         temperature,
         stage_errors,
-        risk_cards,
         stage_warnings,
         execution_target_profile=execution_target_profile,
         target_observations=target_observations,
@@ -507,7 +506,6 @@ def _derive_stage2_control_structure(
     loader: TemplateLoader,
     temperature: float,
     stage_errors: list[str],
-    risk_cards: list[RiskCard],
 ) -> ControlStructureDerivationResult | None:
     """Derive Stage 2's structure while retaining a graceful failure result."""
     try:
@@ -520,7 +518,7 @@ def _derive_stage2_control_structure(
             template_loader=loader,
             temperature=temperature,
             post_review_density_check=lambda reviewed: verify_reviewed_density(
-                reviewed, risk_cards, run_dir=run_dir
+                reviewed, run_dir=run_dir
             ),
         )
     except StageError as exc:
@@ -575,7 +573,6 @@ def _run_stage_2_block(
     loader: TemplateLoader,
     temperature: float,
     stage_errors: list[str],
-    risk_cards: list[RiskCard],
     stage_warnings: list[str] | None = None,
     *,
     execution_target_profile: ExecutionTargetProfile | None = None,
@@ -618,7 +615,6 @@ def _run_stage_2_block(
         loader,
         temperature,
         stage_errors,
-        risk_cards,
     )
     if derivation is None:
         return _Stage2Result()

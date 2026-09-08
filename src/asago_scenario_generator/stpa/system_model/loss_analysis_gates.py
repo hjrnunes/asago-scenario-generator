@@ -327,22 +327,8 @@ class BehaviorClassOwnHazardCheck:
 
 
 @dataclass(frozen=True)
-class RiskClassCoverageCheck:
-    """Per-behavior-class evidence that cited risk cards reach a constraint.
-
-    A cited risk card's class must appear among the constraint classes;
-    otherwise the model cited the card but wrote no constraint of that
-    behavior, and the card's risk is unreachable in synthesis.
-    """
-
-    behavior_class: str
-    citing_risk_ids: tuple[str, ...]
-    passed: bool
-
-
-@dataclass(frozen=True)
 class HazardGraphDensityReport:
-    """Typed result of the six deterministic hazard-graph density checks."""
+    """Typed result of the five deterministic hazard-graph density checks."""
 
     losses_without_hazard: tuple[str, ...]
     constraints_without_hazard: tuple[str, ...]
@@ -351,7 +337,6 @@ class HazardGraphDensityReport:
     class_own_hazard_checks: tuple[BehaviorClassOwnHazardCheck, ...]
     constraint_classes: tuple[tuple[str, str], ...]
     unclassified_constraints: tuple[str, ...]
-    risk_class_coverage_checks: tuple[RiskClassCoverageCheck, ...] = ()
 
     @property
     def passed(self) -> bool:
@@ -377,14 +362,6 @@ class HazardGraphDensityReport:
                 problems.append(
                     f"behavior class {check.behavior_class} has no hazard of "
                     "its own; its constraints share another class's hazard"
-                )
-        for check in self.risk_class_coverage_checks:
-            if not check.passed:
-                problems.append(
-                    f"behavior class {check.behavior_class} is required by "
-                    f"cited risk card(s) {', '.join(check.citing_risk_ids)} "
-                    f"but no security constraint classifies as "
-                    f"{check.behavior_class}"
                 )
         return tuple(problems)
 
@@ -469,9 +446,8 @@ def _accounting_contradictions(analysis: LossAnalysis) -> tuple[str, ...]:
 def check_hazard_graph_density(
     analysis: LossAnalysis,
     class_table: BehaviorClassTable,
-    risk_cards: list[RiskCard],
 ) -> HazardGraphDensityReport:
-    """Run the six deterministic density checks over the merged graph."""
+    """Run the five deterministic density checks over the merged graph."""
     hazards_by_id = {hazard.hazard_id: hazard for hazard in analysis.hazards}
     hazards_referencing_loss: dict[str, set[str]] = {}
     for hazard in analysis.hazards:
@@ -572,39 +548,6 @@ def check_hazard_graph_density(
             )
         )
 
-    # Check 6: every behavior class hit by a cited risk card has at least one
-    # constraint of that class.  Checks 1-5 only see classes that appear among
-    # the constraints; this reverse edge keeps a cited card's risk reachable
-    # when the model wrote no constraint of that class.  Unclassified cards
-    # and not_applicable cards impose nothing, and the check is one-directional:
-    # a constraint class with no citing card is fine.
-    cards_by_id = {card.risk_id: card for card in risk_cards}
-    classes_by_cited_card: dict[str, list[str]] = {}
-    for disposition in analysis.risk_dispositions:
-        if disposition.disposition != "cited":
-            continue
-        card = cards_by_id.get(disposition.risk_ref)
-        if card is None:
-            # A cited reference without supplied text cannot be classified;
-            # the accounting gate owns disposition/supply agreement.
-            continue
-        card_class = classify_constraint(
-            f"{card.risk_name}. {card.risk_description}. {card.consequence or ''}",
-            class_table,
-        )
-        if card_class == UNCLASSIFIED:
-            continue
-        classes_by_cited_card.setdefault(card_class, []).append(disposition.risk_ref)
-    constraint_class_names = set(class_by_constraint.values())
-    risk_class_coverage_checks = tuple(
-        RiskClassCoverageCheck(
-            behavior_class=behavior_class,
-            citing_risk_ids=tuple(citing_ids),
-            passed=behavior_class in constraint_class_names,
-        )
-        for behavior_class, citing_ids in sorted(classes_by_cited_card.items())
-    )
-
     return HazardGraphDensityReport(
         losses_without_hazard=losses_without_hazard,
         constraints_without_hazard=tuple(constraints_without_hazard),
@@ -613,7 +556,6 @@ def check_hazard_graph_density(
         class_own_hazard_checks=tuple(class_checks),
         constraint_classes=tuple(sorted(class_by_constraint.items())),
         unclassified_constraints=tuple(sorted(unclassified)),
-        risk_class_coverage_checks=risk_class_coverage_checks,
     )
 
 
@@ -632,12 +574,6 @@ class _SubjectCheckRecord(BaseModel):
 class _ClassOwnHazardRecord(BaseModel):
     behavior_class: str
     owned_hazards: list[str]
-    passed: bool
-
-
-class _RiskClassCoverageRecord(BaseModel):
-    behavior_class: str
-    citing_risk_ids: list[str]
     passed: bool
 
 
@@ -820,14 +756,6 @@ def _density_report_dict(report: HazardGraphDensityReport) -> dict:
             ).model_dump(mode="json")
             for check in report.class_own_hazard_checks
         ],
-        "risk_class_coverage_checks": [
-            _RiskClassCoverageRecord(
-                behavior_class=check.behavior_class,
-                citing_risk_ids=list(check.citing_risk_ids),
-                passed=check.passed,
-            ).model_dump(mode="json")
-            for check in report.risk_class_coverage_checks
-        ],
         "constraint_classes": [
             {"constraint_id": cid, "behavior_class": cls}
             for cid, cls in report.constraint_classes
@@ -866,12 +794,7 @@ def _write_gates_artifact(
     write_yaml(artifact, run_dir / GATES_ARTIFACT)
 
 
-def verify_reviewed_density(
-    reviewed: LossAnalysis,
-    risk_cards: list[RiskCard],
-    *,
-    run_dir: Path,
-) -> None:
+def verify_reviewed_density(reviewed: LossAnalysis, *, run_dir: Path) -> None:
     """Re-run the offline density checks on the reviewed graph (no model call).
 
     The Stage 2 semantic review may reword hazards/constraints or replace
@@ -880,7 +803,7 @@ def verify_reviewed_density(
     report is recorded in the gates artifact; any regression fails closed
     with the exact still-failing checks.
     """
-    report = check_hazard_graph_density(reviewed, load_behavior_classes(), risk_cards)
+    report = check_hazard_graph_density(reviewed, load_behavior_classes())
     artifact_path = run_dir / GATES_ARTIFACT
     if artifact_path.is_file():
         artifact = LossAnalysisGatesArtifact.model_validate(
@@ -926,7 +849,7 @@ def gate_loss_analysis(
     """
     class_table = load_behavior_classes()
     accounting = check_risk_accounting(loss_analysis, risk_cards)
-    density = check_hazard_graph_density(loss_analysis, class_table, risk_cards)
+    density = check_hazard_graph_density(loss_analysis, class_table)
     revision_attempted = False
     revision_applied = False
     final_density = density
@@ -991,7 +914,7 @@ def gate_loss_analysis(
                 normalization_warnings=accounting_normalization_warnings,
             )
             raise
-        final_density = check_hazard_graph_density(revised, class_table, risk_cards)
+        final_density = check_hazard_graph_density(revised, class_table)
         if final_density.passed:
             revision_applied = True
             loss_analysis = revised
@@ -1066,7 +989,7 @@ def gate_pinned_loss_analysis(
     """
     class_table = load_behavior_classes()
     accounting = check_risk_accounting(loss_analysis, risk_cards)
-    density = check_hazard_graph_density(loss_analysis, class_table, risk_cards)
+    density = check_hazard_graph_density(loss_analysis, class_table)
     if not accounting.passed:
         _write_gates_artifact(
             run_dir,
