@@ -69,104 +69,116 @@ hazards:
   - L-6
 security_constraints:
 - constraint_id: SC-1
-  description: The Klarna application layer must implement automated PII/NPI scrubbing
-    or redaction on all data flows between the authenticated user context and the
-    external Foundation Model.
   related_hazards:
   - H-1
+  rule: The Klarna application layer must implement automated PII/NPI scrubbing or
+    redaction on all data flows between the authenticated user context and the external
+    Foundation Model.
+  applies_when: []
 - constraint_id: SC-2
-  description: The system must validate all requested financial mutations (refunds,
-    payment changes) against a strict set of business rules and user authorization
-    tokens before executing via the Klarna Backend Systems API.
   related_hazards:
   - H-2
+  rule: The system must validate all requested financial mutations (refunds, payment
+    changes) against a strict set of business rules and user authorization tokens
+    before executing via the Klarna Backend Systems API.
+  applies_when: []
 - constraint_id: SC-3
-  description: The RAG-style (Retrieval-Augmented Generation) system must ensure that
-    retrieved policy information is verified for accuracy and currentness before being
-    incorporated into the LLM response.
   related_hazards:
   - H-3
+  rule: The RAG-style (Retrieval-Augmented Generation) system must ensure that retrieved
+    policy information is verified for accuracy and currentness before being incorporated
+    into the LLM response.
+  applies_when: []
 - constraint_id: SC-4
-  description: The application layer must enforce strict multi-tenant isolation, ensuring
+  related_hazards:
+  - H-4
+  rule: The application layer must enforce strict multi-tenant isolation, ensuring
     the LLM prompt context only contains data strictly belonging to the currently
     authenticated user session.
-  related_hazards:
-  - H-4
+  applies_when: []
 - constraint_id: SC-5
-  description: The system must include a deterministic verification layer that cross-references
+  related_hazards:
+  - H-3
+  rule: The system must include a deterministic verification layer that cross-references
     AI-generated financial terms (fees, interest, dates) against the authoritative
     backend database before outputting to the user.
-  related_hazards:
-  - H-3
+  applies_when: []
 - constraint_id: SC-6
-  description: The system must implement rate limiting and anomaly detection on the
-    conversational interface to prevent automated probing of the backend API via the
-    LLM.
   related_hazards:
   - H-2
   - H-4
+  rule: The system must implement rate limiting and anomaly detection on the conversational
+    interface to prevent automated probing of the backend API via the LLM.
+  applies_when: []
 - constraint_id: SC-7
-  description: The escalation trigger logic must be protected against manipulation
-    to ensure regulated topics or ambiguous financial queries are successfully routed
-    to human agents.
   related_hazards:
   - H-3
+  rule: The escalation trigger logic must be protected against manipulation to ensure
+    regulated topics or ambiguous financial queries are successfully routed to human
+    agents.
+  applies_when: []
 - constraint_id: SC-8
-  description: The API integration with Klarna Backend Systems must require explicit,
-    non-bypassable authorization checks that are independent of the LLM's reasoning
-    process.
   related_hazards:
   - H-2
+  rule: The API integration with Klarna Backend Systems must require explicit, non-bypassable
+    authorization checks that are independent of the LLM's reasoning process.
+  applies_when: []
 - constraint_id: SC-9
-  description: System responses regarding legal or regulatory compliance must be gated
-    by a secondary verification mechanism when flagged as regulated topics.
   related_hazards:
   - H-3
+  rule: System responses regarding legal or regulatory compliance must be gated by
+    a secondary verification mechanism when flagged as regulated topics.
+  applies_when: []
 - constraint_id: SC-10
-  description: All writes to transaction history or payment status performed by the
-    AI agent must be logged with a clear audit trail that distinguishes AI-initiated
-    actions from user-initiated actions.
   related_hazards:
   - H-2
+  rule: All writes to transaction history or payment status performed by the AI agent
+    must be logged with a clear audit trail that distinguishes AI-initiated actions
+    from user-initiated actions.
+  applies_when: []
 - constraint_id: SC-11
-  description: The system must implement input filtering to prevent prompt injection
-    attacks from attempting to override the whitelist-based knowledge grounding.
   related_hazards:
   - H-2
   - H-3
   - H-4
+  rule: The system must implement input filtering to prevent prompt injection attacks
+    from attempting to override the whitelist-based knowledge grounding.
+  applies_when: []
 - constraint_id: SC-12
-  description: The conversational context injection mechanism must ensure that order-specific
-    context is cleared immediately upon session termination or user logout.
   related_hazards:
   - H-4
+  rule: The conversational context injection mechanism must ensure that order-specific
+    context is cleared immediately upon session termination or user logout.
+  applies_when: []
 - constraint_id: SC-13
-  description: The system must maintain a real-time accuracy monitoring dashboard
-    for policy-related queries to detect emerging patterns of confident-but-wrong
-    answers.
   related_hazards:
   - H-3
+  rule: The system must maintain a real-time accuracy monitoring dashboard for policy-related
+    queries to detect emerging patterns of confident-but-wrong answers.
+  applies_when: []
 - constraint_id: SC-14
-  description: API endpoints used for refund processing must implement transactional
-    atomicity and secondary confirmation logic to prevent partial or corrupted state
-    changes.
   related_hazards:
   - H-2
+  rule: API endpoints used for refund processing must implement transactional atomicity
+    and secondary confirmation logic to prevent partial or corrupted state changes.
+  applies_when: []
 - constraint_id: SC-15
-  description: The system must validate that the merchant information referenced in
-    the AI response matches the merchant associated with the authenticated user's
-    transaction history.
   related_hazards:
   - H-5
+  rule: The system must validate that the merchant information referenced in the AI
+    response matches the merchant associated with the authenticated user's transaction
+    history.
+  applies_when: []
 - constraint_id: SC-16
-  description: The system must implement strict session binding between the authenticated
+  related_hazards:
+  - H-4
+  rule: The system must implement strict session binding between the authenticated
     Klarna app user and the specific conversation thread to prevent cross-user data
     leakage.
-  related_hazards:
-  - H-4
+  applies_when: []
 - constraint_id: SC-17
-  description: The system must provide a mechanism to detect and block high-frequency,
-    automated inquiries designed to harvest merchant-specific or product-specific
-    data patterns.
   related_hazards:
   - H-5
+  rule: The system must provide a mechanism to detect and block high-frequency, automated
+    inquiries designed to harvest merchant-specific or product-specific data patterns.
+  applies_when: []

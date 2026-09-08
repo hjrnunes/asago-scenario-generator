@@ -585,7 +585,7 @@ class TestRunSp3ProductionWiring:
             security_constraints=[
                 SecurityConstraint(
                     constraint_id="SC-1",
-                    description="Must validate",
+                    rule="Must validate",
                     related_hazards=["H-1"],
                 )
             ],

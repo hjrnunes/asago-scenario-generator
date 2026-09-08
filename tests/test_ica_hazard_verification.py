@@ -227,7 +227,10 @@ def test_loss_method_preserves_triggers_without_inventing_measurement() -> None:
     loader = TemplateLoader(Path(control_structure.__file__).parent / "prompts")
     for template in ("stage1a_risk_system.j2", "stage1a_gap_system.j2"):
         rendered = loader.render_prompt(template)
-        assert "Constraints are requirements, not observations of installed controls" in rendered
+        assert (
+            "Constraints are requirements, not observations of installed controls"
+            in rendered
+        )
         assert "identity-confidence score falls below 0.8" in rendered
         assert "unless that score and threshold were supplied" in rendered
 
@@ -250,7 +253,7 @@ def _stpa_inputs() -> tuple[ICAEnumeration, LossAnalysis, ControlStructure]:
         security_constraints=[
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="Gate releases",
+                rule="Gate releases",
                 related_hazards=["H-1"],
             )
         ],
@@ -307,12 +310,14 @@ def test_request_scopes_multi_hazard_constraint_to_ica_hazard() -> None:
         update={
             "hazards": [
                 *loss_analysis.hazards,
-                Hazard(hazard_id="H-2", description="Other hazard", related_losses=["L-1"]),
+                Hazard(
+                    hazard_id="H-2", description="Other hazard", related_losses=["L-1"]
+                ),
             ],
             "security_constraints": [
                 SecurityConstraint(
                     constraint_id="SC-1",
-                    description="Gate releases",
+                    rule="Gate releases",
                     related_hazards=["H-1", "H-2"],
                 )
             ],
@@ -339,7 +344,7 @@ def test_request_rejects_unknown_hazard_in_constraint_context() -> None:
         security_constraints=[
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="Gate releases",
+                rule="Gate releases",
                 related_hazards=["H-1", "H-missing"],
             )
         ],

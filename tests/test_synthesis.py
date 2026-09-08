@@ -299,6 +299,30 @@ def test_failed_baseline_retains_stage_diagnostic_before_obligation_calls(
     assert [name for name, _ in fake.calls] == ["plan"]
 
 
+def test_target_derived_baseline_skips_structural_revision(tmp_path: Path) -> None:
+    """A target-derived Stage 2 structure never earns a structural revision.
+
+    The revision is a model call that invents structural elements; the
+    target-derived structure must carry only observed actions.  Gaps stay
+    typed upstream-gap routes and the run records an explicit warning.
+    """
+    fake = _FakeAdapters(calls=[], gap=True)
+
+    def baseline(*, inputs, capability_snapshot, **_) -> object:
+        return SimpleNamespace(
+            loss_analysis="baseline-loss",
+            control_structure="baseline-control",
+            target_derived_structure=object(),
+        )
+
+    adapters = replace(SynthesisAdapters.from_object(fake), baseline=baseline)
+
+    result = run_synthesis(_inputs(tmp_path), adapters)
+
+    assert all(name != "revise" for name, _ in fake.calls)
+    assert any("revision skipped" in warning for warning in result.stage_warnings)
+
+
 def test_synthesis_retains_baseline_diagnostics_without_changing_yield(tmp_path):
     """Later stage manifests must not erase the baseline's unresolved findings."""
     diagnostics = {
@@ -1025,7 +1049,7 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
         security_constraints=(
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="Requests must satisfy policy.",
+                rule="Requests must satisfy policy.",
                 related_hazards=("H-1",),
             ),
         ),
@@ -1396,7 +1420,7 @@ def test_synthesis_context_preparation_supports_typed_agent_messages() -> None:
         security_constraints=(
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="Every request must be validated.",
+                rule="Every request must be validated.",
                 related_hazards=("H-1",),
             ),
         ),

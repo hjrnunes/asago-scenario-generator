@@ -28,7 +28,10 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossProvenance,
     SecurityConstraint,
 )
-from asago_scenario_generator.stpa.models.scenario_envelope import GherkinSpec, ScenarioEnvelope
+from asago_scenario_generator.stpa.models.scenario_envelope import (
+    GherkinSpec,
+    ScenarioEnvelope,
+)
 from asago_scenario_generator.stpa.models.scenario_spec import (
     AttackerBDI,
     DefenderBDI,
@@ -55,27 +58,51 @@ def _make_cs() -> ControlStructure:
     return ControlStructure(
         responsibilities=[
             Responsibility(
-                resp_id="RESP-1", description="R1",
+                resp_id="RESP-1",
+                description="R1",
                 process_model_parts=[ProcessModelPart(pm_id="PM-1-1", description="S")],
                 control_actions=[
-                    ControlAction(ca_id="CA-1-1", description="A",
-                                  target=ElementRef(type=ReferenceType.controlled_process, id="CP-1")),
+                    ControlAction(
+                        ca_id="CA-1-1",
+                        description="A",
+                        target=ElementRef(
+                            type=ReferenceType.controlled_process, id="CP-1"
+                        ),
+                    ),
                 ],
                 feedback_channels=[
-                    FeedbackChannel(fb_id="FB-1-1", description="F", updates="PM-1-1",
-                                   source=ElementRef(type=ReferenceType.controlled_process, id="CP-1")),
+                    FeedbackChannel(
+                        fb_id="FB-1-1",
+                        description="F",
+                        updates="PM-1-1",
+                        source=ElementRef(
+                            type=ReferenceType.controlled_process, id="CP-1"
+                        ),
+                    ),
                 ],
             ),
             Responsibility(
-                resp_id="RESP-2", description="R2",
+                resp_id="RESP-2",
+                description="R2",
                 process_model_parts=[ProcessModelPart(pm_id="PM-2-1", description="S")],
                 control_actions=[
-                    ControlAction(ca_id="CA-2-1", description="A",
-                                  target=ElementRef(type=ReferenceType.controlled_process, id="CP-1")),
+                    ControlAction(
+                        ca_id="CA-2-1",
+                        description="A",
+                        target=ElementRef(
+                            type=ReferenceType.controlled_process, id="CP-1"
+                        ),
+                    ),
                 ],
                 feedback_channels=[
-                    FeedbackChannel(fb_id="FB-2-1", description="F", updates="PM-2-1",
-                                   source=ElementRef(type=ReferenceType.controlled_process, id="CP-1")),
+                    FeedbackChannel(
+                        fb_id="FB-2-1",
+                        description="F",
+                        updates="PM-2-1",
+                        source=ElementRef(
+                            type=ReferenceType.controlled_process, id="CP-1"
+                        ),
+                    ),
                 ],
             ),
         ],
@@ -86,12 +113,17 @@ def _make_cs() -> ControlStructure:
 def _make_loss_analysis() -> LossAnalysis:
     return LossAnalysis(
         risk_card_losses=[
-            Loss(loss_id="L-1", description="Loss", provenance=LossProvenance.risk_card, source_risk_cards=["r1"]),
+            Loss(
+                loss_id="L-1",
+                description="Loss",
+                provenance=LossProvenance.risk_card,
+                source_risk_cards=["r1"],
+            ),
         ],
         use_case_losses=[],
         hazards=[Hazard(hazard_id="H-1", description="H", related_losses=["L-1"])],
         security_constraints=[
-            SecurityConstraint(constraint_id="SC-1", description="C", related_hazards=["H-1"]),
+            SecurityConstraint(constraint_id="SC-1", rule="C", related_hazards=["H-1"]),
         ],
     )
 
@@ -115,7 +147,9 @@ def _make_scenario_spec(
         target_control_action=ca_id,
         ica_type=ica_type,
         defender_bdi=DefenderBDI(
-            beliefs=[DefenderBelief(pm_id=pm_id, content="State", vulnerability="vuln")],
+            beliefs=[
+                DefenderBelief(pm_id=pm_id, content="State", vulnerability="vuln")
+            ],
             desires=[DefenderDesire(resp_id=target_resp, content="R")],
             intentions=[DefenderIntention(ca_id=ca_id, content="A")],
         ),
@@ -167,17 +201,31 @@ def _make_enriched_threat_set(
             StructuralThreat(
                 ica_slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
                 ica_id="RESP-1:CA-1-1:NOT_PROVIDED:1",
-                ica_text="t", hazardous_context="c", loss_scenario="l",
-                related_hazards=["H-1"], related_constraints=["SC-1"],
+                ica_text="t",
+                hazardous_context="c",
+                loss_scenario="l",
+                related_hazards=["H-1"],
+                related_constraints=["SC-1"],
             ),
         ],
         coverage_analysis=CoverageAnalysis(
-            structural_coverage={"total_slots": 40, "non_na": 32, "na": 8, "coverage_rate": 0.8},
-            structural_consideration=structural_consideration or {
-                "total_slots": 40, "considered": 40, "rate": 1.0,
+            structural_coverage={
+                "total_slots": 40,
+                "non_na": 32,
+                "na": 8,
+                "coverage_rate": 0.8,
             },
-            na_quality=na_quality or {
-                "na_count": 5, "quality_count": 4, "quality_rate": 0.8,
+            structural_consideration=structural_consideration
+            or {
+                "total_slots": 40,
+                "considered": 40,
+                "rate": 1.0,
+            },
+            na_quality=na_quality
+            or {
+                "na_count": 5,
+                "quality_count": 4,
+                "quality_rate": 0.8,
             },
         ),
     )
@@ -217,12 +265,18 @@ class TestBDIGrounding:
         # 5 scenarios: 4 with valid PM, 1 with invalid
         envelopes = []
         for i in range(4):
-            envelopes.append(_make_envelope(
-                spec=_make_scenario_spec(scenario_id=f"SCN-{i+1:03d}", pm_id="PM-1-1")
-            ))
-        envelopes.append(_make_envelope(
-            spec=_make_scenario_spec(scenario_id="SCN-005", pm_id="PM-99-1")
-        ))
+            envelopes.append(
+                _make_envelope(
+                    spec=_make_scenario_spec(
+                        scenario_id=f"SCN-{i + 1:03d}", pm_id="PM-1-1"
+                    )
+                )
+            )
+        envelopes.append(
+            _make_envelope(
+                spec=_make_scenario_spec(scenario_id="SCN-005", pm_id="PM-99-1")
+            )
+        )
         result = metric_bdi_grounding(envelopes, cs)
         assert result["belief_grounding_rate"] == 0.8  # 4/5
         assert result["desire_grounding_rate"] == 1.0
@@ -243,20 +297,40 @@ class TestTreeBranchCoverage:
         # 5 scenarios: 3 with 2+ categories, 2 with 1
         envelopes = []
         for i in range(3):
-            envelopes.append(_make_envelope(
-                spec=_make_scenario_spec(scenario_id=f"SCN-{i+1:03d}"),
-                attack_tree={"root": "r", "branches": [
-                    {"category": "controller_side", "label": "l", "children": []},
-                    {"category": "path_side", "label": "l", "children": []},
-                ], "leaves": []},
-            ))
+            envelopes.append(
+                _make_envelope(
+                    spec=_make_scenario_spec(scenario_id=f"SCN-{i + 1:03d}"),
+                    attack_tree={
+                        "root": "r",
+                        "branches": [
+                            {
+                                "category": "controller_side",
+                                "label": "l",
+                                "children": [],
+                            },
+                            {"category": "path_side", "label": "l", "children": []},
+                        ],
+                        "leaves": [],
+                    },
+                )
+            )
         for i in range(2):
-            envelopes.append(_make_envelope(
-                spec=_make_scenario_spec(scenario_id=f"SCN-{i+4:03d}"),
-                attack_tree={"root": "r", "branches": [
-                    {"category": "controller_side", "label": "l", "children": []},
-                ], "leaves": []},
-            ))
+            envelopes.append(
+                _make_envelope(
+                    spec=_make_scenario_spec(scenario_id=f"SCN-{i + 4:03d}"),
+                    attack_tree={
+                        "root": "r",
+                        "branches": [
+                            {
+                                "category": "controller_side",
+                                "label": "l",
+                                "children": [],
+                            },
+                        ],
+                        "leaves": [],
+                    },
+                )
+            )
         result = metric_tree_branch_coverage(envelopes)
         assert result["total_scenarios"] == 5
         assert result["scenarios_with_2plus_categories"] == 3
@@ -276,9 +350,10 @@ class TestTraceabilityDepth:
         la = _make_loss_analysis()
         ets = _make_enriched_threat_set()
         # 5 scenarios with valid chains
-        envelopes = [_make_envelope(
-            spec=_make_scenario_spec(scenario_id=f"SCN-{i+1:03d}")
-        ) for i in range(5)]
+        envelopes = [
+            _make_envelope(spec=_make_scenario_spec(scenario_id=f"SCN-{i + 1:03d}"))
+            for i in range(5)
+        ]
         result = metric_traceability_depth(envelopes, ets, cs, la)
         assert result["total_scenarios"] == 5
         assert result["complete_chains"] == 5
@@ -310,14 +385,23 @@ class TestDiversity:
     def test_by_responsibility(self):
         envelopes = []
         for i in range(3):
-            envelopes.append(_make_envelope(
-                spec=_make_scenario_spec(scenario_id=f"SCN-{i+1:03d}", target_resp="RESP-1")
-            ))
+            envelopes.append(
+                _make_envelope(
+                    spec=_make_scenario_spec(
+                        scenario_id=f"SCN-{i + 1:03d}", target_resp="RESP-1"
+                    )
+                )
+            )
         for i in range(2):
-            envelopes.append(_make_envelope(
-                spec=_make_scenario_spec(scenario_id=f"SCN-{i+4:03d}", target_resp="RESP-2",
-                                         ca_id="CA-2-1")
-            ))
+            envelopes.append(
+                _make_envelope(
+                    spec=_make_scenario_spec(
+                        scenario_id=f"SCN-{i + 4:03d}",
+                        target_resp="RESP-2",
+                        ca_id="CA-2-1",
+                    )
+                )
+            )
         result = metric_diversity(envelopes)
         assert result["by_responsibility"]["RESP-1"] == 3
         assert result["by_responsibility"]["RESP-2"] == 2
@@ -325,13 +409,21 @@ class TestDiversity:
     def test_by_ica_type(self):
         envelopes = []
         for i in range(3):
-            envelopes.append(_make_envelope(
-                spec=_make_scenario_spec(scenario_id=f"SCN-{i+1:03d}", ica_type=UCAType.not_provided)
-            ))
+            envelopes.append(
+                _make_envelope(
+                    spec=_make_scenario_spec(
+                        scenario_id=f"SCN-{i + 1:03d}", ica_type=UCAType.not_provided
+                    )
+                )
+            )
         for i in range(2):
-            envelopes.append(_make_envelope(
-                spec=_make_scenario_spec(scenario_id=f"SCN-{i+4:03d}", ica_type=UCAType.incorrect)
-            ))
+            envelopes.append(
+                _make_envelope(
+                    spec=_make_scenario_spec(
+                        scenario_id=f"SCN-{i + 4:03d}", ica_type=UCAType.incorrect
+                    )
+                )
+            )
         result = metric_diversity(envelopes)
         assert result["by_ica_type"]["NOT_PROVIDED"] == 3
         assert result["by_ica_type"]["INCORRECT"] == 2
@@ -339,40 +431,75 @@ class TestDiversity:
     def test_by_branch_category(self):
         envelopes = []
         for i in range(4):
-            envelopes.append(_make_envelope(
-                spec=_make_scenario_spec(scenario_id=f"SCN-{i+1:03d}"),
-                attack_tree={"root": "r", "branches": [
-                    {"category": "controller_side", "label": "l", "children": []},
-                    {"category": "path_side", "label": "l", "children": []},
-                ], "leaves": []},
-            ))
+            envelopes.append(
+                _make_envelope(
+                    spec=_make_scenario_spec(scenario_id=f"SCN-{i + 1:03d}"),
+                    attack_tree={
+                        "root": "r",
+                        "branches": [
+                            {
+                                "category": "controller_side",
+                                "label": "l",
+                                "children": [],
+                            },
+                            {"category": "path_side", "label": "l", "children": []},
+                        ],
+                        "leaves": [],
+                    },
+                )
+            )
         for i in range(3):
-            envelopes.append(_make_envelope(
-                spec=_make_scenario_spec(scenario_id=f"SCN-{i+5:03d}"),
-                attack_tree={"root": "r", "branches": [
-                    {"category": "controller_side", "label": "l", "children": []},
-                    {"category": "coordination_gap", "label": "l", "children": []},
-                ], "leaves": []},
-            ))
+            envelopes.append(
+                _make_envelope(
+                    spec=_make_scenario_spec(scenario_id=f"SCN-{i + 5:03d}"),
+                    attack_tree={
+                        "root": "r",
+                        "branches": [
+                            {
+                                "category": "controller_side",
+                                "label": "l",
+                                "children": [],
+                            },
+                            {
+                                "category": "coordination_gap",
+                                "label": "l",
+                                "children": [],
+                            },
+                        ],
+                        "leaves": [],
+                    },
+                )
+            )
         result = metric_diversity(envelopes)
         assert result["by_branch_category"]["controller_side"] == 7
         assert result["by_branch_category"]["path_side"] == 4
         assert result["by_branch_category"]["coordination_gap"] == 3
 
     def test_responsibility_diversity_is_float(self):
-        envelopes = [_make_envelope(
-            spec=_make_scenario_spec(scenario_id=f"SCN-{i+1:03d}", target_resp="RESP-1" if i < 3 else "RESP-2",
-                                     ca_id="CA-1-1" if i < 3 else "CA-2-1")
-        ) for i in range(5)]
+        envelopes = [
+            _make_envelope(
+                spec=_make_scenario_spec(
+                    scenario_id=f"SCN-{i + 1:03d}",
+                    target_resp="RESP-1" if i < 3 else "RESP-2",
+                    ca_id="CA-1-1" if i < 3 else "CA-2-1",
+                )
+            )
+            for i in range(5)
+        ]
         result = metric_diversity(envelopes)
         assert isinstance(result["responsibility_diversity"], float)
         assert result["responsibility_diversity"] >= 0
 
     def test_ica_type_diversity_is_float(self):
-        envelopes = [_make_envelope(
-            spec=_make_scenario_spec(scenario_id=f"SCN-{i+1:03d}",
-                                     ica_type=UCAType.not_provided if i < 3 else UCAType.incorrect)
-        ) for i in range(5)]
+        envelopes = [
+            _make_envelope(
+                spec=_make_scenario_spec(
+                    scenario_id=f"SCN-{i + 1:03d}",
+                    ica_type=UCAType.not_provided if i < 3 else UCAType.incorrect,
+                )
+            )
+            for i in range(5)
+        ]
         result = metric_diversity(envelopes)
         assert isinstance(result["ica_type_diversity"], float)
         assert result["ica_type_diversity"] >= 0
@@ -380,14 +507,26 @@ class TestDiversity:
     def test_unique_attack_mechanisms(self):
         envelopes = []
         for i in range(4):
-            envelopes.append(_make_envelope(
-                spec=_make_scenario_spec(scenario_id=f"SCN-{i+1:03d}"),
-                attack_tree={"root": "r", "branches": [], "leaves": [f"mechanism_{i+1}"]},
-            ))
-        envelopes.append(_make_envelope(
-            spec=_make_scenario_spec(scenario_id="SCN-005"),
-            attack_tree={"root": "r", "branches": [], "leaves": ["mechanism_1"]},  # duplicate
-        ))
+            envelopes.append(
+                _make_envelope(
+                    spec=_make_scenario_spec(scenario_id=f"SCN-{i + 1:03d}"),
+                    attack_tree={
+                        "root": "r",
+                        "branches": [],
+                        "leaves": [f"mechanism_{i + 1}"],
+                    },
+                )
+            )
+        envelopes.append(
+            _make_envelope(
+                spec=_make_scenario_spec(scenario_id="SCN-005"),
+                attack_tree={
+                    "root": "r",
+                    "branches": [],
+                    "leaves": ["mechanism_1"],
+                },  # duplicate
+            )
+        )
         result = metric_diversity(envelopes)
         assert result["unique_attack_mechanisms"] == 4
 
@@ -396,15 +535,23 @@ class TestDiversity:
         envelopes = [
             _make_envelope(
                 spec=_make_scenario_spec(scenario_id="SCN-001"),
-                attack_tree={"root": "r", "branches": [], "leaves": [
-                    {"label": "dict_mechanism"},
-                ]},
+                attack_tree={
+                    "root": "r",
+                    "branches": [],
+                    "leaves": [
+                        {"label": "dict_mechanism"},
+                    ],
+                },
             ),
             _make_envelope(
                 spec=_make_scenario_spec(scenario_id="SCN-002"),
-                attack_tree={"root": "r", "branches": [], "leaves": [
-                    {"label": "dict_mechanism"},  # duplicate
-                ]},
+                attack_tree={
+                    "root": "r",
+                    "branches": [],
+                    "leaves": [
+                        {"label": "dict_mechanism"},  # duplicate
+                    ],
+                },
             ),
         ]
         result = metric_diversity(envelopes)
@@ -415,12 +562,16 @@ class TestDiversity:
         envelopes = [
             _make_envelope(
                 spec=_make_scenario_spec(scenario_id="SCN-001"),
-                attack_tree={"root": "r", "branches": [], "leaves": [
-                    "string_leaf",
-                    {"label": "labeled_leaf"},
-                    {"no_label": "x"},
-                    42,
-                ]},
+                attack_tree={
+                    "root": "r",
+                    "branches": [],
+                    "leaves": [
+                        "string_leaf",
+                        {"label": "labeled_leaf"},
+                        {"no_label": "x"},
+                        42,
+                    ],
+                },
             ),
         ]
         result = metric_diversity(envelopes)
@@ -437,7 +588,10 @@ class TestEvalScorecard:
         envelopes = [_make_envelope(spec=_make_scenario_spec())]
 
         scorecard = compute_eval_scorecard(
-            envelopes, ets, cs, la,
+            envelopes,
+            ets,
+            cs,
+            la,
             stage_local_errors=["err1", "err2"],
             traceability_errors=["trace_err1"],
         )
@@ -446,6 +600,7 @@ class TestEvalScorecard:
             path = write_eval_scorecard(scorecard, Path(tmpdir))
             assert path.exists()
             import yaml
+
             data = yaml.safe_load(path.read_text())
             assert "metrics" in data
             assert "structural_consideration" in data["metrics"]

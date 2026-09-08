@@ -29,7 +29,10 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossProvenance,
     SecurityConstraint,
 )
-from asago_scenario_generator.stpa.models.scenario_envelope import GherkinSpec, ScenarioEnvelope
+from asago_scenario_generator.stpa.models.scenario_envelope import (
+    GherkinSpec,
+    ScenarioEnvelope,
+)
 from asago_scenario_generator.stpa.models.scenario_spec import (
     AttackerBDI,
     DefenderBDI,
@@ -50,32 +53,62 @@ def _make_cs() -> ControlStructure:
     return ControlStructure(
         responsibilities=[
             Responsibility(
-                resp_id="RESP-1", description="R1",
+                resp_id="RESP-1",
+                description="R1",
                 process_model_parts=[
                     ProcessModelPart(pm_id="PM-1-1", description="S1"),
                     ProcessModelPart(pm_id="PM-1-2", description="S2"),
                 ],
                 control_actions=[
-                    ControlAction(ca_id="CA-1-1", description="A",
-                                  target=ElementRef(type=ReferenceType.controlled_process, id="CP-1")),
+                    ControlAction(
+                        ca_id="CA-1-1",
+                        description="A",
+                        target=ElementRef(
+                            type=ReferenceType.controlled_process, id="CP-1"
+                        ),
+                    ),
                 ],
                 feedback_channels=[
-                    FeedbackChannel(fb_id="FB-1-1", description="F", updates="PM-1-1",
-                                   source=ElementRef(type=ReferenceType.controlled_process, id="CP-1")),
-                    FeedbackChannel(fb_id="FB-1-2", description="F2", updates="PM-1-2",
-                                   source=ElementRef(type=ReferenceType.controlled_process, id="CP-1")),
+                    FeedbackChannel(
+                        fb_id="FB-1-1",
+                        description="F",
+                        updates="PM-1-1",
+                        source=ElementRef(
+                            type=ReferenceType.controlled_process, id="CP-1"
+                        ),
+                    ),
+                    FeedbackChannel(
+                        fb_id="FB-1-2",
+                        description="F2",
+                        updates="PM-1-2",
+                        source=ElementRef(
+                            type=ReferenceType.controlled_process, id="CP-1"
+                        ),
+                    ),
                 ],
             ),
             Responsibility(
-                resp_id="RESP-2", description="R2",
+                resp_id="RESP-2",
+                description="R2",
                 process_model_parts=[ProcessModelPart(pm_id="PM-2-1", description="S")],
                 control_actions=[
-                    ControlAction(ca_id="CA-2-1", description="A",
-                                  target=ElementRef(type=ReferenceType.controlled_process, id="CP-1")),
+                    ControlAction(
+                        ca_id="CA-2-1",
+                        description="A",
+                        target=ElementRef(
+                            type=ReferenceType.controlled_process, id="CP-1"
+                        ),
+                    ),
                 ],
                 feedback_channels=[
-                    FeedbackChannel(fb_id="FB-2-1", description="F", updates="PM-2-1",
-                                   source=ElementRef(type=ReferenceType.controlled_process, id="CP-1")),
+                    FeedbackChannel(
+                        fb_id="FB-2-1",
+                        description="F",
+                        updates="PM-2-1",
+                        source=ElementRef(
+                            type=ReferenceType.controlled_process, id="CP-1"
+                        ),
+                    ),
                 ],
             ),
         ],
@@ -86,12 +119,17 @@ def _make_cs() -> ControlStructure:
 def _make_loss_analysis() -> LossAnalysis:
     return LossAnalysis(
         risk_card_losses=[
-            Loss(loss_id="L-1", description="Loss", provenance=LossProvenance.risk_card, source_risk_cards=["r1"]),
+            Loss(
+                loss_id="L-1",
+                description="Loss",
+                provenance=LossProvenance.risk_card,
+                source_risk_cards=["r1"],
+            ),
         ],
         use_case_losses=[],
         hazards=[Hazard(hazard_id="H-1", description="H", related_losses=["L-1"])],
         security_constraints=[
-            SecurityConstraint(constraint_id="SC-1", description="C", related_hazards=["H-1"]),
+            SecurityConstraint(constraint_id="SC-1", rule="C", related_hazards=["H-1"]),
         ],
     )
 
@@ -123,10 +161,14 @@ def _make_envelope(spec: ScenarioSpec | None = None) -> ScenarioEnvelope:
         scenario_id=s.scenario_id,
         scenario_spec=s,
         narrative="n",
-        attack_tree={"root": "r", "branches": [
-            {"category": "controller_side", "label": "l", "children": []},
-            {"category": "path_side", "label": "l", "children": []},
-        ], "leaves": []},
+        attack_tree={
+            "root": "r",
+            "branches": [
+                {"category": "controller_side", "label": "l", "children": []},
+                {"category": "path_side", "label": "l", "children": []},
+            ],
+            "leaves": [],
+        },
         gherkin_spec=GherkinSpec(
             feature="T",
             scenario="T",
@@ -152,7 +194,8 @@ def _make_ets(
     threats: list[StructuralThreat] | None = None,
 ) -> EnrichedThreatSet:
     return EnrichedThreatSet(
-        structural_threats=threats or [
+        structural_threats=threats
+        or [
             StructuralThreat(
                 ica_slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
                 ica_id="RESP-1:CA-1-1:NOT_PROVIDED:1",
@@ -164,8 +207,12 @@ def _make_ets(
             ),
         ],
         coverage_analysis=CoverageAnalysis(
-            structural_coverage=structural_coverage or {
-                "total_slots": 40, "non_na": 32, "na": 8, "coverage_rate": 0.8,
+            structural_coverage=structural_coverage
+            or {
+                "total_slots": 40,
+                "non_na": 32,
+                "na": 8,
+                "coverage_rate": 0.8,
             },
             by_ica_type=by_ica_type or {},
             by_controller=by_controller or {},
@@ -183,7 +230,14 @@ class TestCoverageGaps:
     def test_structural_coverage_from_sp2(self):
         cs = _make_cs()
         la = _make_loss_analysis()
-        ets = _make_ets(structural_coverage={"total_slots": 40, "non_na": 32, "na": 8, "coverage_rate": 0.8})
+        ets = _make_ets(
+            structural_coverage={
+                "total_slots": 40,
+                "non_na": 32,
+                "na": 8,
+                "coverage_rate": 0.8,
+            }
+        )
         envs = [_make_envelope()]
         result = compute_coverage_gaps(ets, cs, envs, la)
         assert result["structural_coverage"]["total_slots"] == 40
@@ -211,9 +265,13 @@ class TestCoverageGaps:
     def test_catalog_correspondence(self):
         cs = _make_cs()
         la = _make_loss_analysis()
-        ets = _make_ets(catalog_correspondence={
-            "structural_with_match": 10, "structural_unmapped": 5, "catalog_only_supplements": 0,
-        })
+        ets = _make_ets(
+            catalog_correspondence={
+                "structural_with_match": 10,
+                "structural_unmapped": 5,
+                "catalog_only_supplements": 0,
+            }
+        )
         envs = [_make_envelope()]
         result = compute_coverage_gaps(ets, cs, envs, la)
         assert result["catalog_correspondence"]["structural_with_match"] == 10
@@ -245,19 +303,25 @@ class TestCoverageGaps:
             StructuralThreat(
                 ica_slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
                 ica_id=f"RESP-1:CA-1-1:NOT_PROVIDED:{i}",
-                ica_text="t", hazardous_context="c", loss_scenario="l",
-                related_hazards=["H-1"], related_constraints=["SC-1"],
+                ica_text="t",
+                hazardous_context="c",
+                loss_scenario="l",
+                related_hazards=["H-1"],
+                related_constraints=["SC-1"],
             )
             for i in range(1, 11)
         ]
         ets = _make_ets(threats=threats)
         # Only 7 scenarios produced
-        envs = [_make_envelope(
-            spec=_make_scenario_spec(scenario_id=f"SCN-{i+1:03d}")
-        ) for i in range(7)]
+        envs = [
+            _make_envelope(spec=_make_scenario_spec(scenario_id=f"SCN-{i + 1:03d}"))
+            for i in range(7)
+        ]
         # But all specs reference ica_id :1, so we need different ica_ids
         for i, env in enumerate(envs):
-            env.scenario_spec.threat_source.ica_id = f"RESP-1:CA-1-1:NOT_PROVIDED:{i+1}"
+            env.scenario_spec.threat_source.ica_id = (
+                f"RESP-1:CA-1-1:NOT_PROVIDED:{i + 1}"
+            )
         result = compute_coverage_gaps(ets, cs, envs, la)
         assert len(result["orphan_icas"]) == 3
 
@@ -268,7 +332,9 @@ class TestCoverageGaps:
             StructuralThreat(
                 ica_slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
                 ica_id=f"RESP-1:CA-1-1:NOT_PROVIDED:{i}",
-                ica_text="t", hazardous_context="c", loss_scenario="l",
+                ica_text="t",
+                hazardous_context="c",
+                loss_scenario="l",
                 related_hazards=["H-99"],  # broken hazard
                 related_constraints=["SC-1"],
             )
@@ -277,8 +343,8 @@ class TestCoverageGaps:
         ets = _make_ets(threats=threats)
         envs = []
         for i in range(2):
-            spec = _make_scenario_spec(scenario_id=f"SCN-{i+1:03d}")
-            spec.threat_source.ica_id = f"RESP-1:CA-1-1:NOT_PROVIDED:{i+1}"
+            spec = _make_scenario_spec(scenario_id=f"SCN-{i + 1:03d}")
+            spec.threat_source.ica_id = f"RESP-1:CA-1-1:NOT_PROVIDED:{i + 1}"
             envs.append(_make_envelope(spec=spec))
         result = compute_coverage_gaps(ets, cs, envs, la)
         assert len(result["traceability_errors"]) == 2

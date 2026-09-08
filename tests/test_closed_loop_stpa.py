@@ -144,7 +144,7 @@ def _loss_analysis() -> LossAnalysis:
         security_constraints=(
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="The action must occur only in a safe state.",
+                rule="The action must occur only in a safe state.",
                 related_hazards=("H-1",),
             ),
         ),

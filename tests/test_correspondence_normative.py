@@ -126,7 +126,7 @@ def _authoritative_artifacts() -> tuple[
         security_constraints=[
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="Constrain payment",
+                rule="Constrain payment",
                 related_hazards=["H-1"],
             )
         ],
@@ -354,12 +354,12 @@ def test_loss_analysis_pin_is_invariant_to_set_like_collection_order() -> None:
     constraints = (
         SecurityConstraint(
             constraint_id="SC-1",
-            description="First constraint",
+            rule="First constraint",
             related_hazards=["H-2", "H-1"],
         ),
         SecurityConstraint(
             constraint_id="SC-2",
-            description="Second constraint",
+            rule="Second constraint",
             related_hazards=["H-1"],
         ),
     )

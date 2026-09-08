@@ -148,7 +148,7 @@ def _loss_analysis() -> LossAnalysis:
         security_constraints=(
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="Requests must satisfy policy.",
+                rule="Requests must satisfy policy.",
                 related_hazards=("H-1",),
             ),
         ),
@@ -735,9 +735,7 @@ def test_provider_routing_retry_has_one_owner(tmp_path) -> None:
                     },
                 )
                 provider_route["semantic_assessment"].pop("mapping_strength", None)
-                content = {
-                    "routes": [provider_route]
-                }
+                content = {"routes": [provider_route]}
             else:
                 content = {
                     "verdicts": [

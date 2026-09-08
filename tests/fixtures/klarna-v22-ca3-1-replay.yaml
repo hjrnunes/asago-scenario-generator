@@ -3,7 +3,7 @@ source:
   run_root: output/runs/20260905-klarna-gemma4-oc-miniklarna-v22
   embedded_loss_analysis: klarna-v22-loss-analysis.yaml
   embedded_control_structure: klarna-v22-control-structure.yaml
-  loss_analysis_sha256: 89bcc9bcc431e3f14528969fd57b229d765f35b5eed2723d137cb03f2eddd2ae
+  embedded_loss_analysis_sha256: ae56c64f1c6df6c9dedeccce2a3872bc6aab9854768705a63f29118206f3bd76
   control_structure_sha256: dd6e16a286c0dfe78cf84f6e5025605eba07c9421d7b02b98bb411a536263fc4
   calls_file: calls.jsonl
 records:

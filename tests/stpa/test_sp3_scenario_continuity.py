@@ -172,12 +172,12 @@ def _loss_analysis() -> LossAnalysis:
         security_constraints=[
             SecurityConstraint(
                 constraint_id="SC-PII",
-                description="Mask customer PII before disclosure",
+                rule="Mask customer PII before disclosure",
                 related_hazards=["H-PII"],
             ),
             SecurityConstraint(
                 constraint_id="SC-MASS",
-                description="Enforce reviewed batch limits before authorization",
+                rule="Enforce reviewed batch limits before authorization",
                 related_hazards=["H-MASS"],
             ),
         ],

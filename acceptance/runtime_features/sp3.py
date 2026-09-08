@@ -4245,7 +4245,8 @@ def _h_stage6_loss_analysis_with_specific_ids(
         security_constraints=[
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="The system must validate before action",
+                rule="The system must validate before action",
+                applies_when=[],
                 related_hazards=["H-1"],
             ),
         ],

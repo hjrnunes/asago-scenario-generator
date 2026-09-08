@@ -183,7 +183,8 @@ def _losses() -> LossAnalysis:
         security_constraints=[
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="Only approved clinical changes may be committed",
+                rule="Only approved clinical changes may be committed",
+                applies_when=[],
                 related_hazards=["H-1"],
             )
         ],

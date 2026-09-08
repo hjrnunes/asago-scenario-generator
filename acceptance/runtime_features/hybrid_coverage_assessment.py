@@ -554,7 +554,8 @@ def _facade_inputs() -> HybridReconciliationInputs:
         security_constraints=[
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="Constrain payment",
+                rule="Constrain payment",
+                applies_when=[],
                 related_hazards=["H-1"],
             )
         ],

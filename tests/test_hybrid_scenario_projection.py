@@ -196,7 +196,7 @@ def _task1_authority_fixture(control_structure_override=None) -> tuple[object, .
         security_constraints=(
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="Payments require the control action",
+                rule="Payments require the control action",
                 related_hazards=["H-1"],
             ),
         ),
@@ -1089,7 +1089,7 @@ def test_stpa_factory_keeps_multiple_relations_sharing_ica_and_exec() -> None:
         security_constraints=(
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="Payment constraint",
+                rule="Payment constraint",
                 related_hazards=["H-1"],
             ),
         ),
@@ -1197,7 +1197,7 @@ def test_stpa_factory_retains_coordination_namespaces_in_causal_nodes() -> None:
         security_constraints=(
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="Payment constraint",
+                rule="Payment constraint",
                 related_hazards=["H-1"],
             ),
         ),
@@ -1504,7 +1504,7 @@ def test_causal_edge_builder_retains_factor_edges_and_skips_action_self_edge() -
         {
             "SC-1": SecurityConstraint(
                 constraint_id="SC-1",
-                description="constraint",
+                rule="constraint",
                 related_hazards=["H-1"],
             )
         },

@@ -1,0 +1,78 @@
+risk_card_losses:
+- loss_id: L-1
+  description: Unauthorized exposure of customer Personally Identifiable Information
+    (PII) through model responses or data leakage.
+  provenance: risk_card
+  source_risk_cards:
+  - ai-risk-taxonomy-unauthorized-disclosure---pii-(personal-identifiable-information)
+  - ai-risk-taxonomy-unauthorized-distribution---pii-(personal-identifiable-information)
+  - ai-risk-taxonomy-unauthorized-processing---pii-(personal-identifiable-information)
+  - atlas-exposing-personal-information
+  - atlas-personal-information-in-data
+  - atlas-personal-information-in-prompt
+  - atlas-prompt-priming
+  - credo-risk-036
+  - mit-ai-risk-subdomain-2.1
+  - mit-ai-risk-subdomain-2.2
+- loss_id: L-2
+  description: Unauthorized disclosure or exposure of sensitive financial records,
+    including transaction history and payment status.
+  provenance: risk_card
+  source_risk_cards:
+  - ai-risk-taxonomy-unauthorized-disclosure---financial-records
+  - ai-risk-taxonomy-unauthorized-processing---financial-records
+  - credo-risk-037
+  - mit-ai-risk-subdomain-2.1
+use_case_losses:
+- loss_id: L-3
+  description: Financial loss or legal penalty for the stakeholder due to incorrect
+    financial instructions or information provided by the AI Assistant.
+  provenance: use_case
+  source_risk_cards: []
+hazards:
+- hazard_id: H-1
+  description: The AI Assistant's conversation history or prompt context contains
+    unmasked PII that is subsequently included in a model response to an unauthorized
+    recipient.
+  related_losses:
+  - L-1
+- hazard_id: H-2
+  description: The AI Assistant provides confident-but-wrong information regarding
+    fees, policies, or payment terms to a customer.
+  related_losses:
+  - L-3
+security_constraints:
+- constraint_id: SC-1
+  related_hazards:
+  - H-1
+  rule: The AI Assistant must ensure that no Personally Identifiable Information (PII)
+    from the authenticated user context or conversation history is included in the
+    generated output sent to an unauthorized recipient.
+  applies_when: []
+- constraint_id: SC-2
+  related_hazards:
+  - H-1
+  rule: The system must prevent the unauthorized disclosure of sensitive financial
+    records, such as transaction histories or payment schedules, through the AI Assistant's
+    conversational interface.
+  applies_when: []
+- constraint_id: SC-3
+  related_hazards:
+  - H-2
+  rule: The AI Assistant must ensure that all responses regarding fees, policies,
+    and payment terms are grounded in the approved RAG (Retrieval-Augmented Generation)
+    knowledge base and comply with applicable financial regulations.
+  applies_when: []
+- constraint_id: SC-4
+  related_hazards:
+  - H-2
+  rule: The AI Assistant must ensure that any modification to payment schedules or
+    refund processing via API integrations matches the intent and authorized parameters
+    of the authenticated customer session.
+  applies_when: []
+- constraint_id: SC-5
+  related_hazards:
+  - H-2
+  rule: The system must route the interaction to a human agent when the AI flags ambiguity
+    or regulated topics as per the escalation protocols.
+  applies_when: []

@@ -156,7 +156,7 @@ def _make_loss_analysis() -> LossAnalysis:
         security_constraints=[
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="Must validate",
+                rule="Must validate",
                 related_hazards=["H-1"],
             ),
         ],

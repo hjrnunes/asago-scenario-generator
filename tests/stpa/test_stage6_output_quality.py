@@ -30,7 +30,10 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossProvenance,
     SecurityConstraint,
 )
-from asago_scenario_generator.stpa.models.scenario_envelope import GherkinSpec, ScenarioEnvelope
+from asago_scenario_generator.stpa.models.scenario_envelope import (
+    GherkinSpec,
+    ScenarioEnvelope,
+)
 from asago_scenario_generator.stpa.models.scenario_spec import (
     AttackerBDI,
     DefenderBDI,
@@ -41,7 +44,9 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
     ThreatSource,
 )
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
-from asago_scenario_generator.stpa.scenario_prod.attack_tree import build_attack_tree_prompts
+from asago_scenario_generator.stpa.scenario_prod.attack_tree import (
+    build_attack_tree_prompts,
+)
 from asago_scenario_generator.stpa.scenario_prod.gherkin import (
     build_gherkin_prompts,
     find_security_constraint,
@@ -77,7 +82,9 @@ def _make_cs() -> ControlStructure:
                     ControlAction(
                         ca_id="CA-1-1",
                         description="Action",
-                        target=ElementRef(type=ReferenceType.controlled_process, id="CP-1"),
+                        target=ElementRef(
+                            type=ReferenceType.controlled_process, id="CP-1"
+                        ),
                     ),
                 ],
                 feedback_channels=[
@@ -85,7 +92,9 @@ def _make_cs() -> ControlStructure:
                         fb_id="FB-1-1",
                         description="Feedback",
                         updates="PM-1-1",
-                        source=ElementRef(type=ReferenceType.controlled_process, id="CP-1"),
+                        source=ElementRef(
+                            type=ReferenceType.controlled_process, id="CP-1"
+                        ),
                     ),
                 ],
             ),
@@ -110,7 +119,9 @@ def _make_scenario_spec(
         ica_type=ica_type,
         defender_bdi=DefenderBDI(
             beliefs=[
-                DefenderBelief(pm_id="PM-1-1", content="State", vulnerability="exploitable"),
+                DefenderBelief(
+                    pm_id="PM-1-1", content="State", vulnerability="exploitable"
+                ),
             ],
             desires=[DefenderDesire(resp_id="RESP-1", content="R1")],
             intentions=[DefenderIntention(ca_id="CA-1-1", content="Action")],
@@ -154,7 +165,7 @@ def _make_loss_analysis(
         security_constraints=[
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="The system must validate before action",
+                rule="The system must validate before action",
                 related_hazards=[hazard_ids[0]],
             ),
         ],
@@ -174,8 +185,12 @@ def _make_gherkin_spec(
         scenario=scenario,
         given=given if given is not None else ["Given PM-1-1 is active"],
         when=when if when is not None else ["When a revoked user requests access"],
-        then_expected=then_expected if then_expected is not None else ["Then the system should reject the request"],
-        then_actual=then_actual if then_actual is not None else [
+        then_expected=then_expected
+        if then_expected is not None
+        else ["Then the system should reject the request"],
+        then_actual=then_actual
+        if then_actual is not None
+        else [
             "But the system approves the request",
             "And loss L-1 is realized",
         ],
@@ -329,7 +344,9 @@ class TestFeatureFileFromGherkinRaw:
     """JPKW-07: .feature file is written from gherkin_raw."""
 
     def test_jpkw_07_feature_file_contains_gherkin_raw(self):
-        from asago_scenario_generator.stpa.scenario_prod.run import _write_scenario_artifacts
+        from asago_scenario_generator.stpa.scenario_prod.run import (
+            _write_scenario_artifacts,
+        )
 
         raw = "Feature: Safe orchestration\nScenario: SCN-001\n"
         envelope = _make_envelope(gherkin_raw=raw)
@@ -402,7 +419,9 @@ class TestStage7EnvelopeGherkinValidation:
     """JPKW-11: Stage 7 envelope validation uses GherkinSpec fields."""
 
     def test_jpkw_11_empty_then_expected_fails(self):
-        from asago_scenario_generator.stpa.scenario_prod.run import _validate_envelope_stage7
+        from asago_scenario_generator.stpa.scenario_prod.run import (
+            _validate_envelope_stage7,
+        )
 
         la = _make_loss_analysis()
         envelope = _make_envelope(
@@ -461,7 +480,9 @@ class TestGherkinUserPromptValidIds:
 
     def test_gddi_01_user_prompt_contains_loss_ids(self):
         spec = _make_scenario_spec()
-        la = _make_loss_analysis(loss_ids=["L-1", "L-2", "L-3"], hazard_ids=["H-1", "H-2"])
+        la = _make_loss_analysis(
+            loss_ids=["L-1", "L-2", "L-3"], hazard_ids=["H-1", "H-2"]
+        )
         loader = TemplateLoader(PROMPTS_DIR)
         sc = find_security_constraint(spec, la)
         _, user_prompt = build_gherkin_prompts(spec, sc, la, loader)
@@ -472,7 +493,9 @@ class TestGherkinUserPromptValidIds:
     def test_gddi_01_user_prompt_excludes_hazard_ids(self):
         """SP3-072o: Stage 6c user prompt restricts loss references to L-* IDs only."""
         spec = _make_scenario_spec()
-        la = _make_loss_analysis(loss_ids=["L-1", "L-2", "L-3"], hazard_ids=["H-1", "H-2"])
+        la = _make_loss_analysis(
+            loss_ids=["L-1", "L-2", "L-3"], hazard_ids=["H-1", "H-2"]
+        )
         loader = TemplateLoader(PROMPTS_DIR)
         sc = find_security_constraint(spec, la)
         _, user_prompt = build_gherkin_prompts(spec, sc, la, loader)
@@ -593,7 +616,9 @@ class TestLossHazardIdValidationInStage6:
     """GDDI-09: Loss/Hazard ID validation runs during Stage 6 artifact validation."""
 
     def test_gddi_09_stage6_validation_catches_hallucinated_id(self):
-        from asago_scenario_generator.stpa.scenario_prod.run import _validate_stage6_artifacts
+        from asago_scenario_generator.stpa.scenario_prod.run import (
+            _validate_stage6_artifacts,
+        )
 
         spec = _make_scenario_spec()
         cs = _make_cs()
@@ -601,11 +626,20 @@ class TestLossHazardIdValidationInStage6:
         gherkin_raw = "Scenario: Test\n  But loss L-99 is realized\n"
         errors: list[str] = []
         _validate_stage6_artifacts(
-            {"root": "Induce ICA NOT_PROVIDED on CA-1-1", "branches": [
-                {"category": "controller_side", "label": "l", "children": []},
-                {"category": "path_side", "label": "l", "children": []},
-            ], "leaves": []},
-            None, gherkin_raw, cs, la, spec, errors,
+            {
+                "root": "Induce ICA NOT_PROVIDED on CA-1-1",
+                "branches": [
+                    {"category": "controller_side", "label": "l", "children": []},
+                    {"category": "path_side", "label": "l", "children": []},
+                ],
+                "leaves": [],
+            },
+            None,
+            gherkin_raw,
+            cs,
+            la,
+            spec,
+            errors,
         )
         assert any("L-99" in e for e in errors)
 
@@ -614,7 +648,9 @@ class TestLossHazardIdValidationInStage7:
     """GDDI-10: Loss/Hazard ID validation runs during Stage 7 envelope validation."""
 
     def test_gddi_10_stage7_validation_catches_hallucinated_id(self):
-        from asago_scenario_generator.stpa.scenario_prod.run import _validate_envelope_stage7
+        from asago_scenario_generator.stpa.scenario_prod.run import (
+            _validate_envelope_stage7,
+        )
 
         la = _make_loss_analysis(loss_ids=["L-1"], hazard_ids=["H-1"])
         envelope = _make_envelope(
@@ -722,18 +758,29 @@ class TestAttackTreeRootLabelInStage6:
     """V689-05: root label validation runs during Stage 6 artifact validation."""
 
     def test_v689_05_stage6_validation_catches_drift(self):
-        from asago_scenario_generator.stpa.scenario_prod.run import _validate_stage6_artifacts
+        from asago_scenario_generator.stpa.scenario_prod.run import (
+            _validate_stage6_artifacts,
+        )
 
         spec = _make_scenario_spec(ica_type=UCAType.not_provided)
         cs = _make_cs()
         la = _make_loss_analysis()
         errors: list[str] = []
         _validate_stage6_artifacts(
-            {"root": "Induce ICA NOT_TRIGGERED on CA-1-1", "branches": [
-                {"category": "controller_side", "label": "l", "children": []},
-                {"category": "path_side", "label": "l", "children": []},
-            ], "leaves": []},
-            None, "", cs, la, spec, errors,
+            {
+                "root": "Induce ICA NOT_TRIGGERED on CA-1-1",
+                "branches": [
+                    {"category": "controller_side", "label": "l", "children": []},
+                    {"category": "path_side", "label": "l", "children": []},
+                ],
+                "leaves": [],
+            },
+            None,
+            "",
+            cs,
+            la,
+            spec,
+            errors,
         )
         assert any("NOT_PROVIDED" in e for e in errors)
 
@@ -742,17 +789,23 @@ class TestAttackTreeRootLabelInStage7:
     """V689-06: root label validation runs during Stage 7 envelope validation."""
 
     def test_v689_06_stage7_validation_catches_drift(self):
-        from asago_scenario_generator.stpa.scenario_prod.run import _validate_envelope_stage7
+        from asago_scenario_generator.stpa.scenario_prod.run import (
+            _validate_envelope_stage7,
+        )
 
         la = _make_loss_analysis()
         envelope = ScenarioEnvelope(
             scenario_id="SCN-001",
             scenario_spec=_make_scenario_spec(ica_type=UCAType.not_provided),
             narrative="Narrative",
-            attack_tree={"root": "Induce ICA NOT_TRIGGERED on CA-1-1", "branches": [
-                {"category": "controller_side", "label": "l", "children": []},
-                {"category": "path_side", "label": "l", "children": []},
-            ], "leaves": []},
+            attack_tree={
+                "root": "Induce ICA NOT_TRIGGERED on CA-1-1",
+                "branches": [
+                    {"category": "controller_side", "label": "l", "children": []},
+                    {"category": "path_side", "label": "l", "children": []},
+                ],
+                "leaves": [],
+            },
             gherkin_spec=_make_gherkin_spec(),
             gherkin_raw="",
             target_responsibility="RESP-1",
@@ -851,13 +904,19 @@ class TestEnvelopeGherkinTextHelper:
     """
 
     def test_jpkw_16_prefers_spec_text_when_spec_parsed(self):
-        from asago_scenario_generator.stpa.scenario_prod.run import _envelope_gherkin_text
+        from asago_scenario_generator.stpa.scenario_prod.run import (
+            _envelope_gherkin_text,
+        )
 
         envelope = _make_envelope(gherkin_raw="feature: Raw text\nscenario: X\n")
-        assert _envelope_gherkin_text(envelope) == _make_gherkin_spec().to_feature_text()
+        assert (
+            _envelope_gherkin_text(envelope) == _make_gherkin_spec().to_feature_text()
+        )
 
     def test_jpkw_16_falls_back_to_raw_when_spec_not_parsed(self):
-        from asago_scenario_generator.stpa.scenario_prod.run import _envelope_gherkin_text
+        from asago_scenario_generator.stpa.scenario_prod.run import (
+            _envelope_gherkin_text,
+        )
 
         envelope = _make_envelope(
             gherkin_spec=_make_gherkin_spec(feature=""),
@@ -866,14 +925,18 @@ class TestEnvelopeGherkinTextHelper:
         assert _envelope_gherkin_text(envelope) == "feature: Raw text\nscenario: X\n"
 
     def test_jpkw_16_falls_back_to_spec_when_no_raw(self):
-        from asago_scenario_generator.stpa.scenario_prod.run import _envelope_gherkin_text
+        from asago_scenario_generator.stpa.scenario_prod.run import (
+            _envelope_gherkin_text,
+        )
 
         envelope = _make_envelope(gherkin_raw="")
         text = _envelope_gherkin_text(envelope)
         assert "Feature: Safe orchestration" in text
 
     def test_jpkw_16_returns_empty_when_neither_available(self):
-        from asago_scenario_generator.stpa.scenario_prod.run import _envelope_gherkin_text
+        from asago_scenario_generator.stpa.scenario_prod.run import (
+            _envelope_gherkin_text,
+        )
 
         envelope = ScenarioEnvelope.model_construct(
             scenario_id="SCN-001",

@@ -85,7 +85,7 @@ def test_captured_klarna_ca3_1_deviations_survive_public_fill(tmp_path) -> None:
     control_path = (
         _REPLAY_FIXTURE.parent / fixture["source"]["embedded_control_structure"]
     )
-    assert _sha256(loss_path) == fixture["source"]["loss_analysis_sha256"]
+    assert _sha256(loss_path) == fixture["source"]["embedded_loss_analysis_sha256"]
     assert _sha256(control_path) == fixture["source"]["control_structure_sha256"]
 
     records = fixture["records"]
@@ -96,16 +96,12 @@ def test_captured_klarna_ca3_1_deviations_survive_public_fill(tmp_path) -> None:
     # The ignored run is an optional audit source.  The committed fixture above
     # is authoritative for deterministic/offline execution, while a checkout
     # containing the run can still verify every provenance hash and wire value.
+    # The loss-analysis bytes were migrated to the amended Phase 1.3
+    # rule/applies_when shape, so the source-run digest comparison is
+    # restricted to the control structure, whose bytes did not change.
     calls_path = source_root / fixture["source"]["calls_file"]
-    source_loss_path = source_root / "loss-analysis.yaml"
     source_control_path = source_root / "control-structure.yaml"
-    if (
-        source_root.is_dir()
-        and calls_path.is_file()
-        and source_loss_path.is_file()
-        and source_control_path.is_file()
-    ):
-        assert _sha256(source_loss_path) == fixture["source"]["loss_analysis_sha256"]
+    if source_root.is_dir() and calls_path.is_file() and source_control_path.is_file():
         assert (
             _sha256(source_control_path)
             == fixture["source"]["control_structure_sha256"]

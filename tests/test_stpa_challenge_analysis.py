@@ -164,7 +164,7 @@ def _loss_analysis() -> LossAnalysis:
         security_constraints=(
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="Payment timing must be checked.",
+                rule="Payment timing must be checked.",
                 related_hazards=("H-1",),
             ),
         ),

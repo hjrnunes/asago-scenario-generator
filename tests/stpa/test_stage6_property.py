@@ -111,7 +111,9 @@ class TestGherkinSpecRoundTrip:
     """
 
     @given(spec=_gherkin_spec_strategy())
-    @settings(max_examples=100, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @settings(
+        max_examples=100, deadline=None, suppress_health_check=[HealthCheck.too_slow]
+    )
     def test_yaml_round_trip_preserves_fields(self, spec: GherkinSpec):
         """GherkinSpec → YAML dict → parse_gherkin_spec → same GherkinSpec."""
         import yaml
@@ -132,34 +134,44 @@ class TestGherkinSpecRoundTrip:
         assert reparsed.then_actual == spec.then_actual
 
     @given(spec=_gherkin_spec_strategy())
-    @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @settings(
+        max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow]
+    )
     def test_feature_text_starts_with_feature_keyword(self, spec: GherkinSpec):
         """to_feature_text() always starts with 'Feature:'."""
         text = spec.to_feature_text()
         assert text.startswith(f"Feature: {spec.feature}")
 
     @given(spec=_gherkin_spec_strategy())
-    @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @settings(
+        max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow]
+    )
     def test_feature_text_contains_scenario_keyword(self, spec: GherkinSpec):
         """to_feature_text() always contains 'Scenario:'."""
         text = spec.to_feature_text()
         assert f"Scenario: {spec.scenario}" in text
 
     @given(spec=_gherkin_spec_strategy())
-    @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @settings(
+        max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow]
+    )
     def test_feature_text_ends_with_newline(self, spec: GherkinSpec):
         """to_feature_text() always ends with a trailing newline."""
         text = spec.to_feature_text()
         assert text.endswith("\n")
 
     @given(spec=_gherkin_spec_strategy())
-    @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @settings(
+        max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow]
+    )
     def test_idempotent_render(self, spec: GherkinSpec):
         """Rendering twice produces identical output."""
         assert spec.to_feature_text() == spec.to_feature_text()
 
     @given(spec=_gherkin_spec_strategy())
-    @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @settings(
+        max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow]
+    )
     def test_feature_text_contains_all_steps(self, spec: GherkinSpec):
         """to_feature_text() contains every step from every field."""
         text = spec.to_feature_text()
@@ -167,7 +179,9 @@ class TestGherkinSpecRoundTrip:
             assert step in text, f"Step '{step}' missing from feature text"
 
     @given(spec=_gherkin_spec_strategy())
-    @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @settings(
+        max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow]
+    )
     def test_pydantic_model_validate_round_trip(self, spec: GherkinSpec):
         """GherkinSpec → model_dump → model_validate → same GherkinSpec."""
         dumped = spec.model_dump(mode="json")
@@ -184,7 +198,9 @@ class TestValidatorDeterminism:
     """Validators produce identical results for identical inputs."""
 
     @given(spec=_gherkin_spec_strategy())
-    @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @settings(
+        max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow]
+    )
     def test_gherkin_structure_deterministic(self, spec: GherkinSpec):
         """validate_gherkin_structure gives the same result on repeated calls."""
         r1 = validate_gherkin_structure(spec)
@@ -193,7 +209,9 @@ class TestValidatorDeterminism:
         assert r1.errors == r2.errors
 
     @given(spec=_gherkin_spec_strategy())
-    @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @settings(
+        max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow]
+    )
     def test_gherkin_structure_text_path_deterministic(self, spec: GherkinSpec):
         """validate_gherkin_structure on text is deterministic."""
         text = spec.to_feature_text()
@@ -221,7 +239,9 @@ class TestValidatorDeterminism:
 # ---------------------------------------------------------------------------
 
 
-def _make_loss_analysis_with_ids(loss_ids: list[str], hazard_ids: list[str]) -> LossAnalysis:
+def _make_loss_analysis_with_ids(
+    loss_ids: list[str], hazard_ids: list[str]
+) -> LossAnalysis:
     """Build a LossAnalysis with the given IDs for ID-reference tests.
 
     Always includes at least one hazard and one security constraint to
@@ -247,7 +267,7 @@ def _make_loss_analysis_with_ids(loss_ids: list[str], hazard_ids: list[str]) -> 
         security_constraints=[
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="Constraint",
+                rule="Constraint",
                 related_hazards=all_hazard_ids[:1],
             ),
         ],
@@ -279,7 +299,9 @@ class TestRootLabelDriftDetection:
     @given(
         ica_type=st_ica_type,
         ca_id=st.builds(lambda n: f"CA-{n}-1", st.integers(min_value=1, max_value=99)),
-        wrong_ca=st.builds(lambda n: f"CA-{n}-2", st.integers(min_value=1, max_value=99)),
+        wrong_ca=st.builds(
+            lambda n: f"CA-{n}-2", st.integers(min_value=1, max_value=99)
+        ),
     )
     @settings(max_examples=50, deadline=None)
     def test_ca_mismatch_always_caught(
@@ -290,9 +312,7 @@ class TestRootLabelDriftDetection:
             return
         tree = {"root": f"Induce ICA {ica_type.value} on {wrong_ca}", "branches": []}
         result = validate_attack_tree_root_label(tree, ica_type.value, ca_id)
-        assert not result.passed, (
-            f"CA drift {wrong_ca} → {ca_id} not caught"
-        )
+        assert not result.passed, f"CA drift {wrong_ca} → {ca_id} not caught"
 
     @given(
         ica_type=st_ica_type,
@@ -340,9 +360,7 @@ class TestRootLabelDriftDetection:
 
     def test_non_dict_tree_handled_gracefully(self):
         """A non-dict attack tree is handled without crashing."""
-        result = validate_attack_tree_root_label(
-            "not a dict", "NOT_PROVIDED", "CA-1-1"
-        )
+        result = validate_attack_tree_root_label("not a dict", "NOT_PROVIDED", "CA-1-1")
         assert not result.passed
 
 
@@ -370,7 +388,8 @@ class TestLossHazardIdValidator:
         ),
     )
     @settings(
-        max_examples=50, deadline=None,
+        max_examples=50,
+        deadline=None,
         suppress_health_check=[HealthCheck.too_slow],
     )
     def test_valid_ids_always_pass(
@@ -389,12 +408,12 @@ class TestLossHazardIdValidator:
             max_size=3,
             unique=True,
         ),
-        bad_id=st.builds(lambda n: f"L-{n}", st.integers(min_value=1000, max_value=9999)),
+        bad_id=st.builds(
+            lambda n: f"L-{n}", st.integers(min_value=1000, max_value=9999)
+        ),
     )
     @settings(max_examples=50, deadline=None)
-    def test_hallucinated_loss_id_always_caught(
-        self, loss_ids: list[str], bad_id: str
-    ):
+    def test_hallucinated_loss_id_always_caught(self, loss_ids: list[str], bad_id: str):
         """A hallucinated L-* ID is always detected."""
         la = _make_loss_analysis_with_ids(loss_ids, [])
         spec = GherkinSpec(
@@ -416,7 +435,9 @@ class TestLossHazardIdValidator:
             max_size=3,
             unique=True,
         ),
-        bad_id=st.builds(lambda n: f"H-{n}", st.integers(min_value=1000, max_value=9999)),
+        bad_id=st.builds(
+            lambda n: f"H-{n}", st.integers(min_value=1000, max_value=9999)
+        ),
     )
     @settings(max_examples=50, deadline=None)
     def test_hallucinated_hazard_id_always_caught(

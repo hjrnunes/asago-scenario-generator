@@ -25,7 +25,10 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossProvenance,
     SecurityConstraint,
 )
-from asago_scenario_generator.stpa.models.scenario_envelope import GherkinSpec, ScenarioEnvelope
+from asago_scenario_generator.stpa.models.scenario_envelope import (
+    GherkinSpec,
+    ScenarioEnvelope,
+)
 from asago_scenario_generator.stpa.models.scenario_spec import (
     AttackerBDI,
     DefenderBDI,
@@ -59,13 +62,16 @@ def _make_cs(
         ],
         control_actions=[
             ControlAction(
-                ca_id="CA-1-1", description="Action",
+                ca_id="CA-1-1",
+                description="Action",
                 target=ElementRef(type=ReferenceType.controlled_process, id="CP-1"),
             ),
         ],
         feedback_channels=[
             FeedbackChannel(
-                fb_id="FB-1-1", description="Feedback", updates="PM-1-1",
+                fb_id="FB-1-1",
+                description="Feedback",
+                updates="PM-1-1",
                 source=ElementRef(type=ReferenceType.controlled_process, id="CP-1"),
             ),
         ],
@@ -74,18 +80,28 @@ def _make_cs(
     if include_resp2:
         responsibilities.append(
             Responsibility(
-                resp_id="RESP-2", description="R2",
-                process_model_parts=[ProcessModelPart(pm_id="PM-2-1", description="State2")],
+                resp_id="RESP-2",
+                description="R2",
+                process_model_parts=[
+                    ProcessModelPart(pm_id="PM-2-1", description="State2")
+                ],
                 control_actions=[
                     ControlAction(
-                        ca_id="CA-2-1", description="Action2",
-                        target=ElementRef(type=ReferenceType.controlled_process, id="CP-1"),
+                        ca_id="CA-2-1",
+                        description="Action2",
+                        target=ElementRef(
+                            type=ReferenceType.controlled_process, id="CP-1"
+                        ),
                     ),
                 ],
                 feedback_channels=[
                     FeedbackChannel(
-                        fb_id="FB-2-1", description="Feedback2", updates="PM-2-1",
-                        source=ElementRef(type=ReferenceType.controlled_process, id="CP-1"),
+                        fb_id="FB-2-1",
+                        description="Feedback2",
+                        updates="PM-2-1",
+                        source=ElementRef(
+                            type=ReferenceType.controlled_process, id="CP-1"
+                        ),
                     ),
                 ],
             )
@@ -96,12 +112,19 @@ def _make_cs(
 def _make_loss_analysis() -> LossAnalysis:
     return LossAnalysis(
         risk_card_losses=[
-            Loss(loss_id="L-1", description="Loss", provenance=LossProvenance.risk_card, source_risk_cards=["r1"]),
+            Loss(
+                loss_id="L-1",
+                description="Loss",
+                provenance=LossProvenance.risk_card,
+                source_risk_cards=["r1"],
+            ),
         ],
         use_case_losses=[],
         hazards=[Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"])],
         security_constraints=[
-            SecurityConstraint(constraint_id="SC-1", description="Constraint", related_hazards=["H-1"]),
+            SecurityConstraint(
+                constraint_id="SC-1", rule="Constraint", related_hazards=["H-1"]
+            ),
         ],
     )
 
@@ -127,7 +150,11 @@ def _make_scenario_spec(
         target_control_action=target_control_action,
         ica_type=UCAType.not_provided,
         defender_bdi=DefenderBDI(
-            beliefs=[DefenderBelief(pm_id=pm_id, content="State", vulnerability=vulnerability)],
+            beliefs=[
+                DefenderBelief(
+                    pm_id=pm_id, content="State", vulnerability=vulnerability
+                )
+            ],
             desires=[DefenderDesire(resp_id=resp_id, content="R1")],
             intentions=[DefenderIntention(ca_id=ca_id, content="Action")],
         ),
@@ -146,7 +173,8 @@ def _make_envelope(
         scenario_spec=spec or _make_scenario_spec(),
         narrative="Narrative text",
         attack_tree=attack_tree or {"root": "r", "branches": [], "leaves": []},
-        gherkin_spec=gherkin_spec or GherkinSpec(
+        gherkin_spec=gherkin_spec
+        or GherkinSpec(
             feature="Test",
             scenario="Test",
             given=["Given PM-1-1 is valid"],
@@ -183,7 +211,12 @@ def _make_enriched_threat_set(
     return EnrichedThreatSet(
         structural_threats=threats or [_make_threat()],
         coverage_analysis=CoverageAnalysis(
-            structural_coverage={"total_slots": 1, "non_na": 1, "na": 0, "coverage_rate": 1.0},
+            structural_coverage={
+                "total_slots": 1,
+                "non_na": 1,
+                "na": 0,
+                "coverage_rate": 1.0,
+            },
         ),
     )
 
@@ -220,7 +253,9 @@ class TestBDIGroundingValidator:
 
     def test_fails_on_ca_not_belonging_to_controller(self):
         cs = _make_cs(include_resp2=True)
-        spec = _make_scenario_spec(target_controller="RESP-1", target_control_action="CA-2-1")
+        spec = _make_scenario_spec(
+            target_controller="RESP-1", target_control_action="CA-2-1"
+        )
         result = validate_bdi_grounding(spec, cs)
         assert not result.passed
         assert any("target_control_action" in e for e in result.errors)
@@ -252,7 +287,11 @@ class TestTreeBranchCoverage:
     """SP3-VAL-07, SP3-VAL-08."""
 
     def test_passes_with_one_category(self):
-        tree = {"root": "r", "branches": [{"category": "controller_side", "label": "l", "children": []}], "leaves": []}
+        tree = {
+            "root": "r",
+            "branches": [{"category": "controller_side", "label": "l", "children": []}],
+            "leaves": [],
+        }
         result = validate_tree_branch_coverage(tree)
         assert result.passed
 
@@ -292,7 +331,9 @@ class TestGherkinStructure:
     """SP3-VAL-09 through SP3-VAL-11."""
 
     def test_fails_on_missing_but(self):
-        text = "Scenario: Test\n  Given PM-1-1 is valid\n  When x\n  Then should reject\n"
+        text = (
+            "Scenario: Test\n  Given PM-1-1 is valid\n  When x\n  Then should reject\n"
+        )
         result = validate_gherkin_structure(text)
         assert not result.passed
         assert any("but" in e.lower() for e in result.errors)
@@ -320,21 +361,43 @@ class TestTreeIDReferences:
 
     def test_fails_on_invalid_pm(self):
         cs = _make_cs()
-        tree = {"root": "r", "branches": [{"category": "controller_side", "label": "PM-99-1", "children": []}], "leaves": []}
+        tree = {
+            "root": "r",
+            "branches": [
+                {"category": "controller_side", "label": "PM-99-1", "children": []}
+            ],
+            "leaves": [],
+        }
         result = validate_tree_id_references(tree, cs)
         assert not result.passed
         assert any("PM-99-1" in e for e in result.errors)
 
     def test_fails_on_invalid_fb(self):
         cs = _make_cs()
-        tree = {"root": "r", "branches": [{"category": "controller_side", "label": "FB-99-1", "children": []}], "leaves": []}
+        tree = {
+            "root": "r",
+            "branches": [
+                {"category": "controller_side", "label": "FB-99-1", "children": []}
+            ],
+            "leaves": [],
+        }
         result = validate_tree_id_references(tree, cs)
         assert not result.passed
         assert any("FB-99-1" in e for e in result.errors)
 
     def test_passes_with_valid_refs(self):
         cs = _make_cs()
-        tree = {"root": "r", "branches": [{"category": "controller_side", "label": "PM-1-1 via FB-1-1", "children": [{"label": "CA-1-1"}]}], "leaves": []}
+        tree = {
+            "root": "r",
+            "branches": [
+                {
+                    "category": "controller_side",
+                    "label": "PM-1-1 via FB-1-1",
+                    "children": [{"label": "CA-1-1"}],
+                }
+            ],
+            "leaves": [],
+        }
         result = validate_tree_id_references(tree, cs)
         assert result.passed
 
@@ -445,7 +508,9 @@ class TestOrphanDetection:
         assert "CA-1-1" not in orphans
 
     def test_finds_orphan_icas(self):
-        threats = [_make_threat(ica_id=f"RESP-1:CA-1-1:NOT_PROVIDED:{i}") for i in range(1, 6)]
+        threats = [
+            _make_threat(ica_id=f"RESP-1:CA-1-1:NOT_PROVIDED:{i}") for i in range(1, 6)
+        ]
         ets = _make_enriched_threat_set(threats=threats)
         env = _make_envelope()
         # Only 3 scenarios produced out of 5 threats

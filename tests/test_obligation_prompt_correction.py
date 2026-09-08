@@ -102,6 +102,8 @@ def _captured_duplicate_pair_loss_analysis() -> LossAnalysis:
                         for key, value in item.items()
                         if key != "related_hazard_ids"
                     },
+                    "rule": item["description"],
+                    "applies_when": [],
                     "related_hazards": item["related_hazard_ids"],
                 }
             )
@@ -583,7 +585,7 @@ def test_mismatched_hazard_constraint_route_is_unresolved_after_one_correction()
         security_constraints=(
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="Requests must satisfy policy.",
+                rule="Requests must satisfy policy.",
                 related_hazards=("H-1",),
             ),
         ),

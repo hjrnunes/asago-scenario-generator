@@ -336,8 +336,17 @@ def test_captured_target_reference_contract_failure_is_recorded_precisely(
             "maximum_completion_tokens": 8192,
         }
     )
-    stale_constraint = request.loss_analysis.security_constraints[0].model_copy(
-        update={"description": ("Requests must satisfy policy. (related hazards: H-2)")}
+    from asago_scenario_generator.stpa.models.loss_analysis import SecurityConstraint
+
+    baseline = request.loss_analysis.security_constraints[0]
+    stale_constraint = SecurityConstraint.model_validate(
+        {
+            **baseline.model_dump(),
+            # Phase 1.3 as amended: the stale hazard reference lives in the
+            # authored rule so the composed description carries it.
+            "rule": "Requests must satisfy policy. (related hazards: H-2)",
+            "applies_when": [],
+        }
     )
     request = SynthesisSlotRequest(
         target_id=request.target_id,

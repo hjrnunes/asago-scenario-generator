@@ -412,7 +412,7 @@ projections:
     selected_candidate_id: cand:v2:c1ce1e48c8fcea147f0c57d7552d041a
     semantic_digest: ebe2af1dc785d0071e96589308eb4449993a5068fa4ba459290ca1404ad0491b
   obligation_id: ob:v1:741b678e5ed0aae16ceb83ee81db90e98fc10b78f7cb90a5e4628a67ab727727
-  projection_id: projection:v1:408874214ca42963d94dac4b01a23510e92660457998ee4f8999a9d18281c78f
+  projection_id: projection:v1:2ddba081ba60536ef323669b3dc5b82c30b5c292f73f50c7fcbb905d515c3a45
   relation_id: correlation:v1:ea7ad1b470a32d2fbd42e17e1583cb8f186aaf3379766a7cf39056886387cc23
   relation_kind: same_mechanism
   risk_id: risk-a
@@ -444,7 +444,7 @@ projections:
   - artifact_pin:
       artifact_id: loss-analysis
       schema_version: loss-analysis-v1
-      semantic_digest: 6ae9c8374eafdee3b6c93c438d5468c8db0c9b5e79f57224912790207cc8e360
+      semantic_digest: ef69d593da87a5d5b7ea228ea474a7e17a370abc40c0578c98fa07cb87f4dbc3
     record_id: SC-1
     source_kind: stpa_constraint
   - artifact_pin:
@@ -456,7 +456,7 @@ projections:
   - artifact_pin:
       artifact_id: loss-analysis
       schema_version: loss-analysis-v1
-      semantic_digest: 6ae9c8374eafdee3b6c93c438d5468c8db0c9b5e79f57224912790207cc8e360
+      semantic_digest: ef69d593da87a5d5b7ea228ea474a7e17a370abc40c0578c98fa07cb87f4dbc3
     record_id: H-1
     source_kind: stpa_hazard
   - artifact_pin:
@@ -468,7 +468,7 @@ projections:
   - artifact_pin:
       artifact_id: loss-analysis
       schema_version: loss-analysis-v1
-      semantic_digest: 6ae9c8374eafdee3b6c93c438d5468c8db0c9b5e79f57224912790207cc8e360
+      semantic_digest: ef69d593da87a5d5b7ea228ea474a7e17a370abc40c0578c98fa07cb87f4dbc3
     record_id: L-1
     source_kind: stpa_loss
   - artifact_pin:
@@ -479,7 +479,7 @@ projections:
     source_kind: stpa_slot
   schema_version: hybrid-scenario-projection-v1
   selected_candidate_id: cand:v2:c1ce1e48c8fcea147f0c57d7552d041a
-  semantic_digest: 11b287f4b68c743378f7c1ab2234c7d7068dc28c6771aa11f35a76ddda2c93ab
+  semantic_digest: 2eaf31c3a589ed231f398d047359c341884ba24921d698e026f201b9a4d381eb
   source_pins:
   - kind: artifact
     pin:
@@ -497,7 +497,7 @@ projections:
     pin:
       artifact_id: loss-analysis
       schema_version: loss-analysis-v1
-      semantic_digest: 6ae9c8374eafdee3b6c93c438d5468c8db0c9b5e79f57224912790207cc8e360
+      semantic_digest: ef69d593da87a5d5b7ea228ea474a7e17a370abc40c0578c98fa07cb87f4dbc3
     role: artifact
   - kind: artifact
     pin:
@@ -557,7 +557,7 @@ projections:
     pin:
       artifact_id: loss-analysis
       schema_version: loss-analysis-v1
-      semantic_digest: 6ae9c8374eafdee3b6c93c438d5468c8db0c9b5e79f57224912790207cc8e360
+      semantic_digest: ef69d593da87a5d5b7ea228ea474a7e17a370abc40c0578c98fa07cb87f4dbc3
     role: loss-analysis
   - kind: artifact
     pin:
@@ -623,7 +623,7 @@ projections:
     pin:
       artifact_id: pinned-stpa-projection-attestation
       schema_version: pinned-stpa-projection-attestation-v1
-      semantic_digest: b7123aebfe36c984496b770f10bf932b3c242953ed4205bd4101b3a684f95fdf
+      semantic_digest: 2f7e229f99b5d72900940282657644e9eba707e8bffff29c0e4770015089e995
     role: stpa-attestation
   - kind: taxonomy
     pin:
@@ -644,7 +644,7 @@ projections:
     role: mapping
     taxonomy_id: sssom
 schema_version: hybrid-scenario-projection-set-v1
-semantic_digest: b4528f1f594ac28dc9d366995a3e4fd5fc67ee52fde03b83fecdb074d7264746
+semantic_digest: e7b3c0511b3e06ba5f8da285b3ae348b8cc0dd324471f008ea126163e1c65944
 source_pins:
 - kind: artifact
   pin:
@@ -662,7 +662,7 @@ source_pins:
   pin:
     artifact_id: loss-analysis
     schema_version: loss-analysis-v1
-    semantic_digest: 6ae9c8374eafdee3b6c93c438d5468c8db0c9b5e79f57224912790207cc8e360
+    semantic_digest: ef69d593da87a5d5b7ea228ea474a7e17a370abc40c0578c98fa07cb87f4dbc3
   role: artifact
 - kind: artifact
   pin:
@@ -722,7 +722,7 @@ source_pins:
   pin:
     artifact_id: loss-analysis
     schema_version: loss-analysis-v1
-    semantic_digest: 6ae9c8374eafdee3b6c93c438d5468c8db0c9b5e79f57224912790207cc8e360
+    semantic_digest: ef69d593da87a5d5b7ea228ea474a7e17a370abc40c0578c98fa07cb87f4dbc3
   role: loss-analysis
 - kind: artifact
   pin:
@@ -788,7 +788,7 @@ source_pins:
   pin:
     artifact_id: pinned-stpa-projection-attestation
     schema_version: pinned-stpa-projection-attestation-v1
-    semantic_digest: b7123aebfe36c984496b770f10bf932b3c242953ed4205bd4101b3a684f95fdf
+    semantic_digest: 2f7e229f99b5d72900940282657644e9eba707e8bffff29c0e4770015089e995
   role: stpa-attestation
 - kind: taxonomy
   pin:

@@ -442,7 +442,8 @@ def _build_minimal_fixtures() -> dict[str, Any]:
         security_constraints=[
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="Reject revoked users",
+                rule="Reject revoked users",
+                applies_when=[],
                 related_hazards=["H-1"],
             )
         ],

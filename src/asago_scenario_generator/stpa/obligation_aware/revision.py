@@ -562,7 +562,11 @@ def _build_revision_records(
         security_constraints.append(
             SecurityConstraint(
                 constraint_id=allocation.handles[item.handle],
-                description=item.description,
+                # Phase 1.3 as amended: the draft statement is the authored
+                # rule with no conditions, so the composed description
+                # matches the draft text exactly.
+                rule=item.description,
+                applies_when=[],
                 related_hazards=list(refs),
             )
         )

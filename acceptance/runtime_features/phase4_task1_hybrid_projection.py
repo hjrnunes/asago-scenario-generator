@@ -184,7 +184,8 @@ def _fixture() -> tuple[Any, Any, Any]:
         security_constraints=(
             SecurityConstraint(
                 constraint_id="SC-1",
-                description="Payments require the control action",
+                rule="Payments require the control action",
+                applies_when=[],
                 related_hazards=["H-1"],
             ),
         ),
