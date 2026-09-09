@@ -28,7 +28,10 @@ AdversaryKind = Literal[
     "external_attacker",
     "malicious_customer",
     "third_party_via_content",
+    "none",
 ]
+
+TestClass = Literal["adversarial", "functional"]
 
 StimulusKind = Literal["user_message", "conversation", "retrieved_content"]
 
@@ -199,6 +202,7 @@ class GoldCase(BaseModel):
     id: str
     family: Family
     title: str
+    test_class: TestClass = "adversarial"
     adversary: AdversarySpec
     constraint_meaning: str
     state_facts: list[StateFact] = Field(default_factory=list)
@@ -215,6 +219,17 @@ class GoldCase(BaseModel):
                 "adversary.reaches_target_via "
                 f"({self.adversary.reaches_target_via}) must equal "
                 f"stimulus.kind ({self.stimulus.kind})"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_functional_adversary(self) -> GoldCase:
+        is_none = self.adversary.kind == "none"
+        is_functional = self.test_class == "functional"
+        if is_none != is_functional:
+            raise ValueError(
+                "adversary.kind must be 'none' if and only if "
+                "test_class is 'functional'"
             )
         return self
 
@@ -268,6 +283,52 @@ class GoldFile(BaseModel):
         return None
 
 
+class BenchmarkCaseRevision(BaseModel):
+    """One gold case's classification in a benchmark revision 2 sidecar."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    test_class: TestClass
+    adversary: AdversarySpec | None = None
+
+    @model_validator(mode="after")
+    def _check_class_adversary(self) -> BenchmarkCaseRevision:
+        if self.test_class == "functional":
+            if self.adversary is None:
+                raise ValueError(
+                    "a functional benchmark case requires an adversary block"
+                )
+            if self.adversary.kind != "none":
+                raise ValueError(
+                    "a functional benchmark case adversary must have kind 'none'"
+                )
+        elif self.adversary is not None:
+            raise ValueError("an adversarial benchmark case must not set an adversary")
+        return self
+
+
+class BenchmarkRevision(BaseModel):
+    """Benchmark revision 2 sidecar over a pinned version 1 gold file."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    benchmark_version: Literal[2]
+    base_gold_file: str
+    base_gold_digest: str
+    classification_test: str
+    thresholds: dict[str, int]
+    cases: list[BenchmarkCaseRevision] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _check_unique_case_ids(self) -> BenchmarkRevision:
+        ids = [c.id for c in self.cases]
+        duplicates = sorted({i for i in ids if ids.count(i) > 1})
+        if duplicates:
+            raise ValueError(f"duplicate benchmark case ids: {', '.join(duplicates)}")
+        return self
+
+
 def load_gold_file(path: str | Path) -> GoldFile:
     path = Path(path)
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -284,6 +345,73 @@ def load_gold_file(path: str | Path) -> GoldFile:
 def compute_gold_digest(path: str | Path) -> str:
     """Deterministic sha256 digest of the gold file bytes."""
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def load_benchmark_revision(
+    sidecar_path: str | Path,
+    base_gold_path: str | Path | None = None,
+) -> tuple[GoldFile, BenchmarkRevision]:
+    """Load a benchmark revision 2 sidecar over a pinned base gold file.
+
+    The base path defaults to the sidecar's ``base_gold_file`` (relative to
+    the current working directory). Returns a new ``GoldFile`` whose cases
+    carry their sidecar classification, plus the validated revision. Never
+    writes to disk.
+    """
+    sidecar_path = Path(sidecar_path)
+    raw = yaml.safe_load(sidecar_path.read_text(encoding="utf-8"))
+    revision = BenchmarkRevision.model_validate(raw)
+
+    base = (
+        Path(base_gold_path)
+        if base_gold_path is not None
+        else Path(revision.base_gold_file)
+    )
+    actual_digest = compute_gold_digest(base)
+    if actual_digest != revision.base_gold_digest:
+        raise ValueError(
+            f"base gold file digest mismatch for {base}: sidecar pins "
+            f"{revision.base_gold_digest} but the file computes {actual_digest}"
+        )
+    gold = load_gold_file(base)
+
+    base_by_id = {c.id: c for c in gold.gold_cases}
+    base_ids = set(base_by_id)
+    sidecar_ids = {c.id for c in revision.cases}
+    missing = sorted(base_ids - sidecar_ids)
+    extra = sorted(sidecar_ids - base_ids)
+    if missing or extra:
+        raise ValueError(
+            "benchmark sidecar ids must match the base gold file ids exactly "
+            f"(missing from sidecar: {missing or 'none'}; "
+            f"absent from base: {extra or 'none'})"
+        )
+
+    revised: list[GoldCase] = []
+    for rev in revision.cases:
+        update: dict[str, Any] = {"test_class": rev.test_class}
+        if rev.adversary is not None:
+            update["adversary"] = rev.adversary
+        copy = base_by_id[rev.id].model_copy(update=update)
+        # Re-validate so the kind/test-class iff validator runs on the copy.
+        revised.append(GoldCase.model_validate(copy.model_dump()))
+    return (
+        GoldFile(
+            target_environment=gold.target_environment,
+            version=gold.version,
+            gold_cases=revised,
+        ),
+        revision,
+    )
+
+
+def compute_benchmark_digest(
+    sidecar_path: str | Path, base_gold_path: str | Path
+) -> str:
+    """Deterministic digest binding base gold file bytes to sidecar bytes."""
+    base_digest = compute_gold_digest(base_gold_path).encode("utf-8")
+    sidecar_bytes = Path(sidecar_path).read_bytes()
+    return hashlib.sha256(base_digest + b"\n" + sidecar_bytes).hexdigest()
 
 
 def atomic_write_text(path: Path, text: str) -> None:

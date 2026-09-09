@@ -1,19 +1,26 @@
 """Unit tests for gold case loader, schema, and applicability checker."""
 
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from scripts.gold.gold_cases import (
+    BenchmarkCaseRevision,
+    BenchmarkRevision,
     GoldCase,
     check_gold_case_applicability,
+    compute_benchmark_digest,
     compute_gold_digest,
+    load_benchmark_revision,
     load_gold_file,
 )
 
 GOLD_PATH = Path("data/gold/miniklarna/gold-cases.yaml")
+BENCHMARK_PATH = Path("data/gold/miniklarna/benchmark-v2.yaml")
 
 
 def _observations_document() -> dict:
@@ -370,3 +377,180 @@ def test_check_applicability_missing_policy_snippet():
     app, reasons = check_gold_case_applicability(case_g08, doc)
     assert not app
     assert any("Escalate regulated topics" in r for r in reasons)
+
+
+# --- Benchmark revision 2 sidecar ---
+
+
+def _functional_case_dict() -> dict:
+    data = _valid_case_dict()
+    data["test_class"] = "functional"
+    data["adversary"] = {
+        "kind": "none",
+        "gain": "No one gains. The assistant fails on its own.",
+        "reaches_target_via": "user_message",
+    }
+    return data
+
+
+def _sidecar_dict() -> dict:
+    return yaml.safe_load(BENCHMARK_PATH.read_text(encoding="utf-8"))
+
+
+def _write_sidecar(sidecar: dict, path: Path) -> Path:
+    path.write_text(yaml.safe_dump(sidecar), encoding="utf-8")
+    return path
+
+
+def test_v1_gold_file_loads_all_adversarial():
+    gold = load_gold_file(GOLD_PATH)
+    assert gold.version == 1
+    for c in gold.gold_cases:
+        assert c.test_class == "adversarial"
+
+
+def test_schema_accepts_functional_case_with_none_kind():
+    case = GoldCase.model_validate(_functional_case_dict())
+    assert case.test_class == "functional"
+    assert case.adversary.kind == "none"
+
+
+def test_schema_rejects_none_kind_with_adversarial_class():
+    data = _valid_case_dict()
+    data["test_class"] = "adversarial"
+    data["adversary"] = {"kind": "none", "gain": "No one gains."}
+    with pytest.raises(ValidationError):
+        GoldCase.model_validate(data)
+
+
+def test_schema_rejects_functional_class_with_attacker_kind():
+    data = _valid_case_dict()
+    data["test_class"] = "functional"
+    with pytest.raises(ValidationError):
+        GoldCase.model_validate(data)
+
+
+def test_benchmark_case_revision_rejects_functional_without_adversary():
+    with pytest.raises(ValidationError):
+        BenchmarkCaseRevision.model_validate({"id": "G08", "test_class": "functional"})
+
+
+def test_benchmark_case_revision_rejects_functional_with_attacker_adversary():
+    with pytest.raises(ValidationError):
+        BenchmarkCaseRevision.model_validate(
+            {
+                "id": "G08",
+                "test_class": "functional",
+                "adversary": {
+                    "kind": "malicious_customer",
+                    "gain": "Pays less than owed.",
+                },
+            }
+        )
+
+
+def test_benchmark_case_revision_rejects_adversarial_with_adversary():
+    with pytest.raises(ValidationError):
+        BenchmarkCaseRevision.model_validate(
+            {
+                "id": "G01",
+                "test_class": "adversarial",
+                "adversary": {"kind": "none", "gain": "No one gains."},
+            }
+        )
+
+
+def test_benchmark_case_revision_accepts_both_classes():
+    adversarial = BenchmarkCaseRevision.model_validate(
+        {"id": "G01", "test_class": "adversarial"}
+    )
+    assert adversarial.adversary is None
+    functional = BenchmarkCaseRevision.model_validate(
+        {
+            "id": "G08",
+            "test_class": "functional",
+            "adversary": {"kind": "none", "gain": "No one gains."},
+        }
+    )
+    assert functional.adversary is not None
+    assert functional.adversary.kind == "none"
+
+
+def test_benchmark_revision_rejects_duplicate_case_ids():
+    sidecar = _sidecar_dict()
+    sidecar["cases"].append({"id": "G01", "test_class": "adversarial"})
+    with pytest.raises(ValidationError, match="G01"):
+        BenchmarkRevision.model_validate(sidecar)
+
+
+def test_load_benchmark_revision_real_files():
+    base_bytes_before = GOLD_PATH.read_bytes()
+
+    gold, revision = load_benchmark_revision(BENCHMARK_PATH, GOLD_PATH)
+
+    assert GOLD_PATH.read_bytes() == base_bytes_before
+    assert revision.benchmark_version == 2
+    assert len(gold.gold_cases) == 12
+
+    sidecar_by_id = {c["id"]: c for c in _sidecar_dict()["cases"]}
+    base_by_id = {c.id: c for c in load_gold_file(GOLD_PATH).gold_cases}
+
+    functional_ids = {c.id for c in gold.gold_cases if c.test_class == "functional"}
+    assert functional_ids == {"G08", "G09", "G10"}
+
+    for case in gold.gold_cases:
+        if case.test_class == "functional":
+            entry = sidecar_by_id[case.id]
+            assert case.adversary.kind == "none"
+            assert case.adversary.gain == entry["adversary"]["gain"]
+        else:
+            original = base_by_id[case.id]
+            assert case.adversary == original.adversary
+
+
+def test_load_benchmark_revision_rejects_digest_mismatch(tmp_path):
+    sidecar = _sidecar_dict()
+    sidecar["base_gold_digest"] = "0" * 64
+    wrong = _write_sidecar(sidecar, tmp_path / "benchmark-wrong-digest.yaml")
+
+    with pytest.raises(ValueError, match="digest mismatch"):
+        load_benchmark_revision(wrong, GOLD_PATH)
+
+
+def test_load_benchmark_revision_rejects_missing_id(tmp_path):
+    sidecar = _sidecar_dict()
+    sidecar["cases"] = [c for c in sidecar["cases"] if c["id"] != "G12"]
+    partial = _write_sidecar(sidecar, tmp_path / "benchmark-missing-id.yaml")
+
+    with pytest.raises(ValueError, match="G12"):
+        load_benchmark_revision(partial, GOLD_PATH)
+
+
+def test_load_benchmark_revision_rejects_extra_id(tmp_path):
+    sidecar = _sidecar_dict()
+    sidecar["cases"].append({"id": "G13", "test_class": "adversarial"})
+    extra = _write_sidecar(sidecar, tmp_path / "benchmark-extra-id.yaml")
+
+    with pytest.raises(ValueError, match="G13"):
+        load_benchmark_revision(extra, GOLD_PATH)
+
+
+def test_compute_benchmark_digest_is_deterministic_and_formula_bound():
+    d1 = compute_benchmark_digest(BENCHMARK_PATH, GOLD_PATH)
+    d2 = compute_benchmark_digest(BENCHMARK_PATH, GOLD_PATH)
+    assert d1 == d2
+    assert len(d1) == 64
+
+    expected = hashlib.sha256(
+        compute_gold_digest(GOLD_PATH).encode("utf-8")
+        + b"\n"
+        + BENCHMARK_PATH.read_bytes()
+    ).hexdigest()
+    assert d1 == expected
+
+
+def test_compute_benchmark_digest_changes_with_sidecar_bytes(tmp_path):
+    d_real = compute_benchmark_digest(BENCHMARK_PATH, GOLD_PATH)
+    modified = tmp_path / "benchmark-modified.yaml"
+    modified.write_bytes(BENCHMARK_PATH.read_bytes() + b"# trailing change\n")
+    assert compute_benchmark_digest(modified, GOLD_PATH) != d_real
