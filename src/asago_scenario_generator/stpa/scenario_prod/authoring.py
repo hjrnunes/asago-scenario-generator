@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -94,10 +95,11 @@ AUTHORED_STAGE_SUMMARY_KEY = "stage_5_authored"
 
 AUTHORED_SCENARIOS_FILENAME = "authored-scenarios.yaml"
 
-# The one stimulus kind Phase 4 authors.  Multi-turn conversation and
-# content-carried stimuli stay out of the wire schema; anything else is a
-# typed rejection (recorded as a Phase 4 deviation in the spec).
-AUTHORED_STIMULUS_KIND = Literal["user_message"]
+# The stimulus kinds Phase 4 authors: a single user message or a bounded
+# multi-turn conversation.  Content-carried stimuli stay out of the wire
+# schema; anything else is a typed rejection (recorded as a Phase 4
+# deviation in the spec).
+AUTHORED_STIMULUS_KIND = Literal["user_message", "conversation"]
 
 OracleKind = Literal[
     "tool_argument",
@@ -191,11 +193,39 @@ class AuthoredAdversary(ClosedCanonicalModel):
     gain: StrictStr = Field(min_length=1)
 
 
+class AuthoredTurn(ClosedCanonicalModel):
+    """One conversation turn; the wire only carries user turns."""
+
+    role: Literal["user"] = "user"
+    text: StrictStr = Field(min_length=1)
+
+
 class AuthoredStimulus(ClosedCanonicalModel):
-    """The exact test message.  Only single-turn user messages in Phase 4."""
+    """The exact test delivery: one user message or a 2-3 turn conversation.
+
+    A ``user_message`` carries ``text`` and no ``turns``; a ``conversation``
+    carries 2-3 ``turns`` and no ``text``.  The turns are the scenario's
+    full user-side script: earlier turns supply context (optionally the
+    claim under test) and the final turn requests the action under test.
+    """
 
     kind: AUTHORED_STIMULUS_KIND = "user_message"
-    text: StrictStr = Field(min_length=1)
+    text: StrictStr | None = None
+    turns: tuple[AuthoredTurn, ...] | None = None
+
+    @model_validator(mode="after")
+    def validate_shape_for_kind(self) -> "AuthoredStimulus":
+        if self.kind == "user_message":
+            if self.turns is not None:
+                raise ValueError("a user_message stimulus must not carry turns")
+            if self.text is None or self.text == "":
+                raise ValueError("a user_message stimulus requires non-empty text")
+        else:
+            if self.text is not None:
+                raise ValueError("a conversation stimulus must not carry text")
+            if self.turns is None or not 2 <= len(self.turns) <= 3:
+                raise ValueError("a conversation stimulus requires 2 to 3 turns")
+        return self
 
 
 class AuthoredUnsafeObservation(ClosedCanonicalModel):
@@ -220,6 +250,19 @@ class AuthoredConditionEntry(ClosedCanonicalModel):
     note: StrictStr = Field(min_length=1)
 
 
+class AuthoredClaimUnderTest(ClosedCanonicalModel):
+    """One earlier-turn assertion the final turn's request tests.
+
+    ``turn`` is the 1-based conversation turn making the assertion;
+    ``state_path`` is the target-state path whose value the assertion
+    contradicts; ``note`` says what the turn claims.
+    """
+
+    turn: StrictInt = Field(ge=1)
+    state_path: tuple[StrictStr, ...]
+    note: StrictStr = Field(min_length=1)
+
+
 class AuthoredScenarioDraft(ClosedCanonicalModel):
     """One authored scenario draft exactly as the wire defines it."""
 
@@ -228,7 +271,19 @@ class AuthoredScenarioDraft(ClosedCanonicalModel):
     state_facts_used: tuple[tuple[StrictStr, ...], ...] = ()
     unsafe_observation: AuthoredUnsafeObservation
     conditions_established: tuple[AuthoredConditionEntry, ...] = ()
+    claims_under_test: tuple[AuthoredClaimUnderTest, ...] = ()
     safe_behaviors: tuple[StrictStr, ...] = ()
+
+
+def stimulus_user_texts(stimulus: AuthoredStimulus) -> tuple[str, ...]:
+    """Return each user text the stimulus delivers, in turn order.
+
+    A conversation stands for the concatenation of its turns wherever a
+    stimulus text is searched or quoted.
+    """
+    if stimulus.kind == "conversation":
+        return tuple(turn.text for turn in stimulus.turns or ())
+    return (stimulus.text or "",)
 
 
 class AuthoringResponse(ClosedCanonicalModel):
@@ -451,6 +506,9 @@ def validate_authored_scenario(
 ) -> AcceptedScenario | ScenarioRejection:
     """Apply spec 4.3 rules 1-8 plus the Phase 3.2 adversary rules.
 
+    A ``conversation`` stimulus additionally passes the conversation-shape
+    checks (final-turn request, used earlier-turn context, listed claims).
+
     Any failure rejects that scenario only; the reason names the exact rule
     outcome (and the condition index for ``qualifier_dropped``).
     """
@@ -459,6 +517,10 @@ def validate_authored_scenario(
         return rejection
 
     facts, rejection = _validate_state_facts(draft, state)
+    if rejection is not None:
+        return rejection
+
+    rejection = _validate_conversation(draft, candidate, facts, session_identity)
     if rejection is not None:
         return rejection
 
@@ -527,7 +589,11 @@ def validate_authored_scenario(
         state_facts=tuple(facts),
         comparable_field=comparable,
         session_identity=session_identity,
-        reaches_target_via=AdversaryReach.user_message,
+        reaches_target_via=(
+            AdversaryReach.conversation
+            if draft.stimulus.kind == "conversation"
+            else AdversaryReach.user_message
+        ),
     )
 
 
@@ -551,15 +617,16 @@ def _validate_adversary(
         )
     if adversary.kind is AdversaryKind.third_party_via_content:
         # Reach rule before content-surface facts: every authored stimulus is
-        # a user message (AUTHORED_STIMULUS_KIND) and every accepted scenario
-        # records reaches_target_via user_message, so this kind contradicts
-        # the delivery record it sits in no matter what the profile says.
+        # a user message or a user conversation (AUTHORED_STIMULUS_KIND) and
+        # every accepted scenario records that reach, so this kind
+        # contradicts the delivery record it sits in no matter what the
+        # profile says.
         return ScenarioRejection(
             reason="adversary_reach_mismatch",
             detail=(
                 "third_party_via_content requires a stimulus delivered "
                 "through content the target retrieves; authored stimuli "
-                "reach the target as a user message"
+                "reach the target as a user message or a user conversation"
             ),
         )
         # The content-surface rule is retained unchanged below; the reach
@@ -594,6 +661,161 @@ def _validate_state_facts(
             )
         facts.append(StateFactValue(path=path, value=found))
     return facts, None
+
+
+_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def _turn_tokens(lowered_text: str) -> set[str]:
+    """Return the casefolded identifier tokens of one turn's text.
+
+    Tokens keep hyphens so a record id like ``ORD-201`` stays one token and
+    cannot substring-match a different record such as ``ORD-2019``.
+    """
+    return {token.casefold() for token in _TOKEN_PATTERN.findall(lowered_text)}
+
+
+def _mentions_used_identifier(
+    lowered_text: str, facts: list[StateFactValue]
+) -> bool:
+    """Whether text mentions a used-fact path segment or string value.
+
+    The same lowercase substring match ``_validate_tool_absent`` uses for
+    observables; used path segments carry the record identifiers.
+    """
+    for fact in facts:
+        if any(segment and segment.lower() in lowered_text for segment in fact.path):
+            return True
+        if isinstance(fact.value, str) and fact.value.lower() in lowered_text:
+            return True
+    return False
+
+
+def _final_turn_requests_action(
+    lowered_final: str,
+    candidate: AuthoringCandidate,
+    facts: list[StateFactValue],
+) -> bool:
+    """Whether the final turn names the action's tool or a used record."""
+    if candidate.action_name.lower() in lowered_final:
+        return True
+    return _mentions_used_identifier(lowered_final, facts)
+
+
+def _turn_names_used_context(
+    lowered_text: str,
+    facts: list[StateFactValue],
+    session_identity: str,
+) -> bool:
+    """Whether one earlier turn states something the final turn can rely on."""
+    if session_identity and session_identity.lower() in lowered_text:
+        return True
+    return _mentions_used_identifier(lowered_text, facts)
+
+
+def _turn_asserts_contradicted_state(
+    lowered_text: str,
+    fact: StateFactValue,
+    session_identity: str,
+) -> bool:
+    """Whether one turn asserts session ownership the state contradicts.
+
+    Deliberately conservative: only record-id-bearing owner paths with the
+    shape ``(..., <record id>, customer_id)`` whose state owner differs from
+    the session are checked, and only a turn whose tokens include both the
+    record id and the session identity counts as asserting the contradiction.
+    A false rejection discards a valid authored draft, while a missed one
+    only weakens one test.
+    """
+    path = fact.path
+    if len(path) < 3 or path[-1] != _OWNER_FIELD:
+        return False
+    if not isinstance(fact.value, str) or fact.value == session_identity:
+        return False
+    tokens = _turn_tokens(lowered_text)
+    record_id = path[-2].casefold()
+    session = session_identity.casefold()
+    return bool(record_id) and record_id in tokens and session in tokens
+
+
+def _validate_conversation(
+    draft: AuthoredScenarioDraft,
+    candidate: AuthoringCandidate,
+    facts: list[StateFactValue],
+    session_identity: str,
+) -> ScenarioRejection | None:
+    """Shape rules for ``conversation`` stimuli; other kinds pass unchanged.
+
+    The final turn must request the action under test, at least one earlier
+    turn must state something the final turn relies on, and an assertion a
+    turn makes that the target state contradicts must be listed in
+    ``claims_under_test``.
+    """
+    if draft.stimulus.kind != "conversation":
+        return None
+    turns = stimulus_user_texts(draft.stimulus)
+    lowered = [text.lower() for text in turns]
+    used_paths = {fact.path for fact in facts}
+    claims = draft.claims_under_test
+    for claim in claims:
+        if claim.turn > len(turns):
+            return ScenarioRejection(
+                reason="claims_under_test_invalid",
+                detail=(
+                    f"claims_under_test names turn {claim.turn}, beyond the "
+                    f"{len(turns)} conversation turn(s)"
+                ),
+            )
+        if tuple(claim.state_path) not in used_paths:
+            return ScenarioRejection(
+                reason="claims_under_test_invalid",
+                detail=(
+                    f"claims_under_test names state path "
+                    f"{list(claim.state_path)!r}, which is not in "
+                    "state_facts_used"
+                ),
+            )
+    if not _final_turn_requests_action(lowered[-1], candidate, facts):
+        return ScenarioRejection(
+            reason="conversation_final_turn_not_request",
+            detail=(
+                "the final conversation turn must request the action under "
+                f"test {candidate.action_name!r} or name a used record"
+            ),
+        )
+    if not any(
+        _turn_names_used_context(lowered[index], facts, session_identity)
+        or any(claim.turn == index + 1 for claim in claims)
+        for index in range(len(turns) - 1)
+    ):
+        return ScenarioRejection(
+            reason="conversation_context_turn_unused",
+            detail=(
+                "no earlier conversation turn states anything the final turn "
+                "relies on: name a record, the session, a used state-fact "
+                "value, or list the turn in claims_under_test"
+            ),
+        )
+    for index in range(len(turns) - 1):
+        for fact in facts:
+            contradicted = _turn_asserts_contradicted_state(
+                lowered[index], fact, session_identity
+            )
+            listed = any(
+                claim.turn == index + 1 and tuple(claim.state_path) == fact.path
+                for claim in claims
+            )
+            if contradicted and not listed:
+                return ScenarioRejection(
+                    reason="conversation_claim_contradicts_state",
+                    detail=(
+                        f"conversation turn {index + 1} asserts session "
+                        f"ownership the target state contradicts for "
+                        f"{list(fact.path)!r}; list the assertion in "
+                        "claims_under_test"
+                    ),
+                )
+    return None
 
 
 def _validate_tool_argument(
@@ -1263,7 +1485,8 @@ def build_authoring_user_prompt(
         # Plain (kind, definition) tuples: the template unpacks each entry
         # as ``kind, definition`` (spec 4.1 item 6).  third_party_via_content
         # is unreachable on this path: every authored stimulus is a user
-        # message, so the reach rule rejects that kind unconditionally.
+        # message or a user conversation, so the reach rule rejects that
+        # kind unconditionally.
         "adversary_definitions": [
             (kind, definition)
             for kind, definition in _ADVERSARY_DEFINITIONS
@@ -1510,7 +1733,7 @@ def _accepted_payload(accepted: AcceptedScenario) -> dict[str, Any]:
         "deviation_category": accepted.uca_type.value,
         "adversary_kind": accepted.draft.adversary.kind.value,
         "gain": accepted.gain,
-        "stimulus_text": accepted.draft.stimulus.text,
+        "stimulus_text": "\n".join(stimulus_user_texts(accepted.draft.stimulus)),
         "reaches_target_via": accepted.reaches_target_via.value,
         "state_facts_used": [
             {"path": list(fact.path), "value": fact.value}
