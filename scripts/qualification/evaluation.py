@@ -129,7 +129,12 @@ def judge_response_semantics(
     )
     if not isinstance(proposition, str) or not proposition.strip():
         return {**base, "reason": "Compiled semantic oracle has no proposition"}
-    if oracle.get("kind") in {"action_absence", "tool_argument", "tool_call"}:
+    if oracle.get("kind") in {
+        "action_absence",
+        "tool_argument",
+        "tool_call",
+        "event_order",
+    }:
         return {
             **base,
             "reason": "Tool-action and argument oracles use deterministic evidence",

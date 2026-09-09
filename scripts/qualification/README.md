@@ -112,7 +112,12 @@ rejected explicitly. No target system policy is inserted.
 
 Outputs are `garak-attempts.jsonl` and `qualification.json`, including the
 compiled digest, actual responses/tool calls, before/after state and separate
-execution errors. Existing output directories are not overwritten.
+execution errors. The runner submits the compiled history once and scores the
+single continuation. Each result entry records the submitted `history_roles`
+and the `history_texts_sha256` digest of the submitted turn texts, proving
+what was submitted without duplicating prompts. The report copies the compiled
+case's `supplied_history` value verbatim when present and records `null`
+otherwise. Existing output directories are not overwritten.
 
 ## Evaluation boundary
 
