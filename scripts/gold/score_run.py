@@ -2,6 +2,11 @@
 
 Matches compiled conversation artifacts and identifies loss stages for unmatched cases.
 See ai/findings/target-grounded-scenario-generation-spec-2026-09-07.md (Phase 0).
+
+Benchmark revision 2 (``--benchmark-version 2``) scores two lanes: compiled
+artifacts are still matched by the version-1 rules over every applicable case,
+while the functional cases are matched against the persisted ``none``
+specifications under ``scenarios/``.
 """
 
 from __future__ import annotations
@@ -20,7 +25,9 @@ from scripts.gold.gold_cases import (
     GoldCase,
     atomic_write_text,
     check_gold_case_applicability,
+    compute_benchmark_digest,
     compute_gold_digest,
+    load_benchmark_revision,
     load_gold_file,
 )
 
@@ -72,6 +79,48 @@ class UnmatchedGoldCase:
     family: str
     loss_stage: str
     hints: list[UnmatchedGoldHint] = field(default_factory=list)
+
+
+@dataclass
+class FunctionalSpecification:
+    """A persisted ``none`` specification viewed as a matchable artifact.
+
+    The reviewed-specification lane never executes behavior: the specification
+    is projected onto a ``CompiledArtifact`` so the version-1 matching rules
+    apply unchanged.
+    """
+
+    scenario_id: str
+    spec_path: Path
+    artifact: CompiledArtifact
+    control_action_id: str | None
+    constraint_refs: list[str]
+    stimulus: str
+
+    @property
+    def stimulus_excerpt(self) -> str:
+        return self.stimulus[:120].replace("\n", " ")
+
+    def specification_entry(self) -> dict[str, Any]:
+        return {
+            "scenario_id": self.scenario_id,
+            "control_action_id": self.control_action_id,
+            "tool_name": self.artifact.tool_name,
+            "oracle_kind": self.artifact.oracle_kind,
+            "condition_type": self.artifact.condition_type,
+            "expected": self.artifact.expected,
+            "constraint_refs": list(self.constraint_refs),
+            "stimulus_excerpt": self.stimulus_excerpt,
+        }
+
+    def unmatched_entry(self) -> dict[str, Any]:
+        return {
+            "scenario_id": self.scenario_id,
+            "oracle_kind": self.artifact.oracle_kind,
+            "tool_name": self.artifact.tool_name,
+            "constraint_refs": list(self.constraint_refs),
+            "stimulus_excerpt": self.stimulus_excerpt,
+        }
 
 
 def find_synthesis_artifacts_dir(run_dir: Path) -> Path | None:
@@ -530,34 +579,32 @@ def find_hints_for_unmatched_gold(
     return loss_stage, hints
 
 
-def score_run(
-    run_dir: str | Path,
-    gold_path: str | Path = "data/gold/miniklarna/gold-cases.yaml",
-    artifacts_dir_override: str | Path | None = None,
-) -> dict[str, Any]:
-    run_path = Path(run_dir)
-    gold_file = load_gold_file(gold_path)
-    gold_digest = compute_gold_digest(gold_path)
-
+def _resolve_artifacts_dir(
+    run_path: Path, artifacts_dir_override: str | Path | None
+) -> Path:
+    """Resolve the compiled-artifacts directory for a run (shared by v1/v2)."""
     if artifacts_dir_override:
-        artifacts_dir = Path(artifacts_dir_override)
-    else:
-        found = find_synthesis_artifacts_dir(run_path)
-        if not found:
-            raise FileNotFoundError(
-                f"Could not locate synthesis artifacts directory in {run_path}"
-            )
-        artifacts_dir = found
+        return Path(artifacts_dir_override)
+    found = find_synthesis_artifacts_dir(run_path)
+    if not found:
+        raise FileNotFoundError(
+            f"Could not locate synthesis artifacts directory in {run_path}"
+        )
+    return found
 
-    # 1. Applicability check
-    obs_file = run_path / "target-observations.yaml"
-    obs_source = obs_file if obs_file.is_file() else None
 
+def _applicability_check(
+    gold_cases: list[GoldCase], obs_source: Path | None
+) -> tuple[list[dict[str, Any]], list[GoldCase], int]:
+    """Check each gold case against the run's target observations.
+
+    Returns (details, applicable_cases, inapplicable_count).
+    """
     applicability_details: list[dict[str, Any]] = []
     applicable_cases: list[GoldCase] = []
     inapplicable_count = 0
 
-    for case in gold_file.gold_cases:
+    for case in gold_cases:
         app, reasons = check_gold_case_applicability(case, obs_source)
         applicability_details.append(
             {
@@ -572,14 +619,31 @@ def score_run(
         else:
             inapplicable_count += 1
 
-    # 2. Load run evidence
-    compiled_artifacts = load_compiled_artifacts(artifacts_dir)
-    published_scenarios = load_published_scenarios(run_path)
-    exclusions = load_exclusions(artifacts_dir)
-    control_action_map, tool_inventory = load_control_action_map(run_path)
-    compiled_scenario_ids = {art.scenario_id for art in compiled_artifacts}
+    return applicability_details, applicable_cases, inapplicable_count
 
-    # 3. Match evaluation
+
+def _read_run_id(run_path: Path) -> str:
+    """Run identity: the directory name, overridden by run-manifest.yaml."""
+    run_id = run_path.name
+    run_manifest_file = run_path / "run-manifest.yaml"
+    if run_manifest_file.is_file():
+        try:
+            rm = yaml.safe_load(run_manifest_file.read_text(encoding="utf-8"))
+            if isinstance(rm, dict) and "run_id" in rm:
+                run_id = rm["run_id"]
+        except Exception:
+            pass
+    return run_id
+
+
+def _match_compiled_artifacts(
+    applicable_cases: list[GoldCase],
+    compiled_artifacts: list[CompiledArtifact],
+) -> tuple[list[MatchProposal], set[str], set[str]]:
+    """Version-1 matching of compiled artifacts against applicable cases.
+
+    Returns (proposals, matched_gold_ids, matched_scenario_ids).
+    """
     proposals: list[MatchProposal] = []
     matched_gold_ids: set[str] = set()
     matched_scenario_ids: set[str] = set()
@@ -601,7 +665,19 @@ def score_run(
                 matched_gold_ids.add(case.id)
                 matched_scenario_ids.add(art.scenario_id)
 
-    # 4. Unmatched gold cases and hints
+    return proposals, matched_gold_ids, matched_scenario_ids
+
+
+def _find_unmatched_gold_cases(
+    applicable_cases: list[GoldCase],
+    matched_gold_ids: set[str],
+    published_scenarios: dict[str, dict[str, Any]],
+    exclusions: dict[str, dict[str, Any]],
+    compiled_scenario_ids: set[str],
+    control_action_map: dict[str, set[str]],
+    tool_inventory: set[str],
+) -> list[UnmatchedGoldCase]:
+    """Loss stages and hints for applicable cases without a proposal."""
     unmatched_gold_cases: list[UnmatchedGoldCase] = []
     for case in applicable_cases:
         if case.id not in matched_gold_ids:
@@ -622,8 +698,13 @@ def score_run(
                     hints=hints,
                 )
             )
+    return unmatched_gold_cases
 
-    # Unmatched compiled artifacts
+
+def _unmatched_artifact_entries(
+    compiled_artifacts: list[CompiledArtifact], matched_scenario_ids: set[str]
+) -> list[dict[str, Any]]:
+    """Compiled artifacts that matched no gold case."""
     unmatched_artifacts: list[dict[str, Any]] = []
     for art in compiled_artifacts:
         if art.scenario_id not in matched_scenario_ids:
@@ -635,17 +716,57 @@ def score_run(
                     "user_text_excerpt": art.all_user_text()[:120].replace("\n", " "),
                 }
             )
+    return unmatched_artifacts
 
-    run_id = run_path.name
-    # try reading run-manifest.yaml if present
-    run_manifest_file = run_path / "run-manifest.yaml"
-    if run_manifest_file.is_file():
-        try:
-            rm = yaml.safe_load(run_manifest_file.read_text(encoding="utf-8"))
-            if isinstance(rm, dict) and "run_id" in rm:
-                run_id = rm["run_id"]
-        except Exception:
-            pass
+
+def score_run(
+    run_dir: str | Path,
+    gold_path: str | Path = "data/gold/miniklarna/gold-cases.yaml",
+    artifacts_dir_override: str | Path | None = None,
+) -> dict[str, Any]:
+    run_path = Path(run_dir)
+    gold_file = load_gold_file(gold_path)
+    gold_digest = compute_gold_digest(gold_path)
+
+    artifacts_dir = _resolve_artifacts_dir(run_path, artifacts_dir_override)
+
+    # 1. Applicability check
+    obs_file = run_path / "target-observations.yaml"
+    obs_source = obs_file if obs_file.is_file() else None
+
+    applicability_details, applicable_cases, inapplicable_count = _applicability_check(
+        gold_file.gold_cases, obs_source
+    )
+
+    # 2. Load run evidence
+    compiled_artifacts = load_compiled_artifacts(artifacts_dir)
+    published_scenarios = load_published_scenarios(run_path)
+    exclusions = load_exclusions(artifacts_dir)
+    control_action_map, tool_inventory = load_control_action_map(run_path)
+    compiled_scenario_ids = {art.scenario_id for art in compiled_artifacts}
+
+    # 3. Match evaluation
+    proposals, matched_gold_ids, matched_scenario_ids = _match_compiled_artifacts(
+        applicable_cases, compiled_artifacts
+    )
+
+    # 4. Unmatched gold cases and hints
+    unmatched_gold_cases = _find_unmatched_gold_cases(
+        applicable_cases,
+        matched_gold_ids,
+        published_scenarios,
+        exclusions,
+        compiled_scenario_ids,
+        control_action_map,
+        tool_inventory,
+    )
+
+    # Unmatched compiled artifacts
+    unmatched_artifacts = _unmatched_artifact_entries(
+        compiled_artifacts, matched_scenario_ids
+    )
+
+    run_id = _read_run_id(run_path)
 
     score_result = {
         "run_id": run_id,
@@ -678,6 +799,396 @@ def score_run(
     }
 
     out_file = run_path / "gold-score.yaml"
+    atomic_write_text(out_file, yaml.dump(score_result, sort_keys=False))
+    return score_result
+
+
+_STRUCTURAL_SOURCES_RE = re.compile(r"\s*\[structural sources:[^\]]*\]\s*$")
+_INTENTION_TOOL_RE = re.compile(r"^([a-z_]+): ")
+_STIMULUS_MARKER = "Proposed stimulus:"
+
+
+def _clean_stimulus_text(text: str) -> str:
+    """Strip the bullet marker and the trailing structural-sources annotation."""
+    cleaned = text.strip()
+    if cleaned.startswith("- "):
+        cleaned = cleaned[2:]
+    cleaned = _STRUCTURAL_SOURCES_RE.sub("", cleaned)
+    return cleaned.strip()
+
+
+def _stimulus_from_narrative(narrative: str) -> str:
+    """Extract the stimulus bullet after ``Proposed stimulus:`` in a narrative.
+
+    The bullet starts at the next ``- `` line and ends at the next blank
+    line. Returns "" when the marker or bullet is missing.
+    """
+    idx = narrative.find(_STIMULUS_MARKER)
+    if idx < 0:
+        return ""
+    rest = narrative[idx + len(_STIMULUS_MARKER) :]
+    bullet_lines: list[str] = []
+    for line in rest.splitlines():
+        if not line.strip():
+            if bullet_lines:
+                break
+            continue
+        if not bullet_lines:
+            if line.lstrip().startswith("- "):
+                bullet_lines.append(line.strip())
+            continue
+        bullet_lines.append(line.strip())
+    if not bullet_lines:
+        return ""
+    return _clean_stimulus_text(" ".join(bullet_lines))
+
+
+def _spec_stimulus(doc: dict[str, Any], spec: dict[str, Any]) -> str:
+    """Stimulus from the narrative bullet, else the attacker intention, else ""."""
+    narrative = doc.get("narrative")
+    if isinstance(narrative, str):
+        stimulus = _stimulus_from_narrative(narrative)
+        if stimulus:
+            return stimulus
+    attacker = spec.get("attacker_bdi") or {}
+    intentions = attacker.get("intentions") or []
+    if intentions and isinstance(intentions[0], str):
+        return _clean_stimulus_text(intentions[0])
+    return ""
+
+
+def _resolve_intention_tool(spec: dict[str, Any], control_action_id: Any) -> str | None:
+    """Tool name for a control action from the defender's intention entries.
+
+    An intention content of the form ``"<tool>: <text>"`` names the tool;
+    the model-output action (e.g. CA-1-8 "Reply to the user with a
+    model-authored message.") names none.
+    """
+    defender = spec.get("defender_bdi") or {}
+    intentions = defender.get("intentions") or []
+    for entry in intentions:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("ca_id") != control_action_id:
+            continue
+        content = entry.get("content")
+        if not isinstance(content, str):
+            return None
+        match = _INTENTION_TOOL_RE.match(content)
+        return match.group(1) if match else None
+    return None
+
+
+def _functional_spec_view(
+    scenario_id: str,
+    spec_path: Path,
+    doc: dict[str, Any],
+    spec: dict[str, Any],
+) -> FunctionalSpecification | None:
+    """Project a persisted ``none`` specification onto a CompiledArtifact."""
+    adversary = spec.get("adversary") or {}
+    if not isinstance(adversary, dict) or adversary.get("kind") != "none":
+        return None
+
+    cond = spec.get("unsafe_outcome_condition")
+    if not isinstance(cond, dict):
+        cond = {}
+    cond_type = cond.get("type")
+    control_action_id = cond.get("control_action_id")
+
+    tool_name: str | None
+    if cond_type == "action_value" and cond.get("property") == "semantic_proposition":
+        oracle_kind = "response_claim"
+        tool_name = None
+    elif cond_type == "action_presence" and cond.get("expected") == "not_provided":
+        oracle_kind = "action_absence"
+        tool_name = _resolve_intention_tool(spec, control_action_id)
+    else:
+        oracle_kind = cond_type if isinstance(cond_type, str) else ""
+        tool_name = _resolve_intention_tool(spec, control_action_id)
+
+    constraint_refs_raw = spec.get("unsafe_outcome_constraint_refs")
+    if not isinstance(constraint_refs_raw, list):
+        scenario_context = spec.get("scenario_context") or {}
+        constraints = scenario_context.get("constraints") or []
+        constraint_refs_raw = [
+            c.get("constraint_id")
+            for c in constraints
+            if isinstance(c, dict) and c.get("constraint_id")
+        ]
+    constraint_refs = [str(c) for c in constraint_refs_raw]
+
+    stimulus = _spec_stimulus(doc, spec)
+    artifact = CompiledArtifact(
+        scenario_id=scenario_id,
+        artifact_path=spec_path,
+        plan_path=None,
+        messages=[{"role": "user", "content": stimulus}],
+        oracle_kind=oracle_kind,
+        tool_name=tool_name,
+        argument_name=None,
+        condition_type=cond_type if isinstance(cond_type, str) else None,
+        expected=cond.get("expected"),
+        semantic_proposition=spec.get("unsafe_outcome_semantic_proposition"),
+        tools=[],
+    )
+    return FunctionalSpecification(
+        scenario_id=scenario_id,
+        spec_path=spec_path,
+        artifact=artifact,
+        control_action_id=(
+            str(control_action_id) if control_action_id is not None else None
+        ),
+        constraint_refs=constraint_refs,
+        stimulus=stimulus,
+    )
+
+
+def load_functional_specifications(run_path: Path) -> list[FunctionalSpecification]:
+    """Load persisted ``none`` specifications from the run's scenarios/."""
+    specifications: list[FunctionalSpecification] = []
+    scenarios_dir = run_path / "scenarios"
+    if not scenarios_dir.is_dir():
+        return specifications
+    for spec_path in sorted(scenarios_dir.glob("SCN-*.yaml")):
+        try:
+            doc = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(doc, dict):
+            continue
+        spec = doc.get("scenario_spec")
+        if not isinstance(spec, dict):
+            continue
+        view = _functional_spec_view(spec_path.stem, spec_path, doc, spec)
+        if view is not None:
+            specifications.append(view)
+    return specifications
+
+
+def score_run_v2(
+    run_dir: str | Path,
+    benchmark_path: str | Path,
+    base_gold_path: str | Path | None = None,
+    artifacts_dir_override: str | Path | None = None,
+) -> dict[str, Any]:
+    """Score a run against a benchmark revision 2 sidecar in two lanes.
+
+    The compiled-test lane reuses the version-1 matching over every
+    applicable case. The reviewed-specification lane matches the functional
+    cases against the persisted ``none`` specifications under ``scenarios/``.
+    Writes ``gold-score-v2.yaml`` (never ``gold-score.yaml``).
+    """
+    run_path = Path(run_dir)
+    gold_file, revision = load_benchmark_revision(benchmark_path, base_gold_path)
+    resolved_base = (
+        Path(base_gold_path)
+        if base_gold_path is not None
+        else Path(revision.base_gold_file)
+    )
+    gold_digest = compute_gold_digest(resolved_base)
+    benchmark_digest = compute_benchmark_digest(benchmark_path, resolved_base)
+
+    artifacts_dir = _resolve_artifacts_dir(run_path, artifacts_dir_override)
+
+    # 1. Applicability check over the composed benchmark cases
+    obs_file = run_path / "target-observations.yaml"
+    obs_source = obs_file if obs_file.is_file() else None
+    applicability_details, applicable_cases, inapplicable_count = _applicability_check(
+        gold_file.gold_cases, obs_source
+    )
+
+    # 2. Load run evidence
+    compiled_artifacts = load_compiled_artifacts(artifacts_dir)
+    published_scenarios = load_published_scenarios(run_path)
+    exclusions = load_exclusions(artifacts_dir)
+    control_action_map, tool_inventory = load_control_action_map(run_path)
+    compiled_scenario_ids = {art.scenario_id for art in compiled_artifacts}
+
+    # 3. Compiled-test lane: the version-1 matching over ALL applicable cases.
+    compiled_proposals, matched_gold_ids, matched_scenario_ids = (
+        _match_compiled_artifacts(applicable_cases, compiled_artifacts)
+    )
+    compiled_unmatched_gold = _find_unmatched_gold_cases(
+        applicable_cases,
+        matched_gold_ids,
+        published_scenarios,
+        exclusions,
+        compiled_scenario_ids,
+        control_action_map,
+        tool_inventory,
+    )
+    compiled_unmatched_artifacts = _unmatched_artifact_entries(
+        compiled_artifacts, matched_scenario_ids
+    )
+
+    test_class_by_gold = {case.id: case.test_class for case in gold_file.gold_cases}
+    compiled_proposal_entries = [
+        {
+            "gold_id": p.gold_id,
+            "test_class": test_class_by_gold[p.gold_id],
+            "scenario_id": p.scenario_id,
+            "rule1_tool": p.rule1_tool,
+            "rule2_entity": p.rule2_entity,
+            "rule3_direction": p.rule3_direction,
+            "argument_evidence": p.argument_evidence,
+        }
+        for p in compiled_proposals
+    ]
+    compiled_unmatched_entries = [
+        {
+            "gold_id": u.gold_id,
+            "title": u.title,
+            "family": u.family,
+            "test_class": test_class_by_gold[u.gold_id],
+            "loss_stage": u.loss_stage,
+            "hints": [asdict(h) for h in u.hints],
+        }
+        for u in compiled_unmatched_gold
+    ]
+
+    # 4. Reviewed-specification lane: functional cases against none specs.
+    functional_specifications = load_functional_specifications(run_path)
+    functional_cases = [
+        case for case in applicable_cases if case.test_class == "functional"
+    ]
+    reviewed_proposals: list[dict[str, Any]] = []
+    reviewed_matched_gold: set[str] = set()
+    reviewed_matched_spec: set[str] = set()
+    for case in functional_cases:
+        for fs in functional_specifications:
+            matched, r1, r2, r3, r4 = evaluate_match_rules(case, fs.artifact)
+            if matched:
+                reviewed_proposals.append(
+                    {
+                        "gold_id": case.id,
+                        "test_class": "functional",
+                        "scenario_id": fs.scenario_id,
+                        "rule1_tool": r1,
+                        "rule2_entity": r2,
+                        "rule3_direction": r3,
+                        "argument_evidence": r4,
+                    }
+                )
+                reviewed_matched_gold.add(case.id)
+                reviewed_matched_spec.add(fs.scenario_id)
+
+    reviewed_unmatched_gold = [
+        {
+            "gold_id": case.id,
+            "title": case.title,
+            "family": case.family,
+            "test_class": "functional",
+            "loss_stage": "no_functional_specification_matched",
+            "hints": [],
+        }
+        for case in functional_cases
+        if case.id not in reviewed_matched_gold
+    ]
+    reviewed_unmatched_specs = [
+        fs.unmatched_entry()
+        for fs in functional_specifications
+        if fs.scenario_id not in reviewed_matched_spec
+    ]
+
+    # 5. Per-class counts. Adversarial cases are proposed only by the
+    # compiled lane; functional cases by the reviewed lane, with any
+    # compiled-lane functional match counted separately for the reviewer.
+    adversarial_proposals = [
+        p for p in compiled_proposal_entries if p["test_class"] == "adversarial"
+    ]
+    adversarial_matched_ids = {p["gold_id"] for p in adversarial_proposals}
+    adversarial_applicable = [
+        case for case in applicable_cases if case.test_class == "adversarial"
+    ]
+
+    score_result = {
+        "run_id": _read_run_id(run_path),
+        "run_dir": str(run_path),
+        "artifacts_dir": str(artifacts_dir),
+        "benchmark_version": revision.benchmark_version,
+        "benchmark_file": str(benchmark_path),
+        "benchmark_digest": benchmark_digest,
+        "gold_file": str(resolved_base),
+        "gold_digest": gold_digest,
+        "classes": test_class_by_gold,
+        "applicability": {
+            # False when the run carries no target-observations.yaml: cases
+            # were not excluded, but their facts were never checked.
+            "verified": obs_source is not None,
+            "total": len(gold_file.gold_cases),
+            "applicable": len(applicable_cases),
+            "inapplicable": inapplicable_count,
+            "details": applicability_details,
+        },
+        "lanes": {
+            "compiled_test": {
+                "description": (
+                    "compiled-test lane: compiled artifacts matched by the "
+                    "version-1 rules; a match on a functional case is capped "
+                    "at near_miss by the reviewer"
+                ),
+                "proposals": compiled_proposal_entries,
+                "unmatched_gold_cases": compiled_unmatched_entries,
+                "unmatched_compiled_artifacts": compiled_unmatched_artifacts,
+            },
+            "reviewed_specification": {
+                "description": (
+                    "reviewed-specification lane: persisted scenarios/SCN-*.yaml "
+                    "with scenario_spec.adversary.kind == none; never bundled, "
+                    "compiled, or executed"
+                ),
+                "specifications": [
+                    fs.specification_entry() for fs in functional_specifications
+                ],
+                "proposals": reviewed_proposals,
+                "unmatched_gold_cases": reviewed_unmatched_gold,
+                "unmatched_functional_specifications": reviewed_unmatched_specs,
+            },
+        },
+        "counts": {
+            "adversarial": {
+                "gold_cases_total": sum(
+                    1
+                    for case in gold_file.gold_cases
+                    if case.test_class == "adversarial"
+                ),
+                "gold_cases_applicable": len(adversarial_applicable),
+                "proposed_matches": len(adversarial_proposals),
+                "unique_gold_cases_proposed": len(adversarial_matched_ids),
+                "unmatched_gold_cases": len(
+                    [
+                        case
+                        for case in adversarial_applicable
+                        if case.id not in adversarial_matched_ids
+                    ]
+                ),
+            },
+            "functional": {
+                "gold_cases_total": sum(
+                    1
+                    for case in gold_file.gold_cases
+                    if case.test_class == "functional"
+                ),
+                "gold_cases_applicable": len(functional_cases),
+                "reviewed_specifications_total": len(functional_specifications),
+                "proposed_matches": len(reviewed_proposals),
+                "unique_gold_cases_proposed": len(reviewed_matched_gold),
+                "unmatched_gold_cases": len(reviewed_unmatched_gold),
+                "compiled_lane_proposals": len(
+                    [
+                        p
+                        for p in compiled_proposal_entries
+                        if p["test_class"] == "functional"
+                    ]
+                ),
+            },
+            "compiled_artifacts_total": len(compiled_artifacts),
+            "unmatched_compiled_artifacts": len(compiled_unmatched_artifacts),
+        },
+    }
+
+    out_file = run_path / "gold-score-v2.yaml"
     atomic_write_text(out_file, yaml.dump(score_result, sort_keys=False))
     return score_result
 
@@ -737,29 +1248,163 @@ def print_score_report(score: dict[str, Any]) -> None:
     print("=" * 72)
 
 
+def _print_lane_proposals(proposals: list[dict[str, Any]], tagged: bool) -> None:
+    if not proposals:
+        print("No matches proposed.")
+        return
+    print("Proposed Matches:")
+    for p in proposals:
+        tag = f"[{p['test_class']}] " if tagged else ""
+        print(f"  * {tag}{p['gold_id']} <--> {p['scenario_id']}")
+        print(f"      Rule 1: {p['rule1_tool']}")
+        print(f"      Rule 2: {p['rule2_entity']}")
+        print(f"      Rule 3: {p['rule3_direction']}")
+        print(f"      Argument: {p['argument_evidence'] or 'n/a'}")
+
+
+def print_score_report_v2(score: dict[str, Any]) -> None:
+    counts = score["counts"]
+    applicability = score["applicability"]
+    lanes = score["lanes"]
+    compiled_lane = lanes["compiled_test"]
+    reviewed_lane = lanes["reviewed_specification"]
+    adversarial = counts["adversarial"]
+    functional = counts["functional"]
+
+    print("=" * 72)
+    print(f"MiniKlarna Gold Score (benchmark revision 2): {score['run_id']}")
+    print(f"Benchmark: {score['benchmark_file']} ({score['benchmark_digest'][:12]}...)")
+    print(f"Base gold file: {score['gold_file']} ({score['gold_digest'][:12]}...)")
+    print("-" * 72)
+    verified = (
+        "yes" if applicability.get("verified") else "NO (no target-observations.yaml)"
+    )
+    print(f"Applicability verified:   {verified}")
+    print(
+        f"Adversarial gold cases:   {adversarial['gold_cases_applicable']} / "
+        f"{adversarial['gold_cases_total']} applicable; "
+        f"{adversarial['proposed_matches']} proposed "
+        f"(covering {adversarial['unique_gold_cases_proposed']} unique); "
+        f"{adversarial['unmatched_gold_cases']} unmatched"
+    )
+    print(
+        f"Functional gold cases:    {functional['gold_cases_applicable']} / "
+        f"{functional['gold_cases_total']} applicable; "
+        f"{functional['reviewed_specifications_total']} reviewed specifications; "
+        f"{functional['proposed_matches']} proposed "
+        f"(covering {functional['unique_gold_cases_proposed']} unique); "
+        f"{functional['unmatched_gold_cases']} unmatched"
+    )
+    print(f"Compiled artifacts total: {counts['compiled_artifacts_total']}")
+    print("-" * 72)
+
+    print("Compiled-test lane:")
+    _print_lane_proposals(compiled_lane["proposals"], tagged=True)
+
+    print("-" * 72)
+    if compiled_lane["unmatched_gold_cases"]:
+        print("Unmatched Gold Cases (Loss Stages):")
+        for u in compiled_lane["unmatched_gold_cases"]:
+            print(
+                f"  * [{u['test_class']}] {u['gold_id']} ({u['family']}) - {u['title']}"
+            )
+            print(f"      Loss Stage: {u['loss_stage']}")
+            for h in u.get("hints", [])[:2]:
+                print(
+                    f"      Hint: {h['scenario_id']} (tca: {h['control_action']}, "
+                    f"code: {h['exclusion_code']}, compiled: {h['compiled']})"
+                )
+
+    print("-" * 72)
+    if compiled_lane["unmatched_compiled_artifacts"]:
+        print("Unmatched Compiled Artifacts:")
+        for a in compiled_lane["unmatched_compiled_artifacts"]:
+            print(
+                f"  * {a['scenario_id']} ({a['oracle_kind']}): {a['user_text_excerpt']}"
+            )
+
+    print("-" * 72)
+    print("Reviewed-specification lane:")
+    specifications = reviewed_lane["specifications"]
+    if specifications:
+        print("Reviewed Specifications:")
+        for s in specifications:
+            print(f"  * {s['scenario_id']} ({s['oracle_kind']})")
+            print(
+                f"      Control action: {s['control_action_id']} "
+                f"(tool: {s['tool_name']})"
+            )
+            print(f"      Condition: {s['condition_type']} = {s['expected']}")
+            print(f"      Constraints: {', '.join(s['constraint_refs']) or 'n/a'}")
+            print(f"      Stimulus: {s['stimulus_excerpt']}")
+    else:
+        print("No reviewed specifications.")
+    _print_lane_proposals(reviewed_lane["proposals"], tagged=True)
+
+    print("-" * 72)
+    if reviewed_lane["unmatched_gold_cases"]:
+        print("Unmatched Functional Gold Cases:")
+        for u in reviewed_lane["unmatched_gold_cases"]:
+            print(f"  * {u['gold_id']} ({u['family']}) - {u['title']}")
+            print(f"      Loss Stage: {u['loss_stage']}")
+
+    if reviewed_lane["unmatched_functional_specifications"]:
+        print("Unmatched Functional Specifications:")
+        for s in reviewed_lane["unmatched_functional_specifications"]:
+            print(
+                f"  * {s['scenario_id']} ({s['oracle_kind']}): {s['stimulus_excerpt']}"
+            )
+
+    print("No lane reports executed behavior.")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", required=True, help="Path to run directory")
     parser.add_argument(
         "--gold",
         default="data/gold/miniklarna/gold-cases.yaml",
-        help="Path to gold YAML file",
+        help="Path to gold YAML file (version 1; for version 2 it must match "
+        "the sidecar's pinned base file)",
     )
     parser.add_argument(
         "--artifacts",
         default=None,
         help="Optional path to directory containing compiled artifacts",
     )
+    parser.add_argument(
+        "--benchmark-version",
+        type=int,
+        choices=[1, 2],
+        default=1,
+        help="Benchmark revision to score against (default 1)",
+    )
+    parser.add_argument(
+        "--benchmark",
+        default="data/gold/miniklarna/benchmark-v2.yaml",
+        help="Path to the benchmark revision 2 sidecar (used only with "
+        "--benchmark-version 2)",
+    )
     args = parser.parse_args()
 
     try:
-        score = score_run(
-            run_dir=args.run,
-            gold_path=args.gold,
-            artifacts_dir_override=args.artifacts,
-        )
-        print_score_report(score)
-        print(f"\nWritten: {Path(args.run) / 'gold-score.yaml'}")
+        if args.benchmark_version == 2:
+            score = score_run_v2(
+                run_dir=args.run,
+                benchmark_path=args.benchmark,
+                base_gold_path=args.gold,
+                artifacts_dir_override=args.artifacts,
+            )
+            print_score_report_v2(score)
+            print(f"\nWritten: {Path(args.run) / 'gold-score-v2.yaml'}")
+        else:
+            score = score_run(
+                run_dir=args.run,
+                gold_path=args.gold,
+                artifacts_dir_override=args.artifacts,
+            )
+            print_score_report(score)
+            print(f"\nWritten: {Path(args.run) / 'gold-score.yaml'}")
         return 0
     except Exception as e:
         print(f"Error scoring run: {e}", file=sys.stderr)
