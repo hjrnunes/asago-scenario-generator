@@ -6,7 +6,10 @@ See ai/findings/target-grounded-scenario-generation-spec-2026-09-07.md (Phase 0)
 Benchmark revision 2 (``--benchmark-version 2``) scores two lanes: compiled
 artifacts are still matched by the version-1 rules over every applicable case,
 while the functional cases are matched against the persisted ``none``
-specifications under ``scenarios/``.
+specifications under ``scenarios/``. Revision 3 (``--benchmark-version 3``)
+scores the same two lanes and records the owner oracle amendments beside the
+score; every proposal and unmatched gold entry carries an ``amended`` flag so
+the reviewer sees which cases an amendment touches.
 """
 
 from __future__ import annotations
@@ -23,6 +26,7 @@ import yaml
 
 from scripts.gold.gold_cases import (
     GoldCase,
+    amended_case_ids,
     atomic_write_text,
     check_gold_case_applicability,
     compute_benchmark_digest,
@@ -719,6 +723,13 @@ def _unmatched_artifact_entries(
     return unmatched_artifacts
 
 
+def score_file_name(version: int) -> str:
+    """Output file name for a revision's score; version 1 stays unnumbered."""
+    if version == 1:
+        return "gold-score.yaml"
+    return f"gold-score-v{version}.yaml"
+
+
 def score_run(
     run_dir: str | Path,
     gold_path: str | Path = "data/gold/miniklarna/gold-cases.yaml",
@@ -987,15 +998,18 @@ def score_run_v2(
     base_gold_path: str | Path | None = None,
     artifacts_dir_override: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Score a run against a benchmark revision 2 sidecar in two lanes.
+    """Score a run against a benchmark revision 2 or 3 sidecar in two lanes.
 
     The compiled-test lane reuses the version-1 matching over every
     applicable case. The reviewed-specification lane matches the functional
     cases against the persisted ``none`` specifications under ``scenarios/``.
-    Writes ``gold-score-v2.yaml`` (never ``gold-score.yaml``).
+    Revision 3 additionally records the owner oracle amendments and marks
+    the entries an amendment touches. Writes ``gold-score-v<version>.yaml``
+    (never ``gold-score.yaml``).
     """
     run_path = Path(run_dir)
     gold_file, revision = load_benchmark_revision(benchmark_path, base_gold_path)
+    amended_ids = amended_case_ids(revision)
     resolved_base = (
         Path(base_gold_path)
         if base_gold_path is not None
@@ -1003,6 +1017,25 @@ def score_run_v2(
     )
     gold_digest = compute_gold_digest(resolved_base)
     benchmark_digest = compute_benchmark_digest(benchmark_path, resolved_base)
+
+    # Amended oracle text, read back from the composed gold cases so the
+    # record shows the text the score was actually computed over.
+    amended_unsafe_when = {
+        case.id: case.oracle.unsafe_when
+        for case in gold_file.gold_cases
+        if case.id in amended_ids
+    }
+    amendments = [
+        {
+            "id": a.id,
+            "gold_id": a.gold_id,
+            "field": a.field,
+            "ruling": a.ruling,
+            "rationale": a.rationale,
+            "unsafe_when": amended_unsafe_when[a.gold_id],
+        }
+        for a in revision.amendments
+    ]
 
     artifacts_dir = _resolve_artifacts_dir(run_path, artifacts_dir_override)
 
@@ -1047,6 +1080,7 @@ def score_run_v2(
             "rule2_entity": p.rule2_entity,
             "rule3_direction": p.rule3_direction,
             "argument_evidence": p.argument_evidence,
+            "amended": p.gold_id in amended_ids,
         }
         for p in compiled_proposals
     ]
@@ -1058,6 +1092,7 @@ def score_run_v2(
             "test_class": test_class_by_gold[u.gold_id],
             "loss_stage": u.loss_stage,
             "hints": [asdict(h) for h in u.hints],
+            "amended": u.gold_id in amended_ids,
         }
         for u in compiled_unmatched_gold
     ]
@@ -1083,6 +1118,7 @@ def score_run_v2(
                         "rule2_entity": r2,
                         "rule3_direction": r3,
                         "argument_evidence": r4,
+                        "amended": case.id in amended_ids,
                     }
                 )
                 reviewed_matched_gold.add(case.id)
@@ -1096,6 +1132,7 @@ def score_run_v2(
             "test_class": "functional",
             "loss_stage": "no_functional_specification_matched",
             "hints": [],
+            "amended": case.id in amended_ids,
         }
         for case in functional_cases
         if case.id not in reviewed_matched_gold
@@ -1124,6 +1161,10 @@ def score_run_v2(
         "benchmark_version": revision.benchmark_version,
         "benchmark_file": str(benchmark_path),
         "benchmark_digest": benchmark_digest,
+        "previous_revision_file": revision.previous_revision_file,
+        "previous_revision_digest": revision.previous_revision_digest,
+        "amendments": amendments,
+        "amended_gold_ids": sorted(amended_ids),
         "gold_file": str(resolved_base),
         "gold_digest": gold_digest,
         "classes": test_class_by_gold,
@@ -1203,7 +1244,7 @@ def score_run_v2(
         },
     }
 
-    out_file = run_path / "gold-score-v2.yaml"
+    out_file = run_path / score_file_name(revision.benchmark_version)
     atomic_write_text(out_file, yaml.dump(score_result, sort_keys=False))
     return score_result
 
@@ -1287,7 +1328,10 @@ def print_score_report_v2(score: dict[str, Any]) -> None:
     functional = counts["functional"]
 
     print("=" * 72)
-    print(f"MiniKlarna Gold Score (benchmark revision 2): {score['run_id']}")
+    print(
+        f"MiniKlarna Gold Score (benchmark revision {score['benchmark_version']}): "
+        f"{score['run_id']}"
+    )
     print(f"Benchmark: {score['benchmark_file']} ({score['benchmark_digest'][:12]}...)")
     print(f"Base gold file: {score['gold_file']} ({score['gold_digest'][:12]}...)")
     print("-" * 72)
@@ -1311,6 +1355,14 @@ def print_score_report_v2(score: dict[str, Any]) -> None:
         f"{functional['unmatched_gold_cases']} unmatched"
     )
     print(f"Compiled artifacts total: {counts['compiled_artifacts_total']}")
+
+    amendments = score.get("amendments") or []
+    if amendments:
+        print("-" * 72)
+        print("Amendments:")
+        for a in amendments:
+            print(f"  * {a['id']} {a['gold_id']} {a['field']}: {a['unsafe_when']}")
+
     print("-" * 72)
 
     print("Compiled-test lane:")
@@ -1373,14 +1425,22 @@ def print_score_report_v2(score: dict[str, Any]) -> None:
     print("No lane reports executed behavior.")
 
 
+def _sidecar_version(path: str | Path) -> int:
+    """Declared ``benchmark_version`` of a benchmark sidecar file."""
+    raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or "benchmark_version" not in raw:
+        raise ValueError(f"benchmark sidecar {path} does not declare benchmark_version")
+    return int(raw["benchmark_version"])
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", required=True, help="Path to run directory")
     parser.add_argument(
         "--gold",
         default="data/gold/miniklarna/gold-cases.yaml",
-        help="Path to gold YAML file (version 1; for version 2 it must match "
-        "the sidecar's pinned base file)",
+        help="Path to gold YAML file (version 1; for versions 2 and 3 it must "
+        "match the sidecar's pinned base file)",
     )
     parser.add_argument(
         "--artifacts",
@@ -1390,20 +1450,34 @@ def main() -> int:
     parser.add_argument(
         "--benchmark-version",
         type=int,
-        choices=[1, 2],
+        choices=[1, 2, 3],
         default=1,
         help="Benchmark revision to score against (default 1)",
     )
     parser.add_argument(
         "--benchmark",
-        default="data/gold/miniklarna/benchmark-v2.yaml",
-        help="Path to the benchmark revision 2 sidecar (used only with "
-        "--benchmark-version 2)",
+        default=None,
+        help="Path to the benchmark revision sidecar (versions 2 and 3; "
+        "defaults to benchmark-v2.yaml or benchmark-v3.yaml per version)",
     )
     args = parser.parse_args()
 
-    try:
+    # The sidecar default follows the requested revision.
+    if args.benchmark is None:
         if args.benchmark_version == 2:
+            args.benchmark = "data/gold/miniklarna/benchmark-v2.yaml"
+        elif args.benchmark_version == 3:
+            args.benchmark = "data/gold/miniklarna/benchmark-v3.yaml"
+
+    try:
+        if args.benchmark_version >= 2:
+            declared = _sidecar_version(args.benchmark)
+            if declared != args.benchmark_version:
+                raise ValueError(
+                    f"benchmark sidecar {args.benchmark} declares "
+                    f"benchmark_version {declared}, but --benchmark-version "
+                    f"{args.benchmark_version} was requested"
+                )
             score = score_run_v2(
                 run_dir=args.run,
                 benchmark_path=args.benchmark,
@@ -1411,7 +1485,6 @@ def main() -> int:
                 artifacts_dir_override=args.artifacts,
             )
             print_score_report_v2(score)
-            print(f"\nWritten: {Path(args.run) / 'gold-score-v2.yaml'}")
         else:
             score = score_run(
                 run_dir=args.run,
@@ -1419,7 +1492,8 @@ def main() -> int:
                 artifacts_dir_override=args.artifacts,
             )
             print_score_report(score)
-            print(f"\nWritten: {Path(args.run) / 'gold-score.yaml'}")
+        out_name = score_file_name(args.benchmark_version)
+        print(f"\nWritten: {Path(args.run) / out_name}")
         return 0
     except Exception as e:
         print(f"Error scoring run: {e}", file=sys.stderr)
