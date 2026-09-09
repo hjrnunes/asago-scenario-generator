@@ -41,6 +41,10 @@ The initial six rules (spec 4.5) are not listed here; only additions are.
   drew one plain request and no authority variant. Owner approved the
   wording in round 58 (ruling 2). Under Principle 7 the entry stands only
   if the rule recovers G11 and retains G01; v14 did not recover G11, so
-  **this wording is a pending correction** awaiting the owner's decision
-  (keep, revert to `d8e8dc48…`, or amend); see the specification's v14
-  review and open question 18.
+  the wording was recorded as a pending correction.
+- **Owner decision (round 59, 2026-09-09).** Keep the wording. Recorded
+  with it: the observed benefits (approach diversity on `schedule_payment`
+  and `respond`, every revision-4 recovery retained, no unsound compiled
+  artifact) and the unrecovered G11. This entry is therefore an
+  owner-approved exception to the Principle 7 recovery test, not a
+  recovery; G11 remains an adversarial miss in the run ledger.
