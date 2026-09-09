@@ -22,17 +22,28 @@ from scripts.gold.gold_cases import (
     compute_gold_digest,
 )
 
-SCORE_V2_NAME = "gold-score-v2.yaml"
-REVIEW_V2_NAME = "gold-review-v2.yaml"
 V1_REVIEW_NAME = "gold-review.yaml"
 COMPILED_TEST_LANE = "compiled_test"
 REVIEWED_SPECIFICATION_LANE = "reviewed_specification"
 ADVERSARIAL_THRESHOLD = "checkpoint_4_adversarial_recovered"
-BENCHMARK_V2_RECOVERED_MESSAGE = (
-    "Under benchmark revision 2 a compiled artifact on a functional case is "
-    "capped at near_miss; a functional case is recovered only through the "
-    "reviewed-specification lane."
-)
+
+
+def score_file_name(version: int) -> str:
+    """Score file name for a benchmark revision; revision 1 is un-suffixed."""
+    return "gold-score.yaml" if version == 1 else f"gold-score-v{version}.yaml"
+
+
+def review_file_name(version: int) -> str:
+    """Review file name for a benchmark revision; revision 1 is un-suffixed."""
+    return "gold-review.yaml" if version == 1 else f"gold-review-v{version}.yaml"
+
+
+def _recovered_cap_message(version: int) -> str:
+    return (
+        f"Under benchmark revision {version} a compiled artifact on a "
+        "functional case is capped at near_miss; a functional case is "
+        "recovered only through the reviewed-specification lane."
+    )
 
 
 def _file_digest(path: Path) -> str:
@@ -331,10 +342,12 @@ def _v1_decision_index(
 
 
 def _v1_artifact_index(v1_data: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
-    index: dict[str, dict[str, Any]] = {}
-    for a in (v1_data or {}).get("unmatched_artifacts", []):
-        index[a["scenario_id"]] = a
-    return index
+    return _judgement_index((v1_data or {}).get("unmatched_artifacts", []))
+
+
+def _judgement_index(entries: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Index judgement rows (artifacts or specifications) by scenario_id."""
+    return {e["scenario_id"]: e for e in entries}
 
 
 def _v2_rule_evidence(proposal: dict[str, Any]) -> dict[str, str]:
@@ -392,74 +405,186 @@ def _init_v2_proposal(
     }
 
 
-def init_review_v2(
-    run_dir: Path, force: bool = False, allow_missing_v1: bool = False
-) -> Path:
-    """Initialize gold-review-v2.yaml from gold-score-v2.yaml.
+def _init_carried_proposal(
+    proposal: dict[str, Any],
+    lane_name: str,
+    previous_proposals: dict[tuple[str, str], dict[str, Any]],
+    amended_gold_ids: frozenset[str],
+    carried_from_name: str,
+    previous_version: int,
+) -> dict[str, Any]:
+    """Build a version-3+ proposal row from the previous revision's decision.
 
-    Carries non-pending version-1 decisions for adversarial compiled-test
-    proposals and for unmatched artifacts. A missing version-1 review file
-    raises unless ``allow_missing_v1`` is set.
+    Every non-pending previous decision is carried except proposals whose
+    gold case the new revision amends; those restart pending and keep the
+    discarded decision as an informational ``prior_decision``.
     """
-    score_path = run_dir / SCORE_V2_NAME
+    pair = (proposal["gold_id"], proposal["scenario_id"])
+    previous = previous_proposals.get(pair)
+    test_class = proposal.get("test_class") or (
+        "adversarial" if lane_name == COMPILED_TEST_LANE else "functional"
+    )
+    # A non-pending previous verdict; a pending decision is the absence of a verdict.
+    previous_verdict = (
+        previous
+        if (previous is not None and previous.get("decision") != "pending")
+        else None
+    )
+    carried = (
+        previous_verdict is not None and proposal["gold_id"] not in amended_gold_ids
+    )
+    if carried:
+        decision = previous_verdict["decision"]
+        reason = previous_verdict.get("reason", "")
+        reviewer = previous_verdict.get("reviewer")
+        carried_from: str | None = carried_from_name
+        prior_decision: dict[str, Any] | None = None
+    else:
+        decision = "pending"
+        reason = ""
+        reviewer = None
+        carried_from = None
+        prior_decision = (
+            {
+                "benchmark_version": previous_version,
+                "decision": previous_verdict["decision"],
+                "reason": previous_verdict.get("reason", ""),
+            }
+            if previous_verdict is not None
+            else None
+        )
+    return {
+        "gold_id": proposal["gold_id"],
+        "test_class": test_class,
+        "scenario_id": proposal["scenario_id"],
+        "decision": decision,
+        "reason": reason,
+        "reviewer": reviewer,
+        "carried_from": carried_from,
+        "prior_decision": prior_decision,
+        "rule_evidence": _v2_rule_evidence(proposal),
+    }
+
+
+def init_review_v2(
+    run_dir: Path,
+    force: bool = False,
+    allow_missing_v1: bool = False,
+    *,
+    version: int = 2,
+    allow_missing_previous: bool = False,
+) -> Path:
+    """Initialize the revision's lane-based review file from its score file.
+
+    Version 2 carries non-pending version-1 decisions for adversarial
+    compiled-test proposals and for unmatched artifacts. Version 3 and later
+    carry every non-pending decision, unmatched-artifact judgement, and
+    unmatched-functional-specification judgement from the previous revision's
+    review file (``gold-review-v{version - 1}.yaml``), except proposals whose
+    gold case the revision amends: those restart pending and keep the
+    discarded decision as an informational ``prior_decision``. A missing
+    previous review raises unless ``allow_missing_v1`` (version 2) or
+    ``allow_missing_previous`` (version 3 and later) is set.
+    """
+    score_name = score_file_name(version)
+    review_name = review_file_name(version)
+    score_path = run_dir / score_name
     if not score_path.is_file():
         raise FileNotFoundError(
-            f"Missing {score_path}. Run score_run.py --benchmark-version 2 first."
+            f"Missing {score_path}. Run score_run.py --benchmark-version "
+            f"{version} first."
         )
 
-    review_path = run_dir / REVIEW_V2_NAME
+    review_path = run_dir / review_name
     if review_path.is_file() and not force:
         raise FileExistsError(
             f"{review_path} already exists. Use --force to overwrite."
         )
 
     score_data = yaml.safe_load(score_path.read_text(encoding="utf-8"))
-    if score_data.get("benchmark_version") != 2:
-        raise ValueError(f"{score_path} does not declare benchmark_version: 2.")
+    if score_data.get("benchmark_version") != version:
+        raise ValueError(f"{score_path} does not declare benchmark_version: {version}.")
     score_digest = _file_digest(score_path)
 
-    v1_path = run_dir / V1_REVIEW_NAME
-    v1_data: dict[str, Any] | None = None
+    previous_name = review_file_name(version - 1)
+    previous_path = run_dir / previous_name
+    previous_data: dict[str, Any] | None = None
     carried_from: dict[str, str] | None = None
-    if v1_path.is_file():
-        v1_data = yaml.safe_load(v1_path.read_text(encoding="utf-8")) or {}
-        carried_from = {"file": V1_REVIEW_NAME, "digest": _file_digest(v1_path)}
-    elif not allow_missing_v1:
+    if previous_path.is_file():
+        previous_data = yaml.safe_load(previous_path.read_text(encoding="utf-8")) or {}
+        carried_from = {"file": previous_name, "digest": _file_digest(previous_path)}
+    elif version == 2 and not allow_missing_v1:
         raise FileNotFoundError(
-            f"Missing {v1_path}. Initialize the version-1 review first, or "
+            f"Missing {previous_path}. Initialize the version-1 review first, or "
             "pass --allow-missing-v1 to start without carried decisions."
         )
+    elif version >= 3 and not allow_missing_previous:
+        raise FileNotFoundError(
+            f"Missing {previous_path}. Initialize the version-{version - 1} "
+            "review first, or pass --allow-missing-previous to start without "
+            "carried decisions."
+        )
 
-    v1_proposals = _v1_decision_index(v1_data)
-    v1_artifacts = _v1_artifact_index(v1_data)
+    if version >= 3:
+        previous_lane_proposals = {
+            lane_name: _v1_decision_index(
+                ((previous_data or {}).get("lanes", {}) or {}).get(lane_name, {}) or {}
+            )
+            for lane_name in (COMPILED_TEST_LANE, REVIEWED_SPECIFICATION_LANE)
+        }
+    else:
+        flat_v1_proposals = _v1_decision_index(previous_data)
+        previous_lane_proposals = {
+            lane_name: flat_v1_proposals
+            for lane_name in (COMPILED_TEST_LANE, REVIEWED_SPECIFICATION_LANE)
+        }
+    previous_artifacts = _v1_artifact_index(previous_data)
+    previous_specifications = _judgement_index(
+        (previous_data or {}).get("unmatched_functional_specifications", [])
+    )
+    amended_gold_ids = frozenset(score_data.get("amended_gold_ids", []) or [])
     score_lanes = score_data.get("lanes", {}) or {}
 
     lanes_review: dict[str, Any] = {}
     for lane_name in (COMPILED_TEST_LANE, REVIEWED_SPECIFICATION_LANE):
         lane_score = score_lanes.get(lane_name, {}) or {}
-        lanes_review[lane_name] = {
-            "proposals": [
-                _init_v2_proposal(p, lane_name, v1_proposals)
-                for p in lane_score.get("proposals", [])
-            ]
-        }
+        if version >= 3:
+            lanes_review[lane_name] = {
+                "proposals": [
+                    _init_carried_proposal(
+                        p,
+                        lane_name,
+                        previous_lane_proposals[lane_name],
+                        amended_gold_ids,
+                        previous_name,
+                        version - 1,
+                    )
+                    for p in lane_score.get("proposals", [])
+                ]
+            }
+        else:
+            lanes_review[lane_name] = {
+                "proposals": [
+                    _init_v2_proposal(p, lane_name, previous_lane_proposals[lane_name])
+                    for p in lane_score.get("proposals", [])
+                ]
+            }
 
     artifacts_review: list[dict[str, Any]] = []
     for a in (score_lanes.get(COMPILED_TEST_LANE, {}) or {}).get(
         "unmatched_compiled_artifacts", []
     ):
-        v1_artifact = v1_artifacts.get(a["scenario_id"])
-        carried = v1_artifact is not None and v1_artifact.get("judgement") not in (
-            None,
-            "pending",
-        )
+        previous_artifact = previous_artifacts.get(a["scenario_id"])
+        carried = previous_artifact is not None and previous_artifact.get(
+            "judgement"
+        ) not in (None, "pending")
         artifacts_review.append(
             {
                 "scenario_id": a["scenario_id"],
-                "judgement": v1_artifact["judgement"] if carried else "pending",
-                "reason": v1_artifact.get("reason", "") if carried else "",
-                "reviewer": v1_artifact.get("reviewer") if carried else None,
-                "carried_from": V1_REVIEW_NAME if carried else None,
+                "judgement": previous_artifact["judgement"] if carried else "pending",
+                "reason": previous_artifact.get("reason", "") if carried else "",
+                "reviewer": previous_artifact.get("reviewer") if carried else None,
+                "carried_from": previous_name if carried else None,
                 "oracle_kind": a.get("oracle_kind", ""),
                 "excerpt": a.get("user_text_excerpt", ""),
             }
@@ -469,40 +594,63 @@ def init_review_v2(
     for s in (score_lanes.get(REVIEWED_SPECIFICATION_LANE, {}) or {}).get(
         "unmatched_functional_specifications", []
     ):
-        specifications_review.append(
-            {
-                "scenario_id": s["scenario_id"],
-                "judgement": "pending",
-                "reason": "",
-                "reviewer": None,
-                "oracle_kind": s.get("oracle_kind", ""),
-                "tool_name": s.get("tool_name", ""),
-                "constraint_refs": list(s.get("constraint_refs", [])),
-                "excerpt": s.get("stimulus_excerpt", ""),
-            }
+        previous_spec = (
+            previous_specifications.get(s["scenario_id"]) if version >= 3 else None
         )
+        spec_carried = previous_spec is not None and previous_spec.get(
+            "judgement"
+        ) not in (None, "pending")
+        specification_row: dict[str, Any] = {
+            "scenario_id": s["scenario_id"],
+            "judgement": previous_spec["judgement"] if spec_carried else "pending",
+            "reason": previous_spec.get("reason", "") if spec_carried else "",
+            "reviewer": previous_spec.get("reviewer") if spec_carried else None,
+            "oracle_kind": s.get("oracle_kind", ""),
+            "tool_name": s.get("tool_name", ""),
+            "constraint_refs": list(s.get("constraint_refs", [])),
+            "excerpt": s.get("stimulus_excerpt", ""),
+        }
+        if version >= 3:
+            specification_row["carried_from"] = previous_name if spec_carried else None
+        specifications_review.append(specification_row)
 
-    review_data = {
+    review_data: dict[str, Any] = {
         "run_id": score_data.get("run_id"),
-        "benchmark_version": 2,
+        "benchmark_version": version,
         "benchmark_file": score_data.get("benchmark_file"),
         "benchmark_digest": score_data.get("benchmark_digest"),
-        "gold_file": score_data.get("gold_file"),
-        "gold_digest": score_data.get("gold_digest"),
-        "score_digest": score_digest,
-        "carried_from": carried_from,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "lanes": lanes_review,
-        "unmatched_artifacts": artifacts_review,
-        "unmatched_functional_specifications": specifications_review,
-        "summary": None,
     }
+    if version >= 3:
+        review_data["previous_revision_file"] = score_data.get("previous_revision_file")
+        review_data["previous_revision_digest"] = score_data.get(
+            "previous_revision_digest"
+        )
+        review_data["amendments"] = score_data.get("amendments", [])
+        review_data["amended_gold_ids"] = list(score_data.get("amended_gold_ids", []))
+    review_data.update(
+        {
+            "gold_file": score_data.get("gold_file"),
+            "gold_digest": score_data.get("gold_digest"),
+            "score_digest": score_digest,
+            "carried_from": carried_from,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "lanes": lanes_review,
+            "unmatched_artifacts": artifacts_review,
+            "unmatched_functional_specifications": specifications_review,
+            "summary": None,
+        }
+    )
 
     atomic_write_text(review_path, yaml.dump(review_data, sort_keys=False))
     return review_path
 
 
-def _check_v2_benchmark_drift(review_path: Path, review_data: dict[str, Any]) -> None:
+def _check_v2_benchmark_drift(
+    review_path: Path,
+    review_data: dict[str, Any],
+    *,
+    version: int = 2,
+) -> None:
     """Fail when the benchmark sidecar or the gold file changed under the review."""
     benchmark_file = review_data.get("benchmark_file")
     benchmark_digest = review_data.get("benchmark_digest")
@@ -516,8 +664,8 @@ def _check_v2_benchmark_drift(review_path: Path, review_data: dict[str, Any]) ->
     if actual != benchmark_digest:
         raise ValueError(
             "The benchmark sidecar or the gold file has changed since "
-            f"{REVIEW_V2_NAME} was initialized. Re-run score_run.py "
-            "--benchmark-version 2, then re-init the review with --force."
+            f"{review_file_name(version)} was initialized. Re-run score_run.py "
+            f"--benchmark-version {version}, then re-init the review with --force."
         )
 
 
@@ -531,8 +679,10 @@ def record_decision_v2(
     judgement: str | None = None,
     reason: str = "",
     reviewer: str | None = None,
+    *,
+    version: int = 2,
 ) -> None:
-    """Record a version-2 review decision.
+    """Record a review decision for benchmark revision ``version`` (default 2).
 
     Match decisions require ``lane`` and search ``lanes[lane].proposals``.
     ``artifact_id`` adjudicates an unmatched artifact;
@@ -541,11 +691,13 @@ def record_decision_v2(
     if not reason.strip():
         raise ValueError("A non-empty reason is required for review decisions.")
 
-    review_path = run_dir / REVIEW_V2_NAME
-    score_path = run_dir / SCORE_V2_NAME
+    review_name = review_file_name(version)
+    score_name = score_file_name(version)
+    review_path = run_dir / review_name
+    score_path = run_dir / score_name
     if not review_path.is_file():
         raise FileNotFoundError(
-            f"Missing {review_path}. Run init --benchmark-version 2 first."
+            f"Missing {review_path}. Run init --benchmark-version {version} first."
         )
     if not score_path.is_file():
         raise FileNotFoundError(f"Missing {score_path}.")
@@ -553,10 +705,10 @@ def record_decision_v2(
     review_data = yaml.safe_load(review_path.read_text(encoding="utf-8"))
     if review_data.get("score_digest") != _file_digest(score_path):
         raise ValueError(
-            f"{SCORE_V2_NAME} has changed since {REVIEW_V2_NAME} was "
+            f"{score_name} has changed since {review_name} was "
             "initialized. Re-initialize the review with --force to sync."
         )
-    _check_v2_benchmark_drift(review_path, review_data)
+    _check_v2_benchmark_drift(review_path, review_data, version=version)
 
     provided = [t for t in (match_pair, artifact_id, specification_id) if t]
     if len(provided) != 1:
@@ -571,8 +723,8 @@ def record_decision_v2(
             )
         if lane not in (COMPILED_TEST_LANE, REVIEWED_SPECIFICATION_LANE):
             raise ValueError(
-                "--lane must be compiled_test or reviewed_specification "
-                "for --match under benchmark version 2."
+                f"--lane must be compiled_test or reviewed_specification "
+                f"for --match under benchmark version {version}."
             )
         if ":" not in match_pair:
             raise ValueError(
@@ -594,7 +746,7 @@ def record_decision_v2(
             and lane == COMPILED_TEST_LANE
             and target.get("test_class") == "functional"
         ):
-            raise ValueError(BENCHMARK_V2_RECOVERED_MESSAGE)
+            raise ValueError(_recovered_cap_message(version))
         target["decision"] = decision
         target["reason"] = reason.strip()
         target["reviewer"] = reviewer or "reviewer"
@@ -651,11 +803,11 @@ def record_decision_v2(
     atomic_write_text(review_path, yaml.dump(review_data, sort_keys=False))
 
 
-def _adversarial_threshold(review_data: dict[str, Any]) -> int:
+def _adversarial_threshold(review_data: dict[str, Any], *, version: int = 2) -> int:
     benchmark_file = review_data.get("benchmark_file")
     if not benchmark_file:
         raise ValueError(
-            f"{REVIEW_V2_NAME} is missing benchmark_file; "
+            f"{review_file_name(version)} is missing benchmark_file; "
             "re-initialize the review with --force."
         )
     raw = yaml.safe_load(Path(benchmark_file).read_text(encoding="utf-8"))
@@ -669,9 +821,20 @@ def _adversarial_threshold(review_data: dict[str, Any]) -> int:
     return required
 
 
-def generate_summary_v2(run_dir: Path, allow_pending: bool = False) -> dict[str, Any]:
-    review_path = run_dir / REVIEW_V2_NAME
-    score_path = run_dir / SCORE_V2_NAME
+def generate_summary_v2(
+    run_dir: Path,
+    allow_pending: bool = False,
+    *,
+    version: int = 2,
+) -> dict[str, Any]:
+    """Summarize the revision's review and write the summary block.
+
+    Version 3 and later also record the previous revision's summary results,
+    the score file's amendments, and the current decision on every proposal
+    whose gold case an amendment touches.
+    """
+    review_path = run_dir / review_file_name(version)
+    score_path = run_dir / score_file_name(version)
     if not review_path.is_file():
         raise FileNotFoundError(f"Missing {review_path}.")
     if not score_path.is_file():
@@ -680,10 +843,11 @@ def generate_summary_v2(run_dir: Path, allow_pending: bool = False) -> dict[str,
     review_data = yaml.safe_load(review_path.read_text(encoding="utf-8"))
     if review_data.get("score_digest") != _file_digest(score_path):
         raise ValueError(
-            f"{SCORE_V2_NAME} has changed since {REVIEW_V2_NAME} was "
-            "initialized. Re-initialize the review with --force to sync."
+            f"{score_file_name(version)} has changed since "
+            f"{review_file_name(version)} was initialized. Re-initialize the "
+            "review with --force to sync."
         )
-    _check_v2_benchmark_drift(review_path, review_data)
+    _check_v2_benchmark_drift(review_path, review_data, version=version)
 
     score_data = yaml.safe_load(score_path.read_text(encoding="utf-8"))
     classes = score_data.get("classes", {}) or {}
@@ -786,7 +950,7 @@ def generate_summary_v2(run_dir: Path, allow_pending: bool = False) -> dict[str,
         s.get("judgement") != "pending" for s in specifications
     )
 
-    required = _adversarial_threshold(review_data)
+    required = _adversarial_threshold(review_data, version=version)
 
     original_v1: dict[str, Any] | None = None
     v1_path = run_dir / V1_REVIEW_NAME
@@ -799,6 +963,20 @@ def generate_summary_v2(run_dir: Path, allow_pending: bool = False) -> dict[str,
                 "recovered": v1_summary.get("recovered_gold_cases"),
                 "recovered_ids": list(v1_summary.get("recovered_gold_ids", []) or []),
             }
+
+    original_previous: dict[str, Any] | None = None
+    if version >= 3:
+        previous_path = run_dir / review_file_name(version - 1)
+        if previous_path.is_file():
+            previous_data = (
+                yaml.safe_load(previous_path.read_text(encoding="utf-8")) or {}
+            )
+            previous_summary = previous_data.get("summary")
+            if isinstance(previous_summary, dict):
+                original_previous = {
+                    "adversarial": previous_summary.get("adversarial") or {},
+                    "functional": previous_summary.get("functional") or {},
+                }
 
     summary = {
         "original_v1": original_v1,
@@ -840,24 +1018,78 @@ def generate_summary_v2(run_dir: Path, allow_pending: bool = False) -> dict[str,
         "pending_specifications": len(pending_specifications),
     }
 
+    if version >= 3:
+        amended_gold_ids = set(score_data.get("amended_gold_ids", []) or [])
+        summary[f"original_v{version - 1}"] = original_previous
+        summary["amendments"] = [
+            {
+                "id": a.get("id", ""),
+                "gold_id": a.get("gold_id", ""),
+                "field": a.get("field", ""),
+            }
+            for a in (score_data.get("amendments", []) or [])
+        ]
+        summary["re_decided"] = [
+            f"{p['gold_id']}:{p['scenario_id']} {p.get('decision')}"
+            for p in compiled + reviewed
+            if p.get("gold_id") in amended_gold_ids
+        ]
+
     review_data["summary"] = summary
     atomic_write_text(review_path, yaml.dump(review_data, sort_keys=False))
     return summary
 
 
-def print_summary_report_v2(summary: dict[str, Any], run_id: str) -> None:
-    print("=" * 64)
-    print(f"Benchmark Revision 2 Review Summary: {run_id}")
-    print("-" * 64)
-    original = summary.get("original_v1")
-    if original:
-        original_ids = ", ".join(original.get("recovered_ids", []) or []) or "none"
-        print(
-            f"Original (benchmark v1): recovered {original['recovered']} "
-            f"of {original['applicable']} ({original_ids})"
-        )
+def _print_original_previous_revision(summary: dict[str, Any], version: int) -> None:
+    """Print the previous revision's lane results from its review summary."""
+    original = summary.get(f"original_v{version - 1}")
+    if not original:
+        print(f"Original (benchmark v{version - 1}): not summarized")
+        return
+    adversarial = original.get("adversarial") or {}
+    functional = original.get("functional") or {}
+    adversarial_ids = ", ".join(adversarial.get("recovered_ids", []) or []) or "none"
+    parts = [
+        f"adversarial recovered {adversarial.get('recovered')} of "
+        f"{adversarial.get('total')} ({adversarial_ids})"
+    ]
+    if functional.get("status") == "not_assessed":
+        parts.append("functional not assessed")
     else:
-        print("Original (benchmark v1): not recorded")
+        functional_ids = ", ".join(functional.get("recovered_ids", []) or []) or "none"
+        parts.append(
+            f"functional recovered {functional.get('recovered')} of "
+            f"{functional.get('total')} ({functional_ids})"
+        )
+    print(f"Original (benchmark v{version - 1}): " + "; ".join(parts))
+
+
+def print_summary_report_v2(
+    summary: dict[str, Any], run_id: str, *, version: int = 2
+) -> None:
+    print("=" * 64)
+    print(f"Benchmark Revision {version} Review Summary: {run_id}")
+    print("-" * 64)
+    if version >= 3:
+        _print_original_previous_revision(summary, version)
+        for amendment in summary.get("amendments", []):
+            print(
+                f"Amendments: {amendment.get('id', '')} "
+                f"{amendment.get('gold_id', '')} {amendment.get('field', '')}"
+            )
+        re_decided = summary.get("re_decided", [])
+        re_decided_text = ", ".join(re_decided) if re_decided else "none"
+        print(f"Re-decided under amendment: {re_decided_text}")
+    else:
+        original = summary.get("original_v1")
+        if original:
+            original_ids = ", ".join(original.get("recovered_ids", []) or []) or "none"
+            print(
+                f"Original (benchmark v1): recovered {original['recovered']} "
+                f"of {original['applicable']} ({original_ids})"
+            )
+        else:
+            print("Original (benchmark v1): not recorded")
     adversarial = summary["adversarial"]
     adversarial_ids = ", ".join(adversarial["recovered_ids"]) or "none"
     print(
@@ -877,8 +1109,8 @@ def print_summary_report_v2(summary: dict[str, Any], run_id: str) -> None:
     threshold = summary["threshold"]
     verdict = "MET" if threshold["met"] else "NOT MET"
     print(
-        f"Checkpoint 4 (revision 2) threshold: {threshold['required']} adversarial "
-        f"recoveries of {adversarial['total']}: {verdict}"
+        f"Checkpoint 4 (revision {version}) threshold: {threshold['required']} "
+        f"adversarial recoveries of {adversarial['total']}: {verdict}"
     )
     print(f"Sound Unmatched Artifacts:   {summary['sound_unmatched_artifacts']}")
     print(f"Unsound Unmatched Artifacts: {summary['unsound_unmatched_artifacts']}")
@@ -907,11 +1139,12 @@ def _add_benchmark_version(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--benchmark-version",
         type=int,
-        choices=[1, 2],
+        choices=[1, 2, 3],
         default=1,
         help=(
-            "Benchmark revision: 2 reads gold-score-v2.yaml and writes "
-            "gold-review-v2.yaml"
+            "Benchmark revision: N reads gold-score-vN.yaml and writes "
+            "gold-review-vN.yaml (revision 1 uses gold-score.yaml and "
+            "gold-review.yaml)"
         ),
     )
 
@@ -935,6 +1168,14 @@ def main() -> int:
         help=(
             "With --benchmark-version 2, initialize without a version-1 "
             "gold-review.yaml to carry decisions from"
+        ),
+    )
+    init_parser.add_argument(
+        "--allow-missing-previous",
+        action="store_true",
+        help=(
+            "With --benchmark-version 3, initialize without the previous "
+            "revision's gold-review-vN.yaml to carry decisions from"
         ),
     )
 
@@ -993,20 +1234,41 @@ def main() -> int:
     try:
         if args.command == "init":
             if args.benchmark_version == 2:
+                if args.allow_missing_previous:
+                    raise ValueError(
+                        "--allow-missing-previous applies only to "
+                        "--benchmark-version 3."
+                    )
                 out = init_review_v2(
                     run_dir,
                     force=args.force,
                     allow_missing_v1=args.allow_missing_v1,
+                )
+            elif args.benchmark_version >= 3:
+                if args.allow_missing_v1:
+                    raise ValueError(
+                        "--allow-missing-v1 applies only to --benchmark-version 2."
+                    )
+                out = init_review_v2(
+                    run_dir,
+                    force=args.force,
+                    version=args.benchmark_version,
+                    allow_missing_previous=args.allow_missing_previous,
                 )
             else:
                 if args.allow_missing_v1:
                     raise ValueError(
                         "--allow-missing-v1 applies only to --benchmark-version 2."
                     )
+                if args.allow_missing_previous:
+                    raise ValueError(
+                        "--allow-missing-previous applies only to "
+                        "--benchmark-version 3."
+                    )
                 out = init_review(run_dir, force=args.force)
             print(f"Initialized review file: {out}")
         elif args.command == "decide":
-            if args.benchmark_version == 2:
+            if args.benchmark_version >= 2:
                 record_decision_v2(
                     run_dir=run_dir,
                     lane=args.lane,
@@ -1017,12 +1279,13 @@ def main() -> int:
                     judgement=args.judgement,
                     reason=args.reason,
                     reviewer=args.reviewer,
+                    version=args.benchmark_version,
                 )
             else:
                 if args.lane or args.specification:
                     raise ValueError(
                         "--lane and --specification apply only to "
-                        "--benchmark-version 2."
+                        "--benchmark-version 2 and later."
                     )
                 record_decision(
                     run_dir=run_dir,
@@ -1037,9 +1300,15 @@ def main() -> int:
             val = args.decision or args.judgement
             print(f"Recorded decision for {target}: {val}")
         elif args.command == "summary":
-            if args.benchmark_version == 2:
-                summary = generate_summary_v2(run_dir, allow_pending=args.allow_pending)
-                print_summary_report_v2(summary, run_dir.name)
+            if args.benchmark_version >= 2:
+                summary = generate_summary_v2(
+                    run_dir,
+                    allow_pending=args.allow_pending,
+                    version=args.benchmark_version,
+                )
+                print_summary_report_v2(
+                    summary, run_dir.name, version=args.benchmark_version
+                )
             else:
                 summary = generate_summary(run_dir, allow_pending=args.allow_pending)
                 print_summary_report(summary, run_dir.name)

@@ -352,7 +352,9 @@ changing acceptance behavior, or running the quality sequence.
   Benchmark revision 2 (`data/gold/miniklarna/benchmark-v2.yaml`,
   `--benchmark-version 2`) splits cases into adversarial and functional and
   reports compiled-test recovery and reviewed specification recovery
-  separately; neither reports executed behavior.
+  separately; neither reports executed behavior; revision 3
+  (`data/gold/miniklarna/benchmark-v3.yaml`) amends G08's `unsafe_when` and
+  carries the revision 2 review forward except for amended cases.
 - Keep harness installations and runtime state local; the repository owns only
   portable methodology, configuration, and scripts.
 - Update `README.md`, this file, and linked documentation when an interface or
