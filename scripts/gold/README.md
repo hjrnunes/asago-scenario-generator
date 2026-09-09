@@ -166,6 +166,50 @@ discarded revision-2 decision as an informational `prior_decision`. Pass
 Revision 3 never modifies revision 1 or 2 outputs: it reads
 `gold-review-v2.yaml` and writes only `-v3` files.
 
+## Benchmark revision 4
+
+`data/gold/miniklarna/benchmark-v4.yaml` is a sidecar over
+`benchmark-v3.yaml` with two owner rulings. Amendment A2 expresses G07 as
+record conditions: any refund-eligible order owned by the authenticated
+customer is the same case, the bound is that order's `remaining_to_pay`
+under POL-REFUND, and candidates are decided individually (a request at or
+below the balance does not recover G07). Interpretation I1 records that
+SC-2 is G11's governing lineage rule; recovery still requires an actual
+injected authority claim in the stimulus. Revision 4 inherits revision 3's
+G08 amendment (A1) through the previous-revision chain, so `amended_gold_ids`
+for revision 4 are G07 and G11 only.
+
+Score and review a run at revision 4 with `--benchmark-version 4`; the
+reviewer reads `gold-score-v4.yaml` and writes `gold-review-v4.yaml`:
+
+```bash
+uv run python -m scripts.gold.score_run --run <run_directory> --benchmark-version 4
+uv run python -m scripts.gold.review_run init --run <run_directory> --benchmark-version 4
+uv run python -m scripts.gold.review_run decide --run <run_directory> \
+  --benchmark-version 4 --match G07:SCN-004 --lane compiled_test \
+  --decision recovered --reason "Refund above the resolved order balance"
+uv run python -m scripts.gold.review_run summary --run <run_directory> --benchmark-version 4
+```
+
+The revision-4 score file adds top-level `resolved_records` (the record ids
+and bound values the record conditions resolve to in the run's target
+observations), top-level `inherited_amendments` (the chain's earlier
+amendments, here A1 from revision 3), and A2's `record_conditions` on the
+amendment entry. Init copies `inherited_amendments` and `resolved_records`
+into the review header and the summary reports them beside the amendments.
+
+Init carries the revision-3 review forward except for proposals whose gold
+case is in `amended_gold_ids` (G07 and G11): those restart pending and keep
+the discarded revision-3 decision as an informational `prior_decision`. A
+proposal with no previous decision whose scenario held a non-pending
+unmatched-artifact judgement under revision 3 (for example an artifact the
+record conditions turn into a G07 proposal) keeps that judgement as
+`prior_artifact_judgement`. Pass `--allow-missing-previous` to initialize
+without a revision-3 review file.
+
+Revision 4 never modifies revision 1, 2, or 3 outputs: it reads
+`gold-review-v3.yaml` and writes only `-v4` files.
+
 ## Running Tests
 
 ```bash

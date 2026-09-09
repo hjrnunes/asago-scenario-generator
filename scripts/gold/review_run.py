@@ -1,6 +1,10 @@
 """Review CLI for recorded gold-scoring results.
 
 Manages review decisions (recovered, near_miss, rejected) and computes verified recall.
+Revision 4 inherits revision 3's amendment through the sidecar chain, expresses G07
+as record conditions, and records the G11 lineage interpretation; a proposal whose
+scenario was an unmatched artifact under the previous revision keeps that judgement
+as an informational ``prior_artifact_judgement``.
 See ai/findings/target-grounded-scenario-generation-spec-2026-09-07.md (Phase 0).
 """
 
@@ -412,12 +416,17 @@ def _init_carried_proposal(
     amended_gold_ids: frozenset[str],
     carried_from_name: str,
     previous_version: int,
+    previous_artifacts: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     """Build a version-3+ proposal row from the previous revision's decision.
 
     Every non-pending previous decision is carried except proposals whose
     gold case the new revision amends; those restart pending and keep the
-    discarded decision as an informational ``prior_decision``.
+    discarded decision as an informational ``prior_decision``. A proposal
+    with no previous decision whose scenario held a non-pending
+    unmatched-artifact judgement keeps that judgement as an informational
+    ``prior_artifact_judgement`` (for example an artifact that the new
+    revision's record conditions turn into a proposal).
     """
     pair = (proposal["gold_id"], proposal["scenario_id"])
     previous = previous_proposals.get(pair)
@@ -428,6 +437,15 @@ def _init_carried_proposal(
     previous_verdict = (
         previous
         if (previous is not None and previous.get("decision") != "pending")
+        else None
+    )
+    previous_artifact = previous_artifacts.get(proposal["scenario_id"])
+    artifact_judgement = (
+        previous_artifact
+        if (
+            previous_artifact is not None
+            and previous_artifact.get("judgement") not in (None, "pending")
+        )
         else None
     )
     carried = (
@@ -453,6 +471,15 @@ def _init_carried_proposal(
             if previous_verdict is not None
             else None
         )
+    prior_artifact_judgement = (
+        {
+            "benchmark_version": previous_version,
+            "judgement": artifact_judgement["judgement"],
+            "reason": artifact_judgement.get("reason", ""),
+        }
+        if previous_verdict is None and artifact_judgement is not None
+        else None
+    )
     return {
         "gold_id": proposal["gold_id"],
         "test_class": test_class,
@@ -462,6 +489,7 @@ def _init_carried_proposal(
         "reviewer": reviewer,
         "carried_from": carried_from,
         "prior_decision": prior_decision,
+        "prior_artifact_judgement": prior_artifact_judgement,
         "rule_evidence": _v2_rule_evidence(proposal),
     }
 
@@ -482,9 +510,14 @@ def init_review_v2(
     unmatched-functional-specification judgement from the previous revision's
     review file (``gold-review-v{version - 1}.yaml``), except proposals whose
     gold case the revision amends: those restart pending and keep the
-    discarded decision as an informational ``prior_decision``. A missing
-    previous review raises unless ``allow_missing_v1`` (version 2) or
-    ``allow_missing_previous`` (version 3 and later) is set.
+    discarded decision as an informational ``prior_decision``. A version-3-and-later
+    proposal with no previous decision whose scenario held a non-pending
+    unmatched-artifact judgement keeps that judgement as an informational
+    ``prior_artifact_judgement``. Version 3 and later also copy the score
+    file's ``inherited_amendments`` and ``resolved_records`` into the review
+    header when present. A missing previous review raises unless
+    ``allow_missing_v1`` (version 2) or ``allow_missing_previous`` (version 3
+    and later) is set.
     """
     score_name = score_file_name(version)
     review_name = review_file_name(version)
@@ -558,6 +591,7 @@ def init_review_v2(
                         amended_gold_ids,
                         previous_name,
                         version - 1,
+                        previous_artifacts,
                     )
                     for p in lane_score.get("proposals", [])
                 ]
@@ -627,6 +661,10 @@ def init_review_v2(
         )
         review_data["amendments"] = score_data.get("amendments", [])
         review_data["amended_gold_ids"] = list(score_data.get("amended_gold_ids", []))
+        if "inherited_amendments" in score_data:
+            review_data["inherited_amendments"] = score_data["inherited_amendments"]
+        if "resolved_records" in score_data:
+            review_data["resolved_records"] = score_data["resolved_records"]
     review_data.update(
         {
             "gold_file": score_data.get("gold_file"),
@@ -1029,6 +1067,9 @@ def generate_summary_v2(
             }
             for a in (score_data.get("amendments", []) or [])
         ]
+        summary["inherited_amendments"] = list(
+            review_data.get("inherited_amendments", []) or []
+        )
         summary["re_decided"] = [
             f"{p['gold_id']}:{p['scenario_id']} {p.get('decision')}"
             for p in compiled + reviewed
@@ -1077,6 +1118,14 @@ def print_summary_report_v2(
                 f"Amendments: {amendment.get('id', '')} "
                 f"{amendment.get('gold_id', '')} {amendment.get('field', '')}"
             )
+        inherited = summary.get("inherited_amendments", []) or []
+        if inherited:
+            inherited_text = ", ".join(
+                f"{a.get('id', '')} (revision {a.get('benchmark_version', '')}, "
+                f"{a.get('gold_id', '')})"
+                for a in inherited
+            )
+            print(f"Inherited amendments: {inherited_text}")
         re_decided = summary.get("re_decided", [])
         re_decided_text = ", ".join(re_decided) if re_decided else "none"
         print(f"Re-decided under amendment: {re_decided_text}")
@@ -1139,7 +1188,7 @@ def _add_benchmark_version(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--benchmark-version",
         type=int,
-        choices=[1, 2, 3],
+        choices=[1, 2, 3, 4],
         default=1,
         help=(
             "Benchmark revision: N reads gold-score-vN.yaml and writes "
@@ -1174,8 +1223,8 @@ def main() -> int:
         "--allow-missing-previous",
         action="store_true",
         help=(
-            "With --benchmark-version 3, initialize without the previous "
-            "revision's gold-review-vN.yaml to carry decisions from"
+            "With --benchmark-version 3 or later, initialize without the "
+            "previous revision's gold-review-vN.yaml to carry decisions from"
         ),
     )
 
@@ -1236,8 +1285,8 @@ def main() -> int:
             if args.benchmark_version == 2:
                 if args.allow_missing_previous:
                     raise ValueError(
-                        "--allow-missing-previous applies only to "
-                        "--benchmark-version 3."
+                        "--allow-missing-previous applies to "
+                        "--benchmark-version 3 and later."
                     )
                 out = init_review_v2(
                     run_dir,
@@ -1262,8 +1311,8 @@ def main() -> int:
                     )
                 if args.allow_missing_previous:
                     raise ValueError(
-                        "--allow-missing-previous applies only to "
-                        "--benchmark-version 3."
+                        "--allow-missing-previous applies to "
+                        "--benchmark-version 3 and later."
                     )
                 out = init_review(run_dir, force=args.force)
             print(f"Initialized review file: {out}")

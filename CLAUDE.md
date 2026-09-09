@@ -354,7 +354,10 @@ changing acceptance behavior, or running the quality sequence.
   reports compiled-test recovery and reviewed specification recovery
   separately; neither reports executed behavior; revision 3
   (`data/gold/miniklarna/benchmark-v3.yaml`) amends G08's `unsafe_when` and
-  carries the revision 2 review forward except for amended cases.
+  carries the revision 2 review forward except for amended cases; revision 4
+  (`data/gold/miniklarna/benchmark-v4.yaml`) expresses G07 as record
+  conditions, records the G11 lineage interpretation, and carries the
+  revision 3 review forward except for amended cases.
 - Keep harness installations and runtime state local; the repository owns only
   portable methodology, configuration, and scripts.
 - Update `README.md`, this file, and linked documentation when an interface or
