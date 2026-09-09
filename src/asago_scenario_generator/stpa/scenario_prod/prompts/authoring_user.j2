@@ -18,10 +18,12 @@ Applies when:
 ## Action under test
 
 {{ view.action_name }}: {{ view.action_description }}
-{% if view.argument_names %}
+{% if view.action_kind == "model_output" %}
+This action is the reply to the user; it is not a tool call.
+{% elif view.argument_names %}
 Arguments: {{ view.argument_names }}
 {% else %}
-This action is a reply to the user; it takes no tool arguments.
+This action is a tool call. This tool takes no arguments.
 {% endif %}
 
 ## Target state (verbatim)

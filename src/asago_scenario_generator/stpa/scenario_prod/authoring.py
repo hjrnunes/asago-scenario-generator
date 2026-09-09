@@ -1151,6 +1151,7 @@ def build_authoring_user_prompt(
         ),
         "action_name": candidate.action_name,
         "action_description": candidate.action_description,
+        "action_kind": candidate.action_binding.kind,
         "argument_names": ", ".join(candidate.action_binding.argument_names),
         "target_state": _state_block(state),
         "observations": list(observation_records),
