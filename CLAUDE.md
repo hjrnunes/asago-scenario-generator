@@ -349,6 +349,10 @@ changing acceptance behavior, or running the quality sequence.
   in `data/gold/` and the deterministic scoring and review tools in
   `scripts/gold/` (`score_run.py`, `review_run.py`). See `scripts/gold/README.md`
   and `ai/findings/target-grounded-scenario-generation-spec-2026-09-07.md`.
+  Benchmark revision 2 (`data/gold/miniklarna/benchmark-v2.yaml`,
+  `--benchmark-version 2`) splits cases into adversarial and functional and
+  reports compiled-test recovery and reviewed specification recovery
+  separately; neither reports executed behavior.
 - Keep harness installations and runtime state local; the repository owns only
   portable methodology, configuration, and scripts.
 - Update `README.md`, this file, and linked documentation when an interface or

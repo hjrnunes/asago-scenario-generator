@@ -102,6 +102,52 @@ uv run python -m scripts.gold.review_run summary --run output/runs/<run_director
 `gold-cases.yaml` has changed since the review was initialized; re-run the
 scorer and `init --force` to resync.
 
+## Benchmark revision 2
+
+`data/gold/miniklarna/benchmark-v2.yaml` is a sidecar that classifies every
+gold case as `adversarial` or `functional` and pins the version-1 gold file
+by digest. The version-1 `gold-cases.yaml` stays byte-identical so existing
+version-1 scores and reviews keep verifying against it; the sidecar carries
+the classification instead of rewriting the base file.
+
+Score and review a run at revision 2 with:
+
+```bash
+uv run python -m scripts.gold.score_run --run <run_directory> --benchmark-version 2
+uv run python -m scripts.gold.review_run {init,decide,summary} --run <run_directory> --benchmark-version 2 [...]
+```
+
+Init reads `gold-score-v2.yaml` and writes `gold-review-v2.yaml`. The review
+has two lanes, reported separately in the summary:
+
+- **Compiled-test recovery** covers adversarial cases matched against
+  compiled scenario artifacts, like the version-1 review.
+- **Reviewed specification recovery** covers functional cases, which are
+  recovered only by deciding a `reviewed_specification` proposal.
+
+Init carries decisions from the run's version-1 `gold-review.yaml`: an
+adversarial compiled-test proposal with a non-pending v1 decision copies the
+v1 decision, reason, and reviewer and is marked `carried_from: gold-review.yaml`.
+Functional compiled-test proposals and all reviewed-specification proposals
+start pending; a functional compiled-test proposal keeps the v1 verdict as an
+informational `prior_v1_decision` instead of carrying it. Unmatched artifacts
+with a non-pending v1 judgement are carried class-independently. Pass
+`--allow-missing-v1` to initialize without a version-1 review file.
+
+The near-miss cap: a compiled artifact on a functional case is capped at
+`near_miss`; `decide` refuses `recovered` there, because a functional case is
+recovered only through the reviewed-specification lane. Decide unmatched
+functional specifications with `--specification SCN-x --judgement sound|unsound`.
+
+The functional lane reports status `not_assessed` while any functional-case
+proposal in either lane or any unmatched functional specification is pending.
+Neither lane measures executed behavior, and the summary prints the line
+"No lane reports executed behavior." to keep that boundary explicit.
+
+`decide` and `summary` at revision 2 refuse to run when
+`gold-score-v2.yaml`, the sidecar, or `gold-cases.yaml` has changed since the
+review was initialized; re-run the scorer and `init --force` to resync.
+
 ## Running Tests
 
 ```bash
