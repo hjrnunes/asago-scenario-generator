@@ -1132,12 +1132,37 @@ def system_prompt_text() -> str:
     return TemplateLoader(PROMPTS_DIR).render_prompt(_AUTHORING_SYSTEM_TEMPLATE)
 
 
+def _reference_tool_candidates(
+    profile: ExecutionTargetProfile, binding: ActionBinding
+) -> list[dict[str, Any]]:
+    """Return every other profile tool sharing an argument with the action.
+
+    The ``tool_order`` oracle requires a distinct reference tool whose
+    schema also carries the compared argument (rule 4.3.8); the prompt
+    offers the kind only when at least one eligible reference tool exists.
+    """
+    if binding.kind != "tool_call" or not binding.argument_names:
+        return []
+    action_arguments = set(binding.argument_names)
+    candidates: list[dict[str, Any]] = []
+    for resource in profile.resources:
+        if resource.tool_name is None or resource.tool_name == binding.name:
+            continue
+        shared = [name for name in resource.argument_names if name in action_arguments]
+        if shared:
+            candidates.append(
+                {"tool": resource.tool_name, "shared_arguments": shared}
+            )
+    return candidates
+
+
 def build_authoring_user_prompt(
     candidate: AuthoringCandidate,
     *,
     state: dict[str, Any],
     observation_records: tuple[dict[str, str], ...],
     session_identity: str,
+    profile: ExecutionTargetProfile,
 ) -> str:
     """Render the user prompt with exactly the spec 4.1 items 1-7."""
     view = {
@@ -1153,6 +1178,9 @@ def build_authoring_user_prompt(
         "action_description": candidate.action_description,
         "action_kind": candidate.action_binding.kind,
         "argument_names": ", ".join(candidate.action_binding.argument_names),
+        "reference_tool_candidates": _reference_tool_candidates(
+            profile, candidate.action_binding
+        ),
         "target_state": _state_block(state),
         "observations": list(observation_records),
         "session_identity": session_identity,
@@ -1203,6 +1231,7 @@ def author_candidate_scenarios(
             state=state,
             observation_records=observation_records,
             session_identity=session_identity,
+            profile=profile,
         )
     except ValueError as exc:
         return CandidateAuthoringOutcome(candidate=candidate, error=str(exc))

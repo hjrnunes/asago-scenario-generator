@@ -281,6 +281,7 @@ def _given_prompt_templates(world, step, examples):
             if record["observation_ref"] != "TARGET-STATE"
         ),
         session_identity=SESSION,
+        profile=_profile(),
     )
     rule_log = (
         Path(__file__).resolve().parents[2]

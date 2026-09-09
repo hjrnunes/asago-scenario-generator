@@ -1059,6 +1059,7 @@ def test_user_prompt_renders_records_without_a_query_label():
             },
         ),
         session_identity=SESSION,
+        profile=_profile(),
     )
     assert "TARGET-READ-004" in prompt
     assert "produced by query" not in prompt
@@ -1087,6 +1088,7 @@ def test_user_prompt_renders_the_query_label_once():
             },
         ),
         session_identity=SESSION,
+        profile=_profile(),
     )
     assert "TARGET-READ-001 (query: refund eligibility)" in prompt
     assert "query: query:" not in prompt
@@ -1104,6 +1106,7 @@ def test_user_prompt_renders_every_adversary_kind_definition():
         state=STATE,
         observation_records=(),
         session_identity=SESSION,
+        profile=_profile(),
     )
     for kind, definition in _ADVERSARY_DEFINITIONS:
         assert f"- {kind}: {definition}" in prompt
@@ -1121,12 +1124,13 @@ def test_user_prompt_schema_example_carries_no_gold_answer():
         state={"orders": {}},
         observation_records=(),
         session_identity=SESSION,
+        profile=_profile(),
     )
     assert "ORD-201" not in prompt
-    assert "lookup_order" not in prompt
     # The only legal mention is the closed operator set in the field rules.
     assert prompt.count("owner_differs_from_session") == 1
-    assert '"<tool>"' in prompt
+    # The per-kind examples carry the real action name, never a record id.
+    assert '"tool": "process_refund"' in prompt
     assert '["<table>", "<record-id>", "<field>"]' in prompt
     assert '"<adversary kind>"' in prompt
 
