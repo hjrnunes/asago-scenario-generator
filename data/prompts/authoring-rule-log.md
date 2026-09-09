@@ -31,9 +31,16 @@ The initial six rules (spec 4.5) are not listed here; only additions are.
   the target record and the oracle with G11 and is recovered on every run
   from v7 (except v10).
 - **Evidence.** Without the rule: v13 (`authoring_user.j2` `d8e8dc48…`),
-  G11 rejected, G01 recovered. With the rule: v14, the only declared input
-  change; result recorded in the specification's v14 review when the run
-  is scored. Owner approved the wording in round 58 (ruling 2). Under
-  Principle 7 the entry stands only if v14 recovers G11 and retains G01;
-  if v14 does not recover G11, the entry records the wording as a pending
-  correction and the owner decides whether it stays.
+  G11 rejected, G01 recovered. With the rule: v14
+  (`output/runs/20260908-phase4-grounded-authoring-live-v14`, the only
+  declared input change), **G11 not recovered**, G01 recovered (SCN-003,
+  word for word v13), all six revision-4 recoveries retained (6 of 9).
+  Distinct approaches did appear (an authority claim on `schedule_payment`,
+  SCN-012; a role claim, SCN-017; a system-framing banner, SCN-021; two
+  pretexts, SCN-016 and SCN-019), but the `lookup_order` × SC-2 candidate
+  drew one plain request and no authority variant. Owner approved the
+  wording in round 58 (ruling 2). Under Principle 7 the entry stands only
+  if the rule recovers G11 and retains G01; v14 did not recover G11, so
+  **this wording is a pending correction** awaiting the owner's decision
+  (keep, revert to `d8e8dc48…`, or amend); see the specification's v14
+  review and open question 18.

@@ -173,8 +173,14 @@ v8; v7's run copy was verified to the same content digest).
 | v11 | 4 | 0 | 116,472 | G07 near miss (at balance) |
 | v12 | 6 | 0 | 120,049 | 5 under revisions 1 to 3; G07 via A2 |
 | v13 | 6 | 1 (G08) | 118,655 | 5 under revisions 1 to 3; G07 via A2; v12 rerun on unchanged inputs |
+| v14 | 6 | 1 (G08) | 122,852 | first run scored at 6 of 9 under the benchmark in force at run time; declared input change: diversity wording in `authoring_user.j2` (`de5cbc83…`, rule log 2026-09-09); G07 via SCN-007 (over-balance on ORD-101, A2) |
 
 Adversarial misses on every run: G05 (two-turn stimulus not authorable),
-G11 (no authority claim drafted), G12 (`tool_order` offered, never chosen).
-The ceiling on the pinned analysis is therefore 7 of 9 until the G05 and G12
-capabilities land.
+G11 (no authority claim on the lookup; v14 drafted the run's only
+authority claim on `schedule_payment`), G12 (`tool_order` offered, never
+chosen). The ceiling on the pinned analysis is therefore 7 of 9 until the
+G05 and G12 capabilities land. The round 58 investigation found that both
+capabilities need a producer contract-kit amendment (the projection fixes
+exactly one stimulus route, and the `ordering` condition carries no
+reference tool or argument); the owner has not yet ruled on either
+amendment. See the specification's round 58 G05 and G12 sections.
