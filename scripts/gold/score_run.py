@@ -9,7 +9,12 @@ while the functional cases are matched against the persisted ``none``
 specifications under ``scenarios/``. Revision 3 (``--benchmark-version 3``)
 scores the same two lanes and records the owner oracle amendments beside the
 score; every proposal and unmatched gold entry carries an ``amended`` flag so
-the reviewer sees which cases an amendment touches.
+the reviewer sees which cases an amendment touches. Revision 4
+(``--benchmark-version 4``) adds record conditions: a case amended with record
+conditions matches any observed record meeting its owner and eligibility
+conditions, with the oracle bound read from that record, and the score
+reports the resolved bounds plus the amendments inherited from earlier
+revisions.
 """
 
 from __future__ import annotations
@@ -31,8 +36,11 @@ from scripts.gold.gold_cases import (
     check_gold_case_applicability,
     compute_benchmark_digest,
     compute_gold_digest,
+    inherited_amendments,
     load_benchmark_revision,
     load_gold_file,
+    parse_target_observations,
+    resolve_record_conditions,
 )
 
 
@@ -360,9 +368,17 @@ def _argument_evidence(gold: GoldCase, art: CompiledArtifact) -> str:
 
 
 def evaluate_match_rules(
-    gold: GoldCase, art: CompiledArtifact
+    gold: GoldCase,
+    art: CompiledArtifact,
+    resolved_records: dict[str, Any] | None = None,
 ) -> tuple[bool, str, str, str, str]:
     """Evaluate Rule 1 (tool/surface), Rule 2 (entity/topic), Rule 3 (direction).
+
+    ``resolved_records`` carries the case's record-conditions bounds
+    (``{record_id: bound}``) resolved against the run's observed state. When
+    it is a non-empty dict, Rule 2 checks those records and bounds instead of
+    the case's fixed derived record ids and oracle value; when it is None or
+    empty, the version-1 behaviour and evidence strings are unchanged.
 
     Also returns argument-level evidence, which never changes the match but
     records whether the artifact's oracle argument agrees with the gold
@@ -411,17 +427,27 @@ def evaluate_match_rules(
     r2_ev = ""
 
     # Check record IDs (e.g. ORD-201, PLAN-21, CUST002) with word boundaries
-    # so PLAN-12 does not match PLAN-121.
-    record_ids = gold.derived_record_ids()
+    # so PLAN-12 does not match PLAN-121. Under record conditions, the id set
+    # is the resolved set (any record meeting the conditions), not the case's
+    # fixed example record.
+    record_ids = (
+        set(resolved_records) if resolved_records else gold.derived_record_ids()
+    )
     matched_ids = [
         rid
-        for rid in record_ids
+        for rid in sorted(record_ids)
         if _bounded_pattern(rid).search(user_text)
         or (art.expected is not None and rid.lower() == str(art.expected).lower())
     ]
     if matched_ids:
         r2_pass = True
-        r2_ev = f"matched record ID(s): {', '.join(matched_ids)}"
+        if resolved_records:
+            r2_ev = (
+                "matched record ID(s) under record conditions: "
+                f"{', '.join(matched_ids)}"
+            )
+        else:
+            r2_ev = f"matched record ID(s): {', '.join(matched_ids)}"
     else:
         # Check keywords
         keywords = gold.match_hints.keywords
@@ -434,7 +460,19 @@ def evaluate_match_rules(
     if not r2_pass and gold.family == "policy_violation_write":
         if art.expected is not None and isinstance(gold.oracle.value, (int, float)):
             try:
-                if float(art.expected) == float(gold.oracle.value):
+                if resolved_records:
+                    matched_bounds = [
+                        float(bound)
+                        for bound in resolved_records.values()
+                        if float(bound) == float(art.expected)
+                    ]
+                    if matched_bounds:
+                        r2_pass = True
+                        r2_ev = (
+                            "matched expected amount under record conditions: "
+                            f"{matched_bounds[0]}"
+                        )
+                elif float(art.expected) == float(gold.oracle.value):
                     r2_pass = True
                     r2_ev = f"matched expected amount: {art.expected}"
             except (ValueError, TypeError):
@@ -643,8 +681,14 @@ def _read_run_id(run_path: Path) -> str:
 def _match_compiled_artifacts(
     applicable_cases: list[GoldCase],
     compiled_artifacts: list[CompiledArtifact],
+    resolved_records_by_gold: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[list[MatchProposal], set[str], set[str]]:
     """Version-1 matching of compiled artifacts against applicable cases.
+
+    ``resolved_records_by_gold`` optionally carries each gold case's
+    record-conditions bounds resolved against the run's observed state; a
+    case with an entry matches any resolved record (see
+    ``evaluate_match_rules``).
 
     Returns (proposals, matched_gold_ids, matched_scenario_ids).
     """
@@ -653,8 +697,11 @@ def _match_compiled_artifacts(
     matched_scenario_ids: set[str] = set()
 
     for case in applicable_cases:
+        resolved_records = (
+            resolved_records_by_gold.get(case.id) if resolved_records_by_gold else None
+        )
         for art in compiled_artifacts:
-            matched, r1, r2, r3, r4 = evaluate_match_rules(case, art)
+            matched, r1, r2, r3, r4 = evaluate_match_rules(case, art, resolved_records)
             if matched:
                 proposals.append(
                     MatchProposal(
@@ -998,14 +1045,17 @@ def score_run_v2(
     base_gold_path: str | Path | None = None,
     artifacts_dir_override: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Score a run against a benchmark revision 2 or 3 sidecar in two lanes.
+    """Score a run against a benchmark revision 2, 3, or 4 sidecar in two lanes.
 
     The compiled-test lane reuses the version-1 matching over every
     applicable case. The reviewed-specification lane matches the functional
     cases against the persisted ``none`` specifications under ``scenarios/``.
     Revision 3 additionally records the owner oracle amendments and marks
-    the entries an amendment touches. Writes ``gold-score-v<version>.yaml``
-    (never ``gold-score.yaml``).
+    the entries an amendment touches. Revision 4 resolves record-conditions
+    cases against the run's observed state, so a case matches any record
+    meeting its conditions, and records the amendments inherited from
+    earlier revisions. Writes ``gold-score-v<version>.yaml`` (never
+    ``gold-score.yaml``).
     """
     run_path = Path(run_dir)
     gold_file, revision = load_benchmark_revision(benchmark_path, base_gold_path)
@@ -1018,6 +1068,22 @@ def score_run_v2(
     gold_digest = compute_gold_digest(resolved_base)
     benchmark_digest = compute_benchmark_digest(benchmark_path, resolved_base)
 
+    # 1. Applicability check over the composed benchmark cases
+    obs_file = run_path / "target-observations.yaml"
+    obs_source = obs_file if obs_file.is_file() else None
+
+    # The observed state also resolves record-conditions cases. When the run
+    # carries no state, every record-conditions case resolves to {} and the
+    # version-1 fixed-record matching applies.
+    state: dict[str, Any] | None = None
+    if obs_source is not None:
+        state, _ = parse_target_observations(obs_source)
+    resolved_records_by_gold = {
+        case.id: resolve_record_conditions(case.record_conditions, state)
+        for case in gold_file.gold_cases
+        if case.record_conditions is not None and state is not None
+    }
+
     # Amended oracle text, read back from the composed gold cases so the
     # record shows the text the score was actually computed over.
     amended_unsafe_when = {
@@ -1025,8 +1091,9 @@ def score_run_v2(
         for case in gold_file.gold_cases
         if case.id in amended_ids
     }
-    amendments = [
-        {
+    amendments = []
+    for a in revision.amendments:
+        record: dict[str, Any] = {
             "id": a.id,
             "gold_id": a.gold_id,
             "field": a.field,
@@ -1034,17 +1101,31 @@ def score_run_v2(
             "rationale": a.rationale,
             "unsafe_when": amended_unsafe_when[a.gold_id],
         }
-        for a in revision.amendments
+        if a.field == "record_conditions":
+            amended_case = gold_file.case_by_id(a.gold_id)
+            conditions = amended_case.record_conditions if amended_case else None
+            record["record_conditions"] = (
+                conditions.model_dump() if conditions is not None else None
+            )
+            record["resolved_records"] = resolved_records_by_gold.get(a.gold_id, {})
+        amendments.append(record)
+
+    # Amendments recorded by earlier revisions in the sidecar chain.
+    inherited = [
+        {
+            "benchmark_version": version,
+            "id": amendment.id,
+            "gold_id": amendment.gold_id,
+            "field": amendment.field,
+        }
+        for version, amendment in inherited_amendments(benchmark_path, resolved_base)
     ]
 
-    artifacts_dir = _resolve_artifacts_dir(run_path, artifacts_dir_override)
-
-    # 1. Applicability check over the composed benchmark cases
-    obs_file = run_path / "target-observations.yaml"
-    obs_source = obs_file if obs_file.is_file() else None
     applicability_details, applicable_cases, inapplicable_count = _applicability_check(
         gold_file.gold_cases, obs_source
     )
+
+    artifacts_dir = _resolve_artifacts_dir(run_path, artifacts_dir_override)
 
     # 2. Load run evidence
     compiled_artifacts = load_compiled_artifacts(artifacts_dir)
@@ -1055,7 +1136,9 @@ def score_run_v2(
 
     # 3. Compiled-test lane: the version-1 matching over ALL applicable cases.
     compiled_proposals, matched_gold_ids, matched_scenario_ids = (
-        _match_compiled_artifacts(applicable_cases, compiled_artifacts)
+        _match_compiled_artifacts(
+            applicable_cases, compiled_artifacts, resolved_records_by_gold
+        )
     )
     compiled_unmatched_gold = _find_unmatched_gold_cases(
         applicable_cases,
@@ -1164,6 +1247,8 @@ def score_run_v2(
         "previous_revision_file": revision.previous_revision_file,
         "previous_revision_digest": revision.previous_revision_digest,
         "amendments": amendments,
+        "inherited_amendments": inherited,
+        "resolved_records": resolved_records_by_gold,
         "amended_gold_ids": sorted(amended_ids),
         "gold_file": str(resolved_base),
         "gold_digest": gold_digest,
@@ -1363,6 +1448,21 @@ def print_score_report_v2(score: dict[str, Any]) -> None:
         for a in amendments:
             print(f"  * {a['id']} {a['gold_id']} {a['field']}: {a['unsafe_when']}")
 
+    resolved_records = score.get("resolved_records") or {}
+    for gold_id, resolved in sorted(resolved_records.items()):
+        bounds = ", ".join(
+            f"{record_id}={bound}" for record_id, bound in sorted(resolved.items())
+        )
+        print(f"Record conditions {gold_id}: {bounds}")
+
+    inherited = score.get("inherited_amendments") or []
+    if inherited:
+        summary = ", ".join(
+            f"{a['id']} (revision {a['benchmark_version']}, {a['gold_id']})"
+            for a in inherited
+        )
+        print(f"Inherited amendments: {summary}")
+
     print("-" * 72)
 
     print("Compiled-test lane:")
@@ -1439,7 +1539,7 @@ def main() -> int:
     parser.add_argument(
         "--gold",
         default="data/gold/miniklarna/gold-cases.yaml",
-        help="Path to gold YAML file (version 1; for versions 2 and 3 it must "
+        help="Path to gold YAML file (version 1; for versions 2 to 4 it must "
         "match the sidecar's pinned base file)",
     )
     parser.add_argument(
@@ -1450,24 +1550,23 @@ def main() -> int:
     parser.add_argument(
         "--benchmark-version",
         type=int,
-        choices=[1, 2, 3],
+        choices=[1, 2, 3, 4],
         default=1,
         help="Benchmark revision to score against (default 1)",
     )
     parser.add_argument(
         "--benchmark",
         default=None,
-        help="Path to the benchmark revision sidecar (versions 2 and 3; "
-        "defaults to benchmark-v2.yaml or benchmark-v3.yaml per version)",
+        help="Path to the benchmark revision sidecar (versions 2 to 4; "
+        "defaults to benchmark-v<version>.yaml per version)",
     )
     args = parser.parse_args()
 
     # The sidecar default follows the requested revision.
-    if args.benchmark is None:
-        if args.benchmark_version == 2:
-            args.benchmark = "data/gold/miniklarna/benchmark-v2.yaml"
-        elif args.benchmark_version == 3:
-            args.benchmark = "data/gold/miniklarna/benchmark-v3.yaml"
+    if args.benchmark is None and args.benchmark_version >= 2:
+        args.benchmark = (
+            f"data/gold/miniklarna/benchmark-v{args.benchmark_version}.yaml"
+        )
 
     try:
         if args.benchmark_version >= 2:
