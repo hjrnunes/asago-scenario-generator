@@ -358,6 +358,8 @@ changing acceptance behavior, or running the quality sequence.
   (`data/gold/miniklarna/benchmark-v4.yaml`) expresses G07 as record
   conditions, records the G11 lineage interpretation, and carries the
   revision 3 review forward except for amended cases.
+  `docs/development/target-grounded-benchmark.md` states the benchmark in
+  force, the recovery criteria, and the checkpoint requirements in one place.
 - Keep harness installations and runtime state local; the repository owns only
   portable methodology, configuration, and scripts.
 - Update `README.md`, this file, and linked documentation when an interface or

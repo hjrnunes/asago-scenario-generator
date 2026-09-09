@@ -210,6 +210,9 @@ without a revision-3 review file.
 Revision 4 never modifies revision 1, 2, or 3 outputs: it reads
 `gold-review-v3.yaml` and writes only `-v4` files.
 
+For the benchmark in force, the recovery criteria, and the checkpoint
+requirements in one place, see `docs/development/target-grounded-benchmark.md`.
+
 ## Running Tests
 
 ```bash
