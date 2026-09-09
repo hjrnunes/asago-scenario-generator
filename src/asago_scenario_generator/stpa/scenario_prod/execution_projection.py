@@ -515,9 +515,13 @@ def _stimulus_requirements(
 ) -> tuple[AdversarialStimulusRequirement, ...]:
     if execution_contract.disposition.value == "analytical_only":
         return ()
-    intent = "; ".join(
-        item.strip() for item in spec.attacker_bdi.intentions if item.strip()
-    )
+    turns = spec.stimulus_turns
+    if turns is not None:
+        intent = "\n".join(turn.text for turn in turns)
+    else:
+        intent = "; ".join(
+            item.strip() for item in spec.attacker_bdi.intentions if item.strip()
+        )
     desired_effect = "; ".join(
         item.strip() for item in spec.attacker_bdi.desires if item.strip()
     )
@@ -534,6 +538,7 @@ def _stimulus_requirements(
             factor_id=execution_contract.delivery.factor_id,
             source_role=execution_contract.delivery.source_role,
             carrier_requirement_id=execution_contract.delivery.carrier_requirement_id,
+            turns=turns,
         ),
     )
 
@@ -1178,6 +1183,7 @@ def _validation_code(path: str, message: str) -> ProjectionValidationCode:
         ),
         (_is_condition_type_error, ProjectionValidationCode.condition_type_mismatch),
         (_is_condition_error, ProjectionValidationCode.condition_value_invalid),
+        (_is_stimulus_error, ProjectionValidationCode.stimulus_field_mismatch),
         (_is_step_error, ProjectionValidationCode.step_mapping_mismatch),
         (_is_factor_order_error, ProjectionValidationCode.factor_order_mismatch),
         (_is_factor_error, ProjectionValidationCode.factor_reference_mismatch),
@@ -1223,6 +1229,11 @@ def _is_condition_type_error(path: str, message: str) -> bool:
 def _is_condition_error(path: str, message: str) -> bool:
     del message
     return "condition" in path
+
+
+def _is_stimulus_error(path: str, message: str) -> bool:
+    """Map stimulus-route cross-field failures to one stable code."""
+    return "stimulus" in path or "turn" in message
 
 
 def _is_step_error(path: str, message: str) -> bool:

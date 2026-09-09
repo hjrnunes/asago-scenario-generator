@@ -33,6 +33,7 @@ from asago_scenario_generator.stpa.models.scenario_context import (
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     ActionValueCondition,
     SemanticCondition,
+    StimulusTurn,
     normalize_semantic_proposition,
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
@@ -157,6 +158,13 @@ class ScenarioSpec(BaseModel):
     # value is retained for historical/non-contextual values but cannot be
     # published through the v2 execution projection seam.
     execution_contract: SemanticExecutionContract | None = None
+    # Prepared user turns for a conversation_context delivery route.  The
+    # producer copies them verbatim into the published stimulus requirement;
+    # a missing value keeps the route free of turn content.
+    stimulus_turns: tuple[StimulusTurn, ...] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     # Phase 3.1 adversary record.  Optional only for historical/non-contextual
     # values; the corrected contextual Stage 5 wire requires it.
     adversary: Adversary | None = None

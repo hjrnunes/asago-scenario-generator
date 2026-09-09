@@ -47,7 +47,14 @@ Both seams require the explicit run identity and intact source pins; unknown
 semantic values are typed binding placeholders, and their presence derives
 `semantic_binding_required`. The v2 projection and v1 bundle contract kit in
 `data/contracts/stpa-execution/` is producer-owned; consumers vendor it
-byte-for-byte. Stage 5 fixes one delivery route, selected causal factor, action,
+byte-for-byte. A `conversation_context` route may carry `turns`, two to three
+prepared user turns copied verbatim from the authored draft; the consumer
+delivers them as ordered user history with no assistant reply between them.
+An `ordering` condition may name a `reference_tool` and `reference_argument`
+(both or neither); the condition is the unsafe observation, and the same
+argument predicate applies to the target call and the reference call. Both
+fields are omitted when absent, so existing projection digests hold.
+Stage 5 fixes one delivery route, selected causal factor, action,
 logical domain-resource requirements, and observable unsafe outcome. The
 producer deterministically classifies binding completeness as `concrete`,
 `parameterized`, or `analytical_only`, independently of

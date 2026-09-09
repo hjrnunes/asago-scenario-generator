@@ -166,7 +166,12 @@ pinned. Two scheduled exceptions, both owner-approved and kept separate from
 run-to-run comparison: the consumer `event_order` observer for G12 (before
 the freeze begins; the reference-tool representation is resolved before any
 producer contract change) and the two-turn `conversation` stimulus for G05
-(a recorded Principle 8 exception).
+(a recorded Principle 8 exception). Both exceptions land in one
+`projection-v2` kit revision (round 61): `stimulus_requirement.turns`
+carries the prepared user turns verbatim, and `ordering` gains
+`reference_tool` and `reference_argument`; existing fixture digests are
+unchanged, and the `conversation` template offer is logged in the rule log
+(2026-09-10).
 
 ## Run ledger under revision 4
 

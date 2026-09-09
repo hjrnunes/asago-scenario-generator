@@ -57,6 +57,7 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
     SemanticCondition,
     SemanticValue,
     StateValueCondition,
+    StimulusTurn,
     WindowCondition,
     collect_binding_refs,
     contains_binding_placeholder,
@@ -240,6 +241,10 @@ class AdversarialStimulusRequirement(_ClosedFrozenModel):
     carrier_requirement_id: StrictStr | None = Field(
         default=None, pattern=r"^REQ-[A-Za-z0-9._-]+$"
     )
+    turns: tuple[StimulusTurn, ...] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
     @model_validator(mode="after")
     def validate_delivery(self) -> "AdversarialStimulusRequirement":
@@ -252,7 +257,19 @@ class AdversarialStimulusRequirement(_ClosedFrozenModel):
             raise ValueError(
                 "only indirect_content stimuli may name a carrier requirement"
             )
+        self._validate_turns()
         return self
+
+    def _validate_turns(self) -> None:
+        if self.turns is None:
+            return
+        if self.delivery_class is not ExecutionDeliveryClass.conversation_context:
+            raise ValueError("only conversation_context stimuli may carry turns")
+        if not 2 <= len(self.turns) <= 3:
+            raise ValueError("stimulus turns require two to three entries")
+        turn_ids = [turn.turn_id for turn in self.turns]
+        if len(turn_ids) != len(set(turn_ids)):
+            raise ValueError("stimulus turns must carry unique turn_id values")
 
 
 class ExecutionSourcePins(_ClosedFrozenModel):
@@ -485,6 +502,7 @@ class ProjectionValidationCode(str, Enum):
     condition_field_mismatch = "condition_field_mismatch"
     condition_reference_mismatch = "condition_reference_mismatch"
     condition_value_invalid = "condition_value_invalid"
+    stimulus_field_mismatch = "stimulus_field_mismatch"
     semantic_binding_state_mismatch = "semantic_binding_state_mismatch"
     step_mapping_mismatch = "step_mapping_mismatch"
     uca_condition_incompatible = "uca_condition_incompatible"
@@ -1096,6 +1114,7 @@ __all__ = [
     "SemanticCondition",
     "SemanticValue",
     "StateValueCondition",
+    "StimulusTurn",
     "UnsafeOutcome",
     "WindowCondition",
     "canonical_json_bytes",
