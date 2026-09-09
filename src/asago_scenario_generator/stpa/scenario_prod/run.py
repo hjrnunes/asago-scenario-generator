@@ -478,6 +478,7 @@ def run_sp3(
         run_identity=run_identity,
         run_started=run_started,
         authored_scenarios=authored_scenarios,
+        target_observations=target_observations,
     )
 
     return SP3RunResult(
@@ -2216,6 +2217,7 @@ def _write_manifest(
     run_identity: ExecutionRunIdentity,
     run_started: datetime,
     authored_scenarios: Mapping[str, Any] | None = None,
+    target_observations: TargetObservationSnapshot | None = None,
 ) -> None:
     """Write the run manifest YAML."""
     preserved = _preserved_stage_keys(run_dir)
@@ -2229,6 +2231,11 @@ def _write_manifest(
         # file, not the canonical model hash (spec Phase 5, qualification
         # rule 1: a qualifying run's manifest shows the pinned digest).
         input_hashes["loss_analysis"] = preserved.loss_analysis_input_hash
+    if target_observations is not None:
+        # The observation set's content digest pins the exact Stage 5
+        # companion this run consumed (round 48 ruling 1); it is run-manifest
+        # bookkeeping, not a schema field on any provider wire.
+        input_hashes["target_observations"] = target_observations.content_digest
     prompt_hashes = hash_prompt_templates(PROMPTS_DIR)
     stage_summary = count_calls_by_stage(run_dir)
     stage_summary["stage_2"] = dict(stage_summary.get("stage_2") or {})

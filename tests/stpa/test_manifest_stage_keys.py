@@ -18,6 +18,10 @@ from asago_scenario_generator.stpa.models.execution_projection_v2 import (
     ExecutionRunIdentity,
 )
 from asago_scenario_generator.stpa.scenario_prod.run import _write_manifest
+from asago_scenario_generator.stpa.scenario_prod.target_observations import (
+    TargetObservation,
+    TargetObservationSnapshot,
+)
 
 from tests.stpa.sp1_helpers import MockLLMClient
 from tests.stpa.test_sp3_run import _make_cs, _make_ets, _make_loss_analysis
@@ -41,7 +45,11 @@ def _write_prior_manifest(run_dir: Path, *, stage_1a: dict, stage_2: dict, **res
     )
 
 
-def _final_manifest(run_dir: Path) -> dict:
+def _final_manifest(
+    run_dir: Path,
+    *,
+    target_observations: TargetObservationSnapshot | None = None,
+) -> dict:
     _write_manifest(
         run_dir=run_dir,
         llm_client=MockLLMClient(),
@@ -55,6 +63,7 @@ def _final_manifest(run_dir: Path) -> dict:
         stage_errors=[],
         run_identity=ExecutionRunIdentity(run_id="synthesis-test"),
         run_started=datetime(2026, 9, 8, tzinfo=timezone.utc),
+        target_observations=target_observations,
     )
     return yaml.safe_load((run_dir / "run-manifest.yaml").read_text(encoding="utf-8"))
 
@@ -111,3 +120,34 @@ def test_canonical_hash_wins_for_a_run_without_a_prior_manifest(tmp_path):
     manifest = _final_manifest(run_dir)
 
     assert manifest["input_hashes"]["loss_analysis"] != PINNED_DIGEST
+
+
+def test_manifest_records_the_observation_content_digest(tmp_path):
+    """Round 48 ruling 1: input_hashes carries the observation set digest."""
+    run_dir = tmp_path / "observed"
+    run_dir.mkdir()
+    snapshot = TargetObservationSnapshot.create(
+        target_profile_digest="c" * 64,
+        observations=[
+            TargetObservation(
+                observation_ref="TARGET-STATE",
+                kind="state",
+                content_format="json",
+                content='{"authenticated_customer_id": "CUST001"}',
+            ),
+        ],
+    )
+
+    manifest = _final_manifest(run_dir, target_observations=snapshot)
+
+    assert manifest["input_hashes"]["target_observations"] == snapshot.content_digest
+
+
+def test_manifest_omits_the_observation_digest_without_observations(tmp_path):
+    """A target-blind run carries no observation digest."""
+    run_dir = tmp_path / "blind"
+    run_dir.mkdir()
+
+    manifest = _final_manifest(run_dir)
+
+    assert "target_observations" not in manifest["input_hashes"]
