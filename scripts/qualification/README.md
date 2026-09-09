@@ -193,6 +193,37 @@ Run the offline controls without Garak, a target, or an LLM:
   scripts/qualification/test_evaluation.py -q
 ```
 
+## Saved-context authoring replay
+
+`replay_authoring_context.py` re-issues the Phase 4 grounded authoring call
+(`scenario_prod.authoring.author_candidate_scenarios`) for one saved
+(constraint, action) candidate against a completed run's pinned context, so an
+owner question such as "does an entitled refund request get labelled
+adversarial?" can be replayed on the current templates and model. With
+`--constraint-override`, a YAML file supplies replacement constraint, hazard,
+and loss texts (for example the literal texts an older iteration recorded)
+while the run's structure, bindings, state, and observations stay pinned.
+
+The tool writes only its own output directory and adds no judgment field; the
+reviewer judges. Live mode makes one model call per sample (the product seam
+records each call in `calls.jsonl` beside a `replay-record.yaml` with per-call
+token costs); `--dry-run` renders the exact prompts with zero model calls so
+their digests can be compared with a saved run.
+
+```bash
+uv run python scripts/qualification/replay_authoring_context.py \
+  --run output/runs/<phase4-run> \
+  --loss-analysis data/gold/miniklarna/loss-analysis-pinned.yaml \
+  --target-profile build/miniklarna-qualification-20260906/discovery/execution-target-profile.json \
+  --target-observations build/miniklarna-qualification-20260906/topic-runtime-context/runtime-context.json \
+  --capability-profile output/runs/<capability-profile-run>/capability-profile.yaml \
+  --profiles config/model-profiles.yaml --profile gemma4-oc --temperature 0.4 \
+  --constraint SC-8 --action process_refund \
+  [--constraint-override data/gold/miniklarna/replay/iteration-20-scn-019-constraint.yaml] \
+  --samples 3 \
+  --output-dir output/runs/<replay-output-dir>
+```
+
 ## Standalone Stage 1a coverage review
 
 `review_loss_analysis_coverage.py` runs the advisory risk-coverage review
