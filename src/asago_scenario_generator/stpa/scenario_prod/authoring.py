@@ -1207,8 +1207,14 @@ def build_authoring_user_prompt(
         "observations": list(observation_records),
         "session_identity": session_identity,
         # Plain (kind, definition) tuples: the template unpacks each entry
-        # as ``kind, definition`` (spec 4.1 item 6).
-        "adversary_definitions": list(_ADVERSARY_DEFINITIONS),
+        # as ``kind, definition`` (spec 4.1 item 6).  third_party_via_content
+        # is unreachable on this path: every authored stimulus is a user
+        # message, so the reach rule rejects that kind unconditionally.
+        "adversary_definitions": [
+            (kind, definition)
+            for kind, definition in _ADVERSARY_DEFINITIONS
+            if kind != "third_party_via_content"
+        ],
     }
     return TemplateLoader(PROMPTS_DIR).render_prompt(
         _AUTHORING_USER_TEMPLATE, view=view

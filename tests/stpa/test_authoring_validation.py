@@ -1094,8 +1094,13 @@ def test_user_prompt_renders_the_query_label_once():
     assert "query: query:" not in prompt
 
 
-def test_user_prompt_renders_every_adversary_kind_definition():
-    """Spec 4.1 item 6: the model sees all four kinds and definitions."""
+def test_user_prompt_offers_only_the_reachable_adversary_kinds():
+    """Spec 4.1 item 6: the model sees the kinds this path can accept.
+
+    ``third_party_via_content`` is unreachable on the authored
+    user-message path, so the prompt states its unavailability instead of
+    offering it as a choice.
+    """
     from asago_scenario_generator.stpa.scenario_prod.authoring import (
         _ADVERSARY_DEFINITIONS,
         build_authoring_user_prompt,
@@ -1109,7 +1114,11 @@ def test_user_prompt_renders_every_adversary_kind_definition():
         profile=_profile(),
     )
     for kind, definition in _ADVERSARY_DEFINITIONS:
-        assert f"- {kind}: {definition}" in prompt
+        if kind == "third_party_via_content":
+            assert f"- {kind}: {definition}" not in prompt
+        else:
+            assert f"- {kind}: {definition}" in prompt
+    assert "`third_party_via_content` is not available here" in prompt
     assert "- kind: definition" not in prompt
 
 
