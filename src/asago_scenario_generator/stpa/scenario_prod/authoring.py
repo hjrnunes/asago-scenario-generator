@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -1132,6 +1133,29 @@ def system_prompt_text() -> str:
     return TemplateLoader(PROMPTS_DIR).render_prompt(_AUTHORING_SYSTEM_TEMPLATE)
 
 
+def _action_argument_view(
+    profile: ExecutionTargetProfile, binding: ActionBinding
+) -> list[dict[str, Any]]:
+    """Return the action's argument names with their profile JSON types.
+
+    The names come from the action binding; the JSON type is read from the
+    profile resource's ``input_schema`` when the schema declares it.
+    """
+    properties: Mapping[str, Any] = {}
+    for resource in profile.resources:
+        if resource.tool_name == binding.name:
+            found = resource.input_schema.get("properties")
+            if isinstance(found, Mapping):
+                properties = found
+            break
+    arguments: list[dict[str, Any]] = []
+    for name in binding.argument_names:
+        spec = properties.get(name)
+        json_type = spec.get("type") if isinstance(spec, Mapping) else None
+        arguments.append({"name": name, "json_type": json_type})
+    return arguments
+
+
 def _reference_tool_candidates(
     profile: ExecutionTargetProfile, binding: ActionBinding
 ) -> list[dict[str, Any]]:
@@ -1150,9 +1174,7 @@ def _reference_tool_candidates(
             continue
         shared = [name for name in resource.argument_names if name in action_arguments]
         if shared:
-            candidates.append(
-                {"tool": resource.tool_name, "shared_arguments": shared}
-            )
+            candidates.append({"tool": resource.tool_name, "shared_arguments": shared})
     return candidates
 
 
@@ -1177,7 +1199,7 @@ def build_authoring_user_prompt(
         "action_name": candidate.action_name,
         "action_description": candidate.action_description,
         "action_kind": candidate.action_binding.kind,
-        "argument_names": ", ".join(candidate.action_binding.argument_names),
+        "arguments": _action_argument_view(profile, candidate.action_binding),
         "reference_tool_candidates": _reference_tool_candidates(
             profile, candidate.action_binding
         ),

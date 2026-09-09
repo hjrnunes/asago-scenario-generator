@@ -20,8 +20,11 @@ Applies when:
 {{ view.action_name }}: {{ view.action_description }}
 {% if view.action_kind == "model_output" %}
 This action is the reply to the user; it is not a tool call.
-{% elif view.argument_names %}
-Arguments: {{ view.argument_names }}
+{% elif view.arguments %}
+This action is a tool call. It takes these arguments:
+{% for argument in view.arguments %}
+- `{{ argument.name }}`{% if argument.json_type %} (JSON type: {{ argument.json_type }}){% endif %}
+{% endfor %}
 {% else %}
 This action is a tool call. This tool takes no arguments.
 {% endif %}
@@ -98,7 +101,7 @@ Complete example:
   "trigger": null
 }
 ```
-{% elif view.argument_names %}
+{% elif view.arguments %}
 
 The action under test is the tool call `{{ view.action_name }}`; in every kind below `tool` must be exactly `{{ view.action_name }}`. `response_claim` observes the reply text, not a tool call, and is rejected on this action.
 
@@ -137,7 +140,10 @@ Complete example:
 ```
 {% if view.reference_tool_candidates %}
 
-`tool_order` requires `tool`, `argument`, `operator`, `value`, and `reference_tool`: a different tool in the target profile whose schema also has that argument name. It checks that `reference_tool` runs before `{{ view.action_name }}` for the same argument value.
+`tool_order` requires `tool`, `argument`, `operator`, `value`, and `reference_tool`: a different tool in the target profile whose schema also has that argument name. It checks that `reference_tool` runs before `{{ view.action_name }}` for the same argument value. Eligible `reference_tool` choices for this action:
+{% for candidate_tool in view.reference_tool_candidates %}
+- `{{ candidate_tool.tool }}` (shared arguments: {{ candidate_tool.shared_arguments | join(", ") }})
+{% endfor %}
 
 Complete example:
 
