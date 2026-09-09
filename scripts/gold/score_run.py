@@ -15,6 +15,12 @@ conditions matches any observed record meeting its owner and eligibility
 conditions, with the oracle bound read from that record, and the score
 reports the resolved bounds plus the amendments inherited from earlier
 revisions.
+
+Regardless of revision, a conversation gold case (a stimulus with two or
+more user turns) is proposed only for a compiled artifact that carries its
+prepared user turns as supplied history (``supplied_history.kind ==
+"user_only"``); the proposal evidence states the execution mode so the
+reviewer can cite it.
 """
 
 from __future__ import annotations
@@ -57,11 +63,19 @@ class CompiledArtifact:
     expected: Any
     semantic_proposition: str | None
     tools: list[str]
+    # Present when the artifact supplies its prepared user turns in order and
+    # the runner submits that history once: {"kind": "user_only",
+    # "user_turns": [{"turn_id": ..., "text": ...}, ...]}. Only ``kind`` is
+    # read here. Absent (None) for ordinary single-message artifacts.
+    supplied_history: dict[str, Any] | None = None
 
     def all_user_text(self) -> str:
         return "\n".join(
             m.get("content", "") for m in self.messages if m.get("role") == "user"
         )
+
+    def user_message_count(self) -> int:
+        return sum(1 for m in self.messages if m.get("role") == "user")
 
 
 @dataclass
@@ -203,6 +217,10 @@ def load_compiled_artifacts(artifacts_dir: Path) -> list[CompiledArtifact]:
 
         oracle = conv_data.get("structured_oracle", {}) or {}
         messages = conv_data.get("messages", [])
+        supplied_history_raw = conv_data.get("supplied_history")
+        supplied_history = (
+            supplied_history_raw if isinstance(supplied_history_raw, dict) else None
+        )
         tools_raw = conv_data.get("tools", [])
         tools_list: list[str] = []
         for t in tools_raw:
@@ -232,6 +250,7 @@ def load_compiled_artifacts(artifacts_dir: Path) -> list[CompiledArtifact]:
                 expected=oracle.get("expected"),
                 semantic_proposition=oracle.get("semantic_proposition"),
                 tools=tools_list,
+                supplied_history=supplied_history,
             )
         )
     return artifacts
@@ -353,6 +372,11 @@ def _bounded_pattern(text: str) -> re.Pattern[str]:
     return re.compile(r"\b" + re.escape(text.lower()) + r"\b")
 
 
+def _gold_user_turn_count(gold: GoldCase) -> int:
+    """User turns in the gold case's stimulus."""
+    return sum(1 for turn in gold.stimulus.turns if turn.role == "user")
+
+
 def _argument_evidence(gold: GoldCase, art: CompiledArtifact) -> str:
     """Argument-level evidence; does not affect matching but surfaces near misses."""
     gold_arg = gold.oracle.argument
@@ -384,11 +408,30 @@ def evaluate_match_rules(
     records whether the artifact's oracle argument agrees with the gold
     case's (a differing argument is the signature of a near miss).
 
+    Supplied-history gate: a conversation gold case (a stimulus with two or
+    more user turns) proposes only for an artifact that carries its prepared
+    user turns as supplied history (``supplied_history.kind == "user_only"``
+    with at least two ``user`` messages). For any other artifact the
+    proposal is not made, so the artifact stays unproposed for that case.
+
     Returns (is_match, rule1_evidence, rule2_evidence, rule3_evidence,
     argument_evidence).
     """
     user_text = art.all_user_text().lower()
     r4_ev = _argument_evidence(gold, art)
+
+    # Supplied-history gate, ahead of the version-1 rules: without the
+    # artifact-side supplied-history marker a conversation gold case makes no
+    # proposal at all. On a pass, the evidence phrase records the execution
+    # mode beside the version-1 rule evidence.
+    conversation_evidence = ""
+    if _gold_user_turn_count(gold) >= 2:
+        history = art.supplied_history or {}
+        if history.get("kind") != "user_only" or art.user_message_count() < 2:
+            return False, "", "", "", r4_ev
+        conversation_evidence = (
+            f"supplied-history, user-only, {art.user_message_count()} user turns"
+        )
 
     # --- Rule 1: Tool / Surface ---
     r1_pass = False
@@ -510,6 +553,9 @@ def evaluate_match_rules(
 
     if not r3_pass:
         return False, "", "", "", r4_ev
+
+    if conversation_evidence:
+        r1_ev = f"{r1_ev}; {conversation_evidence}"
 
     return True, r1_ev, r2_ev, r3_ev, r4_ev
 

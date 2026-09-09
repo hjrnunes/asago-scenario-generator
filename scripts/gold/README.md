@@ -42,6 +42,10 @@ scripts/gold/
 
 Each tool-kind oracle names the tool it checks; `tool_argument` and `tool_order` additionally require `argument`, `operator`, and `value`. `tool_order` also requires `reference_tool`, the call that must precede `tool` in the same turn (`reference_tool` must differ from `tool` and is rejected on every other kind). It tests process integrity: a verifying read must precede a state-changing write on the same record.
 
+## Supplied-history conversation cases
+
+A gold case whose stimulus has two or more user turns (a conversation case; G05 is the only one) proposes only for a compiled artifact that records `supplied_history: {kind: user_only, ...}` in its `executable-conversation.json` and carries at least two `user` messages. The runner submits the prepared user turns once as conversation history, and the scorer evaluates only the continuation response; the proposal evidence states this execution mode as `supplied-history, user-only, N user turns`. A compiled artifact without the marker makes no proposal for the case, and single-turn cases are unaffected.
+
 ## Usage
 
 ### 1. Score a Run
