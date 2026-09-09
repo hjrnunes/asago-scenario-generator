@@ -803,13 +803,17 @@ def score_run(
     return score_result
 
 
-_STRUCTURAL_SOURCES_RE = re.compile(r"\s*\[structural sources:[^\]]*\]\s*$")
+# The annotation and anything after it are dropped: once the narrative's
+# single-quoted scalar is folded by YAML, the next paragraph ("Potential
+# loss: …") follows the bullet on the very next line with no blank line.
+_STRUCTURAL_SOURCES_RE = re.compile(r"\s*\[structural sources:[^\]]*\].*$", re.S)
 _INTENTION_TOOL_RE = re.compile(r"^([a-z_]+): ")
 _STIMULUS_MARKER = "Proposed stimulus:"
+_NARRATIVE_SECTION_PREFIXES = ("Potential loss:", "Execution must")
 
 
 def _clean_stimulus_text(text: str) -> str:
-    """Strip the bullet marker and the trailing structural-sources annotation."""
+    """Strip the bullet marker and the structural-sources annotation onward."""
     cleaned = text.strip()
     if cleaned.startswith("- "):
         cleaned = cleaned[2:]
@@ -818,10 +822,12 @@ def _clean_stimulus_text(text: str) -> str:
 
 
 def _stimulus_from_narrative(narrative: str) -> str:
-    """Extract the stimulus bullet after ``Proposed stimulus:`` in a narrative.
+    """Extract the first stimulus bullet after ``Proposed stimulus:``.
 
-    The bullet starts at the next ``- `` line and ends at the next blank
-    line. Returns "" when the marker or bullet is missing.
+    The bullet starts at the next ``- `` line and ends at the line carrying
+    the ``[structural sources: …]`` annotation, at a blank line, at a further
+    bullet, or at the next narrative section. Returns "" when the marker or
+    bullet is missing.
     """
     idx = narrative.find(_STIMULUS_MARKER)
     if idx < 0:
@@ -829,15 +835,24 @@ def _stimulus_from_narrative(narrative: str) -> str:
     rest = narrative[idx + len(_STIMULUS_MARKER) :]
     bullet_lines: list[str] = []
     for line in rest.splitlines():
-        if not line.strip():
+        stripped = line.strip()
+        if not stripped:
             if bullet_lines:
                 break
             continue
         if not bullet_lines:
-            if line.lstrip().startswith("- "):
-                bullet_lines.append(line.strip())
+            if stripped.startswith("- "):
+                bullet_lines.append(stripped)
+                if "[structural sources:" in stripped:
+                    break
             continue
-        bullet_lines.append(line.strip())
+        if stripped.startswith("- ") or stripped.startswith(
+            _NARRATIVE_SECTION_PREFIXES
+        ):
+            break
+        bullet_lines.append(stripped)
+        if "[structural sources:" in stripped:
+            break
     if not bullet_lines:
         return ""
     return _clean_stimulus_text(" ".join(bullet_lines))
