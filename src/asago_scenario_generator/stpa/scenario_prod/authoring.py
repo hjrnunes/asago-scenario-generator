@@ -141,7 +141,6 @@ def _ownership_argument_role(name: str, json_type: str | None) -> str | None:
     return None
 
 
-
 ORACLE_TEMPLATES_FILENAME = "templates.yaml"
 _ORACLE_TEMPLATE_DOMAIN = "asago-scenario-generator:oracle-templates:v1"
 
@@ -642,7 +641,7 @@ def _validate_tool_argument(
         )
     if observation.operator == "owner_differs_from_session":
         return (
-            _validate_owner_difference(observation, state, session_identity),
+            _validate_owner_difference(observation, state, session_identity, profile),
             None,
         )
     if observation.operator in {"greater_than", "less_than"}:
@@ -679,6 +678,7 @@ def _validate_owner_difference(
     observation: AuthoredUnsafeObservation,
     state: dict[str, Any],
     session_identity: str,
+    profile: ExecutionTargetProfile,
 ) -> ScenarioRejection | None:
     """Rule 4.3.3: the referenced record's owner differs from the session.
 
@@ -687,7 +687,20 @@ def _validate_owner_difference(
     record to look up; the operator compares the argument value to the
     session identity directly.  A value equal to the session identity
     rejects with ``owner_matches_session``, as for a record.
+
+    Amended round 52: reject ``owner_differs_from_session`` when the
+    argument cannot carry an owned-record key or a customer ID.
     """
+    argument = observation.argument or ""
+    json_type = _profile_argument_type(profile, observation.tool or "", argument)
+    if _ownership_argument_role(argument, json_type) is None:
+        return ScenarioRejection(
+            reason="owner_argument_incompatible",
+            detail=(
+                f"argument {argument!r} with JSON type {json_type!r} cannot "
+                "carry an owned-record key or a customer ID"
+            ),
+        )
     value = str(observation.value) if observation.value is not None else None
     if not value:
         return ScenarioRejection(
@@ -1087,6 +1100,24 @@ def _profile_arguments(
     for resource in profile.resources:
         if resource.tool_name == tool_name:
             return resource.argument_names
+    return None
+
+
+def _profile_argument_type(
+    profile: ExecutionTargetProfile, tool: str, argument: str
+) -> str | None:
+    """Return the JSON schema type of one profile argument, if declared."""
+    for resource in profile.resources:
+        if resource.tool_name != tool:
+            continue
+        properties = resource.input_schema.get("properties")
+        if not isinstance(properties, Mapping):
+            return None
+        spec = properties.get(argument)
+        if not isinstance(spec, Mapping):
+            return None
+        json_type = spec.get("type")
+        return json_type if isinstance(json_type, str) else None
     return None
 
 
