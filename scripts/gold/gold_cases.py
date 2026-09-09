@@ -196,6 +196,67 @@ class MatchHints(BaseModel):
 RECORD_ID_PATTERN = re.compile(r"\b(?:ORD-\d+|PLAN-\d+|CUST\d+|POL-[A-Z0-9_\-]+)\b")
 
 
+class RecordConditions(BaseModel):
+    """Record-level conditions that generalize one gold case's target record.
+
+    A composed case may describe its unsafe outcome over any record meeting
+    the conditions instead of one fixed record id: the record must belong to
+    the authenticated session identity (the record's ``owner_field`` equals
+    the state value at ``session_path``), carry every ``require`` entry, and
+    the oracle bound reads ``bound_field`` from that same record. The base
+    gold file never sets record conditions; benchmark sidecars do.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    resource: str
+    owner_field: str
+    session_path: list[str] = ["authenticated_customer_id"]
+    require: dict[str, Any] = {}
+    bound_field: str
+    policy_ref: str | None = None
+    description: str = ""
+
+
+def resolve_record_conditions(
+    conditions: RecordConditions, state: dict[str, Any]
+) -> dict[str, Any]:
+    """Resolve a record-conditions spec against a state dict.
+
+    Returns ``{record_id: bound_value}`` for every record in
+    ``state[conditions.resource]`` whose ``owner_field`` equals the value at
+    ``session_path`` and whose ``require`` entries all match, sorted by
+    record id. Records missing the bound field are skipped. Returns an empty
+    dict when the state lacks the resource or the session path.
+    """
+    session_value: Any = state
+    for elem in conditions.session_path:
+        if not isinstance(session_value, dict) or elem not in session_value:
+            return {}
+        session_value = session_value[elem]
+
+    resource = state.get(conditions.resource)
+    if not isinstance(resource, dict):
+        return {}
+
+    resolved: dict[str, Any] = {}
+    for record_id in sorted(resource):
+        record = resource[record_id]
+        if not isinstance(record, dict):
+            continue
+        if record.get(conditions.owner_field) != session_value:
+            continue
+        if not all(
+            require_key in record and record[require_key] == require_value
+            for require_key, require_value in conditions.require.items()
+        ):
+            continue
+        if conditions.bound_field not in record:
+            continue
+        resolved[record_id] = record[conditions.bound_field]
+    return resolved
+
+
 class GoldCase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -210,6 +271,7 @@ class GoldCase(BaseModel):
     match_hints: MatchHints = Field(default_factory=MatchHints)
     stimulus: StimulusSpec
     oracle: OracleSpec
+    record_conditions: RecordConditions | None = None
     notes: str | None = None
 
     @model_validator(mode="after")
@@ -284,15 +346,17 @@ class GoldFile(BaseModel):
 
 
 class OracleAmendment(BaseModel):
-    """Amended oracle text for one benchmark case.
+    """Amended oracle for one benchmark case.
 
-    Only ``unsafe_when`` may be amended; kind, tool, argument, operator,
-    value, and safe_behaviors stay from the base gold file.
+    ``unsafe_when`` is required; ``safe_behaviors`` optionally replaces the
+    base list. Kind, tool, argument, operator, and value stay from the base
+    gold file.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     unsafe_when: str = Field(min_length=1)
+    safe_behaviors: list[str] | None = None
 
 
 class BenchmarkCaseRevision(BaseModel):
@@ -304,6 +368,7 @@ class BenchmarkCaseRevision(BaseModel):
     test_class: TestClass
     adversary: AdversarySpec | None = None
     oracle: OracleAmendment | None = None
+    record_conditions: RecordConditions | None = None
 
     @model_validator(mode="after")
     def _check_class_adversary(self) -> BenchmarkCaseRevision:
@@ -322,27 +387,38 @@ class BenchmarkCaseRevision(BaseModel):
 
 
 class BenchmarkAmendment(BaseModel):
-    """One recorded owner ruling that amends a gold case's oracle."""
+    """One recorded owner ruling for one gold case.
+
+    The ruling amends the case's oracle (``oracle.unsafe_when``, optionally
+    with ``safe_behaviors``), expresses the case as record conditions
+    (``record_conditions``), or records a lineage interpretation
+    (``criteria.lineage``) that changes no case field.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     id: str
     gold_id: str
-    field: Literal["oracle.unsafe_when"]
+    field: Literal["oracle.unsafe_when", "record_conditions", "criteria.lineage"]
     ruling: str
     rationale: str
 
 
 class BenchmarkRevision(BaseModel):
-    """Benchmark revision 2 or 3 sidecar over a pinned version 1 gold file.
+    """Benchmark revision 2, 3, or 4 sidecar over a pinned version 1 gold file.
 
-    Version 3 amends oracle text: each amendment records one owner ruling
-    and pairs with exactly one case ``oracle`` override.
+    Version 2 classifies cases only. Version 3 amends oracle text: each
+    amendment records one owner ruling and pairs with exactly one case
+    ``oracle`` override. Version 4 additionally expresses a ruling as case
+    ``record_conditions`` instead of one record, may replace a case's
+    ``safe_behaviors``, and may record a ``criteria.lineage`` interpretation
+    that changes no case field. Each sidecar from version 3 on chains to its
+    previous revision and inherits that revision's amendments.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    benchmark_version: Literal[2, 3]
+    benchmark_version: Literal[2, 3, 4]
     base_gold_file: str
     base_gold_digest: str
     classification_test: str
@@ -371,16 +447,20 @@ class BenchmarkRevision(BaseModel):
             )
         if self.benchmark_version == 2 and has_file:
             raise ValueError("benchmark version 2 must not pin a previous revision")
-        if self.benchmark_version == 3 and not has_file:
+        if self.benchmark_version in (3, 4) and not has_file:
             raise ValueError(
-                "benchmark version 3 requires previous_revision_file and "
-                "previous_revision_digest"
+                f"benchmark version {self.benchmark_version} requires "
+                "previous_revision_file and previous_revision_digest"
             )
         return self
 
     @model_validator(mode="after")
-    def _check_amendments_match_oracle_overrides(self) -> BenchmarkRevision:
-        overridden = {c.id for c in self.cases if c.oracle is not None}
+    def _check_amendments_match_overrides(self) -> BenchmarkRevision:
+        overridden = {
+            c.id
+            for c in self.cases
+            if c.oracle is not None or c.record_conditions is not None
+        }
         if self.benchmark_version == 2:
             if self.amendments or overridden:
                 raise ValueError(
@@ -399,13 +479,50 @@ class BenchmarkRevision(BaseModel):
                 "each amended gold case needs exactly one amendment; "
                 f"duplicate amendment gold_ids: {', '.join(duplicates)}"
             )
-        if set(gold_ids) != overridden:
+        case_by_id = {c.id: c for c in self.cases}
+        for amendment in self.amendments:
+            if amendment.gold_id not in case_by_id:
+                raise ValueError(
+                    f"amendment {amendment.id} references gold case "
+                    f"{amendment.gold_id} which the sidecar does not list"
+                )
+            revised = case_by_id[amendment.gold_id]
+            if amendment.field == "oracle.unsafe_when":
+                if revised.oracle is None:
+                    raise ValueError(
+                        f"amendment {amendment.id} ({amendment.gold_id}) "
+                        "requires an oracle override on its case"
+                    )
+                if revised.record_conditions is not None:
+                    raise ValueError(
+                        f"amendment {amendment.id} ({amendment.gold_id}) "
+                        "amends oracle.unsafe_when and must not pair with a "
+                        "record_conditions override"
+                    )
+            elif amendment.field == "record_conditions":
+                if revised.record_conditions is None:
+                    raise ValueError(
+                        f"amendment {amendment.id} ({amendment.gold_id}) "
+                        "requires a record_conditions override on its case"
+                    )
+            else:  # criteria.lineage
+                if revised.oracle is not None or revised.record_conditions is not None:
+                    raise ValueError(
+                        f"amendment {amendment.id} ({amendment.gold_id}) "
+                        "records a criteria.lineage interpretation and must "
+                        "not change any case field"
+                    )
+        override_gold_ids = {
+            a.gold_id for a in self.amendments if a.field != "criteria.lineage"
+        }
+        if override_gold_ids != overridden:
             raise ValueError(
                 "amendment gold_ids must equal the case ids carrying an "
-                "oracle override (amendments without oracle override: "
-                f"{sorted(set(gold_ids) - overridden) or 'none'}; oracle "
+                "oracle override or record_conditions override (amendments "
+                "without override: "
+                f"{sorted(override_gold_ids - overridden) or 'none'}; "
                 "overrides without amendment: "
-                f"{sorted(overridden - set(gold_ids)) or 'none'})"
+                f"{sorted(overridden - override_gold_ids) or 'none'})"
             )
         return self
 
@@ -439,18 +556,25 @@ def load_benchmark_revision(
 ) -> tuple[GoldFile, BenchmarkRevision]:
     """Load a benchmark revision sidecar over a pinned base gold file.
 
-    The sidecar is version 2 (classification only) or version 3
-    (classification plus oracle amendments). The base path defaults to the
-    sidecar's ``base_gold_file`` (relative to the current working directory).
-    A version 3 sidecar pins its previous revision file and every amendment
-    replaces one case's ``oracle.unsafe_when`` from the base gold file.
-    Returns a new ``GoldFile`` whose cases carry their sidecar classification
-    and amendments, plus the validated revision. Never writes to disk.
+    The sidecar is version 2 (classification only), version 3
+    (classification plus oracle amendments), or version 4 (classification,
+    oracle amendments with optional ``safe_behaviors`` replacement, record
+    conditions, and lineage interpretation records). The base path defaults
+    to the sidecar's ``base_gold_file`` (relative to the current working
+    directory). A sidecar from version 3 on pins its previous revision file;
+    the previous revision loads recursively over the same base path and its
+    composed gold cases are the base the current sidecar's classification
+    and overrides apply to, so amendments inherit down the chain. Every
+    level verifies its ``base_gold_digest`` and previous-revision digest.
+    Returns a new ``GoldFile`` whose cases carry their composed
+    classification and amendments, plus the validated revision. Never writes
+    to disk.
     """
     sidecar_path = Path(sidecar_path)
     raw = yaml.safe_load(sidecar_path.read_text(encoding="utf-8"))
     revision = BenchmarkRevision.model_validate(raw)
 
+    previous_path: Path | None = None
     if revision.previous_revision_file is not None:
         previous_path = Path(revision.previous_revision_file)
         previous_actual = sidecar_digest(previous_path)
@@ -476,6 +600,11 @@ def load_benchmark_revision(
     gold = load_gold_file(base)
 
     base_by_id = {c.id: c for c in gold.gold_cases}
+    if previous_path is not None:
+        # The previous revision composes over the same base gold file; its
+        # composed cases are the base this sidecar's overrides apply to.
+        previous_gold, _ = load_benchmark_revision(previous_path, base)
+        base_by_id = {c.id: c for c in previous_gold.gold_cases}
     base_ids = set(base_by_id)
     sidecar_ids = {c.id for c in revision.cases}
     missing = sorted(base_ids - sidecar_ids)
@@ -494,9 +623,12 @@ def load_benchmark_revision(
             update["adversary"] = rev.adversary
         if rev.oracle is not None:
             base_oracle = base_by_id[rev.id].oracle
-            update["oracle"] = base_oracle.model_copy(
-                update={"unsafe_when": rev.oracle.unsafe_when}
-            )
+            oracle_update: dict[str, Any] = {"unsafe_when": rev.oracle.unsafe_when}
+            if rev.oracle.safe_behaviors is not None:
+                oracle_update["safe_behaviors"] = list(rev.oracle.safe_behaviors)
+            update["oracle"] = base_oracle.model_copy(update=oracle_update)
+        if rev.record_conditions is not None:
+            update["record_conditions"] = rev.record_conditions
         copy = base_by_id[rev.id].model_copy(update=update)
         # Re-validate so the kind/test-class iff validator runs on the copy.
         revised.append(GoldCase.model_validate(copy.model_dump()))
@@ -510,9 +642,68 @@ def load_benchmark_revision(
     )
 
 
+def revision_chain(
+    sidecar_path: str | Path,
+    base_gold_path: str | Path | None = None,
+) -> list[BenchmarkRevision]:
+    """Load a benchmark revision chain, oldest revision first.
+
+    Follows each sidecar's ``previous_revision_file`` pin, verifying every
+    previous-revision digest and every ``base_gold_digest`` against the
+    resolved base gold file at every level. Does not compose the gold cases;
+    use ``load_benchmark_revision`` for the composed ``GoldFile``.
+    """
+    sidecar_path = Path(sidecar_path)
+    raw = yaml.safe_load(sidecar_path.read_text(encoding="utf-8"))
+    revision = BenchmarkRevision.model_validate(raw)
+
+    previous: list[BenchmarkRevision] = []
+    if revision.previous_revision_file is not None:
+        previous_path = Path(revision.previous_revision_file)
+        previous_actual = sidecar_digest(previous_path)
+        if previous_actual != revision.previous_revision_digest:
+            raise ValueError(
+                "previous revision sidecar digest mismatch for "
+                f"{previous_path}: sidecar pins "
+                f"{revision.previous_revision_digest} but the file computes "
+                f"{previous_actual}"
+            )
+        previous = revision_chain(previous_path, base_gold_path)
+
+    base = (
+        Path(base_gold_path)
+        if base_gold_path is not None
+        else Path(revision.base_gold_file)
+    )
+    actual_digest = compute_gold_digest(base)
+    if actual_digest != revision.base_gold_digest:
+        raise ValueError(
+            f"base gold file digest mismatch for {base}: sidecar pins "
+            f"{revision.base_gold_digest} but the file computes {actual_digest}"
+        )
+    return previous + [revision]
+
+
+def inherited_amendments(
+    sidecar_path: str | Path,
+    base_gold_path: str | Path | None = None,
+) -> list[tuple[int, BenchmarkAmendment]]:
+    """Every earlier revision's amendments in the chain, oldest first.
+
+    Returns ``(benchmark_version, amendment)`` pairs for every amendment a
+    revision before the current one recorded. The current revision's own
+    amendments are excluded.
+    """
+    return [
+        (revision.benchmark_version, amendment)
+        for revision in revision_chain(sidecar_path, base_gold_path)[:-1]
+        for amendment in revision.amendments
+    ]
+
+
 def amended_case_ids(revision: BenchmarkRevision) -> frozenset[str]:
-    """Gold case ids whose oracle the revision overrides."""
-    return frozenset(c.id for c in revision.cases if c.oracle is not None)
+    """Gold case ids the revision's amendments record decisions for."""
+    return frozenset(a.gold_id for a in revision.amendments)
 
 
 def compute_benchmark_digest(
