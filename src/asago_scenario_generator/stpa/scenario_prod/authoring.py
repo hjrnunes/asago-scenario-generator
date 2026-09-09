@@ -1461,7 +1461,13 @@ def assemble_authored_scenario_spec(
             condition=condition,
             semantic_proposition=(
                 accepted.oracle.template_text
-                if accepted.oracle.kind == "response_claim"
+                # Round 49 ruling 1: a tool_absent outcome carries its
+                # omission criterion (the rendered "Inconclusive unless …
+                # Then unsafe if … is not called" template) so the
+                # consumer's action-absence judge has the criterion the
+                # contract kit's own absence example carries.  tool_argument
+                # and tool_order outcomes keep null.
+                if accepted.oracle.kind in ("response_claim", "tool_absent")
                 else None
             ),
         ),
