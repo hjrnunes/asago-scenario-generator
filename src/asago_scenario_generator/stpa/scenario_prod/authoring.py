@@ -127,6 +127,21 @@ ConditionBasis = Literal["state_fact", "stimulus", "observation"]
 # so the record lookup and the owner-field branch cannot drift apart.
 _OWNER_FIELD = "customer_id"
 
+
+def _ownership_argument_role(name: str, json_type: str | None) -> str | None:
+    """Classify an argument as a customer ID, an owned-record key, or neither.
+
+    Shared by the prompt view and the owner_differs_from_session validator so
+    the offered examples and the accepted arguments stay in agreement.
+    """
+    if name == _OWNER_FIELD:
+        return "customer_id"
+    if name.endswith("_id") and json_type in (None, "string"):
+        return "record_id"
+    return None
+
+
+
 ORACLE_TEMPLATES_FILENAME = "templates.yaml"
 _ORACLE_TEMPLATE_DOMAIN = "asago-scenario-generator:oracle-templates:v1"
 
@@ -1139,7 +1154,8 @@ def _action_argument_view(
     """Return the action's argument names with their profile JSON types.
 
     The names come from the action binding; the JSON type is read from the
-    profile resource's ``input_schema`` when the schema declares it.
+    profile resource's ``input_schema`` when the schema declares it.  ``role``
+    is the ownership-argument classification shared with the validator.
     """
     properties: Mapping[str, Any] = {}
     for resource in profile.resources:
@@ -1152,7 +1168,14 @@ def _action_argument_view(
     for name in binding.argument_names:
         spec = properties.get(name)
         json_type = spec.get("type") if isinstance(spec, Mapping) else None
-        arguments.append({"name": name, "json_type": json_type})
+        role_type = json_type if isinstance(json_type, str) else None
+        arguments.append(
+            {
+                "name": name,
+                "json_type": json_type,
+                "role": _ownership_argument_role(name, role_type),
+            }
+        )
     return arguments
 
 
