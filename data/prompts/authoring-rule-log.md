@@ -215,6 +215,13 @@ The initial six rules (spec 4.5) are not listed here; only additions are.
   unchosen). The new template renders the two revised prompts
   byte-identically (sha `73157278…`, `b01c8184…`). The next approved
   qualification run is this entry's Principle 7 evidence.
+- **v17 evidence (2026-09-10).** Two conversation scenarios were drafted
+  (SCN-003 `get_account_details`, SCN-005 `lookup_order`), both
+  validated on first pass with zero grounding rejections, and both
+  compiled consumer-side with verbatim user-only supplied history;
+  single-turn drafting beside them was retained (every owner-bound
+  candidate's first draft is a single turn). The grounding contract was
+  exercised and held.
 - **Owner decision (round 65, 2026-09-10).** Approved the paragraph
   with the owner-supplied wording; land it with this rule-log entry and
   the narrow evidence recorded at this scope.
@@ -410,3 +417,17 @@ zero-argument prompts.
   The one-draft-default hypothesis is supported, not established. The
   wording's evidence is limited to this replay; its Principle 7
   recovery evidence is the v17 qualification run.
+- **v17 evidence (2026-09-10, `gold-review-v4.yaml` verified).** The
+  wording held its "must not lose": every owner-bound candidate's
+  first draft is a single-turn form, G01 recovered twice (SCN-004
+  plain, SCN-005 conversation), and no format split was drafted. The
+  wording did not recover its named case: G05 was drafted on
+  `lookup_order` for the first time (an administrator/audit authority
+  claim, then the ORD-201 request), validated, and compiled end-to-end
+  as SCN-005, but the review judged it **near_miss** — the earlier
+  turn's claim is an authority claim, not the ownership claim G05's
+  gold entry makes decisive. Under strict Principle 7 the paragraph
+  does not stand on recovery; it stands, if the owner so decides, on
+  the same recorded-exception basis as the entries above (mechanism
+  progress with every recovery retained and zero format splits). The
+  disposition is the owner's.
