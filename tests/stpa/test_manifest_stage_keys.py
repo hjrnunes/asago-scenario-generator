@@ -27,16 +27,27 @@ from tests.stpa.sp1_helpers import MockLLMClient
 from tests.stpa.test_sp3_run import _make_cs, _make_ets, _make_loss_analysis
 
 PINNED_DIGEST = "6e127482ffcfd0d38b474e4518264c6e81c509a2c4d123f6de11d6f6e7069046"
+BINDINGS_DIGEST = "17856c5a1f2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5"
 
 
-def _write_prior_manifest(run_dir: Path, *, stage_1a: dict, stage_2: dict, **rest):
+def _write_prior_manifest(
+    run_dir: Path,
+    *,
+    stage_1a: dict,
+    stage_2: dict,
+    bindings_digest: str | None = None,
+    **rest,
+):
     """Write the SP1 manifest the final SP3 write replaces."""
     run_dir.mkdir(parents=True, exist_ok=True)
+    input_hashes = {"loss_analysis": PINNED_DIGEST}
+    if bindings_digest is not None:
+        input_hashes["reviewed_obligation_bindings"] = bindings_digest
     manifest = {
         "run_id": "sp1-prior",
         "run_dir": str(run_dir),
         "created_at": "2026-09-08T00:00:00+00:00",
-        "input_hashes": {"loss_analysis": PINNED_DIGEST},
+        "input_hashes": input_hashes,
         "stage_summary": {"stage_1a": stage_1a, "stage_2": stage_2},
         **rest,
     }
@@ -151,3 +162,38 @@ def test_manifest_omits_the_observation_digest_without_observations(tmp_path):
     manifest = _final_manifest(run_dir)
 
     assert "target_observations" not in manifest["input_hashes"]
+
+
+def test_final_manifest_preserves_the_bindings_input_hash(tmp_path):
+    """Q30 ruling: the supplied bindings file digest survives the final write.
+
+    v16 defect: SP1's writer recorded the row and the scenario_prod writer
+    dropped it, so the run manifest could not confirm the bindings in force.
+    """
+    run_dir = tmp_path / "bound"
+    _write_prior_manifest(
+        run_dir,
+        stage_1a={"call_count": 0, "source": "pinned"},
+        stage_2={"call_count": 2, "mode": "target_derived"},
+        bindings_digest=BINDINGS_DIGEST,
+    )
+
+    manifest = _final_manifest(run_dir)
+
+    assert manifest["input_hashes"]["reviewed_obligation_bindings"] == (
+        BINDINGS_DIGEST
+    )
+
+
+def test_final_manifest_omits_the_bindings_row_without_the_input(tmp_path):
+    """A run without a bindings file carries no bindings row."""
+    run_dir = tmp_path / "unbound"
+    _write_prior_manifest(
+        run_dir,
+        stage_1a={"call_count": 0, "source": "pinned"},
+        stage_2={"call_count": 2, "mode": "target_derived"},
+    )
+
+    manifest = _final_manifest(run_dir)
+
+    assert "reviewed_obligation_bindings" not in manifest["input_hashes"]

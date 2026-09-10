@@ -2156,6 +2156,7 @@ class _PreservedStageKeys:
     stage_1a: dict[str, Any] = field(default_factory=dict)
     post_review_loss_analysis_digest: str | None = None
     loss_analysis_input_hash: str | None = None
+    reviewed_obligation_bindings_input_hash: str | None = None
 
 
 def _preserved_stage_keys(run_dir: Path) -> _PreservedStageKeys:
@@ -2166,7 +2167,10 @@ def _preserved_stage_keys(run_dir: Path) -> _PreservedStageKeys:
     the keys SP1 owns: the Stage 1a ``source`` and call count, the advisory
     coverage-review record, and the Stage 2 post-review digest.  A pinned run
     also owns ``input_hashes.loss_analysis``, which must stay the digest of
-    the supplied file rather than the canonical model hash.
+    the supplied file rather than the canonical model hash.  The same applies
+    to ``input_hashes.reviewed_obligation_bindings``: the row is the digest
+    of a supplied file with no canonical model-hash equivalent, so it
+    survives only through this preservation path.
     """
     manifest_path = run_dir / "run-manifest.yaml"
     if not manifest_path.is_file():
@@ -2192,6 +2196,7 @@ def _preserved_stage_keys(run_dir: Path) -> _PreservedStageKeys:
         if stage_1a.get("source") == "pinned"
         else None
     )
+    bindings_hash = input_hashes.get("reviewed_obligation_bindings")
     return _PreservedStageKeys(
         stage_1a=stage_1a,
         post_review_loss_analysis_digest=(
@@ -2199,6 +2204,9 @@ def _preserved_stage_keys(run_dir: Path) -> _PreservedStageKeys:
         ),
         loss_analysis_input_hash=(
             pinned_hash if isinstance(pinned_hash, str) else None
+        ),
+        reviewed_obligation_bindings_input_hash=(
+            bindings_hash if isinstance(bindings_hash, str) else None
         ),
     )
 
@@ -2236,6 +2244,12 @@ def _write_manifest(
         # companion this run consumed (round 48 ruling 1); it is run-manifest
         # bookkeeping, not a schema field on any provider wire.
         input_hashes["target_observations"] = target_observations.content_digest
+    if preserved.reviewed_obligation_bindings_input_hash is not None:
+        # The bindings row is the digest of the supplied file (Q30 ruling);
+        # no canonical model hash exists, so the SP1 value carries through.
+        input_hashes["reviewed_obligation_bindings"] = (
+            preserved.reviewed_obligation_bindings_input_hash
+        )
     prompt_hashes = hash_prompt_templates(PROMPTS_DIR)
     stage_summary = count_calls_by_stage(run_dir)
     stage_summary["stage_2"] = dict(stage_summary.get("stage_2") or {})
