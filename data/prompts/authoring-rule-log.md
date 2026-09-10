@@ -95,3 +95,12 @@ The initial six rules (spec 4.5) are not listed here; only additions are.
   attribute that loss to this rule. Under Principle 7 the entry does not
   stand on this evidence; disposition is with the owner (specification
   open question 23).
+- **Owner decision (round 64, 2026-09-10).** Keep the `conversation`
+  capability and this prompt documentation of it. v15 showed no recovery
+  benefit; that alone is not a reason to remove supported functionality,
+  and the block is the accurate description of a stimulus format the
+  wire, contract kit, consumer, and runner support. This entry is
+  therefore an **explicit Principle 7 exception**: it is retained as
+  documentation of a supported format, not as a rule that recovered a
+  gold case. G05 remains an adversarial miss in the run ledger. Any later
+  change to the offer's wording is a new entry with its own evidence.
