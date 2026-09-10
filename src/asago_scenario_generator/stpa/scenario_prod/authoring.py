@@ -527,15 +527,12 @@ def _compile_basis(kind: str, entry: Obligation | None, authority: str) -> str:
             if entry.violated_via == "reply":
                 return "reviewed channel (reply)"
             return _UNVERIFIED_CHANNEL_BASIS
-        realized = entry.realized_by or "unknown"
-        if realized == "reply":
-            return "reviewed realization (reply-content requirement)"
-        if realized == "tool_call":
-            return "reply given instead of the required action; reviewed realization"
-        return (
-            "UNVERIFIED reply compatibility (realization unknown; a reply "
-            "may not realize the requirement)"
-        )
+        # Q31 (owner ruling 2026-09-10): a reply oracle measures reply
+        # content only, so a required entry admits it only when the
+        # requirement is itself reply content.  The tool_call and unknown
+        # realizations reject or hold in _kind_verdict before a basis is
+        # computed.
+        return "reviewed realization (reply-content requirement)"
     # Commission kinds (tool_argument, tool_order).
     if entry.observation_role == "proxy":
         return (
@@ -606,9 +603,39 @@ def _kind_verdict(
                 ),
                 obligation_ref=ref,
             )
+        # Required entry.  Q31 (owner ruling 2026-09-10): the oracle
+        # observes reply content only, so a reply-content requirement
+        # compiles, a tool-call requirement rejects (the sound test is
+        # the omission oracle through a reviewed binding), and an
+        # unknown realization holds.
+        realized = entry.realized_by or "unknown"
+        if realized == "reply":
+            return OracleAdmission(
+                "compile",
+                basis=_compile_basis(kind, entry, authority),
+                obligation_ref=ref,
+            )
+        if realized == "tool_call":
+            return OracleAdmission(
+                "reject",
+                reason="oracle_channel_unsupported",
+                detail=(
+                    f"cited obligation {ref} is required and realized by "
+                    "a tool call; a reply oracle cannot observe the "
+                    "required action's absence; the omission oracle "
+                    "(tool_absent) through a reviewed binding is the "
+                    "compilable test"
+                ),
+                obligation_ref=ref,
+            )
         return OracleAdmission(
-            "compile",
-            basis=_compile_basis(kind, entry, authority),
+            "hold",
+            reason="realization_unresolved",
+            detail=(
+                f"the cited required entry {ref} has no reviewed "
+                "realization channel; a reply oracle's compatibility is "
+                "not established"
+            ),
             obligation_ref=ref,
         )
 

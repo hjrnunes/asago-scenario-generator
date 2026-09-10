@@ -329,21 +329,15 @@ def test_zero_argument_proposed_candidate_compiles_nothing():
 
 
 def test_draft_without_citation_rejects_when_entries_exist():
-    candidate = _candidate(
-        obligations=(_forbidden(),), direction_authority="reviewed"
-    )
+    candidate = _candidate(obligations=(_forbidden(),), direction_authority="reviewed")
     rejected = _validate(_draft(), candidate=candidate)
     assert isinstance(rejected, ScenarioRejection)
     assert rejected.reason == "obligation_ref_missing"
 
 
 def test_draft_citing_an_unknown_entry_rejects():
-    candidate = _candidate(
-        obligations=(_forbidden(),), direction_authority="reviewed"
-    )
-    rejected = _validate(
-        _draft(obligation_ref="O9"), candidate=candidate
-    )
+    candidate = _candidate(obligations=(_forbidden(),), direction_authority="reviewed")
+    rejected = _validate(_draft(obligation_ref="O9"), candidate=candidate)
     assert rejected.reason == "obligation_ref_unknown"
 
 
@@ -353,19 +347,13 @@ def test_draft_citing_an_entry_on_an_entryless_constraint_rejects():
 
 
 def test_composed_ref_must_name_the_candidate_constraint():
-    candidate = _candidate(
-        obligations=(_forbidden(),), direction_authority="reviewed"
-    )
-    rejected = _validate(
-        _draft(obligation_ref="SC-2/O1"), candidate=candidate
-    )
+    candidate = _candidate(obligations=(_forbidden(),), direction_authority="reviewed")
+    rejected = _validate(_draft(obligation_ref="SC-2/O1"), candidate=candidate)
     assert rejected.reason == "obligation_ref_unknown"
 
 
 def test_local_and_composed_citations_both_compile():
-    candidate = _candidate(
-        obligations=(_forbidden(),), direction_authority="reviewed"
-    )
+    candidate = _candidate(obligations=(_forbidden(),), direction_authority="reviewed")
     for ref in ("O1", "SC-1/O1"):
         accepted = _validate(_draft(obligation_ref=ref), candidate=candidate)
         assert isinstance(accepted, AcceptedScenario)
@@ -400,30 +388,28 @@ def test_r1a_proposed_reply_compiles_and_reviewed_excludes_the_tool_channel():
 
 def test_r1b_commission_oracle_citing_a_required_entry_rejects():
     """R1-b: citing the wrong sibling is a contradiction, not a compile."""
-    candidate = _candidate(
-        obligations=(_required(),), direction_authority="reviewed"
-    )
+    candidate = _candidate(obligations=(_required(),), direction_authority="reviewed")
     rejected = _validate(_draft(obligation_ref="O1"), candidate=candidate)
     assert isinstance(rejected, ScenarioRejection)
     assert rejected.reason == "oracle_direction_contradiction"
     assert "is required" in rejected.detail
 
 
-def test_r1c_reviewed_unknown_realization_reply_compiles_unverified():
-    """R1-c (SC-7's shape): a reply test against a required entry with
-    unknown realization compiles with an explicit UNVERIFIED stamp."""
+def test_r1c_reviewed_unknown_realization_reply_holds_unresolved():
+    """R1-c (SC-7's shape), narrowed by Q31 (owner ruling 2026-09-10): a
+    reply test against a required entry with unknown realization no longer
+    compiles with an UNVERIFIED stamp; it holds realization_unresolved.  The
+    forbidden-side unknown channel keeps the permissive compile (see
+    test_reviewed_forbidden_unknown_channel_compiles_unverified)."""
     candidate = _candidate(
         action="respond",
         obligations=(_required(realized_by="unknown"),),
         direction_authority="reviewed",
     )
-    accepted = _validate(
-        _response_claim_draft(obligation_ref="O1"), candidate=candidate
-    )
-    assert isinstance(accepted, AcceptedScenario)
-    assert accepted.observes == "reply"
-    assert accepted.compile_basis.startswith("UNVERIFIED reply compatibility")
-    assert accepted.obligation_ref == "SC-1/O1"
+    held = _validate(_response_claim_draft(obligation_ref="O1"), candidate=candidate)
+    assert isinstance(held, ScenarioHold)
+    assert held.reason == "realization_unresolved"
+    assert "SC-1/O1" in held.detail
 
 
 def test_reviewed_entryless_reply_compiles_with_the_no_citation_stamp():
@@ -437,20 +423,14 @@ def test_reviewed_entryless_reply_compiles_with_the_no_citation_stamp():
 
 
 def test_omission_oracle_citing_a_forbidden_entry_rejects():
-    candidate = _candidate(
-        obligations=(_forbidden(),), direction_authority="reviewed"
-    )
-    rejected = _validate(
-        _tool_absent_draft(obligation_ref="O1"), candidate=candidate
-    )
+    candidate = _candidate(obligations=(_forbidden(),), direction_authority="reviewed")
+    rejected = _validate(_tool_absent_draft(obligation_ref="O1"), candidate=candidate)
     assert isinstance(rejected, ScenarioRejection)
     assert rejected.reason == "oracle_direction_contradiction"
 
 
 def test_reviewed_forbidden_tool_call_entry_compiles_with_channel_basis():
-    candidate = _candidate(
-        obligations=(_forbidden(),), direction_authority="reviewed"
-    )
+    candidate = _candidate(obligations=(_forbidden(),), direction_authority="reviewed")
     accepted = _validate(_draft(obligation_ref="O1"), candidate=candidate)
     assert isinstance(accepted, AcceptedScenario)
     assert accepted.compile_basis == (
@@ -494,19 +474,180 @@ def test_reviewed_required_reply_entry_supports_response_claim():
     assert accepted.compile_basis == "reviewed realization (reply-content requirement)"
 
 
-def test_reviewed_required_tool_call_entry_stamps_reply_given_instead():
+def test_reviewed_required_tool_call_entry_rejects_response_claim():
+    """Q31 (owner ruling 2026-09-10): a reply oracle observes reply content
+    only, so it cannot test a requirement realized by a tool call.  The
+    draft rejects oracle_channel_unsupported and the detail names the
+    omission oracle through a reviewed binding as the compilable test."""
     candidate = _candidate(
         action="respond",
         obligations=(_required(realized_by="tool_call"),),
+        direction_authority="reviewed",
+    )
+    rejected = _validate(
+        _response_claim_draft(obligation_ref="O1"), candidate=candidate
+    )
+    assert isinstance(rejected, ScenarioRejection)
+    assert rejected.reason == "oracle_channel_unsupported"
+    assert "SC-1/O1" in rejected.detail
+    assert "realized by a tool call" in rejected.detail
+    assert "tool_absent" in rejected.detail
+
+
+def test_proposed_required_tool_call_entry_keeps_the_permissive_reply():
+    """Q31 is a reviewed-authority ruling: under proposed authority a reply
+    test against a required tool-call entry still compiles permissively
+    (the R1-a preserve on the required side)."""
+    candidate = _candidate(
+        action="respond",
+        obligations=(_required(realized_by="tool_call"),),
+    )
+    accepted = _validate(
+        _response_claim_draft(obligation_ref="O1"), candidate=candidate
+    )
+    assert isinstance(accepted, AcceptedScenario)
+    assert accepted.compile_basis == "unreviewed direction (permissive, as today)"
+
+
+def test_mixed_rule_reply_test_follows_the_cited_entry_only():
+    """Mixed rule, cited-entry specificity (R1-b's discipline, Q31's table):
+    citing the forbidden reply sibling compiles on its own channel; citing
+    the required tool-call sibling rejects.  Neither sibling authorizes the
+    other's test."""
+    candidate = _candidate(
+        action="respond",
+        obligations=(
+            _forbidden(violated_via="reply", obligation_id="O1"),
+            _required(
+                obligation_id="O2",
+                behavior="process an eligible refund",
+                rule_span="process a refund only for an eligible order",
+                realized_by="tool_call",
+            ),
+        ),
         direction_authority="reviewed",
     )
     accepted = _validate(
         _response_claim_draft(obligation_ref="O1"), candidate=candidate
     )
     assert isinstance(accepted, AcceptedScenario)
-    assert accepted.compile_basis == (
-        "reply given instead of the required action; reviewed realization"
+    assert accepted.compile_basis == "reviewed channel (reply)"
+    rejected = _validate(
+        _response_claim_draft(obligation_ref="O2"), candidate=candidate
     )
+    assert isinstance(rejected, ScenarioRejection)
+    assert rejected.reason == "oracle_channel_unsupported"
+    assert "SC-1/O2" in rejected.detail
+
+
+def test_mixed_rule_required_unknown_reply_holds_beside_a_forbidden_sibling():
+    """R-SC-8's shape: a required entry with unknown realization holds a
+    reply test as realization_unresolved even when a forbidden sibling on
+    the same constraint would reject on its own channel."""
+    candidate = _candidate(
+        action="respond",
+        obligations=(
+            _forbidden(obligation_id="O1"),
+            _required(
+                obligation_id="O2",
+                behavior="validate the write against the authorized intent",
+                rule_span="must validate that any requested write operation",
+                realized_by="unknown",
+            ),
+        ),
+        direction_authority="reviewed",
+    )
+    held = _validate(_response_claim_draft(obligation_ref="O2"), candidate=candidate)
+    assert isinstance(held, ScenarioHold)
+    assert held.reason == "realization_unresolved"
+    rejected = _validate(
+        _response_claim_draft(obligation_ref="O1"), candidate=candidate
+    )
+    assert isinstance(rejected, ScenarioRejection)
+    assert rejected.reason == "oracle_channel_unsupported"
+
+
+def test_the_two_scn_012_reply_cases_have_no_compilable_reply_oracle():
+    """The v16 SCN-012 failure (Q31's origin).  SC-9's rule fires on
+    low-quality replies, but its obligation is the required escalation
+    realized by a tool call, so the reply-quality proposition is the wrong
+    oracle both ways: a poor reply WITH the escalation satisfies the
+    constraint while the proposition still fires, and a good reply WITHOUT
+    the escalation violates it while the proposition stays false.  The
+    admission layer rejects the reply test and leaves the omission test,
+    which compiles through the reviewed binding."""
+    candidate = _candidate(
+        action="respond",
+        obligations=(
+            _required(
+                realized_by="tool_call",
+                completion="an escalation handoff exists",
+            ),
+        ),
+        direction_authority="reviewed",
+    )
+    rejected = _validate(
+        _response_claim_draft(
+            obligation_ref="O1",
+            oracle=AuthoredUnsafeObservation(
+                kind="response_claim",
+                proposition=(
+                    "The response is generic and ignores the customer's "
+                    "hardship context."
+                ),
+            ),
+        ),
+        candidate=candidate,
+    )
+    assert isinstance(rejected, ScenarioRejection)
+    assert rejected.reason == "oracle_channel_unsupported"
+    # The sound test of the same obligation is the omission oracle.
+    omission_candidate = _candidate(
+        obligations=(
+            _required(
+                realized_by="tool_call",
+                completion="an escalation handoff exists",
+            ),
+        ),
+        direction_authority="reviewed",
+    )
+    accepted = _validate(
+        _tool_absent_draft(obligation_ref="O1"),
+        candidate=omission_candidate,
+        reviewed_bindings=frozenset({BINDING}),
+    )
+    assert isinstance(accepted, AcceptedScenario)
+    assert accepted.observes == "total_omission"
+
+
+def test_required_tool_call_reply_candidate_resolves_no_expressible_oracle():
+    """SC-9-shaped respond candidate at the offer seam (Q31): every kind is
+    non-compilable and no hold exists, so the candidate resolves
+    no_expressible_oracle before the model call."""
+    candidate = _candidate(
+        action="respond",
+        obligations=(_required(realized_by="tool_call"),),
+        direction_authority="reviewed",
+    )
+    admissions = admit_oracle_kinds(candidate, profile=_profile())
+    assert all(verdict.status != "compile" for verdict in admissions.values())
+    assert all(verdict.status != "hold" for verdict in admissions.values())
+    assert admissions["response_claim"].reason == "oracle_channel_unsupported"
+
+
+def test_required_unknown_reply_candidate_holds_at_the_offer_seam():
+    """SC-7-shaped respond candidate (Q31): response_claim holds
+    realization_unresolved at the offer seam, so the candidate resolves
+    specification_only before the model call."""
+    candidate = _candidate(
+        action="respond",
+        obligations=(_required(realized_by="unknown"),),
+        direction_authority="reviewed",
+    )
+    admissions = admit_oracle_kinds(candidate, profile=_profile())
+    assert all(verdict.status != "compile" for verdict in admissions.values())
+    assert admissions["response_claim"].status == "hold"
+    assert admissions["response_claim"].reason == "realization_unresolved"
 
 
 # Proxy vs source stamps
@@ -536,18 +677,14 @@ def test_proxy_entry_compiles_with_a_labeled_proxy_basis():
 
 
 def test_tool_absent_holds_binding_unreviewed_without_the_binding():
-    candidate = _candidate(
-        obligations=(_required(),), direction_authority="reviewed"
-    )
+    candidate = _candidate(obligations=(_required(),), direction_authority="reviewed")
     held = _validate(_tool_absent_draft(obligation_ref="O1"), candidate=candidate)
     assert isinstance(held, ScenarioHold)
     assert held.reason == "binding_unreviewed"
 
 
 def test_tool_absent_compiles_with_the_reviewed_binding():
-    candidate = _candidate(
-        obligations=(_required(),), direction_authority="reviewed"
-    )
+    candidate = _candidate(obligations=(_required(),), direction_authority="reviewed")
     accepted = _validate(
         _tool_absent_draft(obligation_ref="O1"),
         candidate=candidate,
@@ -563,9 +700,7 @@ def test_tool_absent_compiles_with_the_reviewed_binding():
 
 
 def test_a_binding_for_a_different_action_does_not_unblock():
-    candidate = _candidate(
-        obligations=(_required(),), direction_authority="reviewed"
-    )
+    candidate = _candidate(obligations=(_required(),), direction_authority="reviewed")
     held = _validate(
         _tool_absent_draft(obligation_ref="O1"),
         candidate=candidate,
@@ -580,9 +715,7 @@ def test_tool_absent_realized_by_reply_rejects_channel_unsupported():
         obligations=(_required(realized_by="reply"),),
         direction_authority="reviewed",
     )
-    rejected = _validate(
-        _tool_absent_draft(obligation_ref="O1"), candidate=candidate
-    )
+    rejected = _validate(_tool_absent_draft(obligation_ref="O1"), candidate=candidate)
     assert isinstance(rejected, ScenarioRejection)
     assert rejected.reason == "oracle_channel_unsupported"
 
@@ -787,9 +920,7 @@ def _binding(**overrides) -> ReviewedObligationBinding:
 
 def test_bindings_validation_accepts_a_reviewed_required_tool_call_entry():
     analysis = _reviewed_analysis([_required()])
-    validate_reviewed_obligation_bindings(
-        (_binding(),), analysis, _structure().actions
-    )
+    validate_reviewed_obligation_bindings((_binding(),), analysis, _structure().actions)
 
 
 def test_bindings_validation_fails_closed():
@@ -837,9 +968,7 @@ def test_bindings_validation_fails_closed():
 def test_reviewed_bindings_change_the_structure_digest():
     plain = _structure()
     payload = plain.model_dump(mode="json", exclude={"semantic_digest"})
-    payload["reviewed_obligation_bindings"] = [
-        _binding().model_dump(mode="json")
-    ]
+    payload["reviewed_obligation_bindings"] = [_binding().model_dump(mode="json")]
     from asago_scenario_generator.stpa.models.target_derived_structure import (
         TargetDerivedStructure,
     )
@@ -851,9 +980,7 @@ def test_reviewed_bindings_change_the_structure_digest():
 def test_bindings_file_schema_and_the_committed_gold_binding():
     """The committed Q30(c) binding file validates against the pinned gold."""
     payload = yaml.safe_load(
-        (GOLD_DIR / "reviewed-obligation-bindings.yaml").read_text(
-            encoding="utf-8"
-        )
+        (GOLD_DIR / "reviewed-obligation-bindings.yaml").read_text(encoding="utf-8")
     )
     bindings_file = ReviewedObligationBindingsFile.model_validate(payload)
     analysis = LossAnalysis.model_validate(

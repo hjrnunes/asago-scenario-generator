@@ -122,7 +122,12 @@ with the cited entry's kind or channel rejects
 (`oracle_direction_contradiction`, `oracle_channel_unsupported`), and an
 omission oracle compiles only through a reviewed binding, otherwise holding
 with a typed reason (`direction_unresolved`, `realization_unresolved`,
-`binding_unreviewed`). A candidate with no compilable kind resolves before
+`binding_unreviewed`). Under reviewed authority a reply oracle against a
+required entry compiles only when the entry is realized via reply; a
+required `tool_call` realization rejects (`oracle_channel_unsupported`,
+naming the omission oracle through a reviewed binding as the compilable
+test) and an unknown realization holds `realization_unresolved` (owner
+ruling Q31, 2026-09-10). A candidate with no compilable kind resolves before
 the call (`specification_only` or `no_expressible_oracle`), and held drafts
 persist as specification evidence that is never compiled or credited as
 recovery. Every accepted scenario carries `observes` (attempt, total
