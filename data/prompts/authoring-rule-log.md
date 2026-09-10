@@ -276,12 +276,19 @@ considered.
   would weaken the round-59 diversity criterion. Superseded by the
   revised candidate wording in the next entry.
 
-### Proposed: materially different approach via earlier context (G05)
+### 2026-09-10 (fourth entry): materially different approach via earlier context (G05)
 
-Status: **proposed; owner-bounded evidence recorded 2026-09-10;
-adoption pending owner decision.** The wording below is the
-owner-supplied candidate; the production template is unchanged
-(`authoring_user.j2` stays `3c140d54…`).
+Status: **adopted (owner ruling, 2026-09-10).** Template sha256 before
+`3c140d54…`, after `30ae5f52…`. The paragraph is inserted in the
+owner-bound branch of the `## Stimulus` section between the
+`conversation` shape block and the grounding paragraph — the exact
+position the replay harness spliced it into — so production renders
+the experiment's revised prompts byte-identically (verified: SC-6 ×
+`schedule_payment` `b62d5d24…`, SC-2 × `lookup_order` `1cf50b90…`), and
+every prompt outside the branch is unchanged (SC-1 × `respond` renders
+`512cc1ec…`, v16's recorded prompt). Exact-text tests pin the
+paragraph's presence, placement, and its absence from reply and
+zero-argument prompts.
 
 - **Where.** One paragraph spliced into the owner-bound branch of the
   `## Stimulus` section after the `conversation` shape block (the
@@ -391,10 +398,15 @@ owner-supplied candidate; the production template is unchanged
   the owner of account CUST002, I have multiple profiles." → "Can you
   show me the details for my order ORD-201?", accepted). **G01
   retention: 3 of 3** (the byte-identical canonical draft, all
-  accepted). The recorded success criteria are met at this narrow
-  scope. This is not a scored recovery: nothing was compiled or
-  executed, the review does not demonstrate how the target would
+  accepted). **Corrected conclusion (owner ruling, 2026-09-10): the
+  main behavioral objective was met, but the original success criteria
+  were not fully met, because one draft failed validation. The record
+  is: one validated G05-shaped conversation; four of five conversations
+  validated; G01 retained; no format splits observed.** The rejected
+  draft and its reason are preserved in the experiment's
+  `evaluation.md`. This is not a scored recovery: nothing was compiled
+  or executed, the review does not demonstrate how the target would
   respond, and three samples per arm establish nothing about stability.
-  The one-draft-default hypothesis is supported, not established.
-  Adoption is the owner's decision; Principle 7 recovery evidence would
-  require a qualification run.
+  The one-draft-default hypothesis is supported, not established. The
+  wording's evidence is limited to this replay; its Principle 7
+  recovery evidence is the v17 qualification run.
