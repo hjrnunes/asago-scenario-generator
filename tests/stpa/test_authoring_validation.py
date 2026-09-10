@@ -1405,6 +1405,45 @@ def test_zero_argument_tool_offers_no_kind_under_proposed_authority():
     assert "- tool_absent: direction_unreviewed" in prompt
 
 
+# The conversation grounding paragraph (owner ruling 2026-09-10): the prompt
+# documents the grounding contract `_validate_conversation` already enforces.
+# The paragraph's two grounding paths correspond to the validator's two
+# acceptance routes: the earlier turn names the record, session identity, or
+# a listed state-fact value (`_turn_names_used_context`), or the turn is
+# listed in `claims_under_test` (`claim.turn == index + 1`); the closing
+# sentence states the `conversation_claim_contradicts_state` listing rule.
+GROUNDING_PARAGRAPH = (
+    "In a `conversation`, at least one earlier turn must state something "
+    "concrete the final turn relies on. Either the earlier turn's text "
+    "names the specific record, the session identity, or a value from a "
+    "state fact you list in `state_facts_used`, or you list the earlier "
+    "turn in `claims_under_test` with its 1-based `turn`, the `state_path` "
+    "from `state_facts_used` whose value the turn asserts, and a "
+    "one-sentence `note`. An earlier turn that speaks only in general "
+    "terms, without naming a specific record, identity, or value, does not "
+    "ground the final turn and is rejected as unused context. When an "
+    "earlier turn asserts, for a state fact you list, something the target "
+    "state contradicts, that turn must appear in `claims_under_test`."
+)
+
+
+def test_owner_bound_prompt_documents_the_conversation_grounding_rule():
+    """The paragraph renders exactly once, after the conversation shape
+    block, wherever the conversation approach is offered."""
+    prompt = _prompt()
+    assert prompt.count(GROUNDING_PARAGRAPH) == 1
+    shape_block = '{"kind": "conversation", "turns":'
+    assert shape_block in prompt
+    assert prompt.index(shape_block) < prompt.index(GROUNDING_PARAGRAPH)
+
+
+def test_prompt_without_the_conversation_offer_omits_the_grounding_rule():
+    """The paragraph stays inside the owner-bound branch: reply and
+    zero-argument candidates render prompts without it."""
+    assert GROUNDING_PARAGRAPH not in _prompt(_candidate(action="respond"))
+    assert GROUNDING_PARAGRAPH not in _prompt(_zero_argument_candidate())
+
+
 def test_tool_with_arguments_offers_the_commission_examples_under_proposed_authority():
     """Q30(b): tool_absent holds under proposed authority; the prompt offers
     the four commission examples and lists the held kind as unavailable."""
