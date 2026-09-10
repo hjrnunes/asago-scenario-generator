@@ -252,8 +252,40 @@ saved v16 bundle, target profile, and runtime context with a stub author
 trace mirrors the artifact under the identical condition, the check and
 both digests are unchanged, and regression tests preserve rejection of
 tampered or dropped trace evidence. v16's artifacts and review stay as
-recorded; whether the fixed consumer compiles SCN-005 is a separate
-proposed experiment, not assumed.
+recorded. Verified 2026-09-10 by owner-approved offline recompilation:
+the frozen v16 bundle, target profile, and runtime context replayed
+through the consumer at `5199877` with the recorded artifact-authoring
+calls (`build/v16-recheck/replay_with_call_log.py`, report beside it;
+7 of 7 calls byte-identical inputs, zero new calls, zero model contact).
+SCN-005 compiles: `artifact-trace.json`, `executable-conversation.json`,
+and `validation.json` now exist beside its byte-identical plan-side
+files, validation is clean (`ok: true`), and the trace mirrors
+`author.runtime_context` (digest `69da6803…`); the artifact carries
+`supplied_history: user_only` with `turn_texts_verbatim`. Every
+previously successful artifact is byte-identical (42 files across
+SCN-002/003/004/006/007/008/011); the manifest changes only in the
+output-dir prefix and SCN-005's `failed` → `generated` status. This is
+a correctness verification of the consumer fix, not a recall change:
+G03 was already recovered via SCN-007, and v16's score and review stay
+as recorded.
+
+v16 admission defect (recorded, fixed). SCN-012 (SC-9 × `respond`)
+compiled a `response_claim` oracle whose proposition tests reply
+quality — the rule's trigger — rather than SC-9/O1's escalation
+failure, because the frozen v3 table compiled a reply oracle against a
+required entry on any realization channel. The proposition can neither
+confirm satisfaction (poor reply with the escalation) nor detect the
+violation (good reply without it). Fixed 2026-09-10 under owner ruling
+Q31 (`56e1149`): under reviewed authority a reply oracle against a
+required entry compiles only when `realized_by: reply`; `tool_call`
+rejects `oracle_channel_unsupported` naming the omission alternative,
+and `unknown` holds `realization_unresolved` (R1-c narrowed to required
+entries; the forbidden-side permissive compile stands). The frozen v3
+verification passes 10 of 10 with the three changed cells recorded as
+deviation D4. Counterfactual on v16: SCN-012 and SCN-013 resolve
+pre-call `no_expressible_oracle`, SC-7 × `respond` holds
+`specification_only`; verified recall is unchanged (5 of 9, 1 of 3) and
+v16's evidence stays as recorded.
 
 The diversity wording stays in force by owner decision (round 59) as a
 logged exception to the Principle 7 recovery test: it recovered no gold
