@@ -221,12 +221,13 @@ binding set rides on `target-derived-structure.yaml` under
 `reviewed_obligation_bindings`, and the sidecar's `semantic_digest`
 `43684e7b…` verifies intact and covers that set (removing the bindings
 changes the digest to `879e0914…`). A rerun still cannot confirm the
-bindings file digest from the manifest alone. Proposed fix, deferred for
-owner approval: carry `input_hashes.reviewed_obligation_bindings` through
-`_PreservedStageKeys` exactly like the pinned loss-analysis hash (one
-field, one line in the final writer, one manifest test); the row exists
-only when the input was supplied, so target-blind and binding-free runs
-are unchanged.
+bindings file digest from the manifest alone. Fixed 2026-09-10 with owner
+approval (`791d568`): `_PreservedStageKeys` now carries
+`input_hashes.reviewed_obligation_bindings` exactly like the pinned
+loss-analysis hash, with regression tests in
+`tests/stpa/test_manifest_stage_keys.py`; the row exists only when the
+input was supplied, so target-blind and binding-free runs are unchanged.
+v16's evidence and manifest stay as recorded.
 
 v16 observation-stamp inventory. `observes` and `compile_basis` stamps
 appear in exactly three places: the run's `authored-scenarios.yaml`
@@ -238,6 +239,21 @@ authoring record (each accepted draft), all 13 persisted
 `artifacts-garak/` consumer output, or `gold-score-v4.yaml`; the execution
 bundle gained no fields, and no scorer or bundle consumer reads the
 stamps.
+
+v16 consumer defect (recorded, fixed). SCN-005 failed consumer-side
+because the conversation-trace writer required a non-empty author digest
+before copying `author.runtime_context`, while the artifact body records
+the field whenever author evidence exists and a runtime context was
+supplied; a conversation whose every stimulus text is a verbatim producer
+turn has no authored slots, so the intact pair differed and the
+consistency check correctly rejected it. Reproduced offline from the
+saved v16 bundle, target profile, and runtime context with a stub author
+(zero model calls). Fixed 2026-09-10 in the consumer (`5199877`): the
+trace mirrors the artifact under the identical condition, the check and
+both digests are unchanged, and regression tests preserve rejection of
+tampered or dropped trace evidence. v16's artifacts and review stay as
+recorded; whether the fixed consumer compiles SCN-005 is a separate
+proposed experiment, not assumed.
 
 The diversity wording stays in force by owner decision (round 59) as a
 logged exception to the Principle 7 recovery test: it recovered no gold
