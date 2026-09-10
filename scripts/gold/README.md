@@ -76,6 +76,13 @@ uv run python -m scripts.gold.review_run init --run output/runs/<run_directory>
 
 ### 3. Record Decisions
 
+Every accepted draft also receives the required four-axis consistency
+review (stimulus supports the claimed gain and adversary kind; oracle
+detects the intended violation; safe behaviors agree with the supplied
+facts and rule), reported separately from recovery decisions — see
+"Draft consistency review" in
+`docs/development/target-grounded-benchmark.md`.
+
 Record reviewer judgements with mandatory rationale:
 
 ```bash
