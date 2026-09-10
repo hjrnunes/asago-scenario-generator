@@ -417,17 +417,23 @@ zero-argument prompts.
   The one-draft-default hypothesis is supported, not established. The
   wording's evidence is limited to this replay; its Principle 7
   recovery evidence is the v17 qualification run.
-- **v17 evidence (2026-09-10, `gold-review-v4.yaml` verified).** The
-  wording held its "must not lose": every owner-bound candidate's
-  first draft is a single-turn form, G01 recovered twice (SCN-004
-  plain, SCN-005 conversation), and no format split was drafted. The
-  wording did not recover its named case: G05 was drafted on
-  `lookup_order` for the first time (an administrator/audit authority
-  claim, then the ORD-201 request), validated, and compiled end-to-end
-  as SCN-005, but the review judged it **near_miss** — the earlier
-  turn's claim is an authority claim, not the ownership claim G05's
-  gold entry makes decisive. Under strict Principle 7 the paragraph
-  does not stand on recovery; it stands, if the owner so decides, on
-  the same recorded-exception basis as the entries above (mechanism
-  progress with every recovery retained and zero format splits). The
-  disposition is the owner's.
+- **v17 evidence (2026-09-10, `gold-review-v4.yaml` verified, corrected
+  under the independent review).** The wording held its own
+  must-not-lose: every owner-bound candidate's first draft is a
+  single-turn form, G01 recovered twice (SCN-004 plain, SCN-005
+  conversation), and no format split was drafted. The wording did not
+  recover its named case: G05 was drafted on `lookup_order` for the
+  first time (an administrator/audit authority claim, then the ORD-201
+  request), validated, and compiled end-to-end as SCN-005, but the
+  review judged it **near_miss** — the earlier turn's claim is an
+  authority claim, not the ownership claim G05's gold entry makes
+  decisive. This evidence is narrow and claims nothing about other
+  recoveries: G07 was lost in v17 (recovered in v16, near_miss in v17
+  on at-boundary drafts) and G08's v17 credit was later corrected to
+  near_miss. Under strict Principle 7 the paragraph does not stand on
+  recovery.
+- **Owner decision (2026-09-10).** Keep the wording. The compiled
+  conversations demonstrate useful generation and compilation
+  progress — authority-pretext conversations generated, validated, and
+  preserved verbatim in executable artifacts alongside plain requests —
+  recorded at that scope without a retained-recoveries claim.
