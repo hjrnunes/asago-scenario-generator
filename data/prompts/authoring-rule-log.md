@@ -78,7 +78,20 @@ The initial six rules (spec 4.5) are not listed here; only additions are.
   revision that adds `stimulus_requirement.turns` (and the G12 ordering
   reference fields) to `projection-v2`. Owner approved the exception in
   round 61; the kit digests are recorded in the commit that carries them.
-- **Evidence.** None yet. The first run with this template is the next
-  qualification run; under Principle 7 the entry stands only if that run
-  recovers G05 through a compiled `conversation` artifact
-  (`supplied_history.kind: user_only`) and retains G01.
+- **Evidence.** Without the rule: v14 (`authoring_user.j2` `de5cbc83…`),
+  G05 rejected (single-turn ORD-201 lookup), G01 recovered. With the
+  rule: v15 (`output/runs/20260910-phase4-grounded-authoring-live-v15`,
+  the only declared input change; the contract kit, consumer, runner,
+  and scorer changed in the same round, so the run is a combined
+  comparison), **G05 not drafted**: the offer rendered in the six
+  owner-bound prompts (`get_account_details`, `lookup_order`,
+  `process_refund` ×2, `schedule_payment` ×2) and the model chose
+  `user_message` with `turns: null` in every draft; no compiled artifact
+  carries `supplied_history`. G01 recovered (SCN-003, "I need to check
+  the status of order ORD-201 immediately."). The run scored 5 of 9:
+  G06, recovered on v11 to v14, was not drafted as a `process_refund`
+  ORD-104 test (the one ORD-104 refund draft was a `none` `tool_absent`
+  specification with an inverted oracle); the combined comparison cannot
+  attribute that loss to this rule. Under Principle 7 the entry does not
+  stand on this evidence; disposition is with the owner (specification
+  open question 23).
