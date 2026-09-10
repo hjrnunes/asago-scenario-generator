@@ -13,6 +13,14 @@ hazard, and loss texts (for example with the literal texts an older iteration
 recorded) while keeping the run's structure, bindings, state, and
 observations.
 
+An optional ``--prompt-addendum-file`` splices one paragraph of candidate
+prompt wording into the rendered user prompt immediately after the
+``conversation`` shape block, keeping the production templates untouched;
+the addendum file's digest is recorded beside the prompt hashes, and the
+splice fails closed when the anchor is not present exactly once.
+``--no-retry`` disables the harness's one retry per sample for experiments
+with a fixed model-call budget.
+
 The tool writes only its own output directory: ``calls.jsonl`` produced by the
 product seam, plus the rendered prompts (dry-run) or ``replay-record.yaml``
 (live).  It records what the model drafts and how it labels the adversary; it
@@ -80,6 +88,34 @@ def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+# The conversation shape block exactly as ``authoring_user.j2`` renders it
+# when the conversation approach is offered.  The addendum splices in after
+# this anchor; a missing or repeated anchor fails closed.
+_ADDENDUM_ANCHOR = (
+    '{"kind": "conversation", "turns": [{"role": "user", "text": '
+    '"<earlier-turn text, for example the claim under test>"}, '
+    '{"role": "user", "text": "<final-turn request>"}]}\n```'
+)
+
+
+def _splice_addendum(user_prompt: str, addendum: str) -> str:
+    """Insert the addendum paragraph after the conversation shape block.
+
+    The production templates stay untouched: the splice is a replay-only
+    textual amendment, and it fails closed unless the anchor is present
+    exactly once (the conversation offer is per-candidate).
+    """
+    text = addendum.strip()
+    if not text:
+        raise ValueError("prompt addendum is empty")
+    if user_prompt.count(_ADDENDUM_ANCHOR) != 1:
+        raise ValueError(
+            "prompt addendum anchor not found exactly once; the candidate "
+            "does not offer the conversation approach, or the template moved"
+        )
+    return user_prompt.replace(_ADDENDUM_ANCHOR, f"{_ADDENDUM_ANCHOR}\n\n{text}")
+
+
 def _load_yaml(path: Path) -> Any:
     """Load one YAML document."""
     return yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -106,14 +142,31 @@ class _PromptCapture:
     With ``delegate=None`` (dry-run) the stub records both prompt texts and
     returns a typed error, so no model call is attempted.  With a delegate the
     wrapper only records prompt hashes and forwards unchanged, so the live
-    call log keeps its exact product shape.
+    call log keeps its exact product shape.  With ``addendum`` the user
+    prompt is spliced once at the conversation shape block before hashing
+    and forwarding, so every record reflects the text the model receives.
     """
 
-    def __init__(self, delegate: Any) -> None:
+    def __init__(
+        self,
+        delegate: Any,
+        addendum: str | None = None,
+        addendum_file: Path | None = None,
+    ) -> None:
         self._delegate = delegate
+        self._addendum = addendum
+        self.addendum_record = (
+            {"file": str(addendum_file), "sha256": _sha256_file(addendum_file)}
+            if addendum_file is not None
+            else None
+        )
         self.calls: list[dict[str, Any]] = []
 
     def __call__(self, **kwargs: Any) -> tuple[Any, Any, str | None]:
+        if self._addendum is not None:
+            kwargs["user_prompt"] = _splice_addendum(
+                kwargs["user_prompt"], self._addendum
+            )
         record: dict[str, Any] = {
             "system_prompt_sha256": _sha256_text(kwargs["system_prompt"]),
             "user_prompt_sha256": _sha256_text(kwargs["user_prompt"]),
@@ -345,6 +398,7 @@ def _dry_run(
         "system_prompt_sha256": rendered["system_prompt_sha256"],
         "user_prompt_sha256": rendered["user_prompt_sha256"],
         "template_hashes": rendered["template_hashes"],
+        "prompt_addendum": capture.addendum_record,
     }
     (output_dir / PROMPT_HASHES_FILENAME).write_text(
         yaml.dump(hashes, default_flow_style=False, sort_keys=False), encoding="utf-8"
@@ -369,7 +423,9 @@ def _run_live(
     sample_records: list[dict[str, Any]] = []
     failed = False
     for index in range(1, args.samples + 1):
-        attempts_allowed = 2  # one attempt plus at most one retry per sample
+        # One attempt plus at most one retry per sample, unless the caller
+        # holds a fixed call budget (--no-retry).
+        attempts_allowed = 1 if args.no_retry else 2
         rows: list[dict[str, Any]] = []
         outcome = None
         while attempts_allowed:
@@ -416,6 +472,7 @@ def _run_live(
         "system_prompt_sha256": capture.calls[0]["system_prompt_sha256"],
         "user_prompt_sha256": capture.calls[0]["user_prompt_sha256"],
         "template_hashes": capture.calls[0]["template_hashes"],
+        "prompt_addendum": capture.addendum_record,
         "model": context.client.model,
         "temperature": context.temperature,
         "samples": args.samples,
@@ -486,6 +543,19 @@ def main(argv: list[str] | None = None) -> int:
         "the pinned constraint's texts",
     )
     parser.add_argument(
+        "--prompt-addendum-file",
+        type=Path,
+        default=None,
+        help="Optional text file spliced into the rendered user prompt after "
+        "the conversation shape block (production templates stay untouched; "
+        "the splice fails closed unless the anchor is present exactly once)",
+    )
+    parser.add_argument(
+        "--no-retry",
+        action="store_true",
+        help="Make exactly one call attempt per sample (fixed call budgets)",
+    )
+    parser.add_argument(
         "--profiles",
         type=Path,
         default=Path("config/model-profiles.yaml"),
@@ -527,8 +597,16 @@ def main(argv: list[str] | None = None) -> int:
         candidate = _apply_override(candidate, Path(args.constraint_override))
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
+    addendum_file = args.prompt_addendum_file
+    addendum = (
+        Path(addendum_file).read_text(encoding="utf-8") if addendum_file else None
+    )
     original = authoring.safe_llm_call
-    capture = _PromptCapture(None if args.dry_run else original)
+    capture = _PromptCapture(
+        None if args.dry_run else original,
+        addendum=addendum,
+        addendum_file=Path(addendum_file) if addendum_file else None,
+    )
     authoring.safe_llm_call = capture
     try:
         if args.dry_run:

@@ -225,9 +225,17 @@ uv run python scripts/qualification/replay_authoring_context.py \
   --profiles config/model-profiles.yaml --profile gemma4-oc --temperature 0.4 \
   --constraint SC-8 --action process_refund \
   [--constraint-override data/gold/miniklarna/replay/iteration-20-scn-019-constraint.yaml] \
+  [--prompt-addendum-file <addendum-text-file>] [--no-retry] \
   --samples 3 \
   --output-dir output/runs/<replay-output-dir>
 ```
+
+`--prompt-addendum-file` splices one paragraph of candidate prompt wording
+into the rendered user prompt after the `conversation` shape block, keeping
+the production templates untouched; the addendum file's digest is recorded
+with the prompt hashes, and the splice fails closed unless its anchor is
+present exactly once. `--no-retry` disables the one retry per sample for
+experiments with a fixed model-call budget.
 
 ## Standalone Stage 1a coverage review
 

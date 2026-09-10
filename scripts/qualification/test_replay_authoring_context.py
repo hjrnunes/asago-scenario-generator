@@ -161,3 +161,72 @@ def test_sample_record_without_omission_shape_or_drafts() -> None:
     assert record["omission_drafts"] == []
     assert record["no_scenario_reason"].startswith("no supported check")
     assert record["error"] == "provider timeout"
+
+
+# Prompt addendum splice (replay-only; the production templates stay untouched)
+
+
+PROMPT_WITH_OFFER = (
+    "Guidance paragraph.\n\n"
+    "A `conversation` stimulus carries `turns`, two to three user turns in "
+    "order, and no `text`:\n\n"
+    "```json\n" + tool._ADDENDUM_ANCHOR + "\n\nNext section."
+)
+
+
+def test_addendum_splices_once_after_the_shape_block() -> None:
+    spliced = tool._splice_addendum(PROMPT_WITH_OFFER, "Grounding rule text.")
+
+    assert (
+        f"{tool._ADDENDUM_ANCHOR}\n\nGrounding rule text.\n\nNext section." in spliced
+    )
+    assert spliced.count("Grounding rule text.") == 1
+
+
+def test_addendum_fails_closed_without_the_anchor() -> None:
+    with pytest.raises(ValueError, match="anchor"):
+        tool._splice_addendum("No conversation offer here.", "Grounding rule.")
+
+
+def test_addendum_fails_closed_on_a_repeated_anchor() -> None:
+    doubled = PROMPT_WITH_OFFER + "\n\n" + PROMPT_WITH_OFFER
+
+    with pytest.raises(ValueError, match="anchor"):
+        tool._splice_addendum(doubled, "Grounding rule.")
+
+
+def test_addendum_rejects_empty_text() -> None:
+    with pytest.raises(ValueError, match="empty"):
+        tool._splice_addendum(PROMPT_WITH_OFFER, "  \n ")
+
+
+def test_capture_without_addendum_hashes_the_untouched_prompt() -> None:
+    capture = tool._PromptCapture(None)
+
+    capture(system_prompt="system", user_prompt=PROMPT_WITH_OFFER)
+
+    (record,) = capture.calls
+    assert record["user_prompt"] == PROMPT_WITH_OFFER
+    assert record["user_prompt_sha256"] == tool._sha256_text(PROMPT_WITH_OFFER)
+    assert capture.addendum_record is None
+
+
+def test_capture_splices_before_hashing_and_records_the_digest(
+    tmp_path: Path,
+) -> None:
+    addendum_file = tmp_path / "addendum.md"
+    addendum_file.write_text("Grounding rule text.\n", encoding="utf-8")
+    capture = tool._PromptCapture(
+        None, addendum="Grounding rule text.", addendum_file=addendum_file
+    )
+
+    capture(system_prompt="system", user_prompt=PROMPT_WITH_OFFER)
+
+    (record,) = capture.calls
+    expected = tool._splice_addendum(PROMPT_WITH_OFFER, "Grounding rule text.")
+    assert record["user_prompt"] == expected
+    assert record["user_prompt_sha256"] == tool._sha256_text(expected)
+    assert capture.addendum_record == {
+        "file": str(addendum_file),
+        "sha256": tool._sha256_file(addendum_file),
+    }
