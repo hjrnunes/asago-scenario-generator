@@ -65,7 +65,7 @@ omit keys.
   ],
   "security_constraints": [
     {"constraint_id": "SC-4", "rule": "...", "applies_when": [],
-     "related_hazards": ["H-4"]}
+     "obligations": [], "related_hazards": ["H-4"]}
   ]
 }
 ```
@@ -88,6 +88,8 @@ is owned by the risk-derivation call and is retained automatically.
   key is required on every constraint — return it even when empty — with at
   most four conditions, and no condition may simply restate the rule.
 - No duplicate IDs. Continue numbering from where the previous analysis left off.
+
+{% include "_obligation_entries.j2" %}
 - Do NOT duplicate losses, hazards, or constraints already present in the previous analysis. If an existing loss already covers a gap, do not re-derive it.
 
 ## Quality requirements

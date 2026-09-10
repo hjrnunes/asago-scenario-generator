@@ -546,8 +546,28 @@ each validated offline, with one bounded revision for a failing relevance
 check. The exact resource/operation binding for every tool action is
 published in a content-pinned `target-derived-structure.yaml` sidecar, and
 target realization replays those bindings through a zero-call identity
-interpreter instead of a realization model call. The target-blind path and
+interpreter instead of a realization model call. An optional
+`--reviewed-obligation-bindings` input (closed
+`reviewed-obligation-bindings-v1`) supplies reviewed obligation-to-action
+connections; offline validation fails closed unless each names a reviewed
+`required` entry realized by a tool call on a tool action of the structure,
+and the exact set in force rides on the sidecar so it is digest-covered.
+The target-blind path and
 diagnostic `stpa-run` are unchanged.
+
+Security constraints may carry explicit obligation entries (owner ruling
+Q30, 2026-09-10): a `required` entry names a mandated behavior, the rule
+span it reads, and the channel that would realize it (`realized_by`); a
+`forbidden` entry names a prohibited behavior, its span, and the channel a
+violation would take (`violated_via`). The channel fields are
+kind-exclusive, `unknown` is the permissive default, a forbidden entry may
+be marked `observation_role: proxy` with the `source_outcome` it stands
+for, and a required entry may record the `completion` an oracle does not
+observe. The constraint's failure direction is computed from its entries
+(`required`, `forbidden`, `mixed`, or `unresolved`) under a
+`direction_authority` stamp: deterministic code restamps every derived or
+revision-merged graph `proposed` and clears wire-carried reviewer marks, so
+only a pinned graph carries `reviewed` with its reviewer stamp.
 
 In target-derived mode, scenario synthesis replaces the ICA enumeration,
 ICA verification and correction, and Stage 5 BDI generation with one
@@ -563,7 +583,27 @@ the judge text from the closed oracle templates in
 downstream accounting and realization run unchanged; and assembles the
 contextual scenario spec and execution contract without a Stage 5 call.
 Rejected scenarios are recorded with their typed reason and never repaired
-with a second call. The target-blind path keeps the existing Stage 5
+with a second call. The obligation-direction admission seam
+(`admit_oracle_kinds`) judges every oracle kind against the candidate's
+entries before the call, and the prompt offers only kinds that compile;
+deterministic validation re-judges every returned draft against its own
+`obligation_ref` citation (required when entries exist, rejected when
+unknown). Under proposed authority the commission kinds compile
+permissively and an omission oracle holds as `direction_unreviewed`; under
+reviewed authority a contradiction with the cited entry's kind or channel
+rejects (`oracle_direction_contradiction`,
+`oracle_channel_unsupported`), and an omission oracle compiles only through
+a reviewed binding, otherwise holding with a typed reason
+(`direction_unresolved`, `realization_unresolved`, `binding_unreviewed`). A
+candidate with no compilable kind resolves before the call
+(`specification_only` or `no_expressible_oracle`), and held drafts persist
+as specification evidence that is never compiled or credited as recovery.
+Every accepted scenario carries `observes` (attempt, total omission, or
+reply; no compiled kind measures an effect, and an attempt-level or proxy
+stamp never supports an executed-safety claim) and `compile_basis` stamps
+that travel to the compiled spec as `oracle_observes`/`oracle_basis`,
+omitted when absent so existing projection digests hold. The target-blind
+path keeps the existing Stage 5
 pipeline; the two modes are never maintained for the same run.
 
 Stage 2 derives use-case functions and their primary outputs before attaching

@@ -72,10 +72,28 @@ Amendments and interpretations in force:
   unrecovered.
 
 Measurement inputs pinned for comparison runs: loss analysis
-`data/gold/miniklarna/loss-analysis-pinned.yaml` (`6e127482…`), target
+`data/gold/miniklarna/loss-analysis-pinned.yaml`, target
 observations `a6584b7c…`, model `gemma-4-26b-a4b-it` at temperature 0.4 with
 the profile's `max_completion_tokens` unchanged. A run whose manifest differs
 on any of these rows is a declared input change, not an unchanged rerun.
+
+Declared input change (2026-09-10, owner ruling Q30): the pinned loss
+analysis moved from `6e127482…` to `82f4b77a…`, adding the accepted
+obligation entries and reviewed direction stamps (Q30(a)) and the R-SC-8
+required-entry amendment. (The intermediate same-day digest `6182fe88…`
+differed only in two entry wordings, realigned verbatim to the frozen v3
+review text by the implementation verification.) A new pinned input,
+`data/gold/miniklarna/reviewed-obligation-bindings.yaml` (`17856c5a…`),
+carries the one accepted obligation-to-action binding, SC-9/O1 ×
+`escalate_to_human` (Q30(c) option iii); every other omission candidate
+stays `binding_unreviewed`. The same ruling changed the authoring contract:
+`authoring_user.j2` `8c5fbc9e…` → `dd3a146d…` (obligation entries block and
+per-kind offering; rule log 2026-09-10), and the three Stage 1a templates
+gained the `obligations` key via the shared partial
+`_obligation_entries.j2` (`e205c9c3…`). Historical runs v7–v15 were produced
+without obligation entries or bindings; their scores and reviews are
+unchanged, and the v15 tool_absent artifacts are reclassified only by the
+offline direction rules, never rewritten.
 
 ## Recovery criteria
 

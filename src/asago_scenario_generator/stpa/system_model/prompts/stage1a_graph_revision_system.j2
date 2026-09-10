@@ -24,11 +24,16 @@ Your response is a patch over the graph, and only over the graph:
    conditions) and `applies_when` (the conditions under which the rule is
    in force, each in your own words; all must hold; a disjunction goes
    inside one condition; empty when unconditional; at most four; no
-   condition restates the rule). Do not return losses or risk
+   condition restates the rule). `obligations` entries ride with their
+   constraint: a constraint returned without them loses them, and a
+   reworded `rule` needs its entries re-derived against the revised text.
+   Do not return losses or risk
    dispositions: losses are immutable and retained automatically. Do not
    soften a check. The checks are structural requirements of this
    analysis; a response that renames, deletes, or empties records to pass
    them is invalid.
+
+{% include "_obligation_entries.j2" %}
 
 ## Response format
 
@@ -42,7 +47,7 @@ omit keys.
   ],
   "security_constraints": [
     {"constraint_id": "SC-1", "rule": "...", "applies_when": [],
-     "related_hazards": ["H-1"]}
+     "obligations": [], "related_hazards": ["H-1"]}
   ]
 }
 ```

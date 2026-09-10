@@ -75,6 +75,16 @@ def run_cmd(
             "revision; a failing gate is fatal."
         ),
     ),
+    reviewed_obligation_bindings: Path | None = typer.Option(
+        None,
+        "--reviewed-obligation-bindings",
+        help=(
+            "Optional reviewed-obligation-bindings.yaml. Reviewed "
+            "obligation-to-action bindings for the target-derived Stage 2 "
+            "mode; validated offline and pinned on the "
+            "target-derived-structure sidecar."
+        ),
+    ),
     requested_environment_basis: str | None = typer.Option(
         None,
         "--basis",
@@ -129,6 +139,10 @@ def run_cmd(
         _validate_file(target_observations, "target observations file")
     if loss_analysis is not None:
         _validate_file(loss_analysis, "loss analysis file")
+    if reviewed_obligation_bindings is not None:
+        _validate_file(
+            reviewed_obligation_bindings, "reviewed obligation bindings file"
+        )
     if cross_taxonomy is not None:
         _validate_file(cross_taxonomy, "cross-taxonomy file")
     if max_workers < 1:
@@ -212,6 +226,17 @@ def run_cmd(
 
             # Fail fast on a malformed pinned graph before any run work.
             LossAnalysis.model_validate(_load_payload(loss_analysis, "loss analysis"))
+        reviewed_bindings_value: tuple[Any, ...] = ()
+        if reviewed_obligation_bindings is not None:
+            from asago_scenario_generator.stpa.models.target_derived_structure import (
+                ReviewedObligationBindingsFile,
+            )
+
+            reviewed_bindings_value = ReviewedObligationBindingsFile.model_validate(
+                _load_payload(
+                    reviewed_obligation_bindings, "reviewed obligation bindings"
+                )
+            ).bindings
         if requested_environment_basis is not None:
             try:
                 requested_basis = RequestedEnvironmentBasis(requested_environment_basis)
@@ -259,6 +284,8 @@ def run_cmd(
             risk_extraction_path=risk_extraction,
             qualification_facts_path=qualification_facts,
             loss_analysis_path=loss_analysis,
+            reviewed_obligation_bindings=reviewed_bindings_value,
+            reviewed_obligation_bindings_path=reviewed_obligation_bindings,
             profiles_file=profiles_file,
             profile=profile,
             sp1_profile=sp1_profile,

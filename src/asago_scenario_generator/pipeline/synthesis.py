@@ -120,11 +120,17 @@ class SynthesisInputs:
     taxonomy_inputs: TaxonomyObligationInputs | Any | None = None
     prebuilt_plan: Any | None = None
 
+    # Reviewed obligation-to-action bindings (owner ruling Q30(c)): a typed
+    # value threaded into the target-derived Stage 2 derivation, where it is
+    # validated offline and pinned on the target-derived-structure sidecar.
+    reviewed_obligation_bindings: tuple[Any, ...] = ()
+
     # CLI/source metadata.  These are not read by pure planning seams.
     risk_extraction_path: Path | None = None
     qualification_facts_path: Path | None = None
     capability_profile_path: Path | None = None
     loss_analysis_path: Path | None = None
+    reviewed_obligation_bindings_path: Path | None = None
     profiles_file: Path | str = "config/model-profiles.yaml"
 
     # Named model controls, resolved by the outer adapter.
@@ -2863,6 +2869,8 @@ def _default_baseline(
         execution_target_profile=execution_target_profile,
         target_observations=target_observations,
         loss_analysis_path=loss_analysis_path or inputs.loss_analysis_path,
+        reviewed_obligation_bindings=inputs.reviewed_obligation_bindings,
+        reviewed_obligation_bindings_path=inputs.reviewed_obligation_bindings_path,
     )
     return result
 
@@ -3031,6 +3039,8 @@ def _default_author_scenarios(
     )
     from asago_scenario_generator.stpa.pipeline.llm_config import resolve_llm_client
     from asago_scenario_generator.stpa.scenario_prod.authoring import (
+        CandidateAuthoringOutcome,
+        admit_oracle_kinds,
         author_candidate_scenarios,
         build_authoring_candidates,
         synthesize_authored_enumeration,
@@ -3065,21 +3075,56 @@ def _default_author_scenarios(
     )
     temperature = effective_temperature(client, inputs.temperature)
     surface = derive_content_surface(capability_profile)
-    outcomes = tuple(
-        author_candidate_scenarios(
-            client,
+    # Reviewed obligation-to-action bindings ride on the content-pinned
+    # sidecar (owner ruling Q30(c)); authoring consumes them as the closed
+    # (constraint, obligation, action) set.
+    reviewed_bindings = frozenset(
+        (binding.constraint_id, binding.obligation_id, binding.action)
+        for binding in getattr(structure, "reviewed_obligation_bindings", ())
+    )
+    outcome_list: list[Any] = []
+    for candidate in candidates:
+        # Resolve a candidate before the call when no oracle kind is
+        # expressible under the direction authority in force: every kind
+        # rejected means no_expressible_oracle; any held kind means the
+        # candidate survives as a specification (specification_only).
+        admissions = admit_oracle_kinds(
             candidate,
             profile=inputs.execution_target_profile,
-            observations=inputs.target_observations,
-            structure=structure,
-            control_structure=control_structure,
-            capability_profile=capability_profile,
-            run_dir=Path(output_dir),
-            temperature=temperature,
-            has_content_surface=surface.has_content_surface,
+            reviewed_bindings=reviewed_bindings,
         )
-        for candidate in candidates
-    )
+        if not any(admission.status == "compile" for admission in admissions.values()):
+            held = any(admission.status == "hold" for admission in admissions.values())
+            outcome_list.append(
+                CandidateAuthoringOutcome(
+                    candidate=candidate,
+                    resolution=(
+                        "specification_only" if held else "no_expressible_oracle"
+                    ),
+                    resolution_detail="; ".join(
+                        f"{kind}: {admission.status}"
+                        + (f"({admission.reason})" if admission.reason else "")
+                        for kind, admission in sorted(admissions.items())
+                    ),
+                )
+            )
+            continue
+        outcome_list.append(
+            author_candidate_scenarios(
+                client,
+                candidate,
+                profile=inputs.execution_target_profile,
+                observations=inputs.target_observations,
+                structure=structure,
+                control_structure=control_structure,
+                capability_profile=capability_profile,
+                run_dir=Path(output_dir),
+                temperature=temperature,
+                has_content_surface=surface.has_content_surface,
+                reviewed_bindings=reviewed_bindings,
+            )
+        )
+    outcomes = tuple(outcome_list)
     write_authored_scenarios_record(Path(output_dir), outcomes)
     enumeration, bundles = synthesize_authored_enumeration(
         outcomes, structure, control_structure

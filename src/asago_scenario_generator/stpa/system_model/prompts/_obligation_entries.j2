@@ -1,0 +1,13 @@
+Each constraint may carry `obligations`: zero to three explicit
+failure-direction entries. Each entry has `obligation_id` (`O1`, `O2`,
+...), `kind` (`required` when the rule mandates a behavior, `forbidden`
+when it prohibits one), `behavior` (the mandated or prohibited behavior in
+one phrase), `rule_span` (a verbatim quote from `rule` covering that
+behavior), and the channel the behavior would happen through:
+`realized_by` on required entries, `violated_via` on forbidden entries,
+each one of `tool_call`, `reply`, `provider_request` (a prompt sent to the
+third-party model), or `unknown`. An optional `note` records a partial
+projection or an unresolved remainder. Return entries only when the
+rule's direction is legible; omit them rather than guessing a channel.
+Entries you return are proposals: deterministic code stamps them
+`proposed`, and only human review marks them `reviewed`.

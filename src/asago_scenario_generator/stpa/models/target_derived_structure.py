@@ -18,6 +18,7 @@ Two closed artifacts are produced:
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, Literal
 
 from pydantic import Field, model_validator
@@ -43,6 +44,9 @@ CONSTRAINT_ACTION_RELEVANCE_DIGEST_DOMAIN = (
 CONTROL_STRUCTURE_DIGEST_DOMAIN = (
     "asago-scenario-generator:control-structure-content:v1"
 )
+
+REVIEWED_OBLIGATION_BINDINGS_FILENAME = "reviewed-obligation-bindings.yaml"
+REVIEWED_OBLIGATION_BINDINGS_SCHEMA_VERSION = "reviewed-obligation-bindings-v1"
 
 ActionKind = Literal["tool_call", "model_output", "state_change", "environment_action"]
 ProcessModelSource = Literal[
@@ -153,6 +157,32 @@ class BeliefRecord(ClosedCanonicalModel):
         return self
 
 
+class ReviewedObligationBinding(ClosedCanonicalModel):
+    """One reviewed connection from a required obligation to the action that
+    realizes it (owner ruling Q30(c) option iii, 2026-09-10).
+
+    An omission oracle (``tool_absent``) on a reviewed required entry
+    compiles only when the entry's ``realized_by: tool_call`` channel is
+    bound to the exact action by one of these reviewed records; without the
+    binding the draft holds as ``binding_unreviewed``.
+    """
+
+    constraint_id: str = Field(min_length=1)
+    obligation_id: str = Field(min_length=1)
+    action: str = Field(min_length=1)
+    reviewed_by: str = Field(min_length=1)
+    reviewed_on: date
+
+
+class ReviewedObligationBindingsFile(ClosedCanonicalModel):
+    """The reviewed-bindings input file supplied to a run."""
+
+    schema_version: Literal[REVIEWED_OBLIGATION_BINDINGS_SCHEMA_VERSION] = (
+        REVIEWED_OBLIGATION_BINDINGS_SCHEMA_VERSION
+    )
+    bindings: tuple[ReviewedObligationBinding, ...] = ()
+
+
 class TargetDerivedStructure(ClosedCanonicalModel):
     """Pinned sidecar record of the deterministic target-derived structure."""
 
@@ -175,6 +205,15 @@ class TargetDerivedStructure(ClosedCanonicalModel):
     # calls.jsonl and counted by the run manifest's count_calls_by_stage.
     model_call_count: int = Field(ge=0, le=3)
     warnings: tuple[str, ...] = ()
+    # Reviewed obligation-to-action bindings supplied with the run (owner
+    # ruling Q30(c) option iii).  They are reviewed inputs, not derived
+    # content: they ride on this content-pinned sidecar so the exact set in
+    # force for the run is digest-covered, and they are validated offline
+    # against the loss analysis and these actions before derivation
+    # finishes.
+    reviewed_obligation_bindings: tuple[ReviewedObligationBinding, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
 
     @model_validator(mode="after")
     def canonicalize_and_digest(self) -> "TargetDerivedStructure":
@@ -203,6 +242,65 @@ class TargetDerivedStructure(ClosedCanonicalModel):
     def binding_for(self, ca_id: str) -> ActionBinding | None:
         """Return the exact recorded binding for one control action."""
         return next((item for item in self.actions if item.ca_id == ca_id), None)
+
+
+def validate_reviewed_obligation_bindings(
+    bindings: tuple[ReviewedObligationBinding, ...],
+    loss_analysis: LossAnalysis,
+    actions: tuple[ActionBinding, ...],
+) -> None:
+    """Fail closed on any binding that does not name a reviewed required
+    entry realized by a tool call on a tool action of this structure.
+
+    A binding is a reviewed claim, so the cited constraint must carry
+    reviewed direction authority, the cited entry must be a required entry
+    whose realization channel is ``tool_call``, and the action must be one
+    of the structure's tool-call actions.
+    """
+    constraints = {
+        item.constraint_id: item for item in loss_analysis.security_constraints
+    }
+    actions_by_name = {item.name: item for item in actions}
+    seen: set[tuple[str, str, str]] = set()
+    for binding in bindings:
+        key = (binding.constraint_id, binding.obligation_id, binding.action)
+        if key in seen:
+            raise ValueError(f"duplicate reviewed obligation binding {key}")
+        seen.add(key)
+        constraint = constraints.get(binding.constraint_id)
+        if constraint is None:
+            raise ValueError(
+                f"reviewed obligation binding names unknown constraint "
+                f"{binding.constraint_id!r}"
+            )
+        entry = constraint.obligation_by_id(binding.obligation_id)
+        if entry is None:
+            raise ValueError(
+                f"reviewed obligation binding names unknown obligation "
+                f"{binding.constraint_id}/{binding.obligation_id}"
+            )
+        if constraint.effective_direction_authority != "reviewed":
+            raise ValueError(
+                f"reviewed obligation binding cites "
+                f"{binding.constraint_id}/{binding.obligation_id} but the "
+                "constraint's direction authority is not reviewed"
+            )
+        if entry.kind != "required" or entry.realized_by != "tool_call":
+            raise ValueError(
+                f"reviewed obligation binding cites "
+                f"{binding.constraint_id}/{binding.obligation_id}, which is "
+                "not a required entry realized by a tool call"
+            )
+        action = actions_by_name.get(binding.action)
+        if action is None:
+            raise ValueError(
+                f"reviewed obligation binding names unknown action {binding.action!r}"
+            )
+        if action.kind != "tool_call":
+            raise ValueError(
+                f"reviewed obligation binding names action {binding.action!r}, "
+                f"whose kind is {action.kind!r}, not a tool call"
+            )
 
 
 class RelevantAction(ClosedCanonicalModel):
@@ -304,6 +402,8 @@ class ConstraintActionRelevance(ClosedCanonicalModel):
 __all__ = [
     "CONSTRAINT_ACTION_RELEVANCE_FILENAME",
     "CONSTRAINT_ACTION_RELEVANCE_SCHEMA_VERSION",
+    "REVIEWED_OBLIGATION_BINDINGS_FILENAME",
+    "REVIEWED_OBLIGATION_BINDINGS_SCHEMA_VERSION",
     "TARGET_DERIVED_STRUCTURE_FILENAME",
     "TARGET_DERIVED_STRUCTURE_SCHEMA_VERSION",
     "ActionBinding",
@@ -312,8 +412,11 @@ __all__ = [
     "ConstraintRelevanceRow",
     "ControllerPurpose",
     "RelevantAction",
+    "ReviewedObligationBinding",
+    "ReviewedObligationBindingsFile",
     "TargetDerivedStructure",
     "UnconstrainedAction",
     "control_structure_content_digest",
     "loss_analysis_content_digest",
+    "validate_reviewed_obligation_bindings",
 ]

@@ -705,6 +705,7 @@ def _revision_patch_to_draft(
                 rule=constraint.rule,
                 applies_when=constraint.applies_when,
                 related_hazards=constraint.related_hazards,
+                obligations=constraint.obligations,
             )
         )
     return LossAnalysisDraft.model_validate(

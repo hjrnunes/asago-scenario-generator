@@ -38,9 +38,13 @@ from asago_scenario_generator.stpa.models.control_structure import ControlStruct
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
 )
-from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.models.loss_analysis import (
+    LossAnalysis,
+    stamp_proposed_direction,
+)
 from asago_scenario_generator.stpa.models.target_derived_structure import (
     ConstraintActionRelevance,
+    ReviewedObligationBinding,
     TargetDerivedStructure,
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
@@ -136,6 +140,8 @@ def run_sp1(
     execution_target_profile: ExecutionTargetProfile | None = None,
     target_observations: TargetObservationSnapshot | None = None,
     loss_analysis_path: Path | None = None,
+    reviewed_obligation_bindings: tuple[ReviewedObligationBinding, ...] = (),
+    reviewed_obligation_bindings_path: Path | None = None,
 ) -> SP1RunResult:
     """Run the full SP1 pipeline: Stages 1b → 1a → 2.
 
@@ -176,6 +182,12 @@ def run_sp1(
             validated, gated offline (accounting + five density checks, no
             bounded revision), and re-published as the canonical
             ``loss-analysis.yaml``. A failing gate is a fatal stage error.
+        reviewed_obligation_bindings: Optional reviewed obligation-to-action
+            bindings (owner ruling Q30(c)). They apply only to the
+            target-derived Stage 2 mode, are validated offline against the
+            loss analysis and the derived actions, and ride on the
+            content-pinned target-derived-structure sidecar. Supplying them
+            for a target-blind run is a fatal stage error.
 
     Returns:
         SP1RunResult with all artifacts and diagnostic info. On partial
@@ -278,6 +290,7 @@ def run_sp1(
         stage_warnings,
         execution_target_profile=execution_target_profile,
         target_observations=target_observations,
+        reviewed_obligation_bindings=reviewed_obligation_bindings,
     )
 
     # Write run manifest (always, even on partial failure)
@@ -303,6 +316,7 @@ def run_sp1(
         risk_coverage_review=risk_coverage_review,
         stage_2_mode=stage2_result.mode,
         stage_2_call_count=stage2_result.model_call_count,
+        reviewed_obligation_bindings_path=reviewed_obligation_bindings_path,
     )
 
     return SP1RunResult(
@@ -372,6 +386,10 @@ def _try_derive_loss_analysis(
             capability_profile=capability_profile,
             normalization_warnings=normalization_warnings,
         )
+        # Deterministic code owns the direction-authority stamp: entries on
+        # a derived graph are proposals until a human reviews them (owner
+        # ruling Q30, 2026-09-10).
+        stamp_proposed_direction(analysis)
         if stage_warnings is not None:
             stage_warnings.extend(normalization_warnings)
             stage_warnings.extend(
@@ -441,6 +459,9 @@ def _try_gate_loss_analysis(
         ),
         "graph_revision_call_count": 1 if outcome.revision_attempted else 0,
     }
+    # The bounded revision call re-derives constraints; restamp so no
+    # revised entry can carry a reviewed claim out of the derived path.
+    stamp_proposed_direction(outcome.loss_analysis)
     return outcome.loss_analysis, gates
 
 
@@ -646,6 +667,7 @@ def _run_stage_2_block(
     *,
     execution_target_profile: ExecutionTargetProfile | None = None,
     target_observations: TargetObservationSnapshot | None = None,
+    reviewed_obligation_bindings: tuple[ReviewedObligationBinding, ...] = (),
 ) -> _Stage2Result:
     """Run Stage 2: control structure derivation, heuristics, critic, and revision.
 
@@ -660,6 +682,15 @@ def _run_stage_2_block(
 
     stage_warnings = [] if stage_warnings is None else stage_warnings
     mode = target_derived_stage2_mode(capability_profile, execution_target_profile)
+    if reviewed_obligation_bindings and mode != "target_derived":
+        # Reviewed bindings bind obligations to observed target actions; a
+        # target-blind structure has nothing to bind them to, so accepting
+        # them here would silently discard a reviewed input.
+        stage_errors.append(
+            "stage_2/bindings: reviewed obligation bindings require the "
+            "target-derived Stage 2 mode (observed single-controller target)"
+        )
+        return _Stage2Result(mode=mode, model_call_count=0)
     if mode == "target_derived":
         return _run_target_derived_stage_2(
             llm_client,
@@ -673,6 +704,7 @@ def _run_stage_2_block(
             stage_warnings,
             execution_target_profile=execution_target_profile,
             target_observations=target_observations,
+            reviewed_obligation_bindings=reviewed_obligation_bindings,
         )
 
     derivation = _derive_stage2_control_structure(
@@ -751,6 +783,7 @@ def _run_target_derived_stage_2(
     *,
     execution_target_profile: ExecutionTargetProfile,
     target_observations: TargetObservationSnapshot | None,
+    reviewed_obligation_bindings: tuple[ReviewedObligationBinding, ...] = (),
 ) -> _Stage2Result:
     """Run the deterministic target-derived Stage 2 derivation path."""
     if loss_analysis is None or capability_profile is None:
@@ -763,6 +796,7 @@ def _run_target_derived_stage_2(
             capability_profile=capability_profile,
             execution_target_profile=execution_target_profile,
             target_observations=target_observations,
+            reviewed_obligation_bindings=reviewed_obligation_bindings,
             run_dir=run_dir,
             template_loader=loader,
             temperature=temperature if temperature is not None else 0.4,
@@ -805,6 +839,7 @@ def _compute_input_hashes(
     use_case_text: str,
     risk_cards: list[RiskCard],
     loss_analysis_path: Path | None = None,
+    reviewed_obligation_bindings_path: Path | None = None,
 ) -> dict[str, str]:
     """Compute SHA-256 hashes of input artifacts for the manifest."""
     hashes = {
@@ -818,6 +853,10 @@ def _compute_input_hashes(
     if loss_analysis_path is not None:
         hashes["loss_analysis"] = hashlib.sha256(
             loss_analysis_path.read_bytes()
+        ).hexdigest()
+    if reviewed_obligation_bindings_path is not None:
+        hashes["reviewed_obligation_bindings"] = hashlib.sha256(
+            reviewed_obligation_bindings_path.read_bytes()
         ).hexdigest()
     return hashes
 
@@ -851,9 +890,15 @@ def _write_manifest(
     risk_coverage_review: RiskCoverageReviewOutcome | None = None,
     stage_2_mode: str = "target_blind",
     stage_2_call_count: int = STAGE_2_CALL_COUNT,
+    reviewed_obligation_bindings_path: Path | None = None,
 ) -> None:
     """Write the run manifest with stage summary, input hashes, and prompt hashes."""
-    input_hashes = _compute_input_hashes(use_case_text, risk_cards, loss_analysis_path)
+    input_hashes = _compute_input_hashes(
+        use_case_text,
+        risk_cards,
+        loss_analysis_path,
+        reviewed_obligation_bindings_path,
+    )
     prompt_hashes = loader.hash_prompt_templates()
     critic_summary = _summarize_critic_findings(critic_findings)
     stage_1b_calls = 0 if profile_skipped else 1

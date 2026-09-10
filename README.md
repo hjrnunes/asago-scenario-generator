@@ -247,7 +247,15 @@ deterministic code validates every fact, tool, argument, and condition
 account against typed rejection reasons, owns the deviation category,
 identifiers, lineage, and the closed oracle templates in
 `data/oracles/templates.yaml`, and assembles the contract with no repair
-call. The target-blind path is unchanged.
+call. Obligation entries on a constraint (see `--loss-analysis` below) gate
+which oracle kinds are offered: drafts cite one entry in `obligation_ref`,
+a citation that contradicts the cited entry's kind or channel is rejected,
+and an omission oracle compiles only when the constraint's direction is
+reviewed, the cited required entry is realized by a tool call, and an
+optional `run --reviewed-obligation-bindings PATH` file
+(`reviewed-obligation-bindings-v1`) connects that entry to the action;
+otherwise the draft is held as a persisted specification with a typed
+reason and never compiled. The target-blind path is unchanged.
 
 `run --target-observations PATH` optionally accepts normalized runtime-context
 JSON from the standalone [capture workflow](scripts/qualification/README.md).
@@ -265,7 +273,12 @@ deriving it. The supplied graph is validated, run through the same offline
 risk-accounting and hazard-graph density gates with zero model calls and no
 revision call, re-published as the canonical `loss-analysis.yaml`, and hashed
 into the run manifest (`stage_1a.source: pinned`; the derived path records
-`source: derived`). A failing gate is fatal.
+`source: derived`). A failing gate is fatal. A constraint may carry
+explicit obligation entries (a `required` behavior with a `realized_by`
+channel, or a `forbidden` behavior with a `violated_via` channel, each
+quoting its rule span verbatim). Deterministic code stamps every derived
+graph's direction authority `proposed`; only a pinned graph carries
+`reviewed` with its reviewer stamps.
 
 No profile is a valid mode. Omission remains omission: a resource-free route
 can be `target_agnostic`, while a resource-bearing route remains

@@ -15,6 +15,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     Loss,
     LossAnalysis,
     LossProvenance,
+    Obligation,
     SecurityConstraint,
 )
 from asago_scenario_generator.stpa.models.semantic_conditions import (
@@ -87,6 +88,7 @@ def _loss_analysis() -> LossAnalysis:
 
 def _accepted(**draft_overrides):
     candidate = draft_overrides.pop("candidate", None) or _candidate()
+    reviewed_bindings = draft_overrides.pop("reviewed_bindings", frozenset())
     draft = _draft(**draft_overrides)
     accepted = validate_authored_scenario(
         draft,
@@ -96,6 +98,7 @@ def _accepted(**draft_overrides):
         profile=_profile(),
         session_identity=SESSION,
         has_content_surface=False,
+        reviewed_bindings=reviewed_bindings,
     )
     assert not hasattr(accepted, "reason"), getattr(accepted, "detail", "")
     return accepted
@@ -214,8 +217,23 @@ def test_owner_field_scenario_compiles_to_not_equals_the_session():
 
 
 def test_tool_absent_scenario_is_a_functional_test_with_presence_condition():
+    """The reviewed omission path (Q30(b)): a reviewed required entry
+    realized through this tool plus the reviewed binding compiles the draft
+    and stamps the citation on the accepted record and the assembled spec."""
     control_structure = _minimal_control_structure()
+    entry = Obligation(
+        obligation_id="O1",
+        kind="required",
+        behavior="process an eligible refund",
+        rule_span="must process a refund",
+        realized_by="tool_call",
+        completion="tool call present with expected arguments",
+    )
+    candidate = _candidate(obligations=(entry,), direction_authority="reviewed")
     accepted = _accepted(
+        candidate=candidate,
+        reviewed_bindings=frozenset({("SC-1", "O1", "process_refund")}),
+        obligation_ref="O1",
         state_facts=(),
         oracle=AuthoredUnsafeObservation(
             kind="tool_absent",
@@ -236,6 +254,18 @@ def test_tool_absent_scenario_is_a_functional_test_with_presence_condition():
             kind="none",
             gain="No one gains; the customer is not entitled to the refund.",
         ),
+    )
+    assert accepted.obligation_ref == "SC-1/O1"
+    assert accepted.observes == "total_omission"
+    # Frozen basis base (production drops the artifact's "HYPOTHETICAL:
+    # recommended, not yet accepted" suffix because the supplied binding is
+    # accepted reviewed input) plus the completion note for required
+    # entries whose completion differs from the attempt.
+    assert accepted.compile_basis == (
+        "reviewed direction + reviewed realization + binding; "
+        "attempt-level realization: completion is "
+        "'tool call present with expected arguments', "
+        "which the oracle does not observe"
     )
     spec, enumeration = _spec_for(accepted, control_structure)
     assert spec.is_functional_test

@@ -41,6 +41,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysisDraft,
     Loss,
     LossProvenance,
+    Obligation,
     RiskDisposition,
     SecurityConstraint,
 )
@@ -96,13 +97,16 @@ class _ProviderRevisionConstraint(BaseModel):
 
     Phase 1.3 as amended: the patch carries the same authored
     ``rule`` + ``applies_when`` shape as Calls 1 and 2; code composes the
-    description.
+    description.  ``obligations`` rides with the constraint: the patch
+    replaces the constraint collection wholesale, so entries not returned
+    here are dropped.
     """
 
     constraint_id: str
     rule: str = Field(min_length=1)
     applies_when: list[str] = Field(min_length=0, max_length=4)
     related_hazards: list[str]
+    obligations: list[Obligation] = Field(default_factory=list)
 
 
 class _Stage1aRevisionPatch(BaseModel):

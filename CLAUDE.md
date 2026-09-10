@@ -68,7 +68,18 @@ companion, not systemic baseline input. Optional `--loss-analysis` pins the
 Stage 1a output: the supplied graph is validated, gated offline with zero
 model calls and no revision, re-published as `loss-analysis.yaml`, and hashed
 into the run manifest (`stage_1a.source: pinned`; the derived path records
-`source: derived`). Keep observed values separate from
+`source: derived`). A security constraint may carry explicit `obligations`:
+`required` entries naming a realization channel (`realized_by`) or
+`forbidden` entries naming a violation channel (`violated_via`), each
+quoting its rule span verbatim (owner ruling Q30, 2026-09-10). Channels are
+kind-exclusive, `unknown` is the permissive default, a forbidden entry may
+be marked `observation_role: proxy` with the `source_outcome` it stands
+for, and a required entry may record the `completion` an oracle does not
+observe. The constraint's failure direction is computed from its entries
+under a `direction_authority` stamp: deterministic code restamps every
+derived or revision-merged graph `proposed` and clears wire-carried
+reviewer marks, so only a pinned graph carries `reviewed` with its
+`reviewed_by`/`reviewed_on` stamps. Keep observed values separate from
 interpreted rules; see the capture workflow in `scripts/qualification/README.md`.
 Profiles contain semantic resource facts only: no URLs, credentials, or
 secrets. Metadata-free MCP targets are scanned independently through the
@@ -85,7 +96,12 @@ capability-driven conditionals, with at most two bounded model calls
 offline-validated) and a content-pinned `target-derived-structure.yaml`
 sidecar recording the exact resource/operation binding per tool action;
 target realization then replays those bindings through the zero-call
-identity interpreter. Without a profile, or for multi-agent targets, the
+identity interpreter. Optional `--reviewed-obligation-bindings` supplies a
+closed `reviewed-obligation-bindings-v1` file of reviewed
+obligation-to-action connections; offline validation fails closed unless
+each names a reviewed `required` entry realized by a tool call on a tool
+action of the structure, and the exact set rides on the sidecar so it is
+digest-covered. Without a profile, or for multi-agent targets, the
 target-blind Stage 2 and diagnostic `stpa-run` are unchanged. In
 target-derived mode only, scenario synthesis replaces the ICA enumeration,
 ICA verification and correction, and Stage 5 BDI generation with one
@@ -95,7 +111,26 @@ observed target state and policy observations, and deterministic code owns
 validation with typed rejection reasons, the deviation category,
 identifiers, lineage, the closed oracle templates in
 `data/oracles/templates.yaml`, synthesized enumeration slots, and contract
-assembly, with no repair call. The target-blind Stage 5 path is unchanged. After ICA completion,
+assembly, with no repair call. The obligation-direction admission seam
+(`admit_oracle_kinds`) offers only oracle kinds that compile under the
+constraint's direction authority; the prompt offers nothing else, and every
+returned draft is re-judged against its own `obligation_ref` citation
+(required when entries exist, rejected when unknown). Under proposed
+authority the commission kinds compile permissively and an omission oracle
+holds as `direction_unreviewed`; under reviewed authority a contradiction
+with the cited entry's kind or channel rejects
+(`oracle_direction_contradiction`, `oracle_channel_unsupported`), and an
+omission oracle compiles only through a reviewed binding, otherwise holding
+with a typed reason (`direction_unresolved`, `realization_unresolved`,
+`binding_unreviewed`). A candidate with no compilable kind resolves before
+the call (`specification_only` or `no_expressible_oracle`), and held drafts
+persist as specification evidence that is never compiled or credited as
+recovery. Every accepted scenario carries `observes` (attempt, total
+omission, or reply; no compiled kind measures an effect, and an
+attempt-level or proxy stamp never supports an executed-safety claim) and
+`compile_basis` stamps that travel to the compiled spec as
+`oracle_observes`/`oracle_basis`, omitted when absent so existing
+projection digests hold. The target-blind Stage 5 path is unchanged. After ICA completion,
 an observed target profile may drive one separately attested additive target
 realization: exact operation matches may specialize baseline actions, and one
 bounded verified extension may add target-derived actions/ICAs without

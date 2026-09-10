@@ -5,6 +5,7 @@ SP1 output, consumed by SP1 Stage 2, SP2 Stage 3, and SP3 Stage 7.
 
 from __future__ import annotations
 
+from datetime import date
 from enum import Enum
 from typing import Any, Literal
 
@@ -22,6 +23,100 @@ class LossProvenance(str, Enum):
 
 
 RiskDispositionKind = Literal["cited", "not_applicable"]
+
+# Obligation entries (owner ruling Q30, 2026-09-10): an explicit, reviewed
+# failure direction for a security constraint.  A ``required`` entry names a
+# behavior the rule mandates and the channel that would realize it; a
+# ``forbidden`` entry names a behavior the rule prohibits and the channel a
+# violation would take.  ``provider_request`` is the transmission of a prompt
+# to the third-party model: a real channel, but neither an agent tool call
+# nor the reply, so no oracle kind observes it on this target.
+ObligationKind = Literal["required", "forbidden"]
+# Channels on which a forbidden behavior can be violated.  ``state`` and
+# ``result`` name effect-layer observations (a state change, a tool result)
+# that no compiled oracle kind observes; recording one on an entry is how a
+# reviewed graph says "unobservable on this target" and excludes every kind
+# instead of borrowing a channel the entry does not have.
+ObligationChannel = Literal[
+    "tool_call", "reply", "state", "result", "provider_request", "unknown"
+]
+# Channels on which a required behavior can be realized: the observable
+# attempt or the reply.  Effect-layer realization is not representable: a
+# required behavior whose only evidence is a state change carries
+# ``unknown`` and holds as realization_unresolved.
+RealizationChannel = Literal["tool_call", "reply", "unknown"]
+ObservationRole = Literal["source", "proxy"]
+DirectionAuthority = Literal["proposed", "reviewed"]
+
+
+class Obligation(BaseModel):
+    """One reviewed failure-direction entry on a security constraint.
+
+    ``rule_span`` must quote the constraint rule verbatim (checked
+    case-insensitively by the owning constraint).  A proxy observation
+    (``observation_role: proxy``) is a separately reviewed claim and must
+    name the source outcome it stands for; an attempt-level realization is
+    not the behavior's completion, so a required entry may record the
+    ``completion`` the oracle does not observe.  ``projection``/``residual``
+    keep a partial projection's coverage and remainder explicit.
+    """
+
+    obligation_id: str = Field(pattern=r"^O[1-9][0-9]*$")
+    kind: ObligationKind
+    behavior: str = Field(min_length=1)
+    rule_span: str = Field(min_length=1)
+    realized_by: RealizationChannel | None = None
+    violated_via: ObligationChannel | None = None
+    observation_role: ObservationRole | None = None
+    source_outcome: str | None = None
+    completion: str | None = None
+    projection: str | None = None
+    residual: str | None = None
+    note: str | None = None
+
+    @model_validator(mode="after")
+    def validate_kind_channels(self) -> Obligation:
+        if self.kind == "required":
+            if self.violated_via is not None:
+                raise ValueError(
+                    f"obligation {self.obligation_id!r} is required but carries "
+                    "violated_via; required entries name realized_by"
+                )
+            if self.observation_role is not None or self.source_outcome is not None:
+                raise ValueError(
+                    f"obligation {self.obligation_id!r} is required but carries "
+                    "observation_role/source_outcome; those belong to forbidden "
+                    "entries"
+                )
+            if self.realized_by is None:
+                self.realized_by = "unknown"
+        else:
+            if self.realized_by is not None:
+                raise ValueError(
+                    f"obligation {self.obligation_id!r} is forbidden but carries "
+                    "realized_by; forbidden entries name violated_via"
+                )
+            if self.completion is not None:
+                raise ValueError(
+                    f"obligation {self.obligation_id!r} is forbidden but carries "
+                    "completion; completion belongs to required entries"
+                )
+            if self.violated_via is None:
+                self.violated_via = "unknown"
+            if (
+                self.observation_role == "proxy"
+                and not (self.source_outcome or "").strip()
+            ):
+                raise ValueError(
+                    f"obligation {self.obligation_id!r} is a proxy observation "
+                    "and must name its source_outcome"
+                )
+            if (self.source_outcome or "").strip() and self.observation_role != "proxy":
+                raise ValueError(
+                    f"obligation {self.obligation_id!r} names a source_outcome "
+                    "but is not marked observation_role: proxy"
+                )
+        return self
 
 
 class RiskDisposition(BaseModel):
@@ -131,6 +226,24 @@ class SecurityConstraint(BaseModel):
     # silently recomposed (not detected as corruption); the authored fields
     # are the integrity anchor.
     description: str = ""
+    # Explicit failure-direction entries (owner ruling Q30, 2026-09-10).
+    # Entries on a derived graph hold ``proposed`` authority, stamped by
+    # deterministic code after every derivation or revision merge; the model
+    # wire cannot claim ``reviewed``.  A pinned graph carries ``reviewed``
+    # with its reviewer stamp.  ``None`` means unstamped and reads as
+    # ``proposed``.
+    obligations: list[Obligation] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
+    direction_authority: DirectionAuthority | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    reviewed_by: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    reviewed_on: date | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @field_validator("applies_when")
     @classmethod
@@ -163,6 +276,61 @@ class SecurityConstraint(BaseModel):
                 "must not be empty."
             )
         return self
+
+    @model_validator(mode="after")
+    def validate_obligations(self) -> SecurityConstraint:
+        """Validate the failure-direction entries against the rule text."""
+        ids = [entry.obligation_id for entry in self.obligations]
+        if len(ids) != len(set(ids)):
+            raise ValueError(
+                f"SecurityConstraint {self.constraint_id} has duplicate obligation ids."
+            )
+        rule_folded = self.rule.casefold()
+        for entry in self.obligations:
+            if entry.rule_span.casefold() not in rule_folded:
+                raise ValueError(
+                    f"obligation {self.constraint_id}/{entry.obligation_id} "
+                    "rule_span must quote the constraint rule verbatim."
+                )
+        if self.direction_authority == "reviewed":
+            if not (self.reviewed_by or "").strip() or self.reviewed_on is None:
+                raise ValueError(
+                    f"SecurityConstraint {self.constraint_id} claims reviewed "
+                    "direction authority and must carry reviewed_by and "
+                    "reviewed_on."
+                )
+        elif (self.reviewed_by or "").strip() or self.reviewed_on is not None:
+            raise ValueError(
+                f"SecurityConstraint {self.constraint_id} carries reviewer "
+                "stamps but its direction authority is not reviewed."
+            )
+        return self
+
+    @property
+    def failure_direction(
+        self,
+    ) -> Literal["required", "forbidden", "mixed", "unresolved"]:
+        """The constraint's failure direction, computed from its entries."""
+        kinds = {entry.kind for entry in self.obligations}
+        if kinds == {"required"}:
+            return "required"
+        if kinds == {"forbidden"}:
+            return "forbidden"
+        if kinds == {"required", "forbidden"}:
+            return "mixed"
+        return "unresolved"
+
+    @property
+    def effective_direction_authority(self) -> DirectionAuthority:
+        """The authority in force; an unstamped direction reads as proposed."""
+        return self.direction_authority or "proposed"
+
+    def obligation_by_id(self, obligation_id: str) -> Obligation | None:
+        """Return the entry with the given id, or None."""
+        for entry in self.obligations:
+            if entry.obligation_id == obligation_id:
+                return entry
+        return None
 
 
 class LossAnalysisDraft(BaseModel):
@@ -310,3 +478,18 @@ def _validate_constraint_references(
                     f"SecurityConstraint {sc.constraint_id} references "
                     f"non-existent hazard '{ref}' in related_hazards."
                 )
+
+
+def stamp_proposed_direction(analysis: LossAnalysis | LossAnalysisDraft) -> None:
+    """Stamp ``proposed`` direction authority on a derived graph, in place.
+
+    Deterministic code owns the authority stamp: the model wire can author
+    obligation entries but cannot claim they were reviewed, so every derived
+    or revision-merged constraint is restamped ``proposed`` and any
+    wire-carried reviewer stamp is cleared.  Pinned graphs are never passed
+    through here; they keep their supplied ``reviewed`` stamp.
+    """
+    for constraint in analysis.security_constraints:
+        constraint.direction_authority = "proposed" if constraint.obligations else None
+        constraint.reviewed_by = None
+        constraint.reviewed_on = None

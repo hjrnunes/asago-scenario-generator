@@ -65,10 +65,12 @@ from asago_scenario_generator.stpa.models.target_derived_structure import (
     ControllerPurpose,
     ProcessModelRecord,
     RelevantAction,
+    ReviewedObligationBinding,
     TargetDerivedStructure,
     UnconstrainedAction,
     control_structure_content_digest,
     loss_analysis_content_digest,
+    validate_reviewed_obligation_bindings,
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
@@ -819,6 +821,7 @@ def derive_target_structure(
     capability_profile: CapabilityProfile,
     execution_target_profile: ExecutionTargetProfile,
     target_observations: TargetObservationSnapshot | None = None,
+    reviewed_obligation_bindings: tuple[ReviewedObligationBinding, ...] = (),
     run_dir: Path,
     template_loader: TemplateLoader | None = None,
     temperature: float = 0.4,
@@ -1215,6 +1218,13 @@ def derive_target_structure(
         warnings=warnings,
     )
 
+    # Reviewed obligation bindings are reviewed inputs, not derived content:
+    # validate them offline against the loss analysis and the derived
+    # actions, then embed them so the sidecar digest pins the exact set in
+    # force for this run.
+    validate_reviewed_obligation_bindings(
+        reviewed_obligation_bindings, loss_analysis, tuple(bindings)
+    )
     derived = TargetDerivedStructure(
         target_id=execution_target_profile.target_id,
         profile_digest=execution_target_profile.semantic_digest,
@@ -1227,6 +1237,7 @@ def derive_target_structure(
         # its own attempt count including any bounded revision.
         model_call_count=1 + relevance_call_count,
         warnings=tuple(warnings),
+        reviewed_obligation_bindings=reviewed_obligation_bindings,
     )
 
     # Persist exactly the artifacts the target-blind path would publish.

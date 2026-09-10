@@ -168,6 +168,20 @@ class ScenarioSpec(BaseModel):
     # Phase 3.1 adversary record.  Optional only for historical/non-contextual
     # values; the corrected contextual Stage 5 wire requires it.
     adversary: Adversary | None = None
+    # Obligation-direction observation stamps (owner ruling Q30, 2026-09-10).
+    # ``oracle_observes`` names what the compiled oracle measures (attempt,
+    # total_omission, reply); ``oracle_basis`` records why the direction
+    # check admitted the compile (reviewed interpretation, proxy, or an
+    # explicitly UNVERIFIED default).  Both are omitted when absent, so
+    # existing projection digests hold.
+    oracle_observes: StrictStr | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    oracle_basis: StrictStr | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
     @property
     def is_functional_test(self) -> bool:
