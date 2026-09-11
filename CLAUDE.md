@@ -175,19 +175,45 @@ changing acceptance behavior, or running the quality sequence.
   constraint/hazard share a fixed-rule subject noun
   phrase, every behavior class owns a hazard). A first-attempt validation
   failure receives one narrowly scoped targeted repair (owner authorization
-  2026-09-11) for exactly two classes: missing or malformed
-  `risk_dispositions` entries, and malformed obligation entries inside an
-  otherwise preserved constraint. Deterministic code selects the repair
-  identities, the closed repair wire carries nothing outside the repair
-  scope, duplicate, unknown, out-of-scope, or partial responses are
-  rejected with a typed reason, every unselected record and every preserved
-  obligation entry stays byte-identical, and the merged draft is
-  re-validated against the complete original inputs. The single repair
-  call is preflighted, logged with a `_repair` step suffix, and never
-  retried; failures that reduce to deterministic row removal (gap-call
-  out-of-contract rows, rows referencing unsupplied cards) are cleaned
-  with recorded warnings and no call; every other failure class is a typed
-  terminal failure with no second call. A failing graph receives one
+  2026-09-11, corrected contract rev2 same day) for exactly two classes:
+  missing or malformed `risk_dispositions` entries, and malformed
+  obligation entries inside an otherwise preserved constraint. Deterministic
+  code selects the repair identities, the closed repair wire carries nothing
+  outside the repair scope, duplicate, unknown, out-of-scope, or partial
+  responses are rejected with a typed reason, every unselected record and
+  every preserved obligation entry stays byte-identical, and the merged
+  draft is re-validated against the complete original inputs. Obligation
+  repairs preserve channel meaning: a known channel value in the wrong
+  kind-exclusive field relocates unchanged (for example `realized_by` to
+  `violated_via`), and substituting a different channel, dropping a known
+  channel to reach the default `unknown`, or an entry whose defect is
+  outside the fixed permitted-change table (conflicting channel values, a
+  required entry with `violated_via: state`, `source_outcome` without the
+  proxy role) is a typed unsupported scope that reaches no repair call;
+  `unknown` arises only from an original `unknown` value. Wire errors are
+  classified completely before anything else runs: container-level defects
+  (an absent, mistyped, or non-list collection) are typed terminal
+  failures that authorize no cleanup and conceal nothing, while
+  record-level defects are salvaged with every malformed obligation entry
+  retained verbatim and its exact errors. Deterministic row cleanup is an
+  explicit owner-approved policy with limits: only malformed
+  `risk_dispositions` rows of the gap response (C1) and only rows
+  referencing risk cards absent from the supplied set (C2) may be removed,
+  with the original response preserved in `calls.jsonl`, every removed row
+  and its reason recorded, the cleaned object re-validated against the
+  original provider schema before the graph validators, and no cleanup
+  when any container-level or unrelated error is present; neither policy
+  removes a supplied risk or changes risk accounting, which comes from the
+  risk-derivation draft only (gap dispositions never reach the final
+  graph). Every Stage 1a transformation — salvage, cleanup, repair, or a
+  typed unsupported scope — appends to one run-level, cross-stage,
+  accumulating `loss-analysis-repair.yaml` that distinguishes proposed
+  from applied changes, is flushed after each stage so a terminal failure
+  preserves earlier entries, and is referenced by a `stage_1a.repair`
+  block in the run manifest. The single repair call is preflighted, logged
+  with a `_repair` step suffix, and never retried; every other failure
+  class is a typed terminal failure with no second call. A failing graph
+  receives one
   bounded revision call with the exact failing checks; a second failure is a
   fatal stage error recorded in the run manifest and
   `loss-analysis-gates.yaml`. The gates are offline and never soften a check.

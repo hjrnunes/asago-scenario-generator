@@ -48,8 +48,11 @@ from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     DeterministicCleanup,
     RepairPlan,
+    RepairRecord,
     UnsupportedRepair,
     build_repair_plan,
+    record_cleanup_rows,
+    revalidate_provider_object,
     run_targeted_repair,
 )
 
@@ -360,6 +363,7 @@ def derive_loss_analysis(
     temperature: float = DEFAULT_TEMPERATURE,
     capability_profile: CapabilityProfile | None = None,
     normalization_warnings: list[str] | None = None,
+    repair_record: RepairRecord | None = None,
 ) -> LossAnalysis:
     """Run Stage 1a: derive loss analysis via two sequential LLM calls.
 
@@ -371,6 +375,14 @@ def derive_loss_analysis(
     The two drafts are merged with sequential ID renumbering so that
     cross-references remain valid and no IDs are duplicated.
 
+    Every Stage 1a transformation (salvage drop, deterministic cleanup,
+    targeted repair, unsupported outcome) is recorded in one run-level,
+    cross-stage, accumulating ``loss-analysis-repair.yaml`` artifact; both
+    stages append to it, a later write never removes an earlier entry, and a
+    terminal failure still writes it while preserving every earlier entry.
+    A caller may supply its own :class:`RepairRecord` to read the per-stage
+    counts for a run manifest.
+
     Args:
         llm_client: LLM client for making the completion calls.
         use_case_text: Free-text use-case description.
@@ -380,6 +392,8 @@ def derive_loss_analysis(
         temperature: LLM temperature (default 0.4).
         capability_profile: Optional capability profile from Stage 1b,
             passed to the gap analysis call for systematic coverage checking.
+        normalization_warnings: Optional list collecting rendered warnings.
+        repair_record: Optional caller-supplied accumulating record.
 
     Returns:
         Validated LossAnalysis model.
@@ -389,6 +403,7 @@ def derive_loss_analysis(
             validation.
     """
     loader = template_loader or TemplateLoader(PROMPTS_DIR)
+    record = repair_record if repair_record is not None else RepairRecord()
     # Keep the provider context small enough to leave completion room for a
     # complete graph.  The original typed inputs remain authoritative for
     # validation and persistence; these are prompt-only projections.
@@ -401,27 +416,33 @@ def derive_loss_analysis(
         risk_prompt_vars["risk_card_evidence"] = compact_risk_evidence
 
     # --- Call 1: risk_derivation ---
-    risk_draft = _run_stage1a_call(
-        llm_client=llm_client,
-        loader=loader,
-        system_template="stage1a_risk_system.j2",
-        user_template="stage1a_risk_user.j2",
-        run_dir=run_dir,
-        step=STEP_RISK,
-        temperature=temperature,
-        response_format=_Stage1aRiskProviderDraft,
-        accounting_cards=risk_cards,
-        require_risk_accounting=bool(risk_cards),
-        **risk_prompt_vars,
-        allowed_loss_ids=set(),
-        allowed_hazard_ids=set(),
-        # Keep the first call's provider responsibility narrow: establish
-        # grounded risk-card losses.  The second call closes the dependent
-        # hazard/constraint graph against that declared loss registry.
-        require_losses=bool(risk_cards),
-        require_complete_chain=False,
-        normalization_warnings=normalization_warnings,
-    )
+    try:
+        risk_draft = _run_stage1a_call(
+            llm_client=llm_client,
+            loader=loader,
+            system_template="stage1a_risk_system.j2",
+            user_template="stage1a_risk_user.j2",
+            run_dir=run_dir,
+            step=STEP_RISK,
+            temperature=temperature,
+            response_format=_Stage1aRiskProviderDraft,
+            accounting_cards=risk_cards,
+            require_risk_accounting=bool(risk_cards),
+            **risk_prompt_vars,
+            allowed_loss_ids=set(),
+            allowed_hazard_ids=set(),
+            # Keep the first call's provider responsibility narrow: establish
+            # grounded risk-card losses.  The second call closes the dependent
+            # hazard/constraint graph against that declared loss registry.
+            require_losses=bool(risk_cards),
+            require_complete_chain=False,
+            normalization_warnings=normalization_warnings,
+            repair_record=record,
+        )
+    finally:
+        # The record survives a first-stage terminal failure with every
+        # recorded entry intact.
+        record.write(run_dir)
     # The gap prompt is a review of the first draft, so its context must be
     # the canonical source-separated view.  Models occasionally put a
     # risk-card loss in ``use_case_losses`` (or repeat it in both fields).
@@ -447,59 +468,67 @@ def derive_loss_analysis(
     )
 
     # --- Call 2: gap_analysis ---
-    existing_losses = risk_draft.risk_card_losses + risk_draft.use_case_losses
-    kc_subcodes = capability_profile.kc_subcodes if capability_profile else []
-
-    gap_draft = _run_stage1a_call(
-        llm_client=llm_client,
-        loader=loader,
-        system_template="stage1a_gap_system.j2",
-        user_template="stage1a_gap_user.j2",
-        run_dir=run_dir,
-        step=STEP_GAP,
-        temperature=temperature,
-        response_format=_Stage1aGapProviderDraft,
-        require_risk_accounting=False,
-        use_case_text=use_case_text,
-        existing_losses=existing_losses,
-        existing_hazards=risk_draft.hazards,
-        existing_constraints=risk_draft.security_constraints,
-        next_loss_num=next_loss_num,
-        next_hazard_num=next_hazard_num,
-        next_sc_num=next_sc_num,
-        kc_subcodes=kc_subcodes,
-        kc_subcodes_display=build_kc_subcodes_display(kc_subcodes),
-        allowed_loss_ids={
-            loss.loss_id
-            for loss in risk_draft.risk_card_losses + risk_draft.use_case_losses
-        },
-        allowed_hazard_ids={hazard.hazard_id for hazard in risk_draft.hazards},
-        require_losses=False,
-        require_complete_chain=not (
-            existing_losses and risk_draft.hazards and risk_draft.security_constraints
-        ),
-        authoritative_draft=risk_draft,
-        normalization_warnings=normalization_warnings,
-    )
-
-    # --- Merge and validate ---
     try:
-        merged = _merge_drafts(risk_draft, gap_draft)
-    except Exception as exc:
-        # Merge validation happens after both LLM calls, so it is not covered
-        # by ``safe_llm_call``.  Keep the public stage boundary consistent
-        # with call failures and let run_sp1 record a structured diagnostic.
-        raise StageError(
-            stage=STAGE,
-            step=STEP_MERGE,
-            message=f"{type(exc).__name__}: {exc}",
-        ) from exc
-    # Stage 2 may apply evidence-backed H/SC wording and edge reviews. Retain this
-    # merged Stage 1a graph as an explicit draft for audit; the canonical
-    # loss-analysis.yaml is replaced by the reviewed graph after Call 3.
-    write_yaml(merged, run_dir / "loss-analysis-draft.yaml")
-    write_yaml(merged, run_dir / "loss-analysis.yaml")
-    return merged
+        existing_losses = risk_draft.risk_card_losses + risk_draft.use_case_losses
+        kc_subcodes = capability_profile.kc_subcodes if capability_profile else []
+
+        gap_draft = _run_stage1a_call(
+            llm_client=llm_client,
+            loader=loader,
+            system_template="stage1a_gap_system.j2",
+            user_template="stage1a_gap_user.j2",
+            run_dir=run_dir,
+            step=STEP_GAP,
+            temperature=temperature,
+            response_format=_Stage1aGapProviderDraft,
+            require_risk_accounting=False,
+            use_case_text=use_case_text,
+            existing_losses=existing_losses,
+            existing_hazards=risk_draft.hazards,
+            existing_constraints=risk_draft.security_constraints,
+            next_loss_num=next_loss_num,
+            next_hazard_num=next_hazard_num,
+            next_sc_num=next_sc_num,
+            kc_subcodes=kc_subcodes,
+            kc_subcodes_display=build_kc_subcodes_display(kc_subcodes),
+            allowed_loss_ids={
+                loss.loss_id
+                for loss in risk_draft.risk_card_losses + risk_draft.use_case_losses
+            },
+            allowed_hazard_ids={hazard.hazard_id for hazard in risk_draft.hazards},
+            require_losses=False,
+            require_complete_chain=not (
+                existing_losses
+                and risk_draft.hazards
+                and risk_draft.security_constraints
+            ),
+            authoritative_draft=risk_draft,
+            normalization_warnings=normalization_warnings,
+            repair_record=record,
+        )
+
+        # --- Merge and validate ---
+        try:
+            merged = _merge_drafts(risk_draft, gap_draft)
+        except Exception as exc:
+            # Merge validation happens after both LLM calls, so it is not covered
+            # by ``safe_llm_call``.  Keep the public stage boundary consistent
+            # with call failures and let run_sp1 record a structured diagnostic.
+            raise StageError(
+                stage=STAGE,
+                step=STEP_MERGE,
+                message=f"{type(exc).__name__}: {exc}",
+            ) from exc
+        # Stage 2 may apply evidence-backed H/SC wording and edge reviews. Retain this
+        # merged Stage 1a graph as an explicit draft for audit; the canonical
+        # loss-analysis.yaml is replaced by the reviewed graph after Call 3.
+        write_yaml(merged, run_dir / "loss-analysis-draft.yaml")
+        write_yaml(merged, run_dir / "loss-analysis.yaml")
+        return merged
+    finally:
+        # A later stage failure never erases an earlier entry: the record
+        # carries everything both stages recorded, in order.
+        record.write(run_dir)
 
 
 def _wire_error_summary(exc: ValidationError) -> str:
@@ -599,6 +628,7 @@ def _run_stage1a_call(
     accounting_cards: Iterable[RiskCard] = (),
     authoritative_draft: LossAnalysisDraft | None = None,
     normalization_warnings: list[str] | None = None,
+    repair_record: RepairRecord | None = None,
     **template_vars: object,
 ) -> LossAnalysisDraft:
     """Render prompts, call the LLM, and return a validated draft.
@@ -611,6 +641,7 @@ def _run_stage1a_call(
 
     validation_feedback: str | None = None
     first_parse_failed = False
+    first_wire_error: ValidationError | None = None
     # Typed label of the first failure, used to route the targeted repair:
     # wire_schema, risk_accounting, draft_references, or draft_semantics.
     failure_class: str | None = None
@@ -622,13 +653,17 @@ def _run_stage1a_call(
         invalid ``risk_dispositions`` entry) is deterministic and actionable,
         so it joins the reference validators in the one bounded targeted
         repair instead of crashing the run with an uncorrected parse failure.
+        The violation itself is retained so the repair classification can
+        reject container-level damage before any salvage runs.
         """
         nonlocal first_parse_failed, validation_feedback, failure_class
+        nonlocal first_wire_error
         try:
             draft = parse_llm_result(result, response_format)
         except ValidationError as exc:
             first_parse_failed = True
             failure_class = "wire_schema"
+            first_wire_error = exc
             validation_feedback = (
                 "Validation feedback: the prior response violated the "
                 f"required response schema: {_wire_error_summary(exc)} "
@@ -749,8 +784,22 @@ def _run_stage1a_call(
         risk_cards=list(accounting_cards),
         require_risk_accounting=require_risk_accounting,
         constraint_wire_model=_ProviderSecurityConstraint,
+        first_wire_error=first_wire_error,
+        repair_record=repair_record,
     )
     if isinstance(outcome, UnsupportedRepair):
+        if repair_record is not None:
+            repair_record.add(
+                stage=step,
+                attempt="first",
+                kind="unsupported",
+                identity=outcome.scope,
+                reason=outcome.reason,
+                proposed={},
+                applied={},
+                outcome="unsupported",
+                raw_step=step,
+            )
         raise StageError(
             stage=STAGE,
             step=step,
@@ -763,9 +812,31 @@ def _run_stage1a_call(
     if isinstance(outcome, DeterministicCleanup):
         # Deterministic row removal (out-of-contract disposition rows, or rows
         # referencing unsupplied risk cards) is all the failure reduced to.
-        # The cleaned draft passes through the same authority merge, citation
-        # normalization, and full stage validators as a successful response.
+        # The cleaned draft re-validates against the original provider schema
+        # (boundary 1) and then passes through the same authority merge,
+        # citation normalization, and full stage validators as a successful
+        # response.
         cleaned = outcome.draft
+        try:
+            revalidate_provider_object(cleaned, response_format, step=step)
+        except ValueError as exc:
+            record_cleanup_rows(
+                outcome.removed_rows,
+                step=step,
+                repair_record=repair_record,
+                outcome="failed",
+                reason=str(exc),
+            )
+            raise StageError(
+                stage=STAGE,
+                step=step,
+                message=(
+                    f"targeted repair unsupported (deterministic cleanup "
+                    f"failed re-validation of the original provider schema: "
+                    f"{exc}); no repair call was made; first attempt failed: "
+                    f"{error_msg}"
+                ),
+            ) from exc
         try:
             if authoritative_draft is not None:
                 cleaned = _merge_authority(cleaned)
@@ -777,6 +848,13 @@ def _run_stage1a_call(
                     normalization_warnings.append(warning)
             run_validators(cleaned)
         except (_DraftReferenceValidationError, _DraftSemanticValidationError) as exc:
+            record_cleanup_rows(
+                outcome.removed_rows,
+                step=step,
+                repair_record=repair_record,
+                outcome="failed",
+                reason=str(exc),
+            )
             raise StageError(
                 stage=STAGE,
                 step=step,
@@ -788,6 +866,13 @@ def _run_stage1a_call(
                 ),
             ) from exc
         except ValueError as exc:
+            record_cleanup_rows(
+                outcome.removed_rows,
+                step=step,
+                repair_record=repair_record,
+                outcome="failed",
+                reason=str(exc),
+            )
             raise StageError(
                 stage=STAGE,
                 step=step,
@@ -803,6 +888,12 @@ def _run_stage1a_call(
                 and warning not in normalization_warnings
             ):
                 normalization_warnings.append(warning)
+        record_cleanup_rows(
+            outcome.removed_rows,
+            step=step,
+            repair_record=repair_record,
+            outcome="removed",
+        )
         return cleaned
 
     plan: RepairPlan = outcome
@@ -822,6 +913,8 @@ def _run_stage1a_call(
         ),
         normalization_warnings=normalization_warnings,
         max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
+        provider_draft_model=response_format,
+        repair_record=repair_record,
     )
 
 

@@ -14,32 +14,43 @@ exactly two approved failure classes:
 1. missing or malformed ``risk_dispositions`` entries; and
 2. malformed obligation entries within an otherwise preserved constraint.
 
-Contract (owner authorization 2026-09-11):
+Contract (owner authorization 2026-09-11; narrowed per the approved
+correction specification revision 2, 2026-09-11):
 
-- Deterministic code selects the repair identities and the permitted fields.
-  The response wire carries nothing outside the repair scope, so a response
+- Deterministic code selects the repair identities and the single permitted
+  correction per identity.  A known channel value in the wrong field
+  relocates to the correct field unchanged; the repair never selects a new
+  channel meaning, and a known channel is never dropped to reach the wire
+  default ``unknown``.  Conflicting or unrepresentable channel values, and
+  any defect outside the permitted-change table, are typed unsupported
+  outcomes with no repair call.
+- Every initial wire error is classified before any salvage, repair, or
+  cleanup: container-presence, container-type, and container-bounds errors
+  are typed terminal failures, never silently converted to empty
+  collections; only record-level errors are salvageable.
+- The response wire carries nothing outside the repair scope, so a response
   cannot rewrite a constraint's rule, conditions, or hazard links, and every
   record outside the scope is preserved byte-identically.
-- Duplicate, unknown, unexpected, or out-of-scope identities and edits are
-  rejected with a typed reason before the merge.
-- The repair prompt carries the evidence needed to decide the correction:
-  the affected risk-card text, the declared loss meanings, the affected
-  constraint text with its hazard links, and the use-case description.
-- The merged draft is re-validated against the complete original inputs with
-  the same stage validators that produced the failure; a partial or invalid
-  repair is a recorded failure, never a silent partial acceptance.
+- Duplicate, unknown, unexpected, or out-of-scope identities, and any edit
+  outside the permitted correction, are rejected with a typed reason before
+  the merge.
+- The corrected original wire object re-validates against the original
+  provider schema before the domain merge (boundary 1), and the merged
+  draft re-validates against the complete original inputs (boundary 2).
 - Exactly one repair call follows one failed first attempt, and the repair is
-  never retried.  Failure classes outside the two approved scopes get an
-  explicit typed outcome and no additional model call; this is not a general
-  graph-rewriting mechanism.
+  never retried.  Every transformation (salvage drop, deterministic
+  cleanup, repair, unsupported outcome) is recorded in one run-level,
+  cross-stage, accumulating ``loss-analysis-repair.yaml`` artifact that
+  distinguishes proposed from applied changes.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Union
+from typing import Any, Union
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -52,6 +63,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     safe_llm_call,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.loss_analysis import (
     Hazard,
     Loss,
@@ -69,6 +81,43 @@ OBLIGATION_REPAIR_USER_TEMPLATE = "stage1a_obligation_repair_user.j2"
 # Repair steps append this suffix in the durable call log so repair calls are
 # individually countable without changing the first-attempt step names.
 _REPAIR_STEP_SUFFIX = "_repair"
+
+# The run-level, cross-stage record of every Stage 1a transformation (R3).
+REPAIR_RECORD_FILENAME = "loss-analysis-repair.yaml"
+REPAIR_RECORD_SCHEMA_VERSION = "loss-analysis-repair-record-v2"
+
+# The five provider wire collections; locations at exactly one of these
+# names are container locations, everything beneath them is record-level.
+_WIRE_COLLECTIONS = (
+    "risk_card_losses",
+    "use_case_losses",
+    "hazards",
+    "security_constraints",
+    "risk_dispositions",
+)
+
+# Obligation identities are O-numbered (the production wire pattern).
+_OBLIGATION_ID_PATTERN = re.compile(r"^O[1-9][0-9]*$")
+
+# Channels representable on a required entry's ``realized_by`` field.  A
+# forbidden-entry ``violated_via`` value outside this set cannot relocate
+# (R1.2: unrepresentable channel relocation).
+_REALIZATION_CHANNELS = frozenset({"tool_call", "reply", "unknown"})
+
+# Every field of an obligation entry the merge compares when it is not part
+# of the permitted correction.
+_OBLIGATION_FIELDS = (
+    "behavior",
+    "rule_span",
+    "realized_by",
+    "violated_via",
+    "observation_role",
+    "source_outcome",
+    "completion",
+    "projection",
+    "residual",
+    "note",
+)
 
 
 class RepairRejected(ValueError):
@@ -133,19 +182,213 @@ class ObligationRepairResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Wire-error classification (R2.1/R2.2): before any salvage or cleanup
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class WireErrorClassification:
+    """Every error of one failed first parse, classified by kind."""
+
+    record_errors: tuple[str, ...]
+    unsupported_reason: str | None
+
+
+def _format_validation_errors(
+    exc: ValidationError, *, limit: int = 3
+) -> tuple[str, ...]:
+    """Format a pydantic error's items as ``location: message`` strings."""
+    return tuple(
+        f"{'.'.join(str(part) for part in item.get('loc', ())) or 'row'}: "
+        f"{item.get('msg', '')}"
+        for item in exc.errors()[:limit]
+    )
+
+
+def classify_wire_validation_errors(exc: ValidationError) -> WireErrorClassification:
+    """Classify every error of the first parse's ValidationError.
+
+    Container-presence (``missing`` at a collection location), container-type
+    (a non-list value at a collection location), container-bounds
+    (``too_short``/``too_long`` at a collection location), and top-level
+    shape errors are typed terminal failures.  Locations beneath a
+    collection are record errors, the only salvageable or repairable class.
+    Mixed supported and unsupported errors are unsupported.
+    """
+    record_errors: list[str] = []
+    unsupported: list[str] = []
+    for item in exc.errors():
+        location = tuple(str(part) for part in item.get("loc", ()))
+        error_type = str(item.get("type", ""))
+        message = str(item.get("msg", ""))
+        if len(location) == 1 and location[0] in _WIRE_COLLECTIONS:
+            if error_type == "missing":
+                unsupported.append(
+                    f"container-presence: collection '{location[0]}' is missing"
+                )
+            elif error_type in ("too_long", "too_short"):
+                unsupported.append(
+                    f"container-bounds: collection '{location[0]}' {message}"
+                )
+            else:
+                unsupported.append(
+                    f"container-type: collection '{location[0]}' {message}"
+                )
+        elif location and location[0] in _WIRE_COLLECTIONS:
+            record_errors.append(f"{'.'.join(location)}: {message}")
+        else:
+            unsupported.append(
+                f"top-level shape: {'.'.join(location) or error_type} {message}"
+            )
+    if unsupported:
+        reason = (
+            "non-record wire errors are outside the approved repair scope "
+            "(container and shape errors are typed terminal failures): "
+            + "; ".join(unsupported)
+        )
+        return WireErrorClassification(
+            record_errors=tuple(record_errors), unsupported_reason=reason
+        )
+    return WireErrorClassification(
+        record_errors=tuple(record_errors), unsupported_reason=None
+    )
+
+
+class _SalvageReadError(ValueError):
+    """A collection the salvage tried to read is absent or not a list."""
+
+
+def _fail_closed_rows(
+    content: dict,
+    name: str,
+    response_format: type[BaseModel],
+) -> list:
+    """Read one wire collection without ever converting damage to empty.
+
+    A value that is present but not a list, or a required collection that is
+    absent, is a deterministic read failure.  Only a collection the provider
+    schema itself declares optional may be absent (the gap call's
+    ``risk_dispositions``); the error classification has already rejected
+    every schema-violating absence before the salvage runs, so a read
+    failure here is a fail-closed backstop, not a repair route.
+    """
+    if name in content:
+        value = content[name]
+        if not isinstance(value, list):
+            raise _SalvageReadError(f"collection '{name}' is not a list")
+        return value
+    model_field = response_format.model_fields.get(name)
+    if model_field is not None and not model_field.is_required():
+        return []
+    raise _SalvageReadError(f"collection '{name}' is absent from the response")
+
+
+# ---------------------------------------------------------------------------
+# Run-level, cross-stage repair record (R3)
+# ---------------------------------------------------------------------------
+
+
+class RepairRecordEntryModel(BaseModel):
+    """One per-stage, per-attempt transformation record entry."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stage: str
+    attempt: str
+    kind: str
+    identity: str
+    reason: str
+    proposed: dict[str, Any] = Field(default_factory=dict)
+    applied: dict[str, Any] = Field(default_factory=dict)
+    outcome: str
+    raw_step: str
+
+
+class LossAnalysisRepairRecordArtifact(BaseModel):
+    """The persisted ``loss-analysis-repair.yaml`` payload."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: str
+    records: list[RepairRecordEntryModel] = Field(min_length=1)
+
+
+@dataclass
+class RepairRecord:
+    """One run-level, cross-stage, accumulating transformation record.
+
+    Both Stage 1a calls append entries; a later write never removes or
+    rewrites an earlier entry (the artifact always carries every entry in
+    order); a terminal failure still writes the record with the failing
+    outcome while preserving every earlier entry.
+    """
+
+    entries: list[RepairRecordEntryModel] = field(default_factory=list)
+
+    def add(
+        self,
+        *,
+        stage: str,
+        attempt: str,
+        kind: str,
+        identity: str,
+        reason: str,
+        outcome: str,
+        raw_step: str,
+        proposed: dict[str, Any] | None = None,
+        applied: dict[str, Any] | None = None,
+    ) -> None:
+        """Append one entry; entries are immutable once recorded."""
+        self.entries.append(
+            RepairRecordEntryModel(
+                stage=stage,
+                attempt=attempt,
+                kind=kind,
+                identity=identity,
+                reason=reason,
+                proposed=proposed or {},
+                applied=applied or {},
+                outcome=outcome,
+                raw_step=raw_step,
+            )
+        )
+
+    def counts_by_stage(self) -> dict[str, dict[str, int]]:
+        """Per-stage outcome counts for run manifests."""
+        counts: dict[str, dict[str, int]] = {}
+        for entry in self.entries:
+            stage_counts = counts.setdefault(entry.stage, {})
+            stage_counts[entry.outcome] = stage_counts.get(entry.outcome, 0) + 1
+        return counts
+
+    def write(self, run_dir: Path) -> Path | None:
+        """Persist the record; a run with no transformations writes nothing."""
+        if not self.entries:
+            return None
+        artifact = LossAnalysisRepairRecordArtifact(
+            schema_version=REPAIR_RECORD_SCHEMA_VERSION,
+            records=list(self.entries),
+        )
+        return write_yaml(artifact, run_dir / REPAIR_RECORD_FILENAME)
+
+
+# ---------------------------------------------------------------------------
 # Salvage: deterministic row-level recovery of a wire-invalid response
 # ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class SalvageReport:
-    """What deterministic salvage kept and dropped from a failed response."""
+    """What deterministic salvage kept, dropped, and retained verbatim."""
 
     dropped_losses: tuple[str, ...] = ()
     dropped_hazards: tuple[str, ...] = ()
     dropped_constraint_fields: tuple[str, ...] = ()
-    obligation_constraint_ids: tuple[str, ...] = ()
     dropped_dispositions: tuple[tuple[str, str], ...] = ()
+    obligation_salvage: tuple[
+        tuple[str, tuple[tuple[dict, tuple[str, ...]], ...]], ...
+    ] = ()
+    scope_errors: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
 
     @property
@@ -156,6 +399,11 @@ class SalvageReport:
             *self.dropped_hazards,
             *self.dropped_constraint_fields,
         )
+
+    @property
+    def obligation_constraint_ids(self) -> tuple[str, ...]:
+        """Constraints whose failures are confined to obligation entries."""
+        return tuple(constraint_id for constraint_id, _ in self.obligation_salvage)
 
     def dropped_disposition_reason(self, risk_ref: str) -> str | None:
         """Return the recorded salvage reason for one dropped row, if any."""
@@ -200,11 +448,7 @@ def _salvage_rows(
         try:
             kept.append(model.model_validate(row))
         except ValidationError as exc:
-            reason = "; ".join(
-                f"{'.'.join(str(part) for part in item.get('loc', ())) or 'row'}: "
-                f"{item.get('msg', '')}"
-                for item in exc.errors()[:3]
-            )
+            reason = "; ".join(_format_validation_errors(exc))
             label = _row_label(row, index, id_field)
             if label_pairs:
                 dropped.append((label, reason))
@@ -213,10 +457,19 @@ def _salvage_rows(
     return kept
 
 
+def _rule_span_defect(entry: dict, rule: str) -> bool:
+    """Whether the entry's rule_span fails to quote the constraint rule."""
+    span = entry.get("rule_span")
+    return not (
+        isinstance(span, str) and span.strip() and span.casefold() in rule.casefold()
+    )
+
+
 def salvage_provider_response(
     content: dict,
     *,
     constraint_wire_model: type[SecurityConstraint],
+    response_format: type[BaseModel],
 ) -> tuple[LossAnalysisDraft, SalvageReport]:
     """Recover the valid rows of a wire-invalid Stage 1a response.
 
@@ -225,29 +478,41 @@ def salvage_provider_response(
     kept, and dropped rows are recorded with their typed reasons.  A
     constraint whose own fields fail is recorded as out of scope; a constraint
     whose failure is confined to its obligation entries keeps its valid
-    entries and joins the obligation repair scope.
+    entries, and every malformed entry is retained verbatim (the raw dict as
+    received) together with its exact validation errors for the targeted
+    repair, so the repair anchor is the original entry, not a description of
+    it.  Duplicate obligation ids in one original collection cannot define a
+    safe repair scope and are recorded as scope errors.
     """
-
-    def _rows(name: str) -> list:
-        value = content.get(name, [])
-        return value if isinstance(value, list) else []
 
     dropped_losses: list[str] = []
     dropped_hazards: list[str] = []
     dropped_constraint_fields: list[str] = []
     dropped_dispositions: list[tuple[str, str]] = []
-    obligation_ids: list[str] = []
+    obligation_salvage: list[tuple[str, tuple[tuple[dict, tuple[str, ...]], ...]]] = []
+    scope_errors: list[str] = []
     warnings: list[str] = []
 
     risk_losses = _salvage_rows(
-        _rows("risk_card_losses"), Loss, "loss_id", dropped_losses
+        _fail_closed_rows(content, "risk_card_losses", response_format),
+        Loss,
+        "loss_id",
+        dropped_losses,
     )
     use_case_losses = _salvage_rows(
-        _rows("use_case_losses"), Loss, "loss_id", dropped_losses
+        _fail_closed_rows(content, "use_case_losses", response_format),
+        Loss,
+        "loss_id",
+        dropped_losses,
     )
-    hazards = _salvage_rows(_rows("hazards"), Hazard, "hazard_id", dropped_hazards)
+    hazards = _salvage_rows(
+        _fail_closed_rows(content, "hazards", response_format),
+        Hazard,
+        "hazard_id",
+        dropped_hazards,
+    )
     dispositions = _salvage_rows(
-        _rows("risk_dispositions"),
+        _fail_closed_rows(content, "risk_dispositions", response_format),
         RiskDisposition,
         "risk_ref",
         dropped_dispositions,
@@ -255,7 +520,9 @@ def salvage_provider_response(
     )
 
     constraints: list[SecurityConstraint] = []
-    for index, row in enumerate(_rows("security_constraints")):
+    for index, row in enumerate(
+        _fail_closed_rows(content, "security_constraints", response_format)
+    ):
         if not isinstance(row, dict):
             dropped_constraint_fields.append(f"row {index}: not an object")
             continue
@@ -271,27 +538,55 @@ def salvage_provider_response(
         try:
             bare_constraint = constraint_wire_model.model_validate(bare)
         except ValidationError as exc:
-            reason = "; ".join(
-                f"{'.'.join(str(part) for part in item.get('loc', ())) or 'row'}: "
-                f"{item.get('msg', '')}"
-                for item in exc.errors()[:3]
-            )
+            reason = "; ".join(_format_validation_errors(exc))
             dropped_constraint_fields.append(
                 f"{_row_label(row, index, 'constraint_id')}: {reason}"
             )
             continue
+        constraint_id = bare_constraint.constraint_id
         obligation_rows = row.get("obligations")
-        obligation_rows = obligation_rows if isinstance(obligation_rows, list) else []
+        if not isinstance(obligation_rows, list):
+            scope_errors.append(
+                f"constraint '{constraint_id}' carries an obligations "
+                "collection that is not a list"
+            )
+            continue
+        string_ids = [
+            entry.get("obligation_id")
+            for entry in obligation_rows
+            if isinstance(entry, dict) and isinstance(entry.get("obligation_id"), str)
+        ]
+        if len(string_ids) != len(set(string_ids)):
+            duplicated = sorted(
+                {identity for identity in string_ids if string_ids.count(identity) > 1}
+            )
+            scope_errors.append(
+                f"constraint '{constraint_id}' carries duplicate obligation "
+                "ids in its original collection: " + ", ".join(duplicated)
+            )
+            continue
         kept_entries: list[Obligation] = []
-        entry_reasons: list[str] = []
-        for entry_index, entry in enumerate(obligation_rows):
-            try:
-                kept_entries.append(Obligation.model_validate(entry))
-            except ValidationError as exc:
-                first = exc.errors()[0]
-                entry_reasons.append(
-                    f"obligation entry {entry_index}: {first.get('msg', '')}"
+        retained: list[tuple[dict, tuple[str, ...]]] = []
+        for entry in obligation_rows:
+            if not isinstance(entry, dict):
+                scope_errors.append(
+                    f"an obligation entry of constraint '{constraint_id}' is "
+                    "not an object"
                 )
+                continue
+            errors: list[str] = []
+            try:
+                kept_candidate = Obligation.model_validate(entry)
+            except ValidationError as exc:
+                errors.extend(_format_validation_errors(exc, limit=4))
+                kept_candidate = None
+            if _rule_span_defect(entry, bare_constraint.rule):
+                errors.append("rule_span does not quote the constraint rule verbatim")
+            if errors:
+                retained.append((dict(entry), tuple(errors)))
+            else:
+                assert kept_candidate is not None
+                kept_entries.append(kept_candidate)
         payload = bare_constraint.model_dump(mode="json")
         payload["obligations"] = [
             entry.model_dump(mode="json") for entry in kept_entries
@@ -299,25 +594,26 @@ def salvage_provider_response(
         try:
             salvaged = SecurityConstraint.model_validate(payload)
         except ValidationError:
-            # The retained entries still violate a constraint-level rule
-            # (for example duplicated obligation ids), so no entry survives.
-            salvaged = SecurityConstraint.model_validate({**payload, "obligations": []})
-            entry_reasons = [
-                f"obligation entry {entry_index}: dropped; retained entries "
-                "violated a constraint-level obligation rule"
-                for entry_index in range(len(obligation_rows))
-            ]
+            scope_errors.append(
+                f"constraint '{constraint_id}': its retained valid entries "
+                "still violate a constraint-level rule"
+            )
+            continue
         constraints.append(salvaged)
-        constraint_id = salvaged.constraint_id
-        obligation_ids.append(constraint_id)
-        warnings.append(
-            f"salvaged constraint '{constraint_id}' with its valid obligation "
-            f"entries retained and {len(entry_reasons)} malformed entr"
-            f"{'y' if len(entry_reasons) == 1 else 'ies'} dropped: "
-            + "; ".join(entry_reasons)
-            if entry_reasons
-            else f"salvaged constraint '{constraint_id}'"
-        )
+        if retained:
+            obligation_salvage.append((constraint_id, tuple(retained)))
+            summary = "; ".join(
+                f"{entry_raw.get('obligation_id', f'entry {position}')}: "
+                f"{entry_errors[0]}"
+                for position, (entry_raw, entry_errors) in enumerate(retained)
+            )
+            warnings.append(
+                f"salvaged constraint '{constraint_id}' with its valid "
+                f"obligation entries retained; {len(retained)} malformed "
+                f"entr{'y' if len(retained) == 1 else 'ies'} dropped from "
+                "the working draft and retained verbatim for the targeted "
+                f"repair: {summary}"
+            )
 
     draft = LossAnalysisDraft.model_validate(
         {
@@ -338,11 +634,215 @@ def salvage_provider_response(
         dropped_losses=tuple(dropped_losses),
         dropped_hazards=tuple(dropped_hazards),
         dropped_constraint_fields=tuple(dropped_constraint_fields),
-        obligation_constraint_ids=tuple(obligation_ids),
         dropped_dispositions=tuple(dropped_dispositions),
+        obligation_salvage=tuple(obligation_salvage),
+        scope_errors=tuple(scope_errors),
         warnings=tuple(warnings),
     )
     return draft, report
+
+
+# ---------------------------------------------------------------------------
+# Permitted corrections for obligation entries (R1.2)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PermittedChange:
+    """One deterministic correction the repair may apply to an entry."""
+
+    kind: str
+    source_field: str = ""
+    destination_field: str = ""
+    value: str = ""
+    fields: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class SelectedObligation:
+    """One selected ``(constraint_id, obligation_id)`` repair pair.
+
+    Carries the original entry verbatim, its exact validation errors, and
+    the permitted changes deterministic code derived from the defect class.
+    """
+
+    constraint_id: str
+    obligation_id: str
+    original_entry_raw: dict
+    validation_errors: tuple[str, ...]
+    permitted_changes: tuple[PermittedChange, ...]
+    constraint_rule: str
+
+    @property
+    def identity(self) -> str:
+        return f"{self.constraint_id}/{self.obligation_id}"
+
+    @property
+    def correction_instruction(self) -> str:
+        """The permitted change stated as relocation or removal, never a choice."""
+        parts: list[str] = []
+        for change in self.permitted_changes:
+            if change.kind == "relocate_channel":
+                parts.append(
+                    f"move `{change.source_field}: {change.value}` to "
+                    f"`{change.destination_field}` unchanged"
+                )
+            elif change.kind == "remove_fields":
+                names = " and ".join(f"`{name}`" for name in change.fields)
+                parts.append(
+                    f"remove the field{'s' if len(change.fields) > 1 else ''} {names}"
+                )
+            elif change.kind == "set_source_outcome":
+                parts.append(
+                    "set `source_outcome` to the source outcome this proxy "
+                    "observation stands for"
+                )
+            elif change.kind == "set_rule_span":
+                parts.append(
+                    "set `rule_span` to a verbatim quote of the constraint rule"
+                )
+        return "; ".join(parts)
+
+    @property
+    def defect_reason(self) -> str:
+        """The entry's validation errors, for the record and the prompt."""
+        return "; ".join(self.validation_errors)
+
+
+def _apply_permitted_changes(
+    raw: dict,
+    changes: tuple[PermittedChange, ...],
+    *,
+    rule: str,
+) -> dict:
+    """Apply the permitted changes to the original entry (validation probe)."""
+    corrected = dict(raw)
+    for change in changes:
+        if change.kind == "relocate_channel":
+            corrected.pop(change.source_field, None)
+            corrected[change.destination_field] = change.value
+        elif change.kind == "remove_fields":
+            for name in change.fields:
+                corrected.pop(name, None)
+        elif change.kind == "set_source_outcome":
+            corrected["source_outcome"] = (
+                "the source outcome this proxy observation stands for"
+            )
+        elif change.kind == "set_rule_span":
+            corrected["rule_span"] = rule
+    return corrected
+
+
+def classify_obligation_defects(
+    raw: dict,
+    *,
+    rule: str,
+) -> tuple[tuple[PermittedChange, ...], str | None]:
+    """Derive the permitted changes for one retained malformed entry.
+
+    Returns the permitted changes and ``None`` when the entry is repairable,
+    or empty changes and the specific unsupported reason when it is not
+    (R1.5: the scope is not deterministically definable).
+    """
+    raw_id = raw.get("obligation_id")
+    if not isinstance(raw_id, str) or not _OBLIGATION_ID_PATTERN.match(raw_id):
+        return (), "obligation_id is missing, blank, or not an O-numbered identity"
+    kind = raw.get("kind")
+    if kind not in ("required", "forbidden"):
+        return (), "kind is not 'required' or 'forbidden'"
+    behavior = raw.get("behavior")
+    if not isinstance(behavior, str) or not behavior.strip():
+        return (), "behavior is empty"
+
+    changes: list[PermittedChange] = []
+    if kind == "forbidden":
+        realized = raw.get("realized_by")
+        if realized is not None:
+            violated = raw.get("violated_via")
+            if violated is None:
+                # Every realized_by value is in the violated_via vocabulary,
+                # so relocation is always representable here.
+                changes.append(
+                    PermittedChange(
+                        kind="relocate_channel",
+                        source_field="realized_by",
+                        destination_field="violated_via",
+                        value=realized,
+                    )
+                )
+            elif violated == realized:
+                changes.append(
+                    PermittedChange(kind="remove_fields", fields=("realized_by",))
+                )
+            else:
+                return (), (
+                    f"conflicting channel values: realized_by={realized!r} and "
+                    f"violated_via={violated!r}"
+                )
+        if raw.get("completion") is not None:
+            changes.append(
+                PermittedChange(kind="remove_fields", fields=("completion",))
+            )
+        role = raw.get("observation_role")
+        outcome = raw.get("source_outcome")
+        if role == "proxy" and not (isinstance(outcome, str) and outcome.strip()):
+            changes.append(PermittedChange(kind="set_source_outcome"))
+        if isinstance(outcome, str) and outcome.strip() and role != "proxy":
+            return (), (
+                "source_outcome is present without observation_role: proxy; "
+                "removing the outcome and declaring the proxy are different "
+                "interpretations"
+            )
+    else:
+        violated = raw.get("violated_via")
+        if violated is not None:
+            realized = raw.get("realized_by")
+            if realized is None:
+                if violated in _REALIZATION_CHANNELS:
+                    changes.append(
+                        PermittedChange(
+                            kind="relocate_channel",
+                            source_field="violated_via",
+                            destination_field="realized_by",
+                            value=violated,
+                        )
+                    )
+                else:
+                    return (), (
+                        f"unrepresentable channel relocation: violated_via="
+                        f"{violated!r} is not a realized_by channel"
+                    )
+            elif realized == violated:
+                changes.append(
+                    PermittedChange(kind="remove_fields", fields=("violated_via",))
+                )
+            else:
+                return (), (
+                    f"conflicting channel values: violated_via={violated!r} and "
+                    f"realized_by={realized!r}"
+                )
+        foreign = tuple(
+            name
+            for name in ("observation_role", "source_outcome")
+            if raw.get(name) is not None
+        )
+        if foreign:
+            changes.append(PermittedChange(kind="remove_fields", fields=foreign))
+
+    if _rule_span_defect(raw, rule):
+        changes.append(PermittedChange(kind="set_rule_span"))
+
+    # Completeness check: applying the permitted changes must produce a
+    # valid entry.  Any defect outside the table (a bad literal, an invalid
+    # field type, an empty behavior) fails here, so it can never reach a
+    # repair call.
+    corrected = _apply_permitted_changes(raw, tuple(changes), rule=rule)
+    try:
+        Obligation.model_validate(corrected)
+    except ValidationError as exc:
+        first = _format_validation_errors(exc, limit=1)[0]
+        return (), f"the defect is outside the permitted repair table: {first}"
+    return tuple(changes), None
 
 
 # ---------------------------------------------------------------------------
@@ -355,6 +855,7 @@ class UnsupportedRepair:
     """An explicit, documented outcome for failure classes outside the scope."""
 
     reason: str
+    scope: str = "response"
 
 
 @dataclass(frozen=True)
@@ -364,11 +865,13 @@ class DeterministicCleanup:
     The failure reduced to rows deterministic code removed (out-of-contract
     disposition rows on the gap call, or rows referencing unsupplied risk
     cards); the caller re-validates the draft with the full stage validators
-    before accepting it.
+    before accepting it.  ``removed_rows`` carries one ``(identity, reason)``
+    pair per removed row for the transformation record.
     """
 
     draft: LossAnalysisDraft
     warnings: tuple[str, ...]
+    removed_rows: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -384,11 +887,17 @@ class DispositionRepairPlan:
 
 @dataclass(frozen=True)
 class ObligationRepairPlan:
-    """One targeted repair of malformed obligation entries."""
+    """One targeted repair of malformed obligation entries.
+
+    ``selected`` carries one :class:`SelectedObligation` per selected
+    ``(constraint_id, obligation_id)`` pair: the original entry verbatim, its
+    exact validation errors, and the permitted changes derived from the
+    defect class.  Selecting a constraint never authorizes replacing its
+    obligations collection.
+    """
 
     prior: LossAnalysisDraft
-    selected: tuple[str, ...]
-    reasons: tuple[tuple[str, str], ...]
+    selected: tuple[SelectedObligation, ...]
     salvage_warnings: tuple[str, ...] = ()
 
 
@@ -469,6 +978,44 @@ def _without_unknown_disposition_rows(
     )
 
 
+def _record_salvage_drops(
+    report: SalvageReport,
+    *,
+    step: str,
+    repair_record: RepairRecord | None,
+) -> None:
+    """Record every salvage drop that feeds a repair as a record entry."""
+    if repair_record is None:
+        return
+    for label, reason in report.dropped_dispositions:
+        repair_record.add(
+            stage=step,
+            attempt="first",
+            kind="salvage",
+            identity=label,
+            reason=reason,
+            proposed={"dropped_entries": [label]},
+            applied={"dropped_entries": [label]},
+            outcome="removed",
+            raw_step=step,
+        )
+    for constraint_id, retained in report.obligation_salvage:
+        for entry_raw, entry_errors in retained:
+            entry_id = entry_raw.get("obligation_id")
+            identity = entry_id if isinstance(entry_id, str) else "unnamed entry"
+            repair_record.add(
+                stage=step,
+                attempt="first",
+                kind="salvage",
+                identity=f"{constraint_id}/{identity}",
+                reason="; ".join(entry_errors),
+                proposed={"dropped_entries": [identity]},
+                applied={"dropped_entries": [identity]},
+                outcome="removed",
+                raw_step=step,
+            )
+
+
 def build_repair_plan(
     *,
     step: str,
@@ -479,6 +1026,8 @@ def build_repair_plan(
     risk_cards: list[RiskCard],
     require_risk_accounting: bool,
     constraint_wire_model: type[SecurityConstraint],
+    first_wire_error: ValidationError | None = None,
+    repair_record: RepairRecord | None = None,
 ) -> RepairOutcome:
     """Classify one failed Stage 1a attempt and select its repair plan.
 
@@ -486,11 +1035,21 @@ def build_repair_plan(
     ``wire_schema`` (the response never parsed), ``risk_accounting`` (the
     deterministic accounting validator), ``draft_references``, or
     ``draft_semantics``.  Only the first two can produce a repair, and the
-    wire path is further scoped by row-level salvage.
+    wire path is further scoped by the initial error classification and
+    row-level salvage.
     """
     if first_result is None:
         return UnsupportedRepair("no provider response is available to repair")
     if first_parse_failed:
+        if first_wire_error is not None:
+            classification = classify_wire_validation_errors(first_wire_error)
+            if classification.unsupported_reason is not None:
+                scope = "response"
+                for collection in _WIRE_COLLECTIONS:
+                    if collection in classification.unsupported_reason:
+                        scope = collection
+                        break
+                return UnsupportedRepair(classification.unsupported_reason, scope=scope)
         content = first_result.content
         if isinstance(content, BaseModel):
             content = content.model_dump(mode="json")
@@ -505,13 +1064,27 @@ def build_repair_plan(
             return UnsupportedRepair(
                 "the response body is not a JSON object, so no rows can be salvaged"
             )
-        prior, report = salvage_provider_response(
-            content, constraint_wire_model=constraint_wire_model
-        )
+        try:
+            prior, report = salvage_provider_response(
+                content,
+                constraint_wire_model=constraint_wire_model,
+                response_format=response_format,
+            )
+        except _SalvageReadError as exc:
+            return UnsupportedRepair(
+                f"wire violation outside the approved repair scope: {exc}",
+                scope="response",
+            )
         if report.out_of_scope_wire_failures:
             return UnsupportedRepair(
                 "wire violation outside the approved repair scope: "
                 + "; ".join(report.out_of_scope_wire_failures)
+            )
+        if report.scope_errors:
+            return UnsupportedRepair(
+                "obligation repair scope is not deterministically definable: "
+                + "; ".join(report.scope_errors),
+                scope="obligation entries",
             )
         if report.obligation_constraint_ids and report.dropped_dispositions:
             return UnsupportedRepair(
@@ -519,28 +1092,66 @@ def build_repair_plan(
                 "wire failures; the targeted repair fixes one class per attempt"
             )
         if report.obligation_constraint_ids:
-            selected = tuple(report.obligation_constraint_ids)
-            reasons = tuple(
-                (
-                    constraint_id,
-                    "the constraint is otherwise preserved; its malformed "
-                    "obligation entries were dropped and must be returned "
-                    "corrected",
+            selected_entries: list[SelectedObligation] = []
+            prior_constraints = {
+                constraint.constraint_id: constraint
+                for constraint in prior.security_constraints
+            }
+            for constraint_id, retained in report.obligation_salvage:
+                prior_constraint = prior_constraints.get(constraint_id)
+                if prior_constraint is None:
+                    return UnsupportedRepair(
+                        "obligation repair scope is not deterministically "
+                        f"definable: salvaged constraint '{constraint_id}' is "
+                        "not present in the working draft"
+                    )
+                for entry_raw, entry_errors in retained:
+                    changes, unsupported_reason = classify_obligation_defects(
+                        entry_raw, rule=prior_constraint.rule
+                    )
+                    entry_id = entry_raw.get("obligation_id")
+                    identity = (
+                        f"{constraint_id}/{entry_id}"
+                        if isinstance(entry_id, str)
+                        else f"{constraint_id}/unnamed entry"
+                    )
+                    if unsupported_reason is not None:
+                        return UnsupportedRepair(
+                            "obligation repair scope is not deterministically "
+                            f"definable: {identity}: {unsupported_reason}",
+                            scope=identity,
+                        )
+                    selected_entries.append(
+                        SelectedObligation(
+                            constraint_id=constraint_id,
+                            obligation_id=entry_raw["obligation_id"],
+                            original_entry_raw=entry_raw,
+                            validation_errors=entry_errors,
+                            permitted_changes=changes,
+                            constraint_rule=prior_constraint.rule,
+                        )
+                    )
+            if not selected_entries:
+                return UnsupportedRepair(
+                    "the wire failure is not confined to the approved repair scope"
                 )
-                for constraint_id in selected
-            )
+            _record_salvage_drops(report, step=step, repair_record=repair_record)
             return ObligationRepairPlan(
                 prior=prior,
-                selected=selected,
-                reasons=reasons,
+                selected=tuple(selected_entries),
                 salvage_warnings=report.warnings,
             )
         if report.dropped_dispositions:
             warnings = report.dropped_disposition_warnings()
             if step == "gap_analysis":
                 # The gap call's contract carries no risk accounting; its
-                # disposition rows are out of contract and are removed.
-                return DeterministicCleanup(draft=prior, warnings=warnings)
+                # disposition rows are out of contract and are removed
+                # (owner-approved cleanup policy C1, 2026-09-11).
+                return DeterministicCleanup(
+                    draft=prior,
+                    warnings=warnings,
+                    removed_rows=tuple(report.dropped_dispositions),
+                )
             selected, reason_pairs, removed_unknown = select_disposition_repairs(
                 prior, risk_cards
             )
@@ -556,6 +1167,16 @@ def build_repair_plan(
                         f"removed risk_dispositions rows for unsupplied risk "
                         f"references: {', '.join(removed_unknown)}",
                     ),
+                    removed_rows=(
+                        *(
+                            (label, f"malformed row: {reason}")
+                            for label, reason in report.dropped_dispositions
+                        ),
+                        *(
+                            (reference, "risk reference absent from the supplied set")
+                            for reference in removed_unknown
+                        ),
+                    ),
                 )
             enriched_reasons = tuple(
                 (
@@ -569,6 +1190,7 @@ def build_repair_plan(
                 )
                 for card_id, reason in reason_pairs
             )
+            _record_salvage_drops(report, step=step, repair_record=repair_record)
             return DispositionRepairPlan(
                 prior=prior,
                 selected=selected,
@@ -598,6 +1220,10 @@ def build_repair_plan(
                     f"removed risk_dispositions rows for unsupplied risk "
                     f"references: {', '.join(removed_unknown)}",
                 ),
+                removed_rows=tuple(
+                    (reference, "risk reference absent from the supplied set")
+                    for reference in removed_unknown
+                ),
             )
         return DispositionRepairPlan(
             prior=prior,
@@ -609,6 +1235,35 @@ def build_repair_plan(
         f"the {failure_class} failure class is outside the approved repair "
         "scope; no repair call is made"
     )
+
+
+# ---------------------------------------------------------------------------
+# Boundary 1: the corrected original provider object (R2.4)
+# ---------------------------------------------------------------------------
+
+
+def revalidate_provider_object(
+    draft: LossAnalysisDraft,
+    model: type[BaseModel] | None,
+    *,
+    step: str,
+) -> None:
+    """Re-validate the corrected wire object against the original schema.
+
+    After salvage and any repair or cleanup, the original collections with
+    only the authorized corrections applied must still satisfy the original
+    provider schema before the domain merge.
+    """
+    if model is None:
+        return
+    try:
+        model.model_validate(draft.model_dump(mode="json"))
+    except ValidationError as exc:
+        first = _format_validation_errors(exc, limit=3)
+        raise ValueError(
+            f"{step}: the corrected response no longer satisfies the original "
+            "provider schema: " + "; ".join(first)
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -693,6 +1348,102 @@ def merge_disposition_repair(
     )
 
 
+def _verify_corrected_entry(
+    selected: SelectedObligation,
+    returned: RepairObligation,
+) -> None:
+    """Verify one corrected entry against its original and permitted change.
+
+    Every field outside the permitted correction must match the original
+    entry exactly; the relocated channel value must move unchanged; a known
+    channel may never be replaced with another channel or dropped to the
+    wire default ``unknown``; an already-valid destination field may never
+    be overwritten.
+    """
+    identity = selected.identity
+    original = selected.original_entry_raw
+    if returned.kind != original.get("kind"):
+        raise RepairRejected(
+            f"repair_unrelated_field_edit: the corrected entry for "
+            f"'{identity}' changed field 'kind'"
+        )
+
+    changed_fields: set[str] = set()
+    relocation: PermittedChange | None = None
+    for change in selected.permitted_changes:
+        if change.kind == "relocate_channel":
+            relocation = change
+            changed_fields.update((change.source_field, change.destination_field))
+        elif change.kind == "remove_fields":
+            changed_fields.update(change.fields)
+        elif change.kind == "set_source_outcome":
+            changed_fields.add("source_outcome")
+        elif change.kind == "set_rule_span":
+            changed_fields.add("rule_span")
+
+    if relocation is not None:
+        destination_value = getattr(returned, relocation.destination_field)
+        if destination_value != relocation.value:
+            if destination_value == "unknown" and relocation.value != "unknown":
+                raise RepairRejected(
+                    f"repair_channel_omitted: the corrected entry for "
+                    f"'{identity}' dropped the known channel "
+                    f"{relocation.value!r} to the default 'unknown'"
+                )
+            raise RepairRejected(
+                f"repair_channel_replaced: the corrected entry for "
+                f"'{identity}' replaced the channel {relocation.value!r} "
+                f"with {destination_value!r}"
+            )
+
+    # The comparison baseline is the original entry as it would parse: the
+    # wire model defaults an absent channel field to ``unknown`` per kind, so
+    # an original that omits the field and a response that omits it are the
+    # same value, not an edit.
+    baseline = dict(original)
+    if baseline.get("kind") == "required" and baseline.get("realized_by") is None:
+        baseline["realized_by"] = "unknown"
+    if baseline.get("kind") == "forbidden" and baseline.get("violated_via") is None:
+        baseline["violated_via"] = "unknown"
+    for name in _OBLIGATION_FIELDS:
+        if name in changed_fields:
+            continue
+        original_value = baseline.get(name)
+        returned_value = getattr(returned, name, None)
+        if original_value != returned_value:
+            if name in ("violated_via", "realized_by") and original_value is not None:
+                raise RepairRejected(
+                    f"repair_destination_overwritten: the corrected entry for "
+                    f"'{identity}' overwrote the already-valid destination "
+                    f"field '{name}'"
+                )
+            raise RepairRejected(
+                f"repair_unrelated_field_edit: the corrected entry for "
+                f"'{identity}' changed field '{name}'"
+            )
+
+    for change in selected.permitted_changes:
+        if change.kind == "set_source_outcome":
+            outcome = getattr(returned, "source_outcome")
+            if not (isinstance(outcome, str) and outcome.strip()):
+                raise RepairRejected(
+                    f"repair_unrelated_field_edit: the corrected entry for "
+                    f"'{identity}' did not set a non-empty source_outcome"
+                )
+        elif change.kind == "set_rule_span":
+            span = getattr(returned, "rule_span")
+            if not (
+                isinstance(span, str)
+                and span.strip()
+                and span.casefold() in selected.constraint_rule.casefold()
+            ):
+                raise RepairRejected(
+                    f"repair_unrelated_field_edit: the corrected entry for "
+                    f"'{identity}' still does not quote the constraint rule "
+                    "verbatim in rule_span"
+                )
+
+
 def merge_obligation_repair(
     plan: ObligationRepairPlan,
     items: list[RepairObligationConstraint],
@@ -702,13 +1453,21 @@ def merge_obligation_repair(
     Rejects duplicate, unknown, out-of-scope, and incomplete responses with a
     typed reason.  Every previously valid obligation entry of a selected
     constraint must appear byte-identically, so a repair cannot silently
-    rewrite or drop a preserved entry, and the constraint's own rule,
-    conditions, and hazard links are never on the wire.
+    rewrite or drop a preserved entry, and every corrected entry must carry
+    exactly its permitted correction: no deletion, no renaming, no addition,
+    no kind change, no unrelated field edit, no channel replacement, no
+    channel omission to the default ``unknown``, and no destination
+    overwrite.  The constraint's own rule, conditions, and hazard links are
+    never on the wire.
     """
-    selected = set(plan.selected)
+    selected_constraint_order: list[str] = []
+    for selected in plan.selected:
+        if selected.constraint_id not in selected_constraint_order:
+            selected_constraint_order.append(selected.constraint_id)
+    selected_constraints = set(selected_constraint_order)
     by_id: dict[str, RepairObligationConstraint] = {}
     for item in items:
-        if item.constraint_id not in selected:
+        if item.constraint_id not in selected_constraints:
             raise RepairRejected(
                 f"unknown or out-of-scope repair identity "
                 f"'{item.constraint_id}'; only the selected constraints may "
@@ -719,7 +1478,11 @@ def merge_obligation_repair(
                 f"duplicate repair entry for constraint '{item.constraint_id}'"
             )
         by_id[item.constraint_id] = item
-    missing = [ref for ref in plan.selected if ref not in by_id]
+    missing = [
+        constraint_id
+        for constraint_id in selected_constraint_order
+        if constraint_id not in by_id
+    ]
     if missing:
         raise RepairRejected(
             "incomplete repair; no obligations were returned for: " + ", ".join(missing)
@@ -728,13 +1491,51 @@ def merge_obligation_repair(
         constraint.constraint_id: constraint
         for constraint in plan.prior.security_constraints
     }
-    for constraint_id in plan.selected:
+    for constraint_id in selected_constraint_order:
         prior_constraint = prior_by_id.get(constraint_id)
         if prior_constraint is None:
             raise RepairRejected(
                 f"selected constraint '{constraint_id}' is not present in the "
                 "prior draft"
             )
+        selected_entries = {
+            selected.obligation_id: selected
+            for selected in plan.selected
+            if selected.constraint_id == constraint_id
+        }
+        expected_ids = {
+            entry.obligation_id for entry in prior_constraint.obligations
+        } | set(selected_entries)
+        returned_ids = [
+            entry.obligation_id for entry in by_id[constraint_id].obligations
+        ]
+        if len(returned_ids) != len(set(returned_ids)):
+            duplicated = sorted(
+                {
+                    identity
+                    for identity in returned_ids
+                    if returned_ids.count(identity) > 1
+                }
+            )
+            raise RepairRejected(
+                "repair_identity_duplicate: the repair for constraint "
+                f"'{constraint_id}' returns obligation "
+                + ", ".join(duplicated)
+                + " more than once"
+            )
+        for identity in returned_ids:
+            if identity not in expected_ids:
+                raise RepairRejected(
+                    f"repair_identity_unknown: the returned entry '{identity}' "
+                    f"is neither a preserved nor a selected obligation of "
+                    f"constraint '{constraint_id}'"
+                )
+        for obligation_id, selected_entry in selected_entries.items():
+            if obligation_id not in returned_ids:
+                raise RepairRejected(
+                    f"repair_delete_forbidden: no corrected entry was returned "
+                    f"for selected obligation '{constraint_id}/{obligation_id}'"
+                )
         repaired_payloads = [
             entry.model_dump(mode="json") for entry in by_id[constraint_id].obligations
         ]
@@ -746,9 +1547,13 @@ def merge_obligation_repair(
                     f"{preserved.obligation_id}; preserved entries must be "
                     "returned byte-identically"
                 )
+        for returned_entry in by_id[constraint_id].obligations:
+            selected_entry = selected_entries.get(returned_entry.obligation_id)
+            if selected_entry is not None:
+                _verify_corrected_entry(selected_entry, returned_entry)
     merged_constraints: list[dict] = []
     for constraint in plan.prior.security_constraints:
-        if constraint.constraint_id not in selected:
+        if constraint.constraint_id not in selected_constraints:
             merged_constraints.append(constraint.model_dump(mode="json"))
             continue
         payload = constraint.model_dump(mode="json")
@@ -787,6 +1592,7 @@ class _RepairValidation:
     normalizer: Callable[[LossAnalysisDraft], list[str]]
     authoritative_merge: Callable[[LossAnalysisDraft], LossAnalysisDraft] | None
     normalization_warnings: list[str] | None
+    provider_draft_model: type[BaseModel] | None
 
 
 def _record_warnings(
@@ -801,14 +1607,119 @@ def _record_warnings(
 def _finish_merged_draft(
     merged: LossAnalysisDraft,
     validation: _RepairValidation,
+    *,
+    step: str,
 ) -> LossAnalysisDraft:
-    """Normalize, merge authority, and fully validate one repaired draft."""
+    """Re-validate against the provider schema, then normalize and validate."""
+    revalidate_provider_object(merged, validation.provider_draft_model, step=step)
     for warning in validation.normalizer(merged):
         _record_warnings((warning,), validation.normalization_warnings)
     if validation.authoritative_merge is not None:
         merged = validation.authoritative_merge(merged)
     validation.run_validators(merged)
     return merged
+
+
+def _record_repair_outcome(
+    plan: RepairPlan,
+    *,
+    step: str,
+    repair_record: RepairRecord | None,
+    outcome: str,
+    reason: str = "",
+) -> None:
+    """Record the repair attempt's proposed and applied changes per identity.
+
+    A repaired entry records the identity as proposed and applied; a rejected
+    or failed attempt records the identity as proposed with ``applied: {}``
+    and the typed reason, so no failed attempt is ever recorded as applied.
+    """
+    if repair_record is None:
+        return
+    if isinstance(plan, DispositionRepairPlan):
+        reason_map = dict(plan.reasons)
+        identities = [
+            (card_id, reason_map.get(card_id, "selected risk-disposition row"))
+            for card_id in plan.selected
+        ]
+    else:
+        identities = [
+            (
+                selected.identity,
+                f"{selected.defect_reason}; permitted correction: {selected.correction_instruction}",
+            )
+            for selected in plan.selected
+        ]
+    for identity, identity_reason in identities:
+        applied = {"entries": [identity]} if outcome == "repaired" else {}
+        repair_record.add(
+            stage=step,
+            attempt="repair",
+            kind="repair",
+            identity=identity,
+            reason=(
+                identity_reason
+                if outcome == "repaired"
+                else f"{identity_reason}; {reason}"
+            ),
+            proposed={"entries": [identity]},
+            applied=applied,
+            outcome=outcome,
+            raw_step=step + _REPAIR_STEP_SUFFIX,
+        )
+
+
+def _record_removed_unknown_rows(
+    plan: DispositionRepairPlan,
+    *,
+    step: str,
+    repair_record: RepairRecord | None,
+) -> None:
+    """Record the unsupplied-card rows the repair merge removes (C2)."""
+    if repair_record is None:
+        return
+    for reference in plan.removed_unknown:
+        repair_record.add(
+            stage=step,
+            attempt="repair",
+            kind="cleanup",
+            identity=reference,
+            reason="risk reference absent from the supplied set",
+            proposed={"removed_rows": [reference]},
+            applied={"removed_rows": [reference]},
+            outcome="removed",
+            raw_step=step + _REPAIR_STEP_SUFFIX,
+        )
+
+
+def record_cleanup_rows(
+    removed_rows: tuple[tuple[str, str], ...],
+    *,
+    step: str,
+    repair_record: RepairRecord | None,
+    outcome: str,
+    reason: str = "",
+) -> None:
+    """Record one deterministic cleanup's removed rows and its outcome.
+
+    A completed cleanup records each removed row as proposed and applied
+    with outcome ``removed``; a cleanup whose re-validation failed records
+    the same rows as proposed with ``applied: {}`` and the failing reason.
+    """
+    if repair_record is None:
+        return
+    for identity, row_reason in removed_rows:
+        repair_record.add(
+            stage=step,
+            attempt="first",
+            kind="cleanup",
+            identity=identity,
+            reason=row_reason if outcome == "removed" else f"{row_reason}; {reason}",
+            proposed={"removed_rows": [identity]},
+            applied={"removed_rows": [identity]} if outcome == "removed" else {},
+            outcome=outcome,
+            raw_step=step,
+        )
 
 
 def run_targeted_repair(
@@ -826,19 +1737,24 @@ def run_targeted_repair(
     authoritative_merge: Callable[[LossAnalysisDraft], LossAnalysisDraft] | None = None,
     normalization_warnings: list[str] | None = None,
     max_completion_tokens: int = 8192,
+    provider_draft_model: type[BaseModel] | None = None,
+    repair_record: RepairRecord | None = None,
 ) -> LossAnalysisDraft:
     """Make exactly one targeted repair call and return the re-validated draft.
 
     The repair prompt is preflighted by the shared call wrapper, so an
     oversized repair fails closed before dispatch.  Any rejection or
     validation failure raises :class:`StageError`; the repair is never
-    retried.
+    retried.  The attempt's proposed and applied changes are recorded in the
+    run-level repair record with a ``rejected`` or ``failed`` outcome even
+    when it fails.
     """
     validation = _RepairValidation(
         run_validators=run_validators,
         normalizer=normalizer,
         authoritative_merge=authoritative_merge,
         normalization_warnings=normalization_warnings,
+        provider_draft_model=provider_draft_model,
     )
     # The deterministic salvage that produced this plan is recorded evidence:
     # it names exactly which rows or entries were dropped before the repair.
@@ -856,10 +1772,47 @@ def run_targeted_repair(
 
         def parse_disposition_repair(result: LLMResult) -> LossAnalysisDraft:
             response = parse_llm_result(result, DispositionRepairResponse)
-            merged = merge_disposition_repair(
-                plan, list(response.risk_dispositions), risk_cards=risk_cards
+            try:
+                merged = merge_disposition_repair(
+                    plan, list(response.risk_dispositions), risk_cards=risk_cards
+                )
+                merged = _finish_merged_draft(merged, validation, step=step)
+            except RepairRejected as exc:
+                _record_repair_outcome(
+                    plan,
+                    step=step,
+                    repair_record=repair_record,
+                    outcome="rejected",
+                    reason=str(exc),
+                )
+                raise
+            except ValueError as exc:
+                _record_repair_outcome(
+                    plan,
+                    step=step,
+                    repair_record=repair_record,
+                    outcome="failed",
+                    reason=str(exc),
+                )
+                raise
+            if plan.removed_unknown:
+                _record_warnings(
+                    (
+                        "removed risk_dispositions rows for unsupplied risk "
+                        f"references: {', '.join(plan.removed_unknown)}",
+                    ),
+                    normalization_warnings,
+                )
+                _record_removed_unknown_rows(
+                    plan, step=step, repair_record=repair_record
+                )
+            _record_repair_outcome(
+                plan,
+                step=step,
+                repair_record=repair_record,
+                outcome="repaired",
             )
-            return _finish_merged_draft(merged, validation)
+            return merged
 
         draft, _, error_msg = safe_llm_call(
             llm_client=llm_client,
@@ -879,14 +1832,39 @@ def run_targeted_repair(
             OBLIGATION_REPAIR_USER_TEMPLATE,
             use_case_text=use_case_text,
             selected_constraints=_selected_constraint_views(plan),
-            reasons=plan.reasons,
         )
         response_format = ObligationRepairResponse
 
         def parse_obligation_repair(result: LLMResult) -> LossAnalysisDraft:
             response = parse_llm_result(result, ObligationRepairResponse)
-            merged = merge_obligation_repair(plan, list(response.constraints))
-            return _finish_merged_draft(merged, validation)
+            try:
+                merged = merge_obligation_repair(plan, list(response.constraints))
+                merged = _finish_merged_draft(merged, validation, step=step)
+            except RepairRejected as exc:
+                _record_repair_outcome(
+                    plan,
+                    step=step,
+                    repair_record=repair_record,
+                    outcome="rejected",
+                    reason=str(exc),
+                )
+                raise
+            except ValueError as exc:
+                _record_repair_outcome(
+                    plan,
+                    step=step,
+                    repair_record=repair_record,
+                    outcome="failed",
+                    reason=str(exc),
+                )
+                raise
+            _record_repair_outcome(
+                plan,
+                step=step,
+                repair_record=repair_record,
+                outcome="repaired",
+            )
+            return merged
 
         draft, _, error_msg = safe_llm_call(
             llm_client=llm_client,
@@ -901,6 +1879,13 @@ def run_targeted_repair(
             result_parser=parse_obligation_repair,
         )
     if error_msg is not None or draft is None:
+        _record_repair_outcome(
+            plan,
+            step=step,
+            repair_record=repair_record,
+            outcome="failed",
+            reason=error_msg or "no provider response was returned",
+        )
         raise StageError(
             stage="stage_1a",
             step=step,
@@ -941,8 +1926,14 @@ def _declared_loss_views(draft: LossAnalysisDraft) -> list[dict]:
 
 
 def _selected_constraint_views(plan: ObligationRepairPlan) -> list[dict]:
-    """The full text of every selected constraint with its loss meanings."""
-    selected = set(plan.selected)
+    """The full text of every selected constraint with its repair scope.
+
+    Each view carries the constraint's retained context, its preserved valid
+    entries, and one repair item per selected entry: the original entry
+    verbatim, its exact validation errors, and the permitted correction
+    stated as relocation or removal of named fields, never as a choice.
+    """
+    selected_constraints = {selected.constraint_id for selected in plan.selected}
     losses_by_id = {
         loss.loss_id: loss
         for loss in plan.prior.risk_card_losses + plan.prior.use_case_losses
@@ -950,7 +1941,7 @@ def _selected_constraint_views(plan: ObligationRepairPlan) -> list[dict]:
     hazards_by_id = {hazard.hazard_id: hazard for hazard in plan.prior.hazards}
     views: list[dict] = []
     for constraint in plan.prior.security_constraints:
-        if constraint.constraint_id not in selected:
+        if constraint.constraint_id not in selected_constraints:
             continue
         related_loss_meanings: list[dict] = []
         for hazard_id in constraint.related_hazards:
@@ -967,6 +1958,16 @@ def _selected_constraint_views(plan: ObligationRepairPlan) -> list[dict]:
                             "via_hazard": hazard.hazard_id,
                         }
                     )
+        repair_entries = [
+            {
+                "obligation_id": selected.obligation_id,
+                "original_entry": selected.original_entry_raw,
+                "validation_errors": list(selected.validation_errors),
+                "permitted_change": selected.correction_instruction,
+            }
+            for selected in plan.selected
+            if selected.constraint_id == constraint.constraint_id
+        ]
         views.append(
             {
                 "constraint_id": constraint.constraint_id,
@@ -988,6 +1989,7 @@ def _selected_constraint_views(plan: ObligationRepairPlan) -> list[dict]:
                     entry.model_dump(mode="json", exclude_none=True)
                     for entry in constraint.obligations
                 ],
+                "repair_entries": repair_entries,
             }
         )
     return views

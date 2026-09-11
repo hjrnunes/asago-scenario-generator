@@ -563,3 +563,58 @@ def test_gap_reference_failure_feedback_preserves_new_loss_guidance(tmp_path):
     stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
     assert [entry["success"] for entry in stage1a_entries] == [True, False]
     assert len(client.calls) == 2
+
+
+def test_a18_gap_disposition_never_overwrites_risk_stage_accounting(tmp_path):
+    """A18 pins existing ownership: gap dispositions never reach the graph.
+
+    This test demonstrates current behavior, not a new contract rule.  Risk
+    accounting comes from the risk-derivation draft only
+    (``_merge_drafts``), so a fully wire-valid gap ``risk_dispositions``
+    row that conflicts with the risk stage's decision for a cited card
+    (``not_applicable`` with a replacement reason) is discarded: the final
+    graph keeps the risk-stage row, the gap row is absent, and the run
+    accepts with two calls.
+    """
+    gap = _empty_gap_response()
+    gap["risk_dispositions"] = [
+        {
+            "risk_ref": "atlas-001",
+            "disposition": "not_applicable",
+            "loss_ids": [],
+            "reason": "A fully valid replacement reason authored at the gap stage.",
+        }
+    ]
+    client = MockLLMClient()
+    client.set_response_for(
+        LossAnalysisDraft,
+        [_run15_risk_response(), gap],
+    )
+
+    result = derive_loss_analysis(
+        llm_client=client,
+        use_case_text="Klarna's assistant serves authenticated fintech customers.",
+        risk_cards=_risk_cards(),
+        run_dir=tmp_path,
+    )
+
+    # The final row for the contested card is the risk-stage row.
+    assert len(result.risk_dispositions) == 1
+    row = result.risk_dispositions[0]
+    assert row.risk_ref == "atlas-001"
+    assert row.disposition == "cited"
+    assert list(row.loss_ids) == ["L-1"]
+    assert row.reason is None
+    # The gap row is absent from the final graph.
+    assert not any(
+        disposition.disposition == "not_applicable"
+        for disposition in result.risk_dispositions
+    )
+    # The run accepts with two calls; the conflicting row stays call evidence.
+    entries = [
+        json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
+    ]
+    stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
+    assert [entry["success"] for entry in stage1a_entries] == [True, True]
+    assert len(client.calls) == 2
+    assert "not_applicable" in stage1a_entries[1]["response_content"]

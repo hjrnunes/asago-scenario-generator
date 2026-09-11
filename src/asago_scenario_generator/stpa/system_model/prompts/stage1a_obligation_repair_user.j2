@@ -6,11 +6,12 @@
 
 ## Selected Constraints
 
-The prior response failed schema validation for exactly these constraints:
-each constraint is otherwise preserved, but its obligation entries were
-malformed and were dropped. Return the complete, corrected `obligations`
-collection for each. The rule, conditions, and hazard links shown are already
-retained by deterministic code and are context for your entries only.
+The prior response failed validation for exactly these constraints: each
+constraint is otherwise preserved (its rule, conditions, and hazard links are
+retained by deterministic code and cannot change), but the obligation entries
+listed below failed validation. Return the same entries with only the
+permitted correction applied; every field outside the permitted correction
+must be returned byte-identically.
 
 {% for constraint in selected_constraints %}
 ### {{ constraint.constraint_id }}
@@ -32,19 +33,29 @@ retained by deterministic code and are context for your entries only.
   {{ entry | tojson }}
   ```
 {% endfor %}
-{% else %}
-- **No obligation entries were preserved**; the malformed entries were
-  dropped, so return the corrected collection from scratch.
 {% endif %}
-- **Why it was selected:** {{ reasons | selectattr("0", "eq", constraint.constraint_id) | map(attribute="1") | join("; ") }}
+{% if constraint.repair_entries %}
+- **Entries to correct** (return each one with only its permitted
+  correction; no field outside that correction may change):
+{% for entry in constraint.repair_entries %}  - **{{ entry.obligation_id }}**
+    Original entry, verbatim:
+    ```json
+    {{ entry.original_entry | tojson }}
+    ```
+    Validation errors:
+{% for error in entry.validation_errors %}    - {{ error }}
+{% endfor %}    Permitted correction: {{ entry.permitted_change }}
+{% endfor %}
+{% endif %}
 {% endfor %}
 
 ---
 
 ## Your Task
 
-Return the corrected obligations for each selected constraint against the
-rule text, the hazard links, the declared loss meanings, and the use case
-above. Quote the rule verbatim in every `rule_span`. Omit entries rather
-than guessing a channel; the constraint is allowed to end with no entries
-when its failure direction is not legible.
+Return the complete, corrected `obligations` collection for each selected
+constraint: every preserved entry byte-identically, and each entry listed for
+correction with only its permitted correction applied. When the permitted
+correction moves a channel value to its correct field, the exact value moves
+with the entry and must not be re-chosen, replaced with another channel, or
+dropped to `unknown`. Quote the rule verbatim in every `rule_span`.

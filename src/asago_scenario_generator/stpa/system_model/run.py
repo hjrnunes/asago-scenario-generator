@@ -69,6 +69,9 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     diagnose_loss_analysis_semantics,
     derive_loss_analysis,
 )
+from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
+    RepairRecord,
+)
 from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
     LossAnalysisGateError,
     gate_loss_analysis,
@@ -217,6 +220,7 @@ def run_sp1(
     # the derived two-call analysis, followed by the deterministic gates.
     loss_analysis: LossAnalysis | None = None
     loss_analysis_gates: dict | None = None
+    stage_1a_repair_record: RepairRecord | None = None
     if loss_analysis_path is not None:
         loss_analysis, loss_analysis_gates = _try_load_pinned_loss_analysis(
             loss_analysis_path,
@@ -226,7 +230,11 @@ def run_sp1(
         )
     else:
         # --- Stage 1a: Loss Analysis (two calls, receives capability profile) ---
-        loss_analysis, accounting_normalization_warnings = _try_derive_loss_analysis(
+        (
+            loss_analysis,
+            accounting_normalization_warnings,
+            stage_1a_repair_record,
+        ) = _try_derive_loss_analysis(
             llm_client,
             use_case_text,
             risk_cards,
@@ -317,6 +325,7 @@ def run_sp1(
         stage_2_mode=stage2_result.mode,
         stage_2_call_count=stage2_result.model_call_count,
         reviewed_obligation_bindings_path=reviewed_obligation_bindings_path,
+        stage_1a_repair=stage_1a_repair_record,
     )
 
     return SP1RunResult(
@@ -368,13 +377,15 @@ def _try_derive_loss_analysis(
     stage_errors: list[str],
     capability_profile: CapabilityProfile | None = None,
     stage_warnings: list[str] | None = None,
-) -> tuple[LossAnalysis | None, list[str]]:
+) -> tuple[LossAnalysis | None, list[str], RepairRecord]:
     """Run Stage 1a (two calls), recording errors on failure.
 
-    Returns the analysis (or ``None``) and any accounting-normalization
-    warnings produced while parsing the provider responses.
+    Returns the analysis (or ``None``), any accounting-normalization warnings
+    produced while parsing the provider responses, and the accumulating
+    repair record the run manifest summarizes.
     """
     normalization_warnings: list[str] = []
+    repair_record = RepairRecord()
     try:
         analysis = derive_loss_analysis(
             llm_client=llm_client,
@@ -385,6 +396,7 @@ def _try_derive_loss_analysis(
             temperature=temperature,
             capability_profile=capability_profile,
             normalization_warnings=normalization_warnings,
+            repair_record=repair_record,
         )
         # Deterministic code owns the direction-authority stamp: entries on
         # a derived graph are proposals until a human reviews them (owner
@@ -400,10 +412,10 @@ def _try_derive_loss_analysis(
                     risk_cards=risk_cards,
                 )
             )
-        return analysis, normalization_warnings
+        return analysis, normalization_warnings, repair_record
     except StageError as exc:
         stage_errors.append(str(exc))
-        return None, normalization_warnings
+        return None, normalization_warnings, repair_record
 
 
 def _try_gate_loss_analysis(
@@ -891,6 +903,7 @@ def _write_manifest(
     stage_2_mode: str = "target_blind",
     stage_2_call_count: int = STAGE_2_CALL_COUNT,
     reviewed_obligation_bindings_path: Path | None = None,
+    stage_1a_repair: RepairRecord | None = None,
 ) -> None:
     """Write the run manifest with stage summary, input hashes, and prompt hashes."""
     input_hashes = _compute_input_hashes(
@@ -909,6 +922,15 @@ def _write_manifest(
         "call_count": _stage_1a_call_count,
         "source": "pinned" if stage_1a_pinned else "derived",
     }
+    if stage_1a_repair is not None and stage_1a_repair.entries:
+        # The run-level, cross-stage repair record: path, filename, and
+        # per-stage counts by outcome, so a reviewer can see every
+        # transformation without opening calls.jsonl.
+        stage_1a_summary["repair"] = {
+            "artifact": "loss-analysis-repair.yaml",
+            "record_path": str(run_dir / "loss-analysis-repair.yaml"),
+            "counts_by_stage": stage_1a_repair.counts_by_stage(),
+        }
     if stage_1a_gates is not None:
         stage_1a_summary.update(stage_1a_gates)
         # The bounded graph-revision call is a third Stage 1a model call.
