@@ -603,12 +603,10 @@ class TestRunOrchestrationPartialFailure:
         failed = [e for e in entries if e.get("success") is False]
         assert len(failed) >= 1
         stage_1a_failed = [e for e in failed if e["stage"] == "stage_1a"]
-        # Stage 1a gives malformed structured output one bounded JSON retry.
-        assert len(stage_1a_failed) == 2
-        assert [entry["step"] for entry in stage_1a_failed] == [
-            "risk_derivation",
-            "risk_derivation",
-        ]
+        # Stage 1a never retries an undecodable body (owner correction
+        # 2026-09-12): exactly one failed attempt, then the typed terminal.
+        assert len(stage_1a_failed) == 1
+        assert [entry["step"] for entry in stage_1a_failed] == ["risk_derivation"]
         assert all("error" in entry for entry in stage_1a_failed)
 
     def test_gd_13_pipeline_does_not_crash_on_stage_2_failure(self, tmp_path):

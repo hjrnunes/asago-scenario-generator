@@ -13,6 +13,7 @@ duplicates; cross-references stay valid after merge.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -60,7 +61,11 @@ STAGE = "stage_1a"
 STEP_RISK = "risk_derivation"
 STEP_GAP = "gap_analysis"
 STEP_MERGE = "merge"
-JSON_DECODE_RETRIES = 1
+# No automatic second dispatch on a malformed JSON body: the corrected
+# Stage 1a contract (owner authorization 2026-09-11, rev2) allows exactly one
+# call per stage plus at most one targeted repair, so an undecodable body is
+# a typed terminal outcome of the first attempt, never a retry trigger.
+JSON_DECODE_RETRIES = 0
 STAGE1A_MAX_COMPLETION_TOKENS = 8192
 DEFAULT_TEMPERATURE = 0.4
 
@@ -654,7 +659,11 @@ def _run_stage1a_call(
         so it joins the reference validators in the one bounded targeted
         repair instead of crashing the run with an uncorrected parse failure.
         The violation itself is retained so the repair classification can
-        reject container-level damage before any salvage runs.
+        reject container-level damage before any salvage runs.  A body that
+        never decoded as JSON is a terminal outcome of the first attempt: it
+        sets the same routing state so the typed unsupported path records it,
+        and the no-retry contract means it is never answered with a second
+        dispatch.
         """
         nonlocal first_parse_failed, validation_feedback, failure_class
         nonlocal first_wire_error
@@ -669,6 +678,16 @@ def _run_stage1a_call(
                 f"required response schema: {_wire_error_summary(exc)} "
                 "Return the complete corrected structured object that "
                 "matches the response schema exactly."
+            )
+            raise
+        except json.JSONDecodeError as exc:
+            first_parse_failed = True
+            failure_class = "wire_schema"
+            validation_feedback = (
+                "Validation feedback: the prior response body never decoded "
+                f"as JSON ({exc.msg} at line {exc.lineno}, column "
+                f"{exc.colno}); return exactly one JSON object matching the "
+                "response schema."
             )
             raise
         if authoritative_draft is not None:

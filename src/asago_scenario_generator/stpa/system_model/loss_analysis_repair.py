@@ -47,7 +47,7 @@ correction specification revision 2, 2026-09-11):
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Container, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Union
@@ -379,12 +379,20 @@ class RepairRecord:
 
 @dataclass(frozen=True)
 class SalvageReport:
-    """What deterministic salvage kept, dropped, and retained verbatim."""
+    """What deterministic salvage kept, dropped, and retained verbatim.
+
+    Each dropped disposition row is recorded as a
+    ``(label, reason, original_risk_ref)`` triple: ``label`` names the row by
+    its identity when present and by position otherwise, and
+    ``original_risk_ref`` carries the row's own usable identity (``None``
+    when the malformed row carried none), so later classification works from
+    the original identity rather than the positional label.
+    """
 
     dropped_losses: tuple[str, ...] = ()
     dropped_hazards: tuple[str, ...] = ()
     dropped_constraint_fields: tuple[str, ...] = ()
-    dropped_dispositions: tuple[tuple[str, str], ...] = ()
+    dropped_dispositions: tuple[tuple[str, str, str | None], ...] = ()
     obligation_salvage: tuple[
         tuple[str, tuple[tuple[dict, tuple[str, ...]], ...]], ...
     ] = ()
@@ -405,28 +413,27 @@ class SalvageReport:
         """Constraints whose failures are confined to obligation entries."""
         return tuple(constraint_id for constraint_id, _ in self.obligation_salvage)
 
-    def dropped_disposition_reason(self, risk_ref: str) -> str | None:
-        """Return the recorded salvage reason for one dropped row, if any."""
-        for label, reason in self.dropped_dispositions:
-            if label == risk_ref:
-                return reason
-        return None
-
     def dropped_disposition_warnings(self) -> tuple[str, ...]:
         """Render the dropped disposition rows as recorded warnings."""
         return tuple(
             f"dropped malformed risk_dispositions row for '{label}': {reason}"
-            for label, reason in self.dropped_dispositions
+            for label, reason, _ in self.dropped_dispositions
         )
 
 
-def _row_label(row: object, index: int, id_field: str) -> str:
-    """Name a dropped row by its identity when present, else by position."""
+def _row_identity(row: object, id_field: str) -> str | None:
+    """Return the row's usable string identity, when it carries one."""
     if isinstance(row, dict):
         identity = row.get(id_field)
         if isinstance(identity, str) and identity.strip():
             return identity
-    return f"row {index}"
+    return None
+
+
+def _row_label(row: object, index: int, id_field: str) -> str:
+    """Name a dropped row by its identity when present, else by position."""
+    identity = _row_identity(row, id_field)
+    return identity if identity is not None else f"row {index}"
 
 
 def _salvage_rows(
@@ -439,9 +446,11 @@ def _salvage_rows(
 ) -> list[BaseModel]:
     """Keep the rows that validate individually; record the others.
 
-    With ``label_pairs`` the caller receives ``(identity, reason)`` pairs
-    (dispositions), so the repair plan can carry the exact salvage reason
-    into the prompt; otherwise plain ``"identity: reason"`` strings.
+    With ``label_pairs`` the caller receives
+    ``(label, reason, original_risk_ref)`` triples (dispositions), so the
+    repair plan can classify each dropped row by its original identity and
+    carry the exact salvage reason into the prompt; otherwise plain
+    ``"identity: reason"`` strings.
     """
     kept: list[BaseModel] = []
     for index, row in enumerate(rows):
@@ -451,7 +460,7 @@ def _salvage_rows(
             reason = "; ".join(_format_validation_errors(exc))
             label = _row_label(row, index, id_field)
             if label_pairs:
-                dropped.append((label, reason))
+                dropped.append((label, reason, _row_identity(row, id_field)))
             else:
                 dropped.append(f"{label}: {reason}")
     return kept
@@ -488,7 +497,7 @@ def salvage_provider_response(
     dropped_losses: list[str] = []
     dropped_hazards: list[str] = []
     dropped_constraint_fields: list[str] = []
-    dropped_dispositions: list[tuple[str, str]] = []
+    dropped_dispositions: list[tuple[str, str, str | None]] = []
     obligation_salvage: list[tuple[str, tuple[tuple[dict, tuple[str, ...]], ...]]] = []
     scope_errors: list[str] = []
     warnings: list[str] = []
@@ -876,12 +885,18 @@ class DeterministicCleanup:
 
 @dataclass(frozen=True)
 class DispositionRepairPlan:
-    """One targeted repair of missing or malformed risk-disposition entries."""
+    """One targeted repair of missing or malformed risk-disposition entries.
+
+    ``removed_unknown`` carries one ``(risk reference, removal reason)`` pair
+    per unsupplied-card row the repair application removes (C2), whether the
+    row was wire-valid or malformed; the reason names the cleanup policy that
+    authorizes the removal.
+    """
 
     prior: LossAnalysisDraft
     selected: tuple[str, ...]
     reasons: tuple[tuple[str, str], ...]
-    removed_unknown: tuple[str, ...]
+    removed_unknown: tuple[tuple[str, str], ...]
     salvage_warnings: tuple[str, ...] = ()
 
 
@@ -983,11 +998,22 @@ def _record_salvage_drops(
     *,
     step: str,
     repair_record: RepairRecord | None,
+    repair_identities: Container[str] | None = None,
 ) -> None:
-    """Record every salvage drop that feeds a repair as a record entry."""
+    """Record every salvage drop that feeds a repair as a record entry.
+
+    When ``repair_identities`` is provided, only dropped disposition rows
+    whose original identity joins the repair selection are recorded; rows
+    routed to the deterministic cleanup record their own cleanup entry, so
+    no removed row is ever recorded twice.
+    """
     if repair_record is None:
         return
-    for label, reason in report.dropped_dispositions:
+    for label, reason, original_ref in report.dropped_dispositions:
+        if repair_identities is not None and (
+            original_ref is None or original_ref not in repair_identities
+        ):
+            continue
         repair_record.add(
             stage=step,
             attempt="first",
@@ -1150,12 +1176,61 @@ def build_repair_plan(
                 return DeterministicCleanup(
                     draft=prior,
                     warnings=warnings,
-                    removed_rows=tuple(report.dropped_dispositions),
+                    removed_rows=tuple(
+                        (label, reason)
+                        for label, reason, _ in report.dropped_dispositions
+                    ),
                 )
+            # Classify every dropped row by its original identity before any
+            # selection runs (owner correction, 2026-09-12): a supplied card's
+            # malformed row must join the repair selection, because a supplied
+            # card's missing, duplicate, or malformed state may never be
+            # silently resolved by cleanup, and an unsupplied identity routes
+            # to the C2 cleanup policy even when the row itself was malformed.
+            # A malformed row with no usable identity cannot be classified
+            # and fails closed with a typed reason.
+            supplied_order = [card.risk_id for card in risk_cards]
+            supplied = set(supplied_order)
+            supplied_drop_reasons: dict[str, list[str]] = {}
+            unknown_reasons: dict[str, str] = {}
+            for label, reason, original_ref in report.dropped_dispositions:
+                if original_ref is None:
+                    return UnsupportedRepair(
+                        "a malformed risk_dispositions row carries no usable "
+                        "risk_ref identity, so neither a repair selection nor "
+                        "a cleanup scope can be derived for it",
+                        scope="risk_dispositions",
+                    )
+                if original_ref in supplied:
+                    supplied_drop_reasons.setdefault(original_ref, []).append(reason)
+                else:
+                    unknown_reasons[original_ref] = (
+                        "risk reference absent from the supplied set; the "
+                        f"returned row was also malformed: {reason}"
+                    )
             selected, reason_pairs, removed_unknown = select_disposition_repairs(
                 prior, risk_cards
             )
-            if not selected and not removed_unknown:
+            reason_map = dict(reason_pairs)
+            for card_id, drop_reasons in supplied_drop_reasons.items():
+                malformed_note = (
+                    "a malformed risk_dispositions row was returned for this "
+                    "supplied card and dropped: " + "; ".join(drop_reasons)
+                )
+                reason_map[card_id] = (
+                    f"{reason_map[card_id]}; {malformed_note}"
+                    if card_id in reason_map
+                    else malformed_note
+                )
+            selected = tuple(
+                card_id for card_id in supplied_order if card_id in reason_map
+            )
+            for reference in removed_unknown:
+                unknown_reasons.setdefault(
+                    reference, "risk reference absent from the supplied set"
+                )
+            removed_unknown_rows = tuple(sorted(unknown_reasons.items()))
+            if not selected and not removed_unknown_rows:
                 return UnsupportedRepair(
                     "the salvaged response has no repairable disposition rows"
                 )
@@ -1164,38 +1239,23 @@ def build_repair_plan(
                     draft=_without_unknown_disposition_rows(prior, risk_cards),
                     warnings=(
                         *warnings,
-                        f"removed risk_dispositions rows for unsupplied risk "
-                        f"references: {', '.join(removed_unknown)}",
+                        "removed risk_dispositions rows for unsupplied risk "
+                        "references: "
+                        + ", ".join(reference for reference, _ in removed_unknown_rows),
                     ),
-                    removed_rows=(
-                        *(
-                            (label, f"malformed row: {reason}")
-                            for label, reason in report.dropped_dispositions
-                        ),
-                        *(
-                            (reference, "risk reference absent from the supplied set")
-                            for reference in removed_unknown
-                        ),
-                    ),
+                    removed_rows=removed_unknown_rows,
                 )
-            enriched_reasons = tuple(
-                (
-                    card_id,
-                    (
-                        f"{reason}; the returned row was dropped as malformed: "
-                        f"{report.dropped_disposition_reason(card_id)}"
-                        if report.dropped_disposition_reason(card_id)
-                        else reason
-                    ),
-                )
-                for card_id, reason in reason_pairs
+            _record_salvage_drops(
+                report,
+                step=step,
+                repair_record=repair_record,
+                repair_identities=frozenset(supplied_drop_reasons),
             )
-            _record_salvage_drops(report, step=step, repair_record=repair_record)
             return DispositionRepairPlan(
                 prior=prior,
                 selected=selected,
-                reasons=enriched_reasons,
-                removed_unknown=removed_unknown,
+                reasons=tuple((card_id, reason_map[card_id]) for card_id in selected),
+                removed_unknown=removed_unknown_rows,
                 salvage_warnings=warnings,
             )
         return UnsupportedRepair(
@@ -1229,7 +1289,10 @@ def build_repair_plan(
             prior=prior,
             selected=selected,
             reasons=reason_pairs,
-            removed_unknown=removed_unknown,
+            removed_unknown=tuple(
+                (reference, "risk reference absent from the supplied set")
+                for reference in removed_unknown
+            ),
         )
     return UnsupportedRepair(
         f"the {failure_class} failure class is outside the approved repair "
@@ -1627,12 +1690,18 @@ def _record_repair_outcome(
     repair_record: RepairRecord | None,
     outcome: str,
     reason: str = "",
+    recorded_identities: set[str] | None = None,
 ) -> None:
     """Record the repair attempt's proposed and applied changes per identity.
 
     A repaired entry records the identity as proposed and applied; a rejected
     or failed attempt records the identity as proposed with ``applied: {}``
     and the typed reason, so no failed attempt is ever recorded as applied.
+    Exactly one terminal outcome is recorded per attempted identity:
+    ``recorded_identities`` accumulates the identities that already received
+    their terminal outcome for this attempt, and those identities are never
+    recorded again (a typed rejection is not re-recorded as a transport
+    failure).
     """
     if repair_record is None:
         return
@@ -1651,6 +1720,10 @@ def _record_repair_outcome(
             for selected in plan.selected
         ]
     for identity, identity_reason in identities:
+        if recorded_identities is not None:
+            if identity in recorded_identities:
+                continue
+            recorded_identities.add(identity)
         applied = {"entries": [identity]} if outcome == "repaired" else {}
         repair_record.add(
             stage=step,
@@ -1675,20 +1748,26 @@ def _record_removed_unknown_rows(
     step: str,
     repair_record: RepairRecord | None,
 ) -> None:
-    """Record the unsupplied-card rows the repair merge removes (C2)."""
+    """Record the unsupplied-card rows the repair application removes (C2).
+
+    Every removed row exists only in the original first-attempt response, so
+    the entry's source reference (``raw_step``) always points at the original
+    response step, never at the repair response; ``attempt: repair`` records
+    that the removal was applied together with the repair.
+    """
     if repair_record is None:
         return
-    for reference in plan.removed_unknown:
+    for reference, removal_reason in plan.removed_unknown:
         repair_record.add(
             stage=step,
             attempt="repair",
             kind="cleanup",
             identity=reference,
-            reason="risk reference absent from the supplied set",
+            reason=removal_reason,
             proposed={"removed_rows": [reference]},
             applied={"removed_rows": [reference]},
             outcome="removed",
-            raw_step=step + _REPAIR_STEP_SUFFIX,
+            raw_step=step,
         )
 
 
@@ -1746,8 +1825,8 @@ def run_targeted_repair(
     oversized repair fails closed before dispatch.  Any rejection or
     validation failure raises :class:`StageError`; the repair is never
     retried.  The attempt's proposed and applied changes are recorded in the
-    run-level repair record with a ``rejected`` or ``failed`` outcome even
-    when it fails.
+    run-level repair record with exactly one terminal outcome (``repaired``,
+    ``rejected``, or ``failed``) per attempted identity, even when it fails.
     """
     validation = _RepairValidation(
         run_validators=run_validators,
@@ -1756,6 +1835,11 @@ def run_targeted_repair(
         normalization_warnings=normalization_warnings,
         provider_draft_model=provider_draft_model,
     )
+    # One terminal outcome per attempted identity: the set carries the
+    # identities that already received their typed outcome inside the parse
+    # closure, so the catch-all below never re-records a typed rejection or
+    # parse failure as a second transport failure.
+    recorded_identities: set[str] = set()
     # The deterministic salvage that produced this plan is recorded evidence:
     # it names exactly which rows or entries were dropped before the repair.
     _record_warnings(plan.salvage_warnings, normalization_warnings)
@@ -1784,6 +1868,7 @@ def run_targeted_repair(
                     repair_record=repair_record,
                     outcome="rejected",
                     reason=str(exc),
+                    recorded_identities=recorded_identities,
                 )
                 raise
             except ValueError as exc:
@@ -1793,13 +1878,15 @@ def run_targeted_repair(
                     repair_record=repair_record,
                     outcome="failed",
                     reason=str(exc),
+                    recorded_identities=recorded_identities,
                 )
                 raise
             if plan.removed_unknown:
                 _record_warnings(
                     (
                         "removed risk_dispositions rows for unsupplied risk "
-                        f"references: {', '.join(plan.removed_unknown)}",
+                        "references: "
+                        + ", ".join(reference for reference, _ in plan.removed_unknown),
                     ),
                     normalization_warnings,
                 )
@@ -1811,6 +1898,7 @@ def run_targeted_repair(
                 step=step,
                 repair_record=repair_record,
                 outcome="repaired",
+                recorded_identities=recorded_identities,
             )
             return merged
 
@@ -1847,6 +1935,7 @@ def run_targeted_repair(
                     repair_record=repair_record,
                     outcome="rejected",
                     reason=str(exc),
+                    recorded_identities=recorded_identities,
                 )
                 raise
             except ValueError as exc:
@@ -1856,6 +1945,7 @@ def run_targeted_repair(
                     repair_record=repair_record,
                     outcome="failed",
                     reason=str(exc),
+                    recorded_identities=recorded_identities,
                 )
                 raise
             _record_repair_outcome(
@@ -1863,6 +1953,7 @@ def run_targeted_repair(
                 step=step,
                 repair_record=repair_record,
                 outcome="repaired",
+                recorded_identities=recorded_identities,
             )
             return merged
 
@@ -1879,12 +1970,16 @@ def run_targeted_repair(
             result_parser=parse_obligation_repair,
         )
     if error_msg is not None or draft is None:
+        # The catch-all records only the identities whose outcome the parse
+        # closure never reached (a transport failure or an undecodable repair
+        # response); identities with a typed terminal outcome keep it.
         _record_repair_outcome(
             plan,
             step=step,
             repair_record=repair_record,
             outcome="failed",
             reason=error_msg or "no provider response was returned",
+            recorded_identities=recorded_identities,
         )
         raise StageError(
             stage="stage_1a",

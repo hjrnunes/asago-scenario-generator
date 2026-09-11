@@ -1556,6 +1556,490 @@ class TestDeterministicCleanup:
         ) in tuples
 
 
+class TestIndependentReviewCorrections:
+    """Corrections from the independent rev2-implementation review (2026-09-12).
+
+    The review reproduced four production defects despite the green suite
+    (owner correction authorization 2026-09-12, within the approved rev2
+    scope).  Each test here drives the same production path as the
+    reviewer's reproduction and asserts the corrected behavior exactly:
+    dispatch counts, selected identities, record outcomes, and the raw
+    response step each record entry points at.
+    """
+
+    def test_supplied_card_malformed_duplicate_gets_identity_scoped_repair(
+        self, tmp_path
+    ):
+        """A supplied card's malformed duplicate row must be repaired, never
+        silently cleaned up.
+
+        Review finding (spec axis, P2): salvage dropped the malformed
+        duplicate, selection then saw one surviving row for the card, and
+        the unsupplied row authorized a cleanup that silently resolved the
+        supplied card's duplicate state.  Corrected behavior: the dropped
+        row is classified by its original identity first, so the supplied
+        card joins the repair selection and the unsupplied row alone feeds
+        the C2 cleanup.
+        """
+        risk = _complete_risk_response()
+        # A malformed duplicate for a supplied card that already has one
+        # valid row, plus one wire-valid unsupplied row.
+        risk["risk_dispositions"] += [
+            {
+                "risk_ref": _SAVED_CARD_IDS[0],
+                "disposition": "bogus",
+                "loss_ids": [],
+                "reason": "Neutralized malformed duplicate row.",
+            },
+            {
+                "risk_ref": "not-a-supplied-risk",
+                "disposition": "not_applicable",
+                "loss_ids": [],
+                "reason": "Neutralized unsupplied row.",
+            },
+        ]
+        client = MockLLMClient()
+        client.set_response_for(LossAnalysisDraft, [risk, _empty_gap_response()])
+        client.set_response_for(
+            DispositionRepairResponse,
+            {
+                "risk_dispositions": [
+                    {
+                        "risk_ref": _SAVED_CARD_IDS[0],
+                        "disposition": "not_applicable",
+                        "loss_ids": [],
+                        "reason": "Neutralized reason: no grounded loss here.",
+                    }
+                ]
+            },
+        )
+        warnings: list[str] = []
+        result = derive_loss_analysis(
+            llm_client=client,
+            use_case_text=_USE_CASE,
+            risk_cards=_occiai_cards(),
+            run_dir=tmp_path,
+            normalization_warnings=warnings,
+        )
+        # Exactly one disposition row survives for the duplicated card, and
+        # the unsupplied row is gone.
+        assert len(result.risk_dispositions) == 112
+        assert (
+            sum(
+                1
+                for row in result.risk_dispositions
+                if row.risk_ref == _SAVED_CARD_IDS[0]
+            )
+            == 1
+        )
+        assert all(
+            row.risk_ref != "not-a-supplied-risk" for row in result.risk_dispositions
+        )
+        # Exactly one repair call: risk, its repair, then the gap review.
+        entries = _stage1a_entries(tmp_path)
+        assert [entry["step"] for entry in entries] == [
+            "risk_derivation",
+            "risk_derivation_repair",
+            "gap_analysis",
+        ]
+        assert [entry["success"] for entry in entries] == [False, True, True]
+        # The repair prompt carries the malformed-drop reason for the
+        # selected card.
+        repair_prompt = entries[1]["user_prompt_text"]
+        assert (
+            "malformed risk_dispositions row was returned for this supplied card"
+            in repair_prompt
+        )
+        # The record shows the identity-scoped repair: the salvage drop that
+        # feeds it, the C2 cleanup of the unsupplied row (its source is the
+        # original response), and the repaired supplied card.  The supplied
+        # card never appears as a cleanup identity.
+        record = _repair_record(tmp_path)
+        assert [
+            (
+                entry["stage"],
+                entry["attempt"],
+                entry["kind"],
+                entry["identity"],
+                entry["outcome"],
+                entry["raw_step"],
+            )
+            for entry in record["records"]
+        ] == [
+            (
+                "risk_derivation",
+                "first",
+                "salvage",
+                _SAVED_CARD_IDS[0],
+                "removed",
+                "risk_derivation",
+            ),
+            (
+                "risk_derivation",
+                "repair",
+                "cleanup",
+                "not-a-supplied-risk",
+                "removed",
+                "risk_derivation",
+            ),
+            (
+                "risk_derivation",
+                "repair",
+                "repair",
+                _SAVED_CARD_IDS[0],
+                "repaired",
+                "risk_derivation_repair",
+            ),
+        ]
+        salvage = record["records"][0]
+        assert "Input should be 'cited' or 'not_applicable'" in salvage["reason"]
+        assert any(
+            "dropped malformed risk_dispositions row" in warning
+            and _SAVED_CARD_IDS[0] in warning
+            for warning in warnings
+        )
+
+    def test_malformed_unsupplied_row_receives_c2_cleanup(self, tmp_path):
+        """A malformed row referencing an unsupplied card is C2 cleanup, not
+        a typed failure.
+
+        Review finding (spec axis, P2): the dropped row vanished from
+        selection, so the run typed-failed with "no repairable disposition
+        rows".  Corrected behavior: the dropped row's identity is
+        unsupplied, so the C2 policy authorizes its removal and the cleaned
+        draft re-validates with no repair call.
+        """
+        risk = _complete_risk_response()
+        risk["risk_dispositions"].append(
+            {
+                "risk_ref": "not-a-supplied-risk",
+                "disposition": "bogus",
+                "loss_ids": [],
+                "reason": "Neutralized malformed unsupplied row.",
+            }
+        )
+        client = MockLLMClient()
+        client.set_response_for(LossAnalysisDraft, [risk, _empty_gap_response()])
+        warnings: list[str] = []
+        result = derive_loss_analysis(
+            llm_client=client,
+            use_case_text=_USE_CASE,
+            risk_cards=_occiai_cards(),
+            run_dir=tmp_path,
+            normalization_warnings=warnings,
+        )
+        assert len(result.risk_dispositions) == 112
+        assert all(
+            row.risk_ref != "not-a-supplied-risk" for row in result.risk_dispositions
+        )
+        # No repair call: the first attempt and the gap review only.
+        entries = _stage1a_entries(tmp_path)
+        assert [entry["step"] for entry in entries] == [
+            "risk_derivation",
+            "gap_analysis",
+        ]
+        assert [entry["success"] for entry in entries] == [False, True]
+        # The removal is recorded once, as a C2 cleanup of an unsupplied
+        # reference whose row was also malformed, pointing at the original
+        # response.
+        record = _repair_record(tmp_path)
+        assert [
+            (
+                entry["stage"],
+                entry["attempt"],
+                entry["kind"],
+                entry["identity"],
+                entry["outcome"],
+                entry["raw_step"],
+            )
+            for entry in record["records"]
+        ] == [
+            (
+                "risk_derivation",
+                "first",
+                "cleanup",
+                "not-a-supplied-risk",
+                "removed",
+                "risk_derivation",
+            )
+        ]
+        cleanup = record["records"][0]
+        assert cleanup["reason"].startswith(
+            "risk reference absent from the supplied set; "
+            "the returned row was also malformed: "
+        )
+        assert "Input should be 'cited' or 'not_applicable'" in cleanup["reason"]
+        assert any(
+            "dropped malformed risk_dispositions row" in warning
+            and "not-a-supplied-risk" in warning
+            for warning in warnings
+        )
+        assert any(
+            "not-a-supplied-risk" in warning and "unsupplied" in warning
+            for warning in warnings
+        )
+
+    def test_unsupplied_row_removed_during_repair_cites_the_original_response(
+        self, tmp_path
+    ):
+        """A C2 row removed by a repair application is evidenced at the
+        response that carries it.
+
+        Review finding (standards/spec axis, P2): the cleanup entry's
+        ``raw_step`` pointed at the repair response, but the removed row
+        exists only in the original risk_derivation response.  Corrected
+        behavior: ``attempt: repair`` records when the removal was applied
+        and ``raw_step`` records where the row actually lives.
+        """
+        risk = _attempt_two_response()
+        risk["risk_dispositions"].append(
+            {
+                "risk_ref": "not-a-supplied-risk",
+                "disposition": "not_applicable",
+                "loss_ids": [],
+                "reason": "Neutralized unsupplied row.",
+            }
+        )
+        client = MockLLMClient()
+        client.set_response_for(LossAnalysisDraft, [risk, _empty_gap_response()])
+        client.set_response_for(
+            DispositionRepairResponse,
+            {"risk_dispositions": _disposition_repair_rows()},
+        )
+        result = derive_loss_analysis(
+            llm_client=client,
+            use_case_text=_USE_CASE,
+            risk_cards=_occiai_cards(),
+            run_dir=tmp_path,
+        )
+        assert len(result.risk_dispositions) == 112
+        entries = _stage1a_entries(tmp_path)
+        assert [entry["step"] for entry in entries] == [
+            "risk_derivation",
+            "risk_derivation_repair",
+            "gap_analysis",
+        ]
+        assert [entry["success"] for entry in entries] == [False, True, True]
+        # The removed row is present only in the original response, so the
+        # cleanup entry's source must be that step, never the repair step.
+        row_steps = [
+            entry["step"]
+            for entry in entries
+            if "not-a-supplied-risk" in json.dumps(entry.get("response_content"))
+        ]
+        assert row_steps == ["risk_derivation"]
+        record = _repair_record(tmp_path)
+        cleanup = next(
+            entry
+            for entry in record["records"]
+            if entry["kind"] == "cleanup" and entry["identity"] == "not-a-supplied-risk"
+        )
+        assert cleanup["attempt"] == "repair"
+        assert cleanup["raw_step"] == "risk_derivation"
+        assert cleanup["reason"] == "risk reference absent from the supplied set"
+        # The seven selected cards keep their repaired entries.
+        assert [
+            (entry["identity"], entry["outcome"])
+            for entry in record["records"]
+            if entry["kind"] == "repair"
+        ] == [(risk_id, "repaired") for risk_id in _SAVED_MISSING_SEVEN]
+
+    def test_malformed_gap_json_gets_no_second_dispatch_and_is_recorded(self, tmp_path):
+        """An undecodable gap body is a typed terminal: no retry, no repair
+        call, and the failure is recorded.
+
+        Review findings (standards axis, P1/P2): the Stage 1a JSON retry
+        spent a second gap dispatch, and the terminal outcome was never
+        recorded.  Corrected behavior: exactly one gap attempt, one typed
+        unsupported record entry, and the run stops.
+        """
+        client = MockLLMClient()
+        client.set_response_for(
+            LossAnalysisDraft,
+            [_attempt_one_response(), "{broken json"],
+        )
+        client.set_response_for(ObligationRepairResponse, _obligation_repair_response())
+        with pytest.raises(StageError, match="never decoded as JSON"):
+            derive_loss_analysis(
+                llm_client=client,
+                use_case_text=_USE_CASE,
+                risk_cards=_occiai_cards(),
+                run_dir=tmp_path,
+            )
+        # The risk repair happened; the gap body failed once with no second
+        # dispatch and no gap repair call.
+        entries = _stage1a_entries(tmp_path)
+        assert [entry["step"] for entry in entries] == [
+            "risk_derivation",
+            "risk_derivation_repair",
+            "gap_analysis",
+        ]
+        assert [entry["success"] for entry in entries] == [False, True, False]
+        assert len(client.calls) == 3
+        # The terminal outcome is recorded: the risk-stage entries survive
+        # and the gap failure appears as one unsupported response entry.
+        record = _repair_record(tmp_path)
+        assert [
+            (
+                entry["stage"],
+                entry["attempt"],
+                entry["kind"],
+                entry["identity"],
+                entry["outcome"],
+                entry["raw_step"],
+            )
+            for entry in record["records"]
+        ] == [
+            (
+                "risk_derivation",
+                "first",
+                "salvage",
+                "SC-1/O1",
+                "removed",
+                "risk_derivation",
+            ),
+            (
+                "risk_derivation",
+                "repair",
+                "repair",
+                "SC-1/O1",
+                "repaired",
+                "risk_derivation_repair",
+            ),
+            (
+                "gap_analysis",
+                "first",
+                "unsupported",
+                "response",
+                "unsupported",
+                "gap_analysis",
+            ),
+        ]
+        assert record["records"][2]["reason"].startswith(
+            "the response body never decoded as JSON"
+        )
+
+    def test_rejected_repair_records_exactly_one_terminal_outcome(self, tmp_path):
+        """A rejected repair keeps its typed outcome; the transport catch-all
+        never re-records the same identity as failed.
+
+        Review finding (standards axis, P2): the parse closure recorded the
+        typed rejection and the catch-all recorded the same identities again
+        as failed, producing ``rejected: 1`` and ``failed: 1`` for one
+        attempt.  Corrected behavior: one terminal outcome per attempted
+        repair identity.
+        """
+        client = MockLLMClient()
+        client.set_response_for(
+            LossAnalysisDraft,
+            [_attempt_one_response(), _gap_constraint_defect_response()],
+        )
+        client.set_response_for(
+            ObligationRepairResponse,
+            [
+                _obligation_repair_response(),
+                _gap_obligation_repair_response(
+                    entry={
+                        "obligation_id": "O1",
+                        "kind": "forbidden",
+                        "behavior": "including sensitive health data in a reply",
+                        "rule_span": "must uphold control SC-8",
+                        "violated_via": "state",
+                    }
+                ),
+            ],
+        )
+        with pytest.raises(StageError, match="targeted repair failed"):
+            derive_loss_analysis(
+                llm_client=client,
+                use_case_text=_USE_CASE,
+                risk_cards=_occiai_cards(),
+                run_dir=tmp_path,
+            )
+        entries = _stage1a_entries(tmp_path)
+        assert [entry["step"] for entry in entries] == [
+            "risk_derivation",
+            "risk_derivation_repair",
+            "gap_analysis",
+            "gap_analysis_repair",
+        ]
+        assert [entry["success"] for entry in entries] == [False, True, False, False]
+        assert len(client.calls) == 4
+        record = _repair_record(tmp_path)
+        gap_entries = [
+            (
+                entry["attempt"],
+                entry["kind"],
+                entry["identity"],
+                entry["outcome"],
+            )
+            for entry in record["records"]
+            if entry["stage"] == "gap_analysis"
+        ]
+        # The salvage drop and exactly one terminal repair outcome: the
+        # typed rejection.  No second "failed" entry for the same identity.
+        assert gap_entries == [
+            ("first", "salvage", "SC-8/O1", "removed"),
+            ("repair", "repair", "SC-8/O1", "rejected"),
+        ]
+        rejected = next(
+            entry
+            for entry in record["records"]
+            if entry["stage"] == "gap_analysis" and entry["outcome"] == "rejected"
+        )
+        assert "repair_channel_replaced" in rejected["reason"]
+
+    def test_malformed_disposition_row_without_identity_fails_typed(self, tmp_path):
+        """A malformed disposition row with no usable identity cannot be
+        classified, so it is a typed terminal failure.
+
+        The classification works from the original identity: a supplied
+        identity routes to the repair selection and an unsupplied identity
+        routes to the C2 cleanup.  A row with no ``risk_ref`` satisfies
+        neither policy (C2 removes only rows referencing unsupplied cards),
+        so it fails closed with no repair call and no cleanup.
+        """
+        risk = _complete_risk_response()
+        risk["risk_dispositions"].append(
+            {
+                "disposition": "bogus",
+                "loss_ids": [],
+                "reason": "Neutralized identity-free malformed row.",
+            }
+        )
+        client = MockLLMClient()
+        client.set_response_for(LossAnalysisDraft, [risk, _empty_gap_response()])
+        with pytest.raises(StageError, match="no usable risk_ref identity"):
+            derive_loss_analysis(
+                llm_client=client,
+                use_case_text=_USE_CASE,
+                risk_cards=_occiai_cards(),
+                run_dir=tmp_path,
+            )
+        assert len(client.calls) == 1
+        record = _repair_record(tmp_path)
+        assert [
+            (
+                entry["stage"],
+                entry["attempt"],
+                entry["kind"],
+                entry["identity"],
+                entry["outcome"],
+                entry["raw_step"],
+            )
+            for entry in record["records"]
+        ] == [
+            (
+                "risk_derivation",
+                "first",
+                "unsupported",
+                "risk_dispositions",
+                "unsupported",
+                "risk_derivation",
+            )
+        ]
+
+
 class TestGapObligationRepair:
     """The gap call's obligation entries join the same repair scope."""
 

@@ -1,4 +1,12 @@
-"""Regression tests for bounded JSON-decode retries at the Stage 2 boundary."""
+"""JSON-decode retry behavior at the model-call boundaries.
+
+Stage 2 keeps its bounded JSON-decode retry (one extra attempt).  Stage 1a
+has none (owner authorization 2026-09-11, rev2; owner correction
+2026-09-12): an undecodable body is a typed terminal outcome of the single
+first attempt, recorded as an unsupported response failure in the run-level
+repair record, and is never answered with a second dispatch or a repair
+call.
+"""
 
 from __future__ import annotations
 
@@ -171,8 +179,15 @@ def test_stage2_client_failure_is_not_retried(tmp_path):
     assert "RuntimeError" in attempts[0]["error"]
 
 
-def test_stage1a_json_decode_retry_continues_and_logs_both_attempts(tmp_path):
-    """One malformed risk draft is retried and then accepted."""
+def test_stage1a_malformed_json_gets_no_second_dispatch_and_is_recorded(tmp_path):
+    """One malformed risk draft is a typed terminal: no retry, one attempt.
+
+    The corrected Stage 1a contract (owner authorization 2026-09-11, rev2;
+    owner correction 2026-09-12) allows exactly one call per stage plus at
+    most one targeted repair, so an undecodable body is a typed terminal
+    outcome of the first attempt — never an automatic second dispatch —
+    and the run-level repair record carries it.
+    """
     from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
 
     client = MockLLMClient()
@@ -181,26 +196,55 @@ def test_stage1a_json_decode_retry_continues_and_logs_both_attempts(tmp_path):
         ["{malformed JSON", valid_risk_draft_dict(), valid_gap_draft_dict()],
     )
 
-    result = derive_loss_analysis(
-        llm_client=client,
-        use_case_text="Test use case",
-        risk_cards=make_risk_cards(),
-        run_dir=tmp_path,
-    )
+    with pytest.raises(StageError, match="never decoded as JSON"):
+        derive_loss_analysis(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=make_risk_cards(),
+            run_dir=tmp_path,
+        )
 
-    assert result.risk_card_losses
     attempts = [
         entry
         for entry in read_calls_jsonl(tmp_path)
         if entry["stage"] == "stage_1a" and entry["step"] == "risk_derivation"
     ]
-    assert len(attempts) == 2
-    assert [entry["success"] for entry in attempts] == [False, True]
+    # Exactly one attempt: the valid fixtures are never consumed.
+    assert len(attempts) == 1
+    assert attempts[0]["success"] is False
     assert "JSONDecodeError" in attempts[0]["error"]
+    assert client.call_count == 1
+    # The terminal outcome is recorded as an unsupported response failure.
+    record = yaml.safe_load(
+        (tmp_path / "loss-analysis-repair.yaml").read_text(encoding="utf-8")
+    )
+    assert [
+        (
+            entry["stage"],
+            entry["attempt"],
+            entry["kind"],
+            entry["identity"],
+            entry["outcome"],
+            entry["raw_step"],
+        )
+        for entry in record["records"]
+    ] == [
+        (
+            "risk_derivation",
+            "first",
+            "unsupported",
+            "response",
+            "unsupported",
+            "risk_derivation",
+        )
+    ]
+    assert record["records"][0]["reason"].startswith(
+        "the response body never decoded as JSON"
+    )
 
 
-def test_stage1a_json_decode_retry_is_bounded(tmp_path):
-    """Two malformed risk drafts stop after one retry without consuming more."""
+def test_stage1a_malformed_json_terminal_is_never_answered_with_a_repair(tmp_path):
+    """A second malformed body changes nothing: still one attempt, one record."""
     from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
 
     client = MockLLMClient()
@@ -227,9 +271,9 @@ def test_stage1a_json_decode_retry_is_bounded(tmp_path):
         for entry in read_calls_jsonl(tmp_path)
         if entry["stage"] == "stage_1a" and entry["step"] == "risk_derivation"
     ]
-    assert len(attempts) == 2
-    assert [entry["success"] for entry in attempts] == [False, False]
-    assert client.call_count == 2
+    assert len(attempts) == 1
+    assert [entry["success"] for entry in attempts] == [False]
+    assert client.call_count == 1
 
 
 def test_stage1a_calls_forward_exact_completion_cap(tmp_path):
