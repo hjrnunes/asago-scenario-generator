@@ -1,0 +1,50 @@
+## Use-Case Description
+
+{{ use_case_text }}
+
+---
+
+## Selected Constraints
+
+The prior response failed schema validation for exactly these constraints:
+each constraint is otherwise preserved, but its obligation entries were
+malformed and were dropped. Return the complete, corrected `obligations`
+collection for each. The rule, conditions, and hazard links shown are already
+retained by deterministic code and are context for your entries only.
+
+{% for constraint in selected_constraints %}
+### {{ constraint.constraint_id }}
+- **Rule:** {{ constraint.rule }}
+- **Applies when:**
+{% for condition in constraint.applies_when %}  {{ loop.index }}. {{ condition }}
+{% endfor %}
+{% for hazard in constraint.related_hazards %}- **Related hazard:** {{ hazard.hazard_id }}: {{ hazard.description }}
+{% endfor %}
+{% if constraint.related_loss_meanings %}
+- **Declared loss meanings behind this constraint:**
+{% for meaning in constraint.related_loss_meanings %}  - **{{ meaning.loss_id }}** (via {{ meaning.via_hazard }}): {{ meaning.description }}
+{% endfor %}
+{% endif %}
+{% if constraint.preserved_entries %}
+- **Obligation entries to preserve verbatim** (these parsed correctly and
+  must be returned byte-identically):
+{% for entry in constraint.preserved_entries %}  ```json
+  {{ entry | tojson }}
+  ```
+{% endfor %}
+{% else %}
+- **No obligation entries were preserved**; the malformed entries were
+  dropped, so return the corrected collection from scratch.
+{% endif %}
+- **Why it was selected:** {{ reasons | selectattr("0", "eq", constraint.constraint_id) | map(attribute="1") | join("; ") }}
+{% endfor %}
+
+---
+
+## Your Task
+
+Return the corrected obligations for each selected constraint against the
+rule text, the hazard links, the declared loss meanings, and the use case
+above. Quote the rule verbatim in every `rule_span`. Omit entries rather
+than guessing a channel; the constraint is allowed to end with no entries
+when its failure direction is not legible.

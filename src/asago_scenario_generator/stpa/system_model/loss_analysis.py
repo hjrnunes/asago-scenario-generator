@@ -13,7 +13,6 @@ duplicates; cross-references stay valid after merge.
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -46,6 +45,13 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     SecurityConstraint,
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
+from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
+    DeterministicCleanup,
+    RepairPlan,
+    UnsupportedRepair,
+    build_repair_plan,
+    run_targeted_repair,
+)
 
 STAGE = "stage_1a"
 STEP_RISK = "risk_derivation"
@@ -473,6 +479,7 @@ def derive_loss_analysis(
             existing_losses and risk_draft.hazards and risk_draft.security_constraints
         ),
         authoritative_draft=risk_draft,
+        normalization_warnings=normalization_warnings,
     )
 
     # --- Merge and validate ---
@@ -603,22 +610,25 @@ def _run_stage1a_call(
     user_prompt = loader.render_prompt(user_template, **template_vars)
 
     validation_feedback: str | None = None
-    accounting_failure = False
     first_parse_failed = False
+    # Typed label of the first failure, used to route the targeted repair:
+    # wire_schema, risk_accounting, draft_references, or draft_semantics.
+    failure_class: str | None = None
 
     def parse_first_response(result: LLMResult) -> LossAnalysisDraft:
-        """Parse the first response, routing wire-schema errors into the retry.
+        """Parse the first response, routing wire-schema errors into salvage.
 
         A pydantic wire violation (for example a malformed or semantically
         invalid ``risk_dispositions`` entry) is deterministic and actionable,
-        so it joins the reference validators in the one bounded retry instead
-        of crashing the run with an uncorrected parse failure.
+        so it joins the reference validators in the one bounded targeted
+        repair instead of crashing the run with an uncorrected parse failure.
         """
-        nonlocal first_parse_failed, validation_feedback
+        nonlocal first_parse_failed, validation_feedback, failure_class
         try:
             draft = parse_llm_result(result, response_format)
         except ValidationError as exc:
             first_parse_failed = True
+            failure_class = "wire_schema"
             validation_feedback = (
                 "Validation feedback: the prior response violated the "
                 f"required response schema: {_wire_error_summary(exc)} "
@@ -643,7 +653,7 @@ def _run_stage1a_call(
         return merged
 
     def run_validators(draft: LossAnalysisDraft) -> None:
-        nonlocal accounting_failure
+        nonlocal failure_class
         try:
             _validate_draft_references(
                 draft,
@@ -665,16 +675,23 @@ def _run_stage1a_call(
                     allowed_hazard_ids=allowed_hazard_ids,
                 )
             if require_risk_accounting:
-                _validate_risk_accounting(
-                    draft,
-                    risk_cards=list(accounting_cards),
-                    context=step,
-                )
-        except _DraftReferenceValidationError as exc:
-            # Key the retry preamble on the failure kind, not the call type:
-            # a Call 1 failure that is not about accounting must not be
-            # presented to the model as the risk-accounting repair.
-            accounting_failure = "risk accounting is incomplete" in exc.feedback
+                try:
+                    _validate_risk_accounting(
+                        draft,
+                        risk_cards=list(accounting_cards),
+                        context=step,
+                    )
+                except _DraftReferenceValidationError:
+                    # The accounting validator is one of the two approved
+                    # repair classes; label it distinctly from generic
+                    # reference failures.
+                    failure_class = "risk_accounting"
+                    raise
+        except _DraftReferenceValidationError:
+            failure_class = failure_class or "draft_references"
+            raise
+        except _DraftSemanticValidationError:
+            failure_class = "draft_semantics"
             raise
 
     def validate_references(draft: LossAnalysisDraft) -> None:
@@ -707,145 +724,105 @@ def _run_stage1a_call(
         return draft
 
     # Reference validation and wire-schema violations are deterministic and
-    # actionable, so give the model one bounded retry.  Network and provider
-    # failures do not get a duplicate call.
+    # actionable.  The former bounded whole-object retry is replaced (owner
+    # authorization 2026-09-11) by one narrowly scoped targeted repair for
+    # two approved failure classes: missing or malformed risk-disposition
+    # entries, and malformed obligation entries within an otherwise
+    # preserved constraint.  Every other failure class gets an explicit typed
+    # outcome and no additional model call.
     if validation_feedback is None:
         raise StageError(stage=STAGE, step=step, message=error_msg)
 
-    retry_prompt = _loss_analysis_retry_prompt(
-        user_prompt=user_prompt,
-        validation_feedback=validation_feedback,
-        first_result=first_result,
-        require_losses=require_losses,
-        require_complete_chain=require_complete_chain,
-        accounting_failure=accounting_failure,
-        section_patch=step == STEP_GAP,
-    )
-    if first_parse_failed:
-        # The prior response never parsed, so there is no valid prior draft
-        # to patch against; the retry must return the complete object.
-        prior_draft = LossAnalysisDraft()
-    else:
-        prior_draft = parse_llm_result(first_result, response_format)
-
-    def validate_retry_references(draft: LossAnalysisDraft) -> None:
-        run_validators(draft)
-
-    def parse_retry_response(result: LLMResult) -> LossAnalysisDraft:
-        corrected = _merge_loss_analysis_correction(
-            prior_draft,
-            parse_llm_result(result, response_format),
+    def _merge_authority(repaired: LossAnalysisDraft) -> LossAnalysisDraft:
+        return _merge_loss_analysis_correction(
+            LossAnalysisDraft(),
+            repaired,
             authoritative_draft=authoritative_draft,
         )
-        for warning in normalize_disposition_citations(corrected):
+
+    outcome = build_repair_plan(
+        step=step,
+        response_format=response_format,
+        first_result=first_result,
+        first_parse_failed=first_parse_failed,
+        failure_class=failure_class or "unknown",
+        risk_cards=list(accounting_cards),
+        require_risk_accounting=require_risk_accounting,
+        constraint_wire_model=_ProviderSecurityConstraint,
+    )
+    if isinstance(outcome, UnsupportedRepair):
+        raise StageError(
+            stage=STAGE,
+            step=step,
+            message=(
+                f"targeted repair unsupported ({outcome.reason}); no repair "
+                f"call was made; first attempt failed: {error_msg}. "
+                f"{validation_feedback}"
+            ),
+        )
+    if isinstance(outcome, DeterministicCleanup):
+        # Deterministic row removal (out-of-contract disposition rows, or rows
+        # referencing unsupplied risk cards) is all the failure reduced to.
+        # The cleaned draft passes through the same authority merge, citation
+        # normalization, and full stage validators as a successful response.
+        cleaned = outcome.draft
+        try:
+            if authoritative_draft is not None:
+                cleaned = _merge_authority(cleaned)
+            for warning in normalize_disposition_citations(cleaned):
+                if (
+                    normalization_warnings is not None
+                    and warning not in normalization_warnings
+                ):
+                    normalization_warnings.append(warning)
+            run_validators(cleaned)
+        except (_DraftReferenceValidationError, _DraftSemanticValidationError) as exc:
+            raise StageError(
+                stage=STAGE,
+                step=step,
+                message=(
+                    f"targeted repair unsupported (deterministic cleanup left "
+                    f"a {failure_class or 'draft'} failure: {exc}); no repair "
+                    f"call was made; first attempt failed: {error_msg}. "
+                    f"{exc.feedback}"
+                ),
+            ) from exc
+        except ValueError as exc:
+            raise StageError(
+                stage=STAGE,
+                step=step,
+                message=(
+                    "targeted repair unsupported (deterministic cleanup "
+                    f"produced a conflicting duplicate: {exc}); no repair call "
+                    f"was made; first attempt failed: {error_msg}"
+                ),
+            ) from exc
+        for warning in outcome.warnings:
             if (
                 normalization_warnings is not None
                 and warning not in normalization_warnings
             ):
                 normalization_warnings.append(warning)
-        return corrected
+        return cleaned
 
-    draft, _, retry_error_msg = safe_llm_call(
+    plan: RepairPlan = outcome
+    return run_targeted_repair(
+        plan,
         llm_client=llm_client,
-        system_prompt=system_prompt,
-        user_prompt=retry_prompt,
-        response_format=response_format,
+        loader=loader,
         run_dir=run_dir,
-        stage=STAGE,
         step=step,
         temperature=temperature,
+        use_case_text=str(template_vars.get("use_case_text", "")),
+        risk_cards=list(accounting_cards),
+        run_validators=run_validators,
+        normalizer=normalize_disposition_citations,
+        authoritative_merge=(
+            _merge_authority if authoritative_draft is not None else None
+        ),
+        normalization_warnings=normalization_warnings,
         max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
-        result_parser=parse_retry_response,
-        result_validator=validate_retry_references,
     )
-    if retry_error_msg is not None:
-        raise StageError(
-            stage=STAGE,
-            step=step,
-            message=(
-                f"{error_msg}; retry failed: {retry_error_msg}. {validation_feedback}"
-            ),
-        )
-
-    assert draft is not None  # safe_llm_call guarantees this on success
-    return draft
-
-
-def _loss_analysis_retry_prompt(
-    *,
-    user_prompt: str,
-    validation_feedback: str,
-    first_result: LLMResult | None,
-    require_losses: bool,
-    require_complete_chain: bool,
-    accounting_failure: bool = False,
-    section_patch: bool,
-) -> str:
-    prior_object = _prior_structured_object(first_result)
-    collection_patch_rule = (
-        "Apply collection patch semantics to every collection: an empty "
-        "correction collection retains the prior collection, while a non-empty "
-        "correction collection replaces that prior collection in full. Do not "
-        "carry obsolete records from a replaced collection into the corrected "
-        "object."
-    )
-    if accounting_failure:
-        repair_order = (
-            "This is the risk-accounting repair. Return exactly one "
-            "risk_dispositions entry for every supplied risk card: 'cited' "
-            "with the declared loss IDs that account for it, or "
-            "'not_applicable' with a one-sentence reason. The feedback below "
-            "names each missing, duplicated, or malformed entry; fix exactly "
-            "those entries and preserve every valid loss, hazard, and "
-            "constraint record."
-        )
-    elif require_losses:
-        repair_order = (
-            "This is the risk-derivation repair. First declare grounded "
-            "risk-card losses with exact source risk IDs. Do not spend the "
-            "bounded repair on rewriting valid hazards or constraints; their "
-            "records will be retained after the missing loss declarations "
-            "are restored. Every dangling L-* reference must resolve to one "
-            "of the loss records you add."
-        )
-    elif require_complete_chain:
-        repair_order = (
-            "This is the dependency-chain repair. Declare grounded losses "
-            "before any hazards, then declare hazards before constraints. "
-            "Use the supplied prior loss and hazard IDs exactly; do not add "
-            "a record merely to fill a quota."
-        )
-    elif section_patch:
-        repair_order = (
-            "This is a collection-aware gap repair. Keep every explicit loss "
-            "provenance and use only exact declared IDs in the repaired links."
-        )
-    else:
-        repair_order = (
-            "Repair only the named defect and preserve every valid record; "
-            "never introduce an unsupported loss or dependency."
-        )
-    return (
-        f"{user_prompt}\n\n"
-        "## Prior structured object to correct\n\n"
-        f"```json\n{prior_object}\n```\n\n"
-        f"{validation_feedback}\n"
-        f"{repair_order}\n"
-        f"{collection_patch_rule}\n"
-        "Correct the prior object according to the repair rule above. Return "
-        "only the corrected structured object."
-    )
-
-
-def _prior_structured_object(result: LLMResult | None) -> str:
-    if result is None:
-        return "{}"
-    content = result.content
-    if isinstance(content, str):
-        return content
-    if hasattr(content, "model_dump"):
-        content = content.model_dump(mode="json")
-    return json.dumps(content, ensure_ascii=False, sort_keys=True)
 
 
 def _merge_loss_analysis_correction(

@@ -284,10 +284,14 @@ class TestValidReview:
         assert outcome.call_count == 1
         assert outcome.failure_reason is None
         artifact = yaml.safe_load((tmp_path / ARTIFACT_FILENAME).read_text())
-        assert artifact["schema_version"] == "loss-analysis-risk-coverage-review-v2"
+        assert artifact["schema_version"] == "loss-analysis-risk-coverage-review-v3"
         assert artifact["status"] == "completed"
         assert artifact["call_count"] == 1
         assert artifact["failure_reason"] is None
+        # The default budget plans one batch of four cards at the 8,192 cap.
+        assert artifact["batching"]["row_capacity"] == 32
+        assert list(artifact["batching"]["planned_batch_sizes"]) == [4]
+        assert list(artifact["batching"]["beyond_ceiling_cards"]) == []
         assert [row["risk_id"] for row in artifact["rows"]] == [
             "risk-a",
             "risk-b",
@@ -363,9 +367,7 @@ class TestDeterministicValidation:
     def test_non_substring_quote_is_recorded_as_an_invalid_row(self, tmp_path):
         rows = _valid_rows()
         rows["rows"][0]["evidence"][1]["quote"] = "a paraphrase, not a quotation"
-        self._single_invalid(
-            tmp_path, rows, "risk-a", "quote_not_a_substring"
-        )
+        self._single_invalid(tmp_path, rows, "risk-a", "quote_not_a_substring")
 
     def test_cited_card_cannot_be_not_applicable(self, tmp_path):
         rows = _valid_rows()
@@ -401,17 +403,13 @@ class TestDeterministicValidation:
     def test_partial_without_missing_protection_is_invalid(self, tmp_path):
         rows = _valid_rows()
         rows["rows"][2]["missing_protection"] = None
-        self._single_invalid(
-            tmp_path, rows, "risk-c", "missing_protection_required"
-        )
+        self._single_invalid(tmp_path, rows, "risk-c", "missing_protection_required")
 
     def test_disputed_requires_missing_protection(self, tmp_path):
         rows = _valid_rows()
         rows["rows"][3]["coverage"] = "not_applicable_disputed"
         rows["rows"][3]["missing_protection"] = None
-        self._single_invalid(
-            tmp_path, rows, "risk-d", "missing_protection_required"
-        )
+        self._single_invalid(tmp_path, rows, "risk-d", "missing_protection_required")
 
     def test_missing_card_row_is_recorded_under_rows_missing(self, tmp_path):
         rows = _valid_rows()
@@ -456,12 +454,17 @@ class TestDeterministicValidation:
     def test_every_batch_is_issued_when_an_earlier_batch_has_invalid_rows(
         self, tmp_path
     ):
-        """A one-token budget forces two batches; both are called."""
-        first = _valid_rows()
-        first["rows"] = [first["rows"][0], first["rows"][1]]
+        """A one-token budget forces four one-card batches; all are called."""
+        full = _valid_rows()
+        # One response per planned batch, each carrying only its own card.
+        first = {"rows": [full["rows"][0]]}
         first["rows"][0]["evidence"][1]["quote"] = "not a quotation"
-        second = _valid_rows()
-        second["rows"] = [second["rows"][2], second["rows"][3]]
+        responses = [
+            first,
+            {"rows": [full["rows"][1]]},
+            {"rows": [full["rows"][2]]},
+            {"rows": [full["rows"][3]]},
+        ]
         analysis = _analysis()
         from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 
@@ -470,7 +473,7 @@ class TestDeterministicValidation:
             (tmp_path / "loss-analysis.yaml").read_bytes()
         ).hexdigest()
         client = MockLLMClient()
-        client.set_response_for(RiskCoverageReview, [first, second])
+        client.set_response_for(RiskCoverageReview, responses)
 
         outcome = run_risk_coverage_review(
             llm_client=client,
@@ -484,8 +487,10 @@ class TestDeterministicValidation:
             max_completion_tokens=1,
         )
 
-        assert client.call_count == 2
-        assert outcome.call_count == 2
+        # A one-token completion budget sizes one card per batch, so the
+        # four-call ceiling is reached and every batch is issued.
+        assert client.call_count == 4
+        assert outcome.call_count == 4
         assert outcome.status == "partial"
         artifact = yaml.safe_load((tmp_path / ARTIFACT_FILENAME).read_text())
         assert [row["risk_id"] for row in artifact["rows"]] == [
@@ -496,6 +501,7 @@ class TestDeterministicValidation:
         assert artifact["rows_invalid"] == [
             {"risk_id": "risk-a", "reason": "quote_not_a_substring"}
         ]
+        assert list(artifact["batching"]["planned_batch_sizes"]) == [1, 1, 1, 1]
 
     def test_all_invalid_rows_report_unavailable(self, tmp_path):
         rows = _valid_rows()
@@ -713,9 +719,10 @@ class TestSplitRule:
         assert not should_split_review("system", "user", 1, max_completion_tokens=1)
 
     def test_split_merges_rows_in_card_order(self, tmp_path):
-        # A one-token budget forces the documented two-call split.  Each call
-        # gets the rows for its own half of the cards, in reverse order, so
-        # the merged rows must be re-sorted into supplied card order.
+        # A 500-token budget sizes two cards per batch, forcing the
+        # documented two-call split.  Each call gets the rows for its own
+        # half of the cards, in reverse order, so the merged rows must be
+        # re-sorted into supplied card order.
         first = _valid_rows()
         first["rows"] = [first["rows"][1], first["rows"][0]]
         second = _valid_rows()
@@ -739,13 +746,15 @@ class TestSplitRule:
             template_loader=TemplateLoader(PROMPTS_DIR),
             temperature=0.4,
             reviewed_loss_analysis_digest=digest,
-            max_completion_tokens=1,
+            max_completion_tokens=500,
         )
 
         assert outcome.status == "completed"
         assert outcome.call_count == 2
         artifact = yaml.safe_load((tmp_path / ARTIFACT_FILENAME).read_text())
         assert artifact["call_count"] == 2
+        assert artifact["batching"]["row_capacity"] == 2
+        assert list(artifact["batching"]["planned_batch_sizes"]) == [2, 2]
         assert [row["risk_id"] for row in artifact["rows"]] == [
             "risk-a",
             "risk-b",

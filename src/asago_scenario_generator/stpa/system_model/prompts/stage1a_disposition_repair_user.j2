@@ -1,0 +1,40 @@
+## Use-Case Description
+
+{{ use_case_text }}
+
+---
+
+## Declared Loss Registry
+
+These are the losses the prior response declared, with their meanings. A
+`cited` disposition may name only these loss IDs.
+
+{% for loss in declared_losses %}
+- **{{ loss.loss_id }}** ({{ loss.provenance }}): {{ loss.description }}
+  {% if loss.source_risk_cards %}Source risks: {{ loss.source_risk_cards | join(", ") }}{% endif %}
+{% endfor %}
+
+---
+
+## Selected Risk Cards
+
+The prior response failed risk accounting for exactly these supplied cards.
+The reason recorded for each one is shown. Return one corrected
+`risk_dispositions` entry for each.
+
+{% for card in selected_cards %}
+### {{ card.risk_id }} — {{ card.risk_name }}
+- **Description:** {{ card.risk_description }}
+- **Consequence:** {{ card.consequence or "N/A" }}
+- **Why it was selected:** {{ reasons | selectattr("0", "eq", card.risk_id) | map(attribute="1") | join("; ") }}
+{% endfor %}
+
+---
+
+## Your Task
+
+Decide the accounting for each selected card against the declared losses and
+the use case above: `cited` with the exact loss IDs that account for it, or
+`not_applicable` with a one-sentence reason grounded in this system. Every
+unselected disposition row is preserved unchanged by deterministic code, so
+do not restate them.

@@ -173,12 +173,29 @@ changing acceptance behavior, or running the quality sequence.
   checks in `loss_analysis_gates.py` (every loss has a hazard, every
   constraint has a hazard, every hazard has a constraint,
   constraint/hazard share a fixed-rule subject noun
-  phrase, every behavior class owns a hazard). A failing graph receives one
+  phrase, every behavior class owns a hazard). A first-attempt validation
+  failure receives one narrowly scoped targeted repair (owner authorization
+  2026-09-11) for exactly two classes: missing or malformed
+  `risk_dispositions` entries, and malformed obligation entries inside an
+  otherwise preserved constraint. Deterministic code selects the repair
+  identities, the closed repair wire carries nothing outside the repair
+  scope, duplicate, unknown, out-of-scope, or partial responses are
+  rejected with a typed reason, every unselected record and every preserved
+  obligation entry stays byte-identical, and the merged draft is
+  re-validated against the complete original inputs. The single repair
+  call is preflighted, logged with a `_repair` step suffix, and never
+  retried; failures that reduce to deterministic row removal (gap-call
+  out-of-contract rows, rows referencing unsupplied cards) are cleaned
+  with recorded warnings and no call; every other failure class is a typed
+  terminal failure with no second call. A failing graph receives one
   bounded revision call with the exact failing checks; a second failure is a
   fatal stage error recorded in the run manifest and
   `loss-analysis-gates.yaml`. The gates are offline and never soften a check.
-  After the gates pass on a derived analysis, one bounded advisory call
-  reviews every newly generated graph for per-risk coverage, with
+  After the gates pass on a derived analysis, at most four capacity-sized
+  advisory calls (batched up front from the per-row completion estimate,
+  32 cards per batch at the 8,192 cap, in supplied card order; cards beyond
+  four batches are recorded missing) review every newly generated graph
+  for per-risk coverage, with
   quotation-validated verdicts written to
   `loss-analysis-risk-coverage-review.yaml`; the review is advisory (it never
   changes the graph, blocks a run, or acts as a gate), and pinned runs skip it.

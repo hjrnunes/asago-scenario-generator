@@ -255,121 +255,6 @@ def _run15_correction_response() -> dict:
     }
 
 
-def _run16_initial_risk_response() -> dict:
-    """Return a neutralized run-16 response with L-2 in the wrong section."""
-    return {
-        "risk_dispositions": [
-            {
-                "risk_ref": "atlas-001",
-                "disposition": "cited",
-                "loss_ids": ["L-1"],
-                "reason": None,
-            }
-        ],
-        "risk_card_losses": [
-            {
-                "loss_id": "L-1",
-                "description": "Run-16 authoritative loss one.",
-                "provenance": "risk_card",
-                "source_risk_cards": ["atlas-001"],
-            }
-        ],
-        "use_case_losses": [
-            {
-                "loss_id": "L-2",
-                "description": "Run-16 old financial-record loss wording.",
-                "provenance": "risk_card",
-                "source_risk_cards": ["atlas-002"],
-            }
-        ],
-        "hazards": [
-            {
-                "hazard_id": "H-1",
-                "description": "Run-16 authoritative hazard one.",
-                "related_losses": ["L-1"],
-            }
-        ],
-        "security_constraints": [
-            {
-                "constraint_id": "SC-1",
-                "rule": "Run-16 authoritative constraint one.",
-                "related_hazards": ["H-1"],
-                "applies_when": [],
-            },
-            *[
-                {
-                    "constraint_id": f"SC-{index}",
-                    "rule": f"Run-16 invalid constraint {index}.",
-                    "related_hazards": [f"H-{index}"],
-                    "applies_when": [],
-                }
-                for index in range(2, 17)
-            ],
-        ],
-    }
-
-
-def _run16_correction_response() -> dict:
-    """Return the closed run-16 correction with L-2 canonically placed."""
-    return {
-        "risk_dispositions": [
-            {
-                "risk_ref": "atlas-001",
-                "disposition": "cited",
-                "loss_ids": ["L-1"],
-                "reason": None,
-            }
-        ],
-        "risk_card_losses": [
-            {
-                "loss_id": "L-1",
-                "description": "Run-16 authoritative loss one.",
-                "provenance": "risk_card",
-                "source_risk_cards": ["atlas-001"],
-            },
-            {
-                "loss_id": "L-2",
-                "description": "Run-16 corrected financial-record loss wording.",
-                "provenance": "risk_card",
-                "source_risk_cards": ["atlas-002"],
-            },
-            *[
-                {
-                    "loss_id": f"L-{index}",
-                    "description": f"Run-16 corrected loss {index}.",
-                    "provenance": "risk_card",
-                    "source_risk_cards": [f"atlas-{index:03d}"],
-                }
-                for index in range(3, 7)
-            ],
-        ],
-        "use_case_losses": [],
-        "hazards": [
-            {
-                "hazard_id": f"H-{index}",
-                "description": (
-                    "The system provides unreliable or unverified responses for "
-                    "critical financial tasks, or experiences service failure due "
-                    "to upstream dependency issues."
-                    if index == 6
-                    else f"Run-16 corrected hazard {index}."
-                ),
-                "related_losses": [f"L-{index}"],
-            }
-            for index in range(1, 7)
-        ],
-        "security_constraints": [
-            {
-                "constraint_id": f"SC-{index}",
-                "rule": f"Run-16 corrected constraint {index}.",
-                "related_hazards": [f"H-{index}"],
-                "applies_when": [],
-            }
-            for index in range(1, 7)
-        ],
-    }
-
-
 def _empty_gap_response() -> dict:
     """Return an explicitly empty, complete-gap response."""
     return {
@@ -380,16 +265,50 @@ def _empty_gap_response() -> dict:
     }
 
 
-def test_run15_section_patch_retains_losses_and_drops_obsolete_records(tmp_path):
-    """Captured run-15 correction patches collections without ID-union leakage."""
+def test_run15_gap_graph_merges_without_id_union_leakage(tmp_path):
+    """Captured run-15 gap graph merges with exact-repeat deduplication.
+
+    The captured run-15 invalid gap response (constraints referencing
+    undeclared hazards) is a typed terminal failure under the targeted-repair
+    contract, so the corrected closed graph is supplied directly as the gap
+    response.  The authority merge removes the exact repeats of the risk
+    draft's H-1/SC-1 and adds the new records without ID-union leakage.
+    """
+    gap = _run15_correction_response()
+    gap["use_case_losses"] = [
+        {
+            "loss_id": "L-2",
+            "description": (
+                "Financial loss to customers or merchants due to incorrect "
+                "processing of refunds, payments, or transaction adjustments."
+            ),
+            "provenance": "use_case",
+            "source_risk_cards": [],
+        },
+        {
+            "loss_id": "L-3",
+            "description": (
+                "Regulatory non-compliance or legal sanctions resulting from "
+                "inaccurate information provided regarding fees, policies, or "
+                "payment terms."
+            ),
+            "provenance": "use_case",
+            "source_risk_cards": [],
+        },
+        {
+            "loss_id": "L-4",
+            "description": (
+                "Loss of customer trust and brand reputation due to the delivery "
+                "of generic, incorrect, or unhelpful automated service responses."
+            ),
+            "provenance": "use_case",
+            "source_risk_cards": [],
+        },
+    ]
     client = MockLLMClient()
     client.set_response_for(
         LossAnalysisDraft,
-        [
-            _run15_risk_response(),
-            _run15_invalid_gap_response(),
-            _run15_correction_response(),
-        ],
+        [_run15_risk_response(), gap],
     )
 
     result = derive_loss_analysis(
@@ -424,16 +343,9 @@ def test_run15_section_patch_retains_losses_and_drops_obsolete_records(tmp_path)
         json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
     ]
     stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
-    assert len(stage1a_entries) == 3
-    assert [entry["success"] for entry in stage1a_entries] == [True, False, True]
-    assert '"SC-17"' in stage1a_entries[1]["response_content"]
-    assert '"SC-17"' not in stage1a_entries[2]["response_content"]
-    retry_prompt = stage1a_entries[2]["user_prompt_text"].lower()
-    assert "an empty correction collection retains the prior collection" in retry_prompt
-    assert (
-        "a non-empty correction collection replaces that prior collection in full"
-        in retry_prompt
-    )
+    assert [entry["success"] for entry in stage1a_entries] == [True, True]
+    # The obsolete SC-17 record of the captured invalid response never lands.
+    assert '"SC-17"' not in stage1a_entries[1]["response_content"]
 
     wire_schema = client.calls[0].response_format.model_json_schema()
     assert set(wire_schema["required"]) == {
@@ -452,14 +364,103 @@ def test_run15_section_patch_retains_losses_and_drops_obsolete_records(tmp_path)
         assert wire_schema["properties"][field]["maxItems"] == 16
 
 
-def test_run16_canonicalizes_provenance_before_retry_section_patch(tmp_path):
-    """A corrected risk section replaces a misplaced loss without false conflict."""
-    initial = _run16_initial_risk_response()
-    correction = _run16_correction_response()
+def test_run15_invalid_gap_references_fail_typed(tmp_path):
+    """The captured run-15 invalid gap response is a typed terminal failure."""
     client = MockLLMClient()
     client.set_response_for(
         LossAnalysisDraft,
-        [initial, correction, _empty_gap_response()],
+        [_run15_risk_response(), _run15_invalid_gap_response()],
+    )
+
+    with pytest.raises(StageError) as exc_info:
+        derive_loss_analysis(
+            llm_client=client,
+            use_case_text="Klarna's assistant serves authenticated fintech customers.",
+            risk_cards=_risk_cards(),
+            run_dir=tmp_path,
+        )
+
+    message = str(exc_info.value)
+    assert "targeted repair unsupported" in message
+    assert "draft_references failure class" in message
+    assert "no repair call was made" in message
+    entries = [
+        json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
+    ]
+    stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
+    assert [entry["success"] for entry in stage1a_entries] == [True, False]
+    # The captured invalid response is retained as call evidence.
+    assert '"SC-17"' in stage1a_entries[1]["response_content"]
+
+
+def test_run16_canonicalizes_provenance_on_the_risk_draft(tmp_path):
+    """A misplaced risk-card loss is classified by provenance without conflict.
+
+    The captured run-16 shape placed a ``risk_card``-provenance loss in
+    ``use_case_losses``.  Canonicalization moves it by typed provenance, so
+    the final graph carries it in ``risk_card_losses`` with no false
+    conflicting-duplicate diagnostic.
+    """
+    risk = {
+        "risk_dispositions": [
+            {
+                "risk_ref": "atlas-001",
+                "disposition": "cited",
+                "loss_ids": ["L-1"],
+                "reason": None,
+            }
+        ],
+        "risk_card_losses": [
+            {
+                "loss_id": "L-1",
+                "description": "Run-16 authoritative loss one.",
+                "provenance": "risk_card",
+                "source_risk_cards": ["atlas-001"],
+            }
+        ],
+        "use_case_losses": [
+            {
+                "loss_id": "L-2",
+                "description": "Run-16 financial-record loss wording.",
+                "provenance": "risk_card",
+                "source_risk_cards": ["atlas-002"],
+            }
+        ],
+        "hazards": [
+            {
+                "hazard_id": "H-1",
+                "description": "Run-16 authoritative hazard one.",
+                "related_losses": ["L-1"],
+            },
+            {
+                "hazard_id": "H-2",
+                "description": (
+                    "The system provides unreliable or unverified responses for "
+                    "critical financial tasks, or experiences service failure due "
+                    "to upstream dependency issues."
+                ),
+                "related_losses": ["L-2"],
+            },
+        ],
+        "security_constraints": [
+            {
+                "constraint_id": "SC-1",
+                "rule": "Run-16 authoritative constraint one.",
+                "related_hazards": ["H-1"],
+                "applies_when": [],
+            },
+            {
+                "constraint_id": "SC-2",
+                "rule": "Run-16 constraint two.",
+                "related_hazards": ["H-2"],
+                "applies_when": [],
+            },
+        ],
+    }
+    client = MockLLMClient()
+    client.set_response_for(
+        LossAnalysisDraft,
+        [risk, _empty_gap_response()],
     )
 
     result = derive_loss_analysis(
@@ -469,26 +470,23 @@ def test_run16_canonicalizes_provenance_before_retry_section_patch(tmp_path):
         run_dir=tmp_path,
     )
 
-    assert [loss.loss_id for loss in result.risk_card_losses] == [
-        f"L-{index}" for index in range(1, 7)
-    ]
+    assert [loss.loss_id for loss in result.risk_card_losses] == ["L-1", "L-2"]
     assert result.use_case_losses == []
     assert result.risk_card_losses[1].description == (
-        "Run-16 corrected financial-record loss wording."
+        "Run-16 financial-record loss wording."
     )
-    assert [hazard.hazard_id for hazard in result.hazards] == [
-        f"H-{index}" for index in range(1, 7)
-    ]
+    assert [hazard.hazard_id for hazard in result.hazards] == ["H-1", "H-2"]
     assert [constraint.constraint_id for constraint in result.security_constraints] == [
-        f"SC-{index}" for index in range(1, 7)
+        "SC-1",
+        "SC-2",
     ]
     diagnostics = diagnose_loss_analysis_semantics(result)
     assert not any(
-        item.code == "hazard_not_system_state" and "H-6" in item.message
+        item.code == "hazard_not_system_state" and "H-2" in item.message
         for item in diagnostics
     )
     assert any(
-        item.code == "hazard_cause_or_dependency" and "H-6" in item.message
+        item.code == "hazard_cause_or_dependency" and "H-2" in item.message
         for item in diagnostics
     )
 
@@ -496,26 +494,22 @@ def test_run16_canonicalizes_provenance_before_retry_section_patch(tmp_path):
         json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
     ]
     stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
-    assert len(stage1a_entries) == 3
-    assert [entry["success"] for entry in stage1a_entries] == [False, True, True]
+    assert [entry["success"] for entry in stage1a_entries] == [True, True]
     assert (
-        "Run-16 old financial-record loss wording."
+        "Run-16 financial-record loss wording."
         in stage1a_entries[0]["response_content"]
     )
-    assert (
-        "Run-16 corrected financial-record loss wording."
-        in stage1a_entries[1]["response_content"]
-    )
 
 
-def test_run15_section_patch_rejects_conflicting_authoritative_ids(tmp_path):
+def test_run15_authority_merge_rejects_conflicting_duplicate_ids(tmp_path):
     """A reused baseline ID with changed semantics is never silently replaced."""
-    correction = _run15_correction_response()
-    correction["hazards"][0]["description"] = "Changed baseline hazard semantics."
+    gap = _run15_correction_response()
+    gap["use_case_losses"] = []
+    gap["hazards"][0]["description"] = "Changed baseline hazard semantics."
     client = MockLLMClient()
     client.set_response_for(
         LossAnalysisDraft,
-        [_run15_risk_response(), _run15_invalid_gap_response(), correction],
+        [_run15_risk_response(), gap],
     )
 
     with pytest.raises(StageError, match="conflicting duplicate hazard ID 'H-1'"):
@@ -530,57 +524,42 @@ def test_run15_section_patch_rejects_conflicting_authoritative_ids(tmp_path):
         json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
     ]
     stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
-    assert len(stage1a_entries) == 3
-    assert [entry["success"] for entry in stage1a_entries] == [True, False, False]
-    assert '"SC-17"' in stage1a_entries[1]["response_content"]
+    assert [entry["success"] for entry in stage1a_entries] == [True, False]
 
 
-def test_gap_retry_explicitly_preserves_grounded_new_loss_declaration(tmp_path):
-    """Run-14's H-7/L-7 response gets an actionable declaration repair."""
+def test_gap_reference_failure_feedback_preserves_new_loss_guidance(tmp_path):
+    """Run-14's H-7/L-7 response gets the actionable declaration guidance."""
     invalid_gap = _run14_invalid_gap_response()
-    corrected_gap = _run14_invalid_gap_response()
-    corrected_gap["use_case_losses"] = [
-        {
-            "loss_id": "L-7",
-            "description": (
-                "Customers and customer-service operations lose effective, "
-                "timely support when complex inquiries receive generic or "
-                "unhelpful answers instead of appropriate human escalation."
-            ),
-            "provenance": "use_case",
-            "source_risk_cards": [],
-        }
-    ]
-
     client = MockLLMClient()
     client.set_response_for(
         LossAnalysisDraft,
-        [valid_risk_draft_dict(), invalid_gap, corrected_gap],
+        [valid_risk_draft_dict(), invalid_gap],
     )
 
-    result = derive_loss_analysis(
-        llm_client=client,
-        use_case_text=(
-            "Customers complained about generic answers and inability to handle "
-            "complicated, nuanced cases; the service began rehiring human agents."
-        ),
-        risk_cards=_risk_cards(),
-        run_dir=tmp_path,
-    )
+    with pytest.raises(StageError) as exc_info:
+        derive_loss_analysis(
+            llm_client=client,
+            use_case_text=(
+                "Customers complained about generic answers and inability to handle "
+                "complicated, nuanced cases; the service began rehiring human agents."
+            ),
+            risk_cards=_risk_cards(),
+            run_dir=tmp_path,
+        )
 
-    assert any(loss.loss_id == "L-2" for loss in result.use_case_losses)
+    message = str(exc_info.value).lower()
+    assert "targeted repair unsupported" in message
+    assert "missing loss declarations: l-7" in message
+    assert (
+        "for a genuinely new source-grounded use-case loss, declare l-7 in "
+        "use_case_losses"
+    ) in message
+    assert "provenance: use_case" in message
+    assert "source_risk_cards: []" in message
+    assert "otherwise correct only a mistaken reference" in message
     entries = [
         json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
     ]
     stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
-    assert [entry["success"] for entry in stage1a_entries] == [True, False, True]
-    retry_prompt = stage1a_entries[2]["user_prompt_text"]
-    retry_prompt_lower = retry_prompt.lower()
-    assert "missing loss declarations: l-7" in retry_prompt_lower
-    assert (
-        "for a genuinely new source-grounded use-case loss, declare l-7 in "
-        "use_case_losses"
-    ) in retry_prompt_lower
-    assert "provenance: use_case" in retry_prompt_lower
-    assert "source_risk_cards: []" in retry_prompt_lower
-    assert "otherwise correct only a mistaken reference" in retry_prompt_lower
+    assert [entry["success"] for entry in stage1a_entries] == [True, False]
+    assert len(client.calls) == 2

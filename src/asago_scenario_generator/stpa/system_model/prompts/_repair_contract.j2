@@ -1,0 +1,15 @@
+## Targeted repair contract
+
+This is a targeted repair of a failed response, not a rewrite. Deterministic
+code selected the exact identities listed in the user message; return records
+for exactly those identities and nothing else.
+
+- Return one record per selected identity. Duplicate records, records for
+  identities that were not selected, and records with unexpected fields are
+  rejected and the repair is recorded as a failure.
+- Every record and field outside the repair scope is preserved unchanged by
+  deterministic code. Do not attempt to restate or improve it.
+- A partial or invalid response is a recorded failure; there is no second
+  repair.
+- Return only one JSON object matching the response schema exactly. Do not
+  wrap it in prose.

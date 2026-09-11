@@ -1,0 +1,29 @@
+You are completing an obligation-entry repair for a loss analysis that was
+otherwise accepted. The prior response derived the constraint you will see,
+and the constraint itself is preserved: its rule, its conditions, and its
+hazard links are already retained and cannot change. Only its failure-direction
+entries were malformed, so you return the constraint's complete, corrected
+`obligations` collection.
+
+{% include "_obligation_entries.j2" %}
+
+{% include "_repair_contract.j2" %}
+
+## Response format
+
+Return exactly one JSON object with this shape. Only the selected
+constraints may appear, each exactly once, with its complete obligations
+collection; entries the user message marks as preserved must be returned
+byte-identically.
+
+```json
+{
+  "constraints": [
+    {"constraint_id": "<selected-constraint-id>",
+     "obligations": [
+       {"obligation_id": "O1", "kind": "forbidden", "behavior": "...",
+        "rule_span": "...", "violated_via": "reply"}
+     ]}
+  ]
+}
+```

@@ -19,16 +19,23 @@ reason and the valid rows of the same batch are kept.  The status is
 invalid or missing, and ``unavailable`` only when no batch returned a valid
 row.  Nothing is inferred or repaired, and the review never blocks a run.
 
-Split rule (decided up front, never from a failed attempt).  A response
-with one row of quotations per card can approach the profile's
-``max_completion_tokens``.  Before the first call the module estimates the
-completion as the rendered prompt length in tokens plus
-``_ESTIMATED_TOKENS_PER_ROW`` per card and splits the cards into two calls
-when the estimate exceeds the caller's ``max_completion_tokens`` (8,192 for
-the gemma4-oc profile).  Both calls carry identical instructions and the
-full graph, and the merged rows keep the supplied card order.  Every
-planned batch is issued regardless of earlier batches.  The module never
-splits more than twice and never retries a failed call.
+Split rule (amended 2026-09-11, owner authorization): the advisory review
+may issue at most four calls.  A response with one row of quotations per
+card can approach the profile's ``max_completion_tokens``, so before the
+first call the module sizes batches with the current per-row completion
+estimate: ``max_completion_tokens // _ESTIMATED_TOKENS_PER_ROW`` cards per
+batch (32 at the 8,192 cap), then distributes the supplied cards
+deterministically across balanced contiguous batches in supplied order.
+The four-call total is a ceiling, not a retry permission and not an
+assumption that every response fits: a batch that fails or omits cards is
+recorded with its typed reason, cards beyond what four capacity-sized
+batches cover are recorded under ``rows_missing``, and no batch is ever
+retried.  The artifact records the estimate inputs, the planned batch
+sizes, and the conservative prompt-plus-row estimate per batch; that
+conservative figure includes a prompt-share proxy for echo overhead and is
+recorded for transparency, not used for sizing, because it cannot fit any
+bounded batch on large graphs.  Both prompts carry identical instructions
+and the full graph, and the merged rows keep the supplied card order.
 """
 
 from __future__ import annotations
@@ -69,7 +76,11 @@ from asago_scenario_generator.stpa.system_model.semantic_review import (
 
 STEP_RISK_COVERAGE_REVIEW = "risk_coverage_review"
 ARTIFACT_FILENAME = "loss-analysis-risk-coverage-review.yaml"
-SCHEMA_VERSION = "loss-analysis-risk-coverage-review-v2"
+SCHEMA_VERSION = "loss-analysis-risk-coverage-review-v3"
+
+# Owner authorization 2026-09-11: the advisory review may issue at most four
+# calls.  The ceiling is a call-limit policy constant, not a retry budget.
+MAX_REVIEW_BATCHES = 4
 
 SYSTEM_TEMPLATE = "stage1a_coverage_review_system.j2"
 USER_TEMPLATE = "stage1a_coverage_review_user.j2"
@@ -224,18 +235,44 @@ class RiskCoverageSummary(BaseModel):
     reading_list: tuple[RiskCoverageReading, ...] = ()
 
 
+class RiskCoverageBatching(BaseModel):
+    """The deterministic four-call batch plan, recorded before any call.
+
+    ``row_capacity`` is the sizing basis: the retained completion cap divided
+    by the current per-row completion estimate.  The conservative
+    prompt-plus-row estimate is recorded for transparency; it includes a
+    prompt-share proxy for echo overhead and is deliberately not the sizing
+    basis, because on large graphs no bounded batch can fit it.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    max_batches: int
+    max_completion_tokens: int
+    chars_per_token_estimate: int
+    estimated_tokens_per_row: int
+    estimated_tokens_all_cards: int
+    row_capacity: int
+    planned_batch_sizes: tuple[int, ...]
+    planned_batch_row_estimates: tuple[int, ...]
+    planned_batch_conservative_estimates: tuple[int, ...]
+    beyond_ceiling_cards: tuple[StrictStr, ...] = ()
+    sizing_rule: StrictStr
+
+
 class RiskCoverageArtifact(BaseModel):
     """The persisted ``loss-analysis-risk-coverage-review.yaml``."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal["loss-analysis-risk-coverage-review-v2"] = SCHEMA_VERSION
+    schema_version: Literal["loss-analysis-risk-coverage-review-v3"] = SCHEMA_VERSION
     reviewed_loss_analysis_digest: StrictStr
     risk_set_digest: StrictStr
     status: Literal["completed", "partial", "unavailable"]
     call_count: int
     failure_reason: StrictStr | None = None
     prompt_template_hashes: dict[StrictStr, StrictStr] = Field(default_factory=dict)
+    batching: RiskCoverageBatching | None = None
     rows: tuple[RiskCoverageRow, ...] = ()
     rows_invalid: tuple[RiskCoverageInvalidRow, ...] = ()
     rows_missing: tuple[StrictStr, ...] = ()
@@ -502,7 +539,7 @@ def _partition_rows(
 
 
 # ---------------------------------------------------------------------------
-# Split estimate
+# Split estimate and batch plan
 # ---------------------------------------------------------------------------
 
 
@@ -523,12 +560,102 @@ def should_split_review(
     *,
     max_completion_tokens: int,
 ) -> bool:
-    """Return whether the cards must be split across two review calls."""
+    """Return whether the conservative estimate exceeds the completion cap.
+
+    The advisory review sizes batches from the per-row estimate (see
+    :func:`plan_review_batches`); this predicate reports the historical
+    conservative trigger, prompt share plus rows, and is recorded with the
+    batch plan for transparency.
+    """
     if card_count < 2:
         return False
     return (
         estimated_review_tokens(system_prompt, user_prompt, card_count)
         > max_completion_tokens
+    )
+
+
+@dataclass(frozen=True)
+class ReviewBatchPlan:
+    """The deterministic distribution of cards across bounded batches."""
+
+    batches: tuple[tuple[RiskCard, ...], ...]
+    batching: RiskCoverageBatching
+    beyond_ceiling_cards: tuple[str, ...]
+
+
+def plan_review_batches(
+    *,
+    system_prompt: str,
+    probe_user_prompt: str,
+    base_user_prompt: str,
+    risk_cards: list[RiskCard],
+    max_completion_tokens: int,
+    max_batches: int = MAX_REVIEW_BATCHES,
+) -> ReviewBatchPlan:
+    """Distribute the cards deterministically across batches that fit.
+
+    Sizing uses the current per-row completion estimate: at most
+    ``max_completion_tokens // _ESTIMATED_TOKENS_PER_ROW`` cards per batch
+    (32 at the 8,192 cap), in balanced contiguous batches that preserve the
+    supplied card order.  When more batches than the ceiling would be
+    needed, the cards beyond four capacity-sized batches are recorded as
+    beyond the ceiling and are reported missing rather than silently
+    dropped or squeezed into oversized batches.
+    """
+    total = len(risk_cards)
+    row_capacity = max(1, max_completion_tokens // _ESTIMATED_TOKENS_PER_ROW)
+    needed = -(-total // row_capacity)  # ceil division
+    batch_count = min(needed, max_batches)
+    covered = min(total, batch_count * row_capacity)
+    beyond = tuple(card.risk_id for card in risk_cards[covered:])
+    sizes = [
+        covered // batch_count + (1 if index < covered % batch_count else 0)
+        for index in range(batch_count)
+    ]
+    batches: list[tuple[RiskCard, ...]] = []
+    cursor = 0
+    for size in sizes:
+        batches.append(tuple(risk_cards[cursor : cursor + size]))
+        cursor += size
+
+    per_card_chars = (
+        (len(probe_user_prompt) - len(base_user_prompt)) / total if total else 0.0
+    )
+    row_estimates: list[int] = []
+    conservative: list[int] = []
+    for size in sizes:
+        row_estimates.append(_ESTIMATED_TOKENS_PER_ROW * size)
+        batch_chars = len(base_user_prompt) + per_card_chars * size
+        conservative.append(
+            (len(system_prompt) + int(batch_chars)) // _CHARS_PER_TOKEN
+            + _ESTIMATED_TOKENS_PER_ROW * size
+        )
+    batching = RiskCoverageBatching(
+        max_batches=max_batches,
+        max_completion_tokens=max_completion_tokens,
+        chars_per_token_estimate=_CHARS_PER_TOKEN,
+        estimated_tokens_per_row=_ESTIMATED_TOKENS_PER_ROW,
+        estimated_tokens_all_cards=estimated_review_tokens(
+            system_prompt, probe_user_prompt, total
+        ),
+        row_capacity=row_capacity,
+        planned_batch_sizes=tuple(sizes),
+        planned_batch_row_estimates=tuple(row_estimates),
+        planned_batch_conservative_estimates=tuple(conservative),
+        beyond_ceiling_cards=tuple(beyond),
+        sizing_rule=(
+            "cards per batch = max_completion_tokens // estimated_tokens_per_row "
+            "(the current per-row completion estimate); balanced contiguous "
+            "batches in supplied card order; at most max_batches calls; the "
+            "conservative prompt-plus-row estimate is recorded for "
+            "transparency and is not the sizing basis"
+        ),
+    )
+    return ReviewBatchPlan(
+        batches=tuple(batches),
+        batching=batching,
+        beyond_ceiling_cards=beyond,
     )
 
 
@@ -619,6 +746,7 @@ def _write_artifact(
     call_count: int,
     failure_reason: str | None,
     prompt_template_hashes: dict[str, str],
+    batching: RiskCoverageBatching | None = None,
     rows: tuple[RiskCoverageRow, ...] = (),
     rows_invalid: tuple[RiskCoverageInvalidRow, ...] = (),
     rows_missing: tuple[str, ...] = (),
@@ -636,6 +764,7 @@ def _write_artifact(
         call_count=call_count,
         failure_reason=failure_reason,
         prompt_template_hashes=prompt_template_hashes,
+        batching=batching,
         rows=rows,
         rows_invalid=rows_invalid,
         rows_missing=rows_missing,
@@ -798,14 +927,15 @@ def run_risk_coverage_review(
 ) -> RiskCoverageReviewOutcome:
     """Run the advisory review and always persist its artifact.
 
-    The review makes one bounded call (two when the conservative estimate
-    exceeds ``max_completion_tokens``), with zero retries.  Every planned
-    batch is issued regardless of earlier batches.  Validation is per row: an
-    invalid row is recorded under ``rows_invalid`` with its typed reason and
-    the valid rows of the same batch are kept.  The status is ``completed``
-    when every card has a valid row, ``partial`` when any row is invalid or
-    missing, and ``unavailable`` only when no batch returned a valid row.  The
-    review never raises and never blocks the run.
+    The review plans its batches up front from the per-row completion
+    estimate (at most four calls; see :data:`MAX_REVIEW_BATCHES`) and never
+    retries a failed batch.  Every planned batch is issued regardless of
+    earlier batches.  Validation is per row: an invalid row is recorded
+    under ``rows_invalid`` with its typed reason and the valid rows of the
+    same batch are kept.  The status is ``completed`` when every card has a
+    valid row, ``partial`` when any row is invalid or missing, and
+    ``unavailable`` only when no batch returned a valid row.  The review
+    never raises and never blocks the run.
     """
     budget = (
         max_completion_tokens
@@ -833,25 +963,25 @@ def run_risk_coverage_review(
         )
 
     system_prompt = template_loader.render_prompt(SYSTEM_TEMPLATE)
-    probe_prompt = template_loader.render_prompt(
-        USER_TEMPLATE,
-        use_case_text=use_case_text,
-        risk_cards=[_card_view(card, loss_analysis) for card in risk_cards],
-        losses=loss_analysis.risk_card_losses + loss_analysis.use_case_losses,
-        hazards=loss_analysis.hazards,
-        security_constraints=loss_analysis.security_constraints,
-    )
-    split = should_split_review(
-        system_prompt,
-        probe_prompt,
-        len(risk_cards),
+
+    def _render_user_prompt(cards: list[RiskCard]) -> str:
+        return template_loader.render_prompt(
+            USER_TEMPLATE,
+            use_case_text=use_case_text,
+            risk_cards=[_card_view(card, loss_analysis) for card in cards],
+            losses=loss_analysis.risk_card_losses + loss_analysis.use_case_losses,
+            hazards=loss_analysis.hazards,
+            security_constraints=loss_analysis.security_constraints,
+        )
+
+    plan = plan_review_batches(
+        system_prompt=system_prompt,
+        probe_user_prompt=_render_user_prompt(risk_cards),
+        base_user_prompt=_render_user_prompt([]),
+        risk_cards=risk_cards,
         max_completion_tokens=budget,
     )
-    groups = (
-        [risk_cards[: len(risk_cards) // 2], risk_cards[len(risk_cards) // 2 :]]
-        if split
-        else [risk_cards]
-    )
+    groups = [list(batch) for batch in plan.batches]
 
     merged: list[RiskCoverageWireRow] = []
     failures: list[str] = []
@@ -878,6 +1008,10 @@ def run_risk_coverage_review(
         omitted = [card.risk_id for card in group if card.risk_id not in returned]
         if omitted:
             failures.append("batch_omitted_cards: " + ", ".join(sorted(omitted)))
+    if plan.beyond_ceiling_cards:
+        failures.append(
+            "cards_beyond_four_call_ceiling: " + ", ".join(plan.beyond_ceiling_cards)
+        )
 
     valid, invalid, missing = _partition_rows(
         tuple(merged),
@@ -908,6 +1042,7 @@ def run_risk_coverage_review(
         call_count=call_count,
         failure_reason=failure_reason,
         prompt_template_hashes=prompt_hashes,
+        batching=plan.batching,
         rows=valid,
         rows_invalid=invalid,
         rows_missing=missing,

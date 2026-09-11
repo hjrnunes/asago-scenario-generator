@@ -33,7 +33,6 @@ from tests.stpa.sp1_helpers import (
     read_calls_jsonl,
     valid_control_element_set_dict,
     valid_empty_coordination_analysis_dict,
-    valid_gap_draft_dict,
     valid_requirement_set_dict,
     valid_responsibility_set_dict,
     valid_risk_draft_dict,
@@ -91,43 +90,6 @@ def _run3_invalid_risk_draft_dict() -> dict:
         }
         for index in range(1, 7)
     ]
-    return draft
-
-
-def _run3_corrected_risk_draft_dict() -> dict:
-    """Return the bounded-retry correction without dropping constraints."""
-    draft = _run3_invalid_risk_draft_dict()
-    draft["hazards"] = [
-        {
-            "hazard_id": f"H-{index}",
-            "description": f"The customer payment condition {index} is unsafe.",
-            "related_losses": ["L-1"],
-        }
-        for index in range(1, 8)
-    ]
-    return draft
-
-
-def _run3_gap_draft_dict() -> dict:
-    """Return a gap draft with existing and local references."""
-    draft = valid_gap_draft_dict()
-    draft["hazards"][0].update(
-        {
-            "hazard_id": "H-8",
-            "related_losses": ["L-1", "L-2"],
-        }
-    )
-    draft["security_constraints"][0].update(
-        {
-            "constraint_id": "SC-7",
-            "related_hazards": ["H-8", "H-1"],
-            "rule": (
-                "The agent must preserve user trust and prevent every "
-                "customer payment condition."
-            ),
-            "applies_when": [],
-        }
-    )
     return draft
 
 
@@ -283,33 +245,20 @@ def _observed_gemma_invalid_feedback_update_dict() -> dict:
 class TestRunOrchestration:
     """SP1-RUN-01 through SP1-RUN-14."""
 
-    def test_run_retries_stage1a_reference_error_and_completes(self, tmp_path):
-        """SP1 contains a bounded Stage 1a retry and preserves the graph."""
+    def test_run_records_typed_stage1a_reference_failure_and_stops(self, tmp_path):
+        """A Stage 1a reference failure is typed, recorded, and never retried.
+
+        The run-3 captured shape (constraints referencing undeclared hazards)
+        is outside the two approved targeted-repair classes, so the run
+        records the typed failure and stops Stage 1a without a second call.
+        """
         from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
 
         client = _setup_mock_client()
         client.set_response_for(
             LossAnalysisDraft,
-            [
-                _run3_invalid_risk_draft_dict(),
-                _run3_corrected_risk_draft_dict(),
-                _run3_gap_draft_dict(),
-            ],
+            [_run3_invalid_risk_draft_dict()],
         )
-        # The review preserves every constraint's original hazard edges; the
-        # generic helper re-maps SC-n to H-n, which would leave hazards
-        # without any constraint and fail the post-review density re-check.
-        coordination = _coordination_with_constraints(7, hazard_count=8)
-        original_edges = {
-            constraint["constraint_id"]: list(constraint["related_hazards"])
-            for constraint in (
-                _run3_corrected_risk_draft_dict()["security_constraints"]
-                + _run3_gap_draft_dict()["security_constraints"]
-            )
-        }
-        for row in coordination["semantic_review"]["constraints"]:
-            row["related_hazards"] = original_edges[row["constraint_id"]]
-        client.set_response_for(CoordinationAnalysis, coordination)
 
         result = run_sp1(
             llm_client=client,
@@ -318,27 +267,23 @@ class TestRunOrchestration:
             run_dir=tmp_path,
         )
 
-        assert result.stage_errors == []
-        assert result.loss_analysis is not None
-        assert result.control_structure is not None
-        assert len(result.loss_analysis.security_constraints) == 7
+        assert len(result.stage_errors) == 1
+        error = result.stage_errors[0]
+        assert error.startswith("stage_1a/risk_derivation:")
+        assert "targeted repair unsupported" in error
+        assert "draft_references failure class" in error
+        assert "no repair call was made" in error
+        assert result.loss_analysis is None
+        assert result.control_structure is None
 
         entries = [
             json.loads(line)
             for line in (tmp_path / "calls.jsonl").read_text().splitlines()
         ]
         stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
-        # Two derivation attempts (the first fails validation), then the
-        # advisory risk-coverage review call.
-        assert [entry["success"] for entry in stage1a_entries] == [
-            False,
-            True,
-            True,
-            True,
-        ]
-        assert stage1a_entries[0]["step"] == "risk_derivation"
-        assert stage1a_entries[-1]["step"] == "risk_coverage_review"
-        assert "validation feedback" in stage1a_entries[1]["user_prompt_text"].lower()
+        assert [entry["success"] for entry in stage1a_entries] == [False]
+        # No repair call follows the reference failure.
+        assert not any(entry["step"].endswith("_repair") for entry in stage1a_entries)
 
     def test_run_01_full_run_produces_all_artifacts(self, tmp_path):
         """SP1-RUN-01: full run produces all three output artifacts."""
@@ -872,9 +817,7 @@ class TestPinnedLossAnalysis:
         published = LossAnalysis.model_validate(
             yaml.safe_load((tmp_path / "loss-analysis.yaml").read_text())
         )
-        expected = LossAnalysis.model_validate(
-            yaml.safe_load(pinned.read_text())
-        )
+        expected = LossAnalysis.model_validate(yaml.safe_load(pinned.read_text()))
         assert published.model_dump() == expected.model_dump()
         gates = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
         assert gates["passed"] is True
@@ -893,9 +836,10 @@ class TestPinnedLossAnalysis:
             loss_analysis_path=pinned,
         )
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
-        assert manifest["input_hashes"]["loss_analysis"] == hashlib.sha256(
-            pinned.read_bytes()
-        ).hexdigest()
+        assert (
+            manifest["input_hashes"]["loss_analysis"]
+            == hashlib.sha256(pinned.read_bytes()).hexdigest()
+        )
         stage_1a = manifest["stage_summary"]["stage_1a"]
         assert stage_1a["call_count"] == 0
         assert stage_1a["source"] == "pinned"
@@ -932,9 +876,7 @@ class TestPinnedLossAnalysis:
         assert review["reviewed_loss_analysis_digest"]
         # The review call is counted in Stage 1a alongside the two derivations.
         assert stage_1a["call_count"] == 3
-        assert (
-            tmp_path / "loss-analysis-risk-coverage-review.yaml"
-        ).is_file()
+        assert (tmp_path / "loss-analysis-risk-coverage-review.yaml").is_file()
         steps = [entry["step"] for entry in read_calls_jsonl(tmp_path)]
         assert "risk_coverage_review" in steps
 
@@ -986,8 +928,7 @@ class TestPinnedLossAnalysis:
         assert result.loss_analysis is None
         assert result.control_structure is None
         assert any(
-            "hazard graph density gate failed" in error
-            for error in result.stage_errors
+            "hazard graph density gate failed" in error for error in result.stage_errors
         )
         assert "stage_1a" not in [
             entry["stage"] for entry in read_calls_jsonl(tmp_path)

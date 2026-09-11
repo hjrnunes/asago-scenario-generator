@@ -212,13 +212,14 @@ def test_writes_artifact_and_call_log_from_a_fake_client(monkeypatch, tmp_path):
     out = _run(monkeypatch, tmp_path, _valid_rows())
 
     artifact = yaml.safe_load((out / ARTIFACT_FILENAME).read_text())
-    assert artifact["schema_version"] == "loss-analysis-risk-coverage-review-v2"
+    assert artifact["schema_version"] == "loss-analysis-risk-coverage-review-v3"
     assert artifact["reviewed_loss_analysis_digest"] == graph_digest(_analysis())
     assert artifact["status"] == "completed"
     assert artifact["summary"]["rows_valid"] == 2
     assert artifact["summary"]["rows_invalid"] == 0
     assert artifact["summary"]["rows_missing"] == 0
     assert artifact["summary"]["full"] == 2
+    assert list(artifact["batching"]["planned_batch_sizes"]) == [2]
     entry = json.loads((out / "calls.jsonl").read_text().splitlines()[0])
     assert entry["step"] == "risk_coverage_review"
     assert entry["model"] == "fake-review-model"

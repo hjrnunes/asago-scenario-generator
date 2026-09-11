@@ -405,17 +405,36 @@ class TestHazardGraphDensityChecks:
 
 
 class TestDeriveLossAnalysisAccounting:
-    """The 1.1 gate joins Call 1's existing bounded retry."""
+    """The 1.1 gate joins Call 1's one targeted repair."""
 
-    def test_missing_dispositions_get_one_retry_then_pass(self, tmp_path) -> None:
+    def test_missing_dispositions_get_one_targeted_repair_then_pass(
+        self, tmp_path
+    ) -> None:
         import json as jsonlib
+
+        from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
+            DispositionRepairResponse,
+        )
 
         incomplete = valid_risk_draft_dict()
         incomplete["risk_dispositions"] = []
         client = MockLLMClient()
         client.set_response_for(
             LossAnalysisDraft,
-            [incomplete, valid_risk_draft_dict(), valid_gap_draft_dict()],
+            [incomplete, valid_gap_draft_dict()],
+        )
+        client.set_response_for(
+            DispositionRepairResponse,
+            {
+                "risk_dispositions": [
+                    {
+                        "risk_ref": "atlas-001",
+                        "disposition": "cited",
+                        "loss_ids": ["L-1"],
+                        "reason": None,
+                    }
+                ]
+            },
         )
         result = derive_loss_analysis(
             llm_client=client,
@@ -425,30 +444,59 @@ class TestDeriveLossAnalysisAccounting:
         )
 
         assert result.risk_dispositions[0].risk_ref == "atlas-001"
+        assert result.risk_dispositions[0].disposition == "cited"
         entries = [
             jsonlib.loads(line)
             for line in (tmp_path / "calls.jsonl").read_text().splitlines()
         ]
+        assert [entry["step"] for entry in entries] == [
+            "risk_derivation",
+            "risk_derivation_repair",
+            "gap_analysis",
+        ]
         assert [entry["success"] for entry in entries] == [False, True, True]
-        retry_prompt = entries[1]["user_prompt_text"].lower()
-        assert "risk-accounting repair" in retry_prompt
-        assert "missing risk_dispositions entries" in retry_prompt
+        repair_prompt = entries[1]["user_prompt_text"].lower()
+        assert "failed risk accounting" in repair_prompt
+        assert (
+            "no risk_dispositions entry was returned for this supplied card"
+            in repair_prompt
+        )
 
-    def test_second_accounting_failure_is_fatal(self, tmp_path) -> None:
+    def test_failed_disposition_repair_is_fatal(self, tmp_path) -> None:
+        from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
+            DispositionRepairResponse,
+        )
+
         incomplete = valid_risk_draft_dict()
         incomplete["risk_dispositions"] = []
         client = MockLLMClient()
         client.set_response_for(
             LossAnalysisDraft,
-            [incomplete, incomplete, valid_gap_draft_dict()],
+            [incomplete, valid_gap_draft_dict()],
         )
-        with pytest.raises(StageError, match="risk accounting is incomplete"):
+        # The single repair response cites a loss the draft never declared,
+        # so the deterministic merge rejects it and the repair never retries.
+        client.set_response_for(
+            DispositionRepairResponse,
+            {
+                "risk_dispositions": [
+                    {
+                        "risk_ref": "atlas-001",
+                        "disposition": "cited",
+                        "loss_ids": ["L-99"],
+                        "reason": None,
+                    }
+                ]
+            },
+        )
+        with pytest.raises(StageError, match="targeted repair failed"):
             derive_loss_analysis(
                 llm_client=client,
                 use_case_text="Test use case",
                 risk_cards=_risk_cards(("atlas-001",)),
                 run_dir=tmp_path,
             )
+        assert len(client.calls) == 2
 
     def test_dispositions_and_conditions_are_persisted(self, tmp_path) -> None:
         import yaml as yaml_lib
@@ -530,16 +578,16 @@ def _mismatched_gap_draft() -> dict:
 
 
 class TestWireSchemaRetry:
-    """A pydantic wire violation gets the same bounded repair as validators."""
+    """A pydantic wire violation is salvaged row by row, never retried."""
 
-    def test_invalid_gap_dispositions_retry_then_preserve_risk_accounting(
+    def test_invalid_gap_dispositions_are_dropped_and_accounting_survives(
         self, tmp_path
     ) -> None:
         import json as jsonlib
 
         # The live gemma4-oc run emitted a garbage risk_dispositions
-        # collection in the gap response; it must join the bounded retry
-        # instead of crashing the run, and Call 1's accounting must survive.
+        # collection in the gap response; the rows are out of contract, so
+        # deterministic code drops them and Call 1's accounting survives.
         bad_gap = valid_gap_draft_dict()
         bad_gap["risk_dispositions"] = [
             {"risk_ref": "L-2", "disposition": "not_applicable"},
@@ -548,44 +596,60 @@ class TestWireSchemaRetry:
         client = MockLLMClient()
         client.set_response_for(
             LossAnalysisDraft,
-            [valid_risk_draft_dict(), bad_gap, valid_gap_draft_dict()],
+            [valid_risk_draft_dict(), bad_gap],
         )
+        warnings: list[str] = []
         result = derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
             risk_cards=_risk_cards(("atlas-001",)),
             run_dir=tmp_path,
+            normalization_warnings=warnings,
         )
 
         assert result.risk_dispositions[0].risk_ref == "atlas-001"
+        assert any("dropped malformed risk_dispositions" in w for w in warnings)
         entries = [
             jsonlib.loads(line)
             for line in (tmp_path / "calls.jsonl").read_text().splitlines()
         ]
         gap_entries = [e for e in entries if e["step"] == "gap_analysis"]
-        assert [e["success"] for e in gap_entries] == [False, True]
-        retry_prompt = gap_entries[1]["user_prompt_text"]
-        assert "violated the required response schema" in retry_prompt
-        assert "not_applicable" in retry_prompt
-        assert "Return the complete corrected structured object" in retry_prompt
+        assert [e["success"] for e in gap_entries] == [False]
+        # The drop is deterministic: no repair call follows the failure.
+        assert not any(e["step"].endswith("_repair") for e in entries)
+        assert len(client.calls) == 2
 
-    def test_second_wire_violation_is_fatal(self, tmp_path) -> None:
+    def test_repeated_gap_wire_garbage_is_dropped_deterministically(
+        self, tmp_path
+    ) -> None:
+        import json as jsonlib
+
         bad_gap = valid_gap_draft_dict()
         bad_gap["risk_dispositions"] = [
             {"risk_ref": f"SC-{index}", "disposition": "not_applicable"}
             for index in range(2, 20)
         ]
         client = MockLLMClient()
-        client.set_response_for(
-            LossAnalysisDraft, [valid_risk_draft_dict(), bad_gap, bad_gap]
+        client.set_response_for(LossAnalysisDraft, [valid_risk_draft_dict(), bad_gap])
+        warnings: list[str] = []
+        result = derive_loss_analysis(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=_risk_cards(("atlas-001",)),
+            run_dir=tmp_path,
+            normalization_warnings=warnings,
         )
-        with pytest.raises(StageError, match="retry failed"):
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text="Test use case",
-                risk_cards=_risk_cards(("atlas-001",)),
-                run_dir=tmp_path,
-            )
+
+        # Every garbage row is dropped and the run proceeds deterministically.
+        assert result.risk_dispositions[0].risk_ref == "atlas-001"
+        assert sum("dropped malformed risk_dispositions" in w for w in warnings) == 18
+        entries = [
+            jsonlib.loads(line)
+            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
+        ]
+        gap_entries = [e for e in entries if e["step"] == "gap_analysis"]
+        assert [e["success"] for e in gap_entries] == [False]
+        assert not any(e["step"].endswith("_repair") for e in entries)
 
 
 class TestRunSp1Gates:
@@ -1234,11 +1298,17 @@ class TestAccountingGroundRules:
             )
             assert analysis.risk_dispositions[0].reason is None
 
-    def test_cited_disposition_with_substantive_reason_retries(self, tmp_path) -> None:
+    def test_cited_disposition_with_substantive_reason_gets_targeted_repair(
+        self, tmp_path
+    ) -> None:
         # Re-review deviation #3: a non-empty reason on a cited entry is
-        # contradictory evidence, so it rejoins the bounded wire retry
-        # instead of being silently discarded.
+        # contradictory evidence, so the malformed row joins the targeted
+        # repair instead of being silently discarded.
         import json as jsonlib
+
+        from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
+            DispositionRepairResponse,
+        )
 
         echoed = valid_risk_draft_dict()
         echoed["risk_dispositions"] = [
@@ -1252,7 +1322,20 @@ class TestAccountingGroundRules:
         client = MockLLMClient()
         client.set_response_for(
             LossAnalysisDraft,
-            [echoed, valid_risk_draft_dict(), valid_gap_draft_dict()],
+            [echoed, valid_gap_draft_dict()],
+        )
+        client.set_response_for(
+            DispositionRepairResponse,
+            {
+                "risk_dispositions": [
+                    {
+                        "risk_ref": "atlas-001",
+                        "disposition": "cited",
+                        "loss_ids": ["L-1"],
+                        "reason": None,
+                    }
+                ]
+            },
         )
         result = derive_loss_analysis(
             llm_client=client,
@@ -1265,20 +1348,44 @@ class TestAccountingGroundRules:
             jsonlib.loads(line)
             for line in (tmp_path / "calls.jsonl").read_text().splitlines()
         ]
-        risk_entries = [e for e in entries if e["step"] == "risk_derivation"]
-        assert [e["success"] for e in risk_entries] == [False, True]
-        assert "carries a reason" in risk_entries[1]["user_prompt_text"]
+        assert [e["step"] for e in entries if e["stage"] == "stage_1a"] == [
+            "risk_derivation",
+            "risk_derivation_repair",
+            "gap_analysis",
+        ]
+        repair_prompt = next(
+            e["user_prompt_text"] for e in entries if e["step"].endswith("_repair")
+        )
+        # The repair prompt names the exact wire reason the row was dropped.
+        assert "carries a reason" in repair_prompt
 
     def test_call1_missing_disposition_still_requires_repair(self, tmp_path) -> None:
-        """A genuinely missing disposition cannot be normalized; it is retried."""
+        """A genuinely missing disposition cannot be normalized; it is repaired."""
         import json as jsonlib
+
+        from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
+            DispositionRepairResponse,
+        )
 
         incomplete = valid_risk_draft_dict()
         incomplete["risk_dispositions"] = []
         client = MockLLMClient()
         client.set_response_for(
             LossAnalysisDraft,
-            [incomplete, valid_risk_draft_dict(), valid_gap_draft_dict()],
+            [incomplete, valid_gap_draft_dict()],
+        )
+        client.set_response_for(
+            DispositionRepairResponse,
+            {
+                "risk_dispositions": [
+                    {
+                        "risk_ref": "atlas-001",
+                        "disposition": "cited",
+                        "loss_ids": ["L-1"],
+                        "reason": None,
+                    }
+                ]
+            },
         )
         result = derive_loss_analysis(
             llm_client=client,
@@ -1713,8 +1820,7 @@ class TestConstraintRuleAndConditions:
         _revision_patch_to_draft(prior, patch, warnings)
         assert any(
             "changed the rule of constraint SC-2 and re-pointed it to hazards "
-            "['H-1'] sharing none of its prior hazards ['H-2']"
-            in warning
+            "['H-1'] sharing none of its prior hazards ['H-2']" in warning
             for warning in warnings
         )
 
@@ -1758,8 +1864,7 @@ class TestConstraintRuleAndConditions:
         _revision_patch_to_draft(prior, patch, warnings)
         assert any(
             "changed the rule of constraint SC-2 and re-pointed it to hazards "
-            "['H-2'] sharing none of its prior hazards []"
-            in warning
+            "['H-2'] sharing none of its prior hazards []" in warning
             for warning in warnings
         )
 
@@ -1862,9 +1967,9 @@ class TestProductManifestGateStatuses:
 
 
 class TestRetryPromptFailureKind:
-    """The retry preamble names the actual failure, not the call type."""
+    """The typed failure record names the actual failure, not the call type."""
 
-    def test_non_accounting_call1_failure_gets_the_derivation_repair(
+    def test_non_accounting_call1_failure_is_typed_and_unsupported(
         self, tmp_path
     ) -> None:
         import json as jsonlib
@@ -1872,21 +1977,24 @@ class TestRetryPromptFailureKind:
         ungrounded = valid_risk_draft_dict()
         ungrounded["security_constraints"][0]["applies_when"] = ["", ""]
         client = MockLLMClient()
-        client.set_response_for(
-            LossAnalysisDraft,
-            [ungrounded, valid_risk_draft_dict(), valid_gap_draft_dict()],
-        )
-        derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-        )
+        client.set_response_for(LossAnalysisDraft, [ungrounded])
+        with pytest.raises(StageError) as exc_info:
+            derive_loss_analysis(
+                llm_client=client,
+                use_case_text="Test use case",
+                risk_cards=_risk_cards(("atlas-001",)),
+                run_dir=tmp_path,
+            )
+        message = str(exc_info.value)
+        # A constraint-field wire violation is outside the approved repair
+        # scope, so the record names the schema failure and stops.
+        assert "targeted repair unsupported" in message
+        assert "wire violation outside the approved repair scope" in message
+        assert "no repair call was made" in message
+        assert "applies_when" in message
+        assert len(client.calls) == 1
         entries = [
             jsonlib.loads(line)
             for line in (tmp_path / "calls.jsonl").read_text().splitlines()
         ]
-        retry_prompt = entries[1]["user_prompt_text"]
-        assert "This is the risk-derivation repair" in retry_prompt
-        assert "risk-accounting repair" not in retry_prompt
-        assert "applies_when" in retry_prompt
+        assert [entry["success"] for entry in entries] == [False]

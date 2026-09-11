@@ -509,8 +509,16 @@ class TestStage1aLossAnalysis:
         assert len(result.risk_card_losses) == 0
         assert len(result.use_case_losses) == 1
 
-    def test_nonempty_risk_cards_reject_empty_baseline_and_retry(self, tmp_path):
-        """A model cannot satisfy risk derivation with the empty shortcut."""
+    def test_nonempty_risk_cards_reject_empty_baseline_with_typed_failure(
+        self, tmp_path
+    ):
+        """A model cannot satisfy risk derivation with the empty shortcut.
+
+        The owner authorization (2026-09-11) replaced the bounded whole-object
+        retry with the targeted repair, and an empty baseline is a semantic
+        failure outside its two approved classes, so the run fails typed with
+        no second call.
+        """
         empty_risk = {
             "risk_card_losses": [],
             "use_case_losses": [],
@@ -519,27 +527,27 @@ class TestStage1aLossAnalysis:
             "risk_dispositions": [],
         }
         client = MockLLMClient()
-        client.set_response_for(
-            LossAnalysisDraft,
-            [empty_risk, valid_risk_draft_dict(), valid_gap_draft_dict()],
-        )
+        client.set_response_for(LossAnalysisDraft, [empty_risk])
 
-        result = derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        with pytest.raises(StageError) as exc_info:
+            derive_loss_analysis(
+                llm_client=client,
+                use_case_text="Test use case",
+                risk_cards=_make_risk_cards(),
+                run_dir=tmp_path,
+            )
 
-        assert result.hazards
-        assert result.security_constraints
+        message = str(exc_info.value)
+        assert "targeted repair unsupported" in message
+        assert "draft_semantics failure class" in message
+        assert "no grounded losses were declared" in message
+        assert len(client.calls) == 1
         entries = [
             json.loads(line)
             for line in (tmp_path / "calls.jsonl").read_text().splitlines()
         ]
-        assert [entry["success"] for entry in entries] == [False, True, True]
+        assert [entry["success"] for entry in entries] == [False]
         assert "complete loss -> hazard" in entries[0]["error"]
-        assert "empty response is not valid" in entries[1]["user_prompt_text"].lower()
 
     def test_risk_call_can_establish_loss_registry_before_gap_graph(self, tmp_path):
         """The two calls preserve loss-first ordering without extra retries."""
@@ -796,65 +804,48 @@ class TestStage1aLossAnalysis:
             error.startswith("stage_1a/merge:") for error in manifest["stage_errors"]
         )
 
-    def test_la_22_invalid_risk_references_retry_without_dropping_constraints(
-        self, tmp_path
-    ):
-        """Invalid risk references get one corrective retry before the gap call."""
+    def test_la_22_invalid_risk_references_fail_typed_without_repair(self, tmp_path):
+        """Invalid risk references are a typed terminal failure, not a retry.
+
+        Reference validation is outside the two approved targeted-repair
+        classes (owner authorization 2026-09-11), so the constraints are
+        never dropped or rewritten: the run records the exact feedback and
+        stops after the first attempt.
+        """
         client = MockLLMClient()
-        client.set_response_for(
-            LossAnalysisDraft,
-            [
-                _observed_invalid_risk_draft(),
-                _corrected_risk_draft(),
-                _gap_draft_with_existing_references(constraint_id="SC-7"),
-            ],
-        )
+        client.set_response_for(LossAnalysisDraft, [_observed_invalid_risk_draft()])
 
-        result = derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        with pytest.raises(StageError) as exc_info:
+            derive_loss_analysis(
+                llm_client=client,
+                use_case_text="Test use case",
+                risk_cards=_make_risk_cards(),
+                run_dir=tmp_path,
+            )
 
-        assert len(result.hazards) == 8
-        assert len(result.security_constraints) == 7
-        all_loss_ids = {
-            loss.loss_id for loss in result.risk_card_losses + result.use_case_losses
-        }
-        all_hazard_ids = {hazard.hazard_id for hazard in result.hazards}
-        assert all(
-            reference in all_loss_ids
-            for hazard in result.hazards
-            for reference in hazard.related_losses
-        )
-        assert all(
-            reference in all_hazard_ids
-            for constraint in result.security_constraints
-            for reference in constraint.related_hazards
-        )
-
+        message = str(exc_info.value)
+        assert "targeted repair unsupported" in message
+        assert "draft_references failure class" in message
+        assert "no repair call was made" in message
+        assert len(client.calls) == 1
         entries = [
             json.loads(line)
             for line in (tmp_path / "calls.jsonl").read_text().splitlines()
         ]
         stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
-        assert [entry["success"] for entry in stage1a_entries] == [False, True, True]
+        assert [entry["success"] for entry in stage1a_entries] == [False]
         assert stage1a_entries[0]["step"] == "risk_derivation"
         assert "related_hazards" in stage1a_entries[0]["error"]
         assert "validation" in stage1a_entries[0]["error"].lower()
-        assert "validation feedback" in stage1a_entries[1]["user_prompt_text"].lower()
-        assert (
-            "prior structured object to correct"
-            in stage1a_entries[1]["user_prompt_text"].lower()
-        )
-        assert "Constraint 6" in stage1a_entries[1]["user_prompt_text"]
+        # The actionable first-attempt feedback is retained in the record.
+        assert "Missing hazard declarations: H-2" in message
+        assert not (tmp_path / "loss-analysis.yaml").exists()
 
-    def test_la_23_invalid_risk_references_fail_after_one_retry(self, tmp_path):
-        """Retry exhaustion is a structural StageError and preserves call logs."""
+    def test_la_23_invalid_risk_references_fail_typed_on_first_attempt(self, tmp_path):
+        """A reference failure is a structural StageError with no second call."""
         invalid = _observed_invalid_risk_draft()
         client = MockLLMClient()
-        client.set_response_for(LossAnalysisDraft, [invalid, invalid])
+        client.set_response_for(LossAnalysisDraft, [invalid])
 
         with pytest.raises(StageError, match="stage_1a/risk_derivation") as exc_info:
             derive_loss_analysis(
@@ -865,122 +856,112 @@ class TestStage1aLossAnalysis:
             )
 
         assert "related_hazards" in str(exc_info.value)
+        assert "targeted repair unsupported" in str(exc_info.value)
         entries = [
             json.loads(line)
             for line in (tmp_path / "calls.jsonl").read_text().splitlines()
         ]
-        assert len(entries) == 2
+        assert len(entries) == 1
         assert all(not entry["success"] for entry in entries)
         assert not (tmp_path / "loss-analysis.yaml").exists()
 
-    def test_la_retry_explicitly_requests_missing_loss_declarations(self, tmp_path):
-        """An empty loss section gets actionable correction guidance."""
+    def test_reference_failure_feedback_names_missing_loss_declarations(self, tmp_path):
+        """The typed failure record carries the actionable correction guidance."""
         invalid = _observed_invalid_risk_draft()
         invalid["risk_card_losses"] = []
         invalid["use_case_losses"] = []
-        corrected = _corrected_risk_draft()
-        corrected["risk_card_losses"] = valid_risk_draft_dict()["risk_card_losses"]
         client = MockLLMClient()
-        client.set_response_for(
-            LossAnalysisDraft,
-            [
-                invalid,
-                corrected,
-                _gap_draft_with_existing_references(constraint_id="SC-7"),
-            ],
-        )
+        client.set_response_for(LossAnalysisDraft, [invalid])
 
-        derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        with pytest.raises(StageError) as exc_info:
+            derive_loss_analysis(
+                llm_client=client,
+                use_case_text="Test use case",
+                risk_cards=_make_risk_cards(),
+                run_dir=tmp_path,
+            )
 
-        assert "Missing loss declarations:" in client.calls[1].user_prompt
-        assert "Known loss IDs: none" in client.calls[1].user_prompt
+        message = str(exc_info.value)
+        assert "Missing loss declarations: L-1" in message
+        assert "Known loss IDs: none" in message
+        assert len(client.calls) == 1
 
-    def test_la_24_invalid_gap_references_retry_with_existing_and_local_ids(
+    def test_la_24_invalid_gap_references_fail_typed_with_existing_and_local_ids(
         self, tmp_path
     ):
-        """Gap references are validated against risk and corrected local IDs."""
+        """Gap references are validated against risk and corrected local IDs.
+
+        The typed failure record names the missing declaration and the exact
+        known loss IDs from both drafts.
+        """
         invalid_gap = _gap_draft_with_existing_references()
         invalid_gap["hazards"][0]["related_losses"] = ["L-1", "L-99"]
-        corrected_gap = _gap_draft_with_existing_references()
         client = MockLLMClient()
         client.set_response_for(
-            LossAnalysisDraft,
-            [valid_risk_draft_dict(), invalid_gap, corrected_gap],
+            LossAnalysisDraft, [valid_risk_draft_dict(), invalid_gap]
         )
 
-        result = derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        with pytest.raises(StageError) as exc_info:
+            derive_loss_analysis(
+                llm_client=client,
+                use_case_text="Test use case",
+                risk_cards=_make_risk_cards(),
+                run_dir=tmp_path,
+            )
 
-        assert len(result.hazards) == 2
-        assert len(result.security_constraints) == 2
-        assert {loss.loss_id for loss in result.use_case_losses} == {"L-2"}
-        assert {hazard.hazard_id for hazard in result.hazards} == {"H-1", "H-2"}
-
+        message = str(exc_info.value)
+        assert "Missing loss declarations: L-99" in message
+        assert "Known loss IDs: L-1, L-2" in message
         entries = [
             json.loads(line)
             for line in (tmp_path / "calls.jsonl").read_text().splitlines()
         ]
         stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
-        assert len(stage1a_entries) == 3
-        assert [entry["success"] for entry in stage1a_entries] == [True, False, True]
+        assert [entry["success"] for entry in stage1a_entries] == [True, False]
         assert [entry["step"] for entry in stage1a_entries] == [
             "risk_derivation",
             "gap_analysis",
-            "gap_analysis",
         ]
         assert "related_losses" in stage1a_entries[1]["error"]
-        assert "validation feedback" in stage1a_entries[2]["user_prompt_text"].lower()
-        retry_prompt = stage1a_entries[2]["user_prompt_text"]
-        assert "Missing loss declarations: L-99" in retry_prompt
-        assert "Known loss IDs: L-1, L-2" in retry_prompt
+        assert len(client.calls) == 2
 
-    def test_la_25_gap_empty_references_retry_and_fill_links(self, tmp_path):
-        """A non-empty gap draft must repair empty hazard and constraint links."""
+    def test_la_25_gap_empty_references_fail_typed(self, tmp_path):
+        """A non-empty gap draft with empty links fails typed without repair."""
         invalid_gap = _gap_draft_with_empty_references()
         client = MockLLMClient()
         client.set_response_for(
             LossAnalysisDraft,
-            [valid_risk_draft_dict(), invalid_gap, valid_gap_draft_dict()],
+            [valid_risk_draft_dict(), invalid_gap],
         )
 
-        result = derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=_make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        with pytest.raises(StageError) as exc_info:
+            derive_loss_analysis(
+                llm_client=client,
+                use_case_text="Test use case",
+                risk_cards=_make_risk_cards(),
+                run_dir=tmp_path,
+            )
 
-        assert all(hazard.related_losses for hazard in result.hazards)
-        assert all(
-            constraint.related_hazards for constraint in result.security_constraints
-        )
+        message = str(exc_info.value)
+        assert "targeted repair unsupported" in message
+        assert "draft_references failure class" in message
+        assert "empty gap response is valid" in message
         entries = [
             json.loads(line)
             for line in (tmp_path / "calls.jsonl").read_text().splitlines()
         ]
         stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
-        assert [entry["success"] for entry in stage1a_entries] == [True, False, True]
+        assert [entry["success"] for entry in stage1a_entries] == [True, False]
         assert "empty cross-references" in stage1a_entries[1]["error"]
-        assert "empty gap response is valid" in stage1a_entries[2]["user_prompt_text"]
+        assert len(client.calls) == 2
 
-    def test_la_26_gap_empty_references_exhausted_retry_reports_exact_error(
-        self, tmp_path
-    ):
-        """Empty gap links fail closed after the one bounded correction."""
+    def test_la_26_gap_empty_references_fail_typed_with_exact_error(self, tmp_path):
+        """Empty gap links fail closed with the exact typed record."""
         invalid_gap = _gap_draft_with_empty_references()
         client = MockLLMClient()
         client.set_response_for(
             LossAnalysisDraft,
-            [valid_risk_draft_dict(), invalid_gap, invalid_gap],
+            [valid_risk_draft_dict(), invalid_gap],
         )
 
         with pytest.raises(StageError) as exc_info:
@@ -992,23 +973,22 @@ class TestStage1aLossAnalysis:
             )
 
         expected = (
-            "stage_1a/gap_analysis: _DraftReferenceValidationError: gap_analysis "
-            "draft has empty "
+            "stage_1a/gap_analysis: targeted repair unsupported (the "
+            "draft_references failure class is outside the approved repair "
+            "scope; no repair call is made); no repair call was made; first "
+            "attempt failed: _DraftReferenceValidationError: gap_analysis "
+            "draft has empty cross-references: hazards.related_losses empty "
+            "for H-2; security_constraints.related_hazards empty for SC-2. "
+            "Validation feedback: gap_analysis draft has empty "
             "cross-references: hazards.related_losses empty for H-2; "
-            "security_constraints.related_hazards empty for SC-2; retry failed: "
-            "_DraftReferenceValidationError: gap_analysis draft has empty "
-            "cross-references: "
-            "hazards.related_losses empty for H-2; "
-            "security_constraints.related_hazards empty for SC-2. "
-            "Validation feedback: gap_analysis draft has empty cross-references: "
-            "hazards.related_losses empty for H-2; "
-            "security_constraints.related_hazards empty for SC-2. Every supplied "
-            "hazard must list at least one related loss and every supplied "
-            "security constraint must list at least one related hazard. An empty "
-            "gap response is valid only when both collections are empty."
+            "security_constraints.related_hazards empty for SC-2. Every "
+            "supplied hazard must list at least one related loss and every "
+            "supplied security constraint must list at least one related "
+            "hazard. An empty gap response is valid only when both "
+            "collections are empty."
         )
         assert str(exc_info.value) == expected
-        assert len(client.calls) == 3
+        assert len(client.calls) == 2
 
     def test_la_27_complete_risk_graph_accepts_empty_gap(self, tmp_path):
         """An empty gap response remains valid when the risk graph is complete."""

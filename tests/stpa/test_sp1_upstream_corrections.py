@@ -244,27 +244,35 @@ def test_semantic_diagnostics_flag_dependency_and_mechanism_hazards() -> None:
     )
 
 
-def test_component_failure_hazard_gets_one_bounded_semantic_retry(tmp_path) -> None:
-    """A semantic hazard failure is visible and recoverable on one retry."""
+def test_component_failure_hazard_fails_typed_without_repair(tmp_path) -> None:
+    """A semantic hazard failure is typed and recorded, with no retry.
+
+    Component-failure hazards are outside the two approved targeted-repair
+    classes (owner authorization 2026-09-11), so the run records the exact
+    semantic feedback and stops after the first attempt.
+    """
+    from asago_scenario_generator.stpa.infra.llm_helpers import StageError
+
     bad = valid_risk_draft_dict()
     bad["hazards"][0]["description"] = "The sensor fails"
-    corrected = valid_risk_draft_dict()
 
     client = MockLLMClient()
-    client.set_response_for(
-        LossAnalysisDraft,
-        [bad, corrected, valid_gap_draft_dict()],
-    )
-    result = derive_loss_analysis(
-        llm_client=client,
-        use_case_text="An attacker can inject input.",
-        risk_cards=[],
-        run_dir=tmp_path,
-    )
+    client.set_response_for(LossAnalysisDraft, [bad])
+    with pytest.raises(StageError) as exc_info:
+        derive_loss_analysis(
+            llm_client=client,
+            use_case_text="An attacker can inject input.",
+            risk_cards=[],
+            run_dir=tmp_path,
+        )
 
-    assert result.hazards[0].description == "The agent executes an unintended payment."
-    assert len(client.calls) == 3
-    assert "system-level state" in client.calls[1].user_prompt
+    message = str(exc_info.value)
+    assert "targeted repair unsupported" in message
+    assert "draft_semantics failure class" in message
+    assert "no repair call was made" in message
+    # The actionable rewrite guidance is retained in the record.
+    assert "system-level state" in message
+    assert len(client.calls) == 1
 
 
 def test_control_action_typed_effect_and_temporality_are_closed() -> None:

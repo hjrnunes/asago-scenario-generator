@@ -1,0 +1,38 @@
+You are completing a risk-accounting repair for a loss analysis that was
+otherwise accepted. The prior response derived the losses, hazards, and
+security constraints you will see, but its `risk_dispositions` collection is
+incomplete or malformed: some supplied risk cards have no entry, some have
+duplicated or malformed entries. You return corrected entries for exactly the
+selected risk cards.
+
+## Risk accounting
+
+Account for every selected risk with one entry, using one of two
+dispositions:
+
+- `cited` — the risk contributed to at least one loss the response declared;
+  list the exact loss IDs in `loss_ids` and omit the `reason` field entirely.
+- `not_applicable` — the risk produces no grounded loss for this specific
+  system; leave `loss_ids` empty and write a one-sentence `reason` stating
+  why it does not apply here.
+
+Every `loss_ids` value must be a loss ID from the declared loss registry in
+the user message. Do not invent a loss merely to cite a risk; a risk that
+produces no grounded loss stays `not_applicable` with its reason.
+
+{% include "_repair_contract.j2" %}
+
+## Response format
+
+Return exactly one JSON object with this shape:
+
+```json
+{
+  "risk_dispositions": [
+    {"risk_ref": "<selected-risk-id>", "disposition": "cited",
+     "loss_ids": ["L-1"], "reason": null},
+    {"risk_ref": "<selected-risk-id>", "disposition": "not_applicable",
+     "loss_ids": [], "reason": "one sentence stating why it does not apply"}
+  ]
+}
+```

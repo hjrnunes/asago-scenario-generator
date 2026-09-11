@@ -362,6 +362,7 @@ _SYSTEM_MODEL_LAYERS: dict[str, int] = {
     "semantic_review": 0,
     "_constants": 0,
     "id_normalization": 0,
+    "loss_analysis_repair": 0,
     "heuristics": 1,
     "loss_analysis": 1,
     "loss_analysis_gates": 2,
@@ -468,6 +469,7 @@ class TestSystemModelNoImportCycles:
             "asago_scenario_generator.stpa.system_model._constants",
             "asago_scenario_generator.stpa.system_model.id_normalization",
             "asago_scenario_generator.stpa.system_model.loss_analysis",
+            "asago_scenario_generator.stpa.system_model.loss_analysis_repair",
             "asago_scenario_generator.stpa.system_model.profile",
             "asago_scenario_generator.stpa.system_model.control_structure",
             "asago_scenario_generator.stpa.system_model.critic",
@@ -485,7 +487,8 @@ class TestSystemModelDependencyDirection:
     """Higher-level system_model modules must not import lower-level ones in reverse.
 
     Dependency layers (lower = leaf / fewer inbound dependencies):
-      0: _constants, id_normalization  (leaves — no sibling imports)
+      0: _constants, id_normalization, loss_analysis_repair  (leaves — no
+         sibling imports; the repair module is a loss_analysis collaborator)
       1: heuristics, loss_analysis, profile, control_structure  (stages)
       2: critic         (uses heuristics)
       3: run            (orchestrator — uses all)
