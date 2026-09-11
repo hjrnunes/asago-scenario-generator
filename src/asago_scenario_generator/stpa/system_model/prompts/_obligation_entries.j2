@@ -2,12 +2,33 @@ Each constraint may carry `obligations`: zero to three explicit
 failure-direction entries. Each entry has `obligation_id` (`O1`, `O2`,
 ...), `kind` (`required` when the rule mandates a behavior, `forbidden`
 when it prohibits one), `behavior` (the mandated or prohibited behavior in
-one phrase), `rule_span` (a verbatim quote from `rule` covering that
-behavior), and the channel the behavior would happen through:
-`realized_by` on required entries, `violated_via` on forbidden entries,
-each one of `tool_call`, `reply`, `provider_request` (a prompt sent to the
-third-party model), or `unknown`. An optional `note` records a partial
-projection or an unresolved remainder. Return entries only when the
-rule's direction is legible; omit them rather than guessing a channel.
-Entries you return are proposals: deterministic code stamps them
-`proposed`, and only human review marks them `reviewed`.
+one phrase), and `rule_span` (a verbatim quote from `rule` covering that
+behavior). Name the channel through the field that belongs to the kind:
+`realized_by` on required entries, one of `tool_call`, `reply`, or
+`unknown`; `violated_via` on forbidden entries, one of `tool_call`,
+`reply`, `state`, `result`, `provider_request`, or `unknown`. The channel
+field is kind-exclusive: a required entry carries only `realized_by`, and
+a forbidden entry carries only `violated_via`. A `tool_call` channel is
+the agent's observable tool invocation: an attempt, never the completed
+effect. A `reply` channel is content of the assistant's response. `state`
+(a changed state of the controlled process) and `result` (a tool result)
+are effect-layer observations that no compiled oracle kind observes;
+recording one is how an entry says the violation is not observable on
+this target. `provider_request` is a prompt sent to the third-party model
+provider: a real channel, but neither a tool call nor the reply, so no
+compiled oracle kind observes it either. Use `unknown` when the channel
+is not established.
+
+Optional fields carry one meaning each. A forbidden entry may set
+`observation_role`: `source` when the entry states the rule's own
+violation, or `proxy` when the observable behavior stands in for a
+different source outcome, which `source_outcome` must then name; a proxy
+is a separately reviewed claim, not the source interpretation itself. A
+required entry may record the `completion` the oracle does not observe,
+because an attempt-level realization is not the behavior's completion.
+`projection` and `residual` keep a partial projection's covered part and
+uncovered remainder explicit, and `note` records any other remark.
+Return entries only when the rule's direction is legible; omit them
+rather than guessing a channel. Entries you return are proposals:
+deterministic code stamps them `proposed`, and only human review marks
+them `reviewed`.
