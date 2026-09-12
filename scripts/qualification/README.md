@@ -153,6 +153,19 @@ state. The judge must quote literal evidence; missing, malformed or fabricated
 evidence cannot establish an unsafe outcome. Judge calls are saved under
 `judge/calls.jsonl`.
 
+Authored omission checks retain source-addressed trigger quotations alongside
+the author's applicability claim. A source may be an authored user turn, so it
+must not be reported as captured target state. Source validation confirms the
+quotation exists; reviewers still assess whether it activates the cited rule.
+Legacy trigger text containing only an observation or record name is not
+sufficient evidence under the current authoring validator. Revalidating a saved
+draft does not rewrite its historical result or award a recovery.
+The authoring preflight holds `trigger_evidence_unrepresentable` when the
+complete evidence-bearing omission proposition violates the existing length
+or content limits. The authored record retains the trigger and quotations;
+this is a representation limitation, not a failed source check or a finding
+that the rule does not apply.
+
 The response judge's result is provider-reported. Literal-quote validation checks
 that a quotation exists, not that it logically supports the verdict. Results
 explicitly retain `semantic_support_independently_verified: false`. Saved

@@ -255,7 +255,11 @@ reviewed, the cited required entry is realized by a tool call, and an
 optional `run --reviewed-obligation-bindings PATH` file
 (`reviewed-obligation-bindings-v1`) connects that entry to the action;
 otherwise the draft is held as a persisted specification with a typed
-reason and never compiled. The target-blind path is unchanged.
+reason and never compiled. Omission drafts also cite exact trigger evidence
+from a supplied user turn, a used state fact, or a named observation. This
+validates the source, not the author's claim that the rule requires the call;
+the omission check stays conditional on independently establishing that duty.
+The target-blind path is unchanged.
 
 `run --target-observations PATH` optionally accepts normalized runtime-context
 JSON from the standalone [capture workflow](scripts/qualification/README.md).

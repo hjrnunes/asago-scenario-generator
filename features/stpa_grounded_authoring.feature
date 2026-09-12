@@ -38,3 +38,34 @@ Feature: Phase 4 grounded authoring in target-derived mode
     When the authoring system prompt renders
     Then the rendered system prompt is at most 3000 characters
     And the prompt schema names only the four supported oracle kinds
+
+  Scenario: omission triggers cite an exact user source and stay conditional
+    Given a synthetic reviewed handoff obligation and its bound action
+    When a user trigger is cited with its exact prepared turn
+    Then the omission draft is accepted with a conditional semantic proposition
+    And the assembled spec retains the exact trigger evidence
+    And the accepted source does not claim that the obligation is applicable
+    And the prepared stimulus contains user turns only
+
+  Scenario: omission trigger evidence covers state, observation, and persistence
+    Given a synthetic reviewed handoff obligation and its bound action
+    When exact state and observation trigger sources are validated
+    Then each exact source citation is accepted
+    And the trigger evidence survives authored-record persistence
+    And a conversation citation uses its exact one-based turn identity
+
+  Scenario: omission trigger evidence rejects missing and fabricated sources
+    Given a synthetic reviewed handoff obligation and its bound action
+    When malformed, absent, foreign, ambiguous, and fabricated trigger evidence is validated
+    Then every invalid omission draft has a typed trigger-evidence rejection
+
+  Scenario: omission trigger evidence cannot replace a reviewed binding
+    Given a synthetic reviewed handoff obligation and its bound action
+    When valid source evidence is supplied without the reviewed action binding
+    Then the omission draft remains held for an unreviewed binding
+    And an unknown binding does not bypass the reviewed-binding hold
+
+  Scenario: non-omission authoring keeps its existing validation path
+    Given a synthetic reviewed handoff obligation and its bound action
+    When a tool argument draft has no omission trigger evidence
+    Then the non-omission draft is accepted without trigger evidence

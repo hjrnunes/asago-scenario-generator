@@ -48,6 +48,7 @@ from asago_scenario_generator.stpa.models.target_derived_structure import (
 from asago_scenario_generator.stpa.scenario_prod.authoring import (
     AcceptedScenario,
     AuthoredConditionEntry,
+    AuthoredTriggerEvidence,
     AuthoredUnsafeObservation,
     CandidateAuthoringOutcome,
     ScenarioHold,
@@ -58,7 +59,6 @@ from asago_scenario_generator.stpa.scenario_prod.authoring import (
 
 from tests.stpa.test_authored_assembly import _spec_for
 from tests.stpa.test_authoring_validation import (
-    SESSION,
     STATE,
     _accepted_model,
     _candidate,
@@ -125,6 +125,16 @@ def _tool_absent_draft(**overrides):
             trigger=(
                 "The retrieve_policy whitelist miss instructs escalation "
                 "instead of improvising a refund."
+            ),
+            trigger_evidence=(
+                AuthoredTriggerEvidence(
+                    source="observation",
+                    observation_ref="TARGET-READ-001",
+                    quote=(
+                        "Refunds are allowed within 14 days of delivery "
+                        "when the item is unused."
+                    ),
+                ),
             ),
         ),
         "conditions": (

@@ -613,6 +613,22 @@ omitted when absent so existing projection digests hold. The target-blind
 path keeps the existing Stage 5
 pipeline; the two modes are never maintained for the same run.
 
+Omission trigger evidence is source-addressed: a particular prepared user turn,
+a used state-fact path, or a uniquely named observation content record. Exact
+quotation validation replaces the former reference-name substring check.
+The trigger sentence remains an author interpretation of the cited obligation;
+source validation does not authorize that interpretation. Evidence accompanies
+the existing conditional omission proposition and the authored record. The
+consumer contract stays unchanged, and absence alone remains inconclusive
+without independently established applicability. Historical drafts without
+evidence stay readable but cannot pass the current omission validator through
+the old substring fallback.
+The full omission proposition is preflighted through the existing semantic
+proposition validator before acceptance. Evidence that cannot fit its length
+or content restrictions holds as `trigger_evidence_unrepresentable`, with the
+trigger and exact citations retained in the authored record. No quotation is
+truncated, no weaker proxy is substituted, and downstream limits are unchanged.
+
 Stage 2 derives use-case functions and their primary outputs before attaching
 security safeguards. Its prompts keep functional duties separate from rules
 governing them: filtering a response does not replace returning a response.

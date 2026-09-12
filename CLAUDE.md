@@ -146,7 +146,13 @@ test) and an unknown realization holds `realization_unresolved` (owner
 ruling Q31, 2026-09-10). A candidate with no compilable kind resolves before
 the call (`specification_only` or `no_expressible_oracle`), and held drafts
 persist as specification evidence that is never compiled or credited as
-recovery. Every accepted scenario carries `observes` (attempt, total
+recovery. Omission drafts require exact trigger evidence from a particular
+supplied user turn, used state fact, or uniquely named observation content.
+Verify source presence separately from the author's trigger interpretation:
+a valid citation never establishes the duty to call. Preserve the conditional
+omission proposition and its evidence; absence alone stays inconclusive.
+See the omission evidence boundary in `docs/architecture/overview.md`.
+Every accepted scenario carries `observes` (attempt, total
 omission, or reply; no compiled kind measures an effect, and an
 attempt-level or proxy stamp never supports an executed-safety claim) and
 `compile_basis` stamps that travel to the compiled spec as

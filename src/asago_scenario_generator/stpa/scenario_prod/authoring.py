@@ -35,7 +35,10 @@ from pydantic import (
     model_validator,
 )
 
-from asago_scenario_generator.models.canonical import ClosedCanonicalModel
+from asago_scenario_generator.models.canonical import (
+    ClosedCanonicalModel,
+    canonical_json_bytes,
+)
 from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
@@ -72,6 +75,7 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
     ActionValueCondition,
     OrderingCondition,
     ReferenceArgument,
+    normalize_semantic_proposition,
 )
 from asago_scenario_generator.stpa.models.execution_projection_v2 import StimulusTurn
 from asago_scenario_generator.stpa.models.target_derived_structure import (
@@ -126,6 +130,8 @@ OracleKind = Literal[
     "response_claim",
     "paired_response",
 ]
+
+TriggerEvidenceSource = Literal["stimulus", "state_fact", "observation"]
 
 # Kinds accepted on the wire but carrying no producer condition, consumer
 # observer, or compiled artifact today.  They are rejected with a typed
@@ -300,6 +306,62 @@ class AuthoredStimulus(ClosedCanonicalModel):
         return self
 
 
+class AuthoredTriggerEvidence(ClosedCanonicalModel):
+    """One exact source quotation for a ``tool_absent`` trigger.
+
+    ``trigger`` remains the author's interpretation of why the reviewed
+    obligation applies.  This record only identifies and quotes content
+    available to the author: an authored user turn, a used target-state fact,
+    or an observed record.  The locator is intentionally
+    kind-exclusive so a source cannot be smuggled in through a source name,
+    state-path fragment, or an observation identifier alone.
+    """
+
+    source: TriggerEvidenceSource
+    quote: StrictStr = Field(min_length=1)
+    # A single user message is turn 1; a conversation uses the same
+    # one-based numbering as the prepared user-turn contract.
+    turn: StrictInt | None = Field(default=None, ge=1)
+    state_path: tuple[StrictStr, ...] | None = None
+    observation_ref: StrictStr | None = None
+
+    @model_validator(mode="after")
+    def validate_locator(self) -> "AuthoredTriggerEvidence":
+        if not self.quote.strip():
+            raise ValueError("trigger evidence quote must be non-blank")
+        provided = {
+            "turn": self.turn,
+            "state_path": self.state_path,
+            "observation_ref": self.observation_ref,
+        }
+        expected = {
+            "stimulus": "turn",
+            "state_fact": "state_path",
+            "observation": "observation_ref",
+        }[self.source]
+        if provided[expected] is None:
+            raise ValueError(f"{self.source} trigger evidence requires {expected}")
+        unexpected = [
+            name
+            for name, value in provided.items()
+            if name != expected and value is not None
+        ]
+        if unexpected:
+            raise ValueError(
+                f"{self.source} trigger evidence must not carry "
+                + ", ".join(unexpected)
+            )
+        if self.state_path is not None and any(
+            not segment.strip() for segment in self.state_path
+        ):
+            raise ValueError("trigger evidence state_path must use non-empty segments")
+        if self.state_path is not None and not self.state_path:
+            raise ValueError("trigger evidence state_path must not be empty")
+        if self.observation_ref is not None and not self.observation_ref.strip():
+            raise ValueError("trigger evidence observation_ref must be non-blank")
+        return self
+
+
 class AuthoredUnsafeObservation(ClosedCanonicalModel):
     """The observable event that makes the scenario unsafe."""
 
@@ -311,6 +373,10 @@ class AuthoredUnsafeObservation(ClosedCanonicalModel):
     reference_tool: StrictStr | None = None
     proposition: StrictStr | None = None
     trigger: StrictStr | None = None
+    # Kept optional at wire parsing so historical authored records remain
+    # readable. Current semantic validation requires at least one exact
+    # citation for every tool_absent draft.
+    trigger_evidence: tuple[AuthoredTriggerEvidence, ...] = ()
 
 
 class AuthoredConditionEntry(ClosedCanonicalModel):
@@ -1421,6 +1487,14 @@ def validate_authored_scenario(
                 f"under test {candidate.action_name!r} is a tool call"
             ),
         )
+    if observation.kind != "tool_absent" and observation.trigger_evidence:
+        return ScenarioRejection(
+            reason="trigger_evidence_unexpected",
+            detail=(
+                "trigger_evidence is only valid on a tool_absent oracle; "
+                "other oracle kinds carry no omission trigger"
+            ),
+        )
 
     comparable: str | None = None
     outcome: ScenarioRejection | ScenarioHold | None
@@ -1484,7 +1558,19 @@ def validate_authored_scenario(
         facts,
         subject_model=subject_model,
         record_index=record_index,
+        trigger_evidence=observation.trigger_evidence,
     )
+    if observation.kind == "tool_absent":
+        try:
+            normalize_semantic_proposition(oracle.template_text, required=True)
+        except ValueError as exc:
+            return ScenarioHold(
+                reason="trigger_evidence_unrepresentable",
+                detail=(
+                    "tool_absent trigger evidence cannot be represented in the "
+                    f"semantic proposition: {exc}"
+                ),
+            )
     return AcceptedScenario(
         draft=draft,
         candidate=candidate,
@@ -1956,7 +2042,15 @@ def _validate_tool_absent(
     observations: tuple[dict[str, str], ...],
     facts: list[StateFactValue],
 ) -> ScenarioRejection | None:
-    """Rule 4.3.5: the trigger must name something observable."""
+    """Rule 4.3.5: the trigger must cite exact available source evidence.
+
+    The trigger sentence remains an authored interpretation.  This validator
+    checks only that each cited locator identifies one available source and
+    that its non-blank quotation is an exact substring of that source's text
+    (or canonical JSON equality for a non-string state value).  In particular,
+    a policy reference, source name, record id, or path segment in the prose is
+    not a citation.
+    """
     observation = draft.unsafe_observation
     if not observation.tool:
         return ScenarioRejection(
@@ -1969,23 +2063,100 @@ def _validate_tool_absent(
             reason="trigger_not_observable",
             detail="tool_absent oracle requires a trigger sentence",
         )
-    # The tool's own name is not an observable: any trigger can name the
-    # action it skips ("privately decides to skip process_refund").  Only
-    # policy observations and used state facts are observable (spec 4.3.5).
-    observable_names = []
-    for record in observations:
-        if record.get("source_name"):
-            observable_names.append(record["source_name"])
-        observable_names.append(record["observation_ref"])
-    for fact in facts:
-        observable_names.extend(fact.path)
-    lowered = trigger.lower()
-    if not any(name and name.lower() in lowered for name in observable_names):
+    evidence = observation.trigger_evidence
+    if not evidence:
         return ScenarioRejection(
-            reason="trigger_not_observable",
-            detail=("the trigger names no state fact, record, or policy observation"),
+            reason="trigger_evidence_missing",
+            detail=(
+                "tool_absent oracle requires at least one exact trigger_evidence "
+                "citation; trigger text or a reference name is not sufficient"
+            ),
         )
+    stimulus_texts = stimulus_user_texts(draft.stimulus)
+    for item in evidence:
+        if item.source == "stimulus":
+            assert item.turn is not None
+            if item.turn > len(stimulus_texts):
+                return ScenarioRejection(
+                    reason="trigger_evidence_unknown",
+                    detail=(
+                        f"trigger_evidence stimulus turn {item.turn} is beyond the "
+                        f"{len(stimulus_texts)} supplied user turn(s)"
+                    ),
+                )
+            expected = stimulus_texts[item.turn - 1]
+            quote_matches = item.quote in expected
+        elif item.source == "state_fact":
+            assert item.state_path is not None
+            matching = [fact for fact in facts if fact.path == item.state_path]
+            if not matching:
+                return ScenarioRejection(
+                    reason="trigger_evidence_unknown",
+                    detail=(
+                        "trigger_evidence state_path must name one path in "
+                        f"state_facts_used: {list(item.state_path)!r}"
+                    ),
+                )
+            if len(matching) != 1:
+                return ScenarioRejection(
+                    reason="trigger_evidence_ambiguous",
+                    detail=(
+                        "trigger_evidence state_path resolves to more than one "
+                        f"used state fact: {list(item.state_path)!r}"
+                    ),
+                )
+            expected = _canonical_trigger_source_value(matching[0].value)
+            quote_matches = (
+                item.quote in expected
+                if isinstance(matching[0].value, str)
+                else item.quote == expected
+            )
+        else:
+            assert item.observation_ref is not None
+            matches = [
+                record
+                for record in observations
+                if record.get("observation_ref") == item.observation_ref
+            ]
+            if not matches:
+                return ScenarioRejection(
+                    reason="trigger_evidence_unknown",
+                    detail=(
+                        "trigger_evidence observation_ref does not name a supplied "
+                        f"observation: {item.observation_ref!r}"
+                    ),
+                )
+            if len(matches) != 1:
+                return ScenarioRejection(
+                    reason="trigger_evidence_ambiguous",
+                    detail=(
+                        "trigger_evidence observation_ref is not unique in the "
+                        f"supplied observations: {item.observation_ref!r}"
+                    ),
+                )
+            expected = matches[0].get("content")
+            if not isinstance(expected, str) or not expected:
+                return ScenarioRejection(
+                    reason="trigger_evidence_unknown",
+                    detail=("the cited observation has no quoted content to verify"),
+                )
+            quote_matches = item.quote in expected
+        if not quote_matches:
+            return ScenarioRejection(
+                reason="trigger_evidence_quote_mismatch",
+                detail=(
+                    f"trigger_evidence quote does not match the required content of the cited "
+                    f"{item.source} source"
+                ),
+            )
     return None
+
+
+def _canonical_trigger_source_value(value: Any) -> str:
+    """Encode one state value exactly for a trigger quotation comparison."""
+    if isinstance(value, str):
+        return value
+    return canonical_json_bytes(value).decode("utf-8")
 
 
 def _validate_response_claim(
@@ -2148,6 +2319,35 @@ def _owner_resolution(
     return resolution
 
 
+def _trigger_evidence_summary(
+    evidence: tuple[AuthoredTriggerEvidence, ...],
+) -> str:
+    """Render exact, JSON-escaped evidence entries for the proposition.
+
+    JSON escaping keeps a quoted multi-line source on the proposition's one
+    plain line.  The same entries are also copied structurally to the
+    authored record so consumers and reviewers can inspect the exact source
+    locator and quotation without parsing the sentence.
+    """
+    entries: list[str] = []
+    for item in evidence:
+        if item.source == "stimulus":
+            locator: Any = {"turn": item.turn}
+        elif item.source == "state_fact":
+            locator = {"state_path": list(item.state_path or ())}
+        else:
+            locator = {"observation_ref": item.observation_ref}
+        entries.append(
+            json.dumps(
+                {"source": item.source, "locator": locator, "quote": item.quote},
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+    return "[" + ",".join(entries) + "]"
+
+
 def _resolve_oracle(
     observation: AuthoredUnsafeObservation,
     candidate: AuthoringCandidate,
@@ -2157,6 +2357,7 @@ def _resolve_oracle(
     *,
     subject_model: TargetSubjectModel | None = None,
     record_index: RecordIndex | None = None,
+    trigger_evidence: tuple[AuthoredTriggerEvidence, ...] = (),
 ) -> ResolvedOracle:
     """Bind the validated values to the closed oracle template (spec 4.4).
 
@@ -2248,13 +2449,22 @@ def _resolve_oracle(
         )
     if kind == "tool_absent":
         assert observation.tool is not None
-        return ResolvedOracle(
-            kind="tool_absent",
-            template_text=render_oracle_text(
+        if trigger_evidence:
+            template_text = render_oracle_text(
+                "tool_absent_with_evidence",
+                tool=observation.tool,
+                trigger=observation.trigger or "",
+                evidence=_trigger_evidence_summary(trigger_evidence),
+            )
+        else:
+            template_text = render_oracle_text(
                 "tool_absent",
                 tool=observation.tool,
                 trigger=observation.trigger or "",
-            ),
+            )
+        return ResolvedOracle(
+            kind="tool_absent",
+            template_text=template_text,
             operator="not_provided",
         )
     if kind == "tool_order":
@@ -2967,13 +3177,7 @@ def write_authored_scenarios_record(
                     for draft, rejection in outcome.rejected
                 ],
                 "held": [
-                    {
-                        "reason": hold.reason,
-                        "detail": hold.detail,
-                        "obligation_ref": _draft_ref(draft, outcome.candidate),
-                        "observes": OBSERVES.get(draft.unsafe_observation.kind, ""),
-                        "oracle_kind": draft.unsafe_observation.kind,
-                    }
+                    _held_payload(draft, outcome.candidate, hold)
                     for draft, hold in outcome.held
                 ],
                 "no_scenario_reason": outcome.no_scenario_reason,
@@ -3007,7 +3211,7 @@ def _draft_ref(
 
 
 def _accepted_payload(accepted: AcceptedScenario) -> dict[str, Any]:
-    return {
+    payload = {
         "oracle_kind": accepted.oracle.kind,
         "oracle_text": accepted.oracle.template_text,
         "deviation_category": accepted.uca_type.value,
@@ -3024,6 +3228,49 @@ def _accepted_payload(accepted: AcceptedScenario) -> dict[str, Any]:
         "observes": accepted.observes,
         "basis": accepted.compile_basis,
     }
+    if accepted.oracle.kind == "tool_absent":
+        payload["trigger_evidence"] = [
+            _trigger_evidence_payload(item)
+            for item in accepted.draft.unsafe_observation.trigger_evidence
+        ]
+    return payload
+
+
+def _held_payload(
+    draft: AuthoredScenarioDraft,
+    candidate: AuthoringCandidate,
+    hold: ScenarioHold,
+) -> dict[str, Any]:
+    """Persist held omission provenance without turning it into authority."""
+    payload: dict[str, Any] = {
+        "reason": hold.reason,
+        "detail": hold.detail,
+        "obligation_ref": _draft_ref(draft, candidate),
+        "observes": OBSERVES.get(draft.unsafe_observation.kind, ""),
+        "oracle_kind": draft.unsafe_observation.kind,
+    }
+    if draft.unsafe_observation.kind == "tool_absent":
+        payload["trigger"] = draft.unsafe_observation.trigger
+        payload["trigger_evidence"] = [
+            _trigger_evidence_payload(item)
+            for item in draft.unsafe_observation.trigger_evidence
+        ]
+    return payload
+
+
+def _trigger_evidence_payload(evidence: AuthoredTriggerEvidence) -> dict[str, Any]:
+    """Serialize verified omission evidence without changing consumer schemas."""
+    payload: dict[str, Any] = {
+        "source": evidence.source,
+        "quote": evidence.quote,
+    }
+    if evidence.source == "stimulus":
+        payload["turn"] = evidence.turn
+    elif evidence.source == "state_fact":
+        payload["state_path"] = list(evidence.state_path or ())
+    else:
+        payload["observation_ref"] = evidence.observation_ref
+    return payload
 
 
 # ---------------------------------------------------------------------------

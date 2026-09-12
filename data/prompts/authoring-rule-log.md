@@ -9,6 +9,38 @@ The initial six rules (spec 4.5) are not listed here; only additions are.
 
 ## Entries
 
+### 2026-09-12: list paths and explicit omission-trigger evidence
+
+- **Authority and scope.** Owner-authorized correction of the two saved
+  MiniOcciAI rejection findings. The list guidance explains an existing
+  validator contract; the omission evidence field deliberately replaces the
+  reference-substring rule. This is not a claimed Principle 7 recovery.
+- **List addressing.** The field rules distinguish mapping keys from zero-based
+  list indexes encoded as strings, and require condition references to copy
+  the listed path. Embedded record identifiers are not inferred list keys or
+  ownership relations. Examples use generic placeholders.
+- **Omission evidence.** `unsafe_observation.trigger_evidence` addresses an
+  authored user turn, used state fact, or named observation and quotes its
+  content. The trigger sentence remains the author's applicability claim.
+  Exact source validation does not establish entitlement, clinical meaning,
+  or the duty to call. Reviewed obligation/action bindings remain required,
+  and omission evaluation remains conditional on applicability.
+- **Compatibility.** Historical drafts remain parseable, but omission drafts
+  without explicit evidence fail current validation. No old run, accepted
+  graph, gold case, or benchmark decision is rewritten. New authoring schema
+  and prompt bytes are changed measurement inputs. The evidenced oracle uses
+  a new closed template variant. The complete proposition is checked before
+  acceptance against the existing 600-character and content limits; evidence
+  that cannot be represented stays held with its exact quotations preserved.
+- **Evidence.** The read-only investigation is at
+  `build/qualification/miniocciai-rejection-investigation-20260912/`;
+  implementation checks are at
+  `build/qualification/miniocciai-rejection-fixes-20260912/`.
+  Deterministic synthetic cases test provenance and persistence. The inspected
+  evaluation-only clinical draft is exposed diagnostic evidence, not an
+  unseen holdout; its symptoms and expected answer are not prompt examples.
+  No live model calls or scored recoveries support this correction yet.
+
 ### 2026-09-09: distinct tests by outcome or approach (G11)
 
 - **Where.** `authoring_user.j2`, output schema section, the instruction
