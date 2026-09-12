@@ -274,10 +274,17 @@ unknown rather than treating error strings as candidates. Standalone
 diagnostic `stpa-run` does not import or require synthesis artifacts.
 
 The synthesis manifest derives a stable `run_status` from those candidate
-records. `completed` means every requested candidate was published;
+records. Completion is candidate-terminal: `completed` means every requested
+candidate resolved as `published` (its bundle/artifact publication succeeded)
+or `functional_specification` (a functional specification persisted);
 `no_candidates` is a valid analysis with no eligible candidates; `failed`
-means candidates were attempted but produced zero published scenarios; and
-`degraded` records partial or unattempted yield. The product `run` persists and
+means candidates were attempted but produced zero published scenarios or
+persisted functional specifications; and `degraded` records partial or
+unattempted yield. A compiled adversarial spec whose publication failed is a
+`publication_failed` candidate: attempted, never yielded, and never counted
+in `generated`. Candidate counts, artifact counts (`generated`,
+`functional_specifications`), and draft counts stay independent denominators.
+The product `run` persists and
 reports its diagnostic/accounting sidecars before returning non-zero for the
 attempted zero-yield status. Phase 2 verification remains independently
 non-blocking, and cannot change this scenario-generation status.

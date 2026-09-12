@@ -437,3 +437,73 @@ zero-argument prompts.
   progress — authority-pretext conversations generated, validated, and
   preserved verbatim in executable artifacts alongside plain requests —
   recorded at that scope without a retained-recoveries claim.
+
+### 2026-09-12: target-neutral session subject and the three owner oracle forms
+
+Status: **adopted (correction spec 2026-09-12, accepted revision 2;
+offline implementation).** This entry is a target-neutrality correction
+recorded under the closed correction spec
+(`build/qualification/miniocciai-v3-semantic-review/accepted-revision-2/correction-spec-subject-record-20260912.md`),
+not a Principle 7 recovery: no gold case names it, and its evidence is
+the offline acceptance suite, not a run pair.
+
+- **Where.** `authoring_user.j2`, the `## Session subject` section
+  (renamed from the session-identity block), the per-tool
+  `tool_argument` operator offers and examples, the withheld-operator
+  sentence, and the `tool_order` operator list. Oracle templates in
+  `data/oracles/templates.yaml`: `owner_record_subject` and
+  `owner_record_hop` replace the single hardcoded MiniKlarna form; the
+  session-subject form keeps rendering through `tool_argument`
+  byte-identically. Engine-side, the fixed MiniKlarna owner-field
+  defaults are removed; offers come from an accepted
+  `target-subject-model-v1` companion or from session discovery alone.
+- **Rule.** The session subject is target-neutral: TARGET-STATE records
+  a session subject string at a path (declared by the accepted model's
+  `session_path`, else discovered from the single top-level
+  `authenticated_*_id` string key; two or more keys is ambiguous and
+  never guessed). The prompt names the path and the string and never
+  asserts what its bearer may access. `owner_differs_from_session` on
+  `tool_argument` is offered only when the session subject is observed
+  and a declared relation covers the argument's role; otherwise it is
+  withheld with a typed reason (`session_subject_unobserved`,
+  `session_subject_ambiguous`, `subject_relation_unresolved`,
+  `owner_argument_incompatible`), the prompt shows a closed generic
+  sentence for withheld kinds, and a draft using a withheld operator is
+  held as `operator_unavailable`, not rejected. On `tool_order` the
+  operator is never offered: the operator list shows `equals`,
+  `not_equals`, `greater_than`, `less_than` only, plus the deferral
+  note, and a `tool_order` owner-differs draft is always held
+  `owner_differs_tool_order_deferred`. Record-form sentences name the
+  record (`ORD-201.customer_id`), hop-form sentences name the hop
+  (`orders[PLAN-21.order_id].customer_id`); without an accepted model
+  no record or conversation example renders at all.
+- **Why.** The v3 MiniOcciAI review found the production defaults
+  aliased the patient onto the customer: seven eligible OcciAI
+  candidates were erased by a raising identity rule, and PM-1-1 read
+  "which customer is authenticated" on a clinical target. Identity,
+  ownership, admission, and authored status are now target-neutral with
+  no patient-to-customer aliasing.
+- **Gold case.** None (correction, not recovery). Section 7 of the
+  correction spec records correspondence only.
+- **Must not lose.** The frozen MiniKlarna graph, reviewed bindings,
+  gold sets, benchmark YAMLs, and every historical companion stay
+  byte-identical; the frozen MiniOcciAI baseline run stays untouched;
+  the saved OcciAI observation digest `8e179fa6…018e` is unchanged; the
+  sixteen pre-call OcciAI exclusions replay their exact resolutions;
+  MiniKlarna owner oracle sentences for the subject form stay
+  byte-identical (spec section 4.1); `tool_order` `equals` admission is
+  unchanged (M-S14). Drafts held as `operator_unavailable` persist as
+  specification evidence and are never compiled or credited.
+- **Evidence (offline).** The deterministic suites in
+  `tests/stpa/test_target_subject_model.py` (P1–P8, M-S9–M-S12,
+  M-S19–M-S23), `tests/stpa/test_occiai_subject_overlay.py`
+  (O-S1–O-S13 against byte-identical copies of the frozen baseline),
+  `tests/stpa/test_authoring_miniklarna_subject.py` (M-S1–M-S18 on the
+  in-test accepted model), `tests/stpa/test_authoring_terminals.py`
+  (ST-2–ST-13), and the migrated `test_authoring_validation.py`
+  suite. ST-1 and ST-5 read the frozen MiniOcciAI record and manifest
+  read-only. No live call, no target execution, no second MiniOcciAI
+  baseline.
+- **Owner decision (2026-09-12).** Accepted as correction spec revision
+  2 with `TargetObservationSnapshot.content_digest` and the ST-13 mixed
+  candidate; implementation authorized on those terms.

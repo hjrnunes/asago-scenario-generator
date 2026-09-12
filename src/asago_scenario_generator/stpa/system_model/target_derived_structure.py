@@ -72,6 +72,11 @@ from asago_scenario_generator.stpa.models.target_derived_structure import (
     loss_analysis_content_digest,
     validate_reviewed_obligation_bindings,
 )
+from asago_scenario_generator.stpa.models.target_subject_model import (
+    SessionSubject,
+    TargetSubjectModel,
+    resolve_session_subject,
+)
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
     classify_constraint,
@@ -282,8 +287,17 @@ def _purpose_grounding_share(purpose: str, use_case_text: str) -> float:
 
 def _session_identity_record(
     observations: TargetObservationSnapshot | None,
-) -> ProcessModelRecord:
-    """Derive the session_identity process-model record from the target state."""
+    session_path: tuple[str, ...] | None = None,
+) -> tuple[ProcessModelRecord, SessionSubject]:
+    """Derive the session_identity process-model record from the target state.
+
+    The record stores only the session-subject observation (correction spec
+    2026-09-12, section 1.1): the observed TARGET-STATE string and its path
+    under the single declared/discovered precedence rule, never an
+    authorization claim.  The returned ``SessionSubject`` lets the caller
+    record an ``ambiguous`` discovery as a structure warning.
+    """
+    decoded: Any = None
     if observations is not None:
         state = next(
             (
@@ -298,27 +312,38 @@ def _session_identity_record(
                 decoded = json.loads(state.content)
             except json.JSONDecodeError:
                 decoded = None
-            if isinstance(decoded, dict) and isinstance(
-                decoded.get("authenticated_customer_id"), str
-            ):
-                return ProcessModelRecord(
-                    pm_id="PM-1-1",
-                    description=(
-                        "Session identity: the authenticated customer "
-                        f"{decoded['authenticated_customer_id']} observed in "
-                        "TARGET-STATE.authenticated_customer_id."
-                    ),
-                    source="session_identity",
-                    observed_path=("authenticated_customer_id",),
-                )
-    return ProcessModelRecord(
-        pm_id="PM-1-1",
-        description=(
-            "Session identity: which customer is authenticated in this "
-            "session (not observed in the supplied target state)."
+    session = resolve_session_subject(decoded, session_path)
+    if session.observed:
+        return (
+            ProcessModelRecord(
+                pm_id="PM-1-1",
+                description=(
+                    "Session identity: TARGET-STATE records the session "
+                    f"subject string {session.value!r} at path "
+                    f"{list(session.path or ())} ({session.rule} rule)."
+                ),
+                source="session_identity",
+                observed_path=session.path,
+            ),
+            session,
+        )
+    # Spec section 1.1: state that no unique session-subject string was
+    # observed and whether the rule was declared or discovered; never quote
+    # an ambiguous candidate key or value.
+    description = (
+        "Session identity: no unique session-subject string was observed "
+        f"in the supplied target state ({session.rule} rule)."
+    )
+    if session.status == "ambiguous":
+        description += " The session subject is ambiguous."
+    return (
+        ProcessModelRecord(
+            pm_id="PM-1-1",
+            description=description,
+            source="session_identity",
+            observed_path=None,
         ),
-        source="session_identity",
-        observed_path=None,
+        session,
     )
 
 
@@ -825,6 +850,7 @@ def derive_target_structure(
     run_dir: Path,
     template_loader: TemplateLoader | None = None,
     temperature: float = 0.4,
+    target_subject_model: TargetSubjectModel | None = None,
 ) -> TargetDerivedStage2Result:
     """Derive the Stage 2 control structure from the observed target.
 
@@ -832,7 +858,15 @@ def derive_target_structure(
     actions, controlled processes, deterministic process model) need no model
     call; the beliefs call and the relevance call are each bounded provider
     attempts with deterministic validation.
+
+    ``target_subject_model`` is the accepted subject-model companion when
+    one rides with the run (correction spec 2026-09-12): its declared
+    ``session_path`` drives the session-subject rule, and its content
+    digest plus reviewer stamps are recorded on the sidecar.
     """
+    session_path = (
+        target_subject_model.session_path if target_subject_model is not None else None
+    )
     loader = template_loader or TemplateLoader(PROMPTS_DIR)
     warnings: list[str] = []
     tools = _flatten_tools(execution_target_profile)
@@ -997,7 +1031,17 @@ def derive_target_structure(
     action_description_by_ca[respond_ca] = respond_description
 
     # --- Deterministic process model (spec 2.2).
-    process_records.append(_session_identity_record(target_observations))
+    session_record, session = _session_identity_record(
+        target_observations, session_path
+    )
+    process_records.append(session_record)
+    if session.status == "ambiguous":
+        warnings.append(
+            "Session subject discovery is ambiguous: TARGET-STATE carries "
+            "multiple authenticated_*_id keys "
+            f"({', '.join(session.candidates)}); no session subject is "
+            "recorded."
+        )
     process_records.append(
         ProcessModelRecord(
             pm_id="PM-1-2",
@@ -1225,6 +1269,17 @@ def derive_target_structure(
     validate_reviewed_obligation_bindings(
         reviewed_obligation_bindings, loss_analysis, tuple(bindings)
     )
+    # The accepted subject model's stamps ride on the sidecar (correction
+    # spec section 4.4); a model without a reviewed acceptance envelope
+    # stamps nothing, so a digest is never recorded as accepted without
+    # the reviewer stamps.
+    acceptance = (
+        target_subject_model.acceptance
+        if target_subject_model is not None
+        and target_subject_model.acceptance is not None
+        and target_subject_model.acceptance.reviewed
+        else None
+    )
     derived = TargetDerivedStructure(
         target_id=execution_target_profile.target_id,
         profile_digest=execution_target_profile.semantic_digest,
@@ -1238,6 +1293,17 @@ def derive_target_structure(
         model_call_count=1 + relevance_call_count,
         warnings=tuple(warnings),
         reviewed_obligation_bindings=reviewed_obligation_bindings,
+        target_subject_model_digest=(
+            target_subject_model.compute_content_digest()
+            if acceptance is not None
+            else None
+        ),
+        target_subject_model_reviewed_by=(
+            acceptance.reviewed_by if acceptance is not None else None
+        ),
+        target_subject_model_reviewed_on=(
+            acceptance.reviewed_on if acceptance is not None else None
+        ),
     )
 
     # Persist exactly the artifacts the target-blind path would publish.

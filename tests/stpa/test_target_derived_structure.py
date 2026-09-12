@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -388,6 +389,173 @@ def test_session_identity_grounded_in_target_state(tmp_path: Path):
     assert "CUST001" in session.description
 
 
+def _accepted_subject_model(
+    *,
+    session_path=("authenticated_customer_id",),
+    observations: TargetObservationSnapshot | None = None,
+):
+    """A minimal accepted subject model pinned to this file's fixtures."""
+    from asago_scenario_generator.stpa.models.target_subject_model import (
+        TargetSubjectModel,
+        TargetSubjectModelAcceptance,
+    )
+
+    model = TargetSubjectModel(
+        session_path=session_path,
+        subject_noun="account holder",
+        acceptance=TargetSubjectModelAcceptance(
+            reviewed_by="qa",
+            reviewed_on=date(2026, 9, 12),
+            observations_digest=(observations or _observations()).content_digest,
+            execution_target_profile_digest=_profile().semantic_digest,
+            content_digest="0" * 64,
+        ),
+    )
+    digest = model.compute_content_digest()
+    return model.model_copy(
+        update={
+            "acceptance": model.acceptance.model_copy(
+                update={"content_digest": digest}
+            )
+        }
+    )
+
+
+def test_session_subject_wording_is_target_neutral(tmp_path: Path):
+    """PM-1-1 is the closed spec sentence, never an authorization claim
+    (correction spec 1.2)."""
+    result = _derive(tmp_path, target_observations=_observations())
+    description = result.derived.process_model[0].description
+    assert description == (
+        "Session identity: TARGET-STATE records the session subject string "
+        "'CUST001' at path ['authenticated_customer_id'] (discovered rule)."
+    )
+    assert "which customer" not in description.lower()
+    assert "authorized" not in description.lower()
+
+
+def test_unobserved_session_subject_wording_is_target_neutral(tmp_path: Path):
+    state = {"orders": {"ORD-1": {"customer_id": "CUST001"}}}
+    observations = TargetObservationSnapshot.create(
+        target_profile_digest=_profile().semantic_digest,
+        observations=[
+            TargetObservation(
+                observation_ref="TARGET-STATE",
+                kind="state",
+                content_format="json",
+                content=json.dumps(state),
+            )
+        ],
+    )
+    result = _derive(tmp_path, target_observations=observations)
+    session = result.derived.process_model[0]
+    assert session.observed_path is None
+    assert session.description == (
+        "Session identity: no unique session-subject string was observed "
+        "in the supplied target state (discovered rule)."
+    )
+    assert "customer" not in session.description.lower()
+
+
+def test_declared_session_path_overrides_discovery(tmp_path: Path):
+    state = {
+        "authenticated_customer_id": "CUST001",
+        "account": {"holder_id": "HOLD-9"},
+    }
+    observations = TargetObservationSnapshot.create(
+        target_profile_digest=_profile().semantic_digest,
+        observations=[
+            TargetObservation(
+                observation_ref="TARGET-STATE",
+                kind="state",
+                content_format="json",
+                content=json.dumps(state),
+            )
+        ],
+    )
+    model = _accepted_subject_model(
+        session_path=("account", "holder_id"), observations=observations
+    )
+    result = _derive(
+        tmp_path, target_observations=observations, target_subject_model=model
+    )
+    session = result.derived.process_model[0]
+    assert session.observed_path == ("account", "holder_id")
+    assert "HOLD-9" in session.description
+    assert "declared" in session.description
+    # The discovered key beside the declared path never warns.
+    assert not any(
+        "ambiguous session identity" in warning for warning in result.derived.warnings
+    )
+
+
+def test_ambiguous_session_identity_warns_without_guessing(tmp_path: Path):
+    state = {"authenticated_customer_id": "C1", "authenticated_account_id": "A1"}
+    observations = TargetObservationSnapshot.create(
+        target_profile_digest=_profile().semantic_digest,
+        observations=[
+            TargetObservation(
+                observation_ref="TARGET-STATE",
+                kind="state",
+                content_format="json",
+                content=json.dumps(state),
+            )
+        ],
+    )
+    result = _derive(tmp_path, target_observations=observations)
+    session = result.derived.process_model[0]
+    assert session.observed_path is None
+    assert session.description == (
+        "Session identity: no unique session-subject string was observed "
+        "in the supplied target state (discovered rule). "
+        "The session subject is ambiguous."
+    )
+    # Neither candidate string is ever quoted.
+    assert "C1" not in session.description
+    assert "A1" not in session.description
+    assert any(
+        "Session subject discovery is ambiguous" in warning
+        for warning in result.derived.warnings
+    )
+
+
+def test_declared_session_path_missing_states_the_declared_rule(tmp_path: Path):
+    model = _accepted_subject_model(session_path=("account", "holder_id"))
+    result = _derive(
+        tmp_path, target_observations=_observations(), target_subject_model=model
+    )
+    session = result.derived.process_model[0]
+    assert session.observed_path is None
+    assert session.description == (
+        "Session identity: no unique session-subject string was observed "
+        "in the supplied target state (declared rule)."
+    )
+    # The discovered key beside the missing declaration is never used.
+    assert "CUST001" not in session.description
+
+
+def test_subject_model_stamps_ride_the_sidecar_only_when_accepted(tmp_path: Path):
+    result = _derive(tmp_path, target_observations=_observations())
+    sidecar = read_yaml(
+        tmp_path / TARGET_DERIVED_STRUCTURE_FILENAME, TargetDerivedStructure
+    )
+    sidecar.assert_integrity()
+    assert sidecar.target_subject_model_digest is None
+    assert sidecar.target_subject_model_reviewed_by is None
+
+    model = _accepted_subject_model()
+    stamped_dir = tmp_path / "stamped"
+    stamped_dir.mkdir()
+    _derive(stamped_dir, target_observations=_observations(), target_subject_model=model)
+    stamped = read_yaml(
+        stamped_dir / TARGET_DERIVED_STRUCTURE_FILENAME, TargetDerivedStructure
+    )
+    stamped.assert_integrity()
+    assert stamped.target_subject_model_digest == model.compute_content_digest()
+    assert stamped.target_subject_model_reviewed_by == "qa"
+    assert stamped.target_subject_model_reviewed_on == date(2026, 9, 12)
+
+
 def test_ungrounded_purpose_falls_back(tmp_path: Path):
     from asago_scenario_generator.stpa.system_model.target_derived_structure import (
         _BeliefsResponse,
@@ -639,6 +807,80 @@ def test_run_sp1_routes_stage2_to_the_derived_path(tmp_path: Path):
     assert "call_3_coordination" not in steps
     assert "target_beliefs" in steps
     assert "target_relevance" in steps
+
+
+def _sp1_client():
+    from asago_scenario_generator.models.capability_profile import Stage1Profile
+    from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
+    from asago_scenario_generator.stpa.system_model.target_derived_structure import (
+        _BeliefsResponse,
+        _RelevanceResponse,
+    )
+    from tests.stpa.sp1_helpers import (
+        valid_gap_draft_dict,
+        valid_risk_draft_dict,
+        valid_stage1_profile_dict,
+    )
+
+    client = MockLLMClient()
+    client.set_response_for(Stage1Profile, valid_stage1_profile_dict())
+    client.set_response_for(
+        LossAnalysisDraft, [valid_risk_draft_dict(), valid_gap_draft_dict()]
+    )
+    client.set_response_for(_BeliefsResponse, _beliefs_response())
+    client.set_response_for(_RelevanceResponse, _relevance_response())
+    return client
+
+
+def test_run_sp1_hashes_and_stamps_the_accepted_subject_model(tmp_path: Path):
+    import hashlib
+
+    from asago_scenario_generator.stpa.system_model.run import run_sp1
+
+    model = _accepted_subject_model()
+    model_path = tmp_path / "target-subject-model.yaml"
+    model_path.write_text(
+        yaml.safe_dump(model.model_dump(mode="json", exclude_none=True))
+    )
+    result = run_sp1(
+        llm_client=_sp1_client(),
+        use_case_text=USE_CASE,
+        risk_cards=[],
+        run_dir=tmp_path,
+        profile_path=None,
+        execution_target_profile=_profile(),
+        target_observations=_observations(),
+        target_subject_model=model,
+        target_subject_model_path=model_path,
+    )
+    assert result.stage_errors == []
+    manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+    assert manifest["input_hashes"]["target_subject_model"] == hashlib.sha256(
+        model_path.read_bytes()
+    ).hexdigest()
+    sidecar = read_yaml(
+        tmp_path / TARGET_DERIVED_STRUCTURE_FILENAME, TargetDerivedStructure
+    )
+    sidecar.assert_integrity()
+    assert sidecar.target_subject_model_digest == model.compute_content_digest()
+    assert sidecar.target_subject_model_reviewed_by == "qa"
+
+
+def test_run_sp1_rejects_a_subject_model_without_a_target(tmp_path: Path):
+    from asago_scenario_generator.stpa.system_model.run import run_sp1
+
+    result = run_sp1(
+        llm_client=_sp1_client(),
+        use_case_text=USE_CASE,
+        risk_cards=[],
+        run_dir=tmp_path,
+        profile_path=None,
+        target_subject_model=_accepted_subject_model(),
+    )
+    assert any(
+        "subject model" in error and "target-derived" in error
+        for error in result.stage_errors
+    )
 
 
 def _relevance_payload(**overrides) -> dict:

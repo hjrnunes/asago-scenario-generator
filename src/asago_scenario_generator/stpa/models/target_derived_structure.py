@@ -214,6 +214,15 @@ class TargetDerivedStructure(ClosedCanonicalModel):
     reviewed_obligation_bindings: tuple[ReviewedObligationBinding, ...] = Field(
         default=(), exclude_if=lambda value: not value
     )
+    # Accepted target subject model companion (correction spec 2026-09-12,
+    # section 4.4): when an accepted file rides with the run, its framed
+    # content digest and reviewer stamps ride on this sidecar so the exact
+    # accepted inputs are digest-covered.  All three fields are omitted
+    # when the file is absent; a digest without reviewer stamps is never
+    # recorded as accepted.
+    target_subject_model_digest: str | None = None
+    target_subject_model_reviewed_by: str | None = None
+    target_subject_model_reviewed_on: date | None = None
 
     @model_validator(mode="after")
     def canonicalize_and_digest(self) -> "TargetDerivedStructure":

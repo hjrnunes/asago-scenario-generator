@@ -1,0 +1,455 @@
+schema_version: stpa-synthesis-manifest-v1
+run_id: synthesis-20260911T215541Z
+created_at: '2026-09-11T21:55:41.120043+00:00'
+use_case_digest: 9904f5f855cf2c4a236b1396d430351309bcafe2bed77b3f1891c4fec5635609
+risk_set_digest: 6e4c4fbe46818b0f9dedb745f83e945655bc014eb68f53612ccd59571a047eed
+capability_profile_digest: 91428245c198dbd514a2987b6a54047a3101d7e1b36035444053635f8e9bd4cf
+capability_snapshot_digest: 2e50ab9f4e804d6528409e5281700ee73811a14936024e041473ee0abf932580
+qualification_facts_digest: 395d544185c082987a317eddd1edea672cc2da6cb2eade4da08041a7f313e23f
+taxonomy_inputs_digest: 3cfbbf6f4e33e6a708885a8236c7a6df8232112587394b9781d3a9f69f5d24cd
+catalog_pins:
+  atlas:
+    release: '2026.05'
+    digest: af83a0e1fda9e468e506d0895a873f9d5d5c4fcb30eb6bb23242ca135f930c2b
+mapping_pins:
+  obligation_edges:
+    release: obligation-mapping-bundle-v1
+    digest: 09801576fd55c5df3c0ce3a91d12c2cd0417e4d60294e2a466e81644ecacf91d
+  sssom:
+    release: '2026.05'
+    digest: 15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc
+source_artifacts:
+  use_case:
+    artifact_id: use-case
+    schema_version: use-case-text-v1
+    semantic_digest: 9904f5f855cf2c4a236b1396d430351309bcafe2bed77b3f1891c4fec5635609
+  risk_set:
+    artifact_id: risk-set
+    schema_version: reviewed-risk-set-v1
+    semantic_digest: 6e4c4fbe46818b0f9dedb745f83e945655bc014eb68f53612ccd59571a047eed
+  capability_profile:
+    artifact_id: capability-profile
+    schema_version: capability-profile-v1
+    semantic_digest: 91428245c198dbd514a2987b6a54047a3101d7e1b36035444053635f8e9bd4cf
+  capability_snapshot:
+    artifact_id: capability-snapshot
+    schema_version: capability-fact-snapshot-v1
+    semantic_digest: 2e50ab9f4e804d6528409e5281700ee73811a14936024e041473ee0abf932580
+  qualification_facts:
+    artifact_id: qualification-facts
+    schema_version: qualification-facts-v1
+    semantic_digest: 395d544185c082987a317eddd1edea672cc2da6cb2eade4da08041a7f313e23f
+  taxonomy_inputs:
+    artifact_id: taxonomy-obligation-inputs
+    schema_version: taxonomy-obligation-inputs-v1
+    semantic_digest: 3cfbbf6f4e33e6a708885a8236c7a6df8232112587394b9781d3a9f69f5d24cd
+  taxonomy_obligation_plan:
+    artifact_id: taxonomy-obligation-plan
+    schema_version: taxonomy-obligation-plan-v1
+    semantic_digest: e280c255aeb89177ea29ec3b5d0c709174370e2cdc189eec7d0db83e6268c9c4
+  baseline_loss_analysis:
+    artifact_id: stpa-loss-analysis-baseline
+    schema_version: stpa-loss-analysis-v1
+    semantic_digest: 2aca9baa8e69101c4c583b0c08cb3323c6804f56138d4752ae46876be896dc14
+  baseline_control_structure:
+    artifact_id: stpa-control-structure-baseline
+    schema_version: stpa-control-structure-v1
+    semantic_digest: 4a083b8925ce05d20627bfaa616761c2e9cf687aa4f2fefa344e122f549056e2
+  final_loss_analysis:
+    artifact_id: stpa-loss-analysis-final
+    schema_version: stpa-loss-analysis-v1
+    semantic_digest: c702b7e0cbe07d00dcfe93729dd67d15494cd21b61257b1e94bf4f2d916ff26a
+  final_control_structure:
+    artifact_id: stpa-control-structure-final
+    schema_version: stpa-control-structure-v1
+    semantic_digest: 10012aef7338a1f872b23ca0479c4f21bfa2cd6628a77ac78ac4f8f53168bbd6
+  obligation_consideration:
+    artifact_id: obligation-consideration
+    schema_version: stpa-obligation-consideration-v1
+    semantic_digest: 049442a694f37e5185a2ab490a7eec483e6c0aae0687707b46c13d80fd65689e
+  ica_enumeration:
+    artifact_id: ica-enumeration
+    schema_version: ica-enumeration-v1
+    semantic_digest: 5451353eaf18ce94987b5a0cccc6f3823442f59d407f3da2f2375664e74fea4e
+  scenario_collection:
+    artifact_id: stpa-scenario-collection
+    schema_version: stpa-scenario-collection-v1
+    semantic_digest: e24c0748ed360897e1175d1e7cf41753c0aa4d59fdec45b3d6a583e8529f2380
+  obligation_accounting:
+    artifact_id: obligation-accounting
+    schema_version: stpa-obligation-accounting-v1
+    semantic_digest: 4ccae7eb281fb64226f8dd2254d1aea49b8fecf2b555c9d07b706e7a6566dcbe
+  scenario_realization:
+    artifact_id: scenario-realization
+    schema_version: stpa-scenario-realization-v1
+    semantic_digest: 3da950a120925fb032a1ce1515ccd21e04aabf2bbe6b3876e4d51b8e5f6db533
+  execution_target_profile:
+    artifact_id: execution-target-profile
+    schema_version: execution-target-profile-v1
+    semantic_digest: 95b4c327a12ebf9619815ba015cfa42816eff3390cfabb008c055bedca7db32e
+  target_realization:
+    artifact_id: target-realization
+    schema_version: target-realization-v1
+    semantic_digest: db4053be79715e079b77a1a52675312732818d9bc769a642cfab830c83034e16
+plan_digest: e280c255aeb89177ea29ec3b5d0c709174370e2cdc189eec7d0db83e6268c9c4
+baseline_loss_analysis_digest: 2aca9baa8e69101c4c583b0c08cb3323c6804f56138d4752ae46876be896dc14
+baseline_control_structure_digest: 4a083b8925ce05d20627bfaa616761c2e9cf687aa4f2fefa344e122f549056e2
+final_loss_analysis_digest: c702b7e0cbe07d00dcfe93729dd67d15494cd21b61257b1e94bf4f2d916ff26a
+final_control_structure_digest: 10012aef7338a1f872b23ca0479c4f21bfa2cd6628a77ac78ac4f8f53168bbd6
+consideration_digest: 049442a694f37e5185a2ab490a7eec483e6c0aae0687707b46c13d80fd65689e
+ica_enumeration_digest: 5451353eaf18ce94987b5a0cccc6f3823442f59d407f3da2f2375664e74fea4e
+accounting_digest: 4ccae7eb281fb64226f8dd2254d1aea49b8fecf2b555c9d07b706e7a6566dcbe
+scenario_realization_digest: 3da950a120925fb032a1ce1515ccd21e04aabf2bbe6b3876e4d51b8e5f6db533
+execution_target_profile_digest: 95b4c327a12ebf9619815ba015cfa42816eff3390cfabb008c055bedca7db32e
+target_realization_digest: db4053be79715e079b77a1a52675312732818d9bc769a642cfab830c83034e16
+scenario_collection_digest: e24c0748ed360897e1175d1e7cf41753c0aa4d59fdec45b3d6a583e8529f2380
+model_controls:
+  profile: null
+  sp1_profile: gemma4-oc
+  sp2_profile: gemma4-oc
+  sp3_profile: gemma4-oc
+  temperature: 0.4
+  max_workers: 4
+stage_call_counts:
+  account: 1
+  authoring: 1
+  baseline: 1
+  briefs: 1
+  consider: 1
+  persist_plan: 1
+  plan: 1
+  realize: 1
+  scenarios: 1
+  target_realization: 1
+  taxonomy_inputs: 1
+  verify_phase2: 1
+provider_evidence:
+  consideration_initial:
+    call_count: 7
+    records:
+    - call_id: stpa-route:initial-batch-1
+      request_digest: a30cdc03256b66f197d745887e8289b39cda3e004e3654de5b1418f8d60a5240
+      response_digest: 7af0a71d2874d668c4cd47ff39988c73ed5524a06dc0d814d2f280a0f7312ea2
+      model_profile: gemma4-oc
+      model_name: gemma-4-26b-a4b-it
+      attempt_count: 1
+      outcome: accepted
+    - call_id: stpa-route:initial-batch-2
+      request_digest: 2c64782adf9d8c4c956c4e4dec76f4123bf08e9a48bf94ead940cdfd44b6872d
+      response_digest: c665c83971524c5c2f7bf0addbcc3a74e108b093910fc238b8e81edf6f3a4ee6
+      model_profile: gemma4-oc
+      model_name: gemma-4-26b-a4b-it
+      attempt_count: 1
+      outcome: accepted
+    - call_id: stpa-route:initial-batch-3
+      request_digest: e244e712c4af745109f2eb0285f50ad0f1bd9647bcad25a193e670e6a081baf4
+      response_digest: c91526788685c2541213a8d714dcd90e1b4ec4e23726254e785ec9168fae9f27
+      model_profile: gemma4-oc
+      model_name: gemma-4-26b-a4b-it
+      attempt_count: 1
+      outcome: accepted
+    - call_id: stpa-route:initial-batch-4
+      request_digest: f3d04aed29f81bf053215d6fb106eb38d9880cd6416aa2d4c2af55662c8165f8
+      response_digest: c0ee80ef53ec4e17775bc34b63db7dbee5195ea90d45dee1b8f20bd0cb3a2225
+      model_profile: gemma4-oc
+      model_name: gemma-4-26b-a4b-it
+      attempt_count: 1
+      outcome: accepted
+    - call_id: stpa-route:initial-batch-5
+      request_digest: f0c77223e2fc887c2ac344ca99576b580644fb2e9bb2433d6a634b53b7955a18
+      response_digest: a552b2ed9a19dae5db3737fef02b703a19b4077315d62791ecac9968256720d5
+      model_profile: gemma4-oc
+      model_name: gemma-4-26b-a4b-it
+      attempt_count: 1
+      outcome: accepted
+    - call_id: stpa-route:initial-batch-6
+      request_digest: 9c2cc278ebb22ccd39e0925a4b7b836ae96bdc2ae036f0da2f093ba2833a5a6d
+      response_digest: ae46be10b660902afa21b91c3b972cf333ede33ba010a42c05cb1e27f48ebbd1
+      model_profile: gemma4-oc
+      model_name: gemma-4-26b-a4b-it
+      attempt_count: 1
+      outcome: accepted
+    - call_id: stpa-route:initial-batch-7
+      request_digest: 153ef19da8c6009ec0cd103546dc5b81cbfd166c8864bdaed07802b5b05b67eb
+      response_digest: 95d8502206269b408e3f85c38c541b4b6e2b70b77ccc8037abbf6ea82b0fb051
+      model_profile: gemma4-oc
+      model_name: gemma-4-26b-a4b-it
+      attempt_count: 1
+      outcome: accepted
+    controls:
+      profile: gemma4-oc
+      temperature: 0.4
+      max_batch_size: null
+  consideration_recheck:
+    call_count: 0
+    records: []
+    controls:
+      profile: gemma4-oc
+      temperature: 0.4
+      max_batch_size: null
+  ica:
+    call_count: 0
+    records: []
+    controls:
+      profile: gemma4-oc
+      temperature: 0.4
+      max_batch_size: null
+  revision:
+    call_count: 0
+    records: []
+    controls:
+      profile: gemma4-oc
+      temperature: 0.4
+      max_batch_size: null
+prompt_call_evidence:
+- stage: stage_2
+  step: target_beliefs
+  model: gemma-4-26b-a4b-it
+  system_prompt_hash: 883fc656b5e3457c6ebfc61144490553157da93cf2d0c4a617a8e4a1f71f9908
+  user_prompt_hash: 9bbb0e9227dd1eacb88e549565ebdd4c3d7b5cba910c49f539ef60c24e9873c5
+  prompt_tokens: 2042
+  completion_tokens: 212
+  duration_ms: 1958
+  success: true
+  prompt_preflight:
+    rendered_prompt_digest: 071616b784285e39a7a0a942ca73531f707a14df8836efbde0720fe6645b0c64
+    input_tokens: 2577
+    input_tokens_estimated: true
+    context_window: 32768
+    maximum_completion_tokens: 8192
+    safety_margin: 3277
+    usable_input_tokens: 21299
+    provider_call_allowed: true
+    errors: []
+  response_digest: 2b85b2f38aefe04e72662794bc9405a0dd63a7f431b0f40663a6c70a3ddebe0f
+- stage: stage_2
+  step: target_relevance
+  model: gemma-4-26b-a4b-it
+  system_prompt_hash: 54221ede105b0c0971430b89e72f9a744e3833a4574e195d657bbea100f73a91
+  user_prompt_hash: 9f1f92b8580bbe93b3916381c628a1864838e04558ee8488a57911bb9dda93c2
+  prompt_tokens: 2799
+  completion_tokens: 1259
+  duration_ms: 8310
+  success: true
+  prompt_preflight:
+    rendered_prompt_digest: dd1d09447db114dae1f095ba230ac9442fa28103a94d6faaaebec61cc1be77ac
+    input_tokens: 3572
+    input_tokens_estimated: true
+    context_window: 32768
+    maximum_completion_tokens: 8192
+    safety_margin: 3277
+    usable_input_tokens: 21299
+    provider_call_allowed: true
+    errors: []
+  response_digest: 05094493fd8c93489113a0241fd39cfac6749cbee28f8cd2d96392f35638cbf0
+- stage: synthesis_obligation_aware_routing
+  step: initial-batch-1
+  model: gemma-4-26b-a4b-it
+  system_prompt_hash: 1ad511d4c91687d0e5c9fb8d1c3f3350e1812305d3aef78e3e8115a1324362d9
+  user_prompt_hash: cae6ddc0c01f513652c6e4814008332fb466d645f7ddc53561663861842afd55
+  prompt_tokens: 16630
+  completion_tokens: 1727
+  duration_ms: 13962
+  success: true
+  prompt_preflight:
+    rendered_prompt_digest: 015812145acbd2d16765a3ecc02bf3fc0c0c5b8ed94d2c88c4447e8cf751b3ec
+    input_tokens: 13844
+    input_tokens_estimated: true
+    context_window: 32768
+    maximum_completion_tokens: 8192
+    safety_margin: 3277
+    usable_input_tokens: 21299
+    provider_call_allowed: true
+    errors: []
+  response_digest: 12f17ccfd2c4e788b052653a6550fc5a3c911417ff3a279b6a0fdf5103798828
+- stage: synthesis_obligation_aware_routing
+  step: initial-batch-2
+  model: gemma-4-26b-a4b-it
+  system_prompt_hash: 1ad511d4c91687d0e5c9fb8d1c3f3350e1812305d3aef78e3e8115a1324362d9
+  user_prompt_hash: fb12e2eda7b4f9a3b20ca6fdf6eb8ddb70830e42397edf29f2e0a1b2a415ad68
+  prompt_tokens: 16610
+  completion_tokens: 1516
+  duration_ms: 10885
+  success: true
+  prompt_preflight:
+    rendered_prompt_digest: 1c7a55bf2cf3ccbef6b14a2d71906c182b781211aeea0b37032e6ceb1e32e055
+    input_tokens: 13917
+    input_tokens_estimated: true
+    context_window: 32768
+    maximum_completion_tokens: 8192
+    safety_margin: 3277
+    usable_input_tokens: 21299
+    provider_call_allowed: true
+    errors: []
+  response_digest: 92d51cc6b0c2ad24b6c9387ec13ad8c8e69329b22d58fd45b1fa218e3d59a338
+- stage: synthesis_obligation_aware_routing
+  step: initial-batch-3
+  model: gemma-4-26b-a4b-it
+  system_prompt_hash: 1ad511d4c91687d0e5c9fb8d1c3f3350e1812305d3aef78e3e8115a1324362d9
+  user_prompt_hash: 3d140b6facbb939dfa38acb5228f273792dc7c0fd4a749ef688b901d91334409
+  prompt_tokens: 16799
+  completion_tokens: 1797
+  duration_ms: 13831
+  success: true
+  prompt_preflight:
+    rendered_prompt_digest: e2030cfde63fc52834aa40192724fd46880477200f9b2433af118afc3fd92f51
+    input_tokens: 14052
+    input_tokens_estimated: true
+    context_window: 32768
+    maximum_completion_tokens: 8192
+    safety_margin: 3277
+    usable_input_tokens: 21299
+    provider_call_allowed: true
+    errors: []
+  response_digest: 1072635added17837b123efaf703e709da2626aab59f50c09aea301cd40dd4c4
+- stage: synthesis_obligation_aware_routing
+  step: initial-batch-4
+  model: gemma-4-26b-a4b-it
+  system_prompt_hash: 1ad511d4c91687d0e5c9fb8d1c3f3350e1812305d3aef78e3e8115a1324362d9
+  user_prompt_hash: 8913fbe00788081828ba4d88829fd971b61f15f83015a81b0117c959bcf94ab8
+  prompt_tokens: 16555
+  completion_tokens: 1677
+  duration_ms: 13479
+  success: true
+  prompt_preflight:
+    rendered_prompt_digest: 9517ae9863ce5c818bd64cc1189fb7a934ca3272a82483e46797efa02deed7cc
+    input_tokens: 13772
+    input_tokens_estimated: true
+    context_window: 32768
+    maximum_completion_tokens: 8192
+    safety_margin: 3277
+    usable_input_tokens: 21299
+    provider_call_allowed: true
+    errors: []
+  response_digest: b5f7a270a1109289987f29c0a895b0ef93c079dc432fb651ddb834e948d9f1b2
+- stage: synthesis_obligation_aware_routing
+  step: initial-batch-5
+  model: gemma-4-26b-a4b-it
+  system_prompt_hash: 1ad511d4c91687d0e5c9fb8d1c3f3350e1812305d3aef78e3e8115a1324362d9
+  user_prompt_hash: 870af73d73f535cc6f9cd22b572b90a3de95a301d28304f2dbdd2afaafbf0732
+  prompt_tokens: 16759
+  completion_tokens: 1520
+  duration_ms: 10851
+  success: true
+  prompt_preflight:
+    rendered_prompt_digest: 95e76bb868fa41e948d9940d3a30a06d5e35eb8e0accbd824ab3f968648ddd0d
+    input_tokens: 14034
+    input_tokens_estimated: true
+    context_window: 32768
+    maximum_completion_tokens: 8192
+    safety_margin: 3277
+    usable_input_tokens: 21299
+    provider_call_allowed: true
+    errors: []
+  response_digest: ed9474355e83a076e2d75ed13651b5ee6aa40f8ec8a487de8938d33505379320
+- stage: synthesis_obligation_aware_routing
+  step: initial-batch-6
+  model: gemma-4-26b-a4b-it
+  system_prompt_hash: 1ad511d4c91687d0e5c9fb8d1c3f3350e1812305d3aef78e3e8115a1324362d9
+  user_prompt_hash: 2d27f11c12fe39488ed6617bfef2f67ab9afea6babfad059436b96ac90a2916f
+  prompt_tokens: 16911
+  completion_tokens: 1883
+  duration_ms: 14549
+  success: true
+  prompt_preflight:
+    rendered_prompt_digest: 669960ef4152fc6a70d58f3f7eaa8c61040404c8b6c30795c68274a7d8fafdfa
+    input_tokens: 14213
+    input_tokens_estimated: true
+    context_window: 32768
+    maximum_completion_tokens: 8192
+    safety_margin: 3277
+    usable_input_tokens: 21299
+    provider_call_allowed: true
+    errors: []
+  response_digest: 703a2b128c02e3c2735c45607f18517bd9ccb067d27829d4422b2afa326d9c00
+- stage: synthesis_obligation_aware_routing
+  step: initial-batch-7
+  model: gemma-4-26b-a4b-it
+  system_prompt_hash: 1fec21e2b874dfb1e7598421c9159139ae688eda37b9c551aab9e777793143f3
+  user_prompt_hash: c92330be2b9506c9e9887e3084011b6225a4ae0857d1b43ad17171779dbef70a
+  prompt_tokens: 15042
+  completion_tokens: 842
+  duration_ms: 6848
+  success: true
+  prompt_preflight:
+    rendered_prompt_digest: bd4570b998daf1462f18c26c91e243a120eafa6bfce3fed9cbbbd5ed2fc98211
+    input_tokens: 12315
+    input_tokens_estimated: true
+    context_window: 32768
+    maximum_completion_tokens: 8192
+    safety_margin: 3277
+    usable_input_tokens: 21299
+    provider_call_allowed: true
+    errors: []
+  response_digest: 86b61fe450c2aca820ea7d41f07d64ef13b665a5d88c67c233508b91de1ecc0c
+total_prompt_tokens: 120147
+obligation_disposition_counts:
+  total: 152
+  addressed: 0
+  proposed_not_applicable: 0
+  unresolved: 52
+  upstream_gap: 0
+  capability_excluded: 0
+  governance_only: 100
+obligation_stop_reason_counts:
+  no_structural_route: 14
+  risk_pattern_mismatch: 38
+obligation_resolution_funnel:
+  all_plan_rows: 152
+  governance_only: 100
+  capability_excluded: 0
+  applicable_and_considered: 52
+  terminal_reasons:
+    no_structural_route: 14
+    risk_pattern_mismatch: 38
+  terminal_reason_total: 52
+  reconciles: true
+  realized_obligation_denominator: 0
+  admitted_scenario_denominator: 0
+run_status: no_candidates
+status: no_candidates
+run_status_reason: no_eligible_candidates
+scenario_counts:
+  generated: 0
+  failed: 0
+  requested: 0
+  attempted: 0
+  skipped: 0
+  functional_test: 0
+  diagnostic_count: 0
+candidate_outcomes: []
+scenario_errors: []
+phase2_verification:
+  status: awaiting_evidence
+  resource_map_mode: empty_pinned_baseline
+  proposal_set_digest: a681ce07f89c72387323fb58d67c85ac88996342957c284bd45bd0147ee25ff3
+  reconciliation_digest: fc478da837aabb788cfb699e0907126b4727b0b8c7679c69626a578b382c728a
+  assessment_digest: 61a61bd77396b327dc3b46dcb294f04cc7b7fdc5915b89b439ca2c143cb3fd7f
+  proposed: 0
+  accepted: 0
+  taxonomy_unresolved: 52
+  error: null
+  network_calls: 0
+  model_calls: 0
+revision:
+  status: not_required
+  trigger_obligation_ids: []
+  trigger_gap_ids: []
+  diagnostics: []
+  request: null
+  response: null
+  call_evidence: []
+stage_errors: []
+stage_warnings: []
+resume:
+  requested: false
+  state: not_requested
+  reused_stages: []
+  checkpoint: null
+report:
+  artifact_id: synthesis-report
+  schema_version: synthesis-report-html-v1
+  filename: synthesis-report.html
+  normative: false
+  digest: null
+semantic_digest: e62867ca594e5960fe582d8e9d90b3253ad2ad7f1ad2e717443f0ada2e04c59b

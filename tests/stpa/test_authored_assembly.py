@@ -45,11 +45,13 @@ from asago_scenario_generator.stpa.threat_enum.catalog_enrichment import (
 from tests.stpa.test_authoring_validation import (
     SESSION,
     STATE,
+    _accepted_model,
     _candidate,
     _draft,
     _minimal_control_structure,
     _observations,
     _profile,
+    _session,
     _structure,
 )
 
@@ -96,7 +98,8 @@ def _accepted(**draft_overrides):
         state=STATE,
         observations=_observations().prompt_records(),
         profile=_profile(),
-        session_identity=SESSION,
+        session=_session(),
+        subject_model=_accepted_model(),
         has_content_surface=False,
         reviewed_bindings=reviewed_bindings,
     )

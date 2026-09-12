@@ -788,13 +788,24 @@ typed capability-profile content-surface facts and is otherwise rejected as
 `no_content_surface`. A gain that merely restates a governing constraint is
 rejected.
 
-The synthesis manifest also publishes a stable `run_status`: `completed` when
-all requested candidates are published or resolved as functional tests,
+The synthesis manifest also publishes a stable `run_status` whose completion
+rule is candidate-terminal: `completed` when every requested candidate's
+terminal outcome is `published` (publication succeeded) or
+`functional_specification` (a functional specification persisted),
 `no_candidates` when no eligible candidate was available, `failed` when
 candidates were attempted but none was published or resolved, and `degraded`
-for partial or not-yet-attempted yield. Its `scenario_counts` keeps requested,
-attempted, published (`generated`), failed, skipped, and functional-test
-candidates independent from diagnostic-message count. The product `run`
+for partial or not-yet-attempted yield (including `publication_failed`
+candidates, which are attempted but never yielded: a compiled spec whose
+bundle or artifact write failed is not `published`). Its `scenario_counts`
+keeps three denominators independent: candidate counts (`requested`,
+`attempted`, `unprocessable`, `published`, `functional_test`,
+`publication_failed`), artifact counts (`generated` = published adversarial
+artifacts only, `functional_specifications` = persisted functional
+specifications), and draft counts (`drafts_returned`, `drafts_accepted`,
+`drafts_rejected`, `drafts_held`) — all independent from the
+diagnostic-message count. Artifact counts never stand in for `requested`:
+two candidates that publish three artifacts are `completed`, not overcounted.
+The product `run`
 command writes and reports all diagnostics and accounting artifacts before
 returning a non-zero result for the attempted zero-yield `failed` case;
 no-candidate analysis and partial yield remain successful command outcomes.

@@ -125,12 +125,20 @@ class SynthesisInputs:
     # validated offline and pinned on the target-derived-structure sidecar.
     reviewed_obligation_bindings: tuple[Any, ...] = ()
 
+    # Accepted target subject model (correction spec 2026-09-12): loaded
+    # and acceptance-verified by the CLI adapter before the run; threaded
+    # into target-derived Stage 2 (session path, sidecar stamps) and into
+    # grounded authoring (operator overlay).  ``None`` means the companion
+    # is absent, never that a proposed or invalid file was dropped.
+    target_subject_model: Any | None = None
+
     # CLI/source metadata.  These are not read by pure planning seams.
     risk_extraction_path: Path | None = None
     qualification_facts_path: Path | None = None
     capability_profile_path: Path | None = None
     loss_analysis_path: Path | None = None
     reviewed_obligation_bindings_path: Path | None = None
+    target_subject_model_path: Path | None = None
     profiles_file: Path | str = "config/model-profiles.yaml"
 
     # Named model controls, resolved by the outer adapter.
@@ -663,8 +671,9 @@ def run_synthesis(
     # Stage 5 BDI generation (spec 4.6).  The target-blind path below is
     # unchanged; the two modes are never maintained for the same run.
     authored_scenarios: dict[str, Any] | None = None
+    authoring_outcomes: Any | None = None
     if target_derived_stage2:
-        ica_enumeration, authored_scenarios = _run_authoring(
+        ica_enumeration, authored_scenarios, authoring_outcomes = _run_authoring(
             baseline,
             final_loss,
             final_control,
@@ -718,6 +727,17 @@ def run_synthesis(
         target_realization=target_realization,
         authored_scenarios=authored_scenarios,
     )
+    authoring_terminals: Any | None = None
+    if target_derived_stage2 and authoring_outcomes is not None:
+        # Correction spec section 3: candidate terminals are assigned only
+        # after Stage 6 / bundle publication, and the durable record is
+        # written once with the final seven-valued resolutions.
+        authoring_terminals = _finalize_authoring_record(
+            authoring_outcomes,
+            authored_scenarios or {},
+            scenario_result,
+            inputs.output_dir,
+        )
     accounting = _run_accounting(
         plan,
         consideration,
@@ -805,6 +825,7 @@ def run_synthesis(
         revision=revision_result,
         stage_errors=stage_errors,
         stage_warnings=stage_warnings,
+        authoring_terminals=authoring_terminals,
         provider_stages={
             "consideration_initial": initial_consideration,
             "consideration_recheck": recheck_result,
@@ -1731,11 +1752,12 @@ def _run_authoring(
     inputs: SynthesisInputs,
     adapters: SynthesisAdapters,
     calls: list[str],
-) -> tuple[Any, dict[str, Any]]:
+) -> tuple[Any, dict[str, Any], Any | None]:
     """Run Phase 4 grounded authoring over every relevant candidate.
 
     Returns the closed slot-fill result carrying the synthesized ICA
-    enumeration plus the authored bundles keyed by final ICA ID.
+    enumeration, the authored bundles keyed by final ICA ID, and the
+    per-candidate authoring outcomes when the adapter provides them.
     """
     author = adapters.author_scenarios or _default_author_scenarios
     result = _invoke(
@@ -1749,12 +1771,18 @@ def _run_authoring(
         temperature=inputs.temperature,
     )
     calls.append("authoring")
-    if not isinstance(result, tuple) or len(result) != 2:
+    if not isinstance(result, tuple) or len(result) not in (2, 3):
         raise ValueError("authoring adapter returned no enumeration/bundle pair")
-    enumeration, bundles = result
+    enumeration, bundles = result[0], result[1]
+    # The default author also returns the per-candidate authoring outcomes
+    # so the composition root can assign candidate terminals after Stage 6 /
+    # bundle publication and persist the authored record once, with final
+    # resolutions (correction spec section 3.4).  Adapters that predate the
+    # third element leave the record unwritten, as before this seam existed.
+    outcomes = result[2] if len(result) == 3 else None
     if enumeration is None:
         raise ValueError("authoring adapter returned no enumeration")
-    return enumeration, bundles or {}
+    return enumeration, bundles or {}, outcomes
 
 
 def _run_scenarios(
@@ -1807,6 +1835,35 @@ def _run_scenarios(
         result = SimpleNamespace(scenario_envelopes=(), stage_errors=(str(exc),))
     calls.append("scenarios")
     return result
+
+
+def _finalize_authoring_record(
+    outcomes: Any,
+    bundles: Mapping[str, Any],
+    scenario_result: Any,
+    output_dir: Path,
+) -> Any:
+    """Assign candidate terminals after publication and persist the record.
+
+    Correction spec 2026-09-12 sections 3.2-3.4: the four post-call
+    terminals come from the SP3 per-ICA statuses of the candidate's
+    accepted drafts; the record is written once, here, so no terminal is
+    ever frozen at compile time or restamped.
+    """
+    from asago_scenario_generator.stpa.scenario_prod.authoring import (
+        resolve_authoring_terminals,
+        write_authored_scenarios_record,
+    )
+
+    sp3_outcomes = _first_attr(scenario_result, "candidate_outcomes") or ()
+    ica_statuses = {
+        outcome.ica_id: getattr(outcome.status, "value", outcome.status)
+        for outcome in sp3_outcomes
+        if outcome.ica_id
+    }
+    terminals = resolve_authoring_terminals(tuple(outcomes), bundles, ica_statuses)
+    write_authored_scenarios_record(Path(output_dir), terminals)
+    return terminals
 
 
 def _accounting_source_pins(
@@ -2208,6 +2265,7 @@ def _build_manifest(
     stage_warnings: list[str],
     target_realization: Any | None = None,
     provider_stages: Mapping[str, Any] | None = None,
+    authoring_terminals: Any | None = None,
 ) -> dict[str, Any]:
     """Construct a digest-bound manifest from stage authorities."""
     scenarios = tuple(
@@ -2244,7 +2302,16 @@ def _build_manifest(
         scenario_result=scenario_result,
         counts=counts,
     )
-    scenario_counts = _manifest_scenario_counts(scenario_result, len(scenarios))
+    if authoring_terminals is not None:
+        # Authored mode: candidate-terminal accounting (correction spec
+        # sections 3.1-3.3).  The candidate denominator is the authoring
+        # outcome set; the SP3 per-ICA outcomes remain the artifact
+        # denominator under ``candidate_outcomes``.
+        scenario_counts = _authored_scenario_counts(
+            authoring_terminals, scenario_result
+        )
+    else:
+        scenario_counts = _manifest_scenario_counts(scenario_result, len(scenarios))
     run_status, run_status_reason = _scenario_generation_status(scenario_counts)
     payload: dict[str, Any] = {
         "schema_version": _MANIFEST_SCHEMA,
@@ -2871,6 +2938,8 @@ def _default_baseline(
         loss_analysis_path=loss_analysis_path or inputs.loss_analysis_path,
         reviewed_obligation_bindings=inputs.reviewed_obligation_bindings,
         reviewed_obligation_bindings_path=inputs.reviewed_obligation_bindings_path,
+        target_subject_model=inputs.target_subject_model,
+        target_subject_model_path=inputs.target_subject_model_path,
     )
     return result
 
@@ -3043,8 +3112,9 @@ def _default_author_scenarios(
         admit_oracle_kinds,
         author_candidate_scenarios,
         build_authoring_candidates,
+        parse_target_state,
+        resolve_session_identity,
         synthesize_authored_enumeration,
-        write_authored_scenarios_record,
     )
     from asago_scenario_generator.stpa.scenario_prod.content_surface import (
         content_surface_facts as derive_content_surface,
@@ -3082,6 +3152,21 @@ def _default_author_scenarios(
         (binding.constraint_id, binding.obligation_id, binding.action)
         for binding in getattr(structure, "reviewed_obligation_bindings", ())
     )
+    # Correction spec 2026-09-12 sections 1.1 and 2.2: the session subject
+    # and the accepted target subject model (when one rides with the run)
+    # drive the operator overlay; an absent model withholds
+    # owner_differs_from_session without touching kind-level admission.
+    subject_model = inputs.target_subject_model
+    try:
+        shared_state = parse_target_state(inputs.target_observations)
+    except ValueError:
+        # The per-candidate authoring call records the missing or malformed
+        # TARGET-STATE as the candidate-wide error; admission still runs.
+        shared_state = {}
+    session = resolve_session_identity(
+        shared_state,
+        subject_model.session_path if subject_model is not None else None,
+    )
     outcome_list: list[Any] = []
     for candidate in candidates:
         # Resolve a candidate before the call when no oracle kind is
@@ -3092,6 +3177,8 @@ def _default_author_scenarios(
             candidate,
             profile=inputs.execution_target_profile,
             reviewed_bindings=reviewed_bindings,
+            session=session,
+            subject_model=subject_model,
         )
         if not any(admission.status == "compile" for admission in admissions.values()):
             held = any(admission.status == "hold" for admission in admissions.values())
@@ -3122,14 +3209,19 @@ def _default_author_scenarios(
                 temperature=temperature,
                 has_content_surface=surface.has_content_surface,
                 reviewed_bindings=reviewed_bindings,
+                session=session,
+                subject_model=subject_model,
             )
         )
     outcomes = tuple(outcome_list)
-    write_authored_scenarios_record(Path(output_dir), outcomes)
     enumeration, bundles = synthesize_authored_enumeration(
         outcomes, structure, control_structure
     )
-    return SynthesisSlotFillResult(ica_enumeration=enumeration), bundles
+    # The durable authored-scenarios record is written by the composition
+    # root after Stage 6 / bundle publication, when the four post-call
+    # candidate terminals are known (correction spec sections 3.2 and 3.4);
+    # the outcomes ride back with the bundles for that seam.
+    return SynthesisSlotFillResult(ica_enumeration=enumeration), bundles, outcomes
 
 
 def _default_target_realize(
@@ -3975,10 +4067,114 @@ def _manifest_scenario_counts(result: Any, generated: int) -> dict[str, int | No
     return counts
 
 
+def _authored_scenario_counts(
+    terminals: Any,
+    scenario_result: Any,
+) -> dict[str, int | None]:
+    """Candidate-terminal counts for authored mode (correction spec 3.1-3.2).
+
+    Three denominators stay separate: authoring candidates (the terminal
+    outcome of each relevance pair), drafts (objects inside one candidate's
+    authoring response), and artifacts (published adversarial scenarios and
+    persisted functional specifications, counted from the SP3 per-ICA
+    outcomes).  ``generated`` counts published adversarial artifacts only;
+    ``functional_test`` counts candidates whose terminal outcome is
+    ``functional_specification``; ``functional_specifications`` counts the
+    persisted specifications themselves.
+    """
+    from asago_scenario_generator.stpa.scenario_prod.authoring import (
+        AUTHORING_ATTEMPTED_TERMINALS,
+        AUTHORING_INELIGIBLE_TERMINALS,
+        AUTHORING_TERMINAL_FUNCTIONAL,
+        AUTHORING_TERMINAL_NO_YIELD,
+        AUTHORING_TERMINAL_PUBLICATION_FAILED,
+        AUTHORING_TERMINAL_PUBLISHED,
+        AUTHORING_TERMINAL_UNPROCESSABLE,
+    )
+
+    terminals = tuple(terminals)
+    resolutions = [outcome.resolution for outcome in terminals]
+    sp3_outcomes = _first_attr(scenario_result, "candidate_outcomes") or ()
+    sp3_statuses = [
+        getattr(outcome.status, "value", outcome.status) for outcome in sp3_outcomes
+    ]
+    requested = sum(
+        resolution not in AUTHORING_INELIGIBLE_TERMINALS for resolution in resolutions
+    )
+    return {
+        "authoring_candidates": len(terminals),
+        "ineligible": sum(
+            resolution in AUTHORING_INELIGIBLE_TERMINALS for resolution in resolutions
+        ),
+        "requested": requested,
+        "unprocessable": sum(
+            resolution == AUTHORING_TERMINAL_UNPROCESSABLE for resolution in resolutions
+        ),
+        "attempted": sum(
+            resolution in AUTHORING_ATTEMPTED_TERMINALS for resolution in resolutions
+        ),
+        "attempted_no_yield": sum(
+            resolution == AUTHORING_TERMINAL_NO_YIELD for resolution in resolutions
+        ),
+        "published": sum(
+            resolution == AUTHORING_TERMINAL_PUBLISHED for resolution in resolutions
+        ),
+        "functional_test": sum(
+            resolution == AUTHORING_TERMINAL_FUNCTIONAL for resolution in resolutions
+        ),
+        "publication_failed": sum(
+            resolution == AUTHORING_TERMINAL_PUBLICATION_FAILED
+            for resolution in resolutions
+        ),
+        # Artifact counters (SP3 per-ICA terminals).
+        "generated": sum(status == "published" for status in sp3_statuses),
+        "functional_specifications": sum(
+            status == "functional_test" for status in sp3_statuses
+        ),
+        "failed": sum(
+            status in ("generation_failed", "rendering_failed", "publication_failed")
+            for status in sp3_statuses
+        ),
+        "skipped": sum(status == "skipped" for status in sp3_statuses),
+        # Draft counters (never used for run_status).
+        "drafts_returned": sum(
+            len(outcome.accepted) + len(outcome.rejected) + len(outcome.held)
+            for outcome in terminals
+        ),
+        "drafts_accepted": sum(len(outcome.accepted) for outcome in terminals),
+        "drafts_rejected": sum(len(outcome.rejected) for outcome in terminals),
+        "drafts_held": sum(len(outcome.held) for outcome in terminals),
+        "diagnostic_count": len(_first_attr(scenario_result, "stage_errors") or ()),
+    }
+
+
+def _authored_generation_status(
+    counts: Mapping[str, int | None],
+) -> tuple[SynthesisRunStatus, str]:
+    """The candidate-terminal run_status table (correction spec section 3.3)."""
+    requested = counts.get("requested") or 0
+    attempted = counts.get("attempted") or 0
+    unprocessable = counts.get("unprocessable") or 0
+    yielded = (counts.get("published") or 0) + (counts.get("functional_test") or 0)
+    if requested == 0:
+        return SynthesisRunStatus.NO_CANDIDATES, "no_eligible_candidates"
+    if attempted > 0 and yielded == 0:
+        return SynthesisRunStatus.FAILED, "zero_yield_after_attempts"
+    if unprocessable == 0 and attempted == requested and yielded == requested:
+        return SynthesisRunStatus.COMPLETED, "all_requested_candidates_resolved"
+    if yielded > 0:
+        return SynthesisRunStatus.DEGRADED, "partial_candidate_yield"
+    return SynthesisRunStatus.DEGRADED, "requested_candidates_not_attempted"
+
+
 def _scenario_generation_status(
     counts: Mapping[str, int | None],
 ) -> tuple[SynthesisRunStatus, str]:
     """Derive a truthful product status from candidate lifecycle counts."""
+    if counts.get("authoring_candidates") is not None:
+        # Authored mode completes per requested candidate (correction spec
+        # section 3.3), never by generated + functional_test == requested.
+        return _authored_generation_status(counts)
     requested = counts.get("requested")
     attempted = counts.get("attempted")
     generated = counts.get("generated")

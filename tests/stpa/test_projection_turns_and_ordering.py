@@ -72,10 +72,12 @@ from tests.stpa.helpers import make_minimal_loss_analysis
 from tests.stpa.test_authoring_validation import (
     SESSION,
     STATE,
+    _accepted_model,
     _candidate,
     _minimal_control_structure,
     _observations,
     _profile,
+    _session,
     _structure,
 )
 
@@ -380,7 +382,8 @@ def _conversation_accepted():
         state=STATE,
         observations=_observations().prompt_records(),
         profile=_profile(),
-        session_identity=SESSION,
+        session=_session(),
+        subject_model=_accepted_model(),
         has_content_surface=False,
     )
     assert not hasattr(accepted, "reason")
@@ -492,7 +495,8 @@ def test_tool_order_draft_assembles_the_four_ordering_fields():
         state=STATE,
         observations=_observations().prompt_records(),
         profile=_profile(),
-        session_identity=SESSION,
+        session=_session(),
+        subject_model=_accepted_model(),
         has_content_surface=False,
     )
     assert not hasattr(accepted, "reason")
@@ -647,7 +651,8 @@ def _user_message_spec():
         state=STATE,
         observations=_observations().prompt_records(),
         profile=_profile(),
-        session_identity=SESSION,
+        session=_session(),
+        subject_model=_accepted_model(),
         has_content_surface=False,
     )
     assert not hasattr(accepted, "reason")

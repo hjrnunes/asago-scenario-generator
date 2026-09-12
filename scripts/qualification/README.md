@@ -80,6 +80,21 @@ The compilation adapter invokes the normal artifact CLI unchanged and records
 its exact prompt inputs and parsed provider returns locally. These logs may
 contain target test data; do not publish them as sanitized configuration.
 
+### Optional subject-model companion
+
+A product `run` accepts an optional `--target-subject-model
+target-subject-model.yaml` companion (closed `target-subject-model-v1`)
+beside `--target-profile` and `--target-observations`. It declares the
+session-subject path, the per-tool argument roles, and the record-subject
+relations the `owner_differs_from_session` oracle compiles against. The
+command validates structure **and** the reviewer acceptance envelope offline
+before any model call: a proposed (unstamped), edited, or
+observation/profile-mismatched file fails the run closed with a typed
+reason, and the accepted file's content digest plus reviewer stamps ride on
+the run manifest and the target-derived-structure sidecar. Never fold the
+model into the TARGET-STATE observation, and never treat a digest-only file
+(one without `reviewed_by`/`reviewed_on`) as accepted.
+
 ## Execute
 
 ```bash

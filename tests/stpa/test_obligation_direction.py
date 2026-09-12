@@ -60,11 +60,13 @@ from tests.stpa.test_authored_assembly import _spec_for
 from tests.stpa.test_authoring_validation import (
     SESSION,
     STATE,
+    _accepted_model,
     _candidate,
     _draft,
     _minimal_control_structure,
     _observations,
     _profile,
+    _session,
     _structure,
     _validate,
 )
@@ -1027,7 +1029,8 @@ def test_prompt_lists_the_obligation_entries_and_the_citation_rule():
             for record in _observations().prompt_records()
             if record["observation_ref"] != "TARGET-STATE"
         ),
-        session_identity=SESSION,
+        session=_session(),
+        subject_model=_accepted_model(),
         profile=_profile(),
     )
     assert "## Obligation entries (reviewed)" in prompt

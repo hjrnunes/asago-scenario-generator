@@ -47,6 +47,9 @@ from asago_scenario_generator.stpa.models.target_derived_structure import (
     ReviewedObligationBinding,
     TargetDerivedStructure,
 )
+from asago_scenario_generator.stpa.models.target_subject_model import (
+    TargetSubjectModel,
+)
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ControlStructureDerivationResult,
@@ -145,6 +148,8 @@ def run_sp1(
     loss_analysis_path: Path | None = None,
     reviewed_obligation_bindings: tuple[ReviewedObligationBinding, ...] = (),
     reviewed_obligation_bindings_path: Path | None = None,
+    target_subject_model: TargetSubjectModel | None = None,
+    target_subject_model_path: Path | None = None,
 ) -> SP1RunResult:
     """Run the full SP1 pipeline: Stages 1b → 1a → 2.
 
@@ -191,6 +196,14 @@ def run_sp1(
             loss analysis and the derived actions, and ride on the
             content-pinned target-derived-structure sidecar. Supplying them
             for a target-blind run is a fatal stage error.
+        target_subject_model: Optional accepted ``target-subject-model-v1``
+            companion (correction spec 2026-09-12). It applies only to the
+            target-derived Stage 2 mode: its declared ``session_path``
+            drives the session-subject record, and its content digest plus
+            reviewer stamps ride on the sidecar. Supplying one for a
+            target-blind run is a fatal stage error.
+        target_subject_model_path: Optional path the accepted model was
+            loaded from; hashed into the run manifest when present.
 
     Returns:
         SP1RunResult with all artifacts and diagnostic info. On partial
@@ -299,6 +312,7 @@ def run_sp1(
         execution_target_profile=execution_target_profile,
         target_observations=target_observations,
         reviewed_obligation_bindings=reviewed_obligation_bindings,
+        target_subject_model=target_subject_model,
     )
 
     # Write run manifest (always, even on partial failure)
@@ -325,6 +339,7 @@ def run_sp1(
         stage_2_mode=stage2_result.mode,
         stage_2_call_count=stage2_result.model_call_count,
         reviewed_obligation_bindings_path=reviewed_obligation_bindings_path,
+        target_subject_model_path=target_subject_model_path,
         stage_1a_repair=stage_1a_repair_record,
     )
 
@@ -680,6 +695,7 @@ def _run_stage_2_block(
     execution_target_profile: ExecutionTargetProfile | None = None,
     target_observations: TargetObservationSnapshot | None = None,
     reviewed_obligation_bindings: tuple[ReviewedObligationBinding, ...] = (),
+    target_subject_model: TargetSubjectModel | None = None,
 ) -> _Stage2Result:
     """Run Stage 2: control structure derivation, heuristics, critic, and revision.
 
@@ -703,6 +719,15 @@ def _run_stage_2_block(
             "target-derived Stage 2 mode (observed single-controller target)"
         )
         return _Stage2Result(mode=mode, model_call_count=0)
+    if target_subject_model is not None and mode != "target_derived":
+        # An accepted subject model declares roles against an observed
+        # target; a target-blind structure has nothing to bind it to.
+        stage_errors.append(
+            "stage_2/subject_model: an accepted target subject model "
+            "requires the target-derived Stage 2 mode (observed "
+            "single-controller target)"
+        )
+        return _Stage2Result(mode=mode, model_call_count=0)
     if mode == "target_derived":
         return _run_target_derived_stage_2(
             llm_client,
@@ -717,6 +742,7 @@ def _run_stage_2_block(
             execution_target_profile=execution_target_profile,
             target_observations=target_observations,
             reviewed_obligation_bindings=reviewed_obligation_bindings,
+            target_subject_model=target_subject_model,
         )
 
     derivation = _derive_stage2_control_structure(
@@ -796,6 +822,7 @@ def _run_target_derived_stage_2(
     execution_target_profile: ExecutionTargetProfile,
     target_observations: TargetObservationSnapshot | None,
     reviewed_obligation_bindings: tuple[ReviewedObligationBinding, ...] = (),
+    target_subject_model: TargetSubjectModel | None = None,
 ) -> _Stage2Result:
     """Run the deterministic target-derived Stage 2 derivation path."""
     if loss_analysis is None or capability_profile is None:
@@ -812,6 +839,7 @@ def _run_target_derived_stage_2(
             run_dir=run_dir,
             template_loader=loader,
             temperature=temperature if temperature is not None else 0.4,
+            target_subject_model=target_subject_model,
         )
     except StageError as exc:
         stage_errors.append(str(exc))
@@ -852,6 +880,7 @@ def _compute_input_hashes(
     risk_cards: list[RiskCard],
     loss_analysis_path: Path | None = None,
     reviewed_obligation_bindings_path: Path | None = None,
+    target_subject_model_path: Path | None = None,
 ) -> dict[str, str]:
     """Compute SHA-256 hashes of input artifacts for the manifest."""
     hashes = {
@@ -869,6 +898,10 @@ def _compute_input_hashes(
     if reviewed_obligation_bindings_path is not None:
         hashes["reviewed_obligation_bindings"] = hashlib.sha256(
             reviewed_obligation_bindings_path.read_bytes()
+        ).hexdigest()
+    if target_subject_model_path is not None:
+        hashes["target_subject_model"] = hashlib.sha256(
+            target_subject_model_path.read_bytes()
         ).hexdigest()
     return hashes
 
@@ -903,6 +936,7 @@ def _write_manifest(
     stage_2_mode: str = "target_blind",
     stage_2_call_count: int = STAGE_2_CALL_COUNT,
     reviewed_obligation_bindings_path: Path | None = None,
+    target_subject_model_path: Path | None = None,
     stage_1a_repair: RepairRecord | None = None,
 ) -> None:
     """Write the run manifest with stage summary, input hashes, and prompt hashes."""
@@ -911,6 +945,7 @@ def _write_manifest(
         risk_cards,
         loss_analysis_path,
         reviewed_obligation_bindings_path,
+        target_subject_model_path,
     )
     prompt_hashes = loader.hash_prompt_templates()
     critic_summary = _summarize_critic_findings(critic_findings)

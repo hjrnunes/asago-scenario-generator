@@ -101,7 +101,23 @@ closed `reviewed-obligation-bindings-v1` file of reviewed
 obligation-to-action connections; offline validation fails closed unless
 each names a reviewed `required` entry realized by a tool call on a tool
 action of the structure, and the exact set rides on the sidecar so it is
-digest-covered. Without a profile, or for multi-agent targets, the
+digest-covered. Optional `--target-subject-model` supplies a closed
+`target-subject-model-v1` companion declaring the session-subject path,
+argument roles, and record-subject relations for
+`owner_differs_from_session`; it is consumed only when structurally valid
+and accepted (reviewer `reviewed_by`/`reviewed_on` stamps, the exact
+observation/profile digests, and a self-excluding framed content digest),
+and a proposed, edited, or mismatched file fails closed with a typed
+reason. Without it, the session subject is discovered from top-level
+`authenticated_*_id` keys (two or more is ambiguous, never guessed), no
+argument carries an owner role, and `owner_differs_from_session` is
+withheld with a typed reason — always on `tool_order`
+(`owner_differs_tool_order_deferred`), and on `tool_argument` unless the
+identity conditions hold; a draft using a withheld operator is held as
+`operator_unavailable`, not rejected and not a candidate-wide error. The
+accepted model's digest and reviewer stamps ride on the
+target-derived-structure sidecar and the run manifest. Without a profile,
+or for multi-agent targets, the
 target-blind Stage 2 and diagnostic `stpa-run` are unchanged. In
 target-derived mode only, scenario synthesis replaces the ICA enumeration,
 ICA verification and correction, and Stage 5 BDI generation with one
@@ -395,11 +411,16 @@ changing acceptance behavior, or running the quality sequence.
   remain `related_but_not_coverage`. Never auto-confirm correspondence.
   Publish the four standard Phase 2 artifacts, and retain a verification
   failure without deleting or invalidating generated scenarios.
-  Publish a stable synthesis `run_status`: `completed` for full candidate
-  yield, `no_candidates` for a valid run with no eligible candidates, `failed`
-  only when requested candidates were attempted with zero published scenarios,
-  and `degraded` for partial or unattempted yield. Keep candidate counts
-  separate from diagnostic-message counts. Product `run` must publish its
+  Publish a stable synthesis `run_status` whose completion rule is
+  candidate-terminal: `completed` when every requested candidate's terminal
+  outcome is `published` (publication succeeded) or `functional_specification`,
+  `no_candidates` for a valid run with no eligible candidates, `failed` only
+  when requested candidates were attempted with zero published scenarios and
+  zero persisted functional specifications, and `degraded` for partial or
+  unattempted yield. A `publication_failed` candidate is attempted but never
+  yielded and contributes zero to `generated`. Keep candidate counts, artifact
+  counts (`generated`, `functional_specifications`), and draft counts as
+  separate denominators, all distinct from diagnostic-message counts. Product `run` must publish its
   diagnostics and accounting artifacts before returning non-zero for the
   attempted zero-yield case; no-candidate and partial-yield outcomes remain
   successful command results.
