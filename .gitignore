@@ -79,6 +79,21 @@ ai/findings/*
 !ai/findings/klarna-live-prompt-contract-recovery-fixes-spec-2026-09-04.md
 !ai/findings/stpa-execution-environment-basis-default-fix-spec-2026-09-04.md
 !ai/findings/stpa-semantic-outcome-lineage-and-obligation-attribution-spec-2026-09-04.md
+# Preserve the committed Klarna review records alongside the retained findings above.
+!ai/findings/klarna-automatic-garak-iteration-log-2026-09-05.md
+!ai/findings/klarna-iteration-9-quality-assessment-2026-09-06.md
+!ai/findings/klarna-iteration-10-quality-assessment-2026-09-06.md
+!ai/findings/klarna-iteration-11-quality-assessment-2026-09-06.md
+!ai/findings/klarna-iteration-12-quality-assessment-2026-09-06.md
+!ai/findings/klarna-iteration-13-quality-assessment-2026-09-06.md
+!ai/findings/klarna-iteration-14-quality-assessment-2026-09-06.md
+!ai/findings/klarna-iteration-15-quality-assessment-2026-09-06.md
+!ai/findings/klarna-iteration-16-quality-assessment-2026-09-06.md
+!ai/findings/klarna-iteration-17-quality-assessment-2026-09-06.md
+!ai/findings/klarna-iteration-18-bounded-corrections-2026-09-06.md
+!ai/findings/klarna-iteration-19-quality-2026-09-06.md
+!ai/findings/klarna-iteration-20-quality-2026-09-06.md
+!ai/findings/klarna-semantic-review-compilation-quality-2026-09-05.md
 opencode.json
 
 # Preserve the organization-managed Claude project scaffold only

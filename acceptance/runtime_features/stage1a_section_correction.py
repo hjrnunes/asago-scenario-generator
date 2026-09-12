@@ -12,8 +12,10 @@ from runtime_shared import World, _SP1MockLLM
 
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
+    _merge_loss_analysis_correction,
     derive_loss_analysis,
 )
+from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
 
 
 FEATURE_ID = "stage1a_section_correction"
@@ -73,38 +75,8 @@ def _risk_response(
     return response
 
 
-def _invalid_gap_response() -> dict[str, Any]:
-    """Return a gap response whose hazard deliberately references no loss."""
-    return {
-        "risk_card_losses": [],
-        "use_case_losses": [
-            {
-                "loss_id": "gap-case-loss",
-                "description": "Service continuity is lost.",
-                "provenance": "use_case",
-                "source_risk_cards": [],
-            }
-        ],
-        "hazards": [
-            {
-                "hazard_id": "gap-hazard",
-                "description": "The initial gap state is unsafe.",
-                "related_losses": ["missing-loss"],
-            }
-        ],
-        "security_constraints": [
-            {
-                "constraint_id": "obsolete-constraint",
-                "rule": "The obsolete gap condition must be prevented.",
-                "related_hazards": ["gap-hazard"],
-                "applies_when": [],
-            }
-        ],
-    }
-
-
 def _section_patch_response() -> dict[str, Any]:
-    """Return a correction with empty loss sections and full hazard/SC sections."""
+    """Return a valid replacement hazard/constraint collection."""
     return {
         "risk_card_losses": [],
         "use_case_losses": [],
@@ -159,21 +131,99 @@ def _empty_gap_response() -> dict[str, Any]:
 
 def _fixture_responses(name: str) -> list[dict[str, Any]]:
     """Build one deterministic queue for a named neutral acceptance case."""
-    if name == "section_patch":
-        return [
-            _risk_response(displaced=True),
-            _invalid_gap_response(),
-            _section_patch_response(),
-        ]
+    if name == "wire":
+        return [_risk_response(), _empty_gap_response()]
     if name == "duplicate":
         return [_risk_response(duplicate=True), _empty_gap_response()]
     if name == "conflict":
-        return [
-            _risk_response(),
-            _invalid_gap_response(),
-            _conflicting_correction_response(),
-        ]
+        return [_risk_response(), _conflicting_correction_response()]
     raise ValueError(f"unknown Stage 1a correction fixture {name!r}")
+
+
+def _section_patch_drafts(
+    *, empty_correction: bool = False
+) -> tuple[LossAnalysisDraft, LossAnalysisDraft]:
+    """Build typed prior/correction drafts for the offline collection seam."""
+    prior_hazard = {
+        "hazard_id": "risk-base-hazard" if empty_correction else "obsolete-hazard",
+        "description": (
+            "The request state becomes unsafe."
+            if empty_correction
+            else "The initial gap state is unsafe."
+        ),
+        "related_losses": ["risk-base-loss" if empty_correction else "gap-case-loss"],
+    }
+    prior_constraint = {
+        "constraint_id": (
+            "risk-base-constraint" if empty_correction else "obsolete-constraint"
+        ),
+        "rule": (
+            "The request must remain authorized."
+            if empty_correction
+            else "The obsolete gap condition must be prevented."
+        ),
+        "related_hazards": [
+            "risk-base-hazard" if empty_correction else "obsolete-hazard"
+        ],
+        "applies_when": [],
+    }
+    prior = LossAnalysisDraft.model_validate(
+        {
+            "risk_card_losses": [
+                {
+                    "loss_id": "risk-base-loss",
+                    "description": "Baseline request integrity is lost.",
+                    "provenance": "risk_card",
+                    "source_risk_cards": ["neutral-risk"],
+                }
+            ],
+            "use_case_losses": [
+                {
+                    "loss_id": "gap-case-loss",
+                    "description": "Service continuity is lost.",
+                    "provenance": "use_case",
+                    "source_risk_cards": [],
+                }
+            ],
+            "hazards": [prior_hazard],
+            "security_constraints": [prior_constraint],
+            "risk_dispositions": [
+                {
+                    "risk_ref": "neutral-risk",
+                    "disposition": "cited",
+                    "loss_ids": ["risk-base-loss"],
+                    "reason": None,
+                }
+            ],
+        }
+    )
+    correction = LossAnalysisDraft.model_validate(
+        {
+            "risk_card_losses": [],
+            "use_case_losses": [],
+            "hazards": []
+            if empty_correction
+            else [
+                {
+                    "hazard_id": "gap-hazard",
+                    "description": "The corrected request state is unsafe.",
+                    "related_losses": ["gap-case-loss"],
+                }
+            ],
+            "security_constraints": []
+            if empty_correction
+            else [
+                {
+                    "constraint_id": "current-constraint",
+                    "rule": "The corrected request condition must be prevented.",
+                    "related_hazards": ["gap-hazard"],
+                    "applies_when": [],
+                }
+            ],
+            "risk_dispositions": [],
+        }
+    )
+    return prior, correction
 
 
 def _entries(world: World) -> list[dict[str, Any]]:
@@ -200,6 +250,8 @@ def _h_fixture(world: World, text: str, examples: dict[str, str]) -> tuple[bool,
 
 def _h_run(world: World, text: str, examples: dict[str, str]) -> tuple[bool, str]:
     del text, examples
+    if world.stage1a_section_fixture in {"section_patch", "empty_sections"}:
+        return False, "public Stage 1a seam cannot run an offline-only fixture"
     client = _SP1MockLLM()
     client.set_response_queue(_fixture_responses(world.stage1a_section_fixture))
     world.stage1a_section_client = client
@@ -213,6 +265,21 @@ def _h_run(world: World, text: str, examples: dict[str, str]) -> tuple[bool, str
     except Exception as exc:  # assertions below distinguish expected failures
         world.stage1a_section_error = exc
         world.validation_error = exc
+    return True, ""
+
+
+def _h_offline_run(
+    world: World, text: str, examples: dict[str, str]
+) -> tuple[bool, str]:
+    """Call the collection merge directly without constructing a provider."""
+    del text, examples
+    if world.stage1a_section_fixture not in {"section_patch", "empty_sections"}:
+        return False, "offline section merge requires an offline section fixture"
+    prior, correction = _section_patch_drafts(
+        empty_correction=world.stage1a_section_fixture == "empty_sections"
+    )
+    world.stage1a_section_client = None
+    world.stage1a_section_result = _merge_loss_analysis_correction(prior, correction)
     return True, ""
 
 
@@ -284,6 +351,18 @@ def _h_contains_hazard(
     )
 
 
+def _h_prior_hazard(
+    world: World, text: str, examples: dict[str, str]
+) -> tuple[bool, str]:
+    del text, examples
+    result, error = _require_result(world)
+    return (
+        not error
+        and "The request state becomes unsafe." in _descriptions(result.hazards),
+        error or "the prior hazard was not retained",
+    )
+
+
 def _h_omits_hazard(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -335,36 +414,34 @@ def _h_omits_constraint(
     )
 
 
-def _h_at_most_one_correction(
-    world: World, text: str, examples: dict[str, str]
-) -> tuple[bool, str]:
+def _h_no_repair(world: World, text: str, examples: dict[str, str]) -> tuple[bool, str]:
     del text, examples
     entries = _entries(world)
-    expected = (
-        [("risk_derivation", True), ("gap_analysis", False), ("gap_analysis", False)]
-        if world.stage1a_section_fixture == "conflict"
-        else [
-            ("risk_derivation", True),
-            ("gap_analysis", False),
-            ("gap_analysis", True),
-        ]
-    )
+    if world.stage1a_section_fixture != "conflict":
+        return False, "no-repair assertion is only valid for the conflict fixture"
+    expected = [("risk_derivation", True), ("gap_analysis", False)]
     actual = [(entry.get("step"), entry.get("success")) for entry in entries]
-    return (
-        actual == expected,
-        f"expected one bounded correction with {expected}, got {actual}",
-    )
+    if actual != expected:
+        return False, f"expected one failed gap attempt and no repair, got {actual}"
+    client = getattr(world, "stage1a_section_client", None)
+    if client is None or len(client.calls) != 2:
+        return (
+            False,
+            f"expected exactly two provider calls, got {getattr(client, 'calls', None)}",
+        )
+    if any(str(entry.get("step", "")).endswith("_repair") for entry in entries):
+        return False, "conflicting gap response incorrectly triggered repair"
+    return True, ""
 
 
-def _h_rejected_gap_evidence(
+def _h_no_provider_call(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
     del text, examples
-    entries = _entries(world)
-    if len(entries) < 2:
-        return False, "the rejected gap attempt was not logged"
-    raw = entries[1].get("response_content") or ""
-    return "missing-loss" in raw, "raw invalid gap response was not retained"
+    client = getattr(world, "stage1a_section_client", None)
+    if client is not None and client.calls:
+        return False, f"offline section merge made provider calls: {client.calls}"
+    return True, ""
 
 
 def _h_one_risk_loss(
@@ -398,7 +475,7 @@ def _h_no_correction(
     expected = [("risk_derivation", True), ("gap_analysis", True)]
     return (
         actual == expected,
-        f"expected no correction retry with {expected}, got {actual}",
+        f"expected no additional correction call with {expected}, got {actual}",
     )
 
 
@@ -415,12 +492,12 @@ def _h_conflict_evidence(
 ) -> tuple[bool, str]:
     del text, examples
     entries = _entries(world)
-    if len(entries) < 3:
-        return False, "the conflicting correction attempt was not logged"
+    if len(entries) < 2:
+        return False, "the conflicting gap attempt was not logged"
     raw = entries[-1].get("response_content") or ""
     return (
         "authoritative request state has changed semantics" in raw,
-        "raw conflicting correction was not retained",
+        "raw conflicting gap response was not retained",
     )
 
 
@@ -428,6 +505,7 @@ def register(api: object) -> None:
     """Register the focused Stage 1a section-correction acceptance steps."""
     api.register(r'^a neutral Stage 1a correction fixture "[^"]+"$', _h_fixture)
     api.register(r"^the public Stage 1a loss-analysis seam is called$", _h_run)
+    api.register(r"^the offline Stage 1a section-merge seam is called$", _h_offline_run)
     api.register(
         r"^the Stage 1a wire contract requires exactly five collections$", _h_wire
     )
@@ -438,6 +516,10 @@ def register(api: object) -> None:
     api.register(
         r"^the corrected analysis retains the prior use-case loss$",
         _h_prior_use_case_loss,
+    )
+    api.register(
+        r"^the corrected analysis retains the prior hazard$",
+        _h_prior_hazard,
     )
     api.register(
         r"^the corrected analysis contains the replacement hazard$", _h_contains_hazard
@@ -455,14 +537,7 @@ def register(api: object) -> None:
         r"^the corrected analysis omits the obsolete security constraint$",
         _h_omits_constraint,
     )
-    api.register(
-        r"^the Stage 1a run makes at most one correction attempt$",
-        _h_at_most_one_correction,
-    )
-    api.register(
-        r"^the rejected gap response remains in call evidence$",
-        _h_rejected_gap_evidence,
-    )
+    api.register(r"^the section merge makes no provider call$", _h_no_provider_call)
     api.register(
         r"^the final analysis has exactly one risk-derived loss$", _h_one_risk_loss
     )
@@ -472,8 +547,10 @@ def register(api: object) -> None:
         r"^Stage 1a derivation fails with a conflicting authoritative ID$", _h_conflict
     )
     api.register(
-        r"^the conflicting correction remains in call evidence$", _h_conflict_evidence
+        r"^the conflicting gap response remains in call evidence$",
+        _h_conflict_evidence,
     )
+    api.register(r"^the Stage 1a run makes no repair attempt$", _h_no_repair)
 
 
 __all__ = ["FEATURE_ID", "register"]

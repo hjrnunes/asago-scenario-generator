@@ -256,20 +256,25 @@ def _sp1_la_dangling_ref_dict() -> dict:
     return content
 
 
-def _h_sp1_la_retry_setup(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Handle a dangling Stage 1a draft followed by a corrected response."""
+def _h_sp1_la_unsupported_setup(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Queue an unsupported draft and an unused corrected response.
+
+    The second response is deliberately queued so the acceptance assertion
+    proves that unsupported reference failures do not dispatch a repair call.
+    """
     world.sp1_llm_content = [
         _sp1_la_dangling_ref_dict(),
-        _sp1_valid_la_dict(),
         _sp1_valid_la_dict(),
     ]
     return True, ""
 
 
-def _h_sp1_la_retry_exhaustion_setup(
+def _h_sp1_la_second_unsupported_setup(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Handle two consecutive dangling Stage 1a drafts."""
+    """Queue two dangling drafts; the second must remain unused."""
     world.sp1_llm_content = [
         _sp1_la_dangling_ref_dict(),
         _sp1_la_dangling_ref_dict(),
@@ -318,75 +323,63 @@ def _sp1_stage1a_call_entries(world: World) -> list[dict] | None:
     ]
 
 
-def _h_sp1_la_retry_succeeds(
+def _h_sp1_la_unsupported_fails(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Verify corrected Stage 1a output succeeds after one reference retry."""
-    if world.validation_error is not None:
-        return False, f"Unexpected Stage 1a error: {world.validation_error}"
-    if world.loss_analysis is None:
-        return False, "No loss analysis was produced after the reference retry"
-    return True, ""
-
-
-def _h_sp1_la_retry_feedback(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Verify the bounded retry prompt carries deterministic validation feedback."""
-    entries = _sp1_stage1a_call_entries(world)
-    if entries is None or len(entries) < 2:
-        return False, "Expected a logged Stage 1a retry"
-    retry_prompt = entries[1].get("user_prompt_text", "")
-    if "Validation feedback:" not in retry_prompt:
-        return False, "Stage 1a retry did not include validation feedback"
-    return True, ""
-
-
-def _h_sp1_la_retry_success_log(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Verify failed risk attempt and successful retry/gap calls are logged."""
-    entries = _sp1_stage1a_call_entries(world)
-    expected = [
-        ("risk_derivation", False),
-        ("risk_derivation", True),
-        ("gap_analysis", True),
-    ]
-    actual = (
-        [(entry.get("step"), entry.get("success")) for entry in entries]
-        if entries is not None
-        else []
+    """Require the typed terminal refusal for an unsupported reference repair."""
+    error = world.validation_error
+    if not isinstance(error, _GDStageError):
+        return False, f"Expected typed StageError, got {error!r}"
+    message = str(error)
+    required = (
+        "targeted repair unsupported",
+        "draft_references failure class",
+        "no repair call was made",
     )
-    if actual != expected:
-        return False, f"Expected Stage 1a call outcomes {expected}, got {actual}"
-    return True, ""
-
-
-def _h_sp1_la_retry_fails(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Verify retry exhaustion is contained as a structured StageError."""
-    if not isinstance(world.validation_error, _GDStageError):
-        return False, (
-            "Expected StageError after the bounded Stage 1a retry, got "
-            f"{world.validation_error!r}"
-        )
+    missing = [fragment for fragment in required if fragment not in message]
+    if missing:
+        return False, f"Typed refusal omitted {missing}: {message}"
     if world.loss_analysis is not None:
-        return False, "Exhausted Stage 1a retry unexpectedly produced a loss analysis"
+        return False, "Unsupported reference unexpectedly produced a loss analysis"
     return True, ""
 
 
-def _h_sp1_la_retry_failure_log(
+def _h_sp1_la_no_repair_call(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Verify both failed Stage 1a risk attempts are logged and no extra call runs."""
+    """Verify a queued second response was not consumed as a repair."""
+    client = getattr(world, "sp1_mock_client", None)
+    if client is None:
+        return False, "Stage 1a mock client was not retained"
+    if len(client.calls) != 1:
+        return False, f"Expected exactly one provider call, got {len(client.calls)}"
     entries = _sp1_stage1a_call_entries(world)
+    if entries is None or len(entries) != 1:
+        return False, f"Expected one logged Stage 1a attempt, got {entries!r}"
+    if entries[0].get("step") != "risk_derivation":
+        return False, f"Unexpected Stage 1a step: {entries[0].get('step')!r}"
+    return True, ""
+
+
+def _h_sp1_la_unsupported_log(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Verify the unsupported failure is logged once with its typed outcome."""
+    entries = _sp1_stage1a_call_entries(world)
+    expected = [("risk_derivation", False)]
     actual = (
         [(entry.get("step"), entry.get("success")) for entry in entries]
         if entries is not None
         else []
     )
-    expected = [("risk_derivation", False), ("risk_derivation", False)]
     if actual != expected:
-        return False, f"Expected exactly one failed retry, got {actual}"
+        return False, f"Expected one unsupported Stage 1a failure, got {actual}"
+    entry = entries[0] if entries else {}
+    if entry.get("success") is not False:
+        return False, f"Unsupported attempt was not logged as a failure: {entry}"
+    response = str(entry.get("response_content", ""))
+    if "L-99" not in response:
+        return False, f"Rejected dangling response was not retained: {response}"
     return True, ""
 
 
@@ -6096,13 +6089,13 @@ def register(api: object) -> None:
         source_order=4440,
     )
     api.register(
-        "an LLM that returns a Stage 1a draft with a dangling reference followed by a corrected draft",
-        _h_sp1_la_retry_setup,
+        "an LLM that returns a Stage 1a draft with a dangling reference and an unused corrected response queued",
+        _h_sp1_la_unsupported_setup,
         source_order=4441,
     )
     api.register(
-        "an LLM that returns a Stage 1a draft with the same dangling reference twice",
-        _h_sp1_la_retry_exhaustion_setup,
+        "an LLM that returns a Stage 1a draft with an unused second dangling response queued",
+        _h_sp1_la_second_unsupported_setup,
         source_order=4442,
     )
     api.register(
@@ -6117,29 +6110,19 @@ def register(api: object) -> None:
         source_order=4445,
     )
     api.register(
-        "Stage 1a loss analysis succeeds after one reference retry",
-        _h_sp1_la_retry_succeeds,
+        "Stage 1a validation fails with typed unsupported repair",
+        _h_sp1_la_unsupported_fails,
         source_order=4446,
     )
     api.register(
-        "the Stage 1a retry includes validation feedback",
-        _h_sp1_la_retry_feedback,
+        "the Stage 1a provider receives no repair call",
+        _h_sp1_la_no_repair_call,
         source_order=4447,
     )
     api.register(
-        "the Stage 1a attempts are logged with one failure and two successes",
-        _h_sp1_la_retry_success_log,
+        "the Stage 1a attempts are logged as one unsupported failure",
+        _h_sp1_la_unsupported_log,
         source_order=4452,
-    )
-    api.register(
-        "Stage 1a validation fails after one reference retry",
-        _h_sp1_la_retry_fails,
-        source_order=4453,
-    )
-    api.register(
-        "the Stage 1a attempts are logged as two failures",
-        _h_sp1_la_retry_failure_log,
-        source_order=4456,
     )
     api.register(
         "a responsibility RESP-1 with description containing",
