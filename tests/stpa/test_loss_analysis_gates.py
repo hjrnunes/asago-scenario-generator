@@ -526,31 +526,81 @@ class TestDeriveLossAnalysisAccounting:
 
 
 def _revision_response(*, fix_constraint: bool) -> dict:
-    """Return a corrected graph patch for the graph-revision call.
+    """Return an explicit delta for the graph-revision call.
 
-    The patch wire carries only hazards and constraints in the authored
-    ``rule`` + ``applies_when`` shape; losses and risk dispositions are
-    owned by deterministic code.
+    Omitted hazards and constraints are carried forward by deterministic
+    compilation.  The SC-2 edit includes obligations when its rule changes so
+    no prior interpretation is silently reused.
     """
     gap_constraint_rule = (
         "The agent must preserve user trust."
         if fix_constraint
         else "The agent must maintain transparency about fees."
     )
+    edit = {
+        "constraint_id": "SC-2",
+        "rule": gap_constraint_rule,
+        "applies_when": ["through transparency"] if fix_constraint else [],
+        "related_hazards": ["H-2"],
+    }
+    if fix_constraint:
+        edit["obligations"] = []
     return {
-        "hazards": [
-            {
-                "hazard_id": "H-1",
-                "description": "The agent executes an unintended payment.",
-                "related_losses": ["L-1"],
-            },
+        "hazard_edits": [],
+        "hazard_additions": [],
+        "security_constraint_edits": [edit],
+        "security_constraint_additions": [],
+    }
+
+
+def _revision_response_with_hazard_addition(*, fix_constraint: bool) -> dict:
+    """Return a delta that fixes SC-2 and adds a new unclassified chain."""
+    response = _revision_response(fix_constraint=fix_constraint)
+    response["hazard_additions"] = [
+        {
+            "handle": "operational_hazard",
+            "description": "The service suffers operational disruption.",
+            "related_losses": ["L-2"],
+        }
+    ]
+    response["security_constraint_additions"] = [
+        {
+            "handle": "operational_constraint",
+            "rule": (
+                "The system must prevent operational disruption due to "
+                "third-party service availability."
+            ),
+            "applies_when": [],
+            "related_hazards": ["operational_hazard"],
+            "obligations": [],
+        }
+    ]
+    return response
+
+
+def _revision_response_for_disallowed_deletion() -> dict:
+    """A legacy whole-graph deletion shape, rejected by the current wire."""
+    return {
+        "hazard_edits": [],
+        "hazard_additions": [],
+        "security_constraint_edits": [],
+        "security_constraint_additions": [],
+        "security_constraints": [],
+    }
+
+
+def _legacy_revision_conditions_changed_same_rule() -> dict:
+    """Return a current delta for an explicit applicability-only edit."""
+    return {
+        "hazard_edits": [
             {
                 "hazard_id": "H-2",
-                "description": "The agent erodes user trust.",
+                "description": "The agent maintains transparency about fees.",
                 "related_losses": ["L-2"],
-            },
+            }
         ],
-        "security_constraints": [
+        "hazard_additions": [],
+        "security_constraint_edits": [
             {
                 "constraint_id": "SC-1",
                 "rule": "The agent must confirm every unintended payment.",
@@ -559,11 +609,13 @@ def _revision_response(*, fix_constraint: bool) -> dict:
             },
             {
                 "constraint_id": "SC-2",
-                "rule": gap_constraint_rule,
-                "applies_when": ["through transparency"],
+                "rule": "The agent must maintain transparency about fees.",
+                "applies_when": ["for every customer question"],
                 "related_hazards": ["H-2"],
+                "obligations": [],
             },
         ],
+        "security_constraint_additions": [],
     }
 
 
@@ -827,7 +879,9 @@ class TestRunSp1Gates:
         assert gates["hazard_graph_density"] == "passed_after_revision"
         assert gates["graph_revision_call_count"] == 1
 
-    def test_uncovered_hazard_second_failure_is_fatal(self, tmp_path) -> None:
+    def test_deletion_shaped_revision_fails_closed_without_a_second_call(
+        self, tmp_path
+    ) -> None:
         import yaml as yaml_lib
 
         from asago_scenario_generator.stpa.system_model.run import run_sp1
@@ -851,10 +905,10 @@ class TestRunSp1Gates:
         assert result.loss_analysis is None
         assert result.control_structure is None
         assert any(
-            "hazard graph density gate failed" in error for error in result.stage_errors
+            "graph revision call failed" in error for error in result.stage_errors
         )
         assert any(
-            "hazard H-2 has no constraint" in error for error in result.stage_errors
+            "Extra inputs are not permitted" in error for error in result.stage_errors
         )
         artifact = yaml_lib.safe_load(
             (tmp_path / "loss-analysis-gates.yaml").read_text()
@@ -912,10 +966,8 @@ class TestRunSp1Gates:
 
 
 def _revision_dropping_h1() -> dict:
-    """A revision patch whose hazard collection silently drops H-1."""
-    response = _revision_response(fix_constraint=True)
-    response["hazards"] = [response["hazards"][1]]
-    return response
+    """A delta omitting H-1; the compiler must carry it forward unchanged."""
+    return _revision_response(fix_constraint=True)
 
 
 def _gap_draft_with_uncovered_hazard() -> dict:
@@ -927,38 +979,30 @@ def _gap_draft_with_uncovered_hazard() -> dict:
 
 def _revision_covering_h2() -> dict:
     """A revision patch that adds a new constraint for the named hazard H-2."""
-    return _revision_response(fix_constraint=True)
+    return {
+        "hazard_edits": [],
+        "hazard_additions": [],
+        "security_constraint_edits": [],
+        "security_constraint_additions": [
+            {
+                "handle": "trust_constraint",
+                "rule": "The agent must preserve user trust.",
+                "applies_when": ["through transparency"],
+                "related_hazards": ["H-2"],
+                "obligations": [],
+            }
+        ],
+    }
 
 
 def _revision_leaving_h2_uncovered() -> dict:
-    """A revision patch that keeps the named hazard H-2 without a constraint."""
-    response = _revision_response(fix_constraint=True)
-    response["security_constraints"] = [response["security_constraints"][0]]
-    return response
+    """A deletion-shaped response rejected by the explicit delta wire."""
+    return _revision_response_for_disallowed_deletion()
 
 
 def _revision_adding_unclassified_constraint() -> dict:
-    """A good revision patch that also adds a constraint matching no class."""
-    response = _revision_response(fix_constraint=True)
-    response["hazards"] = response["hazards"] + [
-        {
-            "hazard_id": "H-3",
-            "description": "The service suffers operational disruption.",
-            "related_losses": ["L-2"],
-        }
-    ]
-    response["security_constraints"] = response["security_constraints"] + [
-        {
-            "constraint_id": "SC-3",
-            "rule": (
-                "The system must prevent operational disruption due to "
-                "third-party service availability."
-            ),
-            "applies_when": [],
-            "related_hazards": ["H-3"],
-        }
-    ]
-    return response
+    """A valid delta that adds a constraint matching no behavior class."""
+    return _revision_response_with_hazard_addition(fix_constraint=True)
 
 
 def _revision_conditions_changed_same_rule() -> dict:
@@ -967,40 +1011,13 @@ def _revision_conditions_changed_same_rule() -> dict:
     The prior SC-2 rule is kept; its applies_when list grows.  The hazard is
     reworded so the composed text still passes the subject-phrase check.
     """
-    return {
-        "hazards": [
-            {
-                "hazard_id": "H-1",
-                "description": "The agent executes an unintended payment.",
-                "related_losses": ["L-1"],
-            },
-            {
-                "hazard_id": "H-2",
-                "description": "The agent maintains transparency about fees.",
-                "related_losses": ["L-2"],
-            },
-        ],
-        "security_constraints": [
-            {
-                "constraint_id": "SC-1",
-                "rule": "The agent must confirm every unintended payment.",
-                "applies_when": ["before execution"],
-                "related_hazards": ["H-1"],
-            },
-            {
-                "constraint_id": "SC-2",
-                "rule": "The agent must maintain transparency about fees.",
-                "applies_when": ["for every customer question"],
-                "related_hazards": ["H-2"],
-            },
-        ],
-    }
+    return _legacy_revision_conditions_changed_same_rule()
 
 
 class TestRunSp1RevisionDefenses:
     """A failing revision call stops the run with recorded evidence."""
 
-    def test_revision_dropping_a_hazard_fails_closed_with_evidence(
+    def test_revision_omitting_a_hazard_carries_it_forward_with_evidence(
         self, tmp_path
     ) -> None:
         import yaml as yaml_lib
@@ -1023,29 +1040,22 @@ class TestRunSp1RevisionDefenses:
             run_dir=tmp_path,
         )
 
-        assert result.loss_analysis is None
-        assert result.control_structure is None
-        assert any(
-            "graph revision dropped hazards: H-1" in error
-            for error in result.stage_errors
-        )
-        # The manifest and the gates artifact both exist despite the crash
-        # path: a run never stops without its recorded gate evidence.
+        assert result.stage_errors == []
+        assert result.loss_analysis is not None
+        assert any(hazard.hazard_id == "H-1" for hazard in result.loss_analysis.hazards)
+        # The manifest and the gates artifact both exist after the successful
+        # carry-forward path.
         assert (tmp_path / "run-manifest.yaml").is_file()
         manifest = yaml_lib.safe_load((tmp_path / "run-manifest.yaml").read_text())
         assert manifest["stage_summary"]["stage_1a"]["hazard_graph_density"] == (
-            "failed"
+            "passed_after_revision"
         )
         artifact = yaml_lib.safe_load(
             (tmp_path / "loss-analysis-gates.yaml").read_text()
         )
         assert artifact["revision_attempted"] is True
-        assert artifact["revision_applied"] is False
-        assert artifact["passed"] is False
-        assert (
-            "constraint SC-2 and hazard H-2 share no subject phrase"
-            in artifact["failing_checks"]
-        )
+        assert artifact["revision_applied"] is True
+        assert artifact["passed"] is True
 
     def test_revision_changing_conditions_on_unchanged_rule_records_warning(
         self, tmp_path
@@ -1739,32 +1749,18 @@ class TestConstraintRuleAndConditions:
         prior = LossAnalysis.model_validate(valid_loss_analysis_dict())
         patch = _Stage1aRevisionPatch.model_validate(
             {
-                "hazards": [
-                    {
-                        "hazard_id": "H-1",
-                        "description": "The agent executes an unintended payment.",
-                        "related_losses": ["L-1"],
-                    },
-                    {
-                        "hazard_id": "H-2",
-                        "description": "The agent erodes user trust.",
-                        "related_losses": ["L-2"],
-                    },
-                ],
-                "security_constraints": [
-                    {
-                        "constraint_id": "SC-1",
-                        "rule": "The agent must confirm every unintended payment.",
-                        "applies_when": ["before execution"],
-                        "related_hazards": ["H-1"],
-                    },
+                "hazard_edits": [],
+                "hazard_additions": [],
+                "security_constraint_edits": [
                     {
                         "constraint_id": "SC-2",
                         "rule": "The agent must preserve user trust.",
                         "applies_when": ["in writing", "on request"],
                         "related_hazards": ["H-2"],
-                    },
+                        "obligations": [],
+                    }
                 ],
+                "security_constraint_additions": [],
             }
         )
         warnings: list[str] = []
@@ -1788,32 +1784,18 @@ class TestConstraintRuleAndConditions:
         prior = LossAnalysis.model_validate(valid_loss_analysis_dict())
         patch = _Stage1aRevisionPatch.model_validate(
             {
-                "hazards": [
-                    {
-                        "hazard_id": "H-1",
-                        "description": "The agent executes an unintended payment.",
-                        "related_losses": ["L-1"],
-                    },
-                    {
-                        "hazard_id": "H-2",
-                        "description": "The agent erodes user trust.",
-                        "related_losses": ["L-2"],
-                    },
-                ],
-                "security_constraints": [
-                    {
-                        "constraint_id": "SC-1",
-                        "rule": "The agent must confirm every unintended payment.",
-                        "applies_when": ["before execution"],
-                        "related_hazards": ["H-1"],
-                    },
+                "hazard_edits": [],
+                "hazard_additions": [],
+                "security_constraint_edits": [
                     {
                         "constraint_id": "SC-2",
                         "rule": "The agent must never improvise fee amounts.",
                         "applies_when": ["through transparency"],
                         "related_hazards": ["H-1"],
-                    },
+                        "obligations": [],
+                    }
                 ],
+                "security_constraint_additions": [],
             }
         )
         warnings: list[str] = []
@@ -1832,32 +1814,18 @@ class TestConstraintRuleAndConditions:
         prior = LossAnalysis.model_validate(prior_dict)
         patch = _Stage1aRevisionPatch.model_validate(
             {
-                "hazards": [
-                    {
-                        "hazard_id": "H-1",
-                        "description": "The agent executes an unintended payment.",
-                        "related_losses": ["L-1"],
-                    },
-                    {
-                        "hazard_id": "H-2",
-                        "description": "The agent erodes user trust.",
-                        "related_losses": ["L-2"],
-                    },
-                ],
-                "security_constraints": [
-                    {
-                        "constraint_id": "SC-1",
-                        "rule": "The agent must confirm every unintended payment.",
-                        "applies_when": ["before execution"],
-                        "related_hazards": ["H-1"],
-                    },
+                "hazard_edits": [],
+                "hazard_additions": [],
+                "security_constraint_edits": [
                     {
                         "constraint_id": "SC-2",
                         "rule": "The agent must never improvise fee amounts.",
                         "applies_when": [],
                         "related_hazards": ["H-2"],
-                    },
+                        "obligations": [],
+                    }
                 ],
+                "security_constraint_additions": [],
             }
         )
         warnings: list[str] = []
@@ -1874,32 +1842,18 @@ class TestConstraintRuleAndConditions:
         prior = LossAnalysis.model_validate(valid_loss_analysis_dict())
         patch = _Stage1aRevisionPatch.model_validate(
             {
-                "hazards": [
-                    {
-                        "hazard_id": "H-1",
-                        "description": "The agent executes an unintended payment.",
-                        "related_losses": ["L-1"],
-                    },
-                    {
-                        "hazard_id": "H-2",
-                        "description": "The agent erodes user trust.",
-                        "related_losses": ["L-2"],
-                    },
-                ],
-                "security_constraints": [
-                    {
-                        "constraint_id": "SC-1",
-                        "rule": "The agent must confirm every unintended payment.",
-                        "applies_when": ["before execution"],
-                        "related_hazards": ["H-1"],
-                    },
+                "hazard_edits": [],
+                "hazard_additions": [],
+                "security_constraint_edits": [
                     {
                         "constraint_id": "SC-2",
                         "rule": "The agent must preserve user trust explicitly.",
                         "applies_when": ["through transparency"],
                         "related_hazards": ["H-2"],
-                    },
+                        "obligations": [],
+                    }
                 ],
+                "security_constraint_additions": [],
             }
         )
         warnings: list[str] = []
@@ -1987,7 +1941,7 @@ class TestRetryPromptFailureKind:
             )
         message = str(exc_info.value)
         # A constraint-field wire violation is outside the approved repair
-        # scope, so the record names the schema failure and stops.
+        # scope, so the current local-wire adapter stops before any repair.
         assert "targeted repair unsupported" in message
         assert "wire violation outside the approved repair scope" in message
         assert "no repair call was made" in message

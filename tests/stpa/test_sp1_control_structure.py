@@ -31,7 +31,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
 )
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ControlElementSet,
-    CoordinationAnalysis,
+    _CoordinationProviderEnvelope,
     RequirementSet,
     ResponsibilitySet,
     derive_control_structure,
@@ -221,7 +221,6 @@ def _valid_coordination_analysis_dict() -> dict:
                 "description": "Payment controller coordinates with output controller",
             }
         ],
-        "integrity_findings": [],
         "semantic_review": {
             "hazards": [
                 {
@@ -369,7 +368,9 @@ def _setup_mock_client() -> MockLLMClient:
     client.set_response_for(RequirementSet, _valid_requirement_set_dict())
     client.set_response_for(ResponsibilitySet, _valid_responsibility_set_dict())
     client.set_response_for(ControlElementSet, _valid_control_element_set_dict())
-    client.set_response_for(CoordinationAnalysis, _valid_coordination_analysis_dict())
+    client.set_response_for(
+        _CoordinationProviderEnvelope, _valid_coordination_analysis_dict()
+    )
     return client
 
 

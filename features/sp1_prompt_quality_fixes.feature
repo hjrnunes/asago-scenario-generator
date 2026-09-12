@@ -93,8 +93,8 @@ Feature: SP1 Stage 1 prompt quality fixes
       | gap_user_fragment             |
       | ## Capability Profile Context |
       | capability codes              |
-      | ## ID Numbering               |
-      | L-{{ next_loss_num }}         |
+      | unique request-local               |
+      | new records by their local handles         |
 
   # PQF-08
   Scenario Outline: PQF-08 the retired monolithic Stage 1a templates are absent
@@ -146,5 +146,5 @@ Feature: SP1 Stage 1 prompt quality fixes
       | section_header             |
       | {% include "_loss_analysis_method.j2" %} |
       | ## Structural requirements |
-      | ## ID conventions          |
+      | ## Request-local identity conventions |
       | ## Quality requirements    |

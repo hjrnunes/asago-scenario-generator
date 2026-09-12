@@ -34,7 +34,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
 )
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ControlElementSet,
-    CoordinationAnalysis,
+    _CoordinationProviderEnvelope,
     RequirementSet,
     ResponsibilitySet,
     derive_control_structure,
@@ -156,7 +156,7 @@ def _valid_control_element_set_dict() -> dict:
 
 
 def _valid_coordination_analysis_dict() -> dict:
-    """CoordinationAnalysis with coordination links and integrity findings (Call 3 output)."""
+    """Current Call 3 semantic response; code supplies integrity findings."""
     return {
         "coordination_links": [
             {
@@ -172,7 +172,6 @@ def _valid_coordination_analysis_dict() -> dict:
                 "description": "Payment controller coordinates with output controller",
             }
         ],
-        "integrity_findings": [],
         "semantic_review": {
             "hazards": [
                 {
@@ -238,7 +237,9 @@ def _setup_mock_client() -> MockLLMClient:
     client.set_response_for(RequirementSet, _valid_requirement_set_dict())
     client.set_response_for(ResponsibilitySet, _valid_responsibility_set_dict())
     client.set_response_for(ControlElementSet, _valid_control_element_set_dict())
-    client.set_response_for(CoordinationAnalysis, _valid_coordination_analysis_dict())
+    client.set_response_for(
+        _CoordinationProviderEnvelope, _valid_coordination_analysis_dict()
+    )
     return client
 
 
@@ -251,7 +252,7 @@ class TestConnSet01Call3ProducesCoordinationAnalysis:
     """ConnSet-01: Call 3 produces a CoordinationAnalysis (not ControlStructure)."""
 
     def test_connset_01_call_3_response_format_is_coordination_analysis(self, tmp_path):
-        """Call 3 uses CoordinationAnalysis as the response format."""
+        """Call 3's provider schema excludes code-owned integrity findings."""
         client = _setup_mock_client()
         derive_control_structure(
             llm_client=client,
@@ -261,7 +262,11 @@ class TestConnSet01Call3ProducesCoordinationAnalysis:
         )
         # Call 3 is the fourth call (index 3)
         call3 = client.calls[3]
-        assert issubclass(call3.response_format, CoordinationAnalysis)
+        assert issubclass(call3.response_format, _CoordinationProviderEnvelope)
+        assert set(call3.response_format.model_fields) == {
+            "coordination_links",
+            "semantic_review",
+        }
 
 
 # ---------------------------------------------------------------------------

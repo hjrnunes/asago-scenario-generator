@@ -129,19 +129,16 @@ must exchange current operating state or resolve conflicting heat/vent actions.
 
 ## Connection integrity checks
 
-Verify the following and report any issues:
-- Every FB source references a valid responsibility or controlled process
-- Every CA target references a valid responsibility or controlled process
-- Every controlled process is referenced by at least one FB source or CA target
-- Every PM part is updated by at least one feedback channel
-
-Report integrity issues as a list of findings. Do NOT fix them — flag them for the revision step.
+Deterministic code has already checked connection integrity before this call.
+The user prompt contains those findings. Do not recompute, soften, or invent
+integrity findings, and do not fix them here. Do not return an
+`integrity_findings` field; code records these diagnostics. Focus your review on coordination requirements and the
+semantic adequacy decisions above.
 
 ## Output format
 
 Produce a CoordinationAnalysis with:
 - coordination_links: list of CoordinationLink objects
-- integrity_findings: list of strings describing any connection issues found (empty if all valid)
 - semantic_review: {hazards: [...], constraints: [...], responsibilities: [...],
   actions: [...]} with the complete decisions above, including explicit
   unresolved/missing-fact, empty-hazard-edge, empty-constraint-ownership and

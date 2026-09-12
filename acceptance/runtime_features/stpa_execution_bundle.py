@@ -714,6 +714,14 @@ def _h_default_hypothesis(world: World, text: str, examples: dict) -> tuple[bool
     return valid, "Summary must preserve the potential loss without claiming execution"
 
 
+def _h_default_summary_validation(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text, examples
+    errors = _state(world)["default_result"].validation_errors
+    return not errors, f"Deterministic summary validation failed: {errors}"
+
+
 def register(api: object) -> None:
     """Register the producer/bundle acceptance steps."""
     api.register(
@@ -731,6 +739,10 @@ def register(api: object) -> None:
     api.register(
         r"its scenario summary describes a hypothesis rather than an execution result",
         _h_default_hypothesis,
+    )
+    api.register(
+        r"deterministic summaries pass validation without model-authored presentation conventions",
+        _h_default_summary_validation,
     )
     api.register(
         r"the v2 execution projection and bundle seams are available",

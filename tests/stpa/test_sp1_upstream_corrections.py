@@ -112,7 +112,10 @@ def test_gap_prompt_receives_source_separated_deduplicated_losses(tmp_path) -> N
     risk = valid_risk_draft_dict()
     duplicate = risk["risk_card_losses"][0].copy()
     risk["risk_card_losses"] = []
-    risk["use_case_losses"] = [duplicate, duplicate.copy()]
+    # The current provider wire requires unique request-local handles.  Keep
+    # the captured misplaced loss once; source-separated canonicalization is
+    # what this prompt-boundary regression exercises.
+    risk["use_case_losses"] = [duplicate]
 
     client = MockLLMClient()
     client.set_response_for(LossAnalysisDraft, [risk, valid_gap_draft_dict()])

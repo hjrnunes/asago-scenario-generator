@@ -126,7 +126,7 @@ from .projection import (
     project_execution,
 )
 from .prompt_alignment import render_projection_alignment_table
-from .presentation import render_scenario_summary
+from .presentation import render_scenario_summary, validate_scenario_summary
 from .target_observations import (
     TARGET_OBSERVATIONS_FILENAME,
     TargetObservationSnapshot,
@@ -460,6 +460,7 @@ def run_sp3(
         enriched_threat_set,
         control_structure,
         loss_analysis,
+        deterministic_presentation=not render_presentation,
     )
 
     write_eval_scorecard(eval_scorecard, run_dir)
@@ -1003,6 +1004,8 @@ def _stage7_outputs(
     enriched_threat_set: EnrichedThreatSet,
     control_structure: ControlStructure,
     loss_analysis: LossAnalysis,
+    *,
+    deterministic_presentation: bool = False,
 ) -> tuple[list[str], dict, dict]:
     """Validate accepted scenarios and derive coverage/evaluation outputs."""
     validation_errors: list[str] = []
@@ -1012,6 +1015,7 @@ def _stage7_outputs(
         control_structure,
         loss_analysis,
         validation_errors,
+        deterministic_presentation=deterministic_presentation,
     )
     trace_errors = validate_traceability(
         scenario_envelopes, enriched_threat_set, control_structure, loss_analysis
@@ -1971,13 +1975,20 @@ def _run_stage7_validations(
     control_structure: ControlStructure,
     loss_analysis: LossAnalysis,
     validation_errors: list[str],
+    *,
+    deterministic_presentation: bool = False,
 ) -> None:
     """Run Stage 7 validations on all specs and envelopes."""
     for spec in specs:
         _validate_spec_stage7(spec, control_structure, validation_errors)
 
     for env in envelopes:
-        _validate_envelope_stage7(env, loss_analysis, validation_errors)
+        _validate_envelope_stage7(
+            env,
+            loss_analysis,
+            validation_errors,
+            deterministic_presentation=deterministic_presentation,
+        )
 
 
 def _validate_spec_stage7(
@@ -1999,6 +2010,8 @@ def _validate_envelope_stage7(
     envelope: ScenarioEnvelope,
     loss_analysis: LossAnalysis,
     validation_errors: list[str],
+    *,
+    deterministic_presentation: bool = False,
 ) -> None:
     """Run stage-local validators for a single envelope in Stage 7."""
     _extend_validation_errors(
@@ -2006,23 +2019,30 @@ def _validate_envelope_stage7(
             validate_tree_factor_evidence_coverage(
                 envelope.attack_tree, envelope.scenario_spec
             ),
-            validate_attack_tree_root_label(
-                envelope.attack_tree,
-                envelope.ica_type.value,
-                envelope.scenario_spec.target_control_action,
-            ),
         ),
         validation_errors,
     )
-
-    ghk_for_validation: GherkinSpec | str = (
-        envelope.gherkin_spec
-        if isinstance(envelope.gherkin_spec, GherkinSpec)
-        else envelope.gherkin_raw
-    )
-    ghk_result = validate_gherkin_structure(ghk_for_validation)
-    if not ghk_result.passed:
-        validation_errors.extend(ghk_result.errors)
+    if deterministic_presentation:
+        validation_errors.extend(validate_scenario_summary(envelope))
+    else:
+        _extend_validation_errors(
+            (
+                validate_attack_tree_root_label(
+                    envelope.attack_tree,
+                    envelope.ica_type.value,
+                    envelope.scenario_spec.target_control_action,
+                ),
+            ),
+            validation_errors,
+        )
+        ghk_for_validation: GherkinSpec | str = (
+            envelope.gherkin_spec
+            if isinstance(envelope.gherkin_spec, GherkinSpec)
+            else envelope.gherkin_raw
+        )
+        ghk_result = validate_gherkin_structure(ghk_for_validation)
+        if not ghk_result.passed:
+            validation_errors.extend(ghk_result.errors)
 
     id_text = _envelope_gherkin_text(envelope)
     if id_text:

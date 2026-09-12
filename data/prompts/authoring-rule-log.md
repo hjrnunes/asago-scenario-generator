@@ -539,3 +539,31 @@ the offline acceptance suite, not a run pair.
 - **Owner decision (2026-09-12).** Accepted as correction spec revision
   2 with `TargetObservationSnapshot.content_digest` and the ST-13 mixed
   candidate; implementation authorized on those terms.
+
+## 2026-09-12 — Model-facing interface ownership correction
+
+- **Owner decision.** Implement the reviewed bookkeeping corrections. This
+  authorizes an interface change and offline verification; it authorizes no
+  new model experiment, qualification run, target execution, or benchmark edit.
+- **Current versus historical interface.** Current authoring selects explained
+  request-local facts and admissible checks. Code supplies exact paths, fixed
+  action names, obligation references, selected source values, and the used-fact
+  registry. The previous templates and domain response remain historical
+  compatibility surfaces; they are not a fallback for a current response.
+- **Semantic limits.** Source presence is not applicability or authorization.
+  Choosing a numeric source still requires the author to identify the governing
+  bound. Reviewed authority and bindings stay explicit. Functional tests and
+  attempt observations retain their distinct meanings.
+- **Presentation correction.** Deterministic hypothesis summaries are checked
+  against their source scenario. Optional model-authored presentation retains
+  its formatting checks. No PM identifier is invented to satisfy a formatter.
+- **Evidence and future comparisons.** Offline regression evidence is recorded
+  under `build/qualification/model-interface-implementation-20260912/`.
+  A future baseline changes its provider schema and rendered prompt inputs;
+  it must record those changes rather than claim an unchanged-input rerun.
+  No recovery or improvement in model behavior is established by this change.
+- **Remaining representation limit.** The existing 600-character omission
+  proposition carrier is unchanged. Exact evidence that cannot fit remains a
+  held specification. A structured consumer evidence carrier is separate work.
+- **Contract.** See `docs/architecture/model-facing-interfaces.md` for ownership,
+  historical preservation, and verification requirements.

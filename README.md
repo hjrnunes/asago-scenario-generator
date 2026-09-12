@@ -911,3 +911,7 @@ See [the development methodology](docs/development/swarmforge.md) and
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE).
+
+Model-facing authoring and review interfaces separate semantic selections from
+compiler-owned references and assembly; see [Model-facing interfaces](docs/architecture/model-facing-interfaces.md)
+for evidence, compatibility, and observation limits.

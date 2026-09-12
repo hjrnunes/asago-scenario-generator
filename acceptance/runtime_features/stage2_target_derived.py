@@ -214,8 +214,12 @@ def _beliefs_response() -> dict:
         "controller_purpose": (
             "Help customers resolve order, refund, and payment questions within policy."
         ),
-        "beliefs": ["Which orders belong to the current customer"],
-        "belief_feedback": [{"belief_index": 0, "tool_name": "lookup_order"}],
+        "beliefs": [
+            {
+                "text": "Which orders belong to the current customer",
+                "feedback_tool": "lookup_order",
+            }
+        ],
     }
 
 

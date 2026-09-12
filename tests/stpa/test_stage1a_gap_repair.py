@@ -275,6 +275,13 @@ def test_run15_gap_graph_merges_without_id_union_leakage(tmp_path):
     draft's H-1/SC-1 and adds the new records without ID-union leakage.
     """
     gap = _run15_correction_response()
+    # The current local-handle wire treats the risk-stage graph as authority;
+    # carry forward its exact H-1/SC-1 records by omitting them from the gap
+    # additions.  The gap may add only the remaining scoped records.
+    gap["hazards"] = [row for row in gap["hazards"] if row.get("hazard_id") != "H-1"]
+    gap["security_constraints"] = [
+        row for row in gap["security_constraints"] if row.get("constraint_id") != "SC-1"
+    ]
     gap["use_case_losses"] = [
         {
             "loss_id": "L-2",
@@ -390,7 +397,7 @@ def test_run15_invalid_gap_references_fail_typed(tmp_path):
     stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
     assert [entry["success"] for entry in stage1a_entries] == [True, False]
     # The captured invalid response is retained as call evidence.
-    assert '"SC-17"' in stage1a_entries[1]["response_content"]
+    assert '"constraint_16"' in stage1a_entries[1]["response_content"]
 
 
 def test_run16_canonicalizes_provenance_on_the_risk_draft(tmp_path):
@@ -501,30 +508,58 @@ def test_run16_canonicalizes_provenance_on_the_risk_draft(tmp_path):
     )
 
 
-def test_run15_authority_merge_rejects_conflicting_duplicate_ids(tmp_path):
-    """A reused baseline ID with changed semantics is never silently replaced."""
+def test_run15_authority_merge_scopes_redeclared_ids_without_overwrite(tmp_path):
+    """A gap redeclaration gets a new scoped ID and cannot overwrite authority."""
     gap = _run15_correction_response()
     gap["use_case_losses"] = []
-    gap["hazards"][0]["description"] = "Changed baseline hazard semantics."
+    gap["hazards"] = [
+        {
+            "hazard_id": "H-1",
+            "description": "Changed baseline hazard semantics.",
+            "related_losses": ["L-1"],
+        }
+    ]
+    gap["security_constraints"] = [
+        {
+            "constraint_id": "SC-1",
+            "rule": "Run-15 redeclared constraint semantics.",
+            "related_hazards": ["H-1"],
+            "applies_when": [],
+        }
+    ]
     client = MockLLMClient()
     client.set_response_for(
         LossAnalysisDraft,
         [_run15_risk_response(), gap],
     )
 
-    with pytest.raises(StageError, match="conflicting duplicate hazard ID 'H-1'"):
-        derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Klarna's assistant serves authenticated fintech customers.",
-            risk_cards=_risk_cards(),
-            run_dir=tmp_path,
-        )
+    result = derive_loss_analysis(
+        llm_client=client,
+        use_case_text="Klarna's assistant serves authenticated fintech customers.",
+        risk_cards=_risk_cards(),
+        run_dir=tmp_path,
+    )
+
+    assert result.hazards[0].hazard_id == "H-1"
+    assert (
+        result.hazards[0].description
+        == _run15_risk_response()["hazards"][0]["description"]
+    )
+    assert any(
+        hazard.description == "Changed baseline hazard semantics."
+        for hazard in result.hazards
+    )
+    assert result.security_constraints[0].constraint_id == "SC-1"
+    assert any(
+        constraint.rule == "Run-15 redeclared constraint semantics."
+        for constraint in result.security_constraints
+    )
 
     entries = [
         json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
     ]
     stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
-    assert [entry["success"] for entry in stage1a_entries] == [True, False]
+    assert [entry["success"] for entry in stage1a_entries] == [True, True]
 
 
 def test_gap_reference_failure_feedback_preserves_new_loss_guidance(tmp_path):
@@ -565,16 +600,12 @@ def test_gap_reference_failure_feedback_preserves_new_loss_guidance(tmp_path):
     assert len(client.calls) == 2
 
 
-def test_a18_gap_disposition_never_overwrites_risk_stage_accounting(tmp_path):
-    """A18 pins existing ownership: gap dispositions never reach the graph.
+def test_a18_gap_valid_disposition_is_not_c1_cleanup(tmp_path):
+    """A valid out-of-contract gap disposition fails closed.
 
-    This test demonstrates current behavior, not a new contract rule.  Risk
-    accounting comes from the risk-derivation draft only
-    (``_merge_drafts``), so a fully wire-valid gap ``risk_dispositions``
-    row that conflicts with the risk stage's decision for a cited card
-    (``not_applicable`` with a replacement reason) is discarded: the final
-    graph keeps the risk-stage row, the gap row is absent, and the run
-    accepts with two calls.
+    C1 cleanup is limited to malformed gap disposition rows.  A valid-looking
+    row is still an extra collection on the current gap wire and cannot
+    overwrite the risk-stage accounting or be silently discarded.
     """
     gap = _empty_gap_response()
     gap["risk_dispositions"] = [
@@ -591,30 +622,20 @@ def test_a18_gap_disposition_never_overwrites_risk_stage_accounting(tmp_path):
         [_run15_risk_response(), gap],
     )
 
-    result = derive_loss_analysis(
-        llm_client=client,
-        use_case_text="Klarna's assistant serves authenticated fintech customers.",
-        risk_cards=_risk_cards(),
-        run_dir=tmp_path,
-    )
+    with pytest.raises(StageError, match="valid out-of-contract"):
+        derive_loss_analysis(
+            llm_client=client,
+            use_case_text="Klarna's assistant serves authenticated fintech customers.",
+            risk_cards=_risk_cards(),
+            run_dir=tmp_path,
+        )
 
-    # The final row for the contested card is the risk-stage row.
-    assert len(result.risk_dispositions) == 1
-    row = result.risk_dispositions[0]
-    assert row.risk_ref == "atlas-001"
-    assert row.disposition == "cited"
-    assert list(row.loss_ids) == ["L-1"]
-    assert row.reason is None
-    # The gap row is absent from the final graph.
-    assert not any(
-        disposition.disposition == "not_applicable"
-        for disposition in result.risk_dispositions
-    )
-    # The run accepts with two calls; the conflicting row stays call evidence.
+    # The risk-stage response survives in call evidence; the valid extra row
+    # is terminal and receives no cleanup or repair call.
     entries = [
         json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
     ]
     stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
-    assert [entry["success"] for entry in stage1a_entries] == [True, True]
+    assert [entry["success"] for entry in stage1a_entries] == [True, False]
     assert len(client.calls) == 2
     assert "not_applicable" in stage1a_entries[1]["response_content"]

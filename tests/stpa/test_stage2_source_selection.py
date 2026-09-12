@@ -17,6 +17,7 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     _call3_source_ref_map,
     _call_3_coordination,
     _coordination_provider_schema,
+    _deterministic_integrity_findings,
     _parse_call3_source_selection,
 )
 
@@ -82,7 +83,6 @@ def _provider_payload(losses: LossAnalysis, structure: ControlStructure) -> dict
     )
     return {
         "coordination_links": [],
-        "integrity_findings": [],
         "semantic_review": {
             "hazards": [
                 {
@@ -443,6 +443,9 @@ def test_call3_preserves_raw_selection_in_call_log_and_returns_final_evidence(
 
     assert result.semantic_review is not None
     assert result.semantic_review.hazards[0].source_evidence[0].source_ref == "USE_CASE"
+    assert result.integrity_findings == list(
+        _deterministic_integrity_findings(structure, losses)
+    )
     call_log = json.loads((tmp_path / "calls.jsonl").read_text().splitlines()[0])
     assert '"source_ref": "source_1"' in call_log["response_content"]
     assert '"quote"' not in call_log["response_content"]
@@ -473,6 +476,52 @@ def test_call3_review_distinguishes_loss_objectives_from_permitted_behavior() ->
     assert user.count("Linked loss L-1 (source_3)") == 1
     assert user.count("What permitted behavior remains?") == 1
     assert user.index("Linked loss L-1") < user.index("**SC-1** proposed wording")
+
+
+def test_call3_integrity_diagnostics_are_code_owned() -> None:
+    losses, structure = _authorities()
+    loader = TemplateLoader(PROMPTS_DIR)
+    from asago_scenario_generator.stpa.system_model.control_structure import (
+        _coordination_provider_schema,
+    )
+
+    provider_fields = _coordination_provider_schema(
+        structure,
+        losses,
+        use_case_text=USE_CASE,
+        source_excerpts=_build_call3_source_excerpts(USE_CASE, losses),
+    ).model_json_schema()["properties"]
+    assert "integrity_findings" not in provider_fields
+    rendered = loader.render_prompt(
+        "stage2_call3_user.j2",
+        use_case_text=USE_CASE,
+        control_structure=structure,
+        loss_analysis=losses,
+        source_excerpts=_build_call3_source_excerpts(USE_CASE, losses),
+        source_ref_by_canonical={"USE_CASE": "source_1", "L-1": "source_3"},
+        integrity_findings=("error: supplied diagnostic",),
+    )
+    assert "error: supplied diagnostic" in rendered
+    assert "Do not author an" in rendered and "integrity finding" in rendered
+    assert "Verify connection integrity:" not in rendered
+
+
+def test_current_call3_rejects_provider_authored_integrity_findings() -> None:
+    losses, structure = _authorities()
+    payload = _provider_payload(losses, structure)
+    payload["integrity_findings"] = ["Provider says every connection is valid."]
+    with pytest.raises(ValueError, match="code-owned or unknown fields"):
+        _parse_call3_source_selection(
+            LLMResult(
+                content=payload,
+                prompt_tokens=0,
+                completion_tokens=0,
+                duration_ms=0,
+            ),
+            _build_call3_source_excerpts(USE_CASE, losses),
+            structure=structure,
+            loss_analysis=losses,
+        )
 
 
 def _find_source_schema(schema: dict) -> dict:

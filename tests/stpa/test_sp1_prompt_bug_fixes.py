@@ -14,7 +14,7 @@ from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
 _REQUIRED_CONTENT = {
     "stage1a_risk_system.j2": (
         "Every loss must cite its source risk IDs",
-        "Every hazard references at least one valid loss_id",
+        "Every hazard references at least one valid local loss handle",
     ),
     "stage1b_system.j2": (
         "every tool must be explicitly mentioned or directly implied "

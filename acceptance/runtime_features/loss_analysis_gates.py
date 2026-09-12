@@ -329,65 +329,17 @@ def _h_dense_fixture(world: World, text: str, examples: dict) -> tuple[bool, str
 
 
 def _revision_response(**overrides) -> dict:
-    """A no-op graph patch for the gapped density fixture.
+    """A no-op graph delta for the gapped density fixture.
 
-    The patch wire carries only hazards and constraints (identity,
-    description, hazard references); losses and qualifiers are owned by
-    the prior analysis and deterministic code.
+    Existing hazards and constraints are carried forward by the strict
+    revision adapter. Each acceptance fixture overrides only the edit or
+    addition collection needed to exercise its gate behavior.
     """
     response = {
-        "hazards": [
-            {
-                "hazard_id": "H-1",
-                "description": (
-                    "The agent exposes the payment record to an unauthorized recipient."
-                ),
-                "related_losses": ["L-1"],
-            },
-            {
-                "hazard_id": "H-2",
-                "description": "The agent improvises fee amounts.",
-                "related_losses": ["L-1"],
-            },
-            {
-                "hazard_id": "H-3",
-                "description": (
-                    "The agent discloses another customer's order history."
-                ),
-                "related_losses": ["L-1"],
-            },
-        ],
-        "security_constraints": [
-            {
-                "constraint_id": "SC-1",
-                "rule": (
-                    "The payment record must never reach an unauthorized recipient."
-                ),
-                "related_hazards": ["H-1"],
-                "applies_when": [],
-            },
-            {
-                "constraint_id": "SC-2",
-                "rule": "The payment record must stay protected.",
-                "related_hazards": [],
-                "applies_when": [],
-            },
-            {
-                "constraint_id": "SC-3",
-                "rule": ("The agent must escalate every regulated topic to a human."),
-                "related_hazards": ["H-2"],
-                "applies_when": [],
-            },
-            {
-                "constraint_id": "SC-4",
-                "rule": (
-                    "The agent must never give wrong information about the "
-                    "payment record."
-                ),
-                "related_hazards": ["H-1"],
-                "applies_when": [],
-            },
-        ],
+        "hazard_edits": [],
+        "hazard_additions": [],
+        "security_constraint_edits": [],
+        "security_constraint_additions": [],
     }
     response.update(overrides)
     return response
@@ -474,32 +426,16 @@ def _uncovered_hazard_graph_dict() -> dict:
 def _uncovered_hazard_revision() -> dict:
     """A revision patch that adds a new constraint for the named hazard H-2."""
     return {
-        "hazards": [
+        "hazard_edits": [],
+        "hazard_additions": [],
+        "security_constraint_edits": [],
+        "security_constraint_additions": [
             {
-                "hazard_id": "H-1",
-                "description": "The payment record is exposed without authorization.",
-                "related_losses": ["L-1"],
-            },
-            {
-                "hazard_id": "H-2",
-                "description": "The agent erodes user trust.",
-                "related_losses": ["L-1"],
-            },
-        ],
-        "security_constraints": [
-            {
-                "constraint_id": "SC-1",
-                "rule": (
-                    "The payment record must never reach an unauthorized recipient."
-                ),
-                "related_hazards": ["H-1"],
-                "applies_when": [],
-            },
-            {
-                "constraint_id": "SC-2",
+                "handle": "trust_constraint",
                 "rule": "The agent must preserve user trust.",
                 "related_hazards": ["H-2"],
                 "applies_when": [],
+                "obligations": [],
             },
         ],
     }
@@ -519,21 +455,38 @@ def _h_uncovered_hazard_gate_fixture(
 def _h_run_failing_gate(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Queue the mock revision patch named by the step, then run the gate."""
     del examples
-    if "drops a prior hazard" in text:
-        revision = _revision_response()
-        revision["hazards"] = revision["hazards"][1:]
+    if "deletes a prior hazard" in text:
+        # Deletion is outside the current delta contract. Keep this malformed
+        # field so the strict parser proves omission preserves records and an
+        # explicit deletion attempt fails closed.
+        revision = _revision_response(hazard_deletions=["H-1"])
     elif "rewrites that rule" in text:
         # The patch rewrites SC-2's rule and re-points it to a hazard the
         # prior graph never assigned to it.
-        revision = _revision_response()
-        revision["security_constraints"][1]["rule"] = (
-            "The agent must never improvise fee amounts."
+        revision = _revision_response(
+            security_constraint_edits=[
+                {
+                    "constraint_id": "SC-2",
+                    "rule": "The agent must never improvise fee amounts.",
+                    "applies_when": ["the request involves fees"],
+                    "related_hazards": ["H-1"],
+                    "obligations": [],
+                }
+            ]
         )
-        revision["security_constraints"][1]["related_hazards"] = ["H-1"]
     elif "changes those conditions" in text:
         # The patch keeps SC-2's rule and drops its condition.
-        revision = _revision_response()
-        revision["security_constraints"][1]["applies_when"] = []
+        revision = _revision_response(
+            security_constraint_edits=[
+                {
+                    "constraint_id": "SC-2",
+                    "rule": "The payment record must stay protected.",
+                    "applies_when": [],
+                    "related_hazards": ["H-2"],
+                    "obligations": [],
+                }
+            ]
+        )
     elif "covers that hazard" in text:
         revision = _uncovered_hazard_revision()
     else:
@@ -563,8 +516,10 @@ def _h_gate_stops_with_revision_failure(
     del text, examples
     error = world.loss_gates_gate_error
     return (
-        error is not None and "graph revision dropped hazards: H-1" in str(error),
-        f"expected the dropped-hazard revision failure, got {error}",
+        error is not None
+        and "hazard_deletions" in str(error)
+        and "Extra inputs are not permitted" in str(error),
+        f"expected the explicit-deletion revision failure, got {error}",
     )
 
 
@@ -593,11 +548,20 @@ def _h_gate_stops_with_still_failing(
 ) -> tuple[bool, str]:
     del text, examples
     error = world.loss_gates_gate_error
+    error_text = str(error)
+    conditional = any(
+        constraint.constraint_id == "SC-2" and constraint.applies_when
+        for constraint in world.loss_gates_failing_analysis.security_constraints
+    )
+    expected_check = (
+        "constraint SC-2 and hazard H-2 share no subject phrase"
+        if conditional
+        else "constraint SC-2 has no hazard"
+    )
     return (
         error is not None
-        and "revision still failing" in str(error)
-        and "constraint SC-2 and hazard H-1 share no subject phrase" not in str(error)
-        and "constraint SC-2 has no hazard" in str(error),
+        and "revision still failing" in error_text
+        and expected_check in error_text,
         f"expected the exact still-failing checks, got {error}",
     )
 
@@ -826,7 +790,7 @@ def register(api: object) -> None:
     api.register(r"^the loss-analysis gate runs against a mock provider$", _h_run_gate)
     api.register(
         r"^the loss-analysis gate runs against a mock provider that "
-        r"(?:drops a prior hazard|rewrites that rule|changes those conditions|covers that hazard|changes nothing)$",
+        r"(?:deletes a prior hazard|rewrites that rule|changes those conditions|covers that hazard|changes nothing)$",
         _h_run_failing_gate,
     )
     api.register(

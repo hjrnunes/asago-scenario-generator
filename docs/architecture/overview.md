@@ -981,3 +981,10 @@ STPA, accounting, realization, Phase 2, manifest, and report artifacts in their
 requested output directory. Standalone diagnostic STPA persists its stage
 artifacts and combined manifest/report. Retired taxonomy-generator output is
 read-only historical data and is not accepted as a compatibility contract.
+
+## Model-facing interface ownership
+
+[Model-facing interfaces](model-facing-interfaces.md) defines which choices
+belong to model authors and which values, references, identities, joins and
+validation steps belong to deterministic adapters. Consult it when changing
+authoring, evidence review, graph correction, or presentation interfaces.

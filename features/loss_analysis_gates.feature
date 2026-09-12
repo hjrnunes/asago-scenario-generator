@@ -37,9 +37,9 @@ Feature: Phase 1 loss-analysis gates
     And the gate makes no provider call
     And the gate returns the unchanged analysis
 
-  Scenario: a revision that drops a prior record fails closed with evidence
+  Scenario: a revision that explicitly deletes a prior record fails closed with evidence
     Given a persisted loss analysis that fails the density gate
-    When the loss-analysis gate runs against a mock provider that drops a prior hazard
+    When the loss-analysis gate runs against a mock provider that deletes a prior hazard
     Then the gate stops with the revision failure recorded as a stage error
     And the gates artifact records the attempted revision as not applied
     And the gates artifact retains the original failing checks

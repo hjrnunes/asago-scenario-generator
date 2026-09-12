@@ -4171,11 +4171,20 @@ def _authored_scenario_counts(
         "skipped": sum(status == "skipped" for status in sp3_statuses),
         # Draft counters (never used for run_status).
         "drafts_returned": sum(
-            len(outcome.accepted) + len(outcome.rejected) + len(outcome.held)
+            len(outcome.accepted)
+            + len(outcome.rejected)
+            + len(outcome.held)
+            + len(getattr(outcome, "adapter_rejections", ()))
             for outcome in terminals
         ),
         "drafts_accepted": sum(len(outcome.accepted) for outcome in terminals),
-        "drafts_rejected": sum(len(outcome.rejected) for outcome in terminals),
+        "drafts_rejected": sum(
+            len(outcome.rejected) + len(getattr(outcome, "adapter_rejections", ()))
+            for outcome in terminals
+        ),
+        "drafts_adapter_rejected": sum(
+            len(getattr(outcome, "adapter_rejections", ())) for outcome in terminals
+        ),
         "drafts_held": sum(len(outcome.held) for outcome in terminals),
         "diagnostic_count": len(_first_attr(scenario_result, "stage_errors") or ()),
     }

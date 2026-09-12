@@ -235,12 +235,14 @@ def _beliefs_response() -> dict:
             "Help customers resolve order, refund, and payment questions within policy."
         ),
         "beliefs": [
-            "Which orders belong to the current customer",
-            "Whether an order is eligible for a refund",
-        ],
-        "belief_feedback": [
-            {"belief_index": 0, "tool_name": "lookup_order"},
-            {"belief_index": 1, "tool_name": None},
+            {
+                "text": "Which orders belong to the current customer",
+                "feedback_tool": "lookup_order",
+            },
+            {
+                "text": "Whether an order is eligible for a refund",
+                "feedback_tool": None,
+            },
         ],
     }
 
@@ -535,7 +537,7 @@ def test_declared_session_path_missing_states_the_declared_rule(tmp_path: Path):
 
 
 def test_subject_model_stamps_ride_the_sidecar_only_when_accepted(tmp_path: Path):
-    result = _derive(tmp_path, target_observations=_observations())
+    _derive(tmp_path, target_observations=_observations())
     sidecar = read_yaml(
         tmp_path / TARGET_DERIVED_STRUCTURE_FILENAME, TargetDerivedStructure
     )
@@ -567,7 +569,6 @@ def test_ungrounded_purpose_falls_back(tmp_path: Path):
         {
             "controller_purpose": "Quantum flux coordination across neutrino arrays.",
             "beliefs": [],
-            "belief_feedback": [],
         },
     )
     result = derive_target_structure(
@@ -595,8 +596,9 @@ def test_numeric_belief_is_rejected(tmp_path: Path):
             "controller_purpose": (
                 "Help customers resolve order, refund, and payment questions."
             ),
-            "beliefs": ["Refunds over 100.00 need approval"],
-            "belief_feedback": [],
+            "beliefs": [
+                {"text": "Refunds over 100.00 need approval", "feedback_tool": None}
+            ],
         },
     )
     result = derive_target_structure(
@@ -966,7 +968,6 @@ def test_grounded_purpose_is_accepted(tmp_path: Path):
                 "Help customers ask about orders, payment plans, and refunds."
             ),
             "beliefs": [],
-            "belief_feedback": [],
         },
     )
     result = derive_target_structure(
@@ -1096,10 +1097,7 @@ def test_belief_feedback_unknown_tool_is_dropped(tmp_path: Path):
 
     client = _setup_client()
     payload = _beliefs_response()
-    payload["belief_feedback"] = [
-        {"belief_index": 0, "tool_name": "not_a_real_tool"},
-        {"belief_index": 1, "tool_name": None},
-    ]
+    payload["beliefs"][0]["feedback_tool"] = "not_a_real_tool"
     client.set_response_for(_BeliefsResponse, payload)
     result = derive_target_structure(
         llm_client=client,
@@ -1124,29 +1122,59 @@ def test_belief_feedback_known_tool_is_kept(tmp_path: Path):
     assert "lookup_order" in feedback_tools
 
 
-def test_belief_feedback_out_of_range_index_warns(tmp_path: Path):
+def test_legacy_belief_feedback_out_of_range_index_warns():
+    from asago_scenario_generator.stpa.system_model.target_derived_structure import (
+        decode_legacy_beliefs_response,
+    )
+
+    payload = {
+        "controller_purpose": _beliefs_response()["controller_purpose"],
+        "beliefs": [
+            "Which orders belong to the current customer",
+            "Whether an order is eligible for a refund",
+        ],
+        "belief_feedback": [{"belief_index": 2, "tool_name": "lookup_order"}],
+    }
+    warnings: list[str] = []
+    decoded = decode_legacy_beliefs_response(payload, warnings)
+    assert any("out-of-range belief index" in warning for warning in warnings)
+    assert all(item.feedback_tool is None for item in decoded.beliefs)
+
+
+def test_legacy_belief_feedback_duplicate_index_is_reported_without_overwrite():
+    from asago_scenario_generator.stpa.system_model.target_derived_structure import (
+        decode_legacy_beliefs_response,
+    )
+
+    payload = {
+        "controller_purpose": _beliefs_response()["controller_purpose"],
+        "beliefs": ["Which orders belong to the current customer"],
+        "belief_feedback": [
+            {"belief_index": 0, "tool_name": "lookup_order"},
+            {"belief_index": 0, "tool_name": "process_refund"},
+        ],
+    }
+    warnings: list[str] = []
+    decoded = decode_legacy_beliefs_response(payload, warnings)
+    assert decoded.beliefs[0].feedback_tool == "lookup_order"
+    assert any("repeats belief index" in warning for warning in warnings)
+
+
+def test_current_beliefs_call_rejects_legacy_wire_without_opt_in(tmp_path: Path):
     from asago_scenario_generator.stpa.system_model.target_derived_structure import (
         _BeliefsResponse,
     )
 
     client = _setup_client()
-    payload = _beliefs_response()
-    payload["belief_feedback"] = [{"belief_index": 2, "tool_name": "lookup_order"}]
-    client.set_response_for(_BeliefsResponse, payload)
-    result = derive_target_structure(
-        llm_client=client,
-        use_case_text=USE_CASE,
-        loss_analysis=_loss_analysis(),
-        capability_profile=_capability_profile(),
-        execution_target_profile=_profile(),
-        run_dir=tmp_path,
-        temperature=0.4,
-    )
-    assert any(
-        "out-of-range belief index" in warning for warning in result.derived.warnings
-    )
-    accepted = [record for record in result.derived.beliefs if record.accepted]
-    assert all(record.feedback_tool is None for record in accepted)
+    legacy = {
+        "controller_purpose": _beliefs_response()["controller_purpose"],
+        "beliefs": ["Which orders belong to the current customer"],
+        "belief_feedback": [{"belief_index": 0, "tool_name": "lookup_order"}],
+    }
+    client.set_response_for(_BeliefsResponse, legacy)
+    result = _derive(tmp_path, llm_client=client)
+    assert result.derived.controller.source == "deterministic_fallback"
+    assert any("Beliefs call failed" in warning for warning in result.derived.warnings)
 
 
 def test_duplicate_belief_is_rejected_as_duplicate(tmp_path: Path):
@@ -1157,8 +1185,14 @@ def test_duplicate_belief_is_rejected_as_duplicate(tmp_path: Path):
     client = _setup_client()
     payload = _beliefs_response()
     payload["beliefs"] = [
-        "Which orders belong to the current customer",
-        "which orders belong to the current customer",
+        {
+            "text": "Which orders belong to the current customer",
+            "feedback_tool": "lookup_order",
+        },
+        {
+            "text": "which orders belong to the current customer",
+            "feedback_tool": None,
+        },
     ]
     client.set_response_for(_BeliefsResponse, payload)
     result = derive_target_structure(
@@ -1201,7 +1235,6 @@ def test_tool_without_description_has_no_none_placeholder(tmp_path: Path):
     base = _profile(tools=("lookup_order",))
     profile = base.model_copy(update={"resources": (resource,), "inventory": inventory})
     from asago_scenario_generator.stpa.system_model.target_derived_structure import (
-        _BeliefsResponse,
         _RelevanceResponse,
     )
 
@@ -1570,7 +1603,6 @@ def test_purpose_grounding_share_boundary_is_grounded(tmp_path: Path):
         {
             "controller_purpose": "Refunds elephantously.",
             "beliefs": [],
-            "belief_feedback": [],
         },
     )
     result = derive_target_structure(

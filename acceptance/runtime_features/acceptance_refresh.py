@@ -60,7 +60,8 @@ def register(api: object) -> None:
         source_order=21826,
     )
     api.register_first(
-        "(?:an LLM that returns a )?(?:valid )?CoordinationAnalysis",
+        "(?:an LLM that returns a )?(?:valid )?CoordinationAnalysis|"
+        "a control structure with an unreferenced controlled process",
         _h_ar_coordination_analysis,
         source_order=21827,
     )

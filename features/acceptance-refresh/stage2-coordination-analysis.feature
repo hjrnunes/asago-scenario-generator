@@ -68,7 +68,7 @@ Feature: Stage 2 Call 3 Coordination Analysis
 
   # stage2-coordination-analysis-06
   Scenario: stage2-coordination-analysis-06 Call 3 reports integrity findings without fixing them
-    Given an LLM that returns a CoordinationAnalysis with integrity finding for an unreferenced controlled process
+    Given a control structure with an unreferenced controlled process
     When Stage 2 Call 3 coordination derivation is run
     Then the CoordinationAnalysis integrity_findings list is not empty
     And the CoordinationAnalysis contains no coordination links

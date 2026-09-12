@@ -30,7 +30,6 @@ from qa_harness import (  # noqa: E402
 )
 from runtime_features import acceptance_refresh  # noqa: E402
 from runtime_shared import (  # noqa: E402
-    _SP1CoordinationAnalysis,
     _sp1_valid_coordination_analysis_dict,
     _sp1_valid_cs_dict,
 )
@@ -55,6 +54,9 @@ from runtime_features.acceptance_refresh_stage2 import (  # noqa: E402
     _h_ar_valid_responsibility_set,
 )
 from runtime_world import World  # noqa: E402
+from asago_scenario_generator.stpa.system_model.control_structure import (  # noqa: E402
+    _CoordinationProviderEnvelope,
+)
 
 
 def test_qa_runner_reports_recording_order_and_deterministic_status(capsys):
@@ -176,7 +178,7 @@ def test_acceptance_refresh_registration_preserves_characterization():
     expected_patterns = [
         "the Call 2b wire schema forbids external effects on responsibility targets$",
         "the `CoordinationAnalysis` model (?:does not )?declare",
-        "(?:an LLM that returns a )?(?:valid )?CoordinationAnalysis",
+        "(?:an LLM that returns a )?(?:valid )?CoordinationAnalysis|a control structure with an unreferenced controlled process",
         "Stage 2 Call 3 coordination derivation is run",
         "the Stage 2 coordination link addition with fallback is executed",
         "a CoordinationAnalysis model is produced",
@@ -401,7 +403,7 @@ def test_acceptance_refresh_handler_branches_remain_characterized(tmp_path):
         sp1_mock_client=SimpleNamespace(
             calls=[
                 {
-                    "response_format": _SP1CoordinationAnalysis,
+                    "response_format": _CoordinationProviderEnvelope,
                     "user_prompt": "RESP-1 controls CP-1",
                 }
             ]

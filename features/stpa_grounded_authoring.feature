@@ -8,7 +8,7 @@ Feature: Phase 4 grounded authoring in target-derived mode
 
   Scenario: the authoring call validates its scenarios deterministically
     Given a target-derived structure with one relevant constraint-action candidate
-    And a mock provider returning one valid draft and one draft naming an unobserved tool
+    And a mock provider returning one valid draft and one draft missing required condition evidence
     When the grounded authoring call runs for the candidate
     Then exactly one model call is recorded for the candidate
     And the valid scenario is accepted with the synthesized deviation category

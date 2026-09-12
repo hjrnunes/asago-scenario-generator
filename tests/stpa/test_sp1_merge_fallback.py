@@ -436,7 +436,7 @@ def _setup_full_run_client(
 def _reviewed_coordination_fixture(value):
     selected = value or valid_empty_coordination_analysis_dict()
     return {
-        **selected,
+        **{key: value for key, value in selected.items() if key != "integrity_findings"},
         "semantic_review": _valid_coordination_analysis_dict()["semantic_review"],
     }
 

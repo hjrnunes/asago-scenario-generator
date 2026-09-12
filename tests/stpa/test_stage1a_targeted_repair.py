@@ -178,8 +178,7 @@ _USE_CASE = (
 )
 
 _SC1_RULE = (
-    "The system must ensure that no sensitive health data is "
-    "included in model outputs."
+    "The system must ensure that no sensitive health data is included in model outputs."
 )
 
 
@@ -429,7 +428,7 @@ def _gap_constraint_defect_response() -> dict:
         ],
         "security_constraints": [
             {
-                "constraint_id": "SC-8",
+                "constraint_id": "SC-2",
                 "rule": "The neutralized system must uphold control SC-8.",
                 "applies_when": ["a neutralized condition holds"],
                 "related_hazards": ["H-8"],
@@ -447,12 +446,14 @@ def _gap_constraint_defect_response() -> dict:
     }
 
 
-def _gap_obligation_repair_response(*, entry: dict | None = None) -> dict:
+def _gap_obligation_repair_response(
+    *, entry: dict | None = None, constraint_id: str = "SC-2"
+) -> dict:
     """A corrected obligations collection for the gap constraint."""
     return {
         "constraints": [
             {
-                "constraint_id": "SC-8",
+                "constraint_id": constraint_id,
                 "obligations": [
                     entry
                     if entry is not None
@@ -567,10 +568,7 @@ class TestSavedObligationFailure:
         # validation errors, and the permitted change stated as relocation.
         assert "Original entry, verbatim:" in repair_prompt
         assert "realized_by" in repair_prompt
-        assert (
-            "move `realized_by: reply` to `violated_via` unchanged"
-            in repair_prompt
-        )
+        assert "move `realized_by: reply` to `violated_via` unchanged" in repair_prompt
         assert "forbidden but carries realized_by" in repair_prompt
         # The deleted permissions stay deleted.
         assert "from scratch" not in repair_prompt
@@ -802,7 +800,9 @@ class TestObligationRepairRejections:
         assert "conflicting channel values" in message
         assert len(client.calls) == 1
 
-    def test_a10_unrepresentable_channel_relocation_never_reaches_a_call(self, tmp_path):
+    def test_a10_unrepresentable_channel_relocation_never_reaches_a_call(
+        self, tmp_path
+    ):
         fixture = _attempt_one_response()
         fixture["security_constraints"][0]["obligations"] = [
             {
@@ -918,7 +918,9 @@ class TestChannelMeaningPreservation:
             "no sensitive health data is included in model outputs"
         )
 
-    def test_row2_offending_field_with_same_value_destination_is_removed(self, tmp_path):
+    def test_row2_offending_field_with_same_value_destination_is_removed(
+        self, tmp_path
+    ):
         original = dict(_SAVED_MALFORMED_OBLIGATION) | {"violated_via": "reply"}
         corrected = {
             "obligation_id": "O1",
@@ -1016,7 +1018,9 @@ class TestChannelMeaningPreservation:
         corrected = dict(_VALID_OBLIGATION)
         result = self._repair_run(tmp_path, original, corrected)
         entry = result.security_constraints[0].obligations[0]
-        assert entry.rule_span == "no sensitive health data is included in model outputs"
+        assert (
+            entry.rule_span == "no sensitive health data is included in model outputs"
+        )
         assert entry.behavior == "including sensitive health data in a reply"
 
 
@@ -1284,9 +1288,7 @@ class TestContainerErrorClassification:
     """
 
     def test_a14_gap_string_use_case_losses_with_bad_row_is_terminal(self, tmp_path):
-        gap = _gap_malformed_disposition_response() | {
-            "use_case_losses": "not a list"
-        }
+        gap = _gap_malformed_disposition_response() | {"use_case_losses": "not a list"}
         client = MockLLMClient()
         client.set_response_for(
             LossAnalysisDraft,
@@ -1307,8 +1309,7 @@ class TestContainerErrorClassification:
         # Zero repair or cleanup calls: the risk call and the failed gap call.
         assert len(client.calls) == 2
         assert not any(
-            entry["step"].endswith("_repair")
-            for entry in _stage1a_entries(tmp_path)
+            entry["step"].endswith("_repair") for entry in _stage1a_entries(tmp_path)
         )
 
     def test_a15_gap_missing_security_constraints_with_bad_row_is_terminal(
@@ -1451,9 +1452,7 @@ class TestDeterministicCleanup:
             )
         ]
 
-    def test_a13_gap_malformed_disposition_only_is_cleaned_with_no_call(
-        self, tmp_path
-    ):
+    def test_a13_gap_malformed_disposition_only_is_cleaned_with_no_call(self, tmp_path):
         """A13: malformed gap disposition rows alone are a recorded cleanup."""
         risk = _complete_risk_response()
         gap = {
@@ -1979,8 +1978,8 @@ class TestIndependentReviewCorrections:
         # The salvage drop and exactly one terminal repair outcome: the
         # typed rejection.  No second "failed" entry for the same identity.
         assert gap_entries == [
-            ("first", "salvage", "SC-8/O1", "removed"),
-            ("repair", "repair", "SC-8/O1", "rejected"),
+            ("first", "salvage", "SC-2/O1", "removed"),
+            ("repair", "repair", "SC-2/O1", "rejected"),
         ]
         rejected = next(
             entry
@@ -2050,7 +2049,7 @@ class TestGapObligationRepair:
         client.set_response_for(LossAnalysisDraft, [risk, gap])
         client.set_response_for(
             ObligationRepairResponse,
-            _gap_obligation_repair_response(),
+            _gap_obligation_repair_response(constraint_id="SC-8"),
         )
 
         result = derive_loss_analysis(
@@ -2081,6 +2080,58 @@ class TestGapObligationRepair:
             "gap_analysis_repair",
         ]
         assert [entry["success"] for entry in entries] == [True, False, True]
+
+
+class TestRepairScopeBoundaries:
+    """Graph and closed-wire defects cannot enter the bounded repair call."""
+
+    def test_unknown_graph_reference_blocks_obligation_repair(self, tmp_path):
+        risk = _complete_risk_response()
+        gap = _gap_constraint_defect_response()
+        gap["hazards"][0]["related_losses"] = ["L-99"]
+        client = MockLLMClient()
+        client.set_response_for(LossAnalysisDraft, [risk, gap])
+        client.set_response_for(
+            ObligationRepairResponse,
+            _gap_obligation_repair_response(constraint_id="SC-8"),
+        )
+
+        with pytest.raises(StageError, match="graph validation is outside"):
+            derive_loss_analysis(
+                llm_client=client,
+                use_case_text=_USE_CASE,
+                risk_cards=_occiai_cards(),
+                run_dir=tmp_path,
+            )
+
+        assert len(client.calls) == 2
+        assert not any(
+            call.response_format is ObligationRepairResponse for call in client.calls
+        )
+
+    def test_unknown_obligation_field_blocks_repair(self, tmp_path):
+        risk = _complete_risk_response()
+        gap = _gap_constraint_defect_response()
+        gap["security_constraints"][0]["obligations"][0]["mystery"] = "reject"
+        client = MockLLMClient()
+        client.set_response_for(LossAnalysisDraft, [risk, gap])
+        client.set_response_for(
+            ObligationRepairResponse,
+            _gap_obligation_repair_response(constraint_id="SC-8"),
+        )
+
+        with pytest.raises(StageError, match="unknown obligation field"):
+            derive_loss_analysis(
+                llm_client=client,
+                use_case_text=_USE_CASE,
+                risk_cards=_occiai_cards(),
+                run_dir=tmp_path,
+            )
+
+        assert len(client.calls) == 2
+        assert not any(
+            call.response_format is ObligationRepairResponse for call in client.calls
+        )
 
     def test_a30_airbnb_gap_shape_repairs_only_the_rule_span(self, tmp_path):
         """The saved Airbnb first-gap-failure shape: an ellipsis rule_span.
@@ -2245,8 +2296,8 @@ class TestRepairRecord:
         assert _record_tuples(record) == [
             ("risk_derivation", "first", "salvage", "SC-1/O1", "removed"),
             ("risk_derivation", "repair", "repair", "SC-1/O1", "repaired"),
-            ("gap_analysis", "first", "salvage", "SC-8/O1", "removed"),
-            ("gap_analysis", "repair", "repair", "SC-8/O1", "repaired"),
+            ("gap_analysis", "first", "salvage", "SC-2/O1", "removed"),
+            ("gap_analysis", "repair", "repair", "SC-2/O1", "repaired"),
         ]
 
     def test_a22_gap_repair_failure_preserves_the_risk_entries(self, tmp_path):
@@ -2294,13 +2345,13 @@ class TestRepairRecord:
             "gap_analysis",
             "repair",
             "repair",
-            "SC-8/O1",
+            "SC-2/O1",
             "rejected",
         ) in tuples
         rejected = record["records"][3]
         assert "repair_channel_replaced" in rejected["reason"]
         assert rejected["applied"] == {}
-        assert rejected["proposed"] == {"entries": ["SC-8/O1"]}
+        assert rejected["proposed"] == {"entries": ["SC-2/O1"]}
 
     def test_a23_terminal_unsupported_response_still_writes_the_record(self, tmp_path):
         risk = _complete_risk_response() | {"use_case_losses": "not a list"}
@@ -2396,9 +2447,7 @@ class TestRepairRecord:
         repair_block = manifest["stage_summary"]["stage_1a"]["repair"]
         assert repair_block["artifact"] == "loss-analysis-repair.yaml"
         assert repair_block["record_path"].endswith("loss-analysis-repair.yaml")
-        assert repair_block["counts_by_stage"] == {
-            "risk_derivation": {"repaired": 1}
-        }
+        assert repair_block["counts_by_stage"] == {"risk_derivation": {"repaired": 1}}
 
 
 class _ConfiguredClient(MockLLMClient):

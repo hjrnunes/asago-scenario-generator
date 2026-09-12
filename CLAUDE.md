@@ -174,6 +174,10 @@ so the live index never points at bytes being replaced. Historical v1 projection
 read-only and must not grow execution or persistence dependencies.
 
 Read `docs/architecture/overview.md` before changing cross-pipeline contracts.
+Read `docs/architecture/model-facing-interfaces.md` when changing authoring,
+evidence review, graph correction, or presentation interfaces. Model authors
+select explained semantic choices; code owns exact source resolution, fixed
+fields, reference joins, identities, and unchanged-record preservation.
 Read `docs/development/swarmforge.md` when planning or executing feature work,
 changing acceptance behavior, or running the quality sequence.
 

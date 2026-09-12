@@ -222,6 +222,14 @@ def classify_wire_validation_errors(exc: ValidationError) -> WireErrorClassifica
         error_type = str(item.get("type", ""))
         message = str(item.get("msg", ""))
         if len(location) == 1 and location[0] in _WIRE_COLLECTIONS:
+            # The gap contract deliberately omits risk accounting, but owner
+            # policy C1 permits deterministic row cleanup when a gap response
+            # nevertheless includes a malformed ``risk_dispositions`` list.
+            # Keep this one extra top-level collection in the row salvage path;
+            # every other unknown top-level field remains terminal.
+            if location[0] == "risk_dispositions" and error_type == "extra_forbidden":
+                record_errors.append(f"{'.'.join(location)}: {message}")
+                continue
             if error_type == "missing":
                 unsupported.append(
                     f"container-presence: collection '{location[0]}' is missing"
@@ -479,6 +487,7 @@ def salvage_provider_response(
     *,
     constraint_wire_model: type[SecurityConstraint],
     response_format: type[BaseModel],
+    gap_wire: bool = False,
 ) -> tuple[LossAnalysisDraft, SalvageReport]:
     """Recover the valid rows of a wire-invalid Stage 1a response.
 
@@ -520,13 +529,58 @@ def salvage_provider_response(
         "hazard_id",
         dropped_hazards,
     )
-    dispositions = _salvage_rows(
-        _fail_closed_rows(content, "risk_dispositions", response_format),
-        RiskDisposition,
-        "risk_ref",
-        dropped_dispositions,
-        label_pairs=True,
-    )
+    # The gap provider contract has no risk-accounting collection.  If a
+    # malformed gap response nevertheless carries one, preserve only its
+    # malformed rows as deterministic C1 cleanup evidence. A valid-looking
+    # out-of-contract row is terminal; it must never become authoritative or
+    # be silently removed. Risk-stage responses still validate and salvage
+    # this collection normally.
+    if gap_wire and "risk_dispositions" in content:
+        disposition_rows = content["risk_dispositions"]
+        if not isinstance(disposition_rows, list):
+            raise _SalvageReadError("collection 'risk_dispositions' is not a list")
+        valid_out_of_contract: list[str] = []
+        for index, row in enumerate(disposition_rows):
+            label = _row_label(row, index, "risk_ref")
+            row_reason = "malformed risk_dispositions row"
+            if isinstance(row, dict):
+                unknown_fields = sorted(set(row) - set(RiskDisposition.model_fields))
+                if unknown_fields:
+                    row_reason = "extra fields are not permitted: " + ", ".join(
+                        unknown_fields
+                    )
+                else:
+                    try:
+                        RiskDisposition.model_validate(row)
+                    except ValidationError as exc:
+                        row_reason = "; ".join(_format_validation_errors(exc))
+                    else:
+                        valid_out_of_contract.append(label)
+                        continue
+            else:
+                row_reason = "row is not an object"
+            dropped_dispositions.append(
+                (
+                    label,
+                    row_reason
+                    + "; risk_dispositions is not part of the gap response wire",
+                    _row_identity(row, "risk_ref"),
+                )
+            )
+        if valid_out_of_contract:
+            raise _SalvageReadError(
+                "gap risk_dispositions contains valid out-of-contract row(s): "
+                + ", ".join(valid_out_of_contract)
+            )
+        dispositions = []
+    else:
+        dispositions = _salvage_rows(
+            _fail_closed_rows(content, "risk_dispositions", response_format),
+            RiskDisposition,
+            "risk_ref",
+            dropped_dispositions,
+            label_pairs=True,
+        )
 
     constraints: list[SecurityConstraint] = []
     for index, row in enumerate(
@@ -584,6 +638,11 @@ def salvage_provider_response(
                 )
                 continue
             errors: list[str] = []
+            unknown_fields = sorted(set(entry) - set(Obligation.model_fields))
+            if unknown_fields:
+                errors.append(
+                    "extra fields are not permitted: " + ", ".join(unknown_fields)
+                )
             try:
                 kept_candidate = Obligation.model_validate(entry)
             except ValidationError as exc:
@@ -754,6 +813,12 @@ def classify_obligation_defects(
     (R1.5: the scope is not deterministically definable).
     """
     raw_id = raw.get("obligation_id")
+    unknown_fields = sorted(set(raw) - set(Obligation.model_fields))
+    if unknown_fields:
+        return (), (
+            "the defect is outside the permitted repair table: unknown "
+            "obligation field(s): " + ", ".join(unknown_fields)
+        )
     if not isinstance(raw_id, str) or not _OBLIGATION_ID_PATTERN.match(raw_id):
         return (), "obligation_id is missing, blank, or not an O-numbered identity"
     kind = raw.get("kind")
@@ -1054,6 +1119,7 @@ def build_repair_plan(
     constraint_wire_model: type[SecurityConstraint],
     first_wire_error: ValidationError | None = None,
     repair_record: RepairRecord | None = None,
+    gap_wire: bool = False,
 ) -> RepairOutcome:
     """Classify one failed Stage 1a attempt and select its repair plan.
 
@@ -1095,6 +1161,7 @@ def build_repair_plan(
                 content,
                 constraint_wire_model=constraint_wire_model,
                 response_format=response_format,
+                gap_wire=gap_wire,
             )
         except _SalvageReadError as exc:
             return UnsupportedRepair(

@@ -45,6 +45,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ControlElementSet,
     CoordinationAnalysis,
+    _CoordinationProviderEnvelope,
     RequirementSet,
     ResponsibilitySet,
     STAGE_2_CALL_COUNT,
@@ -531,7 +532,7 @@ class TestCallLogOrdering:
         assert client.calls[0].response_format is RequirementSet
         assert client.calls[1].response_format is ResponsibilitySet
         assert issubclass(client.calls[2].response_format, ControlElementSet)
-        assert issubclass(client.calls[3].response_format, CoordinationAnalysis)
+        assert issubclass(client.calls[3].response_format, _CoordinationProviderEnvelope)
 
         # Verify call-log step names in calls.jsonl
         calls_file = tmp_path / "calls.jsonl"

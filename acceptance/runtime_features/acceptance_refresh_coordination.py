@@ -37,11 +37,13 @@ def _h_ar_coordination_analysis(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
     response = _sp1_valid_coordination_analysis_dict()
-    if "integrity finding" in text:
-        response = {
-            "coordination_links": [],
-            "integrity_findings": ["Controlled process CP-404 is unreferenced"],
-        }
+    if "unreferenced controlled process" in text:
+        structure = _sp1_valid_cs_dict()
+        structure["controlled_processes"].append(
+            {"cp_id": "CP-404", "description": "Unreferenced process"}
+        )
+        world.control_structure = ControlStructure.model_validate(structure)
+        response = {"coordination_links": []}
     elif "non-existent responsibility" in text:
         response["coordination_links"][0]["source"] = "RESP-404"
     world.sp1_connection_set = _SP1CoordinationAnalysis.model_validate(response)
@@ -56,7 +58,9 @@ def _h_ar_call3_run(world: World, text: str, examples: dict) -> tuple[bool, str]
 
     _ar_stage2_defaults(world)
     run_dir = _ar_run_dir(world)
-    control_structure = ControlStructure.model_validate(_sp1_valid_cs_dict())
+    control_structure = world.control_structure or ControlStructure.model_validate(
+        _sp1_valid_cs_dict()
+    )
     world.sp1_connection_set = _call_3_coordination(
         llm_client=_ar_client(world),
         use_case_text=world.sp1_use_case_text,
@@ -106,6 +110,8 @@ def _h_ar_integrity_findings(
     analysis = world.sp1_connection_set
     if analysis is None or not analysis.integrity_findings:
         return False, "CoordinationAnalysis integrity_findings is empty"
+    if not any("CP-404" in finding for finding in analysis.integrity_findings):
+        return False, "Deterministic findings did not identify the unreferenced CP-404"
     return True, ""
 
 

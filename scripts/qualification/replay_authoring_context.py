@@ -361,6 +361,11 @@ def _sample_record(
     }
     if outcome.error is not None:
         record["error"] = outcome.error
+    adapter_rejections = getattr(outcome, "adapter_rejections", ())
+    if adapter_rejections:
+        record["adapter_rejected"] = [
+            failure.as_payload() for failure in adapter_rejections
+        ]
     return record
 
 

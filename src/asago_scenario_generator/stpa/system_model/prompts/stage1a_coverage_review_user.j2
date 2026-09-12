@@ -4,14 +4,27 @@
 
 ---
 
+## Exact source excerpt index
+
+Each entry below is an exact excerpt from one supplied record. Select its
+local handle for evidence; do not copy the excerpt into the response. The
+adapter copies the selected bytes and maps the handle to the durable source
+id.
+
+{% for source in source_excerpts %}
+[{{ source.local_ref }}] ({{ source.canonical_ref }}) {{ source.text }}
+Meaning: {{ source.meaning }}
+{% endfor %}
+
+---
+
 ## Supplied Risk Cards
 
 Review every card below. `disposition` is what the analysis recorded.
+The exact card descriptions and consequences appear once in the source index above.
 
 {% for card in risk_cards %}
 ### {{ card.risk_id }} — {{ card.risk_name }}
-- **Description:** {{ card.risk_description }}
-- **Consequence:** {{ card.consequence or "N/A" }}
 - **Disposition:** {{ card.disposition }}{% if card.disposition_reason %} — {{ card.disposition_reason }}{% endif %}
 {% if card.citing_loss_ids %}- **Cited by losses:** {{ card.citing_loss_ids | join(", ") }}{% endif %}
 {% endfor %}
@@ -21,7 +34,7 @@ Review every card below. `disposition` is what the analysis recorded.
 ## Losses
 
 {% for loss in losses %}
-- **{{ loss.loss_id }}** ({{ loss.provenance.value }}): {{ loss.description }}
+- **{{ loss.loss_id }}** ({{ loss.provenance.value }})
   {% if loss.source_risk_cards %}Source risks: {{ loss.source_risk_cards | join(", ") }}{% endif %}
 {% endfor %}
 
@@ -30,7 +43,7 @@ Review every card below. `disposition` is what the analysis recorded.
 ## Hazards
 
 {% for hazard in hazards %}
-- **{{ hazard.hazard_id }}**: {{ hazard.description }} (related losses: {{ hazard.related_losses | join(", ") }})
+- **{{ hazard.hazard_id }}** (related losses: {{ hazard.related_losses | join(", ") }})
 {% endfor %}
 
 ---
@@ -39,10 +52,8 @@ Review every card below. `disposition` is what the analysis recorded.
 
 {% for constraint in security_constraints %}
 - **{{ constraint.constraint_id }}** (related hazards: {{ constraint.related_hazards | join(", ") }})
-  Rule: {{ constraint.rule }}
-  Applies when ({{ constraint.applies_when | length }} conditions):
-  {% for condition in constraint.applies_when %}  {{ loop.index }}. {{ condition }}
-  {% endfor %}
+  Its exact rule and {{ constraint.applies_when | length }} applicability conditions
+  are labeled with this constraint id in the source index above.
 {% endfor %}
 
 ---
@@ -51,3 +62,9 @@ Review every card below. `disposition` is what the analysis recorded.
 
 Return the `rows` object described in the system prompt: exactly one row per
 supplied risk card, in the order the cards appear above.
+
+For a selected constraint, return one nested object in
+`covering_constraints` with that constraint id and its supporting source
+handle selections. The row-level `evidence` list must include the card's own
+source handle. Every evidence item contains only `source_ref` and `meaning`;
+the adapter supplies exact quotes and canonical source ids.

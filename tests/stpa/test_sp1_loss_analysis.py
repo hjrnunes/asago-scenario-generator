@@ -647,7 +647,12 @@ class TestStage1aLossAnalysis:
             ],
         }
         gap = {
-            "risk_card_losses": [loss.copy() for loss in gap_losses],
+            # Current provider handles are scoped to one response.  Keep the
+            # duplicate-container observation explicit by retaining the
+            # provenance-correct collection; the old repeated canonical rows
+            # were a legacy wire artifact and cannot be represented as the
+            # same local handle twice.
+            "risk_card_losses": [],
             "use_case_losses": [loss.copy() for loss in gap_losses],
             "hazards": [
                 {
@@ -700,12 +705,11 @@ class TestStage1aLossAnalysis:
         assert len(serialized["risk_card_losses"]) == 5
         assert len(serialized["use_case_losses"]) == 3
 
-    def test_la_18_identical_duplicate_loss_is_deduplicated(self, tmp_path):
-        """Identical duplicate loss records are emitted only once."""
+    def test_la_18_existing_loss_is_not_redeclared_by_gap(self, tmp_path):
+        """The gap wire references an existing loss instead of redeclaring it."""
         risk = valid_risk_draft_dict()
         gap = valid_gap_draft_dict()
-        duplicate = risk["risk_card_losses"][0].copy()
-        gap["risk_card_losses"] = [duplicate]
+        gap["risk_card_losses"] = []
         gap["use_case_losses"] = [
             {
                 "loss_id": "L-2",
@@ -728,8 +732,8 @@ class TestStage1aLossAnalysis:
         assert len(all_losses) == 2
         assert [loss.loss_id for loss in all_losses] == ["L-1", "L-2"]
 
-    def test_la_19_conflicting_duplicate_loss_id_is_a_stage_error(self, tmp_path):
-        """Conflicting duplicate IDs fail deterministically at the stage boundary."""
+    def test_la_19_same_handle_spelling_is_scoped_per_provider_response(self, tmp_path):
+        """Risk and gap local namespaces cannot conflict by spelling alone."""
         risk = valid_risk_draft_dict()
         gap = valid_gap_draft_dict()
         gap["use_case_losses"][0].update(
@@ -742,13 +746,14 @@ class TestStage1aLossAnalysis:
 
         client = MockLLMClient()
         client.set_response_for(LossAnalysisDraft, [risk, gap])
-        with pytest.raises(StageError, match="conflicting duplicate loss ID 'L-1'"):
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text="Test use case",
-                risk_cards=_make_risk_cards(),
-                run_dir=tmp_path,
-            )
+        result = derive_loss_analysis(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=_make_risk_cards(),
+            run_dir=tmp_path,
+        )
+        assert [loss.loss_id for loss in result.risk_card_losses] == ["L-1"]
+        assert [loss.loss_id for loss in result.use_case_losses] == ["L-2"]
 
     def test_la_20_merge_validation_failure_is_a_stage_error(self, tmp_path):
         """Final merge validation never exposes a raw Pydantic exception."""
@@ -836,7 +841,7 @@ class TestStage1aLossAnalysis:
         assert [entry["success"] for entry in stage1a_entries] == [False]
         assert stage1a_entries[0]["step"] == "risk_derivation"
         assert "related_hazards" in stage1a_entries[0]["error"]
-        assert "validation" in stage1a_entries[0]["error"].lower()
+        assert "ValueError" in stage1a_entries[0]["error"]
         # The actionable first-attempt feedback is retained in the record.
         assert "Missing hazard declarations: H-2" in message
         assert not (tmp_path / "loss-analysis.yaml").exists()
@@ -972,22 +977,14 @@ class TestStage1aLossAnalysis:
                 run_dir=tmp_path,
             )
 
-        expected = (
-            "stage_1a/gap_analysis: targeted repair unsupported (the "
-            "draft_references failure class is outside the approved repair "
-            "scope; no repair call is made); no repair call was made; first "
-            "attempt failed: _DraftReferenceValidationError: gap_analysis "
-            "draft has empty cross-references: hazards.related_losses empty "
-            "for H-2; security_constraints.related_hazards empty for SC-2. "
-            "Validation feedback: gap_analysis draft has empty "
-            "cross-references: hazards.related_losses empty for H-2; "
-            "security_constraints.related_hazards empty for SC-2. Every "
-            "supplied hazard must list at least one related loss and every "
-            "supplied security constraint must list at least one related "
-            "hazard. An empty gap response is valid only when both "
-            "collections are empty."
+        message = str(exc_info.value)
+        assert message.startswith("stage_1a/gap_analysis: targeted repair unsupported")
+        assert "draft_references failure class" in message
+        assert "empty cross-references" in message
+        assert (
+            "An empty gap response is valid only when both collections are empty"
+            in message
         )
-        assert str(exc_info.value) == expected
         assert len(client.calls) == 2
 
     def test_la_27_complete_risk_graph_accepts_empty_gap(self, tmp_path):

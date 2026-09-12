@@ -13,6 +13,10 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
+from pydantic import BaseModel
+
+from acceptance.fixture_adapters import legacy_stage1a_provider_payload
+
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 
@@ -63,7 +67,6 @@ def valid_empty_coordination_analysis_dict(
         )
     return {
         "coordination_links": [],
-        "integrity_findings": [],
         "semantic_review": {
             "hazards": hazards,
             "constraints": constraints,
@@ -138,9 +141,25 @@ def coverage_review_response_from_prompt(
     if constraints_field is not None:
         inner = get_args(constraints_field.annotation)
         if inner:
-            constraint_ids = tuple(get_args(inner[0]))
+            constraint_type = inner[0]
+            constraint_ids = tuple(
+                get_args(constraint_type.model_fields["constraint_id"].annotation)
+            )
 
-    descriptions: dict[str, str] = {}
+    evidence_field = row_type.model_fields.get("evidence")
+    evidence_refs: tuple[str, ...] = ()
+    if evidence_field is not None:
+        inner = get_args(evidence_field.annotation)
+        if inner:
+            evidence_refs = tuple(
+                get_args(inner[0].model_fields["source_ref"].annotation)
+            )
+    source_canonical: dict[str, str] = {}
+    for line in user_prompt.splitlines():
+        source = re.match(r"^\[(source_\d+)\] \(([^)]+)\) ", line)
+        if source:
+            source_canonical[source.group(1)] = source.group(2)
+
     dispositions: dict[str, str] = {}
     current: str | None = None
     for line in user_prompt.splitlines():
@@ -149,10 +168,6 @@ def coverage_review_response_from_prompt(
             current = heading.group(1)
             continue
         if current is None:
-            continue
-        description = re.match(r"^- \*\*Description:\*\* (.*)$", line)
-        if description:
-            descriptions[current] = description.group(1)
             continue
         disposition = re.match(r"^- \*\*Disposition:\*\* (\S+)", line)
         if disposition:
@@ -171,25 +186,35 @@ def coverage_review_response_from_prompt(
         if rule:
             constraint_rules[constraint] = rule.group(1)
 
+    refs_by_canonical: dict[str, str] = {}
+    for local_ref, canonical_ref in source_canonical.items():
+        refs_by_canonical.setdefault(canonical_ref, local_ref)
+
     rows = []
     for risk_id in risk_ids:
-        quote = descriptions.get(risk_id) or risk_id
-        evidence = [{"source_ref": risk_id, "quote": quote, "meaning": "The card."}]
+        card_ref = refs_by_canonical.get(risk_id) or (
+            evidence_refs[0] if evidence_refs else "source_1"
+        )
+        evidence = [{"source_ref": card_ref, "meaning": "The card."}]
         cited = dispositions.get(risk_id, "cited") != "not_applicable"
         if cited and constraint_ids and constraint_rules:
-            covering = [constraint_ids[0]]
-            evidence.append(
-                {
-                    "source_ref": covering[0],
-                    "quote": constraint_rules[covering[0]],
-                    "meaning": "The governing rule.",
-                }
-            )
+            constraint_id = constraint_ids[0]
+            constraint_ref = refs_by_canonical.get(constraint_id) or card_ref
             row = {
                 "risk_id": risk_id,
                 "protects": "the protected interest",
                 "against": None,
-                "covering_constraints": covering,
+                "covering_constraints": [
+                    {
+                        "constraint_id": constraint_id,
+                        "evidence": [
+                            {
+                                "source_ref": constraint_ref,
+                                "meaning": "The governing rule.",
+                            }
+                        ],
+                    }
+                ],
                 "coverage": "full",
                 "missing_protection": None,
                 "evidence": evidence,
@@ -331,6 +356,33 @@ class MockLLMClient:
         else:
             content = None
 
+        # Legacy Stage 1a tests historically registered ``LossAnalysisDraft``
+        # responses.  Adapt those dictionaries only at this explicit test
+        # client boundary; production parsing remains current-wire strict.
+        if response_format is not None:
+            response_name = getattr(response_format, "__name__", "")
+            if response_name in {
+                "_Stage1aRiskProviderDraft",
+                "_Stage1aGapProviderDraft",
+            }:
+                if isinstance(content, BaseModel):
+                    content = content.model_dump(mode="json")
+                if isinstance(content, str):
+                    try:
+                        decoded = json.loads(content)
+                    except (TypeError, ValueError):
+                        decoded = None
+                    if isinstance(decoded, dict):
+                        content = decoded
+                if isinstance(content, dict):
+                    content = legacy_stage1a_provider_payload(
+                        content,
+                        risk=response_name == "_Stage1aRiskProviderDraft",
+                        preserve_gap_extras=(
+                            response_name == "_Stage1aGapProviderDraft"
+                        ),
+                    )
+
         return LLMResult(
             content=content,
             prompt_tokens=100,
@@ -345,7 +397,23 @@ class MockLLMClient:
         """Match exact or provider-specialized subclasses in deterministic tests."""
         return bool(
             model_class
-            and any(issubclass(model_class, candidate) for candidate in configured)
+            and any(
+                issubclass(model_class, candidate)
+                or (
+                    candidate.__name__ == "LossAnalysisDraft"
+                    and model_class.__name__
+                    in {"_Stage1aRiskProviderDraft", "_Stage1aGapProviderDraft"}
+                )
+                or (
+                    candidate.__name__ == "CoordinationAnalysis"
+                    and model_class.__name__
+                    in {
+                        "ProviderCoordinationAnalysis",
+                        "_CoordinationProviderEnvelope",
+                    }
+                )
+                for candidate in configured
+            )
         )
 
     @staticmethod
@@ -356,7 +424,22 @@ class MockLLMClient:
         if model_class is None:
             return None
         for candidate, value in configured.items():
-            if isinstance(candidate, type) and issubclass(model_class, candidate):
+            if isinstance(candidate, type) and (
+                issubclass(model_class, candidate)
+                or (
+                    candidate.__name__ == "LossAnalysisDraft"
+                    and model_class.__name__
+                    in {"_Stage1aRiskProviderDraft", "_Stage1aGapProviderDraft"}
+                )
+                or (
+                    candidate.__name__ == "CoordinationAnalysis"
+                    and model_class.__name__
+                    in {
+                        "ProviderCoordinationAnalysis",
+                        "_CoordinationProviderEnvelope",
+                    }
+                )
+            ):
                 return value
         return None
 
@@ -640,6 +723,7 @@ def setup_sp1_mock_client() -> MockLLMClient:
         CoordinationAnalysis,
         RequirementSet,
         ResponsibilitySet,
+        _CoordinationProviderEnvelope,
     )
     from asago_scenario_generator.stpa.system_model.critic import CriticFindings
 
@@ -656,6 +740,13 @@ def setup_sp1_mock_client() -> MockLLMClient:
     client.set_response_for(ControlElementSet, valid_control_element_set_dict())
     client.set_response_for(
         CoordinationAnalysis,
+        valid_empty_coordination_analysis_dict(constraint_ids=("SC-1", "SC-2")),
+    )
+    # Call 3 uses a generated provider subclass of the closed envelope.  Keep
+    # a direct registration as an explicit test fixture seam; the old
+    # ``integrity_findings`` code-owned field is intentionally absent.
+    client.set_response_for(
+        _CoordinationProviderEnvelope,
         valid_empty_coordination_analysis_dict(constraint_ids=("SC-1", "SC-2")),
     )
     client.set_response_for(CriticFindings, valid_critic_findings_dict_no_gaps())

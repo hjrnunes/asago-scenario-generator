@@ -8,8 +8,8 @@ Feature: Stage 2 Call 3 Coordination and Integrity
   Call 3 is redefined as coordination-only plus integrity verification.
   It receives the full assembled control structure from Call 2a + Call 2b
   and identifies coordination links between responsibilities that share
-  state. It also verifies connection integrity and reports findings as a
-  list — it does NOT fix them, it flags them for the revision step. The old
+  state. Code verifies connection integrity and supplies findings as context;
+  the model reviews semantic meaning and does not rewrite those findings. The old
   connection-assignment mechanism (ConnectionSet with connection_assignments)
   is removed. The call-log step name changes from call_3_connections to
   call_3_coordination.
@@ -33,9 +33,9 @@ Feature: Stage 2 Call 3 Coordination and Integrity
     And `calls.jsonl` does not contain a call entry with `stage` `stage_2` and `step` `call_3_connections`
 
   # stage2-call3-flag-not-fix-in-prompt
-  Scenario: Call 3 system prompt instructs flagging not fixing
-    Then the prompt template `stage2_call3_system.j2` contains `Do NOT fix`
-    And the prompt template `stage2_call3_system.j2` contains `flag them for the revision step`
+  Scenario: Call 3 system prompt separates deterministic findings from semantic review
+    Then the prompt template `stage2_call3_system.j2` contains `Deterministic code has already checked`
+    And the prompt template `stage2_call3_system.j2` contains `Do not return an`
 
   # stage2-call3-no-connection-assignments-in-prompt
   Scenario: Call 3 system prompt does not mention connection assignments

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    _CoordinationProviderEnvelope,
+)
+
 import json
 import re
 
@@ -15,7 +19,6 @@ from runtime_shared import (
     World,
     _PQF_PROMPTS_DIR,
     _SP1ControlElementSet,
-    _SP1CoordinationAnalysis,
     _SP1RequirementSet,
     _SP1ResponsibilitySet,
     _ar_client,
@@ -390,7 +393,7 @@ def _h_ar_call3_prompt(world: World, text: str, examples: dict) -> tuple[bool, s
             call["user_prompt"]
             for call in reversed(calls)
             if isinstance(call["response_format"], type)
-            and issubclass(call["response_format"], _SP1CoordinationAnalysis)
+            and issubclass(call["response_format"], _CoordinationProviderEnvelope)
         ),
         "",
     )

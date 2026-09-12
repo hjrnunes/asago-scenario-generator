@@ -10,11 +10,12 @@ bounded revision.  Pinned runs (``--loss-analysis``) skip it entirely,
 because the supplied graph was already reviewed.
 
 Deterministic code owns the wire.  The ``risk_id`` is a literal of the
-supplied card ids and the covering constraints are literals of the supplied
-constraint ids, so the provider cannot invent a record.  Every quotation
-must be an exact substring of the record it cites.  Validation is per row:
-a row that breaks a rule is recorded under ``rows_invalid`` with its typed
-reason and the valid rows of the same batch are kept.  The status is
+supplied card ids, covering constraints are nested objects with literals of
+the supplied constraint ids, and evidence selects local handles from an exact
+source index. The adapter materializes each selected handle to its canonical
+reference and exact quotation. Validation is per row: a row that breaks a
+rule is recorded under ``rows_invalid`` with its typed reason and the valid
+rows of the same batch are kept.  The status is
 ``completed`` when every card has a valid row, ``partial`` when any row is
 invalid or missing, and ``unavailable`` only when no batch returned a valid
 row.  Nothing is inferred or repaired, and the review never blocks a run.
@@ -45,10 +46,11 @@ import os
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, Sequence
 
 import yaml
 from pydantic import (
+    ValidationError,
     BaseModel,
     ConfigDict,
     Field,
@@ -60,7 +62,7 @@ from pydantic import (
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
-    parse_llm_result,
+    _decode_llm_content,
     safe_llm_call,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
@@ -71,7 +73,6 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
 )
 from asago_scenario_generator.stpa.system_model.semantic_review import (
     SourceEvidence,
-    quote_is_substring,
 )
 
 STEP_RISK_COVERAGE_REVIEW = "risk_coverage_review"
@@ -115,9 +116,9 @@ class RiskCoverageEvidence(SourceEvidence):
 
     The shared :class:`SourceEvidence` restricts ``source_ref`` to the
     use-case text and loss ids.  The review cites risk cards, constraints,
-    and hazards as well.  The provider schema closes ``source_ref`` to a
-    literal of the exact ids supplied for the call, and deterministic
-    validation confirms each reference resolves to a supplied record.
+    and hazards as well.  The provider chooses local excerpt handles;
+    deterministic materialization maps each handle to the exact durable id
+    and quotation before this model is persisted.
     """
 
     @field_validator("source_ref")
@@ -161,13 +162,26 @@ class RiskCoverageRow(BaseModel):
 
 
 class RiskCoverageWireEvidence(BaseModel):
-    """Lenient provider evidence: ids are closed, the text rules are code's."""
+    """Provider evidence selection from the exact excerpt index.
+
+    The provider chooses a local handle and explains its relevance.  It never
+    copies source bytes into the response; the adapter resolves the handle and
+    materializes the durable canonical reference and exact quotation.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     source_ref: StrictStr
-    quote: StrictStr = ""
-    meaning: StrictStr = ""
+    meaning: StrictStr = Field(min_length=1)
+
+
+class RiskCoverageWireConstraint(BaseModel):
+    """One proposed covering constraint with its nested evidence selections."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    constraint_id: StrictStr
+    evidence: tuple[RiskCoverageWireEvidence, ...] = ()
 
 
 class RiskCoverageWireRow(BaseModel):
@@ -182,7 +196,7 @@ class RiskCoverageWireRow(BaseModel):
     risk_id: StrictStr
     protects: StrictStr = ""
     against: StrictStr | None = None
-    covering_constraints: tuple[StrictStr, ...] = ()
+    covering_constraints: tuple[RiskCoverageWireConstraint, ...] = ()
     coverage: CoverageVerdict
     missing_protection: StrictStr | None = None
     evidence: tuple[RiskCoverageWireEvidence, ...] = ()
@@ -291,6 +305,15 @@ class RiskCoverageReviewOutcome:
     warnings: tuple[str, ...] = field(default=())
 
 
+@dataclass(frozen=True)
+class _CoverageCallResult:
+    """One provider response after row-local wire parsing."""
+
+    rows: tuple[RiskCoverageWireRow, ...] = ()
+    invalid_rows: tuple[RiskCoverageInvalidRow, ...] = ()
+    failure_reason: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Wire schema
 # ---------------------------------------------------------------------------
@@ -303,9 +326,11 @@ def _provider_review_model(
 ) -> type[RiskCoverageReview]:
     """Build the closed response schema for the supplied ids.
 
-    ``risk_id`` is a literal of the supplied card ids, ``covering_constraints``
-    holds literals of the supplied constraint ids, and ``source_ref`` is a
-    literal of every citable record, so the provider cannot invent a record.
+    ``risk_id`` is a literal of the supplied card ids, nested
+    ``covering_constraints.constraint_id`` holds literals of the supplied
+    constraint ids, and every evidence ``source_ref`` is a literal of the
+    exact local excerpt handles displayed in the prompt, so the provider
+    cannot invent a record or transcribe source bytes.
     The row count is deliberately unbounded: a response that omits a card is
     a batch result with missing rows, not a schema failure that discards the
     rows it did return.
@@ -331,12 +356,27 @@ def _provider_review_model(
             __base__=row_type,
             risk_id=(Literal[tuple(risk_ids)], ...),
         )
+    constraint_type: type[RiskCoverageWireConstraint] = RiskCoverageWireConstraint
+    if evidence_refs:
+        constraint_type = create_model(
+            "ProviderRiskCoverageConstraintEvidence",
+            __base__=constraint_type,
+            evidence=(
+                tuple[evidence_type, ...],  # type: ignore[valid-type]
+                Field(default=()),
+            ),
+        )
     if constraint_ids:
+        constraint_type = create_model(
+            "ProviderRiskCoverageConstraint",
+            __base__=constraint_type,
+            constraint_id=(Literal[tuple(constraint_ids)], ...),
+        )
         row_type = create_model(
-            f"{row_type.__name__}WithConstraints",
+            f"{row_type.__name__}WithNestedConstraints",
             __base__=row_type,
             covering_constraints=(
-                tuple[Literal[tuple(constraint_ids)], ...],  # type: ignore[valid-type]
+                tuple[constraint_type, ...],  # type: ignore[valid-type]
                 Field(default=()),
             ),
         )
@@ -355,42 +395,127 @@ def _provider_review_model(
 # ---------------------------------------------------------------------------
 
 
-def _record_texts(
-    loss_analysis: LossAnalysis,
-    risk_cards: list[RiskCard],
-) -> dict[str, tuple[str, ...]]:
-    """Return the exact quotable text of every citable record.
+@dataclass(frozen=True)
+class _CoverageSourceExcerpt:
+    """One exact source slice offered to the coverage-review provider."""
 
-    A card quote must match one of its own name, description, or
-    consequence; a constraint quote must match its rule or one of its
-    ``applies_when`` conditions; a hazard or loss quote must match its
-    description.
+    local_ref: str
+    canonical_ref: str
+    text: str
+    meaning: str
+    risk_card_id: str | None = None
+
+
+def _build_coverage_source_excerpts(
+    loss_analysis: LossAnalysis,
+    risk_cards: Sequence[RiskCard],
+) -> tuple[_CoverageSourceExcerpt, ...]:
+    """Build stable local handles for every citable coverage-review excerpt.
+
+    A canonical record may expose several exact excerpts (for example a risk
+    card's name, description, and consequence).  Local handles are therefore
+    unique even when two excerpts share one durable ``canonical_ref``.  The
+    provider sees this index and selects handles; code owns the exact bytes
+    and canonical reference materialized into the v3 artifact.
     """
-    texts: dict[str, tuple[str, ...]] = {}
+
+    excerpts: list[_CoverageSourceExcerpt] = []
+    next_ref = 1
+
+    def add(
+        canonical_ref: str,
+        text: str,
+        meaning: str,
+        *,
+        risk_card_id: str | None = None,
+    ) -> None:
+        nonlocal next_ref
+        if not text:
+            return
+        excerpts.append(
+            _CoverageSourceExcerpt(
+                local_ref=f"source_{next_ref}",
+                canonical_ref=canonical_ref,
+                text=text,
+                meaning=meaning,
+                risk_card_id=risk_card_id,
+            )
+        )
+        next_ref += 1
+
     for card in risk_cards:
-        card_texts = [
-            text
-            for text in (card.risk_name, card.risk_description, card.consequence)
-            if text
-        ]
-        texts[card.risk_id] = tuple(card_texts)
-    for constraint in loss_analysis.security_constraints:
-        texts[constraint.constraint_id] = (
-            constraint.rule,
-            *constraint.applies_when,
+        add(
+            card.risk_id,
+            card.risk_name,
+            f"Exact supplied risk-card name for {card.risk_id}.",
+            risk_card_id=card.risk_id,
+        )
+        add(
+            card.risk_id,
+            card.risk_description,
+            f"Exact supplied risk-card description for {card.risk_id}.",
+            risk_card_id=card.risk_id,
+        )
+        if card.consequence:
+            add(
+                card.risk_id,
+                card.consequence,
+                f"Exact supplied risk-card consequence for {card.risk_id}.",
+                risk_card_id=card.risk_id,
+            )
+    for loss in loss_analysis.risk_card_losses + loss_analysis.use_case_losses:
+        add(
+            loss.loss_id,
+            loss.description,
+            f"Exact supplied description for loss {loss.loss_id}.",
         )
     for hazard in loss_analysis.hazards:
-        texts[hazard.hazard_id] = (hazard.description,)
-    for loss in loss_analysis.risk_card_losses + loss_analysis.use_case_losses:
-        texts[loss.loss_id] = (loss.description,)
-    return texts
+        add(
+            hazard.hazard_id,
+            hazard.description,
+            f"Exact supplied description for hazard {hazard.hazard_id}.",
+        )
+    for constraint in loss_analysis.security_constraints:
+        add(
+            constraint.constraint_id,
+            constraint.rule,
+            f"Exact supplied rule for constraint {constraint.constraint_id}.",
+        )
+        for index, condition in enumerate(constraint.applies_when, start=1):
+            add(
+                constraint.constraint_id,
+                condition,
+                f"Exact supplied applies-when condition {index} for "
+                f"constraint {constraint.constraint_id}.",
+            )
+    return tuple(excerpts)
+
+
+def _batch_source_excerpts(
+    excerpts: Sequence[_CoverageSourceExcerpt], cards: Sequence[RiskCard]
+) -> tuple[_CoverageSourceExcerpt, ...]:
+    """Keep full graph evidence and only this batch's risk-card evidence."""
+    card_ids = {card.risk_id for card in cards}
+    return tuple(
+        excerpt
+        for excerpt in excerpts
+        if excerpt.risk_card_id is None or excerpt.risk_card_id in card_ids
+    )
+
+
+def _coverage_source_ref_map(
+    excerpts: Sequence[_CoverageSourceExcerpt],
+) -> dict[str, _CoverageSourceExcerpt]:
+    """Index local source handles without normalizing their text."""
+
+    return {excerpt.local_ref: excerpt for excerpt in excerpts}
 
 
 def _row_invalid_reason(
     row: RiskCoverageWireRow,
     *,
     supplied: set[str],
-    texts: dict[str, tuple[str, ...]],
+    source_excerpts: dict[str, _CoverageSourceExcerpt],
     constraint_ids: set[str],
     not_applicable: bool,
 ) -> str | None:
@@ -408,11 +533,20 @@ def _row_invalid_reason(
         return "blank_rationale"
     if row.against is not None and not row.against.strip():
         return "blank_against"
-    if len(set(row.covering_constraints)) != len(row.covering_constraints):
+    selected_constraint_ids = tuple(
+        item.constraint_id for item in row.covering_constraints
+    )
+    if len(set(selected_constraint_ids)) != len(selected_constraint_ids):
         return "repeated_covering_constraint"
-    unknown_constraints = sorted(set(row.covering_constraints) - constraint_ids)
+    unknown_constraints = sorted(set(selected_constraint_ids) - constraint_ids)
     if unknown_constraints:
         return "unknown_covering_constraint"
+    if any(item.source_ref not in source_excerpts for item in row.evidence) or any(
+        item.source_ref not in source_excerpts
+        for constraint in row.covering_constraints
+        for item in constraint.evidence
+    ):
+        return "unknown_evidence_source_ref"
     if not_applicable and row.coverage not in _NOT_APPLICABLE_VERDICTS:
         return "not_applicable_card_reports_coverage"
     if not not_applicable and row.coverage in _NOT_APPLICABLE_VERDICTS:
@@ -422,44 +556,80 @@ def _row_invalid_reason(
             return "missing_protection_required"
     elif row.missing_protection is not None:
         return "missing_protection_forbidden"
-    if row.coverage == "full" and not row.covering_constraints:
+    if row.coverage == "full" and not selected_constraint_ids:
         return "full_without_covering_constraint"
-    if row.coverage == "none" and row.covering_constraints:
+    if row.coverage == "none" and selected_constraint_ids:
         return "none_with_covering_constraint"
     if not row.evidence:
         return "no_evidence"
-    if not any(item.source_ref == row.risk_id for item in row.evidence):
+    canonical_evidence_refs = {
+        source_excerpts[item.source_ref].canonical_ref
+        for item in row.evidence
+        if item.source_ref in source_excerpts
+    }
+    if row.risk_id not in canonical_evidence_refs:
         return "no_own_card_quote"
     if row.coverage in _EVIDENCE_PER_CONSTRAINT_VERDICTS:
-        quoted_refs = {item.source_ref for item in row.evidence}
-        for constraint_id in row.covering_constraints:
-            if constraint_id not in quoted_refs:
+        for constraint in row.covering_constraints:
+            if not any(
+                source_excerpts.get(item.source_ref) is not None
+                and source_excerpts[item.source_ref].canonical_ref
+                == constraint.constraint_id
+                for item in constraint.evidence
+            ):
+                return "no_covering_constraint_quote"
+            if not constraint.evidence:
                 return "no_covering_constraint_quote"
     for item in row.evidence:
-        sources = texts.get(item.source_ref)
-        if sources is None:
+        excerpt = source_excerpts.get(item.source_ref)
+        if excerpt is None:
             return "unknown_evidence_source_ref"
-        if not item.quote.strip() or not quote_is_substring(item.quote, sources):
+        if not excerpt.text.strip():
             return "quote_not_a_substring"
+    for constraint in row.covering_constraints:
+        for item in constraint.evidence:
+            excerpt = source_excerpts.get(item.source_ref)
+            if excerpt is None:
+                return "unknown_evidence_source_ref"
+            if not excerpt.text.strip():
+                return "quote_not_a_substring"
     return None
 
 
-def _to_row(row: RiskCoverageWireRow) -> RiskCoverageRow:
+def _to_row(
+    row: RiskCoverageWireRow,
+    source_excerpts: dict[str, _CoverageSourceExcerpt],
+) -> RiskCoverageRow:
     """Convert a validated wire row into the artifact row."""
+    # The durable v3 row deliberately retains its historical flat evidence
+    # list.  The provider wire nests constraint evidence to keep the model
+    # from maintaining a second positional/parallel registry; this adapter
+    # flattens the selected, exact material once at publication time.
+    selected_constraints = tuple(
+        item.constraint_id for item in row.covering_constraints
+    )
+    evidence_items: list[RiskCoverageWireEvidence] = list(row.evidence)
+    seen = {(item.source_ref, item.meaning) for item in evidence_items}
+    for constraint in row.covering_constraints:
+        for item in constraint.evidence:
+            key = (item.source_ref, item.meaning)
+            if key not in seen:
+                evidence_items.append(item)
+                seen.add(key)
     return RiskCoverageRow(
         risk_id=row.risk_id,
         protects=row.protects,
         against=row.against,
-        covering_constraints=row.covering_constraints,
+        covering_constraints=selected_constraints,
         coverage=row.coverage,
         missing_protection=row.missing_protection,
         evidence=tuple(
             RiskCoverageEvidence(
-                source_ref=item.source_ref,
-                quote=item.quote,
-                meaning=item.meaning or item.source_ref,
+                source_ref=source_excerpts[item.source_ref].canonical_ref,
+                quote=source_excerpts[item.source_ref].text,
+                meaning=item.meaning,
             )
-            for item in row.evidence
+            for item in evidence_items
         ),
         rationale=row.rationale,
     )
@@ -495,6 +665,8 @@ def _partition_rows(
     *,
     loss_analysis: LossAnalysis,
     risk_cards: list[RiskCard],
+    source_excerpts: Sequence[_CoverageSourceExcerpt],
+    returned_risk_ids: Sequence[str] = (),
 ) -> tuple[
     tuple[RiskCoverageRow, ...], tuple[RiskCoverageInvalidRow, ...], tuple[str, ...]
 ]:
@@ -505,12 +677,12 @@ def _partition_rows(
     card keep the first and record the rest as invalid.
     """
     supplied = {card.risk_id for card in risk_cards}
-    texts = _record_texts(loss_analysis, risk_cards)
+    source_ref_map = _coverage_source_ref_map(source_excerpts)
     constraint_ids = {sc.constraint_id for sc in loss_analysis.security_constraints}
     not_applicable = _not_applicable_cards(loss_analysis, risk_cards)
     valid: list[RiskCoverageRow] = []
     invalid: list[RiskCoverageInvalidRow] = []
-    returned: set[str] = set()
+    returned: set[str] = set(returned_risk_ids)
     seen: set[str] = set()
     for row in rows:
         returned.add(row.risk_id)
@@ -522,7 +694,7 @@ def _partition_rows(
         reason = _row_invalid_reason(
             row,
             supplied=supplied,
-            texts=texts,
+            source_excerpts=source_ref_map,
             constraint_ids=constraint_ids,
             not_applicable=row.risk_id in not_applicable,
         )
@@ -530,7 +702,7 @@ def _partition_rows(
             invalid.append(RiskCoverageInvalidRow(risk_id=row.risk_id, reason=reason))
             continue
         seen.add(row.risk_id)
-        valid.append(_to_row(row))
+        valid.append(_to_row(row, source_ref_map))
     order = {card.risk_id: index for index, card in enumerate(risk_cards)}
     valid.sort(key=lambda item: order.get(item.risk_id, len(order)))
     invalid.sort(key=lambda item: (order.get(item.risk_id, len(order)), item.reason))
@@ -819,7 +991,10 @@ def _review_prompt_hashes(loader: TemplateLoader) -> dict[str, str]:
     }
 
 
-def _card_view(card: RiskCard, loss_analysis: LossAnalysis) -> dict:
+def _card_view(
+    card: RiskCard,
+    loss_analysis: LossAnalysis,
+) -> dict:
     disposition = next(
         (d for d in loss_analysis.risk_dispositions if d.risk_ref == card.risk_id),
         None,
@@ -851,6 +1026,23 @@ def _card_view(card: RiskCard, loss_analysis: LossAnalysis) -> dict:
     }
 
 
+def _coverage_prompt_views(
+    *,
+    loss_analysis: LossAnalysis,
+    risk_cards: Sequence[RiskCard],
+    source_excerpts: Sequence[_CoverageSourceExcerpt],
+) -> dict[str, Any]:
+    """Return plain prompt views plus the exact local source index."""
+
+    return {
+        "risk_cards": [_card_view(card, loss_analysis) for card in risk_cards],
+        "losses": loss_analysis.risk_card_losses + loss_analysis.use_case_losses,
+        "hazards": loss_analysis.hazards,
+        "security_constraints": loss_analysis.security_constraints,
+        "source_excerpts": source_excerpts,
+    }
+
+
 def _run_one_review_call(
     *,
     llm_client: LLMClient,
@@ -861,7 +1053,8 @@ def _run_one_review_call(
     loader: TemplateLoader,
     temperature: float,
     max_completion_tokens: int,
-) -> tuple[tuple[RiskCoverageWireRow, ...] | None, str | None]:
+    source_excerpts: Sequence[_CoverageSourceExcerpt],
+) -> _CoverageCallResult:
     """Make one review call and return its wire rows or a typed failure reason.
 
     The call validates only the closed wire shape (ids and vocabulary).  Every
@@ -869,31 +1062,83 @@ def _run_one_review_call(
     discard the valid rows beside it.
     """
     system_prompt = loader.render_prompt(SYSTEM_TEMPLATE)
+    prompt_views = _coverage_prompt_views(
+        loss_analysis=loss_analysis,
+        risk_cards=cards,
+        source_excerpts=source_excerpts,
+    )
     user_prompt = loader.render_prompt(
         USER_TEMPLATE,
         use_case_text=use_case_text,
-        risk_cards=[_card_view(card, loss_analysis) for card in cards],
-        losses=loss_analysis.risk_card_losses + loss_analysis.use_case_losses,
-        hazards=loss_analysis.hazards,
-        security_constraints=loss_analysis.security_constraints,
+        **prompt_views,
     )
     risk_ids = tuple(card.risk_id for card in cards)
     constraint_ids = tuple(
         sc.constraint_id for sc in loss_analysis.security_constraints
     )
-    evidence_refs = (
-        risk_ids
-        + constraint_ids
-        + tuple(hazard.hazard_id for hazard in loss_analysis.hazards)
-        + tuple(
-            loss.loss_id
-            for loss in loss_analysis.risk_card_losses + loss_analysis.use_case_losses
-        )
-    )
+    evidence_refs = tuple(excerpt.local_ref for excerpt in source_excerpts)
     response_model = _provider_review_model(risk_ids, constraint_ids, evidence_refs)
 
+    wire_invalid: list[RiskCoverageInvalidRow] = []
+
     def parse_review(result: LLMResult) -> RiskCoverageReview:
-        return parse_llm_result(result, response_model)
+        """Parse rows independently after the strict provider contract."""
+
+        payload = _decode_llm_content(result)
+        if not isinstance(payload, dict) or not isinstance(payload.get("rows"), list):
+            # Container defects are terminal for this batch: there is no
+            # reliable row boundary to preserve.
+            raise ValueError("risk coverage response rows must be a list")
+        wire_invalid.clear()
+        parsed: list[RiskCoverageWireRow] = []
+        for index, raw_row in enumerate(payload["rows"]):
+            risk_id = (
+                raw_row.get("risk_id", f"row-{index + 1}")
+                if isinstance(raw_row, dict)
+                else f"row-{index + 1}"
+            )
+            if not isinstance(risk_id, str) or not risk_id.strip():
+                risk_id = f"row-{index + 1}"
+            try:
+                row = RiskCoverageWireRow.model_validate(raw_row)
+            except ValidationError as exc:
+                detail = " ".join(str(exc).split())
+                if len(detail) > 240:
+                    detail = detail[:237] + "..."
+                wire_invalid.append(
+                    RiskCoverageInvalidRow(
+                        risk_id=risk_id,
+                        reason=f"wire_row_invalid: {detail}",
+                    )
+                )
+                continue
+            # Validate request-local membership separately from shape so the
+            # saved evidence retains stable, actionable rejection reasons.
+            reason = None
+            if row.risk_id not in risk_ids:
+                reason = "unknown_risk_id"
+            elif any(
+                item.constraint_id not in constraint_ids
+                for item in row.covering_constraints
+            ):
+                reason = "unknown_covering_constraint"
+            elif any(
+                item.source_ref not in evidence_refs
+                for item in (
+                    *row.evidence,
+                    *(e for c in row.covering_constraints for e in c.evidence),
+                )
+            ):
+                reason = "unknown_evidence_source_ref"
+            if reason is not None:
+                wire_invalid.append(
+                    RiskCoverageInvalidRow(risk_id=risk_id, reason=reason)
+                )
+            else:
+                parsed.append(row)
+        # Use the dynamic model for the transport-facing schema above, but
+        # return the row-isolated base model for deterministic semantic checks.
+        return RiskCoverageReview(rows=tuple(parsed))
 
     review, _, error_msg = safe_llm_call(
         llm_client=llm_client,
@@ -909,8 +1154,13 @@ def _run_one_review_call(
         prompt_template_hashes=_review_prompt_hashes(loader),
     )
     if error_msg is not None or review is None:
-        return None, error_msg or "risk coverage review returned no result"
-    return tuple(review.rows), None
+        return _CoverageCallResult(
+            invalid_rows=tuple(wire_invalid),
+            failure_reason=error_msg or "risk coverage review returned no result",
+        )
+    return _CoverageCallResult(
+        rows=tuple(review.rows), invalid_rows=tuple(wire_invalid)
+    )
 
 
 def run_risk_coverage_review(
@@ -963,15 +1213,18 @@ def run_risk_coverage_review(
         )
 
     system_prompt = template_loader.render_prompt(SYSTEM_TEMPLATE)
+    all_source_excerpts = _build_coverage_source_excerpts(loss_analysis, risk_cards)
 
     def _render_user_prompt(cards: list[RiskCard]) -> str:
+        prompt_views = _coverage_prompt_views(
+            loss_analysis=loss_analysis,
+            risk_cards=cards,
+            source_excerpts=_batch_source_excerpts(all_source_excerpts, cards),
+        )
         return template_loader.render_prompt(
             USER_TEMPLATE,
             use_case_text=use_case_text,
-            risk_cards=[_card_view(card, loss_analysis) for card in cards],
-            losses=loss_analysis.risk_card_losses + loss_analysis.use_case_losses,
-            hazards=loss_analysis.hazards,
-            security_constraints=loss_analysis.security_constraints,
+            **prompt_views,
         )
 
     plan = plan_review_batches(
@@ -984,11 +1237,12 @@ def run_risk_coverage_review(
     groups = [list(batch) for batch in plan.batches]
 
     merged: list[RiskCoverageWireRow] = []
+    wire_invalid: list[RiskCoverageInvalidRow] = []
     failures: list[str] = []
     call_count = 0
     for group in groups:
         call_count += 1
-        rows, failure_reason = _run_one_review_call(
+        call_result = _run_one_review_call(
             llm_client=llm_client,
             loss_analysis=loss_analysis,
             cards=group,
@@ -997,14 +1251,16 @@ def run_risk_coverage_review(
             loader=template_loader,
             temperature=temperature,
             max_completion_tokens=budget,
+            source_excerpts=_batch_source_excerpts(all_source_excerpts, group),
         )
-        if rows is None:
-            failures.append(failure_reason or "risk coverage review returned no result")
+        wire_invalid.extend(call_result.invalid_rows)
+        if call_result.failure_reason is not None:
+            failures.append(call_result.failure_reason)
             continue
-        merged.extend(rows)
+        merged.extend(call_result.rows)
         # A batch that omits one of its cards is a batch failure with a typed
         # reason, even though its other rows survive per-row validation.
-        returned = {row.risk_id for row in rows}
+        returned = {row.risk_id for row in call_result.rows}
         omitted = [card.risk_id for card in group if card.risk_id not in returned]
         if omitted:
             failures.append("batch_omitted_cards: " + ", ".join(sorted(omitted)))
@@ -1017,6 +1273,19 @@ def run_risk_coverage_review(
         tuple(merged),
         loss_analysis=loss_analysis,
         risk_cards=risk_cards,
+        source_excerpts=all_source_excerpts,
+        returned_risk_ids=tuple(item.risk_id for item in wire_invalid),
+    )
+    invalid = tuple(
+        sorted(
+            (*wire_invalid, *invalid),
+            key=lambda item: (
+                {card.risk_id: index for index, card in enumerate(risk_cards)}.get(
+                    item.risk_id, len(risk_cards)
+                ),
+                item.reason,
+            ),
+        )
     )
     summary = _summarize(
         valid,

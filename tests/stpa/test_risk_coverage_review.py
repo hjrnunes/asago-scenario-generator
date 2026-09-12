@@ -173,20 +173,24 @@ def _valid_rows() -> dict:
                 "risk_id": "risk-a",
                 "protects": "customer financial records",
                 "against": "provider leakage",
-                "covering_constraints": ["SC-1"],
                 "coverage": "full",
                 "missing_protection": None,
                 "evidence": [
                     {
-                        "source_ref": "risk-a",
-                        "quote": "Sensitive account data reaches an unauthorized party.",
+                        "source_ref": "source_2",
                         "meaning": "The card names the disclosure.",
                     },
+                ],
+                "covering_constraints": [
                     {
-                        "source_ref": "SC-1",
-                        "quote": "keep financial records inside the system",
-                        "meaning": "The rule keeps the records inside.",
-                    },
+                        "constraint_id": "SC-1",
+                        "evidence": [
+                            {
+                                "source_ref": "source_19",
+                                "meaning": "The rule keeps the records inside.",
+                            }
+                        ],
+                    }
                 ],
                 "rationale": "The rule protects the same records from the same leak.",
             },
@@ -199,8 +203,7 @@ def _valid_rows() -> dict:
                 "missing_protection": "No rule prevents an unauthorized record write.",
                 "evidence": [
                     {
-                        "source_ref": "risk-b",
-                        "quote": "An attacker changes a stored record.",
+                        "source_ref": "source_5",
                         "meaning": "The card names the write.",
                     }
                 ],
@@ -215,8 +218,7 @@ def _valid_rows() -> dict:
                 "missing_protection": "No rule constrains output fairness.",
                 "evidence": [
                     {
-                        "source_ref": "risk-c",
-                        "quote": "The model produces discriminatory output.",
+                        "source_ref": "source_8",
                         "meaning": "The card names the biased output.",
                     }
                 ],
@@ -231,8 +233,7 @@ def _valid_rows() -> dict:
                 "missing_protection": None,
                 "evidence": [
                     {
-                        "source_ref": "risk-d",
-                        "quote": "A physical actuator injures a bystander.",
+                        "source_ref": "source_11",
                         "meaning": "The card names a physical harm.",
                     }
                 ],
@@ -300,6 +301,19 @@ class TestValidReview:
         ]
         assert artifact["rows_invalid"] == []
         assert artifact["rows_missing"] == []
+        risk_a = artifact["rows"][0]
+        assert risk_a["evidence"] == [
+            {
+                "source_ref": "risk-a",
+                "quote": "Sensitive account data reaches an unauthorized party.",
+                "meaning": "The card names the disclosure.",
+            },
+            {
+                "source_ref": "SC-1",
+                "quote": "The agent must keep financial records inside the system.",
+                "meaning": "The rule keeps the records inside.",
+            },
+        ]
         summary = artifact["summary"]
         assert summary["full"] == 1
         assert summary["partial"] == 1
@@ -364,10 +378,10 @@ class TestDeterministicValidation:
         assert artifact["summary"]["rows_missing"] == 0
         return artifact
 
-    def test_non_substring_quote_is_recorded_as_an_invalid_row(self, tmp_path):
+    def test_unknown_source_handle_is_recorded_as_an_invalid_row(self, tmp_path):
         rows = _valid_rows()
-        rows["rows"][0]["evidence"][1]["quote"] = "a paraphrase, not a quotation"
-        self._single_invalid(tmp_path, rows, "risk-a", "quote_not_a_substring")
+        rows["rows"][0]["evidence"][0]["source_ref"] = "source_999"
+        self._single_invalid(tmp_path, rows, "risk-a", "unknown_evidence_source_ref")
 
     def test_cited_card_cannot_be_not_applicable(self, tmp_path):
         rows = _valid_rows()
@@ -381,14 +395,12 @@ class TestDeterministicValidation:
     def test_not_applicable_card_cannot_be_full(self, tmp_path):
         rows = _valid_rows()
         rows["rows"][3]["coverage"] = "full"
-        rows["rows"][3]["covering_constraints"] = ["SC-1"]
-        rows["rows"][3]["evidence"].append(
+        rows["rows"][3]["covering_constraints"] = [
             {
-                "source_ref": "SC-1",
-                "quote": "keep financial records inside the system",
-                "meaning": "The rule.",
+                "constraint_id": "SC-1",
+                "evidence": [{"source_ref": "source_19", "meaning": "The rule."}],
             }
-        )
+        ]
         self._single_invalid(
             tmp_path, rows, "risk-d", "not_applicable_card_reports_coverage"
         )
@@ -429,36 +441,62 @@ class TestDeterministicValidation:
         # The omitting batch is a batch failure with its typed reason.
         assert artifact["failure_reason"] == "batch_omitted_cards: risk-d"
 
-    def test_unknown_constraint_id_fails_by_wire_schema(self, tmp_path):
+    def test_unknown_constraint_id_isolated_to_one_row(self, tmp_path):
         rows = _valid_rows()
-        rows["rows"][0]["covering_constraints"] = ["SC-9"]
-        rows["rows"][0]["evidence"][1]["source_ref"] = "SC-9"
-        outcome = _run_review(tmp_path, rows=rows)
+        rows["rows"][0]["covering_constraints"] = [
+            {
+                "constraint_id": "SC-9",
+                "evidence": [{"source_ref": "source_19", "meaning": "The rule."}],
+            }
+        ]
+        self._single_invalid(tmp_path, rows, "risk-a", "unknown_covering_constraint")
 
-        # The closed literal id set rejects the whole response, so no row
-        # from that batch survives.
-        assert outcome.status == "unavailable"
-        assert outcome.failure_reason is not None
+    def test_malformed_handle_row_keeps_valid_sibling(self, tmp_path):
+        rows = _valid_rows()
+        rows["rows"] = [
+            rows["rows"][0],
+            {
+                "risk_id": "risk-b",
+                "protects": "stored record integrity",
+                "against": "an attacker",
+                "covering_constraints": [],
+                "coverage": "none",
+                "missing_protection": "No rule prevents an unauthorized write.",
+                "evidence": [{"source_ref": 999, "meaning": "Malformed handle."}],
+                "rationale": "The malformed row must not discard risk-a.",
+            },
+        ]
+        outcome = _run_review(tmp_path, rows=rows)
+        artifact = yaml.safe_load((tmp_path / ARTIFACT_FILENAME).read_text())
+
+        assert outcome.status == "partial"
+        assert [row["risk_id"] for row in artifact["rows"]] == ["risk-a"]
+        assert len(artifact["rows_invalid"]) == 1
+        assert artifact["rows_invalid"][0]["risk_id"] == "risk-b"
+        assert artifact["rows_invalid"][0]["reason"].startswith("wire_row_invalid:")
+        assert artifact["rows_missing"] == ["risk-c", "risk-d"]
 
     def test_row_requires_its_own_card_quote(self, tmp_path):
         rows = _valid_rows()
         rows["rows"][1]["evidence"] = [
             {
-                "source_ref": "L-2",
-                "quote": "Stored records are corrupted.",
+                "source_ref": "source_14",
                 "meaning": "The loss.",
             }
         ]
         self._single_invalid(tmp_path, rows, "risk-b", "no_own_card_quote")
 
+    @pytest.mark.parametrize("invalid_source", ["source_999", "source_5"])
     def test_every_batch_is_issued_when_an_earlier_batch_has_invalid_rows(
-        self, tmp_path
+        self, tmp_path, invalid_source
     ):
         """A one-token budget forces four one-card batches; all are called."""
         full = _valid_rows()
         # One response per planned batch, each carrying only its own card.
         first = {"rows": [full["rows"][0]]}
-        first["rows"][0]["evidence"][1]["quote"] = "not a quotation"
+        first["rows"][0]["covering_constraints"][0]["evidence"][0]["source_ref"] = (
+            invalid_source
+        )
         responses = [
             first,
             {"rows": [full["rows"][1]]},
@@ -499,14 +537,28 @@ class TestDeterministicValidation:
             "risk-d",
         ]
         assert artifact["rows_invalid"] == [
-            {"risk_id": "risk-a", "reason": "quote_not_a_substring"}
+            {"risk_id": "risk-a", "reason": "unknown_evidence_source_ref"}
         ]
         assert list(artifact["batching"]["planned_batch_sizes"]) == [1, 1, 1, 1]
+        # A globally real handle (source_5 belongs to risk-b) is still invalid
+        # when it was not offered in risk-a's request. Each request includes
+        # only its own card passages, plus the complete graph, exactly once.
+        for card, call in zip(_cards(), client.calls, strict=True):
+            assert call.user_prompt.count(card.risk_description) == 1
+            assert call.user_prompt.count(f"({card.risk_id}) {card.consequence}") == 1
+            for other in _cards():
+                if other.risk_id != card.risk_id:
+                    assert other.risk_description not in call.user_prompt
+                    assert (
+                        f"({other.risk_id}) {other.consequence}" not in call.user_prompt
+                    )
+            for constraint in analysis.security_constraints:
+                assert call.user_prompt.count(constraint.rule) == 1
 
     def test_all_invalid_rows_report_unavailable(self, tmp_path):
         rows = _valid_rows()
         for row in rows["rows"]:
-            row["evidence"][0]["quote"] = "not a quotation"
+            row["evidence"][0]["source_ref"] = "source_999"
         outcome = _run_review(tmp_path, rows=rows)
 
         assert outcome.status == "unavailable"
@@ -521,7 +573,7 @@ class TestReviewNeverBlocks:
     def test_run_continues_to_stage_2_after_an_unavailable_review(self, tmp_path):
         client = setup_sp1_mock_client()
         # The run supplies one card (atlas-001).  The wire accepts this row;
-        # the deterministic quote rule rejects it, and because it is the only
+        # the deterministic source-handle rule rejects it, and because it is the only
         # row the review is unavailable without blocking the run.
         bad = {
             "rows": [
@@ -534,8 +586,7 @@ class TestReviewNeverBlocks:
                     "missing_protection": "No rule protects the boundary.",
                     "evidence": [
                         {
-                            "source_ref": "atlas-001",
-                            "quote": "not a quotation from the card",
+                            "source_ref": "source_999",
                             "meaning": "The card.",
                         }
                     ],
@@ -558,7 +609,7 @@ class TestReviewNeverBlocks:
         artifact = yaml.safe_load((tmp_path / ARTIFACT_FILENAME).read_text())
         assert artifact["status"] == "unavailable"
         assert artifact["rows_invalid"] == [
-            {"risk_id": "atlas-001", "reason": "quote_not_a_substring"}
+            {"risk_id": "atlas-001", "reason": "unknown_evidence_source_ref"}
         ]
         assert any(
             "risk_coverage_review unavailable" in warning
@@ -587,8 +638,7 @@ class TestReviewNeverBlocks:
                     "missing_protection": "No rule protects the boundary.",
                     "evidence": [
                         {
-                            "source_ref": "atlas-001",
-                            "quote": "Risk of prompt injection",
+                            "source_ref": "source_2",
                             "meaning": "The card.",
                         }
                     ],
@@ -603,8 +653,7 @@ class TestReviewNeverBlocks:
                     "missing_protection": "No rule protects the boundary.",
                     "evidence": [
                         {
-                            "source_ref": "atlas-001",
-                            "quote": "Risk of prompt injection",
+                            "source_ref": "source_2",
                             "meaning": "The card.",
                         }
                     ],
@@ -708,6 +757,13 @@ class TestPinnedRuns:
 
 
 class TestSplitRule:
+    def test_source_index_payload_growth_is_included_in_estimate(self):
+        short_prompt = "source index: [source_1] (risk-a) short"
+        long_prompt = "source index: [source_1] (risk-a) " + ("exact text " * 500)
+        assert estimated_review_tokens("system", long_prompt, 1) > (
+            estimated_review_tokens("system", short_prompt, 1)
+        )
+
     def test_threshold_splits_a_long_response_estimate(self):
         system = "system"
         user = "user"
@@ -764,6 +820,27 @@ class TestSplitRule:
 
 
 class TestRowSchema:
+    def test_provider_wire_uses_nested_constraint_evidence_handles(self):
+        from asago_scenario_generator.stpa.system_model.risk_coverage_review import (
+            _provider_review_model,
+        )
+
+        provider = _provider_review_model(
+            ("risk-a",), ("SC-1",), ("source_1", "source_2")
+        )
+        row_schema = provider.model_json_schema()["$defs"][
+            "ProviderRiskCoverageRowWithNestedConstraints"
+        ]
+        assert row_schema["properties"]["covering_constraints"]["items"][
+            "$ref"
+        ].endswith("ProviderRiskCoverageConstraint")
+        assert (
+            "quote"
+            not in provider.model_json_schema()["$defs"][
+                "ProviderRiskCoverageEvidence"
+            ]["properties"]
+        )
+
     def test_row_is_closed_and_frozen(self):
         from asago_scenario_generator.stpa.system_model.risk_coverage_review import (
             RiskCoverageRow,

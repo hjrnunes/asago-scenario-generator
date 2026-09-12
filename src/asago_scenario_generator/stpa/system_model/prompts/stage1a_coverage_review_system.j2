@@ -17,9 +17,10 @@ For every supplied risk card, return exactly one row and decide:
    or capability the risk threatens, in your own words.
 2. **Who or what acts against it.** `against` names the actor or path the
    card itself names, in one phrase. Use `null` when the card names none.
-3. **Which constraints cover it.** List the exact `SC-*` ids whose rules
-   protect the same party or asset against the same actor or path. List none
-   when no rule does.
+3. **Which constraints cover it.** Select exact `SC-*` ids whose rules protect
+   the same party or asset against the same actor or path. For each selected
+   constraint, nest the source-handle evidence that supports the selection.
+   Select none when no rule does.
 4. **How complete that coverage is.**
    - For a card the analysis cites, choose `full`, `partial`, or `none`.
    - For a card the analysis marks `not_applicable`, choose
@@ -38,20 +39,22 @@ sending that data to a provider. When you are unsure, prefer `partial` over
 
 ## Evidence rules
 
-Every row carries `evidence`: one or more exact quotations, each with the
-`source_ref` you copied it from and a one-sentence `meaning`.
+Every row carries `evidence`: one or more selections from the exact local
+source excerpt index in the user prompt. Each selection has only a local
+`source_ref` handle and a one-sentence `meaning`. Select the handle whose
+displayed excerpt supports the decision; do not copy, paraphrase, reflow, or
+repair source text. Code copies the exact excerpt bytes and maps the handle to
+the durable source id after the response.
 
-- `source_ref` is the row's own `risk_id`, an `SC-*` constraint id, an `H-*`
-  hazard id, or an `L-*` loss id.
-- A quotation is copied verbatim from one supplied record. Do not paraphrase,
-  reflow, or repair it. A card quote must appear in that card's name,
-  description, or consequence; a constraint quote must appear in its `rule`
-  or one of its `applies_when` conditions; a hazard or loss quote must appear
-  in its description.
-- Every row needs at least one quotation whose `source_ref` is its own
-  `risk_id`.
-- A row with coverage `full` or `partial` needs at least one quotation from
-  every constraint it lists in `covering_constraints`.
+- Every row needs at least one evidence selection whose excerpt belongs to the
+  row's own `risk_id`.
+- `covering_constraints` is a list of nested objects. Each object names one
+  selected `constraint_id` and carries its own `evidence` selections. Do not
+  maintain a second flat constraint-evidence registry.
+- A row with coverage `full` or `partial` needs at least one evidence selection
+  inside every nested covering-constraint object, and that evidence must come
+  from the selected constraint's exact rule or applies-when excerpt.
+- A row with coverage `none` has no covering-constraint objects.
 
 ## Response format
 
@@ -65,12 +68,18 @@ supplied risk card and nothing else.
       "risk_id": "<supplied risk id>",
       "protects": "...",
       "against": "..." or null,
-      "covering_constraints": ["SC-1"],
       "coverage": "full",
       "missing_protection": null,
       "evidence": [
-        {"source_ref": "<supplied risk id>", "quote": "...", "meaning": "..."},
-        {"source_ref": "SC-1", "quote": "...", "meaning": "..."}
+        {"source_ref": "source_1", "meaning": "The card names the protected interest."}
+      ],
+      "covering_constraints": [
+        {
+          "constraint_id": "SC-1",
+          "evidence": [
+            {"source_ref": "source_2", "meaning": "The rule protects that interest."}
+          ]
+        }
       ],
       "rationale": "..."
     }

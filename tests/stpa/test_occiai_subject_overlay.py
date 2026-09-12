@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 import yaml
 
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
@@ -41,7 +40,6 @@ from asago_scenario_generator.stpa.scenario_prod.authoring import (
     AuthoredScenarioDraft,
     AuthoredStimulus,
     AuthoredUnsafeObservation,
-    AuthoringResponse,
     ScenarioHold,
     admit_oracle_kinds,
     author_candidate_scenarios,
@@ -58,9 +56,7 @@ from asago_scenario_generator.stpa.system_model.target_derived_structure import 
 
 from tests.stpa.sp1_helpers import MockLLMClient
 
-FIXTURES = (
-    Path(__file__).resolve().parents[1] / "fixtures" / "miniocciai-baseline-rev2"
-)
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "miniocciai-baseline-rev2"
 FROZEN_OBSERVATIONS_DIGEST = (
     "8e179fa6a288a1d818a95bd01933ca50768876190465adbeaaaba1a7a191018e"
 )
@@ -303,9 +299,8 @@ def test_os7_every_erased_candidate_now_prepares_an_authoring_call(tmp_path):
             admission.status == "compile" for admission in admissions.values()
         ), key
         client = MockLLMClient()
-        client.set_response_for(
-            AuthoringResponse,
-            {"scenarios": [], "no_scenario_reason": "no compilable check"},
+        client.set_response_queue(
+            [{"scenarios": [], "no_scenario_reason": "no compilable check"}]
         )
         outcome = author_candidate_scenarios(
             client,
@@ -490,13 +485,11 @@ def test_st1_the_frozen_record_reads_as_unprocessable_candidates():
         if row["resolution"] is not None
     }
     assert resolutions == EXPECTED_EXCLUSIONS
-    errored = [
-        row for row in rows if row["resolution"] is None and row.get("error")
-    ]
+    errored = [row for row in rows if row["resolution"] is None and row.get("error")]
     assert len(errored) == 7
-    assert all(
-        "session-identity" in row["error"] for row in errored
-    ), "the frozen failure was the raising session-identity rule"
+    assert all("session-identity" in row["error"] for row in errored), (
+        "the frozen failure was the raising session-identity rule"
+    )
 
     # The new terminal model reads those rows as unprocessable candidates.
     from types import SimpleNamespace

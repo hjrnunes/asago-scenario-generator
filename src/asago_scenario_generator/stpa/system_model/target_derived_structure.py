@@ -32,6 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.stpa.infra.llm import LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import (
+    _decode_llm_content,
     StageError,
     safe_llm_call,
 )
@@ -167,8 +168,17 @@ class _ToolFact:
         self.is_text_search = is_text_search
 
 
+class _BeliefSelection(BaseModel):
+    """Current provider wire: belief text and feedback are one record."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: StrictStr = Field(min_length=1)
+    feedback_tool: StrictStr | None = None
+
+
 class _BeliefFeedbackEntry(BaseModel):
-    """One belief's declared feedback source."""
+    """Historical positional belief-feedback wire, kept for decoding only."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -178,6 +188,17 @@ class _BeliefFeedbackEntry(BaseModel):
 
 class _BeliefsResponse(BaseModel):
     """Provider response for the one bounded domain-beliefs call."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    controller_purpose: StrictStr = Field(min_length=1)
+    beliefs: list[_BeliefSelection] = Field(
+        default_factory=list, max_length=_MAX_BELIEFS
+    )
+
+
+class _LegacyBeliefsResponse(BaseModel):
+    """Explicit compatibility decoder for the retired positional wire."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -392,30 +413,27 @@ def _build_belief_records(
         )
     known_names = _known_identifier_names(tools)
     tool_names = {tool.tool_name for tool in tools}
-    feedback_by_index: dict[int, str | None] = {}
     warnings: list[str] = []
-    for entry in response.belief_feedback:
-        if entry.belief_index < 0 or entry.belief_index >= len(response.beliefs):
+    decisions: list[tuple[str, str | None, str | None]] = []
+    for selection in response.beliefs:
+        feedback_tool = selection.feedback_tool
+        if feedback_tool is not None and feedback_tool not in tool_names:
             warnings.append(
-                f"Belief feedback names out-of-range belief index "
-                f"{entry.belief_index}; treated as unattached."
-            )
-            continue
-        if entry.tool_name is not None and entry.tool_name not in tool_names:
-            warnings.append(
-                f"Belief feedback names unknown tool {entry.tool_name!r}; "
+                f"Belief feedback names unknown tool {feedback_tool!r}; "
                 "treated as unattached."
             )
-            feedback_by_index[entry.belief_index] = None
-        else:
-            feedback_by_index[entry.belief_index] = entry.tool_name
-    decisions: list[tuple[str, str | None]] = [
-        (text, _classify_belief(text, known_names)) for text in response.beliefs
-    ]
+            feedback_tool = None
+        decisions.append(
+            (
+                selection.text,
+                _classify_belief(selection.text, known_names),
+                feedback_tool,
+            )
+        )
     records: list[BeliefRecord] = []
     seen: set[str] = set()
     next_number = next_pm_number
-    for index, (text, reason) in enumerate(decisions):
+    for index, (text, reason, feedback_tool) in enumerate(decisions):
         if reason is not None:
             records.append(
                 BeliefRecord(
@@ -443,11 +461,70 @@ def _build_belief_records(
                 pm_id=f"PM-1-{next_number}",
                 text=text,
                 accepted=True,
-                feedback_tool=feedback_by_index.get(index),
+                feedback_tool=feedback_tool,
             )
         )
         next_number += 1
     return tuple(records), next_number, warnings
+
+
+def _parse_beliefs_response(result: Any) -> _BeliefsResponse:
+    """Parse only the current nested provider wire."""
+
+    payload = _decode_llm_content(result)
+    if not isinstance(payload, dict):
+        raise TypeError("beliefs response must be one JSON object")
+    return _BeliefsResponse.model_validate(payload)
+
+
+def decode_legacy_beliefs_response(
+    result: Any,
+    legacy_warnings: list[str] | None = None,
+) -> _BeliefsResponse:
+    """Decode the retired positional beliefs wire for explicit offline callers.
+
+    The live beliefs call never invokes this adapter.  A caller handling a
+    historical artifact must opt in and receives the same nested current model
+    before materialization.  Duplicate indexes keep the first selection and
+    are reported, while out-of-range entries are reported and unattached.
+    """
+
+    if isinstance(result, dict):
+        payload = result
+    else:
+        payload = _decode_llm_content(result)
+    if not isinstance(payload, dict):
+        raise TypeError("legacy beliefs response must be one JSON object")
+    legacy = _LegacyBeliefsResponse.model_validate(payload)
+    feedback_by_index: dict[int, str | None] = {}
+    for entry in legacy.belief_feedback:
+        if entry.belief_index < 0 or entry.belief_index >= len(legacy.beliefs):
+            if legacy_warnings is not None:
+                legacy_warnings.append(
+                    "Belief feedback names out-of-range belief index "
+                    f"{entry.belief_index}; treated as unattached."
+                )
+            continue
+        if entry.belief_index in feedback_by_index:
+            if legacy_warnings is not None:
+                legacy_warnings.append(
+                    "Belief feedback repeats belief index "
+                    f"{entry.belief_index}; kept the first selection."
+                )
+            continue
+        feedback_by_index[entry.belief_index] = entry.tool_name
+    return _BeliefsResponse.model_validate(
+        {
+            "controller_purpose": legacy.controller_purpose,
+            "beliefs": [
+                {
+                    "text": text,
+                    "feedback_tool": feedback_by_index.get(index),
+                }
+                for index, text in enumerate(legacy.beliefs)
+            ],
+        }
+    )
 
 
 def _call_beliefs(
@@ -489,12 +566,12 @@ def _call_beliefs(
         validation_retries=1,
         validation_retry_feedback=(
             " Return one closed JSON object with fields controller_purpose "
-            f"(one grounded sentence), beliefs (at most {_MAX_BELIEFS} short "
-            "strings), and belief_feedback (one object per belief with "
-            "belief_index and tool_name or null)."
+            f"(one grounded sentence) and beliefs (at most {_MAX_BELIEFS} "
+            "objects, each with text and feedback_tool or null)."
         ),
         validation_retry_include_schema=False,
         validation_retry_include_response=True,
+        result_parser=_parse_beliefs_response,
     )
     if error is not None or result is None:
         return None, [f"Beliefs call failed: {error}"]

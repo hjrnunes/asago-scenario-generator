@@ -4,9 +4,13 @@
 
 ---
 
-## Current Hazard Graph
+## Current Graph
 
-### Losses (immutable, shown for context — do not return them)
+Losses are immutable context. Existing losses and graph records use canonical
+IDs. Any new record in your response uses a local `handle`; never allocate a
+canonical ID for an addition.
+
+### Losses
 {% for loss in losses %}
 - **{{ loss.loss_id }}** ({{ loss.provenance.value }}): {{ loss.description }}
   {% if loss.source_risk_cards %}Source risks: {{ loss.source_risk_cards | join(", ") }}{% endif %}
@@ -21,16 +25,35 @@
 {% for constraint in security_constraints %}
 - **{{ constraint.constraint_id }}** (related hazards: {{ constraint.related_hazards | join(", ") }})
   Rule: {{ constraint.rule }}
-  Applies when ({{ constraint.applies_when | length }} conditions; return the full list for every constraint):
+  Applies when ({{ constraint.applies_when | length }} conditions):
   {% for condition in constraint.applies_when %}  {{ loop.index }}. {{ condition }}
   {% endfor %}
+  Existing obligations:
+  {% if constraint.obligations %}
+  {% for obligation in constraint.obligations %}
+  - obligation_id: {{ obligation.obligation_id }}
+    kind: {{ obligation.kind }}
+    behavior: {{ obligation.behavior }}
+    rule_span: {{ obligation.rule_span }}
+    {% if obligation.realized_by is not none %}realized_by: {{ obligation.realized_by }}{% endif %}
+    {% if obligation.violated_via is not none %}violated_via: {{ obligation.violated_via }}{% endif %}
+    {% if obligation.observation_role is not none %}observation_role: {{ obligation.observation_role }}{% endif %}
+    {% if obligation.source_outcome is not none %}source_outcome: {{ obligation.source_outcome }}{% endif %}
+    {% if obligation.completion is not none %}completion: {{ obligation.completion }}{% endif %}
+    {% if obligation.projection is not none %}projection: {{ obligation.projection }}{% endif %}
+    {% if obligation.residual is not none %}residual: {{ obligation.residual }}{% endif %}
+    {% if obligation.note is not none %}note: {{ obligation.note }}{% endif %}
+  {% endfor %}
+  {% else %}
+  - none
+  {% endif %}
 {% endfor %}
 
 ---
 
 ## Failed Checks
 
-The current analysis failed these deterministic structural checks:
+The current graph failed these deterministic checks:
 
 {% for check in failing_checks %}
 - {{ check }}
@@ -40,8 +63,8 @@ The current analysis failed these deterministic structural checks:
 
 ## Your Task
 
-Return the complete corrected hazard graph that satisfies every failed
-check: the full `hazards` and `security_constraints` collections and nothing
-else. Preserve every existing hazard and constraint identity. For every
-constraint, return its `rule` and its complete `applies_when` list. Do not
-return losses or risk dispositions.
+Return only the four delta collections described by the system instructions.
+Repair every listed check while preserving all omitted records. Use an edit
+only when an existing record's wording or references must change. Use an
+addition when a missing hazard or constraint is required. Never delete,
+rename, or restate untouched records.

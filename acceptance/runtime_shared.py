@@ -651,6 +651,16 @@ class _SP1MockLLM:
                 (base for base in response_format.__mro__[1:] if base in configured),
                 response_format,
             )
+            # Reuse historical semantic fixtures only at this test boundary.
+            # Product provider schemas remain separate and strict.
+            legacy_type = {
+                "_Stage1aRiskProviderDraft": _SP1LossAnalysisDraft,
+                "_Stage1aGapProviderDraft": _SP1LossAnalysisDraft,
+                "ProviderCoordinationAnalysis": _SP1CoordinationAnalysis,
+                "_CoordinationProviderEnvelope": _SP1CoordinationAnalysis,
+            }.get(wire_response_format.__name__)
+            if legacy_type in configured:
+                response_format = legacy_type
         # Raise exception if configured
         if response_format is not None and response_format in self._exception_types:
             raise self._exception_types[response_format]
@@ -681,7 +691,29 @@ class _SP1MockLLM:
             content = self._response_map[response_format]
         else:
             content = None
-        content = _sp1_complete_semantic_review_fixture(content, wire_response_format)
+        wire_name = getattr(wire_response_format, "__name__", "")
+        if wire_name in {"_Stage1aRiskProviderDraft", "_Stage1aGapProviderDraft"}:
+            from acceptance.fixture_adapters import legacy_stage1a_provider_payload
+
+            content = legacy_stage1a_provider_payload(
+                content, risk=wire_name == "_Stage1aRiskProviderDraft"
+            )
+        elif (
+            wire_name
+            in {"ProviderCoordinationAnalysis", "_CoordinationProviderEnvelope"}
+            and response_format is _SP1CoordinationAnalysis
+            and isinstance(content, dict)
+        ):
+            content = {
+                key: value
+                for key, value in content.items()
+                if key != "integrity_findings"
+            }
+            if wire_name == "_CoordinationProviderEnvelope":
+                content.pop("semantic_review", None)
+        content = _sp1_complete_semantic_review_fixture(
+            content, wire_response_format, user_prompt=user_prompt
+        )
         return LLMResult(
             content=content,
             prompt_tokens=100,
@@ -692,7 +724,9 @@ class _SP1MockLLM:
         )
 
 
-def _sp1_complete_semantic_review_fixture(content: Any, response_format: type | None):
+def _sp1_complete_semantic_review_fixture(
+    content: Any, response_format: type | None, *, user_prompt: str = ""
+):
     """Complete the static Call 3 fixture for the current provider schema.
 
     Stage 1 can merge multiple authoritative loss-analysis drafts and therefore
@@ -703,9 +737,8 @@ def _sp1_complete_semantic_review_fixture(content: Any, response_format: type | 
 
     The provider contract requires an explicit row for every hazard and
     constraint.  Missing rows are therefore completed as ``preserve`` rows
-    with no newly selected edges.  In particular, this helper does not derive
-    a hazard ID from a constraint suffix: the fixture may only retain the
-    exact IDs and relationships it already names.
+    retaining the exact current edges explicitly rendered in the request.
+    This helper never derives a hazard ID from a constraint suffix.
     """
     if not isinstance(content, dict) or not isinstance(
         content.get("semantic_review"), dict
@@ -752,6 +785,19 @@ def _sp1_complete_semantic_review_fixture(content: Any, response_format: type | 
 
     review = copy.deepcopy(content["semantic_review"])
     hazard_ids = set(_identity_values("hazards", "hazard_id"))
+    supplied_edges: dict[str, list[str]] = {}
+    current_constraint: str | None = None
+    for line in user_prompt.splitlines():
+        constraint_match = re.match(r"\s*- \*\*(SC-\d+)\*\* proposed wording:", line)
+        if constraint_match:
+            current_constraint = constraint_match.group(1)
+        elif "All current hazard edges:" in line and current_constraint is not None:
+            supplied_edges[current_constraint] = [
+                item.strip()
+                for item in line.split("All current hazard edges:", 1)[1].split(",")
+                if item.strip()
+            ]
+            current_constraint = None
 
     collection_specs = {
         "hazards": ("hazard_id", "Acceptance fixture preserves the supplied hazard."),
@@ -800,7 +846,9 @@ def _sp1_complete_semantic_review_fixture(content: Any, response_format: type | 
                 row.setdefault("missing_fact", None)
                 row["related_hazards"] = [
                     hazard
-                    for hazard in row.get("related_hazards", [])
+                    for hazard in row.get(
+                        "related_hazards", supplied_edges.get(identity, [])
+                    )
                     if hazard in hazard_ids
                 ]
                 row.setdefault("source_evidence", [])
@@ -1375,13 +1423,15 @@ def _sp1_make_risk_cards() -> list:
 
 
 def _sp1_valid_revision_patch_dict() -> dict:
-    """A graph-revision patch that restates the shared fixture's graph.
+    """Explicit edits for the shared fixture graph.
 
-    The patch wire carries only hazards and constraints; losses and
-    qualifiers are owned by the prior analysis and deterministic code.
+    Unedited graph records remain in the prior analysis. The fixture
+    explicitly supplies obligations for any rule or scope edit.
     """
     return {
-        "hazards": [
+        "hazard_additions": [],
+        "constraint_additions": [],
+        "hazard_edits": [
             {
                 "hazard_id": "H-1",
                 "description": "Agent executes unintended action",
@@ -1393,7 +1443,7 @@ def _sp1_valid_revision_patch_dict() -> dict:
                 "related_losses": ["L-2"],
             },
         ],
-        "security_constraints": [
+        "constraint_edits": [
             {
                 "constraint_id": "SC-1",
                 "rule": (
@@ -1401,12 +1451,14 @@ def _sp1_valid_revision_patch_dict() -> dict:
                 ),
                 "related_hazards": ["H-1"],
                 "applies_when": [],
+                "obligations": [],
             },
             {
                 "constraint_id": "SC-2",
                 "rule": "Must not expose data",
                 "related_hazards": ["H-2"],
                 "applies_when": [],
+                "obligations": [],
             },
         ],
     }

@@ -293,16 +293,16 @@ def run_static_checks(runner: QARunner) -> None:
     call3_sys = _read_template("stage2_call3_system.j2")
     if call3_sys is not None:
         runner.check(
-            "stage2-call3: system prompt contains 'Do NOT fix'",
-            "Do NOT fix" in call3_sys,
+            "stage2-call3: system prompt contains 'Deterministic code has already checked'",
+            "Deterministic code has already checked" in call3_sys,
         )
         runner.check(
-            "stage2-call3: system prompt contains 'flag them for the revision step'",
-            "flag them for the revision step" in call3_sys,
+            "stage2-call3: system prompt contains 'do not fix them here'",
+            "do not fix them here" in call3_sys,
         )
         runner.check(
-            "stage2-call3: system prompt contains 'integrity_findings'",
-            "integrity_findings" in call3_sys,
+            "stage2-call3: system prompt contains 'Do not return an'",
+            "Do not return an" in call3_sys,
         )
         runner.check(
             "stage2-call3: system prompt does not contain 'connection_assignments'",

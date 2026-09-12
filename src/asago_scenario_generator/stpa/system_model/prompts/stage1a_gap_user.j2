@@ -6,12 +6,13 @@
 
 ## Previously Derived Analysis (from organizational risks)
 
-The following losses, hazards, and security constraints have already been derived. Do not duplicate them. You may reference their IDs in new hazards or constraints.
+The following losses, hazards, and security constraints have already been derived. Do not duplicate them. You may reference their canonical IDs in new hazards or constraints.
 
 Treat this as the complete prior dependency view.  If you add a gap, emit its
 new loss before referencing it from a hazard, and emit that hazard before
 referencing it from a security constraint.  Existing IDs may be reused exactly
-as shown; do not invent replacement IDs.
+as shown; do not invent replacement IDs. New records use request-local handles
+and the compiler assigns their canonical IDs after validation.
 
 If the prior view contains losses but no complete hazards/constraints, finish
 that dependency graph in this response.  An empty result is appropriate only
@@ -53,15 +54,6 @@ Use these to systematically check whether every capability has corresponding los
 
 ---
 
-## ID Numbering
-
-Continue from the following IDs:
-- Next loss ID: L-{{ next_loss_num }}
-- Next hazard ID: H-{{ next_hazard_num }}
-- Next security constraint ID: SC-{{ next_sc_num }}
-
----
-
 ## Your Task
 
 Review the use-case description and identify losses, hazards, and security constraints NOT covered by the existing analysis. Systematically check:
@@ -75,8 +67,10 @@ Review the use-case description and identify losses, hazards, and security const
 
 For each gap, derive the complete chain: loss → hazard → security constraint.
 
-Do not duplicate existing entries. New hazards and constraints may reference
-existing IDs where appropriate. Include every materially grounded gap, whether
+Do not duplicate existing entries. Give every new loss, hazard, and constraint
+a unique request-local `handle` such as `payment_loss`, `payment_hazard`, or
+`payment_constraint`. New hazards and constraints may reference existing
+canonical IDs where appropriate and new records by their local handles. Include every materially grounded gap, whether
 operational, systemic, or adversary-actionable. Do not require an adversary,
 entry point, or concrete attack path for inclusion; treat adversarial
 relevance as later causal analysis.

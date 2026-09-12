@@ -33,6 +33,19 @@ Each `source_N` means one exact supplied USE_CASE paragraph, not an inferred fac
 - {{ cp.cp_id }}: {{ cp.description }}
 {% endfor %}
 
+### Deterministic connection diagnostics
+
+Code has already run the structural connection checks for this control
+structure. These diagnostics are supplied for context; do not recompute,
+edit, or replace them in the provider response.
+{% if integrity_findings is defined and integrity_findings %}
+{% for finding in integrity_findings %}
+- {{ finding }}
+{% endfor %}
+{% else %}
+- No deterministic connection findings were reported.
+{% endif %}
+
 ---
 
 ## Your Task
@@ -103,4 +116,6 @@ meaning supports the narrower scope.
    state or controlled processes, conflicting or order-dependent actions, and
    information one controller needs from another. For each required relationship,
    create a coordination link with a coordination mechanism.
-2. Verify connection integrity: check that all FB sources, CA targets, and CP references are valid and that every PM has at least one FB updating it. Report any issues.
+2. Use the deterministic connection diagnostics above as context, then focus
+   on coordination and the complete semantic review. Do not author an
+   integrity finding.

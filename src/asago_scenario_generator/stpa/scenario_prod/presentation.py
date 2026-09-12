@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from asago_scenario_generator.stpa.models.scenario_envelope import GherkinSpec
+from asago_scenario_generator.stpa.models.scenario_envelope import (
+    GherkinSpec,
+    ScenarioEnvelope,
+)
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 
 
@@ -57,3 +60,24 @@ def render_scenario_summary(spec: ScenarioSpec) -> tuple[str, dict, GherkinSpec]
         ],
     )
     return narrative, tree, gherkin
+
+
+def validate_scenario_summary(envelope: ScenarioEnvelope) -> list[str]:
+    """Verify deterministic presentation against its exact scenario authority.
+
+    Formatting rules for optional model-authored presentation do not apply:
+    a supplied feedback factor need not invent a process-model identifier.
+    Every rendered field must still preserve the fixed source hypothesis.
+    """
+    narrative, tree, gherkin = render_scenario_summary(envelope.scenario_spec)
+    expected = {
+        "narrative": narrative,
+        "attack_tree": tree,
+        "gherkin_spec": gherkin,
+        "gherkin_raw": gherkin.to_feature_text(),
+    }
+    return [
+        f"{envelope.scenario_id} deterministic {name} differs from its source summary."
+        for name, value in expected.items()
+        if getattr(envelope, name) != value
+    ]

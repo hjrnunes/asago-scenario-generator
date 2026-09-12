@@ -45,6 +45,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
     FeedbackChannel,
     ReferenceType,
     Responsibility,
+    check_structural_heuristics,
     _is_valid_element_ref,
     normalize_control_action_effect_kind,
 )
@@ -201,6 +202,14 @@ class CoordinationAnalysis(BaseModel):
     coordination_links: list[CoordinationLink] = []
     integrity_findings: list[str] = []
     semantic_review: ControlStructureSemanticReview | None = None
+
+
+class _CoordinationProviderEnvelope(BaseModel):
+    """Current Call 3 wire, excluding deterministic integrity bookkeeping."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    coordination_links: list[CoordinationLink] = Field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -480,7 +489,7 @@ def _coordination_provider_schema(
     )
     return create_model(
         "ProviderCoordinationAnalysis",
-        __base__=CoordinationAnalysis,
+        __base__=_CoordinationProviderEnvelope,
         semantic_review=(review_type, ...),
     )
 
@@ -496,6 +505,12 @@ def _parse_call3_source_selection(
     payload = _decode_llm_content(result)
     if not isinstance(payload, dict):
         raise ValueError("Call 3 response must be one JSON object")
+    unexpected = set(payload) - {"coordination_links", "semantic_review"}
+    if unexpected:
+        raise ValueError(
+            "Call 3 response contains code-owned or unknown fields: "
+            + ", ".join(sorted(unexpected))
+        )
     payload = copy.deepcopy(payload)
     review = payload.get("semantic_review")
     if not isinstance(review, dict):
@@ -2065,6 +2080,18 @@ def _call_2b_control_elements(
 # ---------------------------------------------------------------------------
 
 
+def _deterministic_integrity_findings(
+    control_structure: ControlStructure,
+    loss_analysis: LossAnalysis | None = None,
+) -> tuple[str, ...]:
+    """Return the structural diagnostics computed by deterministic code."""
+    checks = check_structural_heuristics(control_structure, loss_analysis)
+    return tuple(
+        [f"error: {finding}" for finding in checks.errors]
+        + [f"warning: {finding}" for finding in checks.warnings]
+    )
+
+
 def _call_3_coordination(
     *,
     llm_client: LLMClient,
@@ -2075,11 +2102,12 @@ def _call_3_coordination(
     temperature: float,
     loss_analysis: LossAnalysis | None = None,
 ) -> CoordinationAnalysis:
-    """Run Call 3: identify coordination links and verify connection integrity.
+    """Run Call 3: identify coordination links using deterministic diagnostics.
 
-    Returns a CoordinationAnalysis containing coordination links and
-    integrity findings. Does NOT fix integrity issues — flags them for
-    the revision step.
+    Returns a CoordinationAnalysis containing coordination links and the
+    deterministic structural findings supplied to the prompt. The provider
+    reviews coordination and semantic adequacy; it does not recompute or
+    author the integrity list.
 
     Raises:
         StageError: If the LLM call fails or the response fails validation.
@@ -2088,6 +2116,9 @@ def _call_3_coordination(
         _build_call3_source_excerpts(use_case_text, loss_analysis)
         if loss_analysis is not None
         else ()
+    )
+    integrity_findings = _deterministic_integrity_findings(
+        control_structure, loss_analysis
     )
     source_ref_by_canonical = {
         excerpt.canonical_ref: excerpt.local_ref for excerpt in source_excerpts
@@ -2100,9 +2131,9 @@ def _call_3_coordination(
             source_excerpts=source_excerpts,
         )
         if loss_analysis is not None
-        else CoordinationAnalysis
+        else _CoordinationProviderEnvelope
     )
-    return _run_stage2_llm_call(
+    analysis = _run_stage2_llm_call(
         llm_client=llm_client,
         run_dir=run_dir,
         loader=loader,
@@ -2115,6 +2146,7 @@ def _call_3_coordination(
             "loss_analysis": loss_analysis,
             "source_excerpts": source_excerpts,
             "source_ref_by_canonical": source_ref_by_canonical,
+            "integrity_findings": integrity_findings,
         },
         response_format=response_format,
         step="call_3_coordination",
@@ -2138,8 +2170,15 @@ def _call_3_coordination(
             )
         )
         if loss_analysis is not None
-        else None,
+        else lambda result: CoordinationAnalysis(
+            **_CoordinationProviderEnvelope.model_validate(
+                _decode_llm_content(result)
+            ).model_dump()
+        ),
     )
+    # The durable record receives the structural check actually performed
+    # above; the current provider wire cannot supply integrity findings.
+    return analysis.model_copy(update={"integrity_findings": list(integrity_findings)})
 
 
 def _validate_semantic_review_response(

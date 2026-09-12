@@ -38,6 +38,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysis,
     LossAnalysisDraft,
     SecurityConstraint,
+    stamp_proposed_direction,
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
@@ -45,6 +46,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     STAGE,
     STEP_GAP,
     _disposition_loss_contradictions,
+    _CANONICAL_ID_PATTERNS,
     _Stage1aRevisionPatch,
 )
 from pydantic import BaseModel, Field
@@ -607,7 +609,7 @@ class LossAnalysisGatesArtifact(BaseModel):
 def _verify_revision_preserves_prior(
     prior: LossAnalysis, revised: LossAnalysisDraft
 ) -> None:
-    """Fail closed when a revision response drops or changes prior records."""
+    """Fail closed when an assembled revision drops or changes prior records."""
     prior_losses = {
         loss.loss_id: loss for loss in prior.risk_card_losses + prior.use_case_losses
     }
@@ -645,7 +647,12 @@ def _verify_revision_preserves_prior(
 
 
 def _revised_analysis(prior: LossAnalysis, revised: LossAnalysisDraft) -> LossAnalysis:
-    """Validate the revised draft into the final LossAnalysis shape."""
+    """Restamp and validate the assembled revision into final graph shape."""
+    # A revision is a derived graph, even when an untouched prior constraint
+    # carried reviewed stamps.  The reviewed authority belongs only to an
+    # explicitly pinned graph; deterministic revision compilation clears those
+    # stamps and marks entries with proposed authority.
+    stamp_proposed_direction(revised)
     return LossAnalysis.model_validate(
         {
             "risk_card_losses": revised.risk_card_losses,
@@ -662,60 +669,275 @@ def _revision_patch_to_draft(
     patch: _Stage1aRevisionPatch,
     warnings_out: list[str],
 ) -> LossAnalysisDraft:
-    """Convert a graph patch into a full draft the merge validators accept.
+    """Assemble an explicit graph delta over an immutable prior graph.
 
-    Losses and risk dispositions come from the prior analysis.  Each patched
-    constraint carries the authored ``rule`` + ``applies_when`` shape (Phase
-    1.3 as amended) and code composes the description; nothing is carried
-    over or re-derived.  A changed ``applies_when`` list on a constraint
-    whose ``rule`` is unchanged is recorded as a warning, not a failure.
+    The provider returns only edited records and additions.  Existing records
+    omitted from the patch are copied byte-for-byte; additions receive
+    canonical IDs from sorted request-local handles.  All references are
+    resolved against the prior graph plus additions before the ordinary domain
+    validators run.
     """
-    prior_by_id = {c.constraint_id: c for c in prior.security_constraints}
-    constraints = []
-    for constraint in patch.security_constraints:
-        prior_constraint = prior_by_id.get(constraint.constraint_id)
+    prior_hazards = {hazard.hazard_id: hazard for hazard in prior.hazards}
+    prior_constraints = {
+        constraint.constraint_id: constraint
+        for constraint in prior.security_constraints
+    }
+    hazard_edits = _unique_revision_targets(
+        patch.hazard_edits,
+        target_field="hazard_id",
+        label="hazard edit",
+    )
+    constraint_edits = _unique_revision_targets(
+        patch.security_constraint_edits,
+        target_field="constraint_id",
+        label="security constraint edit",
+    )
+    for target in hazard_edits:
+        if target not in prior_hazards:
+            raise ValueError(f"unknown hazard edit target '{target}'")
+    for target in constraint_edits:
+        if target not in prior_constraints:
+            raise ValueError(f"unknown security constraint edit target '{target}'")
+
+    hazard_additions = _unique_revision_handles(
+        patch.hazard_additions,
+        label="hazard addition",
+    )
+    constraint_additions = _unique_revision_handles(
+        patch.security_constraint_additions,
+        label="security constraint addition",
+    )
+    hazard_handle_map = _allocate_revision_handles(
+        hazard_additions,
+        existing_ids=set(prior_hazards),
+        kind="hazard",
+    )
+
+    losses = {
+        loss.loss_id for loss in (*prior.risk_card_losses, *prior.use_case_losses)
+    }
+    assembled_hazards = {
+        hazard_id: hazard.model_copy(deep=True)
+        for hazard_id, hazard in prior_hazards.items()
+    }
+    for edit in patch.hazard_edits:
+        assembled_hazards[edit.hazard_id] = _build_hazard(
+            hazard_id=edit.hazard_id,
+            description=edit.description,
+            related_losses=edit.related_losses,
+            valid_loss_ids=losses,
+        )
+    for addition in patch.hazard_additions:
+        assembled_hazards[hazard_handle_map[addition.handle]] = _build_hazard(
+            hazard_id=hazard_handle_map[addition.handle],
+            description=addition.description,
+            related_losses=addition.related_losses,
+            valid_loss_ids=losses,
+        )
+
+    constraint_handle_map = _allocate_revision_handles(
+        constraint_additions,
+        existing_ids=set(prior_constraints),
+        kind="constraint",
+    )
+    existing_hazard_ids = set(prior_hazards)
+    assembled_constraints = {
+        constraint_id: constraint.model_copy(deep=True)
+        for constraint_id, constraint in prior_constraints.items()
+    }
+    for edit in patch.security_constraint_edits:
+        prior_constraint = prior_constraints[edit.constraint_id]
+        resolved_edit_hazards = [
+            hazard_handle_map.get(reference, reference)
+            for reference in edit.related_hazards
+        ]
         if (
-            prior_constraint is not None
-            and prior_constraint.rule == constraint.rule
-            and prior_constraint.applies_when != constraint.applies_when
+            edit.rule != prior_constraint.rule
+            or edit.applies_when != prior_constraint.applies_when
+        ) and edit.obligations is None:
+            raise ValueError(
+                f"constraint {edit.constraint_id} changed rule or applicability "
+                "without explicit obligations"
+            )
+        # Keep the prior review diagnostics for edits that are now explicit
+        # enough to compile.  A condition-only change still deserves reviewer
+        # visibility, while a rule that moves to a disjoint hazard set is a
+        # semantic re-pointing even though the delta is structurally valid.
+        if (
+            prior_constraint.rule == edit.rule
+            and prior_constraint.applies_when != edit.applies_when
         ):
             warnings_out.append(
-                f"graph revision changed the applies_when conditions of "
-                f"constraint {constraint.constraint_id} without changing its "
-                f"rule: {prior_constraint.applies_when} -> {constraint.applies_when}"
+                "graph revision changed the applies_when conditions of "
+                f"constraint {edit.constraint_id} without changing its rule: "
+                f"{prior_constraint.applies_when} -> {edit.applies_when}"
             )
-        if (
-            prior_constraint is not None
-            and prior_constraint.rule != constraint.rule
-            and set(prior_constraint.related_hazards) & set(constraint.related_hazards)
+        elif (
+            prior_constraint.rule != edit.rule
+            and set(prior_constraint.related_hazards) & set(resolved_edit_hazards)
             == set()
         ):
-            # A rewritten rule on disjoint hazards is a rename in effect: the
-            # constraint now governs different hazards than the reviewed graph
-            # authorized, so record it rather than merge silently.
+            # A rewritten rule on disjoint hazards is a semantic re-pointing;
+            # preserve the old warning while explicit obligations prevent
+            # stale interpretations from being carried forward.
             warnings_out.append(
-                f"graph revision changed the rule of constraint "
-                f"{constraint.constraint_id} and re-pointed it to hazards "
-                f"{sorted(constraint.related_hazards)} sharing none of its prior "
+                "graph revision changed the rule of constraint "
+                f"{edit.constraint_id} and re-pointed it to hazards "
+                f"{sorted(resolved_edit_hazards)} sharing none of its prior "
                 f"hazards {sorted(prior_constraint.related_hazards)}"
             )
-        constraints.append(
-            SecurityConstraint(
-                constraint_id=constraint.constraint_id,
-                rule=constraint.rule,
-                applies_when=constraint.applies_when,
-                related_hazards=constraint.related_hazards,
-                obligations=constraint.obligations,
+        obligations = (
+            prior_constraint.obligations
+            if edit.obligations is None
+            else edit.obligations
+        )
+        assembled_constraints[edit.constraint_id] = _build_constraint(
+            constraint_id=edit.constraint_id,
+            rule=edit.rule,
+            applies_when=edit.applies_when,
+            related_hazards=edit.related_hazards,
+            obligations=obligations,
+            existing_hazard_ids=existing_hazard_ids,
+            hazard_handle_map=hazard_handle_map,
+        )
+    for addition in patch.security_constraint_additions:
+        assembled_constraints[constraint_handle_map[addition.handle]] = (
+            _build_constraint(
+                constraint_id=constraint_handle_map[addition.handle],
+                rule=addition.rule,
+                applies_when=addition.applies_when,
+                related_hazards=addition.related_hazards,
+                obligations=addition.obligations,
+                existing_hazard_ids=existing_hazard_ids,
+                hazard_handle_map=hazard_handle_map,
             )
         )
+
     return LossAnalysisDraft.model_validate(
         {
-            "risk_card_losses": prior.risk_card_losses,
-            "use_case_losses": prior.use_case_losses,
-            "hazards": patch.hazards,
-            "security_constraints": constraints,
-            "risk_dispositions": prior.risk_dispositions,
+            "risk_card_losses": [
+                loss.model_copy(deep=True) for loss in prior.risk_card_losses
+            ],
+            "use_case_losses": [
+                loss.model_copy(deep=True) for loss in prior.use_case_losses
+            ],
+            "hazards": list(assembled_hazards.values()),
+            "security_constraints": list(assembled_constraints.values()),
+            "risk_dispositions": [
+                disposition.model_copy(deep=True)
+                for disposition in prior.risk_dispositions
+            ],
         }
+    )
+
+
+def _unique_revision_targets(
+    records: list[object],
+    *,
+    target_field: str,
+    label: str,
+) -> set[str]:
+    targets = [str(getattr(record, target_field)) for record in records]
+    duplicates = sorted({target for target in targets if targets.count(target) > 1})
+    if duplicates:
+        raise ValueError(f"duplicate {label} target(s): {', '.join(duplicates)}")
+    return set(targets)
+
+
+def _unique_revision_handles(records: list[object], *, label: str) -> list[object]:
+    handles = [str(getattr(record, "handle")) for record in records]
+    duplicates = sorted({handle for handle in handles if handles.count(handle) > 1})
+    if duplicates:
+        raise ValueError(f"duplicate {label} handle(s): {', '.join(duplicates)}")
+    return records
+
+
+def _allocate_revision_handles(
+    records: list[object],
+    *,
+    existing_ids: set[str],
+    kind: str,
+) -> dict[str, str]:
+    """Allocate added-record IDs in stable local-handle order."""
+    prefix = {"hazard": "H-", "constraint": "SC-"}[kind]
+    pattern = _CANONICAL_ID_PATTERNS[kind]
+    used = set(existing_ids)
+    next_number = (
+        max(
+            (
+                int(match.group(1))
+                for value in used
+                if (match := pattern.fullmatch(value))
+            ),
+            default=0,
+        )
+        + 1
+    )
+    result: dict[str, str] = {}
+    for handle in sorted(str(getattr(record, "handle")) for record in records):
+        target = f"{prefix}{next_number}"
+        while target in used:
+            next_number += 1
+            target = f"{prefix}{next_number}"
+        result[handle] = target
+        used.add(target)
+        next_number += 1
+    return result
+
+
+def _build_hazard(
+    *,
+    hazard_id: str,
+    description: str,
+    related_losses: list[str],
+    valid_loss_ids: set[str],
+) -> object:
+    unknown = sorted(set(related_losses) - valid_loss_ids)
+    if unknown:
+        raise ValueError(
+            f"hazard {hazard_id} references unknown loss ID(s): {', '.join(unknown)}"
+        )
+    from asago_scenario_generator.stpa.models.loss_analysis import Hazard
+
+    return Hazard(
+        hazard_id=hazard_id,
+        description=description,
+        related_losses=list(related_losses),
+    )
+
+
+def _build_constraint(
+    *,
+    constraint_id: str,
+    rule: str,
+    applies_when: list[str],
+    related_hazards: list[str],
+    obligations: list[object],
+    existing_hazard_ids: set[str],
+    hazard_handle_map: dict[str, str],
+) -> SecurityConstraint:
+    resolved_hazards = [
+        hazard_handle_map.get(reference, reference) for reference in related_hazards
+    ]
+    unknown = sorted(
+        {
+            reference
+            for reference in related_hazards
+            if reference not in existing_hazard_ids
+            and reference not in hazard_handle_map
+        }
+    )
+    if unknown:
+        raise ValueError(
+            f"security constraint {constraint_id} references unknown hazard ID(s): "
+            + ", ".join(unknown)
+        )
+    return SecurityConstraint(
+        constraint_id=constraint_id,
+        rule=rule,
+        applies_when=list(applies_when),
+        related_hazards=resolved_hazards,
+        obligations=list(obligations),
     )
 
 
@@ -1059,11 +1281,11 @@ def _run_graph_revision_call(
 ) -> LossAnalysis:
     """Make the single bounded graph-revision call and validate its result.
 
-    The response is a graph patch carrying the authored ``rule`` +
-    ``applies_when`` shape (Phase 1.3 as amended).  Losses and risk
-    dispositions come from the prior analysis and deterministic code
-    composes the persisted description, so the model cannot damage
-    immutable records by echoing them.
+    The response is an explicit edit/add delta carrying the authored ``rule``
+    + ``applies_when`` shape (Phase 1.3 as amended). Losses and risk
+    dispositions come from the prior analysis and deterministic code carries
+    omitted graph records forward, so the model cannot damage immutable
+    records by echoing or omitting them.
     """
     system_prompt = template_loader.render_prompt("stage1a_graph_revision_system.j2")
     user_prompt = template_loader.render_prompt(

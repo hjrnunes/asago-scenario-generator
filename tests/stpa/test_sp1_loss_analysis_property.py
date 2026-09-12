@@ -3,8 +3,8 @@
 These tests verify structural invariants that hold across broad input
 ranges for the two-call merge logic in ``loss_analysis.py``:
 
-1. **Sequential IDs**: After merging any two drafts, all L-/H-/SC- IDs
-   are sequential from 1 with no gaps or duplicates.
+1. **Canonical identity preservation**: After merging two drafts, existing
+   L-/H-/SC- IDs remain stable, with no duplicates or accidental renumbering.
 
 2. **Cross-reference validity**: After merge, every hazard's
    ``related_losses`` references a valid loss ID, and every constraint's
@@ -355,7 +355,7 @@ class TestMergeDraftsProperties:
         n_gap_constraints=st.integers(min_value=0, max_value=3),
     )
     @settings(max_examples=50, deadline=None)
-    def test_sequential_ids_after_merge(
+    def test_canonical_ids_are_preserved_after_merge(
         self,
         n_risk_losses,
         n_uc_losses,
@@ -364,7 +364,7 @@ class TestMergeDraftsProperties:
         n_risk_constraints,
         n_gap_constraints,
     ):
-        """After merge, all L-/H-/SC- IDs are sequential from 1."""
+        """Merge preserves each draft's canonical IDs and their references."""
         risk = _build_risk_draft(
             n_risk_losses,
             n_risk_hazards,
@@ -381,18 +381,24 @@ class TestMergeDraftsProperties:
 
         all_losses = merged.risk_card_losses + merged.use_case_losses
         loss_ids = [loss.loss_id for loss in all_losses]
-        expected_loss_ids = [f"L-{i}" for i in range(1, len(all_losses) + 1)]
-        assert loss_ids == expected_loss_ids, f"Loss IDs not sequential: {loss_ids}"
+        expected_loss_ids = [
+            loss.loss_id for loss in risk.risk_card_losses + gap.use_case_losses
+        ]
+        assert loss_ids == expected_loss_ids
+        assert len(loss_ids) == len(set(loss_ids))
 
         hazard_ids = [h.hazard_id for h in merged.hazards]
-        expected_hazard_ids = [f"H-{i}" for i in range(1, len(hazard_ids) + 1)]
-        assert hazard_ids == expected_hazard_ids, (
-            f"Hazard IDs not sequential: {hazard_ids}"
-        )
+        expected_hazard_ids = [h.hazard_id for h in risk.hazards + gap.hazards]
+        assert hazard_ids == expected_hazard_ids
+        assert len(hazard_ids) == len(set(hazard_ids))
 
         sc_ids = [sc.constraint_id for sc in merged.security_constraints]
-        expected_sc_ids = [f"SC-{i}" for i in range(1, len(sc_ids) + 1)]
-        assert sc_ids == expected_sc_ids, f"SC IDs not sequential: {sc_ids}"
+        expected_sc_ids = [
+            sc.constraint_id
+            for sc in risk.security_constraints + gap.security_constraints
+        ]
+        assert sc_ids == expected_sc_ids
+        assert len(sc_ids) == len(set(sc_ids))
 
     @given(
         n_risk_losses=st.integers(min_value=1, max_value=4),
@@ -726,9 +732,10 @@ class TestMergeDraftsEmptyEdgeCases:
         assert len(merged.use_case_losses) == n_uc_losses
         assert len(merged.hazards) == n_gap_hazards
         assert len(merged.security_constraints) == n_gap_constraints
-        # IDs should be sequential from 1
+        # The gap's existing canonical IDs remain stable even when the risk
+        # draft is empty.
         assert [loss.loss_id for loss in merged.use_case_losses] == [
-            f"L-{i}" for i in range(1, n_uc_losses + 1)
+            loss.loss_id for loss in gap.use_case_losses
         ]
 
     @given(
@@ -751,9 +758,10 @@ class TestMergeDraftsEmptyEdgeCases:
         assert len(merged.use_case_losses) == 0
         assert len(merged.hazards) == n_risk_hazards
         assert len(merged.security_constraints) == n_risk_constraints
-        # IDs should be sequential from 1
+        # The risk draft's existing canonical IDs remain stable even when the
+        # gap draft is empty.
         assert [loss.loss_id for loss in merged.risk_card_losses] == [
-            f"L-{i}" for i in range(1, n_risk_losses + 1)
+            loss.loss_id for loss in risk.risk_card_losses
         ]
 
 
@@ -945,8 +953,8 @@ class TestCallLogOrderingAndProfileSkip:
             # The template may still render the section header but with no values
             pass
 
-    def test_gap_call_starts_after_highest_risk_ids(self, tmp_path):
-        """Gap prompts receive the next number for every merged ID family."""
+    def test_gap_call_receives_existing_ids_without_global_allocation(self, tmp_path):
+        """Gap prompts expose prior IDs; local handles own new allocation."""
         from tests.stpa.sp1_helpers import MockLLMClient, valid_gap_draft_dict
 
         risk = {
@@ -990,6 +998,12 @@ class TestCallLogOrderingAndProfileSkip:
         )
 
         gap_prompt = client.calls[1].user_prompt
-        assert "L-5" in gap_prompt
-        assert "H-8" in gap_prompt
-        assert "SC-10" in gap_prompt
+        # The first provider response is compiled from local handles, so its
+        # canonical IDs start at one.  The gap prompt receives that compiled
+        # dependency view; it does not receive or invent global "next IDs".
+        assert "L-1" in gap_prompt
+        assert "H-1" in gap_prompt
+        assert "SC-1" in gap_prompt
+        assert "L-5" not in gap_prompt
+        assert "H-8" not in gap_prompt
+        assert "SC-10" not in gap_prompt

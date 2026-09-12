@@ -279,6 +279,10 @@ def test_stage1a_malformed_json_terminal_is_never_answered_with_a_repair(tmp_pat
 def test_stage1a_calls_forward_exact_completion_cap(tmp_path):
     """Both Stage 1a structured calls use the bounded completion budget."""
     from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
+    from asago_scenario_generator.stpa.system_model.loss_analysis import (
+        _Stage1aGapProviderDraft,
+        _Stage1aRiskProviderDraft,
+    )
 
     client = MockLLMClient()
     client.set_response_for(
@@ -296,7 +300,7 @@ def test_stage1a_calls_forward_exact_completion_cap(tmp_path):
     stage1a_calls = [
         call
         for call in client.calls
-        if call.response_format and issubclass(call.response_format, LossAnalysisDraft)
+        if call.response_format in {_Stage1aRiskProviderDraft, _Stage1aGapProviderDraft}
     ]
     assert len(stage1a_calls) == 2
     assert [call.max_completion_tokens for call in stage1a_calls] == [8192, 8192]

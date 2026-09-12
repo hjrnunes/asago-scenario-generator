@@ -2334,19 +2334,77 @@ def test_synthesized_enumeration_groups_slots_and_fills_the_universe():
     )
 
 
+def _current_tool_payload(draft, *, numeric_path=None):
+    """Render these integration fixtures through the current request choices.
+
+    The numeric fixture explicitly chooses its source, rather than copying a
+    separately supplied threshold from the historical test draft.
+    """
+    from asago_scenario_generator.stpa.scenario_prod.authoring import (
+        build_authoring_context,
+    )
+
+    context = build_authoring_context(
+        _candidate(),
+        state=STATE,
+        observation_records=tuple(
+            row
+            for row in _observations().prompt_records()
+            if row["observation_ref"] != "TARGET-STATE"
+        ),
+        session=_session(),
+        profile=_profile(),
+        subject_model=_accepted_model(),
+    )
+    observation = draft.unsafe_observation
+    choice = next(
+        choice
+        for choice in context.checks
+        if choice.kind == "tool_argument" and observation.operator in choice.operators
+    )
+    handles = {source.path: source.handle for source in context.state_handles}
+    operand = (
+        {"source": "state_fact", "fact_handle": handles[numeric_path]}
+        if numeric_path is not None
+        else {"source": "literal", "value": observation.value}
+    )
+    conditions = []
+    for condition in draft.conditions_established:
+        row = {
+            "condition": condition.condition,
+            "by": condition.by,
+            "meaning": condition.note,
+        }
+        if condition.by == "state_fact":
+            row["fact_handle"] = handles[condition.ref]
+        else:
+            assert condition.by == "stimulus"
+        conditions.append(row)
+    return {
+        "adversary": draft.adversary.model_dump(mode="json"),
+        "stimulus": {"kind": "user_message", "text": draft.stimulus.text},
+        "unsafe_observation": {
+            "kind": "tool_argument",
+            "choice_handle": choice.handle,
+            "argument": observation.argument,
+            "operator": observation.operator,
+            "operand": operand,
+        },
+        "conditions_established": conditions,
+        "claims_under_test": [],
+        "safe_behaviors": list(draft.safe_behaviors),
+    }
+
+
 def test_two_valid_drafts_yield_two_scenarios_with_distinct_ids(tmp_path):
     """Round 47 ruling 1: one response may accept one scenario per outcome.
 
     A response with two valid drafts that test different unsafe outcomes
     (another customer's record, an amount above the balance) yields two
     accepted scenarios, and the synthesized enumeration gives each its own
-    ICA identity.  The wire already allows three drafts
-    (``AuthoringResponse.scenarios``).
+    ICA identity. The current provider wire allows three drafts.
     """
-    import json
-
     from asago_scenario_generator.stpa.scenario_prod.authoring import (
-        AuthoringResponse,
         author_candidate_scenarios,
     )
     from tests.stpa.sp1_helpers import MockLLMClient
@@ -2376,15 +2434,19 @@ def test_two_valid_drafts_yield_two_scenarios_with_distinct_ids(tmp_path):
         ),
     )
     client = MockLLMClient()
-    client.set_response_for(
-        AuthoringResponse,
-        {
-            "scenarios": [
-                json.loads(owner_draft.model_dump_json()),
-                json.loads(amount_draft.model_dump_json()),
-            ],
-            "no_scenario_reason": None,
-        },
+    client.set_response_queue(
+        [
+            {
+                "scenarios": [
+                    _current_tool_payload(owner_draft),
+                    _current_tool_payload(
+                        amount_draft,
+                        numeric_path=("orders", "ORD-104", "remaining_to_pay"),
+                    ),
+                ],
+                "no_scenario_reason": None,
+            }
+        ],
     )
     outcome = author_candidate_scenarios(
         client,
@@ -2550,11 +2612,9 @@ def test_direct_validation_rebuilds_record_index_from_verified_snapshot():
 
 def test_direct_authoring_uses_snapshot_session_over_supplied_session(tmp_path):
     """A substituted SessionSubject cannot authorize an ownership difference."""
-    import json
     from dataclasses import replace
 
     from asago_scenario_generator.stpa.scenario_prod.authoring import (
-        AuthoringResponse,
         author_candidate_scenarios,
     )
     from tests.stpa.sp1_helpers import MockLLMClient
@@ -2578,12 +2638,13 @@ def test_direct_authoring_uses_snapshot_session_over_supplied_session(tmp_path):
         stimulus="Refund ORD-101.",
     )
     client = MockLLMClient()
-    client.set_response_for(
-        AuthoringResponse,
-        {
-            "scenarios": [json.loads(draft.model_dump_json())],
-            "no_scenario_reason": None,
-        },
+    client.set_response_queue(
+        [
+            {
+                "scenarios": [_current_tool_payload(draft)],
+                "no_scenario_reason": None,
+            }
+        ],
     )
     outcome = author_candidate_scenarios(
         client,

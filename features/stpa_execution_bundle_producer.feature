@@ -11,6 +11,7 @@ Feature: STPA execution projection v2 and bundle producer
     When the default scenario pipeline runs with a valid Stage 5 response
     Then its execution bundle is valid without presentation model calls
     And its scenario summary describes a hypothesis rather than an execution result
+    And deterministic summaries pass validation without model-authored presentation conventions
 
   # STPA-BUNDLE-01
   Scenario: STPA-BUNDLE-01 typed placeholders derive binding state

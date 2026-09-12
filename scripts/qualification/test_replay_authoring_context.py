@@ -64,6 +64,27 @@ def _write_override(path: Path, payload: dict) -> Path:
     return path
 
 
+def test_sample_record_preserves_unadaptable_current_draft_without_repair():
+    from asago_scenario_generator.stpa.scenario_prod.authoring_adapter import (
+        CurrentDraftAdapterFailure,
+    )
+
+    failure = CurrentDraftAdapterFailure(
+        draft_index=1,
+        reason="source_handle_unknown",
+        detail="Not a handle from this request.",
+        raw_draft={"conditions_established": [{"fact_handle": "foreign"}]},
+    )
+    candidate = _candidate()
+    outcome = CandidateAuthoringOutcome(
+        candidate=candidate, adapter_rejections=(failure,), call_issued=True
+    )
+    record = tool._sample_record(1, outcome, candidate, [])
+    assert record["drafts"] == []
+    assert record["adapter_rejected"] == [failure.as_payload()]
+    assert record["omission_shape_drafted"] is False
+
+
 def test_override_replaces_texts_and_keeps_binding(tmp_path: Path) -> None:
     override = _write_override(
         tmp_path / "override.yaml",

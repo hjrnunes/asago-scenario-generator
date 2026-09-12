@@ -62,9 +62,7 @@ def test_coordination_provider_schema_requires_the_complete_review(
         client.calls[0].response_format.model_json_schema()
     )
     assert not list(validator.iter_errors(payload))
-    assert list(
-        validator.iter_errors({"coordination_links": [], "integrity_findings": []})
-    )
+    assert list(validator.iter_errors({"coordination_links": []}))
 
     missing = deepcopy(payload)
     missing["semantic_review"]["hazards"].pop()
@@ -994,7 +992,6 @@ def preserve_constraint(constraint_id, related_hazards):
 def response_payload(review):
     return {
         "coordination_links": [],
-        "integrity_findings": [],
         "semantic_review": review,
     }
 

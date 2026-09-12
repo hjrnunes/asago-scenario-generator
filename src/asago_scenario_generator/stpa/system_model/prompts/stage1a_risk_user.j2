@@ -34,15 +34,19 @@ No organizational risks provided. This call should produce an empty result — g
 Derive losses, hazards, and security constraints from the organizational risks above, grounded in this specific system's architecture and domain.
 
 Return the collections in dependency order: first grounded `risk_card_losses`,
-then hazards whose `related_losses` use only declared loss IDs, then security
-constraints whose `related_hazards` use only declared hazard IDs.  Do not emit
-a dependent record for an undeclared ID.
+then hazards whose `related_losses` use only declared local loss handles, then
+security constraints whose `related_hazards` use only declared local hazard
+handles. Give every new record a unique request-local `handle`; deterministic
+code assigns canonical IDs after validation. Do not emit a dependent record
+for an undeclared handle.
 
 For each risk:
 1. Derive one or more system-specific losses, citing the source risk IDs. Deduplicate where multiple risks converge on the same loss.
 2. Derive system-level hazards that enable each loss. Each hazard must name a concrete component, data flow, or integration point from the use-case description.
 3. Derive security constraints that prevent each hazard.
-4. Account for every risk above in `risk_dispositions`: `cited` with the loss IDs that account for it, or `not_applicable` with a one-sentence reason.
+4. Account for every risk above in `risk_dispositions`: `cited` with the local
+   loss handles that account for it, or `not_applicable` with a one-sentence
+   reason.
 
 Include materially grounded losses and hazards even when a risk card supplies
 no adversarial vector. Do not require an adversary, entry point, or concrete
@@ -50,4 +54,5 @@ attack path for inclusion; treat adversarial relevance and reachability as a
 later causal-feasibility question. Do not invent losses merely to cover every
 capability or fill a quota.
 
-Ensure all cross-references are valid and no IDs are duplicated.
+Ensure all cross-references are valid and no local handles are duplicated. Do
+not use `L-*`, `H-*`, or `SC-*` as handles.

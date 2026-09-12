@@ -36,9 +36,15 @@ def _risk_card() -> RiskCard:
 def _risk_response(
     *, duplicate: bool = False, displaced: bool = False
 ) -> dict[str, Any]:
-    """Return the baseline graph with an optional repeated/displaced loss."""
+    """Return the baseline graph using the current local-handle wire.
+
+    ``duplicate`` intentionally repeats a request-local handle.  The current
+    provider boundary rejects that malformed response before canonical IDs are
+    allocated, so the acceptance case can prove duplicate rows do not reach
+    the graph compiler.
+    """
     baseline_loss = {
-        "loss_id": "risk-base-loss",
+        "handle": "risk_base_loss",
         "description": "Baseline request integrity is lost.",
         "provenance": "risk_card",
         "source_risk_cards": ["neutral-risk"],
@@ -50,24 +56,25 @@ def _risk_response(
         else [],
         "hazards": [
             {
-                "hazard_id": "risk-base-hazard",
+                "handle": "risk_base_hazard",
                 "description": "The request state becomes unsafe.",
-                "related_losses": ["risk-base-loss"],
+                "related_losses": ["risk_base_loss"],
             }
         ],
         "security_constraints": [
             {
-                "constraint_id": "risk-base-constraint",
+                "handle": "risk_base_constraint",
                 "rule": "The request must remain authorized.",
-                "related_hazards": ["risk-base-hazard"],
+                "related_hazards": ["risk_base_hazard"],
                 "applies_when": [],
+                "obligations": [],
             }
         ],
         "risk_dispositions": [
             {
                 "risk_ref": "neutral-risk",
                 "disposition": "cited",
-                "loss_ids": ["risk-base-loss"],
+                "loss_ids": ["risk_base_loss"],
                 "reason": None,
             }
         ],
@@ -76,44 +83,51 @@ def _risk_response(
 
 
 def _section_patch_response() -> dict[str, Any]:
-    """Return a valid replacement hazard/constraint collection."""
+    """Return a valid local-handle hazard/constraint collection."""
     return {
         "risk_card_losses": [],
         "use_case_losses": [],
         "hazards": [
             {
-                "hazard_id": "gap-hazard",
+                "handle": "gap_hazard",
                 "description": "The corrected request state is unsafe.",
-                "related_losses": ["gap-case-loss"],
+                "related_losses": ["gap_case_loss"],
             }
         ],
         "security_constraints": [
             {
-                "constraint_id": "current-constraint",
+                "handle": "current_constraint",
                 "rule": "The corrected request condition must be prevented.",
-                "related_hazards": ["gap-hazard"],
+                "related_hazards": ["gap_hazard"],
                 "applies_when": [],
+                "obligations": [],
             }
         ],
     }
 
 
 def _conflicting_correction_response() -> dict[str, Any]:
-    """Return a correction that changes the authoritative hazard semantics."""
+    """Return a gap response that reuses a reserved canonical hazard ID.
+
+    Current gap responses use local handles for records they add.  A response
+    that attempts to reuse ``H-1`` is therefore malformed and must fail closed
+    before it can overwrite the authoritative risk-derived hazard.
+    """
     response = _section_patch_response()
     response["hazards"] = [
         {
-            "hazard_id": "risk-base-hazard",
+            "handle": "H-1",
             "description": "The authoritative request state has changed semantics.",
-            "related_losses": ["risk-base-loss"],
+            "related_losses": ["risk_base_loss"],
         }
     ]
     response["security_constraints"] = [
         {
-            "constraint_id": "current-constraint",
+            "handle": "current_constraint",
             "rule": "The current request condition must be prevented.",
-            "related_hazards": ["risk-base-hazard"],
+            "related_hazards": ["H-1"],
             "applies_when": [],
+            "obligations": [],
         }
     ]
     return response
@@ -417,20 +431,26 @@ def _h_omits_constraint(
 def _h_no_repair(world: World, text: str, examples: dict[str, str]) -> tuple[bool, str]:
     del text, examples
     entries = _entries(world)
-    if world.stage1a_section_fixture != "conflict":
-        return False, "no-repair assertion is only valid for the conflict fixture"
-    expected = [("risk_derivation", True), ("gap_analysis", False)]
+    if world.stage1a_section_fixture not in {"conflict", "duplicate"}:
+        return False, "no-repair assertion is only valid for malformed fixtures"
+    expected = (
+        [("risk_derivation", False)]
+        if world.stage1a_section_fixture == "duplicate"
+        else [("risk_derivation", True), ("gap_analysis", False)]
+    )
     actual = [(entry.get("step"), entry.get("success")) for entry in entries]
     if actual != expected:
         return False, f"expected one failed gap attempt and no repair, got {actual}"
     client = getattr(world, "stage1a_section_client", None)
-    if client is None or len(client.calls) != 2:
+    expected_calls = 1 if world.stage1a_section_fixture == "duplicate" else 2
+    if client is None or len(client.calls) != expected_calls:
         return (
             False,
-            f"expected exactly two provider calls, got {getattr(client, 'calls', None)}",
+            f"expected exactly {expected_calls} provider calls, got "
+            f"{getattr(client, 'calls', None)}",
         )
     if any(str(entry.get("step", "")).endswith("_repair") for entry in entries):
-        return False, "conflicting gap response incorrectly triggered repair"
+        return False, "malformed gap response incorrectly triggered repair"
     return True, ""
 
 
@@ -466,6 +486,32 @@ def _h_no_use_case_losses(
     )
 
 
+def _h_duplicate_rejected(
+    world: World, text: str, examples: dict[str, str]
+) -> tuple[bool, str]:
+    del text, examples
+    error = getattr(world, "stage1a_section_error", None)
+    return (
+        error is not None
+        and "duplicate request-local loss handle 'risk_base_loss'" in str(error),
+        f"expected the duplicate local-handle failure, got {error}",
+    )
+
+
+def _h_duplicate_evidence(
+    world: World, text: str, examples: dict[str, str]
+) -> tuple[bool, str]:
+    del text, examples
+    entries = _entries(world)
+    if not entries:
+        return False, "the malformed risk response was not logged"
+    raw = entries[0].get("response_content") or ""
+    return (
+        "risk_base_loss" in raw,
+        "raw duplicate-handle response was not retained",
+    )
+
+
 def _h_no_correction(
     world: World, text: str, examples: dict[str, str]
 ) -> tuple[bool, str]:
@@ -482,8 +528,9 @@ def _h_no_correction(
 def _h_conflict(world: World, text: str, examples: dict[str, str]) -> tuple[bool, str]:
     del text, examples
     error = getattr(world, "stage1a_section_error", None)
-    return error is not None and "conflicting duplicate hazard ID" in str(error), str(
-        error
+    return (
+        error is not None and "reserved canonical graph ID" in str(error),
+        f"expected the reserved canonical-handle failure, got {error}",
     )
 
 
@@ -493,11 +540,11 @@ def _h_conflict_evidence(
     del text, examples
     entries = _entries(world)
     if len(entries) < 2:
-        return False, "the conflicting gap attempt was not logged"
+        return False, "the malformed gap attempt was not logged"
     raw = entries[-1].get("response_content") or ""
     return (
-        "authoritative request state has changed semantics" in raw,
-        "raw conflicting gap response was not retained",
+        "H-1" in raw and "authoritative request state has changed semantics" in raw,
+        "raw malformed gap response was not retained",
     )
 
 
@@ -542,12 +589,20 @@ def register(api: object) -> None:
         r"^the final analysis has exactly one risk-derived loss$", _h_one_risk_loss
     )
     api.register(r"^the final analysis has no use-case losses$", _h_no_use_case_losses)
-    api.register(r"^the Stage 1a run makes no correction attempt$", _h_no_correction)
     api.register(
-        r"^Stage 1a derivation fails with a conflicting authoritative ID$", _h_conflict
+        r"^Stage 1a derivation rejects the duplicate local handle$",
+        _h_duplicate_rejected,
     )
     api.register(
-        r"^the conflicting gap response remains in call evidence$",
+        r"^the duplicate risk response remains in call evidence$",
+        _h_duplicate_evidence,
+    )
+    api.register(r"^the Stage 1a run makes no correction attempt$", _h_no_correction)
+    api.register(
+        r"^Stage 1a derivation fails with a reserved canonical handle$", _h_conflict
+    )
+    api.register(
+        r"^the malformed gap response remains in call evidence$",
         _h_conflict_evidence,
     )
     api.register(r"^the Stage 1a run makes no repair attempt$", _h_no_repair)

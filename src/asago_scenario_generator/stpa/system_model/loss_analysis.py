@@ -7,7 +7,8 @@ Call 2 (gap_analysis): reviews the use-case description against Call 1's
 output to find missing adversary-actionable losses.  Receives the capability
 profile as additional input for systematic coverage checking.
 
-IDs (loss/hazard/SC) continue sequentially across the two calls with no
+Provider responses use request-local handles. Deterministic compilation
+allocates canonical loss/hazard/SC IDs across the two calls with no
 duplicates; cross-references stay valid after merge.
 """
 
@@ -15,12 +16,13 @@ from __future__ import annotations
 
 import json
 import re
+from copy import deepcopy
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
@@ -52,6 +54,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     RepairRecord,
     UnsupportedRepair,
     build_repair_plan,
+    classify_wire_validation_errors,
     record_cleanup_rows,
     revalidate_provider_object,
     run_targeted_repair,
@@ -79,21 +82,154 @@ class _ProviderSecurityConstraint(SecurityConstraint):
     the fields.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     applies_when: list[str]
 
 
-class _Stage1aGapProviderDraft(LossAnalysisDraft):
-    """Required provider wire for the gap-analysis and graph-revision calls.
+_LOCAL_HANDLE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
+_CANONICAL_ID_PATTERNS = {
+    "loss": re.compile(r"^L-(\d+)$"),
+    "hazard": re.compile(r"^H-(\d+)$"),
+    "constraint": re.compile(r"^SC-(\d+)$"),
+}
 
-    The internal draft remains partial so the two calls can exchange a loss
-    registry before closing the dependent graph.  The provider contract,
-    however, must make all four collection keys explicit on every response.
+
+class _ProviderObligation(Obligation):
+    """Closed obligation entry for current Stage 1a provider responses."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class _ProviderRiskDisposition(RiskDisposition):
+    """Closed risk-accounting entry for the current provider response."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+def _provider_handle(value: Any, *, kind: str) -> str:
+    """Validate one request-local provider handle.
+
+    The provider may choose a descriptive local handle, but it must not choose
+    a canonical Stage 1a identity.  Canonical allocation is a compiler
+    responsibility and happens after the complete request-local graph has
+    been checked.
+    """
+    if not isinstance(value, str) or not _LOCAL_HANDLE_RE.fullmatch(value):
+        raise ValueError(
+            f"{kind} handle must be a non-empty request-local identifier "
+            "containing letters, digits, '-' or '_'"
+        )
+    # Reserve every canonical namespace in every local collection.  A
+    # cross-kind value such as ``L-1`` on a hazard would otherwise be
+    # ambiguous once references are compiled, because it could be mistaken
+    # for an existing loss ID or a new hazard handle.
+    if any(pattern.fullmatch(value) for pattern in _CANONICAL_ID_PATTERNS.values()):
+        raise ValueError(
+            f"{kind} handle {value!r} is a reserved canonical graph ID; use a local "
+            "handle and let deterministic code allocate the final ID"
+        )
+    return value
+
+
+class _ProviderLoss(BaseModel):
+    """Model-facing loss with a request-local identity.
+
+    The generated provider schema exposes only ``handle``. Historical graph
+    records are decoded through a separate offline compatibility seam; they
+    are not accepted by this current provider boundary.
     """
 
-    risk_card_losses: list[Loss] = Field(max_length=16)
-    use_case_losses: list[Loss] = Field(max_length=16)
-    hazards: list[Hazard] = Field(max_length=16)
-    security_constraints: list[_ProviderSecurityConstraint] = Field(max_length=16)
+    model_config = ConfigDict(extra="forbid")
+
+    handle: str
+    description: str
+    provenance: LossProvenance
+    source_risk_cards: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_handle(self) -> _ProviderLoss:
+        _provider_handle(self.handle, kind="loss")
+        return self
+
+
+class _ProviderHazard(BaseModel):
+    """Model-facing hazard with references to canonical IDs or local handles."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    handle: str
+    description: str
+    related_losses: list[str]
+
+    @model_validator(mode="after")
+    def validate_handle(self) -> _ProviderHazard:
+        _provider_handle(self.handle, kind="hazard")
+        return self
+
+
+class _ProviderConstraint(BaseModel):
+    """Model-facing constraint with references to canonical IDs or handles."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    handle: str
+    rule: str = Field(min_length=1)
+    applies_when: list[str] = Field(min_length=0, max_length=4)
+    related_hazards: list[str]
+    obligations: list[_ProviderObligation] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_handle(self) -> _ProviderConstraint:
+        _provider_handle(self.handle, kind="constraint")
+        # Reuse the domain validator for rule spans and channel exclusivity.
+        SecurityConstraint(
+            constraint_id="SC-1",
+            rule=self.rule,
+            applies_when=self.applies_when,
+            related_hazards=["H-1"],
+            obligations=self.obligations,
+        )
+        return self
+
+
+class _Stage1aGapProviderDraft(BaseModel):
+    """Required provider wire for the gap-analysis call.
+
+    The internal domain draft remains partial so the two calls can exchange a
+    loss registry before closing the dependent graph. The provider contract is
+    separate and makes exactly four collection keys explicit on every response.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    risk_card_losses: list[_ProviderLoss] = Field(min_length=0, max_length=16)
+    use_case_losses: list[_ProviderLoss] = Field(min_length=0, max_length=16)
+    hazards: list[_ProviderHazard] = Field(min_length=0, max_length=16)
+    security_constraints: list[_ProviderConstraint] = Field(
+        min_length=0,
+        max_length=16,
+    )
+
+    @model_validator(mode="after")
+    def validate_local_handles(self) -> _Stage1aGapProviderDraft:
+        for label, records in (
+            (
+                "loss",
+                [*self.risk_card_losses, *self.use_case_losses],
+            ),
+            ("hazard", self.hazards),
+            ("constraint", self.security_constraints),
+        ):
+            handles = [record.handle for record in records]
+            if len(handles) != len(set(handles)):
+                duplicate = next(
+                    handle for handle in handles if handles.count(handle) > 1
+                )
+                raise ValueError(
+                    f"duplicate request-local {label} handle '{duplicate}'"
+                )
+        return self
 
 
 class _Stage1aRiskProviderDraft(_Stage1aGapProviderDraft):
@@ -103,18 +239,134 @@ class _Stage1aRiskProviderDraft(_Stage1aGapProviderDraft):
     response, so the disposition list is a required collection.
     """
 
+    risk_dispositions: list[_ProviderRiskDisposition]
+
+
+class _Stage1aGapRepairDraft(LossAnalysisDraft):
+    """Canonical domain-shaped view used only by the repair adapter."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def validate_current_provider_boundary(self) -> _Stage1aGapRepairDraft:
+        _validate_repair_draft_provider_boundary(self, risk_required=False)
+        return self
+
+
+class _Stage1aRiskRepairDraft(_Stage1aGapRepairDraft):
+    """Repair view retaining the risk wire's required disposition collection."""
+
     risk_dispositions: list[RiskDisposition]
+
+    @model_validator(mode="after")
+    def validate_risk_provider_boundary(self) -> _Stage1aRiskRepairDraft:
+        _validate_repair_draft_provider_boundary(self, risk_required=True)
+        return self
+
+
+class _RevisionHazardEdit(BaseModel):
+    """Complete replacement for one existing hazard, keyed by canonical ID."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    hazard_id: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    related_losses: list[str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_target(self) -> _RevisionHazardEdit:
+        if not _CANONICAL_ID_PATTERNS["hazard"].fullmatch(self.hazard_id):
+            raise ValueError(
+                "hazard edit target must be an existing canonical hazard ID"
+            )
+        return self
+
+
+class _RevisionHazardAddition(BaseModel):
+    """One new hazard whose canonical ID is allocated by deterministic code."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    handle: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    related_losses: list[str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_handle(self) -> _RevisionHazardAddition:
+        _provider_handle(self.handle, kind="hazard")
+        return self
+
+
+class _RevisionConstraintEdit(BaseModel):
+    """Complete replacement for one existing security constraint.
+
+    ``obligations`` is optional only when both the rule and its applicability
+    conditions are unchanged; omission then carries the existing entries. Any
+    rule or scope edit must carry an explicit list so stale interpretations
+    cannot survive silently.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    constraint_id: str = Field(min_length=1)
+    rule: str = Field(min_length=1)
+    applies_when: list[str] = Field(min_length=0, max_length=4)
+    related_hazards: list[str] = Field(min_length=1)
+    obligations: list[_ProviderObligation] | None = None
+
+    @model_validator(mode="after")
+    def validate_target(self) -> _RevisionConstraintEdit:
+        if not _CANONICAL_ID_PATTERNS["constraint"].fullmatch(self.constraint_id):
+            raise ValueError(
+                "security constraint edit target must be an existing canonical ID"
+            )
+        return self
+
+
+class _RevisionConstraintAddition(BaseModel):
+    """One new constraint whose canonical ID is compiler-owned."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    handle: str = Field(min_length=1)
+    rule: str = Field(min_length=1)
+    applies_when: list[str] = Field(min_length=0, max_length=4)
+    related_hazards: list[str] = Field(min_length=1)
+    obligations: list[_ProviderObligation] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_handle(self) -> _RevisionConstraintAddition:
+        _provider_handle(self.handle, kind="constraint")
+        return self
+
+
+class _Stage1aRevisionPatch(BaseModel):
+    """Explicit graph delta for the one bounded Stage 1a revision call.
+
+    Existing records are addressed only by ``*_id`` in edit collections;
+    additions use request-local ``handle`` values.  Untouched records are
+    carried forward by :func:`_revision_patch_to_draft`, so omission cannot
+    delete a graph record. Historical whole-graph patch decoding belongs to a
+    separate offline compatibility seam and is not accepted by this current
+    provider model.
+    """
+
+    hazard_edits: list[_RevisionHazardEdit] = Field(min_length=0, max_length=16)
+    hazard_additions: list[_RevisionHazardAddition] = Field(min_length=0, max_length=16)
+    security_constraint_edits: list[_RevisionConstraintEdit] = Field(
+        min_length=0, max_length=16
+    )
+    security_constraint_additions: list[_RevisionConstraintAddition] = Field(
+        min_length=0, max_length=16
+    )
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class _ProviderRevisionConstraint(BaseModel):
-    """One constraint in the graph-revision patch: identity and graph only.
+    """Historical whole-graph constraint shape, kept out of current schema."""
 
-    Phase 1.3 as amended: the patch carries the same authored
-    ``rule`` + ``applies_when`` shape as Calls 1 and 2; code composes the
-    description.  ``obligations`` rides with the constraint: the patch
-    replaces the constraint collection wholesale, so entries not returned
-    here are dropped.
-    """
+    model_config = ConfigDict(extra="forbid")
 
     constraint_id: str
     rule: str = Field(min_length=1)
@@ -123,19 +375,106 @@ class _ProviderRevisionConstraint(BaseModel):
     obligations: list[Obligation] = Field(default_factory=list)
 
 
-class _Stage1aRevisionPatch(BaseModel):
-    """Patch wire for the graph-revision call.
+def _validate_repair_draft_provider_boundary(
+    draft: LossAnalysisDraft,
+    *,
+    risk_required: bool,
+) -> None:
+    """Validate a repaired canonical draft against the current local wire.
 
-    The model may edit only the hazard/constraint graph, in the same
-    authored ``rule`` + ``applies_when`` shape as the other Stage 1a calls.
-    Losses and risk dispositions are owned by the prior analysis and are
-    never on the wire, so the model cannot damage immutable records by
-    echoing them (live runs v2–v7 lost complete graphs to qualifier
-    flattening and loss-registry echoes).
+    The targeted-repair module operates on canonical domain rows.  This
+    boundary rebuilds a throwaway local-handle response so the original
+    provider's closed shape and obligation validators still run after the
+    repair, without making canonical IDs acceptable on the live wire.
     """
-
-    hazards: list[Hazard] = Field(max_length=16)
-    security_constraints: list[_ProviderRevisionConstraint] = Field(max_length=16)
+    losses = [*draft.risk_card_losses, *draft.use_case_losses]
+    hazards = list(draft.hazards)
+    constraints = list(draft.security_constraints)
+    loss_handles = {
+        loss.loss_id: f"loss_{index}"
+        for index, loss in enumerate(sorted(losses, key=lambda item: item.loss_id), 1)
+    }
+    hazard_handles = {
+        hazard.hazard_id: f"hazard_{index}"
+        for index, hazard in enumerate(
+            sorted(hazards, key=lambda item: item.hazard_id),
+            1,
+        )
+    }
+    constraint_handles = {
+        constraint.constraint_id: f"constraint_{index}"
+        for index, constraint in enumerate(
+            sorted(constraints, key=lambda item: item.constraint_id),
+            1,
+        )
+    }
+    payload: dict[str, object] = {
+        "risk_card_losses": [
+            {
+                "handle": loss_handles[loss.loss_id],
+                "description": loss.description,
+                "provenance": loss.provenance,
+                "source_risk_cards": loss.source_risk_cards,
+            }
+            for loss in draft.risk_card_losses
+        ],
+        "use_case_losses": [
+            {
+                "handle": loss_handles[loss.loss_id],
+                "description": loss.description,
+                "provenance": loss.provenance,
+                "source_risk_cards": loss.source_risk_cards,
+            }
+            for loss in draft.use_case_losses
+        ],
+        "hazards": [
+            {
+                "handle": hazard_handles[hazard.hazard_id],
+                "description": hazard.description,
+                "related_losses": [
+                    loss_handles.get(reference, reference)
+                    for reference in hazard.related_losses
+                ],
+            }
+            for hazard in hazards
+        ],
+        "security_constraints": [
+            {
+                "handle": constraint_handles[constraint.constraint_id],
+                "rule": constraint.rule,
+                "applies_when": constraint.applies_when,
+                "obligations": [
+                    obligation.model_dump(mode="json", exclude_none=True)
+                    for obligation in constraint.obligations
+                ],
+                "related_hazards": [
+                    hazard_handles.get(reference, reference)
+                    for reference in constraint.related_hazards
+                ],
+            }
+            for constraint in constraints
+        ],
+    }
+    if risk_required:
+        payload["risk_dispositions"] = [
+            {
+                "risk_ref": disposition.risk_ref,
+                "disposition": disposition.disposition,
+                "loss_ids": [
+                    loss_handles.get(reference, reference)
+                    for reference in disposition.loss_ids
+                ],
+                **(
+                    {"reason": disposition.reason}
+                    if disposition.reason is not None
+                    else {}
+                ),
+            }
+            for disposition in draft.risk_dispositions
+        ]
+        _Stage1aRiskProviderDraft.model_validate(payload)
+    else:
+        _Stage1aGapProviderDraft.model_validate(payload)
 
 
 def _compact_risk_card_evidence(risk_cards: Iterable[RiskCard]) -> list[str]:
@@ -156,6 +495,439 @@ def _compact_risk_card_evidence(risk_cards: Iterable[RiskCard]) -> list[str]:
             fragments.append(f"consequence: {card.consequence}")
         evidence.append("; ".join(fragments))
     return evidence
+
+
+def _next_canonical_number(ids: Iterable[str], *, kind: str) -> int:
+    pattern = _CANONICAL_ID_PATTERNS[kind]
+    return (
+        max(
+            (
+                int(match.group(1))
+                for value in ids
+                if (match := pattern.fullmatch(value))
+            ),
+            default=0,
+        )
+        + 1
+    )
+
+
+def _max_id_num(ids: list[str], prefix: str) -> int:
+    """Read a historical canonical suffix without allocating or renumbering.
+
+    This pure helper remains for the read-only historical audit/property seam.
+    Current provider compilation uses request-local handles and
+    :func:`_next_canonical_number`; no live prompt receives its result.
+    """
+    pattern = re.compile(rf"^{re.escape(prefix)}(\d+)$")
+    return max(
+        (int(match.group(1)) for value in ids if (match := pattern.fullmatch(value))),
+        default=0,
+    )
+
+
+def _renumber_items(
+    items: list[object],
+    id_attr: str,
+    prefix: str,
+    *,
+    start: int = 1,
+) -> dict[str, str]:
+    """Legacy pure renumbering helper for historical property/audit tests.
+
+    Current Stage 1a compilation never calls this helper: canonical IDs are
+    allocated from request-local handles by :func:`_allocate_provider_scope`
+    and existing IDs are preserved.  The old read-only audit seam still
+    exposes this operation for callers that explicitly need to inspect a
+    historical graph transformation.
+    """
+    mapping: dict[str, str] = {}
+    for index, item in enumerate(items, start=start):
+        old_id = str(getattr(item, id_attr))
+        new_id = f"{prefix}{index}"
+        mapping[old_id] = new_id
+        setattr(item, id_attr, new_id)
+    return mapping
+
+
+def _remap_references(
+    items: list[object],
+    references_attr: str,
+    id_map: dict[str, str],
+) -> None:
+    """Legacy in-place reference remapper for the historical audit seam.
+
+    Unknown references are deliberately retained.  The current provider
+    compiler resolves every reference against explicit local/canonical
+    namespaces before it reaches the graph validators.
+    """
+    for item in items:
+        references = getattr(item, references_attr)
+        setattr(
+            item,
+            references_attr,
+            [id_map.get(reference, reference) for reference in references],
+        )
+
+
+def _allocate_provider_scope(
+    records: Iterable[object],
+    *,
+    prior_ids: set[str],
+    kind: str,
+) -> dict[str, str]:
+    """Allocate canonical IDs for one provider-local namespace.
+
+    Handles are sorted before allocation so model list order cannot change
+    canonical identities; the record order itself remains untouched for
+    readable artifact output.
+    """
+
+    def handle_sort_key(handle: str) -> tuple[str, int, str]:
+        # Generated fixture and model handles commonly use a numeric suffix
+        # (``constraint_2``/``constraint_10``).  Natural ordering keeps their
+        # canonical IDs contiguous while retaining lexical ordering for
+        # descriptive handles such as ``privacy_loss``.
+        match = re.match(r"^(.*?)(\d+)$", handle)
+        if match is None:
+            return (handle, -1, handle)
+        return (match.group(1), int(match.group(2)), handle)
+
+    handles = sorted(
+        {str(getattr(record, "handle")) for record in records},
+        key=handle_sort_key,
+    )
+    mapping: dict[str, str] = {}
+    next_number = _next_canonical_number(prior_ids, kind=kind)
+    used = set(prior_ids)
+    prefix = {"loss": "L-", "hazard": "H-", "constraint": "SC-"}[kind]
+    for handle in handles:
+        target = f"{prefix}{next_number}"
+        while target in used:
+            next_number += 1
+            target = f"{prefix}{next_number}"
+        next_number += 1
+        used.add(target)
+        mapping[handle] = target
+    return mapping
+
+
+def _resolve_provider_reference(
+    value: str,
+    *,
+    mapping: dict[str, str],
+    existing_ids: set[str],
+    kind: str,
+    strict: bool = True,
+    field: str | None = None,
+) -> str:
+    """Resolve one existing canonical ID or request-local handle.
+
+    In the normal materialization path an unknown value is rejected before a
+    newly allocated canonical ID can make it look declared.  The named repair
+    adapter may request ``strict=False`` so it can preserve malformed rows for
+    the existing row-level repair classifier without silently resolving them.
+    """
+    if value in mapping:
+        return mapping[value]
+    if value in existing_ids:
+        return value
+    if strict:
+        known = sorted(existing_ids | set(mapping.values()))
+        prefix = f"{field}: " if field else ""
+        raise ValueError(
+            f"{prefix}unknown {kind} reference '{value}' in provider graph; "
+            f"Missing {kind} declarations: {value}. Known {kind} IDs: "
+            f"{', '.join(known) or 'none'}"
+        )
+    return value
+
+
+def _materialize_provider_draft(
+    provider_draft: _Stage1aGapProviderDraft,
+    *,
+    prior: LossAnalysisDraft | None = None,
+    strict_references: bool = True,
+) -> LossAnalysisDraft:
+    """Compile the request-local Stage 1a provider wire into a domain draft.
+
+    Existing graph identities are preserved when a gap response references
+    them. New records are allocated from the complete prior namespace, and
+    all cross-references are resolved before the ordinary draft validators run.
+    Existing references remain canonical IDs; only records declared in this
+    provider response use request-local handles. The adapter deliberately has
+    no historical-ID fallback.
+    """
+    prior = prior or LossAnalysisDraft()
+    prior_losses = {
+        loss.loss_id for loss in (*prior.risk_card_losses, *prior.use_case_losses)
+    }
+    prior_hazards = {hazard.hazard_id for hazard in prior.hazards}
+    prior_constraints = {
+        constraint.constraint_id for constraint in prior.security_constraints
+    }
+
+    all_provider_losses = [
+        *provider_draft.risk_card_losses,
+        *provider_draft.use_case_losses,
+    ]
+    loss_map = _allocate_provider_scope(
+        all_provider_losses,
+        prior_ids=prior_losses,
+        kind="loss",
+    )
+    hazard_map = _allocate_provider_scope(
+        provider_draft.hazards,
+        prior_ids=prior_hazards,
+        kind="hazard",
+    )
+    constraint_map = _allocate_provider_scope(
+        provider_draft.security_constraints,
+        prior_ids=prior_constraints,
+        kind="constraint",
+    )
+
+    def materialize_loss(item: _ProviderLoss) -> Loss:
+        return Loss(
+            loss_id=loss_map[item.handle],
+            description=item.description,
+            provenance=item.provenance,
+            source_risk_cards=item.source_risk_cards,
+        )
+
+    losses = [materialize_loss(item) for item in all_provider_losses]
+    materialized_risk_losses = [
+        materialize_loss(item) for item in provider_draft.risk_card_losses
+    ]
+    materialized_use_case_losses = [
+        materialize_loss(item) for item in provider_draft.use_case_losses
+    ]
+    # Newly allocated canonical IDs are compiler outputs, not provider
+    # references.  A provider may refer to a new record only by its local
+    # handle; accepting a guessed ``L-n``/``H-n``/``SC-n`` here would make
+    # malformed forward references appear valid.
+    valid_loss_ids = prior_losses
+
+    materialized_hazards = [
+        Hazard(
+            hazard_id=hazard_map[item.handle],
+            description=item.description,
+            related_losses=[
+                _resolve_provider_reference(
+                    reference,
+                    mapping=loss_map,
+                    existing_ids=valid_loss_ids,
+                    kind="loss",
+                    strict=strict_references,
+                    field="related_losses",
+                )
+                for reference in item.related_losses
+            ],
+        )
+        for item in provider_draft.hazards
+    ]
+    valid_hazard_ids = prior_hazards
+    materialized_constraints = [
+        SecurityConstraint(
+            constraint_id=constraint_map[item.handle],
+            rule=item.rule,
+            applies_when=item.applies_when,
+            related_hazards=[
+                _resolve_provider_reference(
+                    reference,
+                    mapping=hazard_map,
+                    existing_ids=valid_hazard_ids,
+                    kind="hazard",
+                    strict=strict_references,
+                    field="related_hazards",
+                )
+                for reference in item.related_hazards
+            ],
+            obligations=item.obligations,
+        )
+        for item in provider_draft.security_constraints
+    ]
+
+    dispositions = [
+        disposition.model_copy(
+            update={
+                "loss_ids": [
+                    _resolve_provider_reference(
+                        reference,
+                        mapping=loss_map,
+                        existing_ids=valid_loss_ids,
+                        kind="loss",
+                        strict=strict_references,
+                        field="loss_ids",
+                    )
+                    for reference in disposition.loss_ids
+                ]
+            }
+        )
+        for disposition in getattr(provider_draft, "risk_dispositions", ())
+    ]
+    # Keep this assertion close to the adapter: it catches accidental changes
+    # to the collection split without hiding records in a later merge.
+    if len(losses) != len(materialized_risk_losses) + len(materialized_use_case_losses):
+        raise AssertionError("provider loss materialization lost a record")
+    return LossAnalysisDraft.model_validate(
+        {
+            "risk_card_losses": materialized_risk_losses,
+            "use_case_losses": materialized_use_case_losses,
+            "hazards": materialized_hazards,
+            "security_constraints": materialized_constraints,
+            "risk_dispositions": dispositions,
+        }
+    )
+
+
+def _prepare_current_provider_repair_input(
+    result: LLMResult | None,
+    *,
+    response_format: type[BaseModel],
+    prior: LossAnalysisDraft | None,
+) -> tuple[LLMResult, type[LossAnalysisDraft]] | None:
+    """Adapt one current local-handle response for the legacy repair engine.
+
+    The targeted-repair module intentionally works on domain rows because its
+    approved scope is limited to dispositions and obligation entries.  Keep
+    the live provider boundary strict, then translate only the failed first
+    response into canonical domain rows for that engine.  A response without
+    any current local handles is rejected here rather than being interpreted
+    as a historical canonical wire.
+    """
+    if result is None:
+        return None
+    if isinstance(result.content, BaseModel):
+        raw = result.content.model_dump(mode="json")
+    elif isinstance(result.content, dict):
+        raw = deepcopy(result.content)
+    elif isinstance(result.content, str):
+        try:
+            raw = json.loads(result.content)
+        except json.JSONDecodeError:
+            return None
+    else:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    collection_names = (
+        "risk_card_losses",
+        "use_case_losses",
+        "hazards",
+        "security_constraints",
+    )
+    has_current_handles = any(
+        isinstance(raw.get(name), list)
+        and any(isinstance(row, dict) and "handle" in row for row in raw[name])
+        for name in collection_names
+    )
+    empty_gap_wire = (
+        issubclass(response_format, _Stage1aGapProviderDraft)
+        and all(isinstance(raw.get(name), list) for name in collection_names)
+        and not any(raw.get(name) for name in collection_names)
+    )
+    if not has_current_handles and not empty_gap_wire:
+        return None
+    # Preserve malformed dispositions/obligations verbatim while removing only
+    # those fields that prevent the structural local wire from providing the
+    # canonical namespace needed by the repair engine.
+    clean = deepcopy(raw)
+    if issubclass(response_format, _Stage1aRiskProviderDraft):
+        clean["risk_dispositions"] = []
+    else:
+        # Gap responses may carry a malformed disposition collection in the
+        # explicitly approved C1 cleanup path.  Remove only that known
+        # cleanup-scoped field before re-validating the remaining current
+        # local-handle wire; the original rows stay in ``raw`` for the
+        # deterministic cleanup/repair record.
+        clean.pop("risk_dispositions", None)
+    for row in clean.get("security_constraints", []):
+        if isinstance(row, dict):
+            row["obligations"] = []
+    try:
+        provider = response_format.model_validate(clean)
+    except ValidationError:
+        return None
+    if not isinstance(
+        provider,
+        (_Stage1aRiskProviderDraft, _Stage1aGapProviderDraft),
+    ):
+        return None
+    # Preserve unresolved references for the approved repair classifier; the
+    # normal first-attempt compiler remains strict and rejects them before any
+    # new canonical ID can be mistaken for a declaration.
+    domain = _materialize_provider_draft(
+        provider,
+        prior=prior,
+        strict_references=False,
+    )
+
+    provider_losses = [*provider.risk_card_losses, *provider.use_case_losses]
+    domain_losses = [*domain.risk_card_losses, *domain.use_case_losses]
+    if len(provider_losses) != len(domain_losses):
+        return None
+    loss_map = {
+        provider_loss.handle: domain_loss.loss_id
+        for provider_loss, domain_loss in zip(provider_losses, domain_losses)
+    }
+    hazard_map = {
+        provider_hazard.handle: domain_hazard.hazard_id
+        for provider_hazard, domain_hazard in zip(provider.hazards, domain.hazards)
+    }
+    constraint_map = {
+        provider_constraint.handle: domain_constraint.constraint_id
+        for provider_constraint, domain_constraint in zip(
+            provider.security_constraints,
+            domain.security_constraints,
+        )
+    }
+
+    def adapt_rows(name: str, identity: str, references: str | None = None) -> None:
+        rows = raw.get(name)
+        if not isinstance(rows, list):
+            return
+        mapping = {
+            "risk_card_losses": loss_map,
+            "use_case_losses": loss_map,
+            "hazards": hazard_map,
+            "security_constraints": constraint_map,
+        }[name]
+        reference_map = loss_map if name == "hazards" else hazard_map
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            handle = row.get("handle")
+            if isinstance(handle, str) and handle in mapping:
+                row[identity] = mapping[handle]
+                row.pop("handle", None)
+            if references is not None:
+                refs = row.get(references)
+                if isinstance(refs, list):
+                    row[references] = [
+                        reference_map.get(reference, reference) for reference in refs
+                    ]
+
+    adapt_rows("risk_card_losses", "loss_id")
+    adapt_rows("use_case_losses", "loss_id")
+    adapt_rows("hazards", "hazard_id", "related_losses")
+    adapt_rows("security_constraints", "constraint_id", "related_hazards")
+    dispositions = raw.get("risk_dispositions")
+    if isinstance(dispositions, list):
+        for row in dispositions:
+            if not isinstance(row, dict):
+                continue
+            loss_ids = row.get("loss_ids")
+            if isinstance(loss_ids, list):
+                row["loss_ids"] = [loss_map.get(value, value) for value in loss_ids]
+    elif not issubclass(response_format, _Stage1aRiskProviderDraft):
+        raw["risk_dispositions"] = []
+    repair_model = (
+        _Stage1aRiskRepairDraft
+        if issubclass(response_format, _Stage1aRiskProviderDraft)
+        else _Stage1aGapRepairDraft
+    )
+    return result.model_copy(update={"content": raw}), repair_model
 
 
 class _DraftReferenceValidationError(ValueError):
@@ -377,8 +1149,9 @@ def derive_loss_analysis(
     for missing source-grounded systemic losses, receiving Call 1's output and
     the capability profile as context.
 
-    The two drafts are merged with sequential ID renumbering so that
-    cross-references remain valid and no IDs are duplicated.
+    Provider-local handles are compiled to canonical IDs before the two drafts
+    are merged. Existing canonical IDs remain stable, new IDs are allocated
+    deterministically, and cross-references are resolved before validation.
 
     Every Stage 1a transformation (salvage drop, deterministic cleanup,
     targeted repair, unsupported outcome) is recorded in one run-level,
@@ -452,25 +1225,8 @@ def derive_loss_analysis(
     # the canonical source-separated view.  Models occasionally put a
     # risk-card loss in ``use_case_losses`` (or repeat it in both fields).
     # Classify by the typed provenance and remove exact duplicate records
-    # before rendering the review context and allocating continuation IDs.
+    # before rendering the review context and compiling the next local scope.
     risk_draft = _canonicalize_draft_losses(risk_draft)
-
-    # --- Compute next IDs for gap analysis ---
-    next_loss_num = (
-        _max_id_num(
-            [
-                loss.loss_id
-                for loss in risk_draft.risk_card_losses + risk_draft.use_case_losses
-            ],
-            "L-",
-        )
-        + 1
-    )
-    next_hazard_num = _max_id_num([h.hazard_id for h in risk_draft.hazards], "H-") + 1
-    next_sc_num = (
-        _max_id_num([sc.constraint_id for sc in risk_draft.security_constraints], "SC-")
-        + 1
-    )
 
     # --- Call 2: gap_analysis ---
     try:
@@ -491,9 +1247,6 @@ def derive_loss_analysis(
             existing_losses=existing_losses,
             existing_hazards=risk_draft.hazards,
             existing_constraints=risk_draft.security_constraints,
-            next_loss_num=next_loss_num,
-            next_hazard_num=next_hazard_num,
-            next_sc_num=next_sc_num,
             kc_subcodes=kc_subcodes,
             kc_subcodes_display=build_kc_subcodes_display(kc_subcodes),
             allowed_loss_ids={
@@ -668,7 +1421,14 @@ def _run_stage1a_call(
         nonlocal first_parse_failed, validation_feedback, failure_class
         nonlocal first_wire_error
         try:
-            draft = parse_llm_result(result, response_format)
+            provider_draft = parse_llm_result(result, response_format)
+            if isinstance(provider_draft, _Stage1aGapProviderDraft):
+                draft = _materialize_provider_draft(
+                    provider_draft,
+                    prior=authoritative_draft,
+                )
+            else:
+                draft = provider_draft
         except ValidationError as exc:
             first_parse_failed = True
             failure_class = "wire_schema"
@@ -689,6 +1449,38 @@ def _run_stage1a_call(
                 f"{exc.colno}); return exactly one JSON object matching the "
                 "response schema."
             )
+            raise
+        except ValueError as exc:
+            # Provider-local references are compiled before the domain
+            # validator runs.  Keep an unresolved reference eligible for
+            # the existing typed repair classification, while refusing to
+            # infer that a guessed canonical ID names a newly allocated
+            # record.
+            first_parse_failed = True
+            failure_class = "draft_references"
+            validation_feedback = (
+                f"Validation feedback: {step} provider graph has an invalid "
+                f"cross-reference ({exc}). Declare the record or use its "
+                "exact existing canonical ID."
+            )
+            if step == STEP_GAP and "loss" in str(exc).casefold():
+                unknown_match = re.search(
+                    r"unknown\s+loss\s+reference\s+'([^']+)'",
+                    str(exc),
+                    flags=re.IGNORECASE,
+                )
+                missing_handle = (
+                    unknown_match.group(1)
+                    if unknown_match is not None
+                    else "the named handle"
+                )
+                validation_feedback += (
+                    " For a genuinely new source-grounded use-case loss, "
+                    f"declare {missing_handle} in use_case_losses with "
+                    "provenance: use_case and source_risk_cards: []; "
+                    "otherwise correct only a mistaken reference to the exact "
+                    "existing loss with that meaning."
+                )
             raise
         if authoritative_draft is not None:
             merged = _merge_loss_analysis_correction(
@@ -787,6 +1579,49 @@ def _run_stage1a_call(
     if validation_feedback is None:
         raise StageError(stage=STAGE, step=step, message=error_msg)
 
+    # Classify container and top-level wire damage before attempting the
+    # narrow repair adapter.  The adapter intentionally accepts only a
+    # complete current local-handle graph; without this early classification a
+    # malformed collection would be reported as a generic "no repair wire"
+    # error and lose its typed terminal reason.
+    if first_wire_error is not None:
+        wire_classification = classify_wire_validation_errors(first_wire_error)
+        if wire_classification.unsupported_reason is not None:
+            reason = wire_classification.unsupported_reason
+            identity = "response"
+            for collection in (
+                "risk_card_losses",
+                "use_case_losses",
+                "hazards",
+                "security_constraints",
+                "risk_dispositions",
+            ):
+                if collection in reason:
+                    identity = collection
+                    break
+            if repair_record is not None:
+                repair_record.add(
+                    stage=step,
+                    attempt="first",
+                    kind="unsupported",
+                    identity=identity,
+                    reason=reason,
+                    proposed={},
+                    applied={},
+                    outcome="unsupported",
+                    raw_step=step,
+                )
+            raise StageError(
+                stage=STAGE,
+                step=step,
+                message=(
+                    f"targeted repair unsupported ({reason}); "
+                    f"{failure_class or 'wire_schema'} failure class; "
+                    f"no repair call was made; first attempt failed: "
+                    f"{error_msg}. {validation_feedback}"
+                ),
+            )
+
     def _merge_authority(repaired: LossAnalysisDraft) -> LossAnalysisDraft:
         return _merge_loss_analysis_correction(
             LossAnalysisDraft(),
@@ -794,10 +1629,101 @@ def _run_stage1a_call(
             authoritative_draft=authoritative_draft,
         )
 
+    repair_input = _prepare_current_provider_repair_input(
+        first_result,
+        response_format=response_format,
+        prior=authoritative_draft,
+    )
+    if repair_input is None:
+        reason = (
+            "the failed response did not contain a valid current local-handle "
+            "wire that can be adapted for the approved repair scope"
+        )
+        if first_wire_error is not None:
+            wire_classification = classify_wire_validation_errors(first_wire_error)
+            if wire_classification.record_errors:
+                reason = "wire violation outside the approved repair scope"
+        if first_result is not None and isinstance(first_result.content, str):
+            try:
+                json.loads(first_result.content)
+            except (TypeError, json.JSONDecodeError):
+                reason = "the response body never decoded as JSON"
+        if repair_record is not None:
+            repair_record.add(
+                stage=step,
+                attempt="first",
+                kind="unsupported",
+                identity="response",
+                reason=reason,
+                proposed={},
+                applied={},
+                outcome="unsupported",
+                raw_step=step,
+            )
+        raise StageError(
+            stage=STAGE,
+            step=step,
+            message=(
+                f"targeted repair unsupported ({reason}); "
+                f"{failure_class or 'unknown'} failure class; "
+                f"no repair call was made; "
+                f"first attempt failed: {error_msg}. {validation_feedback}"
+            ),
+        )
+    repair_first_result, repair_response_format = repair_input
+
+    # The bounded repair may only address dispositions or obligation rows.
+    # Validate the independent graph edges before constructing either repair
+    # plan so a malformed local reference cannot be smuggled through an
+    # otherwise repairable obligation and trigger a second model call.
+    try:
+        repair_content = repair_first_result.content
+        if isinstance(repair_content, BaseModel):
+            repair_content = repair_content.model_dump(mode="json")
+        if not isinstance(repair_content, dict):
+            raise ValueError("the adapted repair graph is not a JSON object")
+        graph_content = deepcopy(repair_content)
+        graph_content["risk_dispositions"] = []
+        constraints = graph_content.get("security_constraints", [])
+        if isinstance(constraints, list):
+            for row in constraints:
+                if isinstance(row, dict):
+                    row["obligations"] = []
+        graph_draft = LossAnalysisDraft.model_validate(graph_content)
+        _validate_draft_references(
+            graph_draft,
+            context=step,
+            allowed_loss_ids=allowed_loss_ids,
+            allowed_hazard_ids=allowed_hazard_ids,
+        )
+    except (_DraftReferenceValidationError, ValidationError, ValueError) as exc:
+        reason = f"graph validation is outside the approved repair scope: {exc}"
+        if repair_record is not None:
+            repair_record.add(
+                stage=step,
+                attempt="first",
+                kind="unsupported",
+                identity="response",
+                reason=reason,
+                proposed={},
+                applied={},
+                outcome="unsupported",
+                raw_step=step,
+            )
+        raise StageError(
+            stage=STAGE,
+            step=step,
+            message=(
+                f"targeted repair unsupported ({reason}); no repair call was "
+                f"made; {failure_class or 'draft_references'} failure class; "
+                f"first attempt failed: {error_msg}. {validation_feedback}"
+            ),
+        ) from exc
+
     outcome = build_repair_plan(
         step=step,
-        response_format=response_format,
-        first_result=first_result,
+        response_format=repair_response_format,
+        first_result=repair_first_result,
         first_parse_failed=first_parse_failed,
         failure_class=failure_class or "unknown",
         risk_cards=list(accounting_cards),
@@ -805,6 +1731,10 @@ def _run_stage1a_call(
         constraint_wire_model=_ProviderSecurityConstraint,
         first_wire_error=first_wire_error,
         repair_record=repair_record,
+        gap_wire=(
+            issubclass(response_format, _Stage1aGapProviderDraft)
+            and not issubclass(response_format, _Stage1aRiskProviderDraft)
+        ),
     )
     if isinstance(outcome, UnsupportedRepair):
         if repair_record is not None:
@@ -824,7 +1754,8 @@ def _run_stage1a_call(
             step=step,
             message=(
                 f"targeted repair unsupported ({outcome.reason}); no repair "
-                f"call was made; first attempt failed: {error_msg}. "
+                f"call was made; {failure_class or 'unknown'} failure class; "
+                f"first attempt failed: {error_msg}. "
                 f"{validation_feedback}"
             ),
         )
@@ -837,7 +1768,7 @@ def _run_stage1a_call(
         # response.
         cleaned = outcome.draft
         try:
-            revalidate_provider_object(cleaned, response_format, step=step)
+            revalidate_provider_object(cleaned, repair_response_format, step=step)
         except ValueError as exc:
             record_cleanup_rows(
                 outcome.removed_rows,
@@ -932,7 +1863,7 @@ def _run_stage1a_call(
         ),
         normalization_warnings=normalization_warnings,
         max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
-        provider_draft_model=response_format,
+        provider_draft_model=repair_response_format,
         repair_record=repair_record,
     )
 
@@ -1403,81 +2334,223 @@ def _validate_gap_relationships(
     )
 
 
-def _max_id_num(ids: list[str], prefix: str) -> int:
-    """Return the maximum numeric suffix among IDs with the given prefix.
-
-    Returns 0 if the list is empty or no IDs match the prefix.
-    """
-    max_num = 0
-    pattern = re.compile(rf"^{re.escape(prefix)}(\d+)$")
-    for id_str in ids:
-        match = pattern.match(id_str)
-        if match:
-            num = int(match.group(1))
-            if num > max_num:
-                max_num = num
-    return max_num
-
-
 def _merge_drafts(
     risk_draft: LossAnalysisDraft,
     gap_draft: LossAnalysisDraft,
 ) -> LossAnalysis:
     """Merge risk derivation and gap analysis drafts into a final LossAnalysis.
 
-    Normalizes losses from both drafts by their typed provenance, removes
-    identical duplicate records, and then concatenates hazards and security
-    constraints.  Finally, renumbers all IDs sequentially to guarantee no
-    duplicates and valid cross-references.
+    Preserve every canonical identity already assigned by the compiler.  A
+    direct caller may still provide local domain IDs (for example an offline
+    fixture), so those are allocated once, deterministically, before the
+    source-separated loss merge.  Identical repeated records are collapsed;
+    a changed payload under one identity is rejected rather than silently
+    replacing the authoritative risk record.
     """
+    risk_draft, gap_draft = _canonicalize_domain_graph(risk_draft, gap_draft)
     all_risk_losses, all_uc_losses = _normalize_losses(risk_draft, gap_draft)
-    all_hazards = [
-        hazard.model_copy(deep=True)
-        for hazard in [*risk_draft.hazards, *gap_draft.hazards]
-    ]
-    all_constraints = [
-        constraint.model_copy(deep=True)
-        for constraint in [
-            *risk_draft.security_constraints,
-            *gap_draft.security_constraints,
-        ]
-    ]
-
-    # --- Renumber loss IDs (risk losses first, then use-case losses) ---
-    loss_id_map = _renumber_items(all_risk_losses, "loss_id", "L-")
-    loss_id_map.update(
-        _renumber_items(all_uc_losses, "loss_id", "L-", start=len(all_risk_losses) + 1)
+    all_hazards = _merge_identity_records(
+        [*risk_draft.hazards, *gap_draft.hazards],
+        identity_field="hazard_id",
+        record_label="hazard",
     )
-
-    # --- Renumber hazard and constraint IDs ---
-    hazard_id_map = _renumber_items(all_hazards, "hazard_id", "H-")
-    _renumber_items(all_constraints, "constraint_id", "SC-")
-
-    # --- Update cross-references ---
-    _remap_references(all_hazards, "related_losses", loss_id_map)
-    _remap_references(all_constraints, "related_hazards", hazard_id_map)
-
-    # Risk accounting comes from the risk-derivation draft only; remap its
-    # cited loss IDs to the renumbered identities before persistence.
-    remapped_dispositions = [
-        disposition.model_copy(
-            update={
-                "loss_ids": [
-                    loss_id_map.get(loss_id, loss_id)
-                    for loss_id in disposition.loss_ids
-                ]
-            }
-        )
-        for disposition in risk_draft.risk_dispositions
-    ]
+    all_constraints = _merge_identity_records(
+        [*risk_draft.security_constraints, *gap_draft.security_constraints],
+        identity_field="constraint_id",
+        record_label="security constraint",
+    )
 
     return LossAnalysis(
         risk_card_losses=all_risk_losses,
         use_case_losses=all_uc_losses,
         hazards=all_hazards,
         security_constraints=all_constraints,
-        risk_dispositions=remapped_dispositions,
+        # Risk accounting has one owner: the risk-derivation response.  Gap
+        # dispositions, if supplied by an offline caller, never alter it.
+        risk_dispositions=[
+            disposition.model_copy(deep=True)
+            for disposition in risk_draft.risk_dispositions
+        ],
     )
+
+
+def _canonical_id_map(
+    records: Iterable[object],
+    *,
+    id_attr: str,
+    kind: str,
+    reserved_ids: set[str] | None = None,
+) -> dict[str, str]:
+    """Preserve canonical IDs and allocate deterministic IDs for local ones.
+
+    ``reserved_ids`` contains canonical identities already in the complete
+    merge.  Local handles are mapped per provider scope, so the same spelling
+    in the risk and gap responses cannot accidentally merge two records or
+    redirect a risk disposition.
+    """
+    pattern = _CANONICAL_ID_PATTERNS[kind]
+    values = {str(getattr(record, id_attr)) for record in records}
+    used = set(reserved_ids or ())
+    used.update(value for value in values if pattern.fullmatch(value))
+    mapping = {value: value for value in used}
+    prefix = {"loss": "L-", "hazard": "H-", "constraint": "SC-"}[kind]
+    next_number = _next_canonical_number(used, kind=kind)
+    for value in sorted(values - used):
+        candidate = f"{prefix}{next_number}"
+        while candidate in used:
+            next_number += 1
+            candidate = f"{prefix}{next_number}"
+        mapping[value] = candidate
+        used.add(candidate)
+        next_number += 1
+    return mapping
+
+
+def _canonicalize_domain_graph(
+    risk_draft: LossAnalysisDraft,
+    gap_draft: LossAnalysisDraft,
+) -> tuple[LossAnalysisDraft, LossAnalysisDraft]:
+    """Normalize optional direct-caller local IDs without rewriting canonicals."""
+    drafts = (risk_draft, gap_draft)
+    all_losses = [
+        loss
+        for draft in drafts
+        for loss in (*draft.risk_card_losses, *draft.use_case_losses)
+    ]
+    all_hazards = [hazard for draft in drafts for hazard in draft.hazards]
+    all_constraints = [
+        constraint for draft in drafts for constraint in draft.security_constraints
+    ]
+
+    def canonical_ids(
+        records: Iterable[object], *, id_attr: str, kind: str
+    ) -> set[str]:
+        pattern = _CANONICAL_ID_PATTERNS[kind]
+        return {
+            str(getattr(record, id_attr))
+            for record in records
+            if pattern.fullmatch(str(getattr(record, id_attr)))
+        }
+
+    used_loss_ids = canonical_ids(all_losses, id_attr="loss_id", kind="loss")
+    used_hazard_ids = canonical_ids(all_hazards, id_attr="hazard_id", kind="hazard")
+    used_constraint_ids = canonical_ids(
+        all_constraints,
+        id_attr="constraint_id",
+        kind="constraint",
+    )
+
+    normalized: list[LossAnalysisDraft] = []
+    for draft in drafts:
+        loss_map = _canonical_id_map(
+            [
+                *draft.risk_card_losses,
+                *draft.use_case_losses,
+            ],
+            id_attr="loss_id",
+            kind="loss",
+            reserved_ids=used_loss_ids,
+        )
+        used_loss_ids.update(loss_map.values())
+        hazard_map = _canonical_id_map(
+            draft.hazards,
+            id_attr="hazard_id",
+            kind="hazard",
+            reserved_ids=used_hazard_ids,
+        )
+        used_hazard_ids.update(hazard_map.values())
+        constraint_map = _canonical_id_map(
+            draft.security_constraints,
+            id_attr="constraint_id",
+            kind="constraint",
+            reserved_ids=used_constraint_ids,
+        )
+        used_constraint_ids.update(constraint_map.values())
+        normalized.append(
+            LossAnalysisDraft.model_validate(
+                {
+                    "risk_card_losses": [
+                        loss.model_copy(
+                            update={"loss_id": loss_map[loss.loss_id]},
+                            deep=True,
+                        )
+                        for loss in draft.risk_card_losses
+                    ],
+                    "use_case_losses": [
+                        loss.model_copy(
+                            update={"loss_id": loss_map[loss.loss_id]},
+                            deep=True,
+                        )
+                        for loss in draft.use_case_losses
+                    ],
+                    "hazards": [
+                        hazard.model_copy(
+                            update={
+                                "hazard_id": hazard_map[hazard.hazard_id],
+                                "related_losses": [
+                                    loss_map.get(reference, reference)
+                                    for reference in hazard.related_losses
+                                ],
+                            },
+                            deep=True,
+                        )
+                        for hazard in draft.hazards
+                    ],
+                    "security_constraints": [
+                        constraint.model_copy(
+                            update={
+                                "constraint_id": constraint_map[
+                                    constraint.constraint_id
+                                ],
+                                "related_hazards": [
+                                    hazard_map.get(reference, reference)
+                                    for reference in constraint.related_hazards
+                                ],
+                            },
+                            deep=True,
+                        )
+                        for constraint in draft.security_constraints
+                    ],
+                    "risk_dispositions": [
+                        disposition.model_copy(
+                            update={
+                                "loss_ids": [
+                                    loss_map.get(reference, reference)
+                                    for reference in disposition.loss_ids
+                                ]
+                            },
+                            deep=True,
+                        )
+                        for disposition in draft.risk_dispositions
+                    ],
+                }
+            )
+        )
+    return normalized[0], normalized[1]
+
+
+def _merge_identity_records(
+    records: Iterable[object],
+    *,
+    identity_field: str,
+    record_label: str,
+) -> list[object]:
+    """Keep first-source order while collapsing exact identities safely."""
+    result: list[object] = []
+    seen: dict[str, object] = {}
+    for record in records:
+        identity = str(getattr(record, identity_field))
+        previous = seen.get(identity)
+        if previous is not None:
+            if previous.model_dump(mode="json") != record.model_dump(mode="json"):
+                raise ValueError(
+                    f"conflicting duplicate {record_label} ID '{identity}'"
+                )
+            continue
+        clone = record.model_copy(deep=True)
+        seen[identity] = clone
+        result.append(clone)
+    return result
 
 
 def _canonicalize_draft_losses(draft: LossAnalysisDraft) -> LossAnalysisDraft:
@@ -1486,9 +2559,9 @@ def _canonicalize_draft_losses(draft: LossAnalysisDraft) -> LossAnalysisDraft:
     ``LossAnalysisDraft`` retains the two provider-facing containers for
     compatibility, but provenance is the authority for which final source a
     loss belongs to.  Canonicalizing before the gap prompt keeps the model
-    from reviewing the same loss twice and makes the next-ID calculation
-    agree with the context shown to it.  A conflicting duplicate ID remains a
-    hard diagnostic; silently choosing one payload would corrupt references.
+    from reviewing the same loss twice and keeps the context's canonical
+    references stable. A conflicting duplicate ID remains a hard diagnostic;
+    silently choosing one payload would corrupt references.
     """
     risk_losses, use_case_losses = _normalize_losses(
         draft,
@@ -1546,38 +2619,3 @@ def _normalize_losses(
         loss for loss in unique_losses if loss.provenance != LossProvenance.risk_card
     ]
     return risk_losses, use_case_losses
-
-
-def _renumber_items(
-    items: list[object],
-    id_attr: str,
-    prefix: str,
-    *,
-    start: int = 1,
-) -> dict[str, str]:
-    """Renumber items sequentially, returning an old-ID → new-ID map.
-
-    Mutates each item's ``id_attr`` in place to ``{prefix}{index}`` where
-    index starts at *start* and increments by 1.
-    """
-    id_map: dict[str, str] = {}
-    for i, item in enumerate(items, start):
-        old_id = getattr(item, id_attr)
-        new_id = f"{prefix}{i}"
-        id_map[old_id] = new_id
-        setattr(item, id_attr, new_id)
-    return id_map
-
-
-def _remap_references(
-    items: list[object],
-    ref_attr: str,
-    id_map: dict[str, str],
-) -> None:
-    """Replace each cross-reference in ``ref_attr`` using ``id_map``.
-
-    References not found in the map are preserved unchanged.
-    """
-    for item in items:
-        refs = getattr(item, ref_attr)
-        setattr(item, ref_attr, [id_map.get(ref, ref) for ref in refs])

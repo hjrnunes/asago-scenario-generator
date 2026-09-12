@@ -57,15 +57,15 @@ omit keys.
 {
   "risk_card_losses": [],
   "use_case_losses": [
-    {"loss_id": "L-4", "description": "...", "provenance": "use_case",
+    {"handle": "refund_loss", "description": "...", "provenance": "use_case",
      "source_risk_cards": []}
   ],
   "hazards": [
-    {"hazard_id": "H-4", "description": "...", "related_losses": ["L-4"]}
+    {"handle": "refund_hazard", "description": "...", "related_losses": ["refund_loss"]}
   ],
   "security_constraints": [
-    {"constraint_id": "SC-4", "rule": "...", "applies_when": [],
-     "obligations": [], "related_hazards": ["H-4"]}
+    {"handle": "refund_constraint", "rule": "...", "applies_when": [],
+     "obligations": [], "related_hazards": ["refund_hazard"]}
   ]
 }
 ```
@@ -77,17 +77,19 @@ is owned by the risk-derivation call and is retained automatically.
 
 ## Structural requirements
 
-- New losses have `provenance: use_case` and empty `source_risk_cards`, and
+- New losses have a request-local `handle`, `provenance: use_case`, and empty `source_risk_cards`, and
   go only in `use_case_losses` — never in `risk_card_losses`.
-- New hazards may reference BOTH existing loss IDs (from the previous analysis) and new loss IDs. Every loss_id in `related_losses` must be valid.
-- New security constraints may reference BOTH existing hazard IDs and new hazard IDs. Every hazard_id in `related_hazards` must be valid.
+- New hazards use local `handle` values and may reference BOTH existing canonical loss IDs (from the previous analysis) and new loss handles. Every reference in `related_losses` must be valid.
+- New security constraints use local `handle` values and may reference BOTH existing canonical hazard IDs and new hazard handles. Every reference in `related_hazards` must be valid.
 - Every security constraint has two authored parts: `rule` (the obligation
   in one sentence, without its limiting conditions) and `applies_when` (the
   conditions under which the rule is in force, each in your own words; all
   must hold; a disjunction goes inside one condition). The `applies_when`
   key is required on every constraint — return it even when empty — with at
   most four conditions, and no condition may simply restate the rule.
-- No duplicate IDs. Continue numbering from where the previous analysis left off.
+- No duplicate local handles. Do not allocate or continue canonical `L-*`,
+  `H-*`, or `SC-*` numbering; deterministic code allocates persisted IDs after
+  validating the complete response.
 
 {% include "_obligation_entries.j2" %}
 - Do NOT duplicate losses, hazards, or constraints already present in the previous analysis. If an existing loss already covers a gap, do not re-derive it.

@@ -14,8 +14,11 @@ For each organizational risk provided, derive:
 
 Apply the dependency order from the method card as a hard output contract:
 declare at least one grounded risk-card loss (with its source IDs) before
-writing any hazard or security constraint.  Do not use `L-1`, `L-2`, or any
-other identifier as a reference until that loss appears in your own response.
+writing any hazard or security constraint. Give each new record a short,
+request-local `handle` such as `customer_data_loss`, `retrieval_hazard`, or
+`privacy_constraint`; references to records declared in this response use
+those handles. Do not allocate canonical `L-*`, `H-*`, or `SC-*` IDs. The
+compiler assigns those IDs after the complete response is validated.
 Then declare hazards against those losses, followed by constraints against
 those hazards.  A hazard/constraint-only response is invalid when
 organizational risks are supplied.
@@ -39,19 +42,19 @@ omit keys.
 ```json
 {
   "risk_card_losses": [
-    {"loss_id": "L-1", "description": "...", "provenance": "risk_card",
+    {"handle": "loss_1", "description": "...", "provenance": "risk_card",
      "source_risk_cards": ["<risk-id>", "..."]}
   ],
   "use_case_losses": [],
   "hazards": [
-    {"hazard_id": "H-1", "description": "...", "related_losses": ["L-1"]}
+    {"handle": "hazard_1", "description": "...", "related_losses": ["loss_1"]}
   ],
   "security_constraints": [
-    {"constraint_id": "SC-1", "rule": "...", "applies_when": [],
-     "obligations": [], "related_hazards": ["H-1"]}
+    {"handle": "constraint_1", "rule": "...", "applies_when": [],
+     "obligations": [], "related_hazards": ["hazard_1"]}
   ],
   "risk_dispositions": [
-    {"risk_ref": "<risk-id>", "disposition": "cited", "loss_ids": ["L-1"]}
+    {"risk_ref": "<risk-id>", "disposition": "cited", "loss_ids": ["loss_1"]}
   ]
 }
 ```
@@ -73,10 +76,10 @@ quota.
 ## Structural requirements
 
 - Every loss must cite its source risk IDs in `source_risk_cards`.
-- Every hazard references at least one valid loss_id in `related_losses`.
-- Every security constraint references at least one valid hazard_id in `related_hazards`.
+- Every hazard references at least one valid local loss handle in `related_losses`.
+- Every security constraint references at least one valid local hazard handle in `related_hazards`.
 - Every supplied organizational risk appears exactly once in `risk_dispositions`.
-- No duplicate IDs.
+- No duplicate handles.
 - All losses have `provenance: risk_card`.
 
 ## Risk accounting
@@ -85,13 +88,13 @@ Account for every supplied organizational risk. `risk_dispositions` must
 contain exactly one entry per supplied risk ID, using one of two dispositions:
 
 - `cited` — the risk contributed to at least one loss you declared; list the
-  exact loss IDs in `loss_ids` and omit the `reason` field entirely.
+  exact local loss handles in `loss_ids` and omit the `reason` field entirely.
 - `not_applicable` — the risk produces no grounded loss for this specific
   system; leave `loss_ids` empty and write a one-sentence `reason` stating
   why it does not apply here.
 
-Never omit a supplied risk and never cite an undeclared loss ID. Every
-`loss_ids` value must be a loss ID declared in this same response. Before
+Never omit a supplied risk and never cite an undeclared loss handle. Every
+`loss_ids` value must be a loss handle declared in this same response. Before
 returning, verify each disposition against your final loss registry: a
 disposition may only cite losses that actually appear in `risk_card_losses`
 or `use_case_losses`. Do not invent a loss merely to be able to cite a risk.
@@ -126,8 +129,10 @@ Losses must describe concrete consequences in terms of THIS system's domain, sta
 
 On first use, expand every acronym: write 'Personally Identifiable Information (PII)' not just 'PII'. After the first expansion, the short form alone is acceptable.
 
-## ID conventions
+## Request-local identity conventions
 
-- Losses: L-1, L-2, ...
-- Hazards: H-1, H-2, ...
-- Security Constraints: SC-1, SC-2, ...
+- Every record has a unique local `handle` in its collection.
+- Handles are references within this response only; do not use canonical
+  `L-*`, `H-*`, or `SC-*` values.
+- Keep handles stable within this response and use them exactly in every edge
+  and disposition. Deterministic code assigns persisted IDs after validation.

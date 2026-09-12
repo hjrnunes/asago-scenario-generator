@@ -1,56 +1,60 @@
-You are a safety and security analyst repairing the hazard graph of an AI
-system after it failed deterministic structural checks.
+You are a safety and security analyst repairing a hazard graph after it failed
+deterministic structural checks.
 
 {% include "_loss_analysis_method.j2" %}
 
-## Repair rules
+## Delta contract
 
-You receive the current hazard graph and the exact list of failed checks.
-Your response is a patch over the graph, and only over the graph:
+Return an explicit graph delta. Deterministic code carries every omitted
+hazard and security constraint forward byte-for-byte, then validates the full
+assembled graph against every failed check.
 
-1. Return the complete hazard and security-constraint collections. Each
-   hazard keeps its identity and references at least one loss; each
-   constraint keeps its identity and references at least one hazard.
-2. You may add new hazards or constraints, reword a constraint's `rule` or
-   `applies_when` conditions, or change which hazards a constraint
-   references. Do not delete or rename an existing hazard or constraint.
-3. Every hazard has at least one constraint.
-4. A constraint and the hazard it references must be about the same thing:
-   they must share a descriptive noun phrase copied from their texts.
-5. Constraints about different kinds of behavior must not depend on one
-   single shared hazard.
-6. Every constraint carries the same two authored parts as the main
-   analysis: `rule` (the obligation in one sentence, without its limiting
-   conditions) and `applies_when` (the conditions under which the rule is
-   in force, each in your own words; all must hold; a disjunction goes
-   inside one condition; empty when unconditional; at most four; no
-   condition restates the rule). `obligations` entries ride with their
-   constraint: a constraint returned without them loses them, and a
-   reworded `rule` needs its entries re-derived against the revised text.
-   Do not return losses or risk
-   dispositions: losses are immutable and retained automatically. Do not
-   soften a check. The checks are structural requirements of this
-   analysis; a response that renames, deletes, or empties records to pass
-   them is invalid.
+- `hazard_edits` replaces an existing hazard addressed by its canonical
+  `hazard_id`. The target must already appear in the supplied graph.
+- `hazard_additions` declares new hazards with a unique request-local
+  `handle`. Their persisted `H-*` IDs are compiler-owned.
+- `security_constraint_edits` replaces an existing constraint addressed by its
+  canonical `constraint_id`.
+- `security_constraint_additions` declares new constraints with a unique local
+  `handle`. Their persisted `SC-*` IDs are compiler-owned.
+- Omitted existing records are untouched and are retained automatically.
+  There is no delete or rename operation. Do not return complete collections.
+- Every edit keeps its existing identity and all references must resolve to
+  supplied losses or hazards, or to an addition handle in this same response.
+- A constraint edit whose `rule` or `applies_when` changes MUST include a
+  complete, compatible `obligations` list with `rule_span` values quoting the
+  new rule. If both are unchanged, omitting `obligations` carries the existing
+  entries; provide a list when you intentionally replace them. Never omit
+  obligations to erase a stale interpretation.
+- A known `required`/`forbidden` channel may not be substituted or dropped to
+  reach `unknown`; ordinary domain validators reject incompatible entries.
+- Do not return losses or risk dispositions. They are immutable and carried
+  from the prior graph.
 
 {% include "_obligation_entries.j2" %}
 
 ## Response format
 
-Return exactly one JSON object with these two keys. Do not add, rename, or
-omit keys.
+Return exactly one JSON object with these four keys and no others:
 
 ```json
 {
-  "hazards": [
+  "hazard_edits": [
     {"hazard_id": "H-1", "description": "...", "related_losses": ["L-1"]}
   ],
-  "security_constraints": [
+  "hazard_additions": [
+    {"handle": "new_hazard", "description": "...", "related_losses": ["L-1"]}
+  ],
+  "security_constraint_edits": [
     {"constraint_id": "SC-1", "rule": "...", "applies_when": [],
      "obligations": [], "related_hazards": ["H-1"]}
+  ],
+  "security_constraint_additions": [
+    {"handle": "new_constraint", "rule": "...", "applies_when": [],
+     "obligations": [], "related_hazards": ["new_hazard"]}
   ]
 }
 ```
 
-Continue hazard and constraint numbering after the existing identifiers when
-you add new ones.
+Use empty arrays when no edits or additions of a kind are needed. Preserve
+every valid existing record by leaving it out of the delta.

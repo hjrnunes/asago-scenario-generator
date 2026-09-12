@@ -26,20 +26,11 @@ from typing import Any, Literal
 
 import yaml
 
-from pydantic import (
-    Field,
-    StrictBool,
-    StrictFloat,
-    StrictInt,
-    StrictStr,
-    model_validator,
+from asago_scenario_generator.models.canonical import canonical_json_bytes
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    parse_llm_result,
+    safe_llm_call,
 )
-
-from asago_scenario_generator.models.canonical import (
-    ClosedCanonicalModel,
-    canonical_json_bytes,
-)
-from asago_scenario_generator.stpa.infra.llm_helpers import safe_llm_call
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
 from asago_scenario_generator.stpa.models.execution_classification import (
@@ -107,7 +98,47 @@ from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
 from asago_scenario_generator.stpa.scenario_prod.execution_classification import (
     resolve_contract_environment_request,
 )
+from asago_scenario_generator.stpa.scenario_prod.authoring_adapter import (
+    CurrentAuthoringAdapterError,
+    adapt_current_response_with_bindings,
+)
+from asago_scenario_generator.stpa.scenario_prod.authoring_context import (
+    AdmissibleCheck,
+    AuthoringContext,
+    build_authoring_context as _build_authoring_context,
+    choice_handle,
+    operand_sources_for_choice,
+)
+from asago_scenario_generator.stpa.scenario_prod import (
+    authoring_types as _authoring_types,
+)
+from asago_scenario_generator.stpa.scenario_prod.authoring_wire import (
+    CurrentAuthoringResponse,
+    current_authoring_response_model,
+)
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
+
+# Re-export the historical names from their neutral low-level home.  This
+# preserves saved-record/replay imports while keeping current orchestration
+# and adaptation dependencies pointed downward.
+AUTHORED_STIMULUS_KIND = _authoring_types.AUTHORED_STIMULUS_KIND
+AuthoringResponse = _authoring_types.AuthoringResponse
+AuthoredAdversary = _authoring_types.AuthoredAdversary
+AuthoredClaimUnderTest = _authoring_types.AuthoredClaimUnderTest
+AuthoredConditionEntry = _authoring_types.AuthoredConditionEntry
+AuthoredScenarioDraft = _authoring_types.AuthoredScenarioDraft
+AuthoredStimulus = _authoring_types.AuthoredStimulus
+AuthoredTriggerEvidence = _authoring_types.AuthoredTriggerEvidence
+AuthoredTurn = _authoring_types.AuthoredTurn
+AuthoredUnsafeObservation = _authoring_types.AuthoredUnsafeObservation
+ConditionBasis = _authoring_types.ConditionBasis
+ObservationOperator = _authoring_types.ObservationOperator
+OracleKind = _authoring_types.OracleKind
+TriggerEvidenceSource = _authoring_types.TriggerEvidenceSource
+UNSUPPORTED_ORACLE_KINDS = _authoring_types.UNSUPPORTED_ORACLE_KINDS
+load_oracle_templates = _authoring_types.load_oracle_templates
+render_oracle_text = _authoring_types.render_oracle_text
+stimulus_user_texts = _authoring_types.stimulus_user_texts
 
 AUTHORING_STAGE = "stage_5_authoring"
 
@@ -116,37 +147,9 @@ AUTHORED_STAGE_SUMMARY_KEY = "stage_5_authored"
 
 AUTHORED_SCENARIOS_FILENAME = "authored-scenarios.yaml"
 
-# The stimulus kinds Phase 4 authors: a single user message or a bounded
-# multi-turn conversation.  Content-carried stimuli stay out of the wire
-# schema; anything else is a typed rejection (recorded as a Phase 4
-# deviation in the spec).
-AUTHORED_STIMULUS_KIND = Literal["user_message", "conversation"]
-
-OracleKind = Literal[
-    "tool_argument",
-    "tool_called",
-    "tool_absent",
-    "tool_order",
-    "response_claim",
-    "paired_response",
-]
-
-TriggerEvidenceSource = Literal["stimulus", "state_fact", "observation"]
-
-# Kinds accepted on the wire but carrying no producer condition, consumer
-# observer, or compiled artifact today.  They are rejected with a typed
-# reason instead of being silently dropped (owner decision 2026-09-08).
-_UNSUPPORTED_ORACLE_KINDS = frozenset({"tool_called", "paired_response"})
-
-ObservationOperator = Literal[
-    "equals",
-    "not_equals",
-    "greater_than",
-    "less_than",
-    "owner_differs_from_session",
-]
-
-ConditionBasis = Literal["state_fact", "stimulus", "observation"]
+# Historical wire aliases remain re-exported from this orchestration module
+# for callers that imported them before the current provider seam existed.
+_UNSUPPORTED_ORACLE_KINDS = UNSUPPORTED_ORACLE_KINDS
 
 # Argument roles and comparison paths for ``owner_differs_from_session``
 # come from the accepted target subject model (correction spec 2026-09-12,
@@ -219,228 +222,6 @@ def _owner_differs_offer(
         f"no record_address role on tool {tool!r} has a declared relation "
         "covering its collections",
     )
-
-
-ORACLE_TEMPLATES_FILENAME = "templates.yaml"
-_ORACLE_TEMPLATE_DOMAIN = "asago-scenario-generator:oracle-templates:v1"
-
-
-def _oracle_templates_path() -> Path:
-    """Resolve ``data/oracles/templates.yaml`` in source or bundled layout."""
-    package = Path(__file__).resolve()
-    source = package.parents[4] / "data" / "oracles" / ORACLE_TEMPLATES_FILENAME
-    if source.is_file():
-        return source
-    return package.parents[2] / "data" / "oracles" / ORACLE_TEMPLATES_FILENAME
-
-
-def load_oracle_templates() -> dict[str, str]:
-    """Load the closed oracle-template table (spec 4.4)."""
-    path = _oracle_templates_path()
-    with path.open(encoding="utf-8") as handle:
-        payload = yaml.safe_load(handle)
-    if not isinstance(payload, dict) or "templates" not in payload:
-        raise ValueError("oracle templates file must carry a templates mapping")
-    templates = payload["templates"]
-    if not isinstance(templates, dict) or not templates:
-        raise ValueError("oracle templates file must define at least one template")
-    return {str(key): str(value) for key, value in templates.items()}
-
-
-def render_oracle_text(kind: str, **values: Any) -> str:
-    """Render one oracle template from validated values only (spec 4.4)."""
-    template = load_oracle_templates().get(kind)
-    if template is None:
-        raise ValueError(f"no oracle template for kind {kind!r}")
-    try:
-        return template.format(**values)
-    except KeyError as exc:
-        raise ValueError(
-            f"oracle template {kind!r} is missing value {exc.args[0]!r}"
-        ) from exc
-
-
-# ---------------------------------------------------------------------------
-# Provider wire models (spec 4.2)
-
-
-class AuthoredAdversary(ClosedCanonicalModel):
-    """Phase 3.1 adversary record as authored; reach is derived by code."""
-
-    kind: AdversaryKind
-    gain: StrictStr = Field(min_length=1)
-
-
-class AuthoredTurn(ClosedCanonicalModel):
-    """One conversation turn; the wire only carries user turns."""
-
-    role: Literal["user"] = "user"
-    text: StrictStr = Field(min_length=1)
-
-
-class AuthoredStimulus(ClosedCanonicalModel):
-    """The exact test delivery: one user message or a 2-3 turn conversation.
-
-    A ``user_message`` carries ``text`` and no ``turns``; a ``conversation``
-    carries 2-3 ``turns`` and no ``text``.  The turns are the scenario's
-    full user-side script: earlier turns supply context (optionally the
-    claim under test) and the final turn requests the action under test.
-    """
-
-    kind: AUTHORED_STIMULUS_KIND = "user_message"
-    text: StrictStr | None = None
-    turns: tuple[AuthoredTurn, ...] | None = None
-
-    @model_validator(mode="after")
-    def validate_shape_for_kind(self) -> "AuthoredStimulus":
-        if self.kind == "user_message":
-            if self.turns is not None:
-                raise ValueError("a user_message stimulus must not carry turns")
-            if self.text is None or self.text == "":
-                raise ValueError("a user_message stimulus requires non-empty text")
-        else:
-            if self.text is not None:
-                raise ValueError("a conversation stimulus must not carry text")
-            if self.turns is None or not 2 <= len(self.turns) <= 3:
-                raise ValueError("a conversation stimulus requires 2 to 3 turns")
-        return self
-
-
-class AuthoredTriggerEvidence(ClosedCanonicalModel):
-    """One exact source quotation for a ``tool_absent`` trigger.
-
-    ``trigger`` remains the author's interpretation of why the reviewed
-    obligation applies.  This record only identifies and quotes content
-    available to the author: an authored user turn, a used target-state fact,
-    or an observed record.  The locator is intentionally
-    kind-exclusive so a source cannot be smuggled in through a source name,
-    state-path fragment, or an observation identifier alone.
-    """
-
-    source: TriggerEvidenceSource
-    quote: StrictStr = Field(min_length=1)
-    # A single user message is turn 1; a conversation uses the same
-    # one-based numbering as the prepared user-turn contract.
-    turn: StrictInt | None = Field(default=None, ge=1)
-    state_path: tuple[StrictStr, ...] | None = None
-    observation_ref: StrictStr | None = None
-
-    @model_validator(mode="after")
-    def validate_locator(self) -> "AuthoredTriggerEvidence":
-        if not self.quote.strip():
-            raise ValueError("trigger evidence quote must be non-blank")
-        provided = {
-            "turn": self.turn,
-            "state_path": self.state_path,
-            "observation_ref": self.observation_ref,
-        }
-        expected = {
-            "stimulus": "turn",
-            "state_fact": "state_path",
-            "observation": "observation_ref",
-        }[self.source]
-        if provided[expected] is None:
-            raise ValueError(f"{self.source} trigger evidence requires {expected}")
-        unexpected = [
-            name
-            for name, value in provided.items()
-            if name != expected and value is not None
-        ]
-        if unexpected:
-            raise ValueError(
-                f"{self.source} trigger evidence must not carry "
-                + ", ".join(unexpected)
-            )
-        if self.state_path is not None and any(
-            not segment.strip() for segment in self.state_path
-        ):
-            raise ValueError("trigger evidence state_path must use non-empty segments")
-        if self.state_path is not None and not self.state_path:
-            raise ValueError("trigger evidence state_path must not be empty")
-        if self.observation_ref is not None and not self.observation_ref.strip():
-            raise ValueError("trigger evidence observation_ref must be non-blank")
-        return self
-
-
-class AuthoredUnsafeObservation(ClosedCanonicalModel):
-    """The observable event that makes the scenario unsafe."""
-
-    kind: OracleKind
-    tool: StrictStr | None = None
-    argument: StrictStr | None = None
-    operator: ObservationOperator | None = None
-    value: StrictStr | StrictInt | StrictFloat | StrictBool | None = None  # type: ignore[valid-type]
-    reference_tool: StrictStr | None = None
-    proposition: StrictStr | None = None
-    trigger: StrictStr | None = None
-    # Kept optional at wire parsing so historical authored records remain
-    # readable. Current semantic validation requires at least one exact
-    # citation for every tool_absent draft.
-    trigger_evidence: tuple[AuthoredTriggerEvidence, ...] = ()
-
-
-class AuthoredConditionEntry(ClosedCanonicalModel):
-    """One account of how an ``applies_when`` condition holds (spec 4.2)."""
-
-    condition: StrictInt = Field(ge=1)
-    by: ConditionBasis
-    ref: tuple[StrictStr, ...] | None = None
-    note: StrictStr = Field(min_length=1)
-
-
-class AuthoredClaimUnderTest(ClosedCanonicalModel):
-    """One earlier-turn assertion the final turn's request tests.
-
-    ``turn`` is the 1-based conversation turn making the assertion;
-    ``state_path`` is the target-state path whose value the assertion
-    contradicts; ``note`` says what the turn claims.
-    """
-
-    turn: StrictInt = Field(ge=1)
-    state_path: tuple[StrictStr, ...]
-    note: StrictStr = Field(min_length=1)
-
-
-class AuthoredScenarioDraft(ClosedCanonicalModel):
-    """One authored scenario draft exactly as the wire defines it."""
-
-    adversary: AuthoredAdversary
-    stimulus: AuthoredStimulus
-    state_facts_used: tuple[tuple[StrictStr, ...], ...] = ()
-    unsafe_observation: AuthoredUnsafeObservation
-    conditions_established: tuple[AuthoredConditionEntry, ...] = ()
-    claims_under_test: tuple[AuthoredClaimUnderTest, ...] = ()
-    safe_behaviors: tuple[StrictStr, ...] = ()
-    # The obligation entry this draft tests (owner ruling Q30).  Required
-    # when the candidate constraint carries obligation entries; validated
-    # deterministically against the constraint's entry ids.
-    obligation_ref: StrictStr | None = None
-
-
-def stimulus_user_texts(stimulus: AuthoredStimulus) -> tuple[str, ...]:
-    """Return each user text the stimulus delivers, in turn order.
-
-    A conversation stands for the concatenation of its turns wherever a
-    stimulus text is searched or quoted.
-    """
-    if stimulus.kind == "conversation":
-        return tuple(turn.text for turn in stimulus.turns or ())
-    return (stimulus.text or "",)
-
-
-class AuthoringResponse(ClosedCanonicalModel):
-    """The closed authoring output: zero to three scenarios."""
-
-    scenarios: tuple[AuthoredScenarioDraft, ...] = Field(default=(), max_length=3)
-    no_scenario_reason: StrictStr | None = None
-
-    @model_validator(mode="after")
-    def validate_empty_case(self) -> "AuthoringResponse":
-        if not self.scenarios and not (self.no_scenario_reason or "").strip():
-            raise ValueError("empty authoring response requires no_scenario_reason")
-        if self.scenarios and self.no_scenario_reason is not None:
-            raise ValueError("no_scenario_reason is only valid when scenarios is empty")
-        return self
 
 
 # ---------------------------------------------------------------------------
@@ -751,6 +532,11 @@ def _compile_basis(kind: str, entry: Obligation | None, authority: str) -> str:
             )
         return base
     if kind == "response_claim":
+        if entry.observation_role == "proxy":
+            return (
+                f"reply PROXY of: {entry.source_outcome or 'the source outcome'}; "
+                "a separately reviewed proxy claim, not the source interpretation"
+            )
         if entry.kind == "forbidden":
             if entry.violated_via == "reply":
                 return "reviewed channel (reply)"
@@ -986,6 +772,85 @@ def _kind_verdict(
         detail=(f"the cited required entry {ref} has no reviewed realization channel"),
         obligation_ref=ref,
     )
+
+
+def resolve_authoring_choices(
+    context: AuthoringContext,
+    *,
+    reviewed_bindings: frozenset[tuple[str, str, str]] = frozenset(),
+) -> tuple[tuple[AdmissibleCheck, ...], tuple[tuple[str, str, str], ...]]:
+    """Resolve the closed current choice set for one indexed request.
+
+    The context/index layer owns source enumeration; this orchestration seam
+    owns obligation-direction admission and action-shape decisions.  Every
+    compiling obligation/kind pair becomes a separate opaque choice handle.
+    No provider-facing context is complete until this function's result is
+    installed by :func:`build_authoring_context`.
+    """
+    candidate = context.candidate
+    references = context.reference_tools
+    numeric_source_available = any(source.numeric for source in context.source_handles)
+    available_operand_sources = frozenset(
+        source.kind for source in context.source_handles
+    )
+    checks: list[AdmissibleCheck] = []
+    unavailable: list[tuple[str, str, str]] = []
+    is_reply = candidate.action_binding.kind == "model_output"
+    shape: dict[str, bool] = {
+        "response_claim": is_reply,
+        "tool_argument": not is_reply and bool(candidate.action_binding.argument_names),
+        "tool_order": (
+            not is_reply
+            and bool(candidate.action_binding.argument_names)
+            and bool(references)
+        ),
+        "tool_absent": not is_reply,
+    }
+    entries: tuple[Any | None, ...] = tuple(candidate.obligations) or (None,)
+    for kind in ("response_claim", "tool_argument", "tool_order", "tool_absent"):
+        if not shape[kind]:
+            unavailable.append((kind, "oracle_shape_unsupported", "action shape"))
+            continue
+        for entry in entries:
+            verdict = _kind_verdict(kind, candidate, entry, reviewed_bindings)
+            if verdict.status != "compile":
+                unavailable.append(
+                    (
+                        kind,
+                        verdict.reason or verdict.status,
+                        verdict.detail or "",
+                    )
+                )
+                continue
+            offered = _with_operator_offers(
+                {kind: verdict},
+                candidate,
+                session=context.session,
+                subject_model=context.subject_model,
+            )[kind]
+            offered_operators = tuple(
+                operator
+                for operator in offered.offered_operators
+                if numeric_source_available
+                or operator not in {"greater_than", "less_than"}
+            )
+            checks.append(
+                AdmissibleCheck(
+                    handle=choice_handle(len(checks) + 1),
+                    kind=kind,
+                    obligation_ref=verdict.obligation_ref,
+                    action_name=candidate.action_name,
+                    basis=offered.basis or "unreviewed direction",
+                    operators=offered_operators,
+                    operand_sources=operand_sources_for_choice(
+                        kind,
+                        offered_operators,
+                        available_operand_sources,
+                    ),
+                    reference_tools=references if kind == "tool_order" else (),
+                )
+            )
+    return tuple(checks), tuple(unavailable)
 
 
 def _heuristic_cited_entry(
@@ -1363,6 +1228,10 @@ class CandidateAuthoringOutcome:
     # Drafts held as specifications under owner ruling Q30 (typed hold
     # reasons; never compiled, never prepared for execution).
     held: tuple[tuple[AuthoredScenarioDraft, ScenarioHold], ...] = ()
+    # Current-wire drafts can fail deterministic handle adaptation before a
+    # legacy draft exists.  Keep those typed, raw per-draft rejections beside
+    # ordinary validation rejections so valid siblings still proceed.
+    adapter_rejections: tuple[Any, ...] = ()
     no_scenario_reason: str | None = None
     error: str | None = None
     # Whether the authoring call was issued before an ``error`` (spec 3.2):
@@ -1392,6 +1261,8 @@ def validate_authored_scenario(
     record_index: RecordIndex | None = None,
     has_content_surface: bool,
     reviewed_bindings: frozenset[tuple[str, str, str]] = frozenset(),
+    selected_numeric_source: Any | None = None,
+    numeric_operand_source: str | None = None,
 ) -> AcceptedScenario | ScenarioRejection | ScenarioHold:
     """Apply spec 4.3 rules 1-8 plus the Phase 3.2 adversary rules.
 
@@ -1529,6 +1400,8 @@ def validate_authored_scenario(
             observations,
             subject_model=subject_model,
             record_index=record_index,
+            selected_numeric_source=selected_numeric_source,
+            numeric_operand_source=numeric_operand_source,
         )
         uca_type = UCAType.incorrect
         if outcome is not None:
@@ -1826,6 +1699,8 @@ def _validate_tool_argument(
     *,
     subject_model: TargetSubjectModel | None = None,
     record_index: RecordIndex | None = None,
+    selected_numeric_source: Any | None = None,
+    numeric_operand_source: str | None = None,
 ) -> tuple[ScenarioRejection | ScenarioHold | None, str | None]:
     """Rules 4.3.2-4.3.4 for tool-argument oracles.
 
@@ -1887,14 +1762,44 @@ def _validate_tool_argument(
                 ),
                 None,
             )
-        comparable = _first_comparable_field(facts, observations)
+        if numeric_operand_source == "literal":
+            # A literal is a deliberate current-wire choice.  Keep it as a
+            # free comparison bound and do not mislabel it as one of the
+            # supplied policy/state facts.
+            return None, None
+        if selected_numeric_source is not None:
+            selected_value = getattr(selected_numeric_source, "value", _MISSING)
+            if selected_value != observation.value:
+                return (
+                    ScenarioRejection(
+                        reason="numeric_source_mismatch",
+                        detail=(
+                            "the selected numeric source value does not match the "
+                            "compiled threshold; source and value must remain bound"
+                        ),
+                    ),
+                    None,
+                )
+            source_kind = getattr(selected_numeric_source, "kind", "state_fact")
+            source_path = tuple(getattr(selected_numeric_source, "path", ()))
+            if source_kind == "observation":
+                source_ref = getattr(selected_numeric_source, "observation_ref", None)
+                comparable = f"{source_ref or 'observation'}{_path_suffix(source_path)}"
+            else:
+                comparable = "/".join(source_path)
+        else:
+            # Historical drafts predate source-bound operands.  Preserve
+            # their read/validation behavior at this compatibility seam; all
+            # current provider drafts carry either ``literal`` or an exact
+            # selected source kind above.
+            comparable = _first_comparable_field(facts, observations)
         if comparable is None:
             return (
                 ScenarioRejection(
-                    reason="no_comparable_field",
+                    reason="numeric_source_missing",
                     detail=(
-                        "no numeric field exists in the used state facts or "
-                        "policy observations to compare against"
+                        "a numeric comparison must select the supplied source "
+                        "fact whose value is the compiled threshold"
                     ),
                 ),
                 None,
@@ -2015,6 +1920,13 @@ def _first_comparable_field(
         if path is not None:
             return f"{record.get('observation_ref', 'observation')}{path}"
     return None
+
+
+def _path_suffix(path: tuple[str, ...]) -> str:
+    """Render a source path for internal comparable-field provenance."""
+    if not path:
+        return ""
+    return "/" + "/".join(path)
 
 
 def _first_numeric_leaf(node: Any, prefix: str = "") -> str | None:
@@ -2337,6 +2249,8 @@ def _trigger_evidence_summary(
             locator = {"state_path": list(item.state_path or ())}
         else:
             locator = {"observation_ref": item.observation_ref}
+            if item.observation_path is not None:
+                locator["observation_path"] = list(item.observation_path)
         entries.append(
             json.dumps(
                 {"source": item.source, "locator": locator, "quote": item.quote},
@@ -2587,11 +2501,18 @@ def _adversary_definitions(subject_noun: str | None) -> tuple[tuple[str, str], .
 
 _AUTHORING_SYSTEM_TEMPLATE = "authoring_system.j2"
 _AUTHORING_USER_TEMPLATE = "authoring_user.j2"
+_CURRENT_AUTHORING_SYSTEM_TEMPLATE = "authoring_current_system.j2"
+_CURRENT_AUTHORING_USER_TEMPLATE = "authoring_current_user.j2"
 
 
 def system_prompt_text() -> str:
     """Return the closed six-rule system prompt (spec 4.5)."""
     return TemplateLoader(PROMPTS_DIR).render_prompt(_AUTHORING_SYSTEM_TEMPLATE)
+
+
+def current_system_prompt_text() -> str:
+    """Return the current provider prompt for the handle-based wire."""
+    return TemplateLoader(PROMPTS_DIR).render_prompt(_CURRENT_AUTHORING_SYSTEM_TEMPLATE)
 
 
 def _action_argument_view(
@@ -2812,6 +2733,176 @@ def _state_block(state: dict[str, Any]) -> str:
     return "```json\n" + json.dumps(state, indent=2, sort_keys=True) + "\n```"
 
 
+def build_authoring_context(
+    candidate: AuthoringCandidate,
+    *,
+    state: dict[str, Any],
+    observation_records: tuple[dict[str, str], ...],
+    session: SessionSubject,
+    profile: ExecutionTargetProfile,
+    subject_model: TargetSubjectModel | None = None,
+    reviewed_bindings: frozenset[tuple[str, str, str]] = frozenset(),
+) -> AuthoringContext:
+    """Build the provider-ready context and its explicit admissible choices.
+
+    Source enumeration is delegated to the low-level context/index module.
+    Direction and action-shape admission is resolved here and then installed
+    into the immutable context, keeping the provider schema closed without
+    making the index layer import this orchestration module.
+    """
+    base = _build_authoring_context(
+        candidate,
+        state=state,
+        observation_records=observation_records,
+        session=session,
+        profile=profile,
+        subject_model=subject_model,
+        reviewed_bindings=reviewed_bindings,
+    )
+    checks, unavailable = resolve_authoring_choices(
+        base,
+        reviewed_bindings=reviewed_bindings,
+    )
+    return replace(base, checks=checks, unavailable_checks=unavailable)
+
+
+def build_current_authoring_user_prompt(context: Any) -> str:
+    """Render the current handle-based prompt from one closed context.
+
+    The historical ``build_authoring_user_prompt`` remains available for
+    audit/replay of old calls.  Current live authoring crosses this separate
+    seam and supplies only the deterministic request-local context.
+    """
+    if not isinstance(context, AuthoringContext):
+        raise TypeError("current authoring prompt requires an AuthoringContext")
+    candidate = context.candidate
+    arguments = _action_argument_view(
+        context.profile,
+        candidate.action_binding,
+        context.subject_model,
+    )
+    view = {
+        "rule": candidate.rule,
+        "applies_when": list(candidate.applies_when),
+        "obligations": [
+            {
+                "obligation_id": entry.obligation_id,
+                "kind": entry.kind,
+                "behavior": entry.behavior,
+                "rule_span": entry.rule_span,
+                "channel": (
+                    entry.realized_by
+                    if entry.kind == "required"
+                    else entry.violated_via
+                ),
+                "completion": entry.completion,
+                "observation_role": entry.observation_role,
+                "source_outcome": entry.source_outcome,
+                "projection": entry.projection,
+                "residual": entry.residual,
+                "note": entry.note,
+            }
+            for entry in candidate.obligations
+        ],
+        "failure_direction": candidate.failure_direction,
+        "direction_authority": candidate.direction_authority,
+        "adversary_definitions": [
+            (kind, definition)
+            for kind, definition in _adversary_definitions(
+                context.subject_model.subject_noun
+                if context.subject_model is not None
+                else None
+            )
+            if kind != "third_party_via_content"
+        ],
+        "hazard_description": " ".join(line.description for line in candidate.hazards),
+        "loss_description": " ".join(
+            loss_description
+            for line in candidate.hazards
+            for _loss_id, loss_description in line.losses
+        ),
+        "action_name": candidate.action_name,
+        "action_description": candidate.action_description,
+        "action_kind": candidate.action_binding.kind,
+        "arguments": arguments,
+        "state_handles": [
+            {
+                "handle": source.handle,
+                "path": list(source.path),
+                "value_json": source.display_value,
+            }
+            for source in context.state_handles
+        ],
+        "observation_handles": [
+            {
+                "handle": source.handle,
+                "observation_ref": source.observation_ref,
+                "path": list(source.path),
+                "value_json": source.display_value,
+            }
+            for source in context.observation_handles
+        ],
+        "checks": [
+            {
+                "handle": choice.handle,
+                "kind": choice.kind,
+                "obligation_ref": choice.obligation_ref,
+                "action_name": choice.action_name,
+                "basis": choice.basis,
+                "operators": list(choice.operators),
+                "operand_sources": list(choice.operand_sources),
+                "reference_tools": [
+                    {
+                        "handle": item.handle,
+                        "tool": item.tool,
+                        "shared_arguments": list(item.shared_arguments),
+                    }
+                    for item in choice.reference_tools
+                ],
+            }
+            for choice in context.checks
+        ],
+        "offer_response_claim": "response_claim" in context.checks_by_kind,
+        "offer_tool_argument": "tool_argument" in context.checks_by_kind,
+        "offer_tool_order": "tool_order" in context.checks_by_kind,
+        "offer_tool_absent": "tool_absent" in context.checks_by_kind,
+        "conversation_allowed": context.conversation_allowed,
+        "has_numeric_source": any(source.numeric for source in context.source_handles),
+        "unavailable_checks": list(context.unavailable_checks),
+        "session_observed": context.session.observed,
+        "session_status": context.session.status,
+        "session_value": context.session.value,
+        "session_path": (
+            list(context.session.path) if context.session.path is not None else None
+        ),
+        "subject_noun": (
+            context.subject_model.subject_noun
+            if context.subject_model is not None
+            else None
+        ),
+        "omission_fixed_characters": context.omission_budget.fixed_compiler_characters,
+        "omission_model_characters": context.omission_budget.model_content_characters,
+    }
+    return TemplateLoader(PROMPTS_DIR).render_prompt(
+        _CURRENT_AUTHORING_USER_TEMPLATE,
+        view=view,
+    )
+
+
+def _parse_current_authoring_result(result: Any) -> Any:
+    """Parse current structure while leaving request-handle checks per draft.
+
+    The provider receives a context-bound schema, but a locally returned
+    response can still contain one stale/unknown request handle (for example
+    from a deterministic fake or a tolerant endpoint).  Parsing the current
+    structural wire here keeps such a draft available as per-draft adapter
+    evidence; the adapter then rejects that draft without discarding valid
+    siblings.  This remains a current-wire parser and never accepts the
+    historical ``AuthoringResponse``.
+    """
+    return parse_llm_result(result, CurrentAuthoringResponse)
+
+
 def author_candidate_scenarios(
     llm_client: Any,
     candidate: AuthoringCandidate,
@@ -2830,8 +2921,8 @@ def author_candidate_scenarios(
 ) -> CandidateAuthoringOutcome:
     """Make the one grounded authoring call and validate its scenarios.
 
-    There is no second model call: malformed JSON gets one bounded decode
-    retry, and every semantically rejected scenario is recorded with its
+    There is one model call and no retry after a decode failure. Every
+    semantically rejected scenario is recorded with its
     typed reason and never repaired (spec 4.3).  Drafts the
     obligation-direction gate holds are recorded as specifications and are
     never compiled (owner ruling Q30).
@@ -2871,41 +2962,95 @@ def author_candidate_scenarios(
             for record in observations.prompt_records()
             if record["observation_ref"] != "TARGET-STATE"
         )
-        system_prompt = system_prompt_text()
-        user_prompt = build_authoring_user_prompt(
+        # Current provider calls cross the handle-based wire/context seam.
+        # ``AuthoringResponse`` remains available only for historical
+        # decoding/replay; it is never requested from a current provider.
+        current_context = build_authoring_context(
             candidate,
             state=state,
             observation_records=observation_records,
             session=session,
             profile=profile,
             subject_model=subject_model,
-            target_observations=observations,
             reviewed_bindings=reviewed_bindings,
         )
+        if not current_context.checks:
+            # Direct/replay callers may reach this seam without the product
+            # pipeline's earlier admission prefilter.  Resolve the candidate
+            # locally and make zero provider calls when no current kind can
+            # compile; held direction evidence remains a specification-only
+            # terminal, while pure rejection/shape failures are no-expressible.
+            hold_reasons = {
+                "direction_unreviewed",
+                "direction_unresolved",
+                "realization_unresolved",
+                "binding_unreviewed",
+            }
+            has_hold = any(
+                reason in hold_reasons
+                for _kind, reason, _detail in current_context.unavailable_checks
+            )
+            resolution = (
+                AUTHORING_TERMINAL_SPECIFICATION_ONLY
+                if has_hold
+                else AUTHORING_TERMINAL_NO_ORACLE
+            )
+            return CandidateAuthoringOutcome(
+                candidate=candidate,
+                resolution=resolution,
+                resolution_detail="; ".join(
+                    f"{kind}: {reason}" + (f" ({detail})" if detail else "")
+                    for kind, reason, detail in current_context.unavailable_checks
+                ),
+            )
+        system_prompt = current_system_prompt_text()
+        user_prompt = build_current_authoring_user_prompt(current_context)
     except ValueError as exc:
         return CandidateAuthoringOutcome(candidate=candidate, error=str(exc))
+
+    try:
+        current_response_model = current_authoring_response_model(current_context)
+    except (TypeError, ValueError) as exc:
+        # A malformed request-local index is a typed pre-call candidate
+        # failure.  Keep it local so one candidate cannot prevent sibling
+        # authoring calls from being prepared.
+        return CandidateAuthoringOutcome(
+            candidate=candidate,
+            error=f"current authoring schema could not be built: {exc}",
+        )
 
     response, _result, error = safe_llm_call(
         llm_client=llm_client,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        response_format=AuthoringResponse,
+        response_format=current_response_model,
         run_dir=run_dir,
         stage=AUTHORING_STAGE,
         step=candidate.step_label,
         temperature=temperature,
         json_decode_retries=0,
-        prompt_template_hashes=_authoring_template_hashes(),
+        result_parser=_parse_current_authoring_result,
+        prompt_template_hashes=_current_authoring_template_hashes(),
     )
     if error is not None or response is None:
         return CandidateAuthoringOutcome(
             candidate=candidate, error=error, call_issued=True
         )
 
+    try:
+        adaptation = adapt_current_response_with_bindings(response, current_context)
+    except CurrentAuthoringAdapterError as exc:
+        return CandidateAuthoringOutcome(
+            candidate=candidate,
+            error=str(exc),
+            call_issued=True,
+        )
+
     accepted: list[AcceptedScenario] = []
     rejected: list[tuple[AuthoredScenarioDraft, ScenarioRejection]] = []
     held: list[tuple[AuthoredScenarioDraft, ScenarioHold]] = []
-    for draft in response.scenarios:
+    for adapted in adaptation.drafts:
+        draft = adapted.draft
         outcome = validate_authored_scenario(
             draft,
             candidate,
@@ -2918,6 +3063,8 @@ def author_candidate_scenarios(
             record_index=record_index,
             has_content_surface=has_content_surface,
             reviewed_bindings=reviewed_bindings,
+            selected_numeric_source=adapted.selected_numeric_source,
+            numeric_operand_source=adapted.numeric_operand_source,
         )
         if isinstance(outcome, AcceptedScenario):
             accepted.append(outcome)
@@ -2930,7 +3077,8 @@ def author_candidate_scenarios(
         accepted=tuple(accepted),
         rejected=tuple(rejected),
         held=tuple(held),
-        no_scenario_reason=response.no_scenario_reason,
+        adapter_rejections=adaptation.failures,
+        no_scenario_reason=adaptation.no_scenario_reason,
     )
 
 
@@ -2939,6 +3087,17 @@ def _authoring_template_hashes() -> dict[str, str]:
     return {
         name: hashlib.sha256((PROMPTS_DIR / name).read_bytes()).hexdigest()
         for name in (_AUTHORING_SYSTEM_TEMPLATE, _AUTHORING_USER_TEMPLATE)
+    }
+
+
+def _current_authoring_template_hashes() -> dict[str, str]:
+    """Hash only templates used by the current handle-based provider call."""
+    return {
+        name: hashlib.sha256((PROMPTS_DIR / name).read_bytes()).hexdigest()
+        for name in (
+            _CURRENT_AUTHORING_SYSTEM_TEMPLATE,
+            _CURRENT_AUTHORING_USER_TEMPLATE,
+        )
     }
 
 
@@ -3180,6 +3339,10 @@ def write_authored_scenarios_record(
                     _held_payload(draft, outcome.candidate, hold)
                     for draft, hold in outcome.held
                 ],
+                "adapter_rejected": [
+                    failure.as_payload() if hasattr(failure, "as_payload") else failure
+                    for failure in outcome.adapter_rejections
+                ],
                 "no_scenario_reason": outcome.no_scenario_reason,
                 "error": outcome.error,
                 "resolution": outcome.resolution,
@@ -3264,12 +3427,16 @@ def _trigger_evidence_payload(evidence: AuthoredTriggerEvidence) -> dict[str, An
         "source": evidence.source,
         "quote": evidence.quote,
     }
+    if evidence.meaning is not None:
+        payload["meaning"] = evidence.meaning
     if evidence.source == "stimulus":
         payload["turn"] = evidence.turn
     elif evidence.source == "state_fact":
         payload["state_path"] = list(evidence.state_path or ())
     else:
         payload["observation_ref"] = evidence.observation_ref
+        if evidence.observation_path is not None:
+            payload["observation_path"] = list(evidence.observation_path)
     return payload
 
 

@@ -120,9 +120,7 @@ def test_a_post_issue_error_is_attempted_not_unprocessable():
     """A provider or decode failure after the call was issued yields no
     artifacts and never reaches publication: attempted_no_yield (spec
     3.2), so an all-fail run reports failed, not 'not attempted'."""
-    (resolved,) = _resolve(
-        (_outcome(error="provider timeout", call_issued=True),), {}
-    )
+    (resolved,) = _resolve((_outcome(error="provider timeout", call_issued=True),), {})
     assert resolved.resolution == AUTHORING_TERMINAL_NO_YIELD
     assert resolved.resolution_detail == "provider timeout"
     counts = _counts([resolved.resolution])
@@ -262,9 +260,7 @@ def test_st4_the_target_blind_status_path_is_unchanged():
 
 
 def test_st6_artifact_parity_is_not_completion():
-    counts = _counts(
-        ["published", "attempted_no_yield"], ["published", "published"]
-    )
+    counts = _counts(["published", "attempted_no_yield"], ["published", "published"])
     assert counts["generated"] == 2
     assert counts["requested"] == 2
     assert _authored_generation_status(counts) == (
@@ -371,6 +367,34 @@ def test_draft_counts_never_enter_run_status():
     assert counts["drafts_accepted"] == 1
     assert counts["drafts_rejected"] == 2
     assert counts["drafts_held"] == 1
+    assert _authored_generation_status(counts)[0] is SynthesisRunStatus.COMPLETED
+
+
+def test_adapter_failure_counts_as_returned_and_rejected_without_hiding_sibling():
+    from dataclasses import replace
+
+    from asago_scenario_generator.stpa.scenario_prod.authoring_adapter import (
+        CurrentDraftAdapterFailure,
+    )
+
+    failure = CurrentDraftAdapterFailure(
+        draft_index=2,
+        reason="source_handle_unknown",
+        detail="A selected handle was not supplied in this request.",
+        raw_draft={"unsafe_observation": {"choice_handle": "unknown"}},
+    )
+    outcome = replace(
+        _outcome(accepted=(_accepted(),), resolution="published", call_issued=True),
+        adapter_rejections=(failure,),
+    )
+    result = SimpleNamespace(
+        candidate_outcomes=[SimpleNamespace(status="published")], stage_errors=[]
+    )
+    counts = _authored_scenario_counts((outcome,), result)
+    assert counts["drafts_returned"] == 2
+    assert counts["drafts_accepted"] == 1
+    assert counts["drafts_rejected"] == counts["drafts_adapter_rejected"] == 1
+    assert counts["published"] == 1
     assert _authored_generation_status(counts)[0] is SynthesisRunStatus.COMPLETED
 
 

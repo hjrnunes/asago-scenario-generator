@@ -168,16 +168,14 @@ def test_pqf_11_stage1a_gap_user_renders_with_existing_analysis() -> None:
         existing_losses=losses,
         existing_hazards=hazards,
         existing_constraints=constraints,
-        next_loss_num=2,
-        next_hazard_num=2,
-        next_sc_num=2,
         kc_subcodes=["KC1.1", "KC6.3.3"],
     )
     assert "Test use case" in rendered
     assert "L-1" in rendered
     assert "H-1" in rendered
     assert "SC-1" in rendered
-    assert "L-2" in rendered  # next_loss_num
+    assert "request-local `handle`" in rendered
+    assert "compiler assigns their canonical IDs" in rendered
     assert "kc_subcodes" in rendered.lower() or "KC1.1" in rendered
 
 
