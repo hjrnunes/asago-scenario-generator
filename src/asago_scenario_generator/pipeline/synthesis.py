@@ -209,6 +209,27 @@ class SynthesisInputs:
                 raise ValueError(
                     "target_observations profile pin does not match target profile"
                 )
+        if self.target_subject_model is not None:
+            if (
+                self.execution_target_profile is None
+                or self.target_observations is None
+            ):
+                raise ValueError(
+                    "--target-subject-model requires --target-observations and "
+                    "--target-profile"
+                )
+            from asago_scenario_generator.stpa.models.target_subject_model import (
+                verify_target_subject_model,
+            )
+
+            # SynthesisInputs is the shared Python entry boundary.  Verify the
+            # parsed companion against the actual snapshot/profile before the
+            # composition root can construct or dispatch any provider.
+            verify_target_subject_model(
+                self.target_subject_model,
+                observations=self.target_observations,
+                profile=self.execution_target_profile,
+            )
         if self.requested_environment_basis is not None and not isinstance(
             self.requested_environment_basis, RequestedEnvironmentBasis
         ):
@@ -3116,6 +3137,9 @@ def _default_author_scenarios(
         resolve_session_identity,
         synthesize_authored_enumeration,
     )
+    from asago_scenario_generator.stpa.models.target_subject_model import (
+        verify_target_subject_model,
+    )
     from asago_scenario_generator.stpa.scenario_prod.content_surface import (
         content_surface_facts as derive_content_surface,
     )
@@ -3131,6 +3155,14 @@ def _default_author_scenarios(
         raise ValueError(
             "target-derived authoring requires the observed execution target "
             "profile and paired target observations"
+        )
+    if inputs.target_subject_model is not None:
+        # Keep this direct production seam safe for callers that invoke the
+        # authoring adapter without first constructing SynthesisInputs.
+        verify_target_subject_model(
+            inputs.target_subject_model,
+            observations=inputs.target_observations,
+            profile=inputs.execution_target_profile,
         )
     client, _profile_name = resolve_llm_client(
         inputs.profile,
@@ -3179,6 +3211,7 @@ def _default_author_scenarios(
             reviewed_bindings=reviewed_bindings,
             session=session,
             subject_model=subject_model,
+            target_observations=inputs.target_observations,
         )
         if not any(admission.status == "compile" for admission in admissions.values()):
             held = any(admission.status == "hold" for admission in admissions.values())

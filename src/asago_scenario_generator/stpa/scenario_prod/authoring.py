@@ -83,9 +83,12 @@ from asago_scenario_generator.stpa.models.target_subject_model import (
     ComparableResolution,
     RecordIndex,
     SessionSubject,
+    SUBJECT_MODEL_INVALID,
+    SubjectModelError,
     TargetSubjectModel,
     resolve_comparable_string,
     resolve_session_subject,
+    verify_target_subject_model,
 )
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.bdi_generation import (
@@ -624,6 +627,49 @@ def _with_operator_offers(
     return admissions
 
 
+def _subject_model_context(
+    subject_model: TargetSubjectModel,
+    *,
+    target_observations: Any | None,
+    profile: ExecutionTargetProfile,
+) -> tuple[dict[str, Any], SessionSubject] | SubjectModelError:
+    """Verify a model against the actual run inputs and derive its identity.
+
+    The lower-level admission and validation functions are also callable by
+    replay/qualification code.  A parsed model is not an authority at those
+    seams: callers must supply the complete observation snapshot so the
+    existing verifier can compare the acceptance envelope with the actual
+    snapshot/profile digests.  The returned state and session are derived
+    from that same snapshot, never from caller-supplied identity values.
+    """
+    if target_observations is None:
+        return SubjectModelError(
+            SUBJECT_MODEL_INVALID,
+            "direct subject-model admission/validation requires the actual "
+            "target observation snapshot",
+        )
+    try:
+        verify_target_subject_model(
+            subject_model,
+            observations=target_observations,
+            profile=profile,
+        )
+        state = parse_target_state(target_observations)
+    except SubjectModelError as exc:
+        return exc
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        return SubjectModelError(
+            SUBJECT_MODEL_INVALID,
+            f"the target observation snapshot has no usable TARGET-STATE: {exc}",
+        )
+    if not isinstance(state, dict):
+        return SubjectModelError(
+            SUBJECT_MODEL_INVALID,
+            "the target observation TARGET-STATE must be a JSON object",
+        )
+    return state, resolve_session_identity(state, subject_model.session_path)
+
+
 def _compile_basis(kind: str, entry: Obligation | None, authority: str) -> str:
     """Why a compile is admitted: reviewed interpretation, proxy, or default."""
     if authority != "reviewed":
@@ -926,6 +972,7 @@ def admit_oracle_kinds(
     reviewed_bindings: frozenset[tuple[str, str, str]] = frozenset(),
     session: SessionSubject | None = None,
     subject_model: TargetSubjectModel | None = None,
+    target_observations: Any | None = None,
 ) -> dict[str, OracleAdmission]:
     """The per-kind direction verdicts for one candidate, before any draft.
 
@@ -939,7 +986,34 @@ def admit_oracle_kinds(
     operator overlay attaches the offered operators and the withheld
     ``owner_differs_from_session`` operator with its typed reason.  The
     overlay never changes a kind-level verdict.
+
+    When ``subject_model`` is supplied, ``target_observations`` is required
+    and the model is verified against that actual snapshot/profile before any
+    operator is offered.  This keeps the pure admission seam from treating a
+    parsed or restamped model as reviewer authority.
     """
+    if subject_model is not None:
+        context = _subject_model_context(
+            subject_model,
+            target_observations=target_observations,
+            profile=profile,
+        )
+        if isinstance(context, SubjectModelError):
+            detail = context.detail
+            return {
+                kind: OracleAdmission(
+                    "reject",
+                    reason=context.reason,
+                    detail=detail,
+                )
+                for kind in (
+                    "response_claim",
+                    "tool_argument",
+                    "tool_order",
+                    "tool_absent",
+                )
+            }
+        _state, session = context
     if session is None:
         session = SessionSubject(
             status="unobserved",
@@ -1248,6 +1322,7 @@ def validate_authored_scenario(
     profile: ExecutionTargetProfile,
     session: SessionSubject,
     subject_model: TargetSubjectModel | None = None,
+    target_observations: Any | None = None,
     record_index: RecordIndex | None = None,
     has_content_surface: bool,
     reviewed_bindings: frozenset[tuple[str, str, str]] = frozenset(),
@@ -1270,7 +1345,27 @@ def validate_authored_scenario(
     ``owner_differs_from_session`` operator is held
     (``operator_unavailable`` plus the withheld reason), never rejected as
     a direction contradiction and never held at candidate level.
+
+    When ``subject_model`` is supplied, ``target_observations`` is required.
+    The subject model, TARGET-STATE, and session identity are all taken from
+    that verified snapshot; caller-provided ``state`` and ``session`` values
+    cannot substitute for it.
     """
+    if subject_model is not None:
+        context = _subject_model_context(
+            subject_model,
+            target_observations=target_observations,
+            profile=profile,
+        )
+        if isinstance(context, SubjectModelError):
+            return ScenarioRejection(
+                reason=context.reason,
+                detail=context.detail,
+            )
+        state, session = context
+        # A caller-supplied index may have been built from substituted state;
+        # rebuild it from the verified snapshot and accepted model.
+        record_index = RecordIndex(state, subject_model)
     if record_index is None:
         record_index = RecordIndex(state, subject_model)
     rejection = _validate_adversary(draft, candidate, has_content_surface)
@@ -2380,6 +2475,7 @@ def build_authoring_user_prompt(
     session: SessionSubject,
     profile: ExecutionTargetProfile,
     subject_model: TargetSubjectModel | None = None,
+    target_observations: Any | None = None,
     reviewed_bindings: frozenset[tuple[str, str, str]] = frozenset(),
 ) -> str:
     """Render the user prompt with exactly the spec 4.1 items 1-7.
@@ -2398,6 +2494,7 @@ def build_authoring_user_prompt(
         reviewed_bindings=reviewed_bindings,
         session=session,
         subject_model=subject_model,
+        target_observations=target_observations,
     )
     tool_argument = admissions.get("tool_argument")
     owner_withheld = (
@@ -2536,11 +2633,27 @@ def author_candidate_scenarios(
     prompt render failure.
     """
     try:
+        if subject_model is not None:
+            # This public authoring seam may be called directly by a
+            # qualification/replay harness.  Re-check the parsed companion
+            # against the actual observation/profile authorities before even
+            # rendering a prompt or dispatching a provider call.
+            verify_target_subject_model(
+                subject_model,
+                observations=observations,
+                profile=profile,
+            )
         state = parse_target_state(observations)
-        if session is None:
+        if subject_model is not None:
+            # The accepted companion and actual TARGET-STATE are the only
+            # authority for owner/session comparisons.  A caller may pass a
+            # precomputed session for compatibility, but it must not replace
+            # the identity derived from these verified inputs.
+            session = resolve_session_identity(state, subject_model.session_path)
+        elif session is None:
             session = resolve_session_identity(
                 state,
-                subject_model.session_path if subject_model is not None else None,
+                None,
             )
         record_index = RecordIndex(state, subject_model)
         observation_records = tuple(
@@ -2556,6 +2669,7 @@ def author_candidate_scenarios(
             session=session,
             profile=profile,
             subject_model=subject_model,
+            target_observations=observations,
             reviewed_bindings=reviewed_bindings,
         )
     except ValueError as exc:
@@ -2590,6 +2704,7 @@ def author_candidate_scenarios(
             profile=profile,
             session=session,
             subject_model=subject_model,
+            target_observations=observations,
             record_index=record_index,
             has_content_surface=has_content_surface,
             reviewed_bindings=reviewed_bindings,

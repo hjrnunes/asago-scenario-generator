@@ -384,6 +384,7 @@ def _conversation_accepted():
         profile=_profile(),
         session=_session(),
         subject_model=_accepted_model(),
+        target_observations=_observations(),
         has_content_surface=False,
     )
     assert not hasattr(accepted, "reason")
@@ -497,6 +498,7 @@ def test_tool_order_draft_assembles_the_four_ordering_fields():
         profile=_profile(),
         session=_session(),
         subject_model=_accepted_model(),
+        target_observations=_observations(),
         has_content_surface=False,
     )
     assert not hasattr(accepted, "reason")
@@ -653,6 +655,7 @@ def _user_message_spec():
         profile=_profile(),
         session=_session(),
         subject_model=_accepted_model(),
+        target_observations=_observations(),
         has_content_surface=False,
     )
     assert not hasattr(accepted, "reason")

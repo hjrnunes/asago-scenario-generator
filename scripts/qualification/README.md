@@ -95,6 +95,14 @@ the run manifest and the target-derived-structure sidecar. Never fold the
 model into the TARGET-STATE observation, and never treat a digest-only file
 (one without `reviewed_by`/`reviewed_on`) as accepted.
 
+Historical MiniKlarna qualification snapshots remain readable without this
+companion. They retain their captured session and record observations, but
+they do not gain `owner_differs_from_session` or conversation offers through
+inference; a new qualification run needs an accepted `target-subject-model-v1`
+file to enable those declarations. Frozen historical artifacts are not
+rewritten. The current consumer uses the typed projection conditions, so it
+does not require an ownership-sentence parser for this companion.
+
 ## Execute
 
 ```bash

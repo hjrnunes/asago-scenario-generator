@@ -1031,6 +1031,7 @@ def test_prompt_lists_the_obligation_entries_and_the_citation_rule():
         ),
         session=_session(),
         subject_model=_accepted_model(),
+        target_observations=_observations(),
         profile=_profile(),
     )
     assert "## Obligation entries (reviewed)" in prompt

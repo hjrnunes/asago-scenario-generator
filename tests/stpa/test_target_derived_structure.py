@@ -866,6 +866,57 @@ def test_run_sp1_hashes_and_stamps_the_accepted_subject_model(tmp_path: Path):
     assert sidecar.target_subject_model_reviewed_by == "qa"
 
 
+def test_run_sp1_then_sp3_preserves_the_subject_model_input_hash(tmp_path: Path):
+    """The final SP3 writer keeps SP1's supplied-file byte pin."""
+    import hashlib
+
+    from asago_scenario_generator.stpa.models.enriched_threat_set import (
+        CoverageAnalysis,
+        EnrichedThreatSet,
+    )
+    from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
+    from asago_scenario_generator.stpa.system_model.run import run_sp1
+
+    model = _accepted_subject_model()
+    model_path = tmp_path / "target-subject-model.yaml"
+    model_path.write_text(
+        yaml.safe_dump(model.model_dump(mode="json", exclude_none=True))
+    )
+    subject_hash = hashlib.sha256(model_path.read_bytes()).hexdigest()
+    client = _sp1_client()
+    result = run_sp1(
+        llm_client=client,
+        use_case_text=USE_CASE,
+        risk_cards=[],
+        run_dir=tmp_path,
+        profile_path=None,
+        execution_target_profile=_profile(),
+        target_observations=_observations(),
+        target_subject_model=model,
+        target_subject_model_path=model_path,
+    )
+    assert result.stage_errors == []
+    before = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+    assert before["input_hashes"]["target_subject_model"] == subject_hash
+
+    assert result.control_structure is not None
+    assert result.loss_analysis is not None
+    run_sp3(
+        llm_client=MockLLMClient(),
+        enriched_threat_set=EnrichedThreatSet(
+            structural_threats=[],
+            coverage_analysis=CoverageAnalysis(structural_coverage={}),
+        ),
+        control_structure=result.control_structure,
+        loss_analysis=result.loss_analysis,
+        run_dir=tmp_path,
+        execution_target_profile=_profile(),
+        target_observations=_observations(),
+    )
+    after = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+    assert after["input_hashes"]["target_subject_model"] == subject_hash
+
+
 def test_run_sp1_rejects_a_subject_model_without_a_target(tmp_path: Path):
     from asago_scenario_generator.stpa.system_model.run import run_sp1
 

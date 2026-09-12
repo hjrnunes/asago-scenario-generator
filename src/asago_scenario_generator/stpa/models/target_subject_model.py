@@ -24,6 +24,7 @@ the session-identity process-model record.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from datetime import date
@@ -677,6 +678,94 @@ def load_target_subject_model(
     return model
 
 
+def _target_state_from_observations(observations: Any) -> Any:
+    """Decode the actual TARGET-STATE value from a validated snapshot.
+
+    The subject-model verifier intentionally accepts the observation object,
+    rather than a caller-supplied digest or state, so callers cannot
+    re-authorize an edited model by comparing acceptance fields with
+    themselves.  A malformed or non-JSON state is represented as ``None``;
+    the structural target checks then fail closed for declarations that need
+    target state.
+    """
+    for item in getattr(observations, "observations", ()):
+        if (
+            getattr(item, "observation_ref", None) == "TARGET-STATE"
+            and getattr(item, "content_format", None) == "json"
+        ):
+            try:
+                return json.loads(item.content)
+            except (TypeError, json.JSONDecodeError):
+                return None
+    return None
+
+
+def verify_target_subject_model(
+    model: TargetSubjectModel,
+    *,
+    observations: Any,
+    profile: Any,
+) -> TargetSubjectModel:
+    """Verify one in-memory model against the exact run authorities.
+
+    This is the shared public-entry check for callers that already parsed a
+    companion file.  It verifies the snapshot and profile integrity, checks
+    that they are paired, validates the model's declarations against the
+    actual target inputs, and only then verifies the reviewer acceptance
+    envelope against the snapshot/profile digests.  In particular, it never
+    recomputes a digest and treats that new digest as acceptance.
+    """
+    if not isinstance(model, TargetSubjectModel):
+        raise SubjectModelError(
+            SUBJECT_MODEL_INVALID,
+            "the target subject model must be a TargetSubjectModel value",
+        )
+    if observations is None or profile is None:
+        raise SubjectModelError(
+            SUBJECT_MODEL_INVALID,
+            "an accepted target subject model requires paired target "
+            "observations and an execution target profile",
+        )
+
+    try:
+        observations.assert_integrity()
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise SubjectModelError(
+            SUBJECT_MODEL_INVALID,
+            f"the target observation snapshot is not intact: {exc}",
+        ) from exc
+    try:
+        profile.assert_integrity()
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise SubjectModelError(
+            SUBJECT_MODEL_INVALID,
+            f"the execution target profile is not intact: {exc}",
+        ) from exc
+
+    observations_digest = getattr(observations, "content_digest", None)
+    profile_digest = getattr(profile, "semantic_digest", None)
+    if not isinstance(observations_digest, str) or not isinstance(profile_digest, str):
+        raise SubjectModelError(
+            SUBJECT_MODEL_INVALID,
+            "paired target observations/profile are missing their content digests",
+        )
+    if getattr(observations, "target_profile_digest", None) != profile_digest:
+        raise SubjectModelError(
+            SUBJECT_MODEL_PROFILE_MISMATCH,
+            "the target observation snapshot is not paired with this "
+            "execution target profile",
+        )
+
+    model.validate_against_target(
+        _target_state_from_observations(observations), profile
+    )
+    model.verify_acceptance(
+        observations_digest=observations_digest,
+        execution_target_profile_digest=profile_digest,
+    )
+    return model
+
+
 # ---------------------------------------------------------------------------
 # Comparable-string resolution (spec 1.4)
 
@@ -863,4 +952,5 @@ __all__ = [
     "resolve_comparable_string",
     "resolve_session_subject",
     "state_value_at_path",
+    "verify_target_subject_model",
 ]

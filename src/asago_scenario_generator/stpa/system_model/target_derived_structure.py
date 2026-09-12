@@ -74,8 +74,10 @@ from asago_scenario_generator.stpa.models.target_derived_structure import (
 )
 from asago_scenario_generator.stpa.models.target_subject_model import (
     SessionSubject,
+    SubjectModelError,
     TargetSubjectModel,
     resolve_session_subject,
+    verify_target_subject_model,
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
@@ -864,6 +866,18 @@ def derive_target_structure(
     ``session_path`` drives the session-subject rule, and its content
     digest plus reviewer stamps are recorded on the sidecar.
     """
+    if target_subject_model is not None:
+        if target_observations is None:
+            raise SubjectModelError(
+                "subject_model_invalid",
+                "an accepted target subject model requires paired target "
+                "observations and an execution target profile",
+            )
+        verify_target_subject_model(
+            target_subject_model,
+            observations=target_observations,
+            profile=execution_target_profile,
+        )
     session_path = (
         target_subject_model.session_path if target_subject_model is not None else None
     )

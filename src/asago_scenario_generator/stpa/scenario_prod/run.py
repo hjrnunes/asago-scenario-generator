@@ -2157,6 +2157,7 @@ class _PreservedStageKeys:
     post_review_loss_analysis_digest: str | None = None
     loss_analysis_input_hash: str | None = None
     reviewed_obligation_bindings_input_hash: str | None = None
+    target_subject_model_input_hash: str | None = None
 
 
 def _preserved_stage_keys(run_dir: Path) -> _PreservedStageKeys:
@@ -2170,7 +2171,8 @@ def _preserved_stage_keys(run_dir: Path) -> _PreservedStageKeys:
     the supplied file rather than the canonical model hash.  The same applies
     to ``input_hashes.reviewed_obligation_bindings``: the row is the digest
     of a supplied file with no canonical model-hash equivalent, so it
-    survives only through this preservation path.
+    survives only through this preservation path.  The same applies to the
+    optional target-subject-model companion.
     """
     manifest_path = run_dir / "run-manifest.yaml"
     if not manifest_path.is_file():
@@ -2207,6 +2209,11 @@ def _preserved_stage_keys(run_dir: Path) -> _PreservedStageKeys:
         ),
         reviewed_obligation_bindings_input_hash=(
             bindings_hash if isinstance(bindings_hash, str) else None
+        ),
+        target_subject_model_input_hash=(
+            input_hashes.get("target_subject_model")
+            if isinstance(input_hashes.get("target_subject_model"), str)
+            else None
         ),
     )
 
@@ -2250,6 +2257,11 @@ def _write_manifest(
         input_hashes["reviewed_obligation_bindings"] = (
             preserved.reviewed_obligation_bindings_input_hash
         )
+    if preserved.target_subject_model_input_hash is not None:
+        # The subject-model row is the digest of the supplied companion file;
+        # the canonical framed model digest on the sidecar does not replace
+        # this supplied-file byte pin, so the SP1 value carries through.
+        input_hashes["target_subject_model"] = preserved.target_subject_model_input_hash
     prompt_hashes = hash_prompt_templates(PROMPTS_DIR)
     stage_summary = count_calls_by_stage(run_dir)
     stage_summary["stage_2"] = dict(stage_summary.get("stage_2") or {})

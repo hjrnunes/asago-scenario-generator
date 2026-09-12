@@ -48,7 +48,9 @@ from asago_scenario_generator.stpa.models.target_derived_structure import (
     TargetDerivedStructure,
 )
 from asago_scenario_generator.stpa.models.target_subject_model import (
+    SubjectModelError,
     TargetSubjectModel,
+    verify_target_subject_model,
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.control_structure import (
@@ -211,6 +213,28 @@ def run_sp1(
         and remaining artifacts as None.
     """
     run_dir.mkdir(parents=True, exist_ok=True)
+    if target_subject_model is not None:
+        # The Python composition seam receives already parsed values, so it
+        # must repeat the CLI loader's acceptance check against the actual
+        # target authorities before any provider-backed stage starts.  A
+        # target subject model is never silently treated as absent.
+        if execution_target_profile is None or target_observations is None:
+            return SP1RunResult(
+                stage_errors=[
+                    "stage_2/subject_model: an accepted target subject model "
+                    "requires the target-derived Stage 2 mode (observed "
+                    "single-controller target)"
+                ]
+            )
+        try:
+            verify_target_subject_model(
+                target_subject_model,
+                observations=target_observations,
+                profile=execution_target_profile,
+            )
+        except SubjectModelError as exc:
+            return SP1RunResult(stage_errors=[f"stage_2/subject_model: {exc}"])
+
     loader = TemplateLoader(PROMPTS_DIR)
     temperature = effective_temperature(llm_client, temperature)
 

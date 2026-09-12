@@ -12,6 +12,7 @@ accepted model explicitly in the test; none inherits authority.
 from __future__ import annotations
 
 import copy
+import json
 
 from asago_scenario_generator.stpa.scenario_prod.authoring import (
     AuthoredUnsafeObservation,
@@ -20,6 +21,10 @@ from asago_scenario_generator.stpa.scenario_prod.authoring import (
     admit_oracle_kinds,
     build_authoring_user_prompt,
     resolve_session_identity,
+)
+from asago_scenario_generator.stpa.scenario_prod.target_observations import (
+    TargetObservation,
+    TargetObservationSnapshot,
 )
 
 from tests.stpa.test_authoring_validation import (
@@ -48,6 +53,7 @@ def test_ms1_admission_offers_owner_differs_where_roles_exist():
         profile=_profile(),
         session=_session(),
         subject_model=_accepted_model(),
+        target_observations=_observations(),
     )
     tool_argument = admissions["tool_argument"]
     assert tool_argument.status == "compile"
@@ -118,6 +124,32 @@ def test_ms7_a_hop_to_a_missing_order_is_unresolved_not_guessed():
         "order_id": "ORD-999",
         "next_due": "2026-11-01",
     }
+    observations = TargetObservationSnapshot.create(
+        target_profile_digest=_profile().semantic_digest,
+        observations=(
+            TargetObservation(
+                observation_ref="TARGET-STATE",
+                kind="state",
+                content_format="json",
+                content=json.dumps(state, sort_keys=True),
+            ),
+        ),
+    )
+    model = _accepted_model()
+    model = model.model_copy(
+        update={
+            "acceptance": model.acceptance.model_copy(
+                update={"observations_digest": observations.content_digest}
+            )
+        }
+    )
+    model = model.model_copy(
+        update={
+            "acceptance": model.acceptance.model_copy(
+                update={"content_digest": model.compute_content_digest()}
+            )
+        }
+    )
     # The operator was offered, so the unresolved hop is a typed draft
     # rejection (spec 2.3), never a guessed comparable.
     rejected = _validate(
@@ -136,6 +168,8 @@ def test_ms7_a_hop_to_a_missing_order_is_unresolved_not_guessed():
         ),
         candidate=_candidate(action="schedule_payment"),
         state=state,
+        target_observations=observations,
+        subject_model=model,
     )
     assert isinstance(rejected, ScenarioRejection)
     assert rejected.reason == "record_address_unresolved"
@@ -151,6 +185,7 @@ def test_ms14_tool_order_equals_still_compiles_with_the_accepted_model():
         profile=_profile(),
         session=_session(),
         subject_model=_accepted_model(),
+        target_observations=_observations(),
     )
     tool_order = admissions["tool_order"]
     assert tool_order.status == "compile"
@@ -220,16 +255,14 @@ def test_ms18_a_companion_without_the_file_loads_and_withholds():
     }
 
 
-def test_owner_differs_withheld_reason_is_typed_per_cause():
-    """The withheld reason distinguishes an unobserved session from a
-    missing model (spec 2.2's closed reason set)."""
+def test_owner_differs_uses_verified_snapshot_over_supplied_session():
+    """Admission derives identity from the verified snapshot, not an override."""
     unobserved = resolve_session_identity({"orders": {}})
     admissions = admit_oracle_kinds(
         _candidate(),
         profile=_profile(),
         session=unobserved,
         subject_model=_accepted_model(),
+        target_observations=_observations(),
     )
-    assert dict(admissions["tool_argument"].withheld_operators) == {
-        "owner_differs_from_session": "session_subject_unobserved"
-    }
+    assert "owner_differs_from_session" in admissions["tool_argument"].offered_operators

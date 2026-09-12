@@ -100,6 +100,7 @@ def _accepted(**draft_overrides):
         profile=_profile(),
         session=_session(),
         subject_model=_accepted_model(),
+        target_observations=_observations(),
         has_content_surface=False,
         reviewed_bindings=reviewed_bindings,
     )
