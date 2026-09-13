@@ -9,5 +9,6 @@ Use only handles listed in the request. A source handle proves that supplied
 content exists; it does not prove that the cited obligation applies. Explain
 why selected evidence supports each condition and why an unsafe observation is
 the relevant test. Never invent target facts, policy observations, identifiers,
-or permissions. If no listed check expresses the unsafe outcome, return an
-empty response with a reason.
+or permissions. If no listed check expresses the unsafe outcome, return a
+`no_scenario` result with a reason. Otherwise return the `scenarios` result;
+the response schema keeps these two outcomes separate.

@@ -2437,14 +2437,16 @@ def test_two_valid_drafts_yield_two_scenarios_with_distinct_ids(tmp_path):
     client.set_response_queue(
         [
             {
-                "scenarios": [
-                    _current_tool_payload(owner_draft),
-                    _current_tool_payload(
-                        amount_draft,
-                        numeric_path=("orders", "ORD-104", "remaining_to_pay"),
-                    ),
-                ],
-                "no_scenario_reason": None,
+                "result": {
+                    "kind": "scenarios",
+                    "scenarios": [
+                        _current_tool_payload(owner_draft),
+                        _current_tool_payload(
+                            amount_draft,
+                            numeric_path=("orders", "ORD-104", "remaining_to_pay"),
+                        ),
+                    ],
+                }
             }
         ],
     )
@@ -2641,8 +2643,10 @@ def test_direct_authoring_uses_snapshot_session_over_supplied_session(tmp_path):
     client.set_response_queue(
         [
             {
-                "scenarios": [_current_tool_payload(draft)],
-                "no_scenario_reason": None,
+                "result": {
+                    "kind": "scenarios",
+                    "scenarios": [_current_tool_payload(draft)],
+                }
             }
         ],
     )

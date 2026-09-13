@@ -6,6 +6,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+from jsonschema import Draft202012Validator
 import yaml
 from pydantic import ValidationError
 
@@ -387,8 +388,10 @@ def _response_payload() -> str:
     }
     return json.dumps(
         {
-            "scenarios": [draft, {**draft, "conditions_established": []}],
-            "no_scenario_reason": None,
+            "result": {
+                "kind": "scenarios",
+                "scenarios": [draft, {**draft, "conditions_established": []}],
+            }
         }
     )
 
@@ -457,6 +460,119 @@ def _then_rejected(world, step, examples):
     assert rejection.reason == "qualifier_dropped"
     # No repair: exactly one logged call survives the rejection.
     assert len(_read_calls(world.ga_dir)) == 1
+    return True, ""
+
+
+def _given_current_outcome_contract(world, step, examples):
+    """Prepare the current provider model and one real mock response."""
+    del step, examples
+    from asago_scenario_generator.stpa.infra.llm import _json_schema_response_format
+    from asago_scenario_generator.stpa.scenario_prod.authoring_wire import (
+        current_authoring_response_model,
+    )
+
+    world.ga_current_context = _current_context()
+    world.ga_current_model = current_authoring_response_model(world.ga_current_context)
+    success = json.loads(_response_payload())
+    success["result"]["scenarios"] = success["result"]["scenarios"][:1]
+    world.ga_current_success_payload = success
+    world.ga_current_no_scenario_payload = {
+        "result": {
+            "kind": "no_scenario",
+            "reason": "No supported test is established by the supplied context.",
+        }
+    }
+    world.ga_current_schema = _json_schema_response_format(world.ga_current_model)[
+        "json_schema"
+    ]["schema"]
+    world.ga_current_client = MockLLMClient()
+    world.ga_current_client.set_response_for(
+        world.ga_current_model, world.ga_current_success_payload
+    )
+    return True, ""
+
+
+def _when_current_outcome_contract_validates(world, step, examples):
+    """Exercise the actual mock provider conversion and local result model."""
+    del step, examples
+    provider_result = world.ga_current_client.complete(
+        "current authoring system",
+        "current authoring user",
+        response_format=world.ga_current_model,
+    )
+    assert len(world.ga_current_client.calls) == 1
+    world.ga_current_success = world.ga_current_model.model_validate(
+        provider_result.content
+    )
+    world.ga_current_no_scenario = world.ga_current_model.model_validate(
+        world.ga_current_no_scenario_payload
+    )
+    world.ga_current_success_schema_errors = list(
+        Draft202012Validator(world.ga_current_schema).iter_errors(
+            world.ga_current_success_payload
+        )
+    )
+    world.ga_current_no_scenario_schema_errors = list(
+        Draft202012Validator(world.ga_current_schema).iter_errors(
+            world.ga_current_no_scenario_payload
+        )
+    )
+    world.ga_current_blank_reason_errors = []
+    world.ga_current_blank_reason_validation_errors = []
+    for reason in ("", " ", "\n\t"):
+        blank = {"result": {"kind": "no_scenario", "reason": reason}}
+        world.ga_current_blank_reason_errors.extend(
+            Draft202012Validator(world.ga_current_schema).iter_errors(blank)
+        )
+        try:
+            world.ga_current_model.model_validate(blank)
+        except ValidationError as exc:
+            world.ga_current_blank_reason_validation_errors.append(exc)
+    world.ga_current_mixed = dict(world.ga_current_success_payload)
+    world.ga_current_mixed["result"] = {
+        **world.ga_current_mixed["result"],
+        "reason": "unexpected",
+    }
+    world.ga_current_mixed_errors = list(
+        Draft202012Validator(world.ga_current_schema).iter_errors(
+            world.ga_current_mixed
+        )
+    )
+    try:
+        world.ga_current_model.model_validate(world.ga_current_mixed)
+    except ValidationError as exc:
+        world.ga_current_mixed_validation_error = exc
+    else:  # pragma: no cover - the closed model must reject this branch
+        world.ga_current_mixed_validation_error = None
+    return True, ""
+
+
+def _then_current_success_has_no_reason(world, step, examples):
+    del step, examples
+    assert not world.ga_current_success_schema_errors
+    assert world.ga_current_success.no_scenario_reason is None
+    assert "reason" not in world.ga_current_success.model_dump(mode="json")["result"]
+    return True, ""
+
+
+def _then_current_no_scenario_requires_reason(world, step, examples):
+    del step, examples
+    assert not world.ga_current_no_scenario_schema_errors
+    assert world.ga_current_no_scenario.scenarios == ()
+    assert world.ga_current_no_scenario.no_scenario_reason
+    assert (
+        "scenarios"
+        not in world.ga_current_no_scenario.model_dump(mode="json")["result"]
+    )
+    assert len(world.ga_current_blank_reason_errors) == 3
+    assert len(world.ga_current_blank_reason_validation_errors) == 3
+    return True, ""
+
+
+def _then_current_mixed_fields_rejected(world, step, examples):
+    del step, examples
+    assert world.ga_current_mixed_errors
+    assert world.ga_current_mixed_validation_error is not None
     return True, ""
 
 
@@ -1076,6 +1192,27 @@ def register(api):
         r"^the invalid scenario is rejected with a typed reason and no repair "
         r"call$",
         _then_rejected,
+    )
+    api.register(
+        r"^the current provider outcome contract and existing current authoring "
+        r"context$",
+        _given_current_outcome_contract,
+    )
+    api.register(
+        r"^a mock client validates the successful and no-scenario responses$",
+        _when_current_outcome_contract_validates,
+    )
+    api.register(
+        r"^the successful result has no reason field$",
+        _then_current_success_has_no_reason,
+    )
+    api.register(
+        r"^the no-scenario result requires a nonblank reason$",
+        _then_current_no_scenario_requires_reason,
+    )
+    api.register(
+        r"^mixed result fields are rejected$",
+        _then_current_mixed_fields_rejected,
     )
     api.register(
         r"^the committed oracle template table$",

@@ -37,6 +37,14 @@ old saved artifacts are not rewritten or silently repaired. Provider-visible
 schema checks and local parsing must be tested together through the actual
 request builder.
 
+The authoring root selects one closed result: `result.kind: scenarios` carries
+one to three drafts and no reason field; `result.kind: no_scenario` carries a
+nonblank `reason` and no drafts. Code derives the durable empty collection or
+null reason. The model does not synchronize a nullable reason with a scenario
+list. Mixed results and the previous flat provider envelope fail closed; saved
+flat responses may be examined by an explicitly recorded offline translation,
+never a live-parser fallback or a rewrite of historical run evidence.
+
 Current authoring keeps valid siblings when a structurally parsed draft selects
 an unknown handle or fails adaptation. Malformed JSON or a missing required
 structural field still fails parsing of the response as a whole; this change

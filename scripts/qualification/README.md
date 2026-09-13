@@ -249,6 +249,10 @@ This replays saved **inputs through the current provider interface**. It does
 not reproduce an old response schema or promise prompt byte equality with an
 older run. The current authoring interface uses request-local fact and check
 handles; historical `AuthoringResponse` records remain readable separately.
+Its current root is `result`: either `kind: scenarios` with a nonempty
+`scenarios` list, or `kind: no_scenario` with a nonblank `reason`. The old flat
+provider envelope is not a fallback. An offline envelope-only translation must
+be saved separately and cannot change a historical validation or recovery.
 Freeze the dry-run prompts and emitted schema before any new comparison.
 Previously saved addenda that target the old conversation JSON block fail
 closed when that anchor is absent; they are not automatically translated.

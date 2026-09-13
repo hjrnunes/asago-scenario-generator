@@ -567,3 +567,23 @@ the offline acceptance suite, not a run pair.
   held specification. A structured consumer evidence carrier is separate work.
 - **Contract.** See `docs/architecture/model-facing-interfaces.md` for ownership,
   historical preservation, and verification requirements.
+
+## 2026-09-13 — Separate authored and no-scenario response outcomes
+
+- **Owner decision.** Correct the response structure and review the saved
+  failures offline. No new model run, target execution, or benchmark edit.
+- **Defect.** Four current-interface MiniOcciAI replies supplied a scenario
+  plus an empty `no_scenario_reason`. The old nullable schema admitted that
+  representation, while its local cross-field validator rejected the response.
+- **Correction.** A closed `result` union has `kind: scenarios` with one to
+  three drafts, or `kind: no_scenario` with a nonblank `reason`. Successful
+  responses have no reason field. Deterministic properties supply the existing
+  adapter view; the provider no longer synchronizes those bookkeeping fields.
+- **Evidence.** SDK-emitted schema and local-parser regression cases cover
+  successful, no-scenario, empty, mixed, over-budget, and legacy-flat outcomes.
+  Separate offline translations preserve each saved scenario payload exactly.
+  Evidence lives under `build/qualification/current-interface-followup-20260913/`.
+- **Limits.** Parsing and validation do not establish test soundness or recovery.
+  Historical responses and scores remain unchanged. This changes the provider
+  schema and two current prompt hashes for any future run. The 600-character
+  omission carrier is unchanged; its replacement remains a separate proposal.

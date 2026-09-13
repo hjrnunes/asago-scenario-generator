@@ -300,7 +300,14 @@ def test_os7_every_erased_candidate_now_prepares_an_authoring_call(tmp_path):
         ), key
         client = MockLLMClient()
         client.set_response_queue(
-            [{"scenarios": [], "no_scenario_reason": "no compilable check"}]
+            [
+                {
+                    "result": {
+                        "kind": "no_scenario",
+                        "reason": "No compilable check is available.",
+                    }
+                }
+            ]
         )
         outcome = author_candidate_scenarios(
             client,

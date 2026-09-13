@@ -14,6 +14,13 @@ Feature: Phase 4 grounded authoring in target-derived mode
     And the valid scenario is accepted with the synthesized deviation category
     And the invalid scenario is rejected with a typed reason and no repair call
 
+  Scenario: the current provider outcome uses one closed result envelope
+    Given the current provider outcome contract and existing current authoring context
+    When a mock client validates the successful and no-scenario responses
+    Then the successful result has no reason field
+    And the no-scenario result requires a nonblank reason
+    And mixed result fields are rejected
+
   Scenario: the oracle templates render deterministic text and fail closed
     Given the committed oracle template table
     When the oracle text renders for every supported kind

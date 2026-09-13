@@ -18,7 +18,6 @@ from pydantic import (
     StrictInt,
     StrictStr,
     create_model,
-    model_validator,
 )
 
 from asago_scenario_generator.models.canonical import ClosedCanonicalModel
@@ -235,23 +234,44 @@ class CurrentScenarioDraft(ClosedCanonicalModel):
     safe_behaviors: tuple[StrictStr, ...] = ()
 
 
+class CurrentScenariosResult(ClosedCanonicalModel):
+    """A nonempty authored result carries no no-scenario bookkeeping."""
+
+    kind: Literal["scenarios"]
+    scenarios: tuple[CurrentScenarioDraft, ...] = Field(min_length=1, max_length=3)
+
+
+class CurrentNoScenarioResult(ClosedCanonicalModel):
+    """An explicit no-scenario decision requires meaningful explanatory text."""
+
+    kind: Literal["no_scenario"]
+    reason: Annotated[StrictStr, Field(min_length=1, pattern=r"\S")]
+
+
 class CurrentAuthoringResponse(ClosedCanonicalModel):
-    """Current provider response; it never accepts the historical wire shape."""
+    """One closed outcome, with durable bookkeeping derived after decoding."""
 
-    scenarios: tuple[CurrentScenarioDraft, ...] = Field(default=(), max_length=3)
-    no_scenario_reason: StrictStr | None = None
+    result: Annotated[
+        CurrentScenariosResult | CurrentNoScenarioResult, Field(discriminator="kind")
+    ]
 
-    @model_validator(mode="after")
-    def validate_empty_case(self) -> "CurrentAuthoringResponse":
-        if not self.scenarios and not (self.no_scenario_reason or "").strip():
-            raise ValueError(
-                "empty current authoring response requires no_scenario_reason"
-            )
-        if self.scenarios and self.no_scenario_reason is not None:
-            raise ValueError(
-                "no_scenario_reason is only valid when current scenarios is empty"
-            )
-        return self
+    @property
+    def scenarios(self) -> tuple[CurrentScenarioDraft, ...]:
+        """Expose the existing adapter view without another provider field."""
+        return (
+            self.result.scenarios
+            if isinstance(self.result, CurrentScenariosResult)
+            else ()
+        )
+
+    @property
+    def no_scenario_reason(self) -> str | None:
+        """Derive the durable null for a successful response in code."""
+        return (
+            self.result.reason
+            if isinstance(self.result, CurrentNoScenarioResult)
+            else None
+        )
 
 
 def _literal(values: tuple[str, ...]) -> Any:
@@ -297,8 +317,8 @@ def _plain_union(types: list[type[Any]]) -> Any:
 def current_authoring_response_model(context: Any) -> type[CurrentAuthoringResponse]:
     """Build the closed provider schema for one request-local context.
 
-    The public :class:`CurrentAuthoringResponse` is the unbound compatibility
-    model used for parsing and tests.  Live calls use this derived subclass so
+    The public :class:`CurrentAuthoringResponse` is the unbound current
+    model used for parsing. Live calls use this derived subclass so
     the emitted schema contains only the compiling oracle kinds, choice
     handles, action arguments, reference tools, and source handles available
     in this request.  The adapter still rechecks every binding after parsing.
@@ -543,13 +563,12 @@ def current_authoring_response_model(context: Any) -> type[CurrentAuthoringRespo
 
     if not unsafe_variants:
         # A candidate with no admissible check can only return the typed
-        # no-scenario response.  ``tuple[()]`` expresses that closure in the
-        # actual provider schema while the inherited response validator keeps
-        # the reason mandatory.
+        # no-scenario response. The actual schema carries only that branch;
+        # no empty scenario list or unused nullable field is requested.
         return create_model(
             "CurrentAuthoringResponseForContext",
             __base__=CurrentAuthoringResponse,
-            scenarios=(tuple[()], Field(default=(), max_length=0)),
+            result=(CurrentNoScenarioResult, ...),
         )
 
     unsafe_type = _plain_union(unsafe_variants)
@@ -595,10 +614,18 @@ def current_authoring_response_model(context: Any) -> type[CurrentAuthoringRespo
         "CurrentScenarioDraftForContext",
         scenario_fields,
     )
+    scenarios_result = _bound_model(
+        CurrentScenariosResult,
+        "CurrentScenariosResultForContext",
+        {"scenarios": (tuple[scenario_type, ...], Field(min_length=1, max_length=3))},
+    )
     return create_model(
         "CurrentAuthoringResponseForContext",
         __base__=CurrentAuthoringResponse,
-        scenarios=(tuple[scenario_type, ...], Field(default=(), max_length=3)),
+        result=(
+            _discriminated_union([scenarios_result, CurrentNoScenarioResult], "kind"),
+            ...,
+        ),
     )
 
 
@@ -606,6 +633,8 @@ __all__ = [
     "CurrentAdversary",
     "CurrentAdversaryKind",
     "CurrentAuthoringResponse",
+    "CurrentScenariosResult",
+    "CurrentNoScenarioResult",
     "CurrentClaimUnderTest",
     "CurrentCondition",
     "CurrentConversation",
