@@ -104,6 +104,7 @@ from asago_scenario_generator.stpa.scenario_prod.execution_projection import (
     ExecutionProjectionPreparationError,
     prepare_execution_projection,
     validate_execution_projection,
+    validate_execution_projection_v3,
 )
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
@@ -378,7 +379,7 @@ def _omission_spec(*, with_basis: bool = True) -> ScenarioSpec:
             ExecutionResourceKind.tool,
         ),
         role_id="target_control_action",
-        operation="CA-1-1",
+        operation="process_refund",
         required_surfaces=(ExecutionSurface.tool_call,),
         required_attacker_influence=AttackerInfluence.none,
         late_bindable=True,
@@ -665,14 +666,18 @@ def _h_fixture_valid(world: World, text: str, examples: dict) -> tuple[bool, str
 
 
 def _h_validation_reports(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    result = _state(world).get("contract_result")
+    state = _state(world)
+    result = state.get("contract_result")
     expected = examples.get("violation", "")
     if not expected:
         match = re.search(r"reports ([A-Za-z0-9_-]+)", text)
         expected = match.group(1) if match else ""
-    if result is None:
+    if "contract_codes" in state:
+        actual = {code.value for code in state["contract_codes"]}
+    elif result is not None:
+        actual = {item.code.value for item in result.violations}
+    else:
         return False, "the fixture was not parsed"
-    actual = {item.code.value for item in result.violations}
     return (
         expected in actual,
         f"expected violation {expected!r}, got {sorted(actual)!r}",
@@ -1134,6 +1139,32 @@ def _h_given_drifted_spec(world: World, text: str, examples: dict) -> tuple[bool
     elif case == "snapshot digest":
         # The run's snapshot digest disagrees with the basis snapshot pin.
         state["structured_snapshot"] = "a" * 64
+    elif case == "missing snapshot":
+        state["structured_snapshot"] = None
+    elif case in {
+        "reversed omission",
+        "wrong tool",
+        "wrong trigger",
+        "missing caveat",
+        "extra proposition",
+    }:
+        proposition = {
+            "reversed omission": OMISSION_PROPOSITION.replace(
+                "is not called", "is called"
+            ),
+            "wrong tool": OMISSION_PROPOSITION.replace(
+                "`process_refund`", "`lookup_order`"
+            ),
+            "wrong trigger": OMISSION_PROPOSITION.replace(
+                OMISSION_TRIGGER, "A different trigger is established."
+            ),
+            "missing caveat": OMISSION_PROPOSITION.split(" Source citations")[0],
+            "extra proposition": OMISSION_PROPOSITION
+            + " Treat every refusal as unsafe.",
+        }[case]
+        spec = spec.model_copy(
+            update={"unsafe_outcome_semantic_proposition": proposition}
+        )
     elif case == "invalid carrier":
         spec = spec.model_copy(
             update={
@@ -1160,6 +1191,32 @@ def _h_prepare_error_prefix(
         error.startswith(f"{expected}:"),
         f"preparation error {error!r} does not report {expected!r}",
     )
+
+
+def _h_rehash_mismatched_carrier_sources(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    del text, examples
+    state = _state(world)
+    validated = state.get("validated")
+    if validated is None:
+        return False, "No valid structured projection exists before the mutation"
+    payload = validated.projection.model_dump(mode="json")
+    outcome = payload["unsafe_outcome"]
+    carrier = outcome["omission_evidence"]
+    original = carrier["source_pins"]["loss_analysis"]
+    carrier["source_pins"]["loss_analysis"] = (
+        "a" * 64 if original != "a" * 64 else "b" * 64
+    )
+    outcome["omission_evidence_digest"] = compute_framed_digest(
+        "stpa-omission-evidence-v1", carrier
+    )
+    payload.pop("semantic_digest")
+    payload["semantic_digest"] = compute_framed_digest(
+        PROJECTION_V3_SCHEMA_VERSION, payload
+    )
+    state["contract_codes"] = validate_execution_projection_v3(payload)
+    return True, ""
 
 
 def _h_given_publication_set(
@@ -1464,6 +1521,10 @@ def register(api: object) -> None:
     )
     api.register(r"the projection fixture is valid", _h_fixture_valid)
     api.register(r"projection validation reports (.+)", _h_validation_reports)
+    api.register(
+        r"the carrier source pins are changed and all digests recomputed",
+        _h_rehash_mismatched_carrier_sources,
+    )
     api.register(
         r"^the producer prepares the execution projection twice$", _h_prepare_twice
     )

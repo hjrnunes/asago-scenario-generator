@@ -65,6 +65,7 @@ from asago_scenario_generator.stpa.models.omission_evidence import (
     OmissionApplicability,
     OmissionDelivery,
     OmissionEvidenceBasis,
+    render_omission_proposition,
     SOURCE_ATTESTATION_FRAME,
     StateFactOmissionEvidence,
     StimulusOmissionEvidence,
@@ -2570,10 +2571,10 @@ def _resolve_oracle(
             # Structured branch: the short proposition carries the trigger
             # only; the exact evidence rides in the typed carrier, so the
             # compiled proposition stays within the closed 600-char limit.
-            template_text = render_oracle_text(
-                "tool_absent_structured",
-                tool=observation.tool,
+            binding = candidate.action_binding
+            template_text = render_omission_proposition(
                 trigger=observation.trigger or "",
+                operation=binding.operation_id or binding.name,
             )
         else:
             template_text = render_oracle_text(

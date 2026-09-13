@@ -150,7 +150,13 @@ Feature: STPA execution projection v2 and bundle producer
       | delivery mismatch | stimulus_delivery_mismatch    |
       | prepared text     | prepared_text_mismatch        |
       | snapshot digest   | snapshot_digest_mismatch      |
+      | missing snapshot  | snapshot_digest_mismatch      |
       | invalid carrier   | omission_evidence_invalid     |
+      | reversed omission | omission_evidence_invalid     |
+      | wrong tool        | omission_evidence_invalid     |
+      | wrong trigger     | omission_evidence_invalid     |
+      | missing caveat    | omission_evidence_invalid     |
+      | extra proposition | omission_evidence_invalid     |
 
   # STPA-BUNDLE-17
   Scenario Outline: STPA-BUNDLE-17 homogeneous sets publish their own bundle version
@@ -177,3 +183,10 @@ Feature: STPA execution projection v2 and bundle producer
     When the bundle-v2 kit fixtures are verified
     Then the bundle-v2 valid fixture verifies successfully
     And the bundle-v2 invalid fixtures report their expected violations
+
+  # STPA-BUNDLE-20
+  Scenario: STPA-BUNDLE-20 recomputed hashes do not hide mismatched evidence sources
+    Given a structured omission scenario spec with an evidence basis
+    When the producer prepares the structured v3 execution projection
+    And the carrier source pins are changed and all digests recomputed
+    Then projection validation reports source_pin_mismatch

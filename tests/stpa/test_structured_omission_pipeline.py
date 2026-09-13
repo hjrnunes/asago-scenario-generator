@@ -37,6 +37,7 @@ from asago_scenario_generator.stpa.models.execution_projection_v3 import (
     PROJECTION_V3_SCHEMA_VERSION,
     AdversarialStimulusRequirementV3,
     ExecutionBundleIndexV2,
+    ExecutionProjectionV3,
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionDeliveryClass,
@@ -47,6 +48,7 @@ from asago_scenario_generator.stpa.models.omission_evidence import (
     OmissionApplicability,
     OmissionDelivery,
     OmissionEvidenceBasis,
+    OmissionEvidence,
     StimulusOmissionEvidence,
     TRIGGER_DIGEST_FRAME,
 )
@@ -503,6 +505,20 @@ def _prepared_v3(
     )
 
 
+def _rehash_v3_payload(payload: dict) -> dict:
+    """Recompute the projection digest after an intentional wire mutation."""
+    carrier_raw = payload.get("unsafe_outcome", {}).get("omission_evidence")
+    if carrier_raw is not None:
+        carrier = OmissionEvidence.model_validate(carrier_raw)
+        payload["unsafe_outcome"]["omission_evidence_digest"] = (
+            carrier.compute_carrier_digest()
+        )
+    payload["semantic_digest"] = None
+    projection = ExecutionProjectionV3.model_validate(payload)
+    payload["semantic_digest"] = projection.semantic_digest
+    return payload
+
+
 class TestV3Preparation:
     def test_carrier_pins_the_projection_source_pins_and_digest(self):
         accepted = _reviewed_omission_accepted()
@@ -630,6 +646,46 @@ class TestV3PreparationCrossChecks:
                 snapshot="a" * 64,
             )
 
+    def test_source_backed_evidence_requires_the_validated_run_snapshot(self):
+        spec, enumeration, control_structure = self._spec()
+
+        with pytest.raises(
+            ExecutionProjectionPreparationError,
+            match="^snapshot_digest_mismatch:.*validated run observation snapshot",
+        ):
+            _prepared_v3(
+                spec,
+                control_structure,
+                enumeration,
+                snapshot=None,
+            )
+
+    def test_stimulus_only_evidence_does_not_require_a_snapshot(self):
+        spec, enumeration, control_structure = self._spec()
+        basis = spec.omission_evidence_basis
+        stimulus_only = basis.model_copy(
+            update={
+                "observation_snapshot_digest": None,
+                "evidence": (
+                    StimulusOmissionEvidence(
+                        delivery_turn_ordinal=1,
+                        quote=PREPARED_TEXT,
+                    ),
+                ),
+            }
+        )
+        prepared = _prepared_v3(
+            spec.model_copy(update={"omission_evidence_basis": stimulus_only}),
+            control_structure,
+            enumeration,
+            snapshot=None,
+        )
+
+        carrier = prepared.projection.unsafe_outcome.omission_evidence
+        assert carrier is not None
+        assert carrier.observation_snapshot_digest is None
+        assert {entry.source for entry in carrier.evidence} == {"stimulus"}
+
     def test_carrier_model_rejects_a_corrupted_basis(self):
         spec, enumeration, control_structure = self._spec()
         basis = spec.omission_evidence_basis
@@ -682,9 +738,7 @@ class TestV3ConversationTurnBinding:
             factor_id="CF-1",
             source_role="user_request",
             turns=(
-                StimulusTurn(
-                    turn_id="T-1", text="I already paid for ORD-201."
-                ),
+                StimulusTurn(turn_id="T-1", text="I already paid for ORD-201."),
                 StimulusTurn(turn_id="T-2", text=self.QUOTE),
             ),
         )
@@ -842,6 +896,79 @@ class TestV3StandaloneVerification:
         codes = validate_execution_projection_v3(payload)
 
         assert codes[0].value == "omission_evidence_invalid"
+
+    @pytest.mark.parametrize(
+        "mutate",
+        (
+            pytest.param(
+                lambda proposition: proposition.replace(
+                    "`process_refund` is not called",
+                    "`process_refund` is called",
+                ),
+                id="inverted-absence-direction",
+            ),
+            pytest.param(
+                lambda proposition: proposition.replace(
+                    "`process_refund` is not called",
+                    "`wrong_tool` is not called",
+                ),
+                id="wrong-tool",
+            ),
+            pytest.param(
+                lambda proposition: proposition.replace(
+                    f"`{OMISSION_TRIGGER}`",
+                    "`A different authored observation sentence.`",
+                ),
+                id="wrong-trigger",
+            ),
+            pytest.param(
+                lambda proposition: proposition.replace(
+                    " Source citations establish source presence only; they do "
+                    "not establish that the reviewed obligation applies.",
+                    "",
+                ),
+                id="missing-caveat",
+            ),
+            pytest.param(
+                lambda proposition: proposition + " Extra authored text.",
+                id="additional-text",
+            ),
+        ),
+    )
+    def test_rehashed_proposition_drift_is_typed(self, mutate):
+        payload, _control_structure = _v3_payload()
+        original = payload["unsafe_outcome"]["semantic_proposition"]
+        payload["unsafe_outcome"]["semantic_proposition"] = mutate(original)
+        _rehash_v3_payload(payload)
+
+        codes = validate_execution_projection_v3(payload)
+
+        assert codes[0].value == "omission_evidence_invalid"
+
+    def test_carrier_source_pin_drift_is_typed_after_rehash(self):
+        payload, _control_structure = _v3_payload()
+        payload["unsafe_outcome"]["omission_evidence"]["source_pins"][
+            "control_structure"
+        ] = "e" * 64
+        _rehash_v3_payload(payload)
+
+        codes = validate_execution_projection_v3(payload)
+
+        assert codes[0].value == "source_pin_mismatch"
+
+    def test_optional_target_pins_as_null_do_not_drift_from_carrier_pins(self):
+        payload, _control_structure = _v3_payload()
+        pins = payload["trace_refs"]["source_pins"]
+        pins["execution_target_profile"] = None
+        pins["target_realization"] = None
+        carrier_pins = payload["unsafe_outcome"]["omission_evidence"]["source_pins"]
+        carrier_pins["execution_target_profile"] = None
+        carrier_pins["target_realization"] = None
+        _rehash_v3_payload(payload)
+
+        codes = validate_execution_projection_v3(payload)
+
+        assert codes == ()
 
 
 # ---------------------------------------------------------------------------
@@ -1027,6 +1154,43 @@ class TestBundlePublication:
         )
         assert verify_execution_bundle(tmp_path).valid is True
 
+    def test_v3_bundle_reload_rejects_carrier_source_pin_drift(self, tmp_path):
+        publication = _publish_bundle_dir(
+            tmp_path,
+            structured=True,
+            run_id="bundle-pin-drift",
+        )
+        projection_path = tmp_path / publication.projection_path
+        payload = json.loads(projection_path.read_text(encoding="utf-8"))
+        payload["unsafe_outcome"]["omission_evidence"]["source_pins"][
+            "control_structure"
+        ] = "e" * 64
+        carrier = OmissionEvidence.model_validate(
+            payload["unsafe_outcome"]["omission_evidence"]
+        )
+        payload["unsafe_outcome"]["omission_evidence_digest"] = (
+            carrier.compute_carrier_digest()
+        )
+        payload["semantic_digest"] = None
+        projection = ExecutionProjectionV3.model_validate(payload)
+        payload["semantic_digest"] = projection.semantic_digest
+        projection_bytes = canonical_json_bytes(payload)
+        projection_path.write_bytes(projection_bytes)
+
+        index_path = tmp_path / "execution-bundle.json"
+        index_data = json.loads(index_path.read_text(encoding="utf-8"))
+        reference = index_data["entries"][0]["projection"]
+        reference["content_sha256"] = hashlib.sha256(projection_bytes).hexdigest()
+        reference["semantic_digest"] = payload["semantic_digest"]
+        index_data.pop("bundle_digest", None)
+        index = ExecutionBundleIndexV2.model_validate(index_data)
+        index_path.write_bytes(index.canonical_json_bytes())
+
+        result = verify_execution_bundle(tmp_path)
+
+        assert result.valid is False
+        assert result.violations[0].code.value == "source_pin_mismatch"
+
     def test_v2_set_still_publishes_the_bundle_v1_index(self, tmp_path):
         accepted = _reviewed_omission_accepted()
         control_structure = _minimal_control_structure()
@@ -1085,17 +1249,13 @@ class TestBundlePublication:
 
         assert not (tmp_path / "execution-bundle.json").is_file()
 
-    def test_reload_rejects_a_v2_projection_under_a_bundle_v2_index(
-        self, tmp_path
-    ):
+    def test_reload_rejects_a_v2_projection_under_a_bundle_v2_index(self, tmp_path):
         structured_dir = tmp_path / "structured"
         plain_dir = tmp_path / "plain"
         structured = _publish_bundle_dir(
             structured_dir, structured=True, run_id="swap-structured"
         )
-        plain = _publish_bundle_dir(
-            plain_dir, structured=False, run_id="swap-plain"
-        )
+        plain = _publish_bundle_dir(plain_dir, structured=False, run_id="swap-plain")
         assert verify_execution_bundle(structured_dir).valid is True
 
         # Swap a v2 projection document under the v2 bundle index and
@@ -1110,17 +1270,13 @@ class TestBundlePublication:
         assert result.valid is False
         assert result.violations[0].code.value == "schema_version_mismatch"
 
-    def test_reload_rejects_a_v3_projection_under_a_bundle_v1_index(
-        self, tmp_path
-    ):
+    def test_reload_rejects_a_v3_projection_under_a_bundle_v1_index(self, tmp_path):
         structured_dir = tmp_path / "structured"
         plain_dir = tmp_path / "plain"
         structured = _publish_bundle_dir(
             structured_dir, structured=True, run_id="swap-structured"
         )
-        plain = _publish_bundle_dir(
-            plain_dir, structured=False, run_id="swap-plain"
-        )
+        plain = _publish_bundle_dir(plain_dir, structured=False, run_id="swap-plain")
         assert verify_execution_bundle(plain_dir).valid is True
 
         # Swap a v3 projection document under the v1 bundle index, again

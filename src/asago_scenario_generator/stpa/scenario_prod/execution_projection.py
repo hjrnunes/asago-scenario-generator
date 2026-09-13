@@ -64,6 +64,7 @@ from asago_scenario_generator.stpa.models.execution_projection_v3 import (
 from asago_scenario_generator.stpa.models.omission_evidence import (
     OmissionEvidence,
     SOURCE_ATTESTATION_FRAME,
+    render_omission_proposition,
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionActionKind,
@@ -576,6 +577,7 @@ def _build_projection_v3(
         spec,
         stimulus=(stimulus_requirements[0] if stimulus_requirements else None),
         source_pins=trace_refs.source_pins,
+        execution_contract=execution_contract,
         observation_snapshot_digest=observation_snapshot_digest,
     )
     outcome = _build_unsafe_outcome_v3(spec, hazard_refs, constraint_refs, carrier)
@@ -771,6 +773,7 @@ def _v3_omission_carrier(
     *,
     stimulus: AdversarialStimulusRequirementV3 | None,
     source_pins: ExecutionSourcePins,
+    execution_contract: SemanticExecutionContract,
     observation_snapshot_digest: str | None,
 ) -> tuple[OmissionEvidence, str] | None:
     """Assemble the closed carrier from the basis and the projection pins.
@@ -812,9 +815,17 @@ def _v3_omission_carrier(
             "does not match the published stimulus requirement "
             f"({stimulus.stimulus_id}, {stimulus.delivery_class.value})"
         )
+    operation = _omission_target_operation(
+        execution_contract,
+        owner_ref=spec.target_control_action,
+    )
     _check_v3_prepared_text(basis, stimulus)
     _check_v3_snapshot(basis, observation_snapshot_digest)
-    _check_v3_proposition_binding(basis, spec.unsafe_outcome_semantic_proposition)
+    _check_v3_proposition_binding(
+        basis,
+        spec.unsafe_outcome_semantic_proposition,
+        operation,
+    )
     try:
         carrier = basis.to_carrier(source_pins)
     except (ValidationError, ValueError) as exc:
@@ -825,25 +836,74 @@ def _v3_omission_carrier(
     return carrier, carrier.compute_carrier_digest()
 
 
-def _check_v3_proposition_binding(basis: Any, proposition: str | None) -> None:
-    """Bind the short proposition to the carrier's trigger sentence.
+def _omission_target_operation(
+    contract: SemanticExecutionContract,
+    *,
+    owner_ref: str,
+) -> str:
+    """Return the one typed tool operation owned by an omission outcome."""
+    operation = _typed_omission_operation(contract, owner_ref=owner_ref)
+    if operation is None:
+        raise ExecutionProjectionPreparationError(
+            "omission_evidence_invalid: a structured omission requires exactly "
+            "one typed target_action tool operation"
+        )
+    return operation
 
-    The proposition is the deterministic ``tool_absent_structured`` render
-    over the same authored observation as the carrier, so it must embed the
-    carrier's exact trigger inside the fixed conditional frame.  A carrier
-    whose trigger disagrees with the executed proposition is rejected before
-    publication.
+
+def _typed_omission_operation(
+    contract: SemanticExecutionContract,
+    *,
+    owner_ref: str | None = None,
+) -> str | None:
+    """Return the operation from a valid tool-action contract, if available.
+
+    The operation is a typed target-action identity.  Persisted validation
+    uses this helper after parsing the contract and never extracts an
+    operation from provider-authored proposition text.
     """
+    requirements = tuple(
+        item
+        for item in contract.resource_requirements
+        if item.purpose is ExecutionResourcePurpose.target_action
+    )
     if (
-        proposition is None
-        or not proposition.startswith("Inconclusive unless")
-        or "Then unsafe if" not in proposition
-        or f"`{basis.trigger}`" not in proposition
+        contract.action_kind is not ExecutionActionKind.tool_call
+        or len(requirements) != 1
     ):
+        return None
+    requirement = requirements[0]
+    if owner_ref is not None and requirement.owner_ref != owner_ref:
+        return None
+    return requirement.operation
+
+
+def _check_v3_proposition_binding(
+    basis: Any,
+    proposition: str | None,
+    operation: str,
+) -> None:
+    """Bind the short proposition to the canonical trigger and operation.
+
+    The proposition is the deterministic structured omission render over the
+    same authored observation and typed target operation as the carrier.  A
+    provider-authored proposition is retained only when it is byte-identical
+    to that render; the producer never parses or repairs its text.
+    """
+    try:
+        expected = render_omission_proposition(
+            trigger=basis.trigger,
+            operation=operation,
+        )
+    except ValueError as exc:
+        raise ExecutionProjectionPreparationError(
+            f"omission_evidence_invalid: cannot render the canonical omission "
+            f"proposition: {exc}"
+        ) from exc
+    if proposition != expected:
         raise ExecutionProjectionPreparationError(
             "omission_evidence_invalid: the outcome proposition does not "
-            "embed the omission carrier's trigger inside the structured "
-            "conditional frame"
+            "equal the canonical structured omission proposition"
         )
 
 
@@ -901,11 +961,16 @@ def _check_v3_snapshot(
     observation_snapshot_digest: str | None,
 ) -> None:
     """Cross-check the carrier snapshot pin against the run's snapshot."""
-    if observation_snapshot_digest is None:
-        return
     cites_snapshot = any(
         entry.source in ("state_fact", "observation") for entry in basis.evidence
     )
+    if not cites_snapshot:
+        return
+    if cites_snapshot and observation_snapshot_digest is None:
+        raise ExecutionProjectionPreparationError(
+            "snapshot_digest_mismatch: a state-fact or observation-backed "
+            "carrier requires the validated run observation snapshot digest"
+        )
     if (
         cites_snapshot
         and basis.observation_snapshot_digest != observation_snapshot_digest
@@ -1605,41 +1670,111 @@ def _v3_carrier_violations(
                 "omission_evidence_digest does not match the carrier content",
             )
         )
+    violations.extend(_v3_carrier_source_pin_violations(carrier, payload))
     violations.extend(_v3_carrier_delivery_violations(carrier, payload))
     violations.extend(
         _v3_carrier_snapshot_violations(carrier, observation_snapshot_digest)
     )
-    violations.extend(_v3_carrier_proposition_violations(carrier, outcome))
+    violations.extend(_v3_carrier_proposition_violations(carrier, outcome, payload))
     return violations
+
+
+def _v3_carrier_source_pin_violations(
+    carrier: OmissionEvidence,
+    payload: Mapping[str, Any],
+) -> list[ProjectionValidationViolation]:
+    """Require the carrier to repeat the projection's exact source pins."""
+    trace_refs = payload.get("trace_refs")
+    if not isinstance(trace_refs, Mapping):
+        # The structural validator reports a missing or malformed trace_refs
+        # container.  Do not hide that diagnostic with a duplicate here.
+        return []
+    trace_pins = trace_refs.get("source_pins")
+    if not isinstance(trace_pins, Mapping):
+        return []
+    carrier_pins = carrier.source_pins.model_dump(mode="json", exclude_none=True)
+    trace_pins_normalized = {
+        key: value for key, value in trace_pins.items() if value is not None
+    }
+    if trace_pins_normalized == carrier_pins:
+        return []
+    return [
+        _violation(
+            ProjectionValidationCode.source_pin_mismatch,
+            "unsafe_outcome.omission_evidence.source_pins",
+            "carrier source_pins must equal projection trace_refs source_pins",
+        )
+    ]
 
 
 def _v3_carrier_proposition_violations(
     carrier: OmissionEvidence,
     outcome: Mapping[str, Any],
+    payload: Mapping[str, Any],
 ) -> list[ProjectionValidationViolation]:
-    """Bind the short proposition to the carrier's trigger sentence.
+    """Bind the proposition to the typed operation and carrier trigger.
 
-    The structured proposition is the deterministic render over the same
-    authored observation as the carrier: it must embed the carrier's exact
-    trigger inside the fixed conditional frame, so a persisted document
-    whose proposition names a different trigger fails closed.
+    The operation comes only from the parsed target-action contract owned by
+    the outcome.  Persisted validation never extracts an operation or a
+    trigger from provider-authored prose.
     """
     proposition = outcome.get("semantic_proposition")
     if not isinstance(proposition, str):
         # The model validation layer reports the structural defect.
         return []
+    contract_raw = payload.get("execution_contract")
+    if not isinstance(contract_raw, Mapping):
+        return []
+    try:
+        contract = SemanticExecutionContract.model_validate(contract_raw)
+    except (ValidationError, TypeError, ValueError):
+        # Keep the contract's own structural diagnostics; this helper cannot
+        # derive a canonical operation from an invalid typed contract.
+        return []
+    requirements = tuple(
+        item
+        for item in contract.resource_requirements
+        if item.purpose is ExecutionResourcePurpose.target_action
+    )
     if (
-        proposition.startswith("Inconclusive unless")
-        and "Then unsafe if" in proposition
-        and f"`{carrier.trigger}`" in proposition
+        contract.action_kind is not ExecutionActionKind.tool_call
+        or len(requirements) != 1
     ):
+        return [
+            _violation(
+                ProjectionValidationCode.omission_evidence_invalid,
+                "execution_contract",
+                "a structured omission requires exactly one typed target_action "
+                "tool operation",
+            )
+        ]
+    requirement = requirements[0]
+    owner_ref = outcome.get("control_action_id")
+    if isinstance(owner_ref, str) and requirement.owner_ref != owner_ref:
+        return [
+            _violation(
+                ProjectionValidationCode.omission_evidence_invalid,
+                "execution_contract.resource_requirements",
+                "the structured omission target_action requirement must be owned "
+                "by the outcome control_action_id",
+            )
+        ]
+    operation = requirement.operation
+    try:
+        expected = render_omission_proposition(
+            trigger=carrier.trigger,
+            operation=operation,
+        )
+    except ValueError:
+        return []
+    if proposition == expected:
         return []
     return [
         _violation(
             ProjectionValidationCode.omission_evidence_invalid,
             "unsafe_outcome.semantic_proposition",
-            "the outcome proposition does not embed the omission carrier's "
-            "trigger inside the structured conditional frame",
+            "the outcome proposition does not equal the canonical structured "
+            "omission proposition",
         )
     ]
 

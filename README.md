@@ -876,7 +876,13 @@ atomically. A structured-omission run instead publishes the homogeneous
 `stpa-execution-bundle-v2` with `stpa-execution-projection-v3` entries whose
 omission outcomes carry the closed `stpa-omission-evidence-v1` carrier; a
 bundle never mixes projection versions, and a legacy run's bundle-v1 bytes
-are unchanged. Initial entries are written before the canonical
+are unchanged. Structured omission preparation checks the complete canonical
+proposition, including the bound tool and absence direction, and requires the
+run's validated snapshot digest when evidence cites state or observations.
+Persisted verification also checks that carrier source pins equal the
+projection's trace pins. Offline readers without the original snapshot check
+internal consistency; they do not authenticate that snapshot's contents.
+Initial entries are written before the canonical
 `execution-bundle.json` index; updates stage entries under a deterministic,
 content-addressed generation and leave the currently indexed bytes untouched
 until that index is replaced last. YAML mirrors are written before the index,

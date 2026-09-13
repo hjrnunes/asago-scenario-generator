@@ -158,7 +158,10 @@ projection-v3/bundle-v2, whose unsafe outcome carries the closed
 `stpa-omission-evidence-v1` carrier beside a short trigger-only proposition,
 upgrading every entry in that run's bundle to v3 so bundles stay homogeneous.
 A direct-prompt carrier delivers the exact authored user text verbatim
-(`prepared_user_text`); evidence beyond the carrier bounds hold as
+(`prepared_user_text`). Before publication, verify the complete deterministic
+proposition against its trigger and owned tool operation, and require the run's
+validated snapshot digest for state/observation evidence. Persisted carrier
+source pins must equal the projection trace pins. Evidence beyond the carrier bounds hold as
 `trigger_evidence_unrepresentable` with the original evidence retained, and
 unattestable or unresolved deliveries hold as `delivery_evidence_mismatch` /
 `delivery_evidence_unresolved`. Absence alone stays inconclusive; a `kind:

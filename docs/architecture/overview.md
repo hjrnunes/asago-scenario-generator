@@ -649,6 +649,18 @@ substituted, and the six projection cross-checks (`omission_evidence_missing`,
 functional specification may retain a validated carrier for review, but it
 never produces an executable v3 projection.
 
+The short omission proposition must exactly equal the deterministic rendering
+of the carrier trigger, the outcome's owned target-action operation, the absence
+direction, and the fixed applicability caveat. A trigger substring or matching
+hash alone is insufficient. Preparation requires the expected validated run
+snapshot digest whenever the evidence cites state or an observation; absence
+of that input and mismatched snapshots both fail closed. Stimulus-only evidence
+does not require a snapshot. Persisted validation and bundle verification also
+require equality between carrier source pins and projection trace source pins.
+Standalone readers can check internal structure without the original snapshot,
+but only a caller supplying the expected snapshot digest can verify that
+particular input association.
+
 Stage 2 derives use-case functions and their primary outputs before attaching
 security safeguards. Its prompts keep functional duties separate from rules
 governing them: filtering a response does not replace returning a response.
