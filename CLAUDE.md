@@ -151,9 +151,9 @@ persist as specification evidence that is never compiled or credited as
 recovery. Omission drafts require exact trigger evidence from a particular
 supplied user turn, used state fact, or uniquely named observation content.
 Verify source presence separately from the author's trigger interpretation:
-a valid citation never establishes the duty to call. A draft without authored
-evidence keeps the proposition-only projection-v2/bundle-v1 path unchanged; a
-draft with source-validated evidence publishes the paired
+a valid citation never establishes the duty to call. A run with no evidenced
+omission draft keeps the proposition-only projection-v2/bundle-v1 path
+unchanged; a draft with source-validated evidence publishes the paired
 projection-v3/bundle-v2, whose unsafe outcome carries the closed
 `stpa-omission-evidence-v1` carrier beside a short trigger-only proposition,
 upgrading every entry in that run's bundle to v3 so bundles stay homogeneous.

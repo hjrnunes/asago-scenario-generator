@@ -619,7 +619,7 @@ quotation validation replaces the former reference-name substring check.
 The trigger sentence remains an author interpretation of the cited obligation;
 source validation does not authorize that interpretation. Publication has two
 explicit branches, selected by validated evidence and never inferred by the
-consumer: a draft without authored evidence keeps the legacy
+consumer: a run with no evidenced omission draft keeps the legacy
 proposition-only projection-v2/bundle-v1 path unchanged, and a draft with
 source-validated evidence publishes the structured
 projection-v3/bundle-v2 pair. The v3 unsafe outcome carries the closed

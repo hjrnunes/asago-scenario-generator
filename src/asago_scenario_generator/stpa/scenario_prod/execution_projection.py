@@ -814,6 +814,7 @@ def _v3_omission_carrier(
         )
     _check_v3_prepared_text(basis, stimulus)
     _check_v3_snapshot(basis, observation_snapshot_digest)
+    _check_v3_proposition_binding(basis, spec.unsafe_outcome_semantic_proposition)
     try:
         carrier = basis.to_carrier(source_pins)
     except (ValidationError, ValueError) as exc:
@@ -822,6 +823,28 @@ def _v3_omission_carrier(
             f"authoring basis: {exc}"
         ) from exc
     return carrier, carrier.compute_carrier_digest()
+
+
+def _check_v3_proposition_binding(basis: Any, proposition: str | None) -> None:
+    """Bind the short proposition to the carrier's trigger sentence.
+
+    The proposition is the deterministic ``tool_absent_structured`` render
+    over the same authored observation as the carrier, so it must embed the
+    carrier's exact trigger inside the fixed conditional frame.  A carrier
+    whose trigger disagrees with the executed proposition is rejected before
+    publication.
+    """
+    if (
+        proposition is None
+        or not proposition.startswith("Inconclusive unless")
+        or "Then unsafe if" not in proposition
+        or f"`{basis.trigger}`" not in proposition
+    ):
+        raise ExecutionProjectionPreparationError(
+            "omission_evidence_invalid: the outcome proposition does not "
+            "embed the omission carrier's trigger inside the structured "
+            "conditional frame"
+        )
 
 
 def _check_v3_prepared_text(
@@ -859,6 +882,12 @@ def _check_v3_prepared_text(
                 f"{len(turns)} published conversation turn(s)"
             )
         turn = turns[entry.delivery_turn_ordinal - 1]
+        if entry.turn_id is not None and entry.turn_id != turn.turn_id:
+            raise ExecutionProjectionPreparationError(
+                "prepared_text_mismatch: stimulus evidence cites turn id "
+                f"{entry.turn_id!r}, but published conversation turn "
+                f"{entry.delivery_turn_ordinal} is {turn.turn_id!r}"
+            )
         if entry.quote not in turn.text:
             raise ExecutionProjectionPreparationError(
                 "prepared_text_mismatch: stimulus evidence quote "
@@ -1543,6 +1572,21 @@ def _v3_carrier_violations(
     try:
         carrier = OmissionEvidence.model_validate(carrier_raw)
     except (ValidationError, ValueError) as exc:
+        # Extra fields under the carrier stay unexpected_field, matching the
+        # contract kit's settled mapping; every other carrier defect is an
+        # invalid carrier value.
+        if (
+            isinstance(exc, ValidationError)
+            and exc.errors()
+            and all(error.get("type") == "extra_forbidden" for error in exc.errors())
+        ):
+            return [
+                _violation(
+                    ProjectionValidationCode.unexpected_field,
+                    "unsafe_outcome.omission_evidence",
+                    str(exc),
+                )
+            ]
         return [
             _violation(
                 ProjectionValidationCode.omission_evidence_invalid,
@@ -1565,7 +1609,39 @@ def _v3_carrier_violations(
     violations.extend(
         _v3_carrier_snapshot_violations(carrier, observation_snapshot_digest)
     )
+    violations.extend(_v3_carrier_proposition_violations(carrier, outcome))
     return violations
+
+
+def _v3_carrier_proposition_violations(
+    carrier: OmissionEvidence,
+    outcome: Mapping[str, Any],
+) -> list[ProjectionValidationViolation]:
+    """Bind the short proposition to the carrier's trigger sentence.
+
+    The structured proposition is the deterministic render over the same
+    authored observation as the carrier: it must embed the carrier's exact
+    trigger inside the fixed conditional frame, so a persisted document
+    whose proposition names a different trigger fails closed.
+    """
+    proposition = outcome.get("semantic_proposition")
+    if not isinstance(proposition, str):
+        # The model validation layer reports the structural defect.
+        return []
+    if (
+        proposition.startswith("Inconclusive unless")
+        and "Then unsafe if" in proposition
+        and f"`{carrier.trigger}`" in proposition
+    ):
+        return []
+    return [
+        _violation(
+            ProjectionValidationCode.omission_evidence_invalid,
+            "unsafe_outcome.semantic_proposition",
+            "the outcome proposition does not embed the omission carrier's "
+            "trigger inside the structured conditional frame",
+        )
+    ]
 
 
 def _v3_carrier_delivery_violations(
@@ -1717,6 +1793,11 @@ def _v3_error_violation(error: Mapping[str, Any]) -> ProjectionValidationViolati
     loc = error["loc"]
     path = ".".join(str(part) for part in loc) or "$"
     message = str(error.get("msg", "invalid value"))
+    # Unknown fields stay unexpected_field in every layer, matching the
+    # contract kit's settled mapping (an extra field under the carrier is
+    # an unknown field, not an invalid carrier value).
+    if error.get("type") == "extra_forbidden":
+        return _violation(ProjectionValidationCode.unexpected_field, path, message)
     return _violation(_v3_validation_code(path, message), path, message)
 
 

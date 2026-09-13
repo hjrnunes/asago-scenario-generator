@@ -144,3 +144,18 @@ def test_validate_stpa_projection_reports_v3_carrier_violation_code():
     assert body["schema_version"] == "stpa-execution-projection-v3"
     assert body["valid"] is False
     assert body["violation_codes"] == ["omission_evidence_missing"]
+
+
+def test_validate_stpa_projection_reports_unexpected_field_for_extra_carrier_field():
+    """An unknown carrier field is an unexpected field, not an invalid one."""
+    fixture = (
+        Path(__file__).resolve().parents[2]
+        / "data/contracts/stpa-execution/projection-v3/invalid/"
+        "unknown-carrier-field.json"
+    )
+    result = runner.invoke(app, ["validate-stpa-projection", str(fixture)])
+    assert result.exit_code == 1
+    body = json.loads(result.stdout)
+    assert body["schema_version"] == "stpa-execution-projection-v3"
+    assert body["valid"] is False
+    assert body["violation_codes"] == ["unexpected_field"]

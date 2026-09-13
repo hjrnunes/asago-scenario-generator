@@ -23,6 +23,9 @@ from asago_scenario_generator.stpa.models.execution_projection_v3 import (
     ExecutionBundleIndexV2,
     ExecutionProjectionV3,
 )
+from asago_scenario_generator.stpa.scenario_prod.execution_projection import (
+    validate_execution_projection_v3,
+)
 
 CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "data/contracts/stpa-execution"
 PROJECTION_V3_ROOT = CONTRACT_ROOT / "projection-v3"
@@ -139,6 +142,38 @@ def test_invalid_v3_fixtures_fail_with_expected_codes(fixture: Path) -> None:
     if message in MODEL_ERROR_TO_CODE:
         assert MODEL_ERROR_TO_CODE[message] == FIXTURE_CODES[fixture.name]
     assert expected_codes[fixture.name] == [FIXTURE_CODES[fixture.name]]
+
+
+# The standalone verifier's own settled code per invalid fixture.  It agrees
+# with expected-violations.json everywhere except prepared-text-missing,
+# where the kit records the model-level required-field code while the
+# verifier's delivery binding owns the failure.
+VERIFIER_CODES = {
+    "omission-evidence-missing.json": ["omission_evidence_missing"],
+    "carrier-on-non-omission.json": ["omission_evidence_unexpected"],
+    "carrier-digest-mismatch.json": ["omission_evidence_digest_mismatch"],
+    "carrier-field-invalid.json": ["omission_evidence_invalid"],
+    "prepared-text-missing.json": ["prepared_text_mismatch"],
+    "unknown-carrier-field.json": ["unexpected_field"],
+}
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    sorted((PROJECTION_V3_ROOT / "invalid").glob("*.json")),
+    ids=lambda path: path.name,
+)
+def test_standalone_verifier_pins_the_settled_code_per_fixture(
+    fixture: Path,
+) -> None:
+    """The standalone verifier maps every invalid fixture to its code."""
+    payload = _read(fixture)
+    codes = validate_execution_projection_v3(payload)
+
+    assert [code.value for code in codes] == VERIFIER_CODES[fixture.name]
+    if fixture.name != "prepared-text-missing.json":
+        expected = _read(PROJECTION_V3_ROOT / "expected-violations.json")
+        assert [code.value for code in codes] == expected[fixture.name]
 
 
 @pytest.mark.parametrize(

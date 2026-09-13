@@ -604,7 +604,7 @@ the offline acceptance suite, not a run pair.
   evidence JSON into the 600-character sentence, and the exact evidence rides
   in the closed `stpa-omission-evidence-v1` carrier completed from the
   projection's source pins.
-- **Publication branches.** A draft without authored evidence keeps the
+- **Publication branches.** A run with no evidenced omission draft keeps the
   proposition-only projection-v2/bundle-v1 path byte-identical. A draft with
   validated evidence publishes projection-v3/bundle-v2, upgrading every entry
   in that run's bundle to v3 so bundles stay homogeneous; mixed-version

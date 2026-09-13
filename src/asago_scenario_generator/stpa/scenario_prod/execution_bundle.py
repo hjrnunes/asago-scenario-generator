@@ -24,6 +24,7 @@ from asago_scenario_generator.stpa.models.execution_projection_v2 import (
     ExecutionBundleIndex,
     ExecutionRunIdentity,
     ProducerIdentity,
+    PROJECTION_SCHEMA_VERSION,
     ProjectionValidationCode,
     ProjectionValidationViolation,
 )
@@ -57,6 +58,10 @@ EXECUTION_TARGET_PROFILE_NAME = "execution-target-profile.json"
 _BUNDLE_INDEX_TYPES = {
     BUNDLE_SCHEMA_VERSION: ExecutionBundleIndex,
     BUNDLE_V2_SCHEMA_VERSION: ExecutionBundleIndexV2,
+}
+_PROJECTION_VERSION_BY_BUNDLE = {
+    BUNDLE_SCHEMA_VERSION: PROJECTION_SCHEMA_VERSION,
+    BUNDLE_V2_SCHEMA_VERSION: PROJECTION_V3_SCHEMA_VERSION,
 }
 _BundleIndex = ExecutionBundleIndex | ExecutionBundleIndexV2
 _BundleEntry = ExecutionBundleEntry | ExecutionBundleEntryV3
@@ -711,6 +716,22 @@ def _validate_projection_entry_payload(
     document_version = (
         payload.get("schema_version") if isinstance(payload, Mapping) else None
     )
+    # A bundle never mixes projection generations: the referenced document
+    # must carry exactly the projection version its bundle index pins, and
+    # the index entry's own claim must equal the document's version.
+    expected_version = _PROJECTION_VERSION_BY_BUNDLE[index.schema_version]
+    if document_version != expected_version or (
+        entry.projection.schema_version != document_version
+    ):
+        return None, [
+            _violation(
+                ProjectionValidationCode.schema_version_mismatch,
+                "projection",
+                "projection schema version "
+                f"{document_version!r} does not match the version pinned by "
+                f"the {index.schema_version} bundle index",
+            )
+        ]
     if document_version == PROJECTION_V3_SCHEMA_VERSION:
         codes = validate_execution_projection_v3(
             payload,

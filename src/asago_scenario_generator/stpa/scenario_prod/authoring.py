@@ -71,6 +71,9 @@ from asago_scenario_generator.stpa.models.omission_evidence import (
     TRIGGER_DIGEST_FRAME,
     attest_source,
 )
+from asago_scenario_generator.stpa.models.execution_projection_v3 import (
+    MAX_PREPARED_USER_TEXT_LENGTH,
+)
 from asago_scenario_generator.stpa.models.scenario_spec import (
     Adversary,
     AdversaryKind,
@@ -2147,6 +2150,19 @@ def _omission_evidence_basis(
                     "direct_prompt omission delivery requires the exact prepared "
                     "user text copied from the authored stimulus; it is "
                     "unavailable, so no executable carrier can be prepared"
+                ),
+            )
+        if len(prepared_text) > MAX_PREPARED_USER_TEXT_LENGTH:
+            # The delivery bound is a closed carrier limit: an over-limit
+            # prepared text holds with the original evidence retained
+            # rather than failing later at the projection seam.
+            return ScenarioHold(
+                reason="trigger_evidence_unrepresentable",
+                detail=(
+                    "the prepared user text exceeds the closed carrier bound of "
+                    f"{MAX_PREPARED_USER_TEXT_LENGTH} characters, so no "
+                    "executable carrier can represent this delivery; the "
+                    "original evidence is retained unchanged in this held record"
                 ),
             )
         for item in stimulus_items:
