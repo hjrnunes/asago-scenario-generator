@@ -868,6 +868,7 @@ def test_current_omission_preserves_observation_condition_and_stimulus_evidence(
         session=_session(),
         has_content_surface=False,
         reviewed_bindings=bindings,
+        target_observations=_observations(),
     )
     assert isinstance(accepted, AcceptedScenario)
     assert accepted.oracle.kind == "tool_absent"

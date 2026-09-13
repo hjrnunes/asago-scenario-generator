@@ -512,6 +512,15 @@ class ProjectionValidationCode(str, Enum):
     bundle_path_invalid = "bundle_path_invalid"
     content_digest_mismatch = "content_digest_mismatch"
     pair_identity_mismatch = "pair_identity_mismatch"
+    # Structured omission (projection-v3) verification codes.  Additive only:
+    # v2 validation never emits them.
+    omission_evidence_missing = "omission_evidence_missing"
+    omission_evidence_unexpected = "omission_evidence_unexpected"
+    omission_evidence_digest_mismatch = "omission_evidence_digest_mismatch"
+    omission_evidence_invalid = "omission_evidence_invalid"
+    stimulus_delivery_mismatch = "stimulus_delivery_mismatch"
+    prepared_text_mismatch = "prepared_text_mismatch"
+    snapshot_digest_mismatch = "snapshot_digest_mismatch"
 
 
 class ProjectionValidationViolation(_ClosedFrozenModel):
@@ -538,14 +547,31 @@ class ExecutionProjectionValidationResult(_ClosedFrozenModel):
 
 
 class BundleValidationResult(_ClosedFrozenModel):
-    """Result of verifying one persisted execution bundle."""
+    """Result of verifying one persisted execution bundle.
+
+    ``index`` carries the parsed bundle index: an ``ExecutionBundleIndex``
+    for a bundle-v1 document or the v3 module's ``ExecutionBundleIndexV2``
+    for a bundle-v2 document.  The union is enforced by the validator below
+    through a lazy import because the v3 module imports this one.
+    """
 
     valid: StrictBool
-    index: ExecutionBundleIndex | None = None
+    index: Any | None = None
     violations: tuple[ProjectionValidationViolation, ...] = ()
 
     @model_validator(mode="after")
     def synchronize_validity(self) -> "BundleValidationResult":
+        if self.index is not None:
+            from asago_scenario_generator.stpa.models.execution_projection_v3 import (
+                ExecutionBundleIndexV2,
+            )
+
+            if not isinstance(
+                self.index, (ExecutionBundleIndex, ExecutionBundleIndexV2)
+            ):
+                raise ValueError(
+                    "index must be a validated bundle-v1 or bundle-v2 index"
+                )
         expected = self.index is not None and not self.violations
         if self.valid is not expected:
             object.__setattr__(self, "valid", expected)

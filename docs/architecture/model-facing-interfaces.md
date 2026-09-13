@@ -63,12 +63,19 @@ Omission evidence establishes source presence, not that the obligation applies.
 Functional tests remain persisted specifications outside execution bundles.
 Attempt-level checks never establish completed state effects.
 
-The current consumer proposition limit remains 600 characters. Source values
-and evidence serialization are code-owned; representation must retain exact
-selected evidence and the applicability caveat. Essential evidence that cannot
-fit remains an explicit uncompiled hold. A separate structured evidence carrier
-through the consumer would require a paired versioned contract change; this
-interface update does not silently add one or remove evidence to fit.
+The semantic proposition limit remains 600 characters. In the structured
+branch the authored proposition carries the trigger sentence only; exact
+evidence, locators, meanings, attestations, and the unresolved applicability
+stamp ride in the closed `stpa-omission-evidence-v1` carrier completed from
+the projection's source pins, delivered through the paired
+`stpa-execution-projection-v3` / `stpa-execution-bundle-v2` contract that this
+seam's earlier deferral required. Source values and evidence serialization
+stay code-owned; representation retains exact selected evidence and the
+applicability caveat. A direct-prompt carrier records the exact authored user
+text (`prepared_user_text`) verbatim with its digest, and the consumer
+delivers those bytes without generative rewriting. Evidence that cannot fit
+the closed carrier bounds remains an explicit uncompiled hold with the
+original evidence retained; nothing is truncated or removed to fit.
 
 ## Corrections and preservation
 

@@ -1,9 +1,15 @@
-"""Preparation and standalone validation for STPA execution projection v2.
+"""Preparation and standalone validation for STPA execution projections.
 
 This module is the producer's deep public seam.  It is intentionally the only
 place that translates the inward ``ScenarioSpec``/``ControlStructure`` graph
-into the closed v2 wire model and the only place that turns a validated
+into the closed v2/v3 wire models and the only place that turns a validated
 projection into a Stage 6 alignment view.
+
+The legacy proposition-only branch builds ``stpa-execution-projection-v2``
+documents exactly as before.  ``prepare_execution_projection(structured_omission=True)``
+builds a ``stpa-execution-projection-v3`` document, assembling the closed
+structured omission-evidence carrier from the spec's authoring-side basis and
+the projection's own source pins.
 """
 
 from __future__ import annotations
@@ -49,6 +55,16 @@ from asago_scenario_generator.stpa.models.execution_projection_v2 import (
     ProjectionValidationViolation,
     UnsafeOutcome,
 )
+from asago_scenario_generator.stpa.models.execution_projection_v3 import (
+    PROJECTION_V3_SCHEMA_VERSION,
+    AdversarialStimulusRequirementV3,
+    ExecutionProjectionV3,
+    UnsafeOutcomeV3,
+)
+from asago_scenario_generator.stpa.models.omission_evidence import (
+    OmissionEvidence,
+    SOURCE_ATTESTATION_FRAME,
+)
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionActionKind,
     ExecutionDeliveryClass,
@@ -65,6 +81,7 @@ from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     AbsenceCondition,
+    ActionPresenceCondition,
     ActionValueCondition,
     DelayCondition,
     DurationCondition,
@@ -121,7 +138,7 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 class ExecutionProjectionPreparationError(ValueError):
-    """Typed failure raised when a spec cannot become a v2 projection."""
+    """Typed failure raised when a spec cannot become a v2/v3 projection."""
 
     def __init__(
         self,
@@ -134,9 +151,13 @@ class ExecutionProjectionPreparationError(ValueError):
 
 @dataclass(frozen=True)
 class ValidatedExecutionProjection:
-    """Immutable projection plus the exact bytes and Stage 6 alignment view."""
+    """Immutable projection plus the exact bytes and Stage 6 alignment view.
 
-    projection: ExecutionProjectionV2
+    ``projection`` carries either the legacy v2 document or the structured
+    v3 document; every accessor is attribute-based and version-neutral.
+    """
+
+    projection: ExecutionProjectionV2 | ExecutionProjectionV3
     canonical_json_bytes: bytes
     semantic_digest: str
     alignment_view: str
@@ -156,12 +177,22 @@ def prepare_execution_projection(
     execution_contract: SemanticExecutionContract | None = None,
     target_profile: ExecutionTargetProfile | None = None,
     target_realization: TargetRealizationResult | None = None,
+    structured_omission: bool = False,
+    observation_snapshot_digest: str | None = None,
 ) -> ValidatedExecutionProjection:
-    """Validate and freeze one contextual ``ScenarioSpec`` as v2 intent.
+    """Validate and freeze one contextual ``ScenarioSpec`` as execution intent.
 
     No provider or runtime work occurs in this function.  All factor and
     condition identities are checked against the exact control structure
     before the immutable digest-bearing value is returned.
+
+    ``structured_omission`` selects the wire version: ``False`` (the default)
+    builds the legacy v2 projection byte-identically to the historical
+    behavior, while ``True`` builds a v3 projection that carries the closed
+    structured omission-evidence carrier on action-absence outcomes.  The
+    ``observation_snapshot_digest`` is the run's validated
+    ``TargetObservationSnapshot.content_digest`` used to cross-check the
+    carrier's snapshot pin; it is never embedded in the projection itself.
     """
     _validate_prepare_types(
         spec,
@@ -185,7 +216,8 @@ def prepare_execution_projection(
             "contextual v2 projection requires an explicit Stage 5 execution contract"
         )
     _validate_target_realization(contract, spec, target_profile, target_realization)
-    projection = _build_projection(
+    build = _build_projection_v3 if structured_omission else _build_projection
+    projection = build(
         spec,
         control_structure,
         context,
@@ -196,6 +228,7 @@ def prepare_execution_projection(
         contract,
         target_profile,
         target_realization,
+        observation_snapshot_digest,
     )
     return _freeze_validated_projection(projection)
 
@@ -467,7 +500,9 @@ def _build_projection(
     execution_contract: SemanticExecutionContract,
     target_profile: ExecutionTargetProfile | None,
     target_realization: TargetRealizationResult | None,
+    observation_snapshot_digest: str | None = None,
 ) -> ExecutionProjectionV2:
+    del observation_snapshot_digest  # v2 never carries the omission carrier
     steps = _build_projection_steps(factors, spec.target_control_action)
     outcome = _build_unsafe_outcome(spec, hazard_refs, constraint_refs)
     classification = classify_scenario_execution(
@@ -505,6 +540,72 @@ def _build_projection(
             target_profile,
             target_realization,
         ),
+    )
+
+
+def _build_projection_v3(
+    spec: ScenarioSpec,
+    control_structure: ControlStructure,
+    context: ScenarioGenerationContext,
+    run_identity: ExecutionRunIdentity,
+    factors: tuple[ExecutionCausalFactor, ...],
+    hazard_refs: tuple[str, ...],
+    constraint_refs: tuple[str, ...],
+    execution_contract: SemanticExecutionContract,
+    target_profile: ExecutionTargetProfile | None,
+    target_realization: TargetRealizationResult | None,
+    observation_snapshot_digest: str | None,
+) -> ExecutionProjectionV3:
+    """Mirror the v2 build with the v3 carrier and prepared-text deltas."""
+    steps = _build_projection_steps(factors, spec.target_control_action)
+    stimulus_requirements = _stimulus_requirements_v3(
+        spec,
+        factors,
+        execution_contract,
+    )
+    trace_refs = _trace_refs(
+        spec,
+        control_structure,
+        context,
+        hazard_refs,
+        constraint_refs,
+        target_profile,
+        target_realization,
+    )
+    carrier = _v3_omission_carrier(
+        spec,
+        stimulus=(stimulus_requirements[0] if stimulus_requirements else None),
+        source_pins=trace_refs.source_pins,
+        observation_snapshot_digest=observation_snapshot_digest,
+    )
+    outcome = _build_unsafe_outcome_v3(spec, hazard_refs, constraint_refs, carrier)
+    classification = classify_scenario_execution(
+        execution_contract,
+        outcome,
+        target_profile,
+    )
+    return ExecutionProjectionV3(
+        run_id=run_identity.run_id,
+        scenario_id=spec.scenario_id,
+        candidate_id=(
+            f"EXEC:{spec.target_controller}:{spec.target_control_action}:"
+            f"{spec.ica_type.value}"
+        ),
+        ica_slot_id=spec.threat_source.ica_slot_id,
+        ica_id=spec.threat_source.ica_id or "",
+        controller_id=spec.target_controller,
+        control_action_id=spec.target_control_action,
+        uca_type=spec.ica_type,
+        causal_factors=factors,
+        steps=steps,
+        unsafe_outcome=outcome,
+        stimulus_requirements=stimulus_requirements,
+        execution_requirements=_execution_requirements(
+            spec, factors, context, execution_contract
+        ),
+        execution_contract=execution_contract,
+        execution_classification=classification,
+        trace_refs=trace_refs,
     )
 
 
@@ -588,8 +689,206 @@ def _build_unsafe_outcome(
     )
 
 
+def _build_unsafe_outcome_v3(
+    spec: ScenarioSpec,
+    hazard_refs: tuple[str, ...],
+    constraint_refs: tuple[str, ...],
+    carrier: tuple[OmissionEvidence, str] | None,
+) -> UnsafeOutcomeV3:
+    """Mirror the v2 outcome build with the optional omission carrier."""
+    condition = spec.unsafe_outcome_condition
+    if condition is None:
+        raise ExecutionProjectionPreparationError(
+            "contextual v3 projection requires a non-null unsafe outcome condition"
+        )
+    condition = scope_temporal_condition_bindings(condition, "outcome")
+    carrier_evidence, carrier_digest = carrier if carrier is not None else (None, None)
+    return UnsafeOutcomeV3(
+        outcome_id="OUTCOME-1",
+        control_action_id=spec.target_control_action,
+        uca_type=spec.ica_type,
+        condition=condition,
+        semantic_proposition=spec.unsafe_outcome_semantic_proposition,
+        semantic_binding_required=contains_binding_placeholder(condition),
+        hazard_refs=hazard_refs,
+        constraint_refs=constraint_refs,
+        omission_evidence=carrier_evidence,
+        omission_evidence_digest=carrier_digest,
+    )
+
+
+def _stimulus_requirements_v3(
+    spec: ScenarioSpec,
+    factors: Sequence[ExecutionCausalFactor],
+    execution_contract: SemanticExecutionContract,
+) -> tuple[AdversarialStimulusRequirementV3, ...]:
+    """Build the v3 stimulus route with its exact prepared delivery text."""
+    if execution_contract.disposition.value == "analytical_only":
+        return ()
+    turns = spec.stimulus_turns
+    if turns is not None:
+        intent = "\n".join(turn.text for turn in turns)
+    else:
+        intent = "; ".join(
+            item.strip() for item in spec.attacker_bdi.intentions if item.strip()
+        )
+    desired_effect = "; ".join(
+        item.strip() for item in spec.attacker_bdi.desires if item.strip()
+    )
+    if not intent or not desired_effect:
+        raise ExecutionProjectionPreparationError(
+            "contextual execution projection requires attacker intent and desired effect"
+        )
+    delivery = execution_contract.delivery
+    try:
+        requirement = AdversarialStimulusRequirementV3(
+            stimulus_id="STIM-1",
+            intent=intent,
+            desired_effect=desired_effect,
+            delivery_class=delivery.delivery_class,
+            factor_id=delivery.factor_id,
+            source_role=delivery.source_role,
+            carrier_requirement_id=delivery.carrier_requirement_id,
+            turns=turns,
+            prepared_user_text=(
+                spec.prepared_user_text
+                if delivery.delivery_class is ExecutionDeliveryClass.direct_prompt
+                else None
+            ),
+        )
+    except (ValidationError, ValueError) as exc:
+        message = str(exc)
+        if "prepared_user_text" in message:
+            raise ExecutionProjectionPreparationError(
+                f"prepared_text_mismatch: {message}"
+            ) from exc
+        raise ExecutionProjectionPreparationError(message) from exc
+    return (requirement,)
+
+
+def _v3_omission_carrier(
+    spec: ScenarioSpec,
+    *,
+    stimulus: AdversarialStimulusRequirementV3 | None,
+    source_pins: ExecutionSourcePins,
+    observation_snapshot_digest: str | None,
+) -> tuple[OmissionEvidence, str] | None:
+    """Assemble the closed carrier from the basis and the projection pins.
+
+    Every cross-check fails closed with a message prefixed by the mapped
+    ``ProjectionValidationCode`` name; the derived carrier digest is computed
+    by the closed model and never trusted from a caller.
+    """
+    basis = spec.omission_evidence_basis
+    condition = spec.unsafe_outcome_condition
+    is_action_absence = (
+        isinstance(condition, ActionPresenceCondition)
+        and condition.expected == "not_provided"
+    )
+    if basis is None:
+        if is_action_absence:
+            raise ExecutionProjectionPreparationError(
+                "omission_evidence_missing: a structured v3 projection requires "
+                "an omission evidence basis on its action-presence outcome"
+            )
+        return None
+    if not is_action_absence:
+        raise ExecutionProjectionPreparationError(
+            "omission_evidence_unexpected: an omission evidence basis is only "
+            "valid on a not-provided action-presence outcome"
+        )
+    if stimulus is None:
+        raise ExecutionProjectionPreparationError(
+            "stimulus_delivery_mismatch: the omission carrier has no published "
+            "stimulus requirement to bind to"
+        )
+    if (
+        basis.delivery.stimulus_id != stimulus.stimulus_id
+        or basis.delivery.delivery_class != stimulus.delivery_class.value
+    ):
+        raise ExecutionProjectionPreparationError(
+            "stimulus_delivery_mismatch: the omission basis delivery "
+            f"({basis.delivery.stimulus_id}, {basis.delivery.delivery_class}) "
+            "does not match the published stimulus requirement "
+            f"({stimulus.stimulus_id}, {stimulus.delivery_class.value})"
+        )
+    _check_v3_prepared_text(basis, stimulus)
+    _check_v3_snapshot(basis, observation_snapshot_digest)
+    try:
+        carrier = basis.to_carrier(source_pins)
+    except (ValidationError, ValueError) as exc:
+        raise ExecutionProjectionPreparationError(
+            f"omission_evidence_invalid: the closed carrier rejected the "
+            f"authoring basis: {exc}"
+        ) from exc
+    return carrier, carrier.compute_carrier_digest()
+
+
+def _check_v3_prepared_text(
+    basis: Any,
+    stimulus: AdversarialStimulusRequirementV3,
+) -> None:
+    """Re-verify every stimulus quotation against the exact delivery text."""
+    stimulus_entries = [entry for entry in basis.evidence if entry.source == "stimulus"]
+    if stimulus.delivery_class is ExecutionDeliveryClass.direct_prompt:
+        prepared = stimulus.prepared_user_text
+        if prepared is None:
+            raise ExecutionProjectionPreparationError(
+                "prepared_text_mismatch: a direct_prompt carrier requires the "
+                "exact prepared user text"
+            )
+        recomputed = compute_framed_digest(SOURCE_ATTESTATION_FRAME, prepared)
+        if recomputed != basis.delivery.prepared_user_text_digest:
+            raise ExecutionProjectionPreparationError(
+                "prepared_text_mismatch: the recomputed prepared_user_text_digest "
+                "does not match the omission basis delivery"
+            )
+        for entry in stimulus_entries:
+            if entry.quote not in prepared:
+                raise ExecutionProjectionPreparationError(
+                    "prepared_text_mismatch: stimulus evidence quote "
+                    f"{entry.quote!r} is not a substring of the prepared user text"
+                )
+        return
+    turns = stimulus.turns or ()
+    for entry in stimulus_entries:
+        if entry.delivery_turn_ordinal > len(turns):
+            raise ExecutionProjectionPreparationError(
+                "prepared_text_mismatch: stimulus evidence cites turn "
+                f"{entry.delivery_turn_ordinal}, beyond the "
+                f"{len(turns)} published conversation turn(s)"
+            )
+        turn = turns[entry.delivery_turn_ordinal - 1]
+        if entry.quote not in turn.text:
+            raise ExecutionProjectionPreparationError(
+                "prepared_text_mismatch: stimulus evidence quote "
+                f"{entry.quote!r} is not a substring of the referenced "
+                f"conversation turn {turn.turn_id}"
+            )
+
+
+def _check_v3_snapshot(
+    basis: Any,
+    observation_snapshot_digest: str | None,
+) -> None:
+    """Cross-check the carrier snapshot pin against the run's snapshot."""
+    if observation_snapshot_digest is None:
+        return
+    cites_snapshot = any(
+        entry.source in ("state_fact", "observation") for entry in basis.evidence
+    )
+    if (
+        cites_snapshot
+        and basis.observation_snapshot_digest != observation_snapshot_digest
+    ):
+        raise ExecutionProjectionPreparationError(
+            "snapshot_digest_mismatch: the omission basis snapshot digest does "
+            "not match the run's target observation snapshot"
+        )
+
+
 def _freeze_validated_projection(
-    projection: ExecutionProjectionV2,
+    projection: ExecutionProjectionV2 | ExecutionProjectionV3,
 ) -> ValidatedExecutionProjection:
     return ValidatedExecutionProjection(
         projection=projection,
@@ -602,7 +901,7 @@ def _freeze_validated_projection(
 
 
 def _projection_source_identities(
-    projection: ExecutionProjectionV2,
+    projection: ExecutionProjectionV2 | ExecutionProjectionV3,
 ) -> tuple[str, ...]:
     return (
         projection.scenario_id,
@@ -897,7 +1196,9 @@ def _trace_source_pins(
     )
 
 
-def render_execution_projection_alignment(projection: ExecutionProjectionV2) -> str:
+def render_execution_projection_alignment(
+    projection: ExecutionProjectionV2 | ExecutionProjectionV3,
+) -> str:
     """Render the ordered semantic references Stage 6 must realize."""
     lines = [
         "Ordered causal projection:",
@@ -1109,8 +1410,342 @@ def parse_execution_projection(
     )
 
 
+def validate_execution_projection_v3(
+    payload: Any,
+    *,
+    control_structure: ControlStructure | None = None,
+    expected_run_id: str | None = None,
+    expected_scenario_id: str | None = None,
+    observation_snapshot_digest: str | None = None,
+) -> tuple[ProjectionValidationCode, ...]:
+    """Standalone v3 verification: typed codes in deterministic order.
+
+    An empty tuple means the persisted ``stpa-execution-projection-v3``
+    document is valid.  The checks mirror the v2 verifier — runtime keys,
+    closed top-level fields, schema version, and the required persisted
+    ``semantic_digest`` validated against the v3 digest frame — and add the
+    structured omission-carrier checks.  Codes are deduplicated in first
+    failure order.
+    """
+    violations = _v3_projection_violations(
+        payload,
+        control_structure=control_structure,
+        expected_run_id=expected_run_id,
+        expected_scenario_id=expected_scenario_id,
+        observation_snapshot_digest=observation_snapshot_digest,
+    )
+    codes: list[ProjectionValidationCode] = []
+    for violation in violations:
+        if violation.code not in codes:
+            codes.append(violation.code)
+    return tuple(codes)
+
+
+def _v3_projection_violations(
+    payload: Any,
+    *,
+    control_structure: ControlStructure | None,
+    expected_run_id: str | None,
+    expected_scenario_id: str | None,
+    observation_snapshot_digest: str | None,
+) -> list[ProjectionValidationViolation]:
+    if not isinstance(payload, Mapping):
+        return [
+            _violation(
+                ProjectionValidationCode.container_type_mismatch,
+                "$",
+                "projection must be a JSON object",
+            )
+        ]
+    violations = _v3_header_violations(payload)
+    if violations:
+        return violations
+    violations.extend(_v3_carrier_violations(payload, observation_snapshot_digest))
+    if violations:
+        return violations
+    try:
+        projection = ExecutionProjectionV3.model_validate(payload)
+    except ValidationError as exc:
+        return _v3_validation_errors(exc)
+    violations.extend(
+        _projection_identity_violations(
+            projection, expected_run_id, expected_scenario_id
+        )
+    )
+    if control_structure is not None:
+        violations.extend(
+            _validate_against_control_structure(projection, control_structure)
+        )
+    return violations
+
+
+def _v3_header_violations(
+    payload: Mapping[str, Any],
+) -> list[ProjectionValidationViolation]:
+    """Mirror the v2 preflight header checks against the v3 contract."""
+    violations = _runtime_observation_violations(payload)
+    violations.extend(_unknown_top_level_violations(payload))
+    violations.extend(_missing_top_level_violations(payload))
+    if payload.get("schema_version") != PROJECTION_V3_SCHEMA_VERSION:
+        violations.append(
+            _violation(
+                ProjectionValidationCode.schema_version_mismatch,
+                "schema_version",
+                f"schema_version must be {PROJECTION_V3_SCHEMA_VERSION}",
+            )
+        )
+    if not isinstance(payload.get("semantic_digest"), str):
+        violations.append(
+            _violation(
+                ProjectionValidationCode.required_field_missing,
+                "semantic_digest",
+                "persisted projections require a semantic_digest string",
+            )
+        )
+    return violations
+
+
+def _v3_carrier_violations(
+    payload: Mapping[str, Any],
+    observation_snapshot_digest: str | None,
+) -> list[ProjectionValidationViolation]:
+    """Check the omission carrier's presence, digest, and delivery binding."""
+    outcome = payload.get("unsafe_outcome")
+    if not isinstance(outcome, Mapping):
+        # The model validation layer reports the structural defect.
+        return []
+    condition = outcome.get("condition")
+    is_action_absence = (
+        isinstance(condition, Mapping)
+        and condition.get("type") == "action_presence"
+        and condition.get("expected") == "not_provided"
+    )
+    carrier_raw = outcome.get("omission_evidence")
+    digest_raw = outcome.get("omission_evidence_digest")
+    if carrier_raw is None:
+        if is_action_absence:
+            return [
+                _violation(
+                    ProjectionValidationCode.omission_evidence_missing,
+                    "unsafe_outcome.omission_evidence",
+                    "action-presence outcomes require omission_evidence",
+                )
+            ]
+        return []
+    if not is_action_absence:
+        return [
+            _violation(
+                ProjectionValidationCode.omission_evidence_unexpected,
+                "unsafe_outcome.omission_evidence",
+                "omission_evidence is allowed only on action-presence outcomes",
+            )
+        ]
+    try:
+        carrier = OmissionEvidence.model_validate(carrier_raw)
+    except (ValidationError, ValueError) as exc:
+        return [
+            _violation(
+                ProjectionValidationCode.omission_evidence_invalid,
+                "unsafe_outcome.omission_evidence",
+                str(exc),
+            )
+        ]
+    violations: list[ProjectionValidationViolation] = []
+    if not isinstance(digest_raw, str) or (
+        digest_raw != carrier.compute_carrier_digest()
+    ):
+        violations.append(
+            _violation(
+                ProjectionValidationCode.omission_evidence_digest_mismatch,
+                "unsafe_outcome.omission_evidence_digest",
+                "omission_evidence_digest does not match the carrier content",
+            )
+        )
+    violations.extend(_v3_carrier_delivery_violations(carrier, payload))
+    violations.extend(
+        _v3_carrier_snapshot_violations(carrier, observation_snapshot_digest)
+    )
+    return violations
+
+
+def _v3_carrier_delivery_violations(
+    carrier: OmissionEvidence,
+    payload: Mapping[str, Any],
+) -> list[ProjectionValidationViolation]:
+    """Bind the carrier delivery to one published stimulus requirement."""
+    raw_requirements = payload.get("stimulus_requirements")
+    if not isinstance(raw_requirements, Sequence) or isinstance(
+        raw_requirements, (str, bytes, bytearray)
+    ):
+        return []
+    parsed: list[AdversarialStimulusRequirementV3] = []
+    for item in raw_requirements:
+        if not isinstance(item, Mapping):
+            return []
+        try:
+            parsed.append(AdversarialStimulusRequirementV3.model_validate(item))
+        except (ValidationError, ValueError):
+            # Structural stimulus defects are reported by the model layer.
+            return []
+    if len(parsed) != 1:
+        return [
+            _violation(
+                ProjectionValidationCode.stimulus_delivery_mismatch,
+                "unsafe_outcome.omission_evidence.delivery",
+                "the omission carrier delivery requires exactly one published "
+                "stimulus requirement",
+            )
+        ]
+    stimulus = parsed[0]
+    violations: list[ProjectionValidationViolation] = []
+    if (
+        carrier.delivery.stimulus_id != stimulus.stimulus_id
+        or carrier.delivery.delivery_class != stimulus.delivery_class.value
+    ):
+        return [
+            _violation(
+                ProjectionValidationCode.stimulus_delivery_mismatch,
+                "unsafe_outcome.omission_evidence.delivery",
+                "carrier stimulus identity does not match the published "
+                "stimulus requirement",
+            )
+        ]
+    stimulus_entries = [
+        entry for entry in carrier.evidence if entry.source == "stimulus"
+    ]
+    if stimulus.delivery_class is ExecutionDeliveryClass.direct_prompt:
+        prepared = stimulus.prepared_user_text
+        if prepared is None or not isinstance(prepared, str):
+            return [
+                _violation(
+                    ProjectionValidationCode.prepared_text_mismatch,
+                    "unsafe_outcome.omission_evidence.delivery",
+                    "a direct_prompt carrier requires the exact prepared user text",
+                )
+            ]
+        if compute_framed_digest(SOURCE_ATTESTATION_FRAME, prepared) != (
+            carrier.delivery.prepared_user_text_digest
+        ):
+            violations.append(
+                _violation(
+                    ProjectionValidationCode.prepared_text_mismatch,
+                    "unsafe_outcome.omission_evidence.delivery.prepared_user_text_digest",
+                    "prepared_user_text_digest does not match the published "
+                    "prepared text",
+                )
+            )
+        for entry in stimulus_entries:
+            if entry.quote not in prepared:
+                violations.append(
+                    _violation(
+                        ProjectionValidationCode.prepared_text_mismatch,
+                        "unsafe_outcome.omission_evidence.evidence",
+                        "stimulus evidence quote is not a substring of the "
+                        "published prepared text",
+                    )
+                )
+        return violations
+    turns = stimulus.turns or ()
+    for entry in stimulus_entries:
+        if entry.delivery_turn_ordinal > len(turns):
+            violations.append(
+                _violation(
+                    ProjectionValidationCode.prepared_text_mismatch,
+                    "unsafe_outcome.omission_evidence.evidence",
+                    "stimulus evidence cites a turn beyond the published "
+                    "conversation turns",
+                )
+            )
+            continue
+        turn = turns[entry.delivery_turn_ordinal - 1]
+        if entry.turn_id != turn.turn_id:
+            violations.append(
+                _violation(
+                    ProjectionValidationCode.stimulus_delivery_mismatch,
+                    "unsafe_outcome.omission_evidence.evidence",
+                    "stimulus evidence turn identity does not match the "
+                    "published conversation turn",
+                )
+            )
+        if entry.quote not in turn.text:
+            violations.append(
+                _violation(
+                    ProjectionValidationCode.prepared_text_mismatch,
+                    "unsafe_outcome.omission_evidence.evidence",
+                    "stimulus evidence quote is not a substring of the "
+                    "referenced conversation turn",
+                )
+            )
+    return violations
+
+
+def _v3_carrier_snapshot_violations(
+    carrier: OmissionEvidence,
+    observation_snapshot_digest: str | None,
+) -> list[ProjectionValidationViolation]:
+    if observation_snapshot_digest is None:
+        return []
+    cites_snapshot = any(
+        entry.source in ("state_fact", "observation") for entry in carrier.evidence
+    )
+    if cites_snapshot and (
+        carrier.observation_snapshot_digest != observation_snapshot_digest
+    ):
+        return [
+            _violation(
+                ProjectionValidationCode.snapshot_digest_mismatch,
+                "unsafe_outcome.omission_evidence.observation_snapshot_digest",
+                "carrier snapshot digest does not match the supplied target "
+                "observation snapshot",
+            )
+        ]
+    return []
+
+
+def _v3_validation_errors(
+    exc: ValidationError,
+) -> list[ProjectionValidationViolation]:
+    return [
+        _v3_error_violation(error)
+        for error in sorted(
+            exc.errors(), key=lambda item: tuple(str(part) for part in item["loc"])
+        )
+    ]
+
+
+def _v3_error_violation(error: Mapping[str, Any]) -> ProjectionValidationViolation:
+    loc = error["loc"]
+    path = ".".join(str(part) for part in loc) or "$"
+    message = str(error.get("msg", "invalid value"))
+    return _violation(_v3_validation_code(path, message), path, message)
+
+
+def _v3_validation_code(path: str, message: str) -> ProjectionValidationCode:
+    """Map v3 model failures, with the omission deltas ahead of the v2 rules."""
+    lowered = message.lower()
+    if "omission_evidence" in lowered or "omission_evidence" in path:
+        if (
+            "does not match the carrier content" in lowered
+            or "omission_evidence_digest" in path
+        ):
+            return ProjectionValidationCode.omission_evidence_digest_mismatch
+        if "require omission_evidence" in lowered:
+            return ProjectionValidationCode.omission_evidence_missing
+        if "allowed only on action-presence" in lowered:
+            return ProjectionValidationCode.omission_evidence_unexpected
+        return ProjectionValidationCode.omission_evidence_invalid
+    if "prepared_user_text" in lowered or "prepared_user_text" in path:
+        return ProjectionValidationCode.prepared_text_mismatch
+    if (
+        "observation_snapshot_digest" in lowered
+        or "observation_snapshot_digest" in path
+    ):
+        return ProjectionValidationCode.snapshot_digest_mismatch
+    return _validation_code(path, lowered)
+
+
 def _validate_against_control_structure(
-    projection: ExecutionProjectionV2,
+    projection: ExecutionProjectionV2 | ExecutionProjectionV3,
     control_structure: ControlStructure,
 ) -> list[ProjectionValidationViolation]:
     violations: list[ProjectionValidationViolation] = []
@@ -1325,4 +1960,5 @@ __all__ = [
     "prepare_execution_projection",
     "render_execution_projection_alignment",
     "validate_execution_projection",
+    "validate_execution_projection_v3",
 ]

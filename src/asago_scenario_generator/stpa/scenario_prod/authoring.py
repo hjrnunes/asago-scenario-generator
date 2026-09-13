@@ -26,7 +26,12 @@ from typing import Any, Literal
 
 import yaml
 
-from asago_scenario_generator.models.canonical import canonical_json_bytes
+from pydantic import ValidationError
+
+from asago_scenario_generator.models.canonical import (
+    canonical_json_bytes,
+    compute_framed_digest,
+)
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     parse_llm_result,
     safe_llm_call,
@@ -54,6 +59,17 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     DirectionAuthority,
     LossAnalysis,
     Obligation,
+)
+from asago_scenario_generator.stpa.models.omission_evidence import (
+    ObservationOmissionEvidence,
+    OmissionApplicability,
+    OmissionDelivery,
+    OmissionEvidenceBasis,
+    SOURCE_ATTESTATION_FRAME,
+    StateFactOmissionEvidence,
+    StimulusOmissionEvidence,
+    TRIGGER_DIGEST_FRAME,
+    attest_source,
 )
 from asago_scenario_generator.stpa.models.scenario_spec import (
     Adversary,
@@ -1164,6 +1180,10 @@ class AcceptedScenario:
     observes: str = ""
     compile_basis: str = ""
     obligation_ref: str | None = None
+    # Structured omission evidence for an accepted tool_absent draft: the
+    # authoring-side basis the projection seam completes with source pins.
+    # ``None`` for every other oracle kind.
+    omission_evidence_basis: OmissionEvidenceBasis | None = None
 
     @property
     def deviation_category(self) -> UCAType:
@@ -1433,6 +1453,7 @@ def validate_authored_scenario(
         record_index=record_index,
         trigger_evidence=observation.trigger_evidence,
     )
+    basis: OmissionEvidenceBasis | None = None
     if observation.kind == "tool_absent":
         try:
             normalize_semantic_proposition(oracle.template_text, required=True)
@@ -1444,6 +1465,22 @@ def validate_authored_scenario(
                     f"semantic proposition: {exc}"
                 ),
             )
+        if observation.trigger_evidence:
+            # Structured branch: every accepted authored tool_absent draft
+            # carries validated evidence, so the acceptance record carries
+            # the authoring-side omission-evidence basis with it.
+            basis_outcome = _omission_evidence_basis(
+                draft,
+                candidate,
+                observation=observation,
+                facts=facts,
+                observations=observations,
+                obligation_ref=direction.obligation_ref,
+                snapshot_digest=getattr(target_observations, "content_digest", None),
+            )
+            if isinstance(basis_outcome, ScenarioHold):
+                return basis_outcome
+            basis = basis_outcome
     return AcceptedScenario(
         draft=draft,
         candidate=candidate,
@@ -1460,6 +1497,7 @@ def validate_authored_scenario(
         observes=OBSERVES.get(observation.kind, ""),
         compile_basis=direction.basis,
         obligation_ref=direction.obligation_ref,
+        omission_evidence_basis=basis,
     )
 
 
@@ -2071,6 +2109,186 @@ def _canonical_trigger_source_value(value: Any) -> str:
     return canonical_json_bytes(value).decode("utf-8")
 
 
+def _omission_evidence_basis(
+    draft: AuthoredScenarioDraft,
+    candidate: AuthoringCandidate,
+    *,
+    observation: AuthoredUnsafeObservation,
+    facts: list[StateFactValue],
+    observations: tuple[dict[str, str], ...],
+    obligation_ref: str | None,
+    snapshot_digest: str | None,
+) -> OmissionEvidenceBasis | ScenarioHold:
+    """Build the authoring-side omission-evidence basis for one accepted draft.
+
+    The structured branch never rewrites evidence: every quotation, locator,
+    and meaning is copied from the already source-validated draft, and any
+    closed-carrier limit holds the draft with the original evidence retained.
+    The delivery checks re-verify each stimulus quotation against the exact
+    prepared text (or referenced conversation turn) before the prepared-text
+    digest is computed, because that digest attests the executable delivery.
+    """
+    evidence = observation.trigger_evidence
+    is_conversation = draft.stimulus.kind == "conversation"
+    stimulus_texts = stimulus_user_texts(draft.stimulus)
+    if is_conversation:
+        delivery_class = "conversation_context"
+    else:
+        delivery_class = "direct_prompt"
+
+    stimulus_items = [item for item in evidence if item.source == "stimulus"]
+    prepared_digest: str | None = None
+    if delivery_class == "direct_prompt":
+        prepared_text = stimulus_texts[0] if stimulus_texts else ""
+        if not prepared_text:
+            return ScenarioHold(
+                reason="delivery_evidence_unresolved",
+                detail=(
+                    "direct_prompt omission delivery requires the exact prepared "
+                    "user text copied from the authored stimulus; it is "
+                    "unavailable, so no executable carrier can be prepared"
+                ),
+            )
+        for item in stimulus_items:
+            if item.quote not in prepared_text:
+                return ScenarioHold(
+                    reason="delivery_evidence_mismatch",
+                    detail=(
+                        f"stimulus evidence quote {item.quote!r} is not a "
+                        "substring of the prepared user text, so the prepared "
+                        "delivery cannot attest it"
+                    ),
+                )
+        prepared_digest = compute_framed_digest(SOURCE_ATTESTATION_FRAME, prepared_text)
+    else:
+        for item in stimulus_items:
+            assert item.turn is not None  # already validated by _validate_tool_absent
+            if item.turn > len(stimulus_texts):
+                return ScenarioHold(
+                    reason="delivery_evidence_unresolved",
+                    detail=(
+                        f"conversation evidence cites turn {item.turn}, beyond the "
+                        f"{len(stimulus_texts)} authored user turn(s)"
+                    ),
+                )
+            turn_text = stimulus_texts[item.turn - 1]
+            if item.quote not in turn_text:
+                return ScenarioHold(
+                    reason="delivery_evidence_mismatch",
+                    detail=(
+                        f"stimulus evidence quote {item.quote!r} is not a substring "
+                        f"of authored turn {item.turn}, so the conversation "
+                        "delivery cannot attest it"
+                    ),
+                )
+
+    # The carrier binds the snapshot digest exactly when state or observation
+    # entries exist; stimulus-only evidence must omit it.
+    cites_snapshot = any(
+        item.source in ("state_fact", "observation") for item in evidence
+    )
+    if cites_snapshot and snapshot_digest is None:
+        return ScenarioHold(
+            reason="delivery_evidence_unresolved",
+            detail=(
+                "state-fact or observation evidence requires the supplied "
+                "target-observation snapshot digest; it is unavailable, so no "
+                "executable carrier can be prepared"
+            ),
+        )
+
+    trigger = observation.trigger or ""
+    try:
+        if delivery_class == "direct_prompt":
+            delivery = OmissionDelivery(
+                stimulus_id="STIM-1",
+                delivery_class="direct_prompt",
+                status="prepared",
+                prepared_user_text_digest=prepared_digest,
+            )
+        else:
+            delivery = OmissionDelivery(
+                stimulus_id="STIM-1",
+                delivery_class="conversation_context",
+                status="prepared",
+            )
+
+        entries = []
+        for item in evidence:
+            if item.source == "stimulus":
+                entries.append(
+                    StimulusOmissionEvidence(
+                        delivery_turn_ordinal=item.turn,
+                        turn_id=f"T-{item.turn}" if is_conversation else None,
+                        quote=item.quote,
+                        meaning=item.meaning,
+                    )
+                )
+            elif item.source == "state_fact":
+                assert item.state_path is not None
+                matching = [fact for fact in facts if fact.path == item.state_path]
+                value = matching[0].value
+                entries.append(
+                    StateFactOmissionEvidence(
+                        state_path=item.state_path,
+                        quote=item.quote,
+                        source_attestation=attest_source(
+                            {"state_path": list(item.state_path), "value": value}
+                        ),
+                        meaning=item.meaning,
+                    )
+                )
+            else:
+                assert item.observation_ref is not None
+                record = next(
+                    item_
+                    for item_ in observations
+                    if item_.get("observation_ref") == item.observation_ref
+                )
+                entries.append(
+                    ObservationOmissionEvidence(
+                        observation_ref=item.observation_ref,
+                        observation_path=item.observation_path,
+                        quote=item.quote,
+                        source_attestation=attest_source(
+                            {
+                                "observation_ref": item.observation_ref,
+                                "observation_path": (
+                                    list(item.observation_path)
+                                    if item.observation_path is not None
+                                    else None
+                                ),
+                                "content": record.get("content"),
+                            }
+                        ),
+                        meaning=item.meaning,
+                    )
+                )
+
+        return OmissionEvidenceBasis(
+            delivery=delivery,
+            obligation_ref=obligation_ref,
+            direction_authority=candidate.direction_authority,
+            trigger=trigger,
+            trigger_digest=compute_framed_digest(TRIGGER_DIGEST_FRAME, trigger),
+            applicability=OmissionApplicability(
+                status="unresolved",
+                evidence_role="source_presence_only",
+            ),
+            observation_snapshot_digest=(snapshot_digest if cites_snapshot else None),
+            evidence=tuple(entries),
+        )
+    except (ValidationError, ValueError) as exc:
+        return ScenarioHold(
+            reason="trigger_evidence_unrepresentable",
+            detail=(
+                "structured omission evidence exceeds the closed carrier "
+                "limits; the original evidence is retained unchanged in this "
+                f"held record: {exc}"
+            ),
+        )
+
+
 def _validate_response_claim(
     observation: AuthoredUnsafeObservation,
 ) -> ScenarioRejection | None:
@@ -2231,37 +2449,6 @@ def _owner_resolution(
     return resolution
 
 
-def _trigger_evidence_summary(
-    evidence: tuple[AuthoredTriggerEvidence, ...],
-) -> str:
-    """Render exact, JSON-escaped evidence entries for the proposition.
-
-    JSON escaping keeps a quoted multi-line source on the proposition's one
-    plain line.  The same entries are also copied structurally to the
-    authored record so consumers and reviewers can inspect the exact source
-    locator and quotation without parsing the sentence.
-    """
-    entries: list[str] = []
-    for item in evidence:
-        if item.source == "stimulus":
-            locator: Any = {"turn": item.turn}
-        elif item.source == "state_fact":
-            locator = {"state_path": list(item.state_path or ())}
-        else:
-            locator = {"observation_ref": item.observation_ref}
-            if item.observation_path is not None:
-                locator["observation_path"] = list(item.observation_path)
-        entries.append(
-            json.dumps(
-                {"source": item.source, "locator": locator, "quote": item.quote},
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-        )
-    return "[" + ",".join(entries) + "]"
-
-
 def _resolve_oracle(
     observation: AuthoredUnsafeObservation,
     candidate: AuthoringCandidate,
@@ -2364,11 +2551,13 @@ def _resolve_oracle(
     if kind == "tool_absent":
         assert observation.tool is not None
         if trigger_evidence:
+            # Structured branch: the short proposition carries the trigger
+            # only; the exact evidence rides in the typed carrier, so the
+            # compiled proposition stays within the closed 600-char limit.
             template_text = render_oracle_text(
-                "tool_absent_with_evidence",
+                "tool_absent_structured",
                 tool=observation.tool,
                 trigger=observation.trigger or "",
-                evidence=_trigger_evidence_summary(trigger_evidence),
             )
         else:
             template_text = render_oracle_text(
@@ -3396,6 +3585,10 @@ def _accepted_payload(accepted: AcceptedScenario) -> dict[str, Any]:
             _trigger_evidence_payload(item)
             for item in accepted.draft.unsafe_observation.trigger_evidence
         ]
+        if accepted.omission_evidence_basis is not None:
+            payload["omission_evidence"] = accepted.omission_evidence_basis.model_dump(
+                mode="json"
+            )
     return payload
 
 
@@ -3524,9 +3717,19 @@ def assemble_authored_scenario_spec(
         "oracle_observes": accepted.observes or None,
         "oracle_basis": accepted.compile_basis or None,
     }
+    if accepted.omission_evidence_basis is not None:
+        # Structured omission: the authoring-side basis rides to the
+        # projection seam, which completes it with the projection's pins.
+        updates["omission_evidence_basis"] = accepted.omission_evidence_basis
     turns = _authored_stimulus_turns(accepted)
     if turns is not None:
         updates["stimulus_turns"] = turns
+    if accepted.draft.stimulus.kind == "user_message":
+        # The exact authored user text, copied verbatim before projection so
+        # the v3 direct-prompt stimulus requirement can deliver it without
+        # generative rewriting.  Deliberately not the intentions string,
+        # which appends the structural-source marker.
+        updates["prepared_user_text"] = stimulus_user_texts(accepted.draft.stimulus)[0]
     return spec.model_copy(update=updates)
 
 

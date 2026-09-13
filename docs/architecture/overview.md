@@ -617,17 +617,37 @@ Omission trigger evidence is source-addressed: a particular prepared user turn,
 a used state-fact path, or a uniquely named observation content record. Exact
 quotation validation replaces the former reference-name substring check.
 The trigger sentence remains an author interpretation of the cited obligation;
-source validation does not authorize that interpretation. Evidence accompanies
-the existing conditional omission proposition and the authored record. The
-consumer contract stays unchanged, and absence alone remains inconclusive
-without independently established applicability. Historical drafts without
-evidence stay readable but cannot pass the current omission validator through
-the old substring fallback.
-The full omission proposition is preflighted through the existing semantic
-proposition validator before acceptance. Evidence that cannot fit its length
-or content restrictions holds as `trigger_evidence_unrepresentable`, with the
-trigger and exact citations retained in the authored record. No quotation is
-truncated, no weaker proxy is substituted, and downstream limits are unchanged.
+source validation does not authorize that interpretation. Publication has two
+explicit branches, selected by validated evidence and never inferred by the
+consumer: a draft without authored evidence keeps the legacy
+proposition-only projection-v2/bundle-v1 path unchanged, and a draft with
+source-validated evidence publishes the structured
+projection-v3/bundle-v2 pair. The v3 unsafe outcome carries the closed
+`stpa-omission-evidence-v1` carrier beside a short semantic proposition that
+holds the trigger sentence only; exact quotations, locators, meanings, source
+attestations, the trigger digest, and the unresolved applicability stamp ride
+in the typed carrier, never mixed back into the proposition. A run upgrades
+every entry in its bundle to the v3 projection when any spec carries a basis,
+keeping each bundle homogeneous; bundle-v1 readers stay unchanged. A
+direct-prompt carrier delivers the exact authored user text verbatim through
+`prepared_user_text` with its recorded digest; conversation carriers bind each
+quotation to its authored turn. State-fact and observation entries pin the
+target-observation snapshot digest. Absence alone remains inconclusive without
+independently established applicability, and citations establish source
+presence only. Historical drafts without evidence stay readable but cannot
+pass the current omission validator through the old substring fallback.
+Evidence that exceeds the closed carrier limits (quotation, trigger, entry
+count, or total size) holds as `trigger_evidence_unrepresentable` with the
+trigger and exact citations retained in the authored record; a quotation the
+delivery cannot attest holds as `delivery_evidence_mismatch`, and a missing
+prepared text, unreferenced turn, or unavailable snapshot holds as
+`delivery_evidence_unresolved`. No quotation is truncated, no weaker proxy is
+substituted, and the six projection cross-checks (`omission_evidence_missing`,
+`omission_evidence_unexpected`, `stimulus_delivery_mismatch`,
+`prepared_text_mismatch`, `snapshot_digest_mismatch`,
+`omission_evidence_invalid`) fail closed before publication. A `kind: none`
+functional specification may retain a validated carrier for review, but it
+never produces an executable v3 projection.
 
 Stage 2 derives use-case functions and their primary outputs before attaching
 security safeguards. Its prompts keep functional duties separate from rules
@@ -945,12 +965,18 @@ semantic-condition hierarchy, preserves exact source pins from
 requirements from typed evidence. It carries the Stage 5 semantic execution
 contract, a neutral stimulus requirement containing the adversarial intent,
 desired effect, and eligible causal-factor IDs, and the producer's
-classification. The v2 model is prepared before Stage 6 and
+classification. The model is prepared before Stage 6 and
 is the only normal product persistence input; the v1 projection reader is
-retained solely for historical audit validation.
+retained solely for historical audit validation. A structured-omission run
+prepares the closed `stpa-execution-projection-v3` model instead: the same
+typed hierarchy, source pins, and canonical computation, with the structured
+omission carrier required on its action-presence outcomes and the exact
+prepared direct-prompt text on the stimulus requirement.
 
 The companion `stpa.scenario_prod.execution_bundle` seam publishes
-`stpa-execution-bundle-v1` scenario/projection pairs and its canonical index.
+`stpa-execution-bundle-v1` scenario/projection pairs and its canonical index,
+or the homogeneous `stpa-execution-bundle-v2` index when every entry is a
+v3 projection; a run never mixes projection schema versions in one bundle.
 Publication preflights every pair and path, writes verified YAML mirrors first,
 and replaces `execution-bundle.json` last. On an update, entries are staged
 under a deterministic content-addressed generation, so the live index always

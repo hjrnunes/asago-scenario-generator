@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import yaml
 from typer.testing import CliRunner
@@ -113,3 +114,33 @@ def test_validate_stpa_projection_rejects_non_object_payload(tmp_path):
     result = runner.invoke(app, ["validate-stpa-projection", str(path)])
     assert result.exit_code == 1
     assert "must be a JSON or YAML object" in result.output
+
+
+def test_validate_stpa_projection_accepts_valid_v3_carrier_fixture():
+    """A committed v3 structured-omission projection validates as v3."""
+    fixture = (
+        Path(__file__).resolve().parents[2]
+        / "data/contracts/stpa-execution/projection-v3/valid/"
+        "structured-omission-direct.json"
+    )
+    result = runner.invoke(app, ["validate-stpa-projection", str(fixture)])
+    assert result.exit_code == 0, result.output
+    body = json.loads(result.stdout)
+    assert body["schema_version"] == "stpa-execution-projection-v3"
+    assert body["valid"] is True
+    assert body["violation_codes"] == []
+
+
+def test_validate_stpa_projection_reports_v3_carrier_violation_code():
+    """A v3 fixture missing its carrier fails closed with the typed code."""
+    fixture = (
+        Path(__file__).resolve().parents[2]
+        / "data/contracts/stpa-execution/projection-v3/invalid/"
+        "omission-evidence-missing.json"
+    )
+    result = runner.invoke(app, ["validate-stpa-projection", str(fixture)])
+    assert result.exit_code == 1
+    body = json.loads(result.stdout)
+    assert body["schema_version"] == "stpa-execution-projection-v3"
+    assert body["valid"] is False
+    assert body["violation_codes"] == ["omission_evidence_missing"]

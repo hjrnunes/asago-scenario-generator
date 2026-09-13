@@ -27,6 +27,14 @@ from asago_scenario_generator.stpa.models.execution_projection_v2 import (
     ProjectionValidationCode,
     ProjectionValidationViolation,
 )
+from asago_scenario_generator.stpa.models.execution_projection_v3 import (
+    BUNDLE_V2_SCHEMA_VERSION,
+    PROJECTION_V3_SCHEMA_VERSION,
+    BundleProjectionReferenceV3,
+    ExecutionBundleEntryV3,
+    ExecutionBundleIndexV2,
+    ExecutionProjectionV3,
+)
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
 )
@@ -35,12 +43,23 @@ from asago_scenario_generator.stpa.models.scenario_envelope import ScenarioEnvel
 from .execution_projection import (
     ValidatedExecutionProjection,
     validate_execution_projection,
+    validate_execution_projection_v3,
 )
 
 
 INDEX_JSON_NAME = "execution-bundle.json"
 INDEX_YAML_NAME = "execution-bundle.yaml"
 EXECUTION_TARGET_PROFILE_NAME = "execution-target-profile.json"
+
+# A published bundle is homogeneous: every entry references projections of
+# exactly one schema version.  Bundle v1 indexes carry v2 projections only;
+# bundle v2 indexes carry v3 projections only.
+_BUNDLE_INDEX_TYPES = {
+    BUNDLE_SCHEMA_VERSION: ExecutionBundleIndex,
+    BUNDLE_V2_SCHEMA_VERSION: ExecutionBundleIndexV2,
+}
+_BundleIndex = ExecutionBundleIndex | ExecutionBundleIndexV2
+_BundleEntry = ExecutionBundleEntry | ExecutionBundleEntryV3
 
 
 @dataclass(frozen=True)
@@ -92,8 +111,13 @@ def publish_execution_bundle(
     destination: Path,
     run_identity: ExecutionRunIdentity,
     entries: Sequence[ExecutionBundlePublication],
-) -> ExecutionBundleIndex:
-    """Publish validated canonical scenario/projection pairs and index last."""
+) -> _BundleIndex:
+    """Publish validated canonical scenario/projection pairs and index last.
+
+    The published index version is homogeneous: a set of v2 projections
+    publishes the bundle-v1 index exactly as before, a set of v3 projections
+    publishes the bundle-v2 index, and a mixed set fails closed.
+    """
     if not isinstance(destination, Path):
         raise ExecutionBundlePublicationError("destination must be a pathlib.Path")
     if not isinstance(run_identity, ExecutionRunIdentity):
@@ -109,24 +133,47 @@ def publish_execution_bundle(
     prepared = _prepare_publications(base, run_identity, publications)
     if (base / INDEX_JSON_NAME).is_file():
         prepared = _stage_update_generation(base, run_identity, prepared)
-    index_entries = tuple(_bundle_entry(base, item) for item in prepared)
-    index = ExecutionBundleIndex(
-        run_id=run_identity.run_id,
-        producer=ProducerIdentity(
-            name=run_identity.producer_name,
-            version=run_identity.producer_version,
-        ),
-        entries=index_entries,
-    )
+    index = _build_bundle_index(base, run_identity, prepared)
     _publish_transaction(_publication_writes(base, prepared, index))
     return index
+
+
+def _build_bundle_index(
+    base: Path,
+    run_identity: ExecutionRunIdentity,
+    prepared: tuple[tuple[ExecutionBundlePublication, bytes, bytes, Path, Path], ...],
+) -> _BundleIndex:
+    """Build the closed index for one homogeneous projection version set."""
+    versions = {
+        publication.validated_projection.projection.schema_version
+        for publication, _scenario_bytes, _projection_bytes, _scenario_path, _projection_path in prepared
+    }
+    if len(versions) > 1:
+        raise ExecutionBundlePublicationError(
+            "bundle entries must share one projection schema version"
+        )
+    producer = ProducerIdentity(
+        name=run_identity.producer_name,
+        version=run_identity.producer_version,
+    )
+    if versions == {PROJECTION_V3_SCHEMA_VERSION}:
+        return ExecutionBundleIndexV2(
+            run_id=run_identity.run_id,
+            producer=producer,
+            entries=tuple(_bundle_entry_v3(base, item) for item in prepared),
+        )
+    return ExecutionBundleIndex(
+        run_id=run_identity.run_id,
+        producer=producer,
+        entries=tuple(_bundle_entry(base, item) for item in prepared),
+    )
 
 
 def _bundle_entry(
     base: Path,
     prepared: tuple[ExecutionBundlePublication, bytes, bytes, Path, Path],
 ) -> ExecutionBundleEntry:
-    """Build one index entry from preflighted canonical bytes and paths."""
+    """Build one bundle-v1 index entry from preflighted canonical bytes."""
     publication, scenario_bytes, projection_bytes, scenario_path, projection_path = (
         prepared
     )
@@ -141,6 +188,33 @@ def _bundle_entry(
             content_sha256=_sha256(scenario_bytes),
         ),
         projection=BundleProjectionReference(
+            path=_relative_posix(base, projection_path),
+            content_sha256=_sha256(projection_bytes),
+            semantic_digest=projection.semantic_digest
+            or projection.compute_semantic_digest(),
+        ),
+    )
+
+
+def _bundle_entry_v3(
+    base: Path,
+    prepared: tuple[ExecutionBundlePublication, bytes, bytes, Path, Path],
+) -> ExecutionBundleEntryV3:
+    """Build one bundle-v2 index entry referencing its v3 projection."""
+    publication, scenario_bytes, projection_bytes, scenario_path, projection_path = (
+        prepared
+    )
+    projection = publication.validated_projection.projection
+    return ExecutionBundleEntryV3(
+        scenario_id=projection.scenario_id,
+        candidate_id=projection.candidate_id,
+        ica_slot_id=projection.ica_slot_id,
+        ica_id=projection.ica_id,
+        scenario=BundleScenarioReference(
+            path=_relative_posix(base, scenario_path),
+            content_sha256=_sha256(scenario_bytes),
+        ),
+        projection=BundleProjectionReferenceV3(
             path=_relative_posix(base, projection_path),
             content_sha256=_sha256(projection_bytes),
             semantic_digest=projection.semantic_digest
@@ -202,7 +276,7 @@ def _generation_key(
 def _publication_writes(
     base: Path,
     prepared: tuple[tuple[ExecutionBundlePublication, bytes, bytes, Path, Path], ...],
-    index: ExecutionBundleIndex,
+    index: _BundleIndex,
 ) -> tuple[tuple[Path, bytes], ...]:
     """Materialize the complete generation before touching final paths."""
     writes: list[tuple[Path, bytes]] = []
@@ -353,10 +427,13 @@ def _decode_index_payload(
 
 def _validate_index_document(
     document: _IndexDocument,
-) -> tuple[ExecutionBundleIndex | None, list[ProjectionValidationViolation]]:
+) -> tuple[_BundleIndex | None, list[ProjectionValidationViolation]]:
     violations = _index_header_violations(document.payload)
+    index_type = _BUNDLE_INDEX_TYPES.get(document.payload.get("schema_version"))
+    if index_type is None:
+        return None, violations
     try:
-        index = ExecutionBundleIndex.model_validate(document.payload)
+        index = index_type.model_validate(document.payload)
     except ValidationError as exc:
         violations.extend(_index_validation_errors(exc))
         return None, violations
@@ -390,12 +467,13 @@ def _index_header_violations(
                 f"unknown bundle index field {unknown[0]!r}",
             )
         )
-    if payload.get("schema_version") != BUNDLE_SCHEMA_VERSION:
+    if payload.get("schema_version") not in _BUNDLE_INDEX_TYPES:
         violations.append(
             _violation(
                 ProjectionValidationCode.schema_version_mismatch,
                 "schema_version",
-                "schema_version must be stpa-execution-bundle-v1",
+                "schema_version must be stpa-execution-bundle-v1 or "
+                "stpa-execution-bundle-v2",
             )
         )
     return violations
@@ -421,7 +499,7 @@ def _entry_order_violations(
 
 def _verify_index_entries(
     base: Path,
-    index: ExecutionBundleIndex,
+    index: _BundleIndex,
 ) -> list[ProjectionValidationViolation]:
     violations: list[ProjectionValidationViolation] = []
     seen_paths: set[str] = set()
@@ -432,9 +510,9 @@ def _verify_index_entries(
 
 def _verify_entry(
     base: Path,
-    index: ExecutionBundleIndex,
+    index: _BundleIndex,
     entry_index: int,
-    entry: ExecutionBundleEntry,
+    entry: _BundleEntry,
     seen_paths: set[str],
 ) -> list[ProjectionValidationViolation]:
     prefix = f"entries[{entry_index}]"
@@ -471,7 +549,7 @@ def _verify_entry(
 
 def _entry_paths(
     base: Path,
-    entry: ExecutionBundleEntry,
+    entry: _BundleEntry,
 ) -> tuple[Path, Path] | None:
     scenario_file = _safe_resolved_path(base, entry.scenario.path)
     projection_file = _safe_resolved_path(base, entry.projection.path)
@@ -482,7 +560,7 @@ def _entry_paths(
 
 def _entry_path_violations(
     base: Path,
-    entry: ExecutionBundleEntry,
+    entry: _BundleEntry,
     prefix: str,
     seen_paths: set[str],
 ) -> list[ProjectionValidationViolation]:
@@ -532,7 +610,7 @@ def _read_entry_content(
 
 
 def _entry_digest_violations(
-    entry: ExecutionBundleEntry,
+    entry: _BundleEntry,
     prefix: str,
     scenario_bytes: bytes,
     projection_bytes: bytes,
@@ -558,7 +636,7 @@ def _entry_digest_violations(
 
 
 def _load_scenario_entry(
-    entry: ExecutionBundleEntry,
+    entry: _BundleEntry,
     prefix: str,
     content: bytes,
 ) -> tuple[ScenarioEnvelope | None, list[ProjectionValidationViolation]]:
@@ -605,27 +683,58 @@ def _load_scenario_entry(
 
 
 def _load_projection_entry(
-    index: ExecutionBundleIndex,
-    entry: ExecutionBundleEntry,
+    index: _BundleIndex,
+    entry: _BundleEntry,
     prefix: str,
     content: bytes,
 ) -> tuple[Any | None, list[ProjectionValidationViolation]]:
     payload, decode_violations = _decode_projection_entry(content, prefix)
     if decode_violations:
         return None, decode_violations
+    projection, violations = _validate_projection_entry_payload(index, entry, payload)
+    if projection is None:
+        return None, [
+            _prefix_violation(item, prefix + ".projection") for item in violations
+        ]
+    integrity_violations = _projection_entry_integrity(
+        entry, prefix, projection, content
+    )
+    return projection, violations + integrity_violations
+
+
+def _validate_projection_entry_payload(
+    index: _BundleIndex,
+    entry: _BundleEntry,
+    payload: Any,
+) -> tuple[Any | None, list[ProjectionValidationViolation]]:
+    """Validate one referenced projection through its own schema version."""
+    document_version = (
+        payload.get("schema_version") if isinstance(payload, Mapping) else None
+    )
+    if document_version == PROJECTION_V3_SCHEMA_VERSION:
+        codes = validate_execution_projection_v3(
+            payload,
+            expected_run_id=index.run_id,
+            expected_scenario_id=entry.scenario_id,
+        )
+        if codes:
+            return None, [
+                _violation(
+                    code,
+                    "projection",
+                    f"projection-v3 validation failed: {code.value}",
+                )
+                for code in codes
+            ]
+        return ExecutionProjectionV3.model_validate(payload), []
     result = validate_execution_projection(
         payload,
         expected_run_id=index.run_id,
         expected_scenario_id=entry.scenario_id,
     )
     if not result.valid or result.projection is None:
-        return None, [
-            _prefix_violation(item, prefix + ".projection")
-            for item in result.violations
-        ]
-    projection = result.projection
-    violations = _projection_entry_integrity(entry, prefix, projection, content)
-    return projection, violations
+        return None, list(result.violations)
+    return result.projection, []
 
 
 def _decode_projection_entry(
@@ -645,7 +754,7 @@ def _decode_projection_entry(
 
 
 def _projection_entry_integrity(
-    entry: ExecutionBundleEntry,
+    entry: _BundleEntry,
     prefix: str,
     projection: Any,
     content: bytes,
@@ -1028,7 +1137,7 @@ def _envelope_projection_identity_violations(
 def _pair_identity_violations(
     envelope: ScenarioEnvelope,
     projection: Any,
-    entry: ExecutionBundleEntry,
+    entry: _BundleEntry,
     prefix: str,
 ) -> list[ProjectionValidationViolation]:
     violations = _envelope_projection_identity_violations(

@@ -587,3 +587,44 @@ the offline acceptance suite, not a run pair.
   Historical responses and scores remain unchanged. This changes the provider
   schema and two current prompt hashes for any future run. The 600-character
   omission carrier is unchanged; its replacement remains a separate proposal.
+
+## 2026-09-13 — Structured omission-evidence carrier
+
+- **Owner decision.** Implement the approved structured omission-evidence
+  proposal (`build/qualification/current-interface-followup-20260913/
+  structured-evidence-proposal.md`): a bounded carrier beside the short
+  proposition, paired projection-v3/bundle-v2 contracts, consumer
+  propagation, and one fresh baseline after verification. No constraint,
+  gold, or benchmark edit.
+- **Model-facing wire unchanged.** The author still supplies
+  `unsafe_observation.trigger_evidence` exactly as before; source validation
+  and the applicability boundary are unchanged. The change is compiler-side:
+  an evidenced `tool_absent` draft renders the new short
+  `tool_absent_structured` proposition (trigger only) instead of mixing
+  evidence JSON into the 600-character sentence, and the exact evidence rides
+  in the closed `stpa-omission-evidence-v1` carrier completed from the
+  projection's source pins.
+- **Publication branches.** A draft without authored evidence keeps the
+  proposition-only projection-v2/bundle-v1 path byte-identical. A draft with
+  validated evidence publishes projection-v3/bundle-v2, upgrading every entry
+  in that run's bundle to v3 so bundles stay homogeneous; mixed-version
+  bundles are a publication error. A direct-prompt carrier records the exact
+  authored user text verbatim (`prepared_user_text`) with its digest.
+- **Holds.** Evidence beyond the carrier bounds holds as
+  `trigger_evidence_unrepresentable` with the original evidence retained; an
+  unattestable delivery holds as `delivery_evidence_mismatch`; a missing
+  prepared text, unreferenced turn, or unavailable snapshot holds as
+  `delivery_evidence_unresolved`. Nothing is truncated or replaced by a
+  weaker proxy.
+- **Evidence.** Carrier, pipeline, and contract-kit tests
+  (`test_omission_evidence_carrier.py`,
+  `test_structured_omission_pipeline.py`,
+  `test_stpa_execution_contract_v3.py`) cover the branches, holds, six
+  projection cross-checks, homogeneous dispatch, full reload verification of
+  the committed bundle-v2 fixtures, and a synthetic adversarial end-to-end
+  compile. The saved SC-10 record remains a `kind: none` functional
+  specification whose carrier is retained for review only.
+- **Limits.** Applicability stays unresolved; source presence never
+  establishes the duty to call. This entry is not a Principle 7 recovery
+  claim. Future runs record the changed oracle-template and contract-kit
+  digests rather than claiming an unchanged-input rerun.

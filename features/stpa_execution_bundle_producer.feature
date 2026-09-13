@@ -106,3 +106,74 @@ Feature: STPA execution projection v2 and bundle producer
     Given a committed invalid runtime-observation projection fixture
     When standalone projection validation parses the fixture
     Then projection validation reports runtime_observation_forbidden
+
+  # STPA-BUNDLE-13
+  Scenario: STPA-BUNDLE-13 structured omission evidence prepares a v3 projection
+    Given a structured omission scenario spec with an evidence basis
+    When the producer prepares the structured v3 execution projection
+    Then the v3 projection carries the omission carrier and its digest
+    And the structured outcome proposition is the short trigger-only text
+    And the v3 stimulus requirement carries the exact prepared user text
+
+  # STPA-BUNDLE-14
+  Scenario: STPA-BUNDLE-14 legacy preparation ignores a riding basis
+    Given a structured omission scenario spec with an evidence basis
+    When the producer prepares the execution projection with structured omission disabled
+    Then the projection remains the v2 schema
+    And the v2 canonical bytes equal the preparation without a basis
+
+  # STPA-BUNDLE-15
+  Scenario Outline: STPA-BUNDLE-15 unrepresentable omission evidence holds with typed reasons
+    Given an authored tool_absent draft with <case> evidence
+    When the authoring seam builds the omission evidence basis
+    Then the basis holds as <reason>
+    And the original evidence is retained unchanged
+
+    Examples:
+      | case                         | reason                           |
+      | over-limit quote             | trigger_evidence_unrepresentable |
+      | unsubstantiated prompt quote | delivery_evidence_mismatch       |
+      | turn beyond the conversation | delivery_evidence_unresolved     |
+      | observation without snapshot | delivery_evidence_unresolved     |
+
+  # STPA-BUNDLE-16
+  Scenario Outline: STPA-BUNDLE-16 structured preparation cross checks fail closed
+    Given a structured omission scenario spec with a <case> drift
+    When the producer prepares the structured v3 execution projection
+    Then projection preparation is rejected before Stage 6
+    And the preparation error reports <prefix>
+
+    Examples:
+      | case              | prefix                        |
+      | missing basis     | omission_evidence_missing     |
+      | unexpected basis  | omission_evidence_unexpected  |
+      | delivery mismatch | stimulus_delivery_mismatch    |
+      | prepared text     | prepared_text_mismatch        |
+      | snapshot digest   | snapshot_digest_mismatch      |
+      | invalid carrier   | omission_evidence_invalid     |
+
+  # STPA-BUNDLE-17
+  Scenario Outline: STPA-BUNDLE-17 homogeneous sets publish their own bundle version
+    Given a <delivery> publication set
+    When the set is published as a bundle
+    Then the bundle index reports <version>
+    And the published bundle verifies successfully
+
+    Examples:
+      | delivery                | version                    |
+      | structured omission     | stpa-execution-bundle-v2   |
+      | legacy proposition-only | stpa-execution-bundle-v1   |
+
+  # STPA-BUNDLE-18
+  Scenario: STPA-BUNDLE-18 mixed version sets are rejected before the index
+    Given a mixed v2 and v3 publication set
+    When the set is published as a bundle
+    Then bundle publication reports one schema version error
+    And the interrupted directory has no valid publication marker
+
+  # STPA-BUNDLE-19
+  Scenario: STPA-BUNDLE-19 the committed bundle-v2 kit verifies and fails closed
+    Given the committed STPA execution contract kit
+    When the bundle-v2 kit fixtures are verified
+    Then the bundle-v2 valid fixture verifies successfully
+    And the bundle-v2 invalid fixtures report their expected violations

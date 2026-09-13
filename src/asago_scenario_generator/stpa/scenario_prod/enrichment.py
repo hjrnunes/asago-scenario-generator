@@ -25,6 +25,9 @@ from asago_scenario_generator.stpa.models.execution_classification import (
 from asago_scenario_generator.stpa.models.execution_projection_v2 import (
     ExecutionProjectionV2,
 )
+from asago_scenario_generator.stpa.models.execution_projection_v3 import (
+    ExecutionProjectionV3,
+)
 from asago_scenario_generator.stpa.models.scenario_envelope import (
     ConsumerHints,
     SystemContext,
@@ -128,7 +131,7 @@ def compute_consumer_hints(
     attack_tree: dict,
     narrative: str,
     primary_attack_zone: str | None = None,
-    execution_projection: ExecutionProjectionV2 | None = None,
+    execution_projection: ExecutionProjectionV2 | ExecutionProjectionV3 | None = None,
 ) -> ConsumerHints:
     """Compute deterministic consumer hints for adapter filtering.
 
@@ -177,7 +180,9 @@ def compute_consumer_hints(
     )
 
 
-def _typed_consumer_hints(projection: ExecutionProjectionV2) -> ConsumerHints:
+def _typed_consumer_hints(
+    projection: ExecutionProjectionV2 | ExecutionProjectionV3,
+) -> ConsumerHints:
     """Derive readiness from the immutable execution projection only."""
     requirements = projection.execution_requirements
     contract = projection.execution_contract
@@ -228,7 +233,9 @@ def _typed_primary_attack_zone(
     )
 
 
-def _typed_garak_testability(projection: ExecutionProjectionV2) -> str:
+def _typed_garak_testability(
+    projection: ExecutionProjectionV2 | ExecutionProjectionV3,
+) -> str:
     """Assess Garak readiness from typed observability and binding state."""
     classification = projection.execution_classification
     requirements = projection.execution_requirements

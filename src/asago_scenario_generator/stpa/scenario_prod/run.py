@@ -403,6 +403,18 @@ def run_sp3(
             content_surface=content_surface_facts(capability_profile),
             authored_scenarios=authored_scenarios,
         )
+        # The run-level wire branch is fixed here, before any Stage 6 work:
+        # one structured omission basis anywhere in the assembled specs
+        # upgrades every published projection in the run to v3 (bundle v2);
+        # a run with none keeps the legacy v2/v1 pair unchanged.
+        structured_omission = any(
+            spec.omission_evidence_basis is not None for spec in scenario_specs
+        )
+        observation_snapshot_digest = (
+            target_observations.content_digest
+            if target_observations is not None
+            else None
+        )
         functional_test_specs = [
             spec for spec in scenario_specs if spec.is_functional_test
         ]
@@ -434,6 +446,8 @@ def run_sp3(
             target_realization=target_realization,
             render_presentation=render_presentation,
             candidate_builders=candidate_builders,
+            structured_omission=structured_omission,
+            observation_snapshot_digest=observation_snapshot_digest,
         )
     else:
         scenario_specs = []
@@ -793,6 +807,8 @@ def _render_stage6_candidate(
     target_realization: TargetRealizationResult | None = None,
     render_presentation: bool = False,
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
+    structured_omission: bool = False,
+    observation_snapshot_digest: str | None = None,
 ) -> tuple[ScenarioEnvelope, ValidatedExecutionProjection | dict | None] | None:
     """Render and persist one Stage 6 candidate, isolating all failure kinds."""
     prior_error_count = len(stage_errors)
@@ -812,6 +828,8 @@ def _render_stage6_candidate(
             execution_target_profile=execution_target_profile,
             target_realization=target_realization,
             render_presentation=render_presentation,
+            structured_omission=structured_omission,
+            observation_snapshot_digest=observation_snapshot_digest,
         )
     except Exception as exc:  # noqa: BLE001 - isolate one candidate
         diagnostic = f"Stage 6 rendering failed for {spec.scenario_id}: {exc}"
@@ -880,6 +898,8 @@ def _collect_stage6_artifacts(
     target_realization: TargetRealizationResult | None = None,
     render_presentation: bool = False,
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
+    structured_omission: bool = False,
+    observation_snapshot_digest: str | None = None,
 ) -> tuple[
     list[ScenarioEnvelope],
     list[tuple[ScenarioEnvelope, ValidatedExecutionProjection]],
@@ -905,6 +925,8 @@ def _collect_stage6_artifacts(
             target_realization=target_realization,
             render_presentation=render_presentation,
             candidate_builders=candidate_builders,
+            structured_omission=structured_omission,
+            observation_snapshot_digest=observation_snapshot_digest,
         )
         if artifact is None:
             continue
@@ -1448,6 +1470,9 @@ def _stage6_projection(
     run_identity: ExecutionRunIdentity | None,
     execution_target_profile: ExecutionTargetProfile | None,
     target_realization: TargetRealizationResult | None = None,
+    *,
+    structured_omission: bool = False,
+    observation_snapshot_digest: str | None = None,
 ) -> tuple[ValidatedExecutionProjection | dict | None, str | None]:
     """Prepare one Stage 6 projection and its shared prompt alignment."""
     if run_identity is not None:
@@ -1458,6 +1483,8 @@ def _stage6_projection(
                 run_identity,
                 target_profile=execution_target_profile,
                 target_realization=target_realization,
+                structured_omission=structured_omission,
+                observation_snapshot_digest=observation_snapshot_digest,
             )
         except ExecutionProjectionPreparationError as exc:
             stage_errors.append(
@@ -1519,6 +1546,8 @@ def _run_stage6_for_spec(
     execution_target_profile: ExecutionTargetProfile | None = None,
     target_realization: TargetRealizationResult | None = None,
     render_presentation: bool = False,
+    structured_omission: bool = False,
+    observation_snapshot_digest: str | None = None,
 ) -> tuple[ScenarioEnvelope | None, ValidatedExecutionProjection | dict | None]:
     """Run Stage 6 concretization for a single scenario spec.
 
@@ -1527,7 +1556,9 @@ def _run_stage6_for_spec(
     to every Stage 6 prompt, so the narrative, attack-tree, and Gherkin
     calls all receive the same projection.  Corrected contextual specs return
     an immutable v2 projection; historical specs retain their v1 diagnostic
-    document for read/validation compatibility.
+    document for read/validation compatibility.  A structured-omission run
+    returns an immutable v3 projection for every spec, including specs whose
+    outcome is not an omission.
 
     Returns:
         A ``(envelope, projection)`` pair; ``None`` envelope means the
@@ -1541,6 +1572,8 @@ def _run_stage6_for_spec(
         run_identity,
         execution_target_profile,
         target_realization,
+        structured_omission=structured_omission,
+        observation_snapshot_digest=observation_snapshot_digest,
     )
     if projection_doc is None:
         return None, None
@@ -2086,9 +2119,12 @@ def _write_scenario_artifacts(
     The canonical projection document is exported as standalone JSON and YAML
     under ``scenarios/canonical/`` beside the legacy scenario YAML and Gherkin
     feature, so legacy ``*.yaml`` readers keep seeing only envelope documents.
-    V2 bytes come from the immutable validated value; a v1 dictionary uses the
-    historical exporter. When no projection is supplied only legacy artifacts
-    are written.
+    The writer is version-aware without dispatch: the bytes and dump come from
+    the document itself, so a v2 projection persists as
+    ``stpa-execution-projection-v2`` and a v3 projection persists as
+    ``stpa-execution-projection-v3`` under the same file layout. A v1
+    dictionary uses the historical exporter. When no projection is supplied
+    only legacy artifacts are written.
     """
     write_yaml(envelope, scenarios_dir / f"{envelope.scenario_id}.yaml")
     feature_text = _envelope_gherkin_text(envelope)

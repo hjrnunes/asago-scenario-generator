@@ -32,6 +32,9 @@ from asago_scenario_generator.stpa.models.execution_envelope import (
 from asago_scenario_generator.stpa.models.execution_projection_v2 import (
     ExecutionProjectionV2,
 )
+from asago_scenario_generator.stpa.models.execution_projection_v3 import (
+    ExecutionProjectionV3,
+)
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.scenario_envelope import (
     ConsumerHints,
@@ -57,7 +60,7 @@ def assemble_envelope(
     capability_profile: CapabilityProfile | None = None,
     control_structure: ControlStructure | None = None,
     primary_attack_zone: str | None = None,
-    execution_projection: ExecutionProjectionV2 | None = None,
+    execution_projection: ExecutionProjectionV2 | ExecutionProjectionV3 | None = None,
 ) -> ScenarioEnvelope:
     """Assemble a ScenarioEnvelope from its components.
 

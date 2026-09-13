@@ -832,7 +832,8 @@ can also be regenerated independently:
 asago-scenario-generator stpa-report --output-dir output/my-system-stpa
 ```
 
-Canonical Stage 6 projection artifacts (`stpa-execution-projection-v2`) can be
+Canonical Stage 6 projection artifacts (`stpa-execution-projection-v2`, or
+`stpa-execution-projection-v3` for a structured-omission run) can be
 checked through the public validation command without reconstructing project
 objects. The historical v1 reader remains available for audit-only validation;
 it is not a product-run input or publication path:
@@ -871,7 +872,11 @@ prompt-side history that ends before the target response.
 
 `publish_execution_bundle(...)` writes the closed
 `stpa-execution-bundle-v1` envelope and canonical scenario/projection pairs
-atomically. Initial entries are written before the canonical
+atomically. A structured-omission run instead publishes the homogeneous
+`stpa-execution-bundle-v2` with `stpa-execution-projection-v3` entries whose
+omission outcomes carry the closed `stpa-omission-evidence-v1` carrier; a
+bundle never mixes projection versions, and a legacy run's bundle-v1 bytes
+are unchanged. Initial entries are written before the canonical
 `execution-bundle.json` index; updates stage entries under a deterministic,
 content-addressed generation and leave the currently indexed bytes untouched
 until that index is replaced last. YAML mirrors are written before the index,

@@ -1556,6 +1556,7 @@ def test_every_template_kind_is_present_and_renders():
         "tool_called",
         "tool_absent",
         "tool_absent_with_evidence",
+        "tool_absent_structured",
         "tool_order",
         "response_claim",
         "paired_response",
@@ -1569,6 +1570,14 @@ def test_every_template_kind_is_present_and_renders():
         trigger="hardship query",
         evidence="[]",
     ).endswith("applies.")
+    assert render_oracle_text(
+        "tool_absent_structured",
+        tool="escalate_to_human",
+        trigger="hardship query",
+    ).endswith("applies.")
+    assert "evidence" not in render_oracle_text(
+        "tool_absent_structured", tool="t", trigger="tr"
+    )
 
 
 def test_owner_record_templates_render_the_two_forms():

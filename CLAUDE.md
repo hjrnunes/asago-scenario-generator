@@ -45,9 +45,11 @@ behavior and observed argument schema; quantitative unknowns remain typed
 placeholders, while event ordering uses explained local reference handles.
 Both seams require the explicit run identity and intact source pins; unknown
 semantic values are typed binding placeholders, and their presence derives
-`semantic_binding_required`. The v2 projection and v1 bundle contract kit in
-`data/contracts/stpa-execution/` is producer-owned; consumers vendor it
-byte-for-byte. A `conversation_context` route may carry `turns`, two to three
+`semantic_binding_required`. The paired contract kits in
+`data/contracts/stpa-execution/` are producer-owned; consumers vendor them
+byte-for-byte. A legacy run publishes the v2 projection through the v1
+bundle; a structured-omission run publishes the v3 projection through the
+homogeneous v2 bundle, and a mixed-version bundle is a publication error. A `conversation_context` route may carry `turns`, two to three
 prepared user turns copied verbatim from the authored draft; the consumer
 delivers them as ordered user history with no assistant reply between them.
 An `ordering` condition may name a `reference_tool` and `reference_argument`
@@ -149,9 +151,20 @@ persist as specification evidence that is never compiled or credited as
 recovery. Omission drafts require exact trigger evidence from a particular
 supplied user turn, used state fact, or uniquely named observation content.
 Verify source presence separately from the author's trigger interpretation:
-a valid citation never establishes the duty to call. Preserve the conditional
-omission proposition and its evidence; absence alone stays inconclusive.
-See the omission evidence boundary in `docs/architecture/overview.md`.
+a valid citation never establishes the duty to call. A draft without authored
+evidence keeps the proposition-only projection-v2/bundle-v1 path unchanged; a
+draft with source-validated evidence publishes the paired
+projection-v3/bundle-v2, whose unsafe outcome carries the closed
+`stpa-omission-evidence-v1` carrier beside a short trigger-only proposition,
+upgrading every entry in that run's bundle to v3 so bundles stay homogeneous.
+A direct-prompt carrier delivers the exact authored user text verbatim
+(`prepared_user_text`); evidence beyond the carrier bounds hold as
+`trigger_evidence_unrepresentable` with the original evidence retained, and
+unattestable or unresolved deliveries hold as `delivery_evidence_mismatch` /
+`delivery_evidence_unresolved`. Absence alone stays inconclusive; a `kind:
+none` functional specification may retain a validated carrier for review but
+never produces an executable v3 projection. See the omission evidence boundary
+in `docs/architecture/overview.md`.
 Every accepted scenario carries `observes` (attempt, total
 omission, or reply; no compiled kind measures an effect, and an
 attempt-level or proxy stamp never supports an executed-safety claim) and

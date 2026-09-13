@@ -33,12 +33,32 @@ def validate_stpa_projection(
     """Validate a standalone STPA execution projection document.
 
     Parses the file with standard JSON or YAML readers and reports typed
-    traceability violations. A missing or malformed document is rejected
-    rather than treated as a valid empty projection.
+    traceability violations for the v1, v2, or v3 projection schema. A
+    missing or malformed document is rejected rather than treated as a
+    valid empty projection.
     """
     _validate_file(artifact, "projection file")
     try:
         payload = _load_projection_payload(artifact)
+        if payload.get("schema_version") == "stpa-execution-projection-v3":
+            from asago_scenario_generator.stpa.scenario_prod.execution_projection import (
+                validate_execution_projection_v3,
+            )
+
+            codes = validate_execution_projection_v3(payload)
+            typer.echo(
+                json.dumps(
+                    {
+                        "schema_version": "stpa-execution-projection-v3",
+                        "valid": not codes,
+                        "violation_codes": [code.value for code in codes],
+                    },
+                    indent=2,
+                )
+            )
+            if codes:
+                raise typer.Exit(code=1)
+            return
         if payload.get("schema_version") == "stpa-execution-projection-v2":
             from asago_scenario_generator.stpa.scenario_prod.execution_projection import (
                 validate_execution_projection,

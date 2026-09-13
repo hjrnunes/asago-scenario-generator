@@ -78,41 +78,60 @@ def test_short_omission_evidence_remains_accepted_when_reviewed():
     result = _validate_reviewed(_omission_draft("refund ORD-201"))
 
     assert isinstance(result, AcceptedScenario)
-    assert '"quote":"refund ORD-201"' in result.oracle.template_text
+    # The structured proposition carries the trigger only; the exact
+    # quotation rides in the typed omission-evidence basis.
+    assert '"quote":"refund ORD-201"' not in result.oracle.template_text
+    assert result.oracle.template_text.startswith(
+        "Inconclusive unless `The reviewed requirement applies to this "
+        "request.` is established by the observation."
+    )
+    basis = result.omission_evidence_basis
+    assert basis is not None
+    assert basis.evidence[0].quote == "refund ORD-201"
 
 
-def test_long_omission_quote_is_held_before_acceptance():
+def test_long_quote_within_carrier_bounds_does_not_invalidate_the_proposition():
+    """A long exact quotation stays representable in the typed carrier.
+
+    The compiled proposition stays short; the quotation never enters it, so
+    the closed 600-character limit is not what bounds evidence any more.
+    """
     quote = "A" * 700
-    draft = _omission_draft(quote)
-    result = _validate_reviewed(draft)
+    result = _validate_reviewed(_omission_draft(quote))
 
-    assert isinstance(result, ScenarioHold)
-    assert not isinstance(result, AcceptedScenario)
-    assert result.reason == "trigger_evidence_unrepresentable"
-    assert "semantic_proposition must be at most" in result.detail
+    assert isinstance(result, AcceptedScenario)
+    assert len(result.oracle.template_text) < 600
+    basis = result.omission_evidence_basis
+    assert basis is not None
+    assert basis.evidence[0].quote == "A" * 700
 
 
-def test_url_omission_quote_is_held_without_relaxing_proposition_validation():
+def test_url_omission_quote_is_provenance_and_never_enters_the_proposition():
     result = _validate_reviewed(_omission_draft("https://example.test/policy"))
 
-    assert isinstance(result, ScenarioHold)
-    assert result.reason == "trigger_evidence_unrepresentable"
-    assert "runtime URL" in result.detail
+    assert isinstance(result, AcceptedScenario)
+    assert "https://" not in result.oracle.template_text
+    basis = result.omission_evidence_basis
+    assert basis is not None
+    assert basis.evidence[0].quote == "https://example.test/policy"
 
 
-def test_structural_id_omission_quote_is_held_without_relaxing_proposition_validation():
+def test_structural_id_omission_quote_is_provenance_and_never_enters_the_proposition():
     result = _validate_reviewed(_omission_draft("CA-123"))
 
-    assert isinstance(result, ScenarioHold)
-    assert result.reason == "trigger_evidence_unrepresentable"
-    assert "structural identifiers" in result.detail
+    assert isinstance(result, AcceptedScenario)
+    assert "CA-123" not in result.oracle.template_text
+    basis = result.omission_evidence_basis
+    assert basis is not None
+    assert basis.evidence[0].quote == "CA-123"
 
 
 def test_unrepresentable_omission_hold_persists_trigger_and_exact_quote(tmp_path):
-    quote = "A" * 700
+    quote = "A" * 2049
     draft = _omission_draft(quote)
     hold = _validate_reviewed(draft)
     assert isinstance(hold, ScenarioHold)
+    assert hold.reason == "trigger_evidence_unrepresentable"
 
     outcome = CandidateAuthoringOutcome(
         candidate=_reviewed_candidate(),

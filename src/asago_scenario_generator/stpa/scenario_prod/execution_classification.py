@@ -24,6 +24,7 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     SemanticExecutionContract,
 )
 from asago_scenario_generator.stpa.models.execution_projection_v2 import UnsafeOutcome
+from asago_scenario_generator.stpa.models.execution_projection_v3 import UnsafeOutcomeV3
 
 
 def resolve_contract_environment_request(
@@ -48,7 +49,7 @@ def resolve_contract_environment_request(
 
 def classify_scenario_execution(
     contract: SemanticExecutionContract,
-    unsafe_outcome: UnsafeOutcome | None,
+    unsafe_outcome: UnsafeOutcome | UnsafeOutcomeV3 | None,
     profile: ExecutionTargetProfile | None,
 ) -> ExecutionClassification:
     """Classify one contract without constructing a provider or runtime client.
@@ -67,14 +68,14 @@ def classify_scenario_execution(
 
 def _classify_executable_contract(
     contract: SemanticExecutionContract,
-    unsafe_outcome: UnsafeOutcome | None,
+    unsafe_outcome: UnsafeOutcome | UnsafeOutcomeV3 | None,
     profile: ExecutionTargetProfile | None,
 ) -> ExecutionClassification:
     """Classify an executable route after the analytical branch is removed."""
     if unsafe_outcome is None:
         return _classify_missing_outcome(profile)
-    if not isinstance(unsafe_outcome, UnsafeOutcome):
-        raise TypeError("unsafe_outcome must be an UnsafeOutcome")
+    if not isinstance(unsafe_outcome, (UnsafeOutcome, UnsafeOutcomeV3)):
+        raise TypeError("unsafe_outcome must be a closed projection outcome")
     if not _outcome_matches_contract(contract, unsafe_outcome):
         return _classify_outcome_mismatch(profile)
     return _classify_validated_executable(contract, profile)
@@ -252,7 +253,7 @@ def _classify_basis_mismatch(
 
 def _outcome_matches_contract(
     contract: SemanticExecutionContract,
-    outcome: UnsafeOutcome,
+    outcome: UnsafeOutcome | UnsafeOutcomeV3,
 ) -> bool:
     """Require the contract to preserve the unsafe action identity."""
     if _action_is_model_observed(contract):
@@ -270,7 +271,7 @@ def _action_is_model_observed(contract: SemanticExecutionContract) -> bool:
 
 def _target_action_matches_outcome(
     contract: SemanticExecutionContract,
-    outcome: UnsafeOutcome,
+    outcome: UnsafeOutcome | UnsafeOutcomeV3,
 ) -> bool:
     """Match the selected external action requirement to the unsafe outcome."""
     return any(
