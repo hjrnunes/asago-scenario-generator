@@ -329,3 +329,42 @@ Run the deterministic check without a model endpoint:
 ```bash
 .venv/bin/pytest scripts/qualification/test_review_loss_analysis_coverage.py -q
 ```
+
+## Offline cross-repository smoke
+
+`crossrepo_smoke.py` runs the real saved execution bundles through the real
+consumer public chain — bundle loading, case resolution, default Garak
+runtime bindings, readiness planning, artifact compilation, and public
+case/trace validation — and proves that semantic evidence survives the whole
+chain. It is a reusable integration check, not a per-run execution wrapper:
+it never calls a model, executes a target, rescores gold, or modifies a
+sealed run. A socket guard inside the consumer phase fails any attempted
+network contact, so zero provider requests and zero target executions are
+enforced invariants, not conventions.
+
+```bash
+uv run python scripts/qualification/crossrepo_smoke.py \
+  --consumer-root ../asago-artifact-generator \
+  --report build/qualification/crossrepo-smoke/report.json \
+  output/runs/20260914-miniklarna-boundary-correction \
+  output/runs/20260914-miniocciai-baseline-regression
+```
+
+Each target is a directory holding `execution-bundle.json` (and normally
+`execution-target-profile.json`). Committed consumer fixture directories work
+too — `tests/fixtures/crossrepo/` in the artifact-generator repository — which
+is how structured-omission and prepared-history coverage rides the chain when
+no saved bundle carries it. Per coverage kind, the report records fidelity
+checks: the `event_order` oracle must preserve the target tool, reference
+tool, argument predicate, and ordering direction with a null semantic
+proposition; the omission carrier and its source pins must reach the compiled
+artifact byte-for-byte; prepared user-history turns must arrive in order,
+verbatim, with no assistant reply; and output-text propositions must reach
+the judge. Fully rehashed negative copies (missing proposition, inverted
+omission direction, mismatched carrier pin) must fail through the existing
+typed contract.
+
+A run directory without an execution bundle is recorded as a limitation, not
+a failure. The committed consumer fixtures are portable: the sealed-byte
+fixtures carry their provenance in `tests/fixtures/crossrepo/PROVENANCE.md`.
+
