@@ -1017,8 +1017,9 @@ def _write_manifest(
 
     stage_2_summary: dict[str, object] = {
         "call_count": _stage_2_call_count,
-        "mode": stage_2_mode,
     }
+    # One adaptive analysis: the manifest records no generation-mode field,
+    # because no supplied input selects a different generation algorithm.
     # Target-blind Call 3 may reword the graph after the review.  Record the
     # final published digest whenever it differs from the reviewed one, so a
     # reviewer can see that the review covered a different graph.

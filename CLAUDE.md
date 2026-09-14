@@ -40,7 +40,15 @@ product execution crosses `prepare_execution_projection(...)` before any
 Stage 6 call and publishes only through `publish_execution_bundle(...)`.
 Normal publication renders hypothesis summaries deterministically. Generative
 presentation is an explicit `run_sp3(render_presentation=True)` option, not an
-execution prerequisite. Stage 5 condition values must come from the supplied
+execution prerequisite. The normal product `run` publishes the versioned
+scenario handoff instead of an execution bundle: the envelope over narrative,
+attack tree, Gherkin and necessary metadata defined by
+`data/contracts/scenario-handoff/` (schema `scenario-handoff-v1`), with a
+recorded kit version and canonical digests. It retains the semantic failure
+criterion, the safe alternative, lineage, identity and hypothesis framing, and
+publishes no prepared message, prepared history, delivery route, oracle
+selection, detector expression, judge prompt or executable setup, at either the
+structural-field or the prose level. Stage 5 condition values must come from the supplied
 behavior and observed argument schema; quantitative unknowns remain typed
 placeholders, while event ordering uses explained local reference handles.
 Both seams require the explicit run identity and intact source pins; unknown
@@ -87,23 +95,23 @@ Profiles contain semantic resource facts only: no URLs, credentials, or
 secrets. Metadata-free MCP targets are scanned independently through the
 optional `asago-target-scan mcp` entry point; the product run consumes only
 the resulting closed profile and never imports MCP transport or performs a
-scan. The systemic STPA baseline is always target-blind. When `run` receives
-an observed (non-simulation) execution target profile with
-`multi_agent: false`, Stage 2 switches to
-the deterministic target-derived structure
-(`system_model.target_derived_structure`): one ASSISTANT controller, one
+scan. The systemic STPA baseline is always target-blind. The deterministic
+target-derived structure
+(`system_model.target_derived_structure`) is the enrichment seam of the
+internal grounded-authoring path: one ASSISTANT controller, one
 tool action per observed operation, a `respond` action, and
 capability-driven conditionals, with at most two bounded model calls
 (grounded controller-purpose beliefs and constraint-action relevance, each
 offline-validated) and a content-pinned `target-derived-structure.yaml`
 sidecar recording the exact resource/operation binding per tool action;
 target realization then replays those bindings through the zero-call
-identity interpreter. Optional `--reviewed-obligation-bindings` supplies a
-closed `reviewed-obligation-bindings-v1` file of reviewed
-obligation-to-action connections; offline validation fails closed unless
-each names a reviewed `required` entry realized by a tool call on a tool
+identity interpreter. No `run` input supplies a
+`reviewed-obligation-bindings-v1` file of reviewed
+obligation-to-action connections; the closed form is an internal seam whose
+offline validation fails closed unless
+each entry names a reviewed `required` entry realized by a tool call on a tool
 action of the structure, and the exact set rides on the sidecar so it is
-digest-covered. Optional `--target-subject-model` supplies a closed
+digest-covered. No `run` input supplies the closed
 `target-subject-model-v1` companion declaring the session-subject path,
 argument roles, and record-subject relations for
 `owner_differs_from_session`; it is consumed only when structurally valid
@@ -118,10 +126,11 @@ withheld with a typed reason — always on `tool_order`
 identity conditions hold; a draft using a withheld operator is held as
 `operator_unavailable`, not rejected and not a candidate-wide error. The
 accepted model's digest and reviewer stamps ride on the
-target-derived-structure sidecar and the run manifest. Without a profile,
-or for multi-agent targets, the
-target-blind Stage 2 and diagnostic `stpa-run` are unchanged. In
-target-derived mode only, scenario synthesis replaces the ICA enumeration,
+target-derived-structure sidecar and the run manifest. The normal unified
+`run` records no generation-mode field and executes one analysis pipeline for
+every supplied input; the grounded-authoring seam below is an internal seam
+that no documented input selects. The diagnostic `stpa-run` is unchanged.
+The grounded-authoring seam replaces the ICA enumeration,
 ICA verification and correction, and Stage 5 BDI generation with one
 grounded authoring call per (constraint, action) candidate
 (`scenario_prod.authoring`): the model drafts scenarios against the
@@ -147,10 +156,14 @@ required entry compiles only when the entry is realized via reply; a
 required `tool_call` realization rejects (`oracle_channel_unsupported`,
 naming the omission oracle through a reviewed binding as the compilable
 test) and an unknown realization holds `realization_unresolved` (owner
-ruling Q31, 2026-09-10). A candidate with no compilable kind resolves before
-the call (`specification_only` or `no_expressible_oracle`), and held drafts
+ruling Q31, 2026-09-10). A candidate whose failure criterion has no
+downstream-compilable detector is still authored: the admission table shapes
+the prompt offering, and a non-compilable table is recorded as a downstream
+limitation on the candidate outcome instead of suppressing the authoring call.
+Held drafts
 persist as specification evidence that is never compiled or credited as
-recovery. Omission drafts require exact trigger evidence from a particular
+recovery, and a functional candidate (no attacker) is persisted with its
+classification rather than rejected. Omission drafts require exact trigger evidence from a particular
 supplied user turn, used state fact, or uniquely named observation content.
 Verify source presence separately from the author's trigger interpretation:
 a valid citation never establishes the duty to call. A run with no evidenced

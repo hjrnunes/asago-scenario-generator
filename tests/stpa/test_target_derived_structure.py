@@ -306,22 +306,25 @@ def _derive(tmp_path: Path, **kwargs):
     return derive_target_structure(**defaults)
 
 
-def test_mode_trigger_selects_target_derived_only_for_single_controller_target():
+def test_one_unified_analysis_mode_for_every_supplied_input():
+    """Enrichment never selects a different generation algorithm.
+
+    One adaptive analysis serves narrative-only input, an observed
+    single-controller target, a multi-agent capability profile and a
+    simulation basis alike; no supplied input selects a generation mode.
+    """
     profile = _profile()
-    assert (
-        target_derived_stage2_mode(_capability_profile(), profile) == "target_derived"
-    )
-    assert target_derived_stage2_mode(_capability_profile(), None) == "target_blind"
-    assert (
-        target_derived_stage2_mode(_capability_profile(), profile.model_copy())
-        == "target_derived"
-    )
+    single = _capability_profile()
     multi = _capability_profile(kc_subcodes=["KC1.1", "KC2.3"])
-    assert target_derived_stage2_mode(multi, profile) == "target_blind"
     simulation = _profile().model_copy(update={"basis": ProfileBasis.simulation})
-    assert (
-        target_derived_stage2_mode(_capability_profile(), simulation) == "target_blind"
-    )
+    for capability, target in (
+        (single, profile),
+        (single, None),
+        (multi, profile),
+        (single, simulation),
+        (None, None),
+    ):
+        assert target_derived_stage2_mode(capability, target) == "target_blind"
 
 
 def test_derived_structure_shape_and_bindings(tmp_path: Path):
@@ -762,31 +765,13 @@ def test_sidecar_rejects_tampering(tmp_path: Path):
         tampered.assert_integrity()
 
 
-def test_run_sp1_routes_stage2_to_the_derived_path(tmp_path: Path):
-    from asago_scenario_generator.models.capability_profile import Stage1Profile
-    from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
+def test_run_sp1_uses_one_unified_analysis_for_an_observed_target(tmp_path: Path):
+    """An observed profile enriches Stage 2; it selects no algorithm mode."""
     from asago_scenario_generator.stpa.system_model.run import run_sp1
-    from asago_scenario_generator.stpa.system_model.target_derived_structure import (
-        _BeliefsResponse,
-        _RelevanceResponse,
-    )
-    from tests.stpa.sp1_helpers import (
-        read_calls_jsonl,
-        valid_gap_draft_dict,
-        valid_risk_draft_dict,
-        valid_stage1_profile_dict,
-    )
-
-    client = MockLLMClient()
-    client.set_response_for(Stage1Profile, valid_stage1_profile_dict())
-    client.set_response_for(
-        LossAnalysisDraft, [valid_risk_draft_dict(), valid_gap_draft_dict()]
-    )
-    client.set_response_for(_BeliefsResponse, _beliefs_response())
-    client.set_response_for(_RelevanceResponse, _relevance_response())
+    from tests.stpa.sp1_helpers import read_calls_jsonl, setup_sp1_mock_client
 
     result = run_sp1(
-        llm_client=client,
+        llm_client=setup_sp1_mock_client(),
         use_case_text=USE_CASE,
         risk_cards=[],
         run_dir=tmp_path,
@@ -794,21 +779,17 @@ def test_run_sp1_routes_stage2_to_the_derived_path(tmp_path: Path):
         execution_target_profile=_profile(),
         target_observations=None,
     )
-    assert result.stage_errors == []
-    assert result.control_structure is not None
-    assert len(result.control_structure.responsibilities) == 1
-    assert result.target_derived_structure is not None
-    assert result.target_derived_structure.model_call_count == 2
-    assert result.critic_findings is None
+    # The observed target no longer substitutes a deterministic derived
+    # structure, and the manifest records no algorithm-selecting field.
+    assert result.target_derived_structure is None
+    assert not (tmp_path / TARGET_DERIVED_STRUCTURE_FILENAME).exists()
     manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
     stage_2 = manifest["stage_summary"]["stage_2"]
-    assert stage_2 == {"call_count": 2, "mode": "target_derived"}
+    assert "mode" not in stage_2
+    assert stage_2["call_count"] > 0
     steps = [entry["step"] for entry in read_calls_jsonl(tmp_path)]
-    # The four target-blind Stage 2 call steps never ran.
-    assert "call_1_requirements" not in steps
-    assert "call_3_coordination" not in steps
-    assert "target_beliefs" in steps
-    assert "target_relevance" in steps
+    assert "target_beliefs" not in steps
+    assert "target_relevance" not in steps
 
 
 def _sp1_client():
@@ -834,9 +815,13 @@ def _sp1_client():
     return client
 
 
-def test_run_sp1_hashes_and_stamps_the_accepted_subject_model(tmp_path: Path):
-    import hashlib
+def test_run_sp1_refuses_a_retired_subject_model_loudly(tmp_path: Path):
+    """A target-derived-only companion is refused, never silently discarded.
 
+    The unified analysis has no observed-target structure to bind a reviewed
+    session-subject model to, so the run records a typed stage error instead
+    of dropping the supplied input.
+    """
     from asago_scenario_generator.stpa.system_model.run import run_sp1
 
     model = _accepted_subject_model()
@@ -855,52 +840,34 @@ def test_run_sp1_hashes_and_stamps_the_accepted_subject_model(tmp_path: Path):
         target_subject_model=model,
         target_subject_model_path=model_path,
     )
-    assert result.stage_errors == []
+    assert any("target-derived" in error for error in result.stage_errors)
+    assert not (tmp_path / TARGET_DERIVED_STRUCTURE_FILENAME).exists()
     manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
-    assert manifest["input_hashes"]["target_subject_model"] == hashlib.sha256(
-        model_path.read_bytes()
-    ).hexdigest()
-    sidecar = read_yaml(
-        tmp_path / TARGET_DERIVED_STRUCTURE_FILENAME, TargetDerivedStructure
-    )
-    sidecar.assert_integrity()
-    assert sidecar.target_subject_model_digest == model.compute_content_digest()
-    assert sidecar.target_subject_model_reviewed_by == "qa"
+    assert any("target-derived" in error for error in manifest["stage_errors"])
 
 
-def test_run_sp1_then_sp3_preserves_the_subject_model_input_hash(tmp_path: Path):
-    """The final SP3 writer keeps SP1's supplied-file byte pin."""
-    import hashlib
-
+def test_run_sp1_then_sp3_publishes_the_handoff_without_the_retired_companion(
+    tmp_path: Path,
+):
+    """The unified run publishes the scenario handoff and no execution bundle."""
     from asago_scenario_generator.stpa.models.enriched_threat_set import (
         CoverageAnalysis,
         EnrichedThreatSet,
     )
     from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
     from asago_scenario_generator.stpa.system_model.run import run_sp1
+    from tests.stpa.sp1_helpers import setup_sp1_mock_client
 
-    model = _accepted_subject_model()
-    model_path = tmp_path / "target-subject-model.yaml"
-    model_path.write_text(
-        yaml.safe_dump(model.model_dump(mode="json", exclude_none=True))
-    )
-    subject_hash = hashlib.sha256(model_path.read_bytes()).hexdigest()
-    client = _sp1_client()
     result = run_sp1(
-        llm_client=client,
+        llm_client=setup_sp1_mock_client(),
         use_case_text=USE_CASE,
         risk_cards=[],
         run_dir=tmp_path,
         profile_path=None,
         execution_target_profile=_profile(),
-        target_observations=_observations(),
-        target_subject_model=model,
-        target_subject_model_path=model_path,
+        target_observations=None,
     )
     assert result.stage_errors == []
-    before = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
-    assert before["input_hashes"]["target_subject_model"] == subject_hash
-
     assert result.control_structure is not None
     assert result.loss_analysis is not None
     run_sp3(
@@ -914,9 +881,13 @@ def test_run_sp1_then_sp3_preserves_the_subject_model_input_hash(tmp_path: Path)
         run_dir=tmp_path,
         execution_target_profile=_profile(),
         target_observations=_observations(),
+        publish_execution_bundle=False,
     )
-    after = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
-    assert after["input_hashes"]["target_subject_model"] == subject_hash
+    manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+    assert manifest["stage_errors"] == []
+    # The retired observed-target companions are not published on this path.
+    assert not (tmp_path / "execution-bundle.json").exists()
+    assert not (tmp_path / "scenarios" / "canonical").exists()
 
 
 def test_run_sp1_rejects_a_subject_model_without_a_target(tmp_path: Path):

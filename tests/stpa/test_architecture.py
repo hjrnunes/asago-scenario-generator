@@ -955,6 +955,9 @@ _SCENARIO_PROD_LAYERS: dict[str, int] = {
     "execution_projection": 1,
     "execution_classification": 1,
     "prompt_alignment": 1,
+    # The versioned scenario handoff is the normal publication seam: a pure
+    # projection over the scenario envelope and its models.
+    "handoff": 1,
     "execution_bundle": 2,
     "eval_metrics": 2,
     "coverage": 2,

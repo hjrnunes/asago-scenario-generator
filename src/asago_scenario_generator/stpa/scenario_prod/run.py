@@ -39,9 +39,6 @@ from asago_scenario_generator.stpa.infra.templates import (
     TemplateLoader,
     hash_prompt_templates,
 )
-from asago_scenario_generator.stpa.models.target_derived_structure import (
-    TARGET_DERIVED_STRUCTURE_FILENAME,
-)
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.models.target_realization import (
     TargetOperationObservation,
@@ -127,6 +124,12 @@ from .projection import (
 )
 from .prompt_alignment import render_projection_alignment_table
 from .presentation import render_scenario_summary, validate_scenario_summary
+from .handoff import (
+    ScenarioHandoff,
+    build_scenario_handoff,
+    handoff_ownership_violations,
+    write_scenario_handoff,
+)
 from .target_observations import (
     TARGET_OBSERVATIONS_FILENAME,
     TargetObservationSnapshot,
@@ -283,6 +286,7 @@ def run_sp3(
     target_observations: TargetObservationSnapshot | None = None,
     render_presentation: bool = False,
     authored_scenarios: Mapping[str, Any] | None = None,
+    publish_execution_bundle: bool = True,
 ) -> SP3RunResult:
     """Run the full SP3 pipeline: Stage 5 → Stage 6 → Stage 7.
 
@@ -323,6 +327,13 @@ def run_sp3(
             Stage 5 assembles its spec deterministically from the validated
             authoring record instead of calling the BDI provider; other
             threats produce no scenario.
+        publish_execution_bundle: Publish the execution projection/bundle
+            companions.  The normal product run sets this to ``False`` and
+            publishes the versioned scenario handoff instead: narrative,
+            attack tree, Gherkin and necessary metadata only, with no
+            prepared message, delivery route, oracle selection, detector
+            expression or executable setup.  The historical reader path and
+            the ``stpa-run`` diagnostic keep the default ``True``.
 
     Returns:
         An :class:`SP3RunResult` with artifacts and diagnostics.
@@ -384,6 +395,8 @@ def run_sp3(
         run_dir, execution_target_profile, stage_errors
     )
     functional_test_specs: list[ScenarioSpec] = []
+    handoff_publication = not publish_execution_bundle
+    environment_bound = execution_target_profile is not None
     if profile_published:
         scenario_specs = _collect_stage5_specs(
             llm_client,
@@ -425,6 +438,9 @@ def run_sp3(
             control_structure,
             stage_errors,
             candidate_builders,
+            handoff_publication=handoff_publication,
+            loss_analysis=loss_analysis,
+            environment_bound=environment_bound,
         )
         scenario_specs = [
             spec for spec in scenario_specs if not spec.is_functional_test
@@ -448,6 +464,8 @@ def run_sp3(
             candidate_builders=candidate_builders,
             structured_omission=structured_omission,
             observation_snapshot_digest=observation_snapshot_digest,
+            handoff_publication=handoff_publication,
+            environment_bound=environment_bound,
         )
     else:
         scenario_specs = []
@@ -456,12 +474,19 @@ def run_sp3(
     successful_candidate_ids = {
         envelope.scenario_id for envelope, _projection in validated_projections
     }
-    if profile_published:
+    if not profile_published:
+        publication_error = _latest_stage_error(stage_errors)
+    elif handoff_publication:
+        # The normal product run publishes the scenario handoff and no
+        # execution projection or bundle.
+        successful_candidate_ids = {
+            envelope.scenario_id for envelope in scenario_envelopes
+        }
+        publication_error = None
+    else:
         publication_error = _publish_validated_projections(
             run_dir, run_identity, validated_projections, stage_errors
         )
-    else:
-        publication_error = _latest_stage_error(stage_errors)
     if publication_error is not None:
         _mark_publication_failures(
             candidate_builders,
@@ -714,6 +739,35 @@ def _stage6_diagnostics(
     return tuple(stage_errors[prior_error_count:]) or (fallback,)
 
 
+def _write_scenario_handoff_artifacts(
+    envelope: ScenarioEnvelope,
+    scenarios_dir: Path,
+    *,
+    loss_analysis: LossAnalysis | None,
+    environment_bound: bool,
+) -> ScenarioHandoff:
+    """Write the versioned scenario handoff for one published scenario.
+
+    The normal product run publishes scenario meaning only: narrative, attack
+    tree, Gherkin and necessary metadata, with the semantic failure criterion
+    and the safe alternative retained. No execution projection, prepared text,
+    delivery route, oracle selection, detector expression or judge prompt is
+    written.
+    """
+    handoff = build_scenario_handoff(
+        envelope,
+        loss_analysis=loss_analysis,
+        environment_bound=environment_bound,
+    )
+    violations = handoff_ownership_violations(handoff.model_dump(mode="json"))
+    if violations:
+        raise ValueError(
+            "scenario handoff carries artifact-design content: " + "; ".join(violations)
+        )
+    write_scenario_handoff(handoff, scenarios_dir)
+    return handoff
+
+
 def _publish_stage6_artifacts(
     envelope: ScenarioEnvelope,
     projection_doc: ValidatedExecutionProjection | dict | None,
@@ -721,10 +775,22 @@ def _publish_stage6_artifacts(
     stage_errors: list[str],
     prior_error_count: int,
     builder: _CandidateOutcomeBuilder | None,
+    *,
+    handoff_publication: bool = False,
+    loss_analysis: LossAnalysis | None = None,
+    environment_bound: bool = False,
 ) -> None:
     """Write one scenario companion set and assign its publication status."""
     try:
-        _write_scenario_artifacts(envelope, scenarios_dir, projection_doc)
+        if handoff_publication:
+            _write_scenario_handoff_artifacts(
+                envelope,
+                scenarios_dir,
+                loss_analysis=loss_analysis,
+                environment_bound=environment_bound,
+            )
+        else:
+            _write_scenario_artifacts(envelope, scenarios_dir, projection_doc)
     except Exception as exc:  # noqa: BLE001 - isolate publication failure
         diagnostic = (
             f"Stage 6 artifact publication failed for {envelope.scenario_id}: {exc}"
@@ -749,12 +815,17 @@ def _persist_functional_test_candidates(
     control_structure: ControlStructure,
     stage_errors: list[str],
     candidate_builders: list[_CandidateOutcomeBuilder] | None,
+    *,
+    handoff_publication: bool = False,
+    loss_analysis: LossAnalysis | None = None,
+    environment_bound: bool = False,
 ) -> None:
     """Persist ``kind: none`` candidates without any execution projection.
 
     Phase 3.2: a functional test is retained in the run for the owner's
     information.  It renders deterministically (no provider calls), never
-    prepares an execution projection, and never enters the bundle index.
+    prepares an execution projection, and never enters the bundle index.  A
+    functional scenario is *not* rejected for lacking an attacker.
     """
     for spec in specs:
         prior_error_count = len(stage_errors)
@@ -770,7 +841,15 @@ def _persist_functional_test_candidates(
                 capability_profile=capability_profile,
                 control_structure=control_structure,
             )
-            _write_scenario_artifacts(envelope, scenarios_dir, None)
+            if handoff_publication:
+                _write_scenario_handoff_artifacts(
+                    envelope,
+                    scenarios_dir,
+                    loss_analysis=loss_analysis,
+                    environment_bound=environment_bound,
+                )
+            else:
+                _write_scenario_artifacts(envelope, scenarios_dir, None)
         except Exception as exc:  # noqa: BLE001 - isolate publication failure
             diagnostic = (
                 f"Functional-test publication failed for {spec.scenario_id}: {exc}"
@@ -809,6 +888,8 @@ def _render_stage6_candidate(
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
     structured_omission: bool = False,
     observation_snapshot_digest: str | None = None,
+    handoff_publication: bool = False,
+    environment_bound: bool = False,
 ) -> tuple[ScenarioEnvelope, ValidatedExecutionProjection | dict | None] | None:
     """Render and persist one Stage 6 candidate, isolating all failure kinds."""
     prior_error_count = len(stage_errors)
@@ -830,6 +911,7 @@ def _render_stage6_candidate(
             render_presentation=render_presentation,
             structured_omission=structured_omission,
             observation_snapshot_digest=observation_snapshot_digest,
+            handoff_publication=handoff_publication,
         )
     except Exception as exc:  # noqa: BLE001 - isolate one candidate
         diagnostic = f"Stage 6 rendering failed for {spec.scenario_id}: {exc}"
@@ -862,6 +944,9 @@ def _render_stage6_candidate(
         stage_errors,
         prior_error_count,
         builder,
+        handoff_publication=handoff_publication,
+        loss_analysis=loss_analysis,
+        environment_bound=environment_bound,
     )
     return envelope, projection_doc
 
@@ -900,6 +985,8 @@ def _collect_stage6_artifacts(
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
     structured_omission: bool = False,
     observation_snapshot_digest: str | None = None,
+    handoff_publication: bool = False,
+    environment_bound: bool = False,
 ) -> tuple[
     list[ScenarioEnvelope],
     list[tuple[ScenarioEnvelope, ValidatedExecutionProjection]],
@@ -927,6 +1014,8 @@ def _collect_stage6_artifacts(
             candidate_builders=candidate_builders,
             structured_omission=structured_omission,
             observation_snapshot_digest=observation_snapshot_digest,
+            handoff_publication=handoff_publication,
+            environment_bound=environment_bound,
         )
         if artifact is None:
             continue
@@ -1548,6 +1637,7 @@ def _run_stage6_for_spec(
     render_presentation: bool = False,
     structured_omission: bool = False,
     observation_snapshot_digest: str | None = None,
+    handoff_publication: bool = False,
 ) -> tuple[ScenarioEnvelope | None, ValidatedExecutionProjection | dict | None]:
     """Run Stage 6 concretization for a single scenario spec.
 
@@ -1560,23 +1650,32 @@ def _run_stage6_for_spec(
     returns an immutable v3 projection for every spec, including specs whose
     outcome is not an omission.
 
+    On the handoff publication path the execution projection is not part of
+    the product at all, so it is never prepared and never gates rendering: a
+    scenario whose failure criterion has no downstream-compilable detector is
+    still rendered and published, with the limitation reported downstream.
+
     Returns:
         A ``(envelope, projection)`` pair; ``None`` envelope means the
         scenario was rejected before any Stage 6 provider call and no
         artifact is written.
     """
-    projection_doc, projection_alignment = _stage6_projection(
-        spec,
-        control_structure,
-        stage_errors,
-        run_identity,
-        execution_target_profile,
-        target_realization,
-        structured_omission=structured_omission,
-        observation_snapshot_digest=observation_snapshot_digest,
-    )
-    if projection_doc is None:
-        return None, None
+    needs_projection = not handoff_publication or render_presentation
+    if needs_projection:
+        projection_doc, projection_alignment = _stage6_projection(
+            spec,
+            control_structure,
+            stage_errors,
+            run_identity,
+            execution_target_profile,
+            target_realization,
+            structured_omission=structured_omission,
+            observation_snapshot_digest=observation_snapshot_digest,
+        )
+        if projection_doc is None:
+            return None, None
+    else:
+        projection_doc, projection_alignment = None, None
     if not render_presentation:
         narrative, tree, gherkin = render_scenario_summary(spec)
         return assemble_envelope(
@@ -2194,14 +2293,12 @@ def _stage_1a_gate_statuses(run_dir: Path) -> dict[str, object]:
 
 
 def _stage_2_mode(run_dir: Path) -> str:
-    """Report the Stage 2 mode recorded in this run directory.
+    """Return the single unified Stage 2 analysis mode.
 
-    The target-derived derivation is the only writer of the pinned sidecar,
-    so its presence marks a target-derived Stage 2; the target-blind
-    coordination path leaves no sidecar.
+    There is one adaptive analysis, so the run manifest records no
+    algorithm-selecting field; this helper remains for callers that need the
+    named value.
     """
-    if (run_dir / TARGET_DERIVED_STRUCTURE_FILENAME).is_file():
-        return "target_derived"
     return "target_blind"
 
 
@@ -2321,7 +2418,6 @@ def _write_manifest(
     prompt_hashes = hash_prompt_templates(PROMPTS_DIR)
     stage_summary = count_calls_by_stage(run_dir)
     stage_summary["stage_2"] = dict(stage_summary.get("stage_2") or {})
-    stage_summary["stage_2"]["mode"] = _stage_2_mode(run_dir)
     if preserved.post_review_loss_analysis_digest is not None:
         stage_summary["stage_2"]["post_review_loss_analysis_digest"] = (
             preserved.post_review_loss_analysis_digest

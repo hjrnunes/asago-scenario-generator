@@ -55,7 +55,8 @@ def run_cmd(
         "--execution-target-profile",
         help=(
             "Optional verified execution target/simulation profile JSON or YAML. "
-            "The run publishes its canonical copy before the execution bundle."
+            "The run publishes its canonical copy as enrichment evidence; it "
+            "does not select a generation algorithm."
         ),
     ),
     target_observations: Path | None = typer.Option(
@@ -73,27 +74,6 @@ def run_cmd(
             "Optional pinned loss-analysis.yaml. Stage 1a runs its offline "
             "gates on the supplied graph with zero model calls and no "
             "revision; a failing gate is fatal."
-        ),
-    ),
-    reviewed_obligation_bindings: Path | None = typer.Option(
-        None,
-        "--reviewed-obligation-bindings",
-        help=(
-            "Optional reviewed-obligation-bindings.yaml. Reviewed "
-            "obligation-to-action bindings for the target-derived Stage 2 "
-            "mode; validated offline and pinned on the "
-            "target-derived-structure sidecar."
-        ),
-    ),
-    target_subject_model: Path | None = typer.Option(
-        None,
-        "--target-subject-model",
-        help=(
-            "Optional accepted target-subject-model.yaml companion "
-            "(correction spec 2026-09-12). Validated offline against the "
-            "supplied target observations and profile, including the "
-            "reviewer acceptance envelope; a proposed or mismatched file "
-            "fails the run closed before any model call."
         ),
     ),
     requested_environment_basis: str | None = typer.Option(
@@ -150,12 +130,6 @@ def run_cmd(
         _validate_file(target_observations, "target observations file")
     if loss_analysis is not None:
         _validate_file(loss_analysis, "loss analysis file")
-    if reviewed_obligation_bindings is not None:
-        _validate_file(
-            reviewed_obligation_bindings, "reviewed obligation bindings file"
-        )
-    if target_subject_model is not None:
-        _validate_file(target_subject_model, "target subject model file")
     if cross_taxonomy is not None:
         _validate_file(cross_taxonomy, "cross-taxonomy file")
     if max_workers < 1:
@@ -239,55 +213,6 @@ def run_cmd(
 
             # Fail fast on a malformed pinned graph before any run work.
             LossAnalysis.model_validate(_load_payload(loss_analysis, "loss analysis"))
-        reviewed_bindings_value: tuple[Any, ...] = ()
-        if reviewed_obligation_bindings is not None:
-            from asago_scenario_generator.stpa.models.target_derived_structure import (
-                ReviewedObligationBindingsFile,
-            )
-
-            reviewed_bindings_value = ReviewedObligationBindingsFile.model_validate(
-                _load_payload(
-                    reviewed_obligation_bindings, "reviewed obligation bindings"
-                )
-            ).bindings
-        target_subject_model_value = None
-        if target_subject_model is not None:
-            # Correction spec 2026-09-12 section 1.3: structure and the
-            # acceptance envelope are validated offline before the run; a
-            # proposed or mismatched file fails closed, never silently
-            # drops to "no model".
-            from asago_scenario_generator.stpa.models.target_subject_model import (
-                SubjectModelError,
-                load_target_subject_model,
-            )
-            from asago_scenario_generator.stpa.scenario_prod.authoring import (
-                parse_target_state,
-            )
-
-            if (
-                target_observations_value is None
-                or execution_target_profile_value is None
-            ):
-                raise ValueError(
-                    "--target-subject-model requires --target-observations and "
-                    "--target-profile"
-                )
-            try:
-                subject_state: Any = parse_target_state(target_observations_value)
-            except ValueError:
-                subject_state = None
-            try:
-                target_subject_model_value = load_target_subject_model(
-                    target_subject_model,
-                    observations_digest=target_observations_value.content_digest,
-                    execution_target_profile_digest=(
-                        execution_target_profile_value.semantic_digest
-                    ),
-                    state=subject_state,
-                    profile=execution_target_profile_value,
-                )
-            except SubjectModelError as exc:
-                raise ValueError(f"target subject model rejected: {exc}") from exc
         if requested_environment_basis is not None:
             try:
                 requested_basis = RequestedEnvironmentBasis(requested_environment_basis)
@@ -335,10 +260,6 @@ def run_cmd(
             risk_extraction_path=risk_extraction,
             qualification_facts_path=qualification_facts,
             loss_analysis_path=loss_analysis,
-            reviewed_obligation_bindings=reviewed_bindings_value,
-            reviewed_obligation_bindings_path=reviewed_obligation_bindings,
-            target_subject_model=target_subject_model_value,
-            target_subject_model_path=target_subject_model,
             profiles_file=profiles_file,
             profile=profile,
             sp1_profile=sp1_profile,

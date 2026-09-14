@@ -376,12 +376,12 @@ def test_failed_baseline_retains_stage_diagnostic_before_obligation_calls(
     assert [name for name, _ in fake.calls] == ["plan"]
 
 
-def test_target_derived_baseline_skips_structural_revision(tmp_path: Path) -> None:
-    """A target-derived Stage 2 structure never earns a structural revision.
+def test_structural_revision_runs_for_every_baseline(tmp_path: Path) -> None:
+    """One adaptive analysis: no baseline suppresses the structural revision.
 
-    The revision is a model call that invents structural elements; the
-    target-derived structure must carry only observed actions.  Gaps stay
-    typed upstream-gap routes and the run records an explicit warning.
+    A baseline that carries a target-derived structure is no longer a separate
+    mode; the observed target is enrichment evidence, so obligation-gap
+    revision still runs and no "revision skipped" warning is recorded.
     """
     fake = _FakeAdapters(calls=[], gap=True)
 
@@ -396,8 +396,8 @@ def test_target_derived_baseline_skips_structural_revision(tmp_path: Path) -> No
 
     result = run_synthesis(_inputs(tmp_path), adapters)
 
-    assert all(name != "revise" for name, _ in fake.calls)
-    assert any("revision skipped" in warning for warning in result.stage_warnings)
+    assert any(name == "revise" for name, _ in fake.calls)
+    assert all("revision skipped" not in warning for warning in result.stage_warnings)
 
 
 def test_synthesis_retains_baseline_diagnostics_without_changing_yield(tmp_path):
@@ -592,7 +592,11 @@ def test_run_synthesis_routes_the_accepted_miniklarna_package_without_a_provider
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The public root keeps exact target authorities out of systemic inputs."""
+    """The public root keeps exact target authorities out of systemic inputs.
+
+    The retired target-derived authoring seam is not invoked: one adaptive
+    analysis with ICA enumeration and Stage 5 authoring is the single path.
+    """
     package = _accepted_miniklarna_package(tmp_path)
     inputs = package.inputs
     profile = package.profile
@@ -635,9 +639,6 @@ def test_run_synthesis_routes_the_accepted_miniklarna_package_without_a_provider
     systemic, seen_provider = next(
         value for name, value in fake.calls if name == "consider_boundary"
     )
-    _baseline, authoring_inputs = next(
-        value for name, value in fake.calls if name == "authoring"
-    )
     realization_inputs, seen_profile = next(
         value for name, value in fake.calls if name == "target_realization"
     )
@@ -656,7 +657,9 @@ def test_run_synthesis_routes_the_accepted_miniklarna_package_without_a_provider
     assert systemic.reviewed_obligation_bindings == ()
     assert systemic.target_subject_model is None
     assert seen_provider is provider_adapter
-    assert authoring_inputs is inputs
+    assert all(name != "authoring" for name, _ in fake.calls), (
+        "the retired target-derived authoring seam must not run"
+    )
     assert realization_inputs is inputs
     assert seen_profile is profile
     assert result.inputs is inputs

@@ -600,22 +600,10 @@ def run_synthesis(
     final_routes = initial_routes
     consideration = initial_consideration
 
-    # Phase 2: when Stage 2 was derived from the observed target, the
-    # obligation-gap structural revision is suppressed.  The revision is a
-    # model call that invents structural elements; a target-derived structure
-    # must carry only the actions the target actually exposes.  The gaps stay
-    # as typed upstream-gap routes with an explicit run warning.
-    target_derived_stage2 = (
-        getattr(baseline, "target_derived_structure", None) is not None
-    )
-    if gaps and target_derived_stage2:
-        stage_warnings.append(
-            "Obligation-gap structural revision skipped: the Stage 2 control "
-            "structure was derived from the observed target, so no model may "
-            "add structural elements; "
-            f"{len(gaps)} obligation route(s) remain typed upstream gaps."
-        )
-    elif gaps:
+    # One adaptive analysis: no supplied input selects a different generation
+    # algorithm, so there is no mode branch here. Obligation-gap structural
+    # revision always runs; the observed target never suppresses it.
+    if gaps:
         revision_result = _run_revision(
             gaps,
             plan,
@@ -703,35 +691,23 @@ def run_synthesis(
         final_control=final_control,
     )
 
-    # Phase 4: when Stage 2 was derived from the observed target, the grounded
-    # authoring call replaces ICA enumeration, ICA verification/correction, and
-    # Stage 5 BDI generation (spec 4.6).  The target-blind path below is
-    # unchanged; the two modes are never maintained for the same run.
+    # One adaptive analysis: ICA enumeration and Stage 5 authoring are the
+    # single authoring path. Enrichment (capability profile, execution target
+    # profile, target observations) feeds this analysis; it never selects a
+    # different generation algorithm.
     authored_scenarios: dict[str, Any] | None = None
-    authoring_outcomes: Any | None = None
-    if target_derived_stage2:
-        ica_enumeration, authored_scenarios, authoring_outcomes = _run_authoring(
-            baseline,
-            final_loss,
-            final_control,
-            capability_profile,
-            inputs,
-            resolved,
-            calls,
-        )
-    else:
-        ica_enumeration = _run_ica(
-            final_routes,
-            briefs,
-            plan,
-            final_loss,
-            final_control,
-            capability_profile,
-            inputs,
-            capability_snapshot,
-            resolved,
-            calls,
-        )
+    ica_enumeration = _run_ica(
+        final_routes,
+        briefs,
+        plan,
+        final_loss,
+        final_control,
+        capability_profile,
+        inputs,
+        capability_snapshot,
+        resolved,
+        calls,
+    )
     target_realization = _run_target_realization(
         ica_enumeration=ica_enumeration,
         loss_analysis=final_loss,
@@ -765,16 +741,6 @@ def run_synthesis(
         authored_scenarios=authored_scenarios,
     )
     authoring_terminals: Any | None = None
-    if target_derived_stage2 and authoring_outcomes is not None:
-        # Correction spec section 3: candidate terminals are assigned only
-        # after Stage 6 / bundle publication, and the durable record is
-        # written once with the final seven-valued resolutions.
-        authoring_terminals = _finalize_authoring_record(
-            authoring_outcomes,
-            authored_scenarios or {},
-            scenario_result,
-            inputs.output_dir,
-        )
     accounting = _run_accounting(
         plan,
         consideration,
@@ -3136,6 +3102,26 @@ def _default_fill_icas(**kwargs: Any) -> Any:
     )
 
 
+def _with_admission_limitation(outcome: Any, admissions: Mapping[str, Any]) -> str:
+    """Return the outcome detail with the downstream detector limitation.
+
+    A candidate with no downstream-compilable detector is still authored; the
+    missing capability is reported here as a downstream limitation instead of
+    suppressing the candidate before the call.
+    """
+    limitation = (
+        "downstream detector limitation: no oracle kind compiles under the "
+        "constraint's direction authority; "
+        + "; ".join(
+            f"{kind}: {admission.status}"
+            + (f"({admission.reason})" if admission.reason else "")
+            for kind, admission in sorted(admissions.items())
+        )
+    )
+    existing = getattr(outcome, "resolution_detail", None)
+    return f"{existing}; {limitation}" if existing else limitation
+
+
 def _default_author_scenarios(
     *,
     baseline: Any,
@@ -3153,7 +3139,6 @@ def _default_author_scenarios(
     )
     from asago_scenario_generator.stpa.pipeline.llm_config import resolve_llm_client
     from asago_scenario_generator.stpa.scenario_prod.authoring import (
-        CandidateAuthoringOutcome,
         admit_oracle_kinds,
         author_candidate_scenarios,
         build_authoring_candidates,
@@ -3225,10 +3210,11 @@ def _default_author_scenarios(
     )
     outcome_list: list[Any] = []
     for candidate in candidates:
-        # Resolve a candidate before the call when no oracle kind is
-        # expressible under the direction authority in force: every kind
-        # rejected means no_expressible_oracle; any held kind means the
-        # candidate survives as a specification (specification_only).
+        # No detector-admission suppression: a candidate whose failure
+        # criterion has no downstream-compilable detector is still authored.
+        # The admission table still shapes the prompt offering, and a
+        # non-compilable table is recorded as a downstream limitation on the
+        # outcome rather than as a reason to skip the authoring call.
         admissions = admit_oracle_kinds(
             candidate,
             profile=inputs.execution_target_profile,
@@ -3237,39 +3223,30 @@ def _default_author_scenarios(
             subject_model=subject_model,
             target_observations=inputs.target_observations,
         )
-        if not any(admission.status == "compile" for admission in admissions.values()):
-            held = any(admission.status == "hold" for admission in admissions.values())
-            outcome_list.append(
-                CandidateAuthoringOutcome(
-                    candidate=candidate,
-                    resolution=(
-                        "specification_only" if held else "no_expressible_oracle"
-                    ),
-                    resolution_detail="; ".join(
-                        f"{kind}: {admission.status}"
-                        + (f"({admission.reason})" if admission.reason else "")
-                        for kind, admission in sorted(admissions.items())
-                    ),
-                )
-            )
-            continue
-        outcome_list.append(
-            author_candidate_scenarios(
-                client,
-                candidate,
-                profile=inputs.execution_target_profile,
-                observations=inputs.target_observations,
-                structure=structure,
-                control_structure=control_structure,
-                capability_profile=capability_profile,
-                run_dir=Path(output_dir),
-                temperature=temperature,
-                has_content_surface=surface.has_content_surface,
-                reviewed_bindings=reviewed_bindings,
-                session=session,
-                subject_model=subject_model,
-            )
+        compilable = any(
+            admission.status == "compile" for admission in admissions.values()
         )
+        outcome = author_candidate_scenarios(
+            client,
+            candidate,
+            profile=inputs.execution_target_profile,
+            observations=inputs.target_observations,
+            structure=structure,
+            control_structure=control_structure,
+            capability_profile=capability_profile,
+            run_dir=Path(output_dir),
+            temperature=temperature,
+            has_content_surface=surface.has_content_surface,
+            reviewed_bindings=reviewed_bindings,
+            session=session,
+            subject_model=subject_model,
+        )
+        if not compilable:
+            outcome = replace(
+                outcome,
+                resolution_detail=_with_admission_limitation(outcome, admissions),
+            )
+        outcome_list.append(outcome)
     outcomes = tuple(outcome_list)
     enumeration, bundles = synthesize_authored_enumeration(
         outcomes, structure, control_structure
@@ -3495,6 +3472,7 @@ def _default_scenarios(
         target_realization=target_realization,
         target_observations=target_observations,
         authored_scenarios=authored_scenarios,
+        publish_execution_bundle=False,
     )
 
 

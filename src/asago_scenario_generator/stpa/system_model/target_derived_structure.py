@@ -53,7 +53,6 @@ from asago_scenario_generator.stpa.models.control_structure import (
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
-    ProfileBasis,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.models.target_derived_structure import (
@@ -131,18 +130,15 @@ def target_derived_stage2_mode(
     capability_profile: CapabilityProfile | None,
     execution_target_profile: ExecutionTargetProfile | None,
 ) -> str:
-    """Return ``target_derived`` only for the spec's single-controller trigger.
+    """Return the single unified Stage 2 analysis mode.
 
-    No profile, a simulation basis, or a multi-agent capability profile all
-    keep the unchanged target-blind derivation path.
+    There is one adaptive STPA analysis. Supplying an observed profile,
+    tool definitions, policies or state observations enriches that analysis;
+    it never selects a different generation algorithm. This function is kept
+    as the named seam so callers record the decision in one place, and it
+    always reports the target-blind adaptive derivation.
     """
-    if execution_target_profile is None:
-        return "target_blind"
-    if execution_target_profile.basis is ProfileBasis.simulation:
-        return "target_blind"
-    if capability_profile is None or capability_profile.multi_agent:
-        return "target_blind"
-    return "target_derived"
+    return "target_blind"
 
 
 class _ToolFact:
