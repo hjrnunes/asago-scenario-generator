@@ -277,3 +277,45 @@ Append one entry per work commit, newest last. Keep every prior entry unchanged.
   VAL-PROD-014's grounding half.
 - verify.py: file-hash/plan-hash/configuration-reference checks keep passing;
   HEAD/clean-tree checks fail by design after implementation commits.
+
+### R8 — 2026-09-14 — producer — 3f04a38
+
+- Commit: `3f04a38` — `fix(qualification): load execution plans through the version dispatcher`
+- What changed: `scripts/qualification/garak_case_runner.py` loads `--plan`
+  through `asago_artifact_generator.garak.plan.load_execution_plan` instead of
+  `ReadyExecutionPlan.model_validate_json`, so both legacy `execution-plan-v1`
+  plans and consumer design-path `artifact-design-plan-v1` plans replay
+  without case changes. Integration-owned pending item from the consumer
+  design-slice handoff.
+- Verification: offline qualification tests 51 passed
+  (`test_garak_case_runner.py` + `test_evaluation.py`); a design-path
+  `artifact-design-plan-v1` plan replays through the runner's exact
+  load-and-validate sequence with zero errors, and an unknown schema version
+  fails closed (`PlatformPlanError`).
+- verify.py: file-hash/plan-hash/configuration-reference checks keep passing;
+  HEAD/clean-tree checks fail by design after implementation commits.
+
+### R9 — 2026-09-14 — integration attempt record — <no commit>
+
+- First registered M2 end-to-end attempt (`build/adaptive-e2e/first-run/`,
+  evidence preserved): stack reset and seeded state verified (ORD-101 40.0
+  refund-eligible, refunds empty); fresh producer run
+  `build/adaptive-runs/m2-e2e-first-run` (run id
+  `synthesis-20260914T221451.836080Z`, 150 calls, 31 published handoffs, all
+  digests distinct from the M1 fixture and historical runs); runtime context
+  captured fresh from safe server 8888; offline checks and pre-dispatch
+  selections recorded in `build/adaptive-e2e/first-run/pre-dispatch-checks.yaml`.
+- BLOCKED at the consumer design seam: `asago-artifact-generator design`
+  excluded SCN-022 with the typed reason `unsupported-observation` — no
+  documented operation in the handoff envelope matches the observed inventory.
+  Root cause (see `build/adaptive-e2e/first-run/diagnosis-blocked-design.yaml`):
+  the producer handoff publication (`stpa/scenario_prod/handoff.py::
+  _documented_operations`) lists capability descriptions and system-context
+  tool-inventory names, and never surfaces the enrichment sidecar's verified
+  operation identities (`CA-3-1` → `process_refund`), which the consumer
+  matches against the target profile inventory per the M1 contract fixture
+  (`adversarial-refund.json`). No Garak dispatch occurred (no executable
+  artifact exists); no unsafe-server use.
+- Why recorded: preserve the attempt and hand the precise first-failing-seam
+  diagnosis to the producer worker; the fix belongs to the producer handoff
+  publication seam, not the runner.
