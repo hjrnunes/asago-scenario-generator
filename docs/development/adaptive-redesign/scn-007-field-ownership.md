@@ -2,8 +2,9 @@
 
 This mapping attributes every field of the M1 SCN-007 design fixture at
 `docs/development/adaptive-redesign/scn-007-design-fixture.yaml` to its owner.
-Ownership follows `library/ownership-rules.md` and the plan
-`docs/development/designs/adaptive-scenarios-artifact-ownership-plan-2026-09-14.md`.
+Ownership follows the plan
+`docs/development/designs/adaptive-scenarios-artifact-ownership-plan-2026-09-14.md`
+and its producer/consumer responsibility table.
 
 Owners:
 
